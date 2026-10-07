@@ -46,13 +46,13 @@
 # 바뀌지 않은 서비스까지 전부 다시 뜬다. 그런데 「바뀐 것」과 「바꿔 끼울 것」이
 # 1:1 이 아니다 — 그 어긋남이 이 파일의 대부분이다.
 #
-#   backend/             -> backend + celery-worker + celery-beat + events + celery-scoring
+#   backend/             -> backend + celery-worker + celery-beat + events + grader
 #                                                                   (이미지 하나 — events 는 ASGI 로
 #                                                                    강의실 실시간 신호만 여는 별도
 #                                                                    프로세스다, ADR-0046, #380;
-#                                                                    celery-scoring 은 강의실 채점
-#                                                                    큐만 소비하는 워커다, ADR-0056,
-#                                                                    #582)
+#                                                                    grader 는 강의실 채점
+#                                                                    상주 프로세스다, ADR-0059,
+#                                                                    #584)
 #   frontend/            -> frontend
 #   operator/            -> operator
 #   classroom/           -> classroom                              (#276/#277, ADR-0037)
@@ -151,10 +151,51 @@ UNSAFE_MIGRATION_MARKER='^[[:space:]]*#[[:space:]]*ROLLING-DEPLOY-UNSAFE:'
 
 log() { echo "[deploy:${TARGET}] $*"; }
 
-# 서비스 이름 → compose 서비스들. backend 는 다섯을 함께 받는다(채점 워커 celery-scoring 포함, #582)(아래 build 의 주석).
+# 지금 compose 에 없는 채점 프로세스를 걷는다(#584) — `celery-scoring`(#582~#583 의 채점 워커)과
+# `grader`(#584) 둘 다. compose 파일에서 서비스가 사라져도 컨테이너는 남는다(고아):
+# - **첫 배포**(celery-scoring → grader): 옛 워커는 compose 에서 사라진 고아다.
+# - **롤백**(grader → 옛 compose): grader 가 고아가 돼 옛 워커와 함께 돈다 — 리허설에서 보니 grader 의
+#   임대 UPDATE 가 옛 워커의 행 잠금에 걸려 grader 가 통째로 멈췄다.
+# 현재 `$COMPOSE config --services` 에 있는 것은 건드리지 않는다. 채점 중인 것을 마저 끝내도록 4분
+# (`stop_grace_period` 와 같다) 기다려 멈추고 지운다. 없으면 아무 일도 하지 않는다.
+#
+# **마이그레이션보다 먼저 부른다.** 옛 워커는 벤더를 기다리는 동안 행 잠금 트랜잭션을 쥔다(분 단위).
+# 그 뒤에 ALTER TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부 그 뒤에 막힌다
+# (리허설 실측: 마이그레이션 174초, 그동안 제출 요청이 타임아웃). 먼저 걷는 동안 backend 는 계속
+# 요청을 받고, 제출은 DB 큐(`scoring_queued_at`)에서 기다린다.
+# 옛 워커를 걷었으면 Redis 의 옛 큐 `classroom-scoring` 도 비운다(소비할 곳이 없다 — 시도는 DB 큐에 있다).
+# 옛 deploy.sh 로 되돌릴 때는 이 함수가 없어 소용없다 — 되돌리기 전에 손으로 grader 를 내린다([배포] 문서).
+retire_orphan_scoring() {
+  current=$($COMPOSE config --services 2>/dev/null || true)
+  retired_worker=false
+  for svc in celery-scoring grader; do
+    case "
+$current
+" in *"
+$svc
+"*) continue ;; esac
+    old=$(docker ps -aq --filter "label=com.docker.compose.service=$svc" \
+      --filter "label=com.docker.compose.project=codemit-${TARGET}" 2>/dev/null || true)
+    if [ -n "$old" ]; then
+      log "compose 에 없는 채점 프로세스($svc)를 걷는다 — 채점 중인 것을 마저 끝내느라 최대 4분 걸린다"
+      # shellcheck disable=SC2086
+      docker stop -t 240 $old >/dev/null 2>&1 || true
+      # shellcheck disable=SC2086
+      docker rm $old >/dev/null 2>&1 || true
+      [ "$svc" = celery-scoring ] && retired_worker=true
+    fi
+  done
+  if [ "$retired_worker" = true ]; then
+    # 걷은 뒤에도 옛 backend 가 잠깐 더 넣을 수 있다 — 그것도 소비할 곳이 없다(시도는 DB 큐에 있다).
+    $COMPOSE exec -T redis redis-cli -n 0 DEL classroom-scoring >/dev/null 2>&1 || true
+    log "옛 채점 큐(classroom-scoring)를 비웠다"
+  fi
+}
+
+# 서비스 이름 → compose 서비스들. backend 는 다섯을 함께 받는다(채점 grader 포함, #584)(아래 build 의 주석).
 compose_services() {
   case "$1" in
-    backend) echo "backend celery-worker celery-beat events celery-scoring" ;;
+    backend) echo "backend celery-worker celery-beat events grader" ;;
     frontend|operator|classroom|search|pgbouncer) echo "$1" ;;
     *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search|pgbouncer)" >&2; return 2 ;;
   esac
@@ -319,7 +360,7 @@ cmd_plan() {
     #
     # **풀러만은 정의가 실제로 바뀌었을 때만 바꾼다**(2026-10-06, GlitchTip 64 재발).
     # 풀러를 바꾸는 배포는 backend·events 를 겹쳐 바꾸지 못하고 내렸다 올린다(아래
-    # ROLLING_BACKEND). #582 가 다른 서비스(celery-scoring)만 더했는데도 이 줄이 풀러까지
+    # ROLLING_BACKEND). #582 가 다른 서비스(채점 워커)만 더했는데도 이 줄이 풀러까지
     # 바꾸게 해 prod 에서 이벤트 서비스 이름이 16초 넘게 안 풀렸고, BFF 재시도 예산(약
     # 15.8초)을 넘겨 강의실이 500 을 냈다. 직전 배포의 compose 와 지금 것을 compose 자신이
     # 렌더한 풀러 정의(그것이 기대는 db 포함)로 비교한다 — 렌더하지 못하면 바뀐 것으로 본다.
@@ -344,7 +385,7 @@ cmd_plan() {
     [ -z "$($COMPOSE ps -q "$1" 2>/dev/null | head -1)" ]
   }
 
-  for svc in backend celery-worker celery-beat events celery-scoring; do
+  for svc in backend celery-worker celery-beat events grader; do
     if missing "$svc"; then
       log "백엔드 계열 컨테이너 '$svc' 가 없다 — 굽는다."
       BUILD_BACKEND=true
@@ -477,7 +518,7 @@ cmd_plan() {
     if [ "$1" = true ]; then echo "바꿔 끼운다"; else echo "건너뛴다"; fi
   }
   echo "계획"
-  echo "  backend(+celery-worker,+celery-beat,+events,+celery-scoring) : $(plan_word "$BUILD_BACKEND")"
+  echo "  backend(+celery-worker,+celery-beat,+events,+grader) : $(plan_word "$BUILD_BACKEND")"
   echo "  frontend                                      : $(plan_word "$BUILD_FRONTEND")"
   echo "  operator                                      : $(plan_word "$BUILD_OPERATOR")"
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
@@ -677,10 +718,43 @@ rolling_replace() {
 # 만드는 코드가 실패할 수 있어, 있을 때만 만든다(staging 은 그 값이 없다).
 run_migrations() {
   log "마이그레이션 — 새 이미지($(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))의 일회성 컨테이너에서"
-  # shellcheck disable=SC2016
-  $COMPOSE run --rm --no-deps -T backend \
-    sh -c 'if [ -n "${PROMETHEUS_MULTIPROC_DIR:-}" ]; then mkdir -p "$PROMETHEUS_MULTIPROC_DIR"; fi; exec python manage.py migrate --noinput' \
-    || return 1
+  # **잠금을 기다리는 시간에 상한을 둔다**(리허설 실측, ADR-0053 「장기 트랜잭션 뒤 줄 서기」):
+  # ALTER TABLE 은 테이블 잠금을 얻기까지 기다리는 동안 뒤 쿼리를 전부 막는다. 5초 안에 얻지 못하면
+  # 그 마이그레이션은 되감기고(DDL 은 트랜잭션) 몇 번 다시 한다 — 그래도 안 되면 배포를 멈춘다.
+  # `lock_timeout` 은 잠금 대기에만 걸려 오래 걸리는 DDL·데이터 이전 자체는 막지 않는다.
+  # 풀러(pgbouncer, 트랜잭션 모드)는 `PGOPTIONS`(시작 매개변수 `options`)를 거부하므로 이 일회성
+  # 컨테이너만 풀러가 붙는 **실제 DB 주소**로 직접 붙는다(풀러 컨테이너가 쓰는 값을 그대로 읽는다).
+  # 풀러가 없는 compose 면 값이 없어 이전처럼 돌린다.
+  set --
+  dbhost=$($COMPOSE run --rm --no-deps -T --entrypoint printenv pgbouncer POSTGRES_HOST 2>/dev/null | tr -d '\r\n' || true)
+  if [ -n "$dbhost" ]; then
+    dbport=$($COMPOSE run --rm --no-deps -T --entrypoint printenv pgbouncer POSTGRES_PORT 2>/dev/null | tr -d '\r\n' || true)
+    set -- -e "POSTGRES_HOST=$dbhost" -e "POSTGRES_PORT=${dbport:-5432}" -e "PGOPTIONS=-c lock_timeout=${MIGRATE_LOCK_TIMEOUT:-5s}"
+  fi
+  attempt=1
+  while :; do
+    out=$(mktemp)
+    # shellcheck disable=SC2016
+    if $COMPOSE run --rm --no-deps -T "$@" backend \
+      sh -c 'if [ -n "${PROMETHEUS_MULTIPROC_DIR:-}" ]; then mkdir -p "$PROMETHEUS_MULTIPROC_DIR"; fi; exec python manage.py migrate --noinput' \
+      >"$out" 2>&1; then
+      cat "$out"; rm -f "$out"
+      break
+    fi
+    cat "$out"
+    if grep -q "lock timeout" "$out" && [ "$attempt" -lt "${MIGRATE_LOCK_RETRIES:-5}" ]; then
+      rm -f "$out"
+      log "마이그레이션이 테이블 잠금을 ${MIGRATE_LOCK_TIMEOUT:-5s} 안에 얻지 못했다(긴 트랜잭션이 쥐고 있다) — ${attempt}번째, ${MIGRATE_LOCK_RETRY_SLEEP:-10}초 뒤 다시"
+      attempt=$((attempt + 1))
+      sleep "${MIGRATE_LOCK_RETRY_SLEEP:-10}"
+      continue
+    fi
+    if grep -q "lock timeout" "$out"; then
+      log "마이그레이션이 ${attempt}번 모두 테이블 잠금을 얻지 못했다 — 긴 트랜잭션(옛 채점 워커 등)이 쥐고 있다. 배포를 멈춘다"
+    fi
+    rm -f "$out"
+    return 1
+  done
   log "마이그레이션 끝"
 }
 
@@ -716,10 +790,11 @@ cmd_up() {
     #
     # backend 를 먼저 내리는 이유는 HTTP 를 받는 쪽이라 거기부터 새 요청을 멈춰야
     # 해서다. events 의 SSE 는 끊기면 화면이 폴링으로 물러난다(ADR-0046).
-    log "풀러를 바꾼다 — 그 전에 celery-scoring·backend·celery-worker·celery-beat·events 를 내린다"
+    log "풀러를 바꾼다 — 그 전에 grader·backend·celery-worker·celery-beat·events 를 내린다"
+    retire_orphan_scoring
     # 채점 워커를 먼저 따로 내린다 — 따뜻한 종료가 채점 중인 것을 마저 끝내느라 최대
     # 4분(`stop_grace_period`) 걸릴 수 있고, 그동안 backend 는 아직 요청을 받는다.
-    $COMPOSE stop celery-scoring
+    $COMPOSE stop grader
     $COMPOSE stop backend celery-worker celery-beat events
     # shellcheck disable=SC2086
     $COMPOSE up -d --no-deps $UP_FLAGS pgbouncer
@@ -732,7 +807,7 @@ cmd_up() {
       # 이 배포가 backend 를 바꾸지 않으면 아래 블록이 넷을 올리지 않는다 —
       # 내린 그 컨테이너를 그대로 다시 켠다(`start` 는 다시 만들지 않으므로 이미지가
       # 바뀌지 않는다). 바꾸는 배포면 아래 블록이 새 이미지로 올린다.
-      $COMPOSE start backend celery-worker celery-beat events celery-scoring
+      $COMPOSE start backend celery-worker celery-beat events grader
     fi
   fi
 
@@ -748,7 +823,7 @@ cmd_up() {
   if [ "$BUILD_BACKEND" = true ]; then
     # **다섯을 함께 바꾼다.** backend 만 갈면 워커·beat·events·채점 워커가 옛 코드로
     # 남는다 — 앞의 둘은 스캔으로 상태를 진행시키는 주체고, events 는 강의실
-    # 실시간 신호를 여는 주체다(ADR-0046, #380). celery-scoring 은 강의실 채점(ADR-0056).
+    # 실시간 신호를 여는 주체다(ADR-0046, #380). grader 는 강의실 채점(ADR-0059).
     #
     # **마이그레이션은 여기서, 넷을 바꾸기 전에 한 번 돌린다**(#526, ADR-0053). 예전에는
     # backend 의 command 가 기동 때 migrate 를 돌렸는데, 그러면 겹쳐 바꾸는 동안 새
@@ -758,6 +833,10 @@ cmd_up() {
       # 옛 넷은 그대로 요청을 받는 채로 스키마를 먼저 바꾼다 — 마이그레이션이 뒤로
       # 호환되므로 옛 코드는 새 스키마 위에서 그대로 돈다(표식이 붙은 것은 plan 이
       # 이 길로 보내지 않는다). 실패하면 아무것도 내리지 않고 끝낸다.
+      # 마이그레이션보다 **먼저** 고아 채점 프로세스를 걷는다 — 옛 워커의 장기 트랜잭션 뒤에
+      # ALTER TABLE 이 줄을 서면 API 가 멈춘다(`retire_orphan_scoring` 주석). backend 는 그동안
+      # 요청을 계속 받고 제출은 DB 큐에서 기다린다.
+      retire_orphan_scoring
       if ! run_migrations; then
         echo "마이그레이션이 실패했다 — 옛 backend·worker·beat·events 는 그대로 요청을 받는다."
         echo "실패한 것 앞의 마이그레이션은 이미 적용됐을 수 있다(뒤로 호환되므로 옛 코드는 그대로 돈다)."
@@ -769,35 +848,36 @@ cmd_up() {
       # shellcheck disable=SC2086
       $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat
       rolling_replace events 8001 10
-      # 채점 워커는 맨 끝에 바꾼다(#582, ADR-0056) — 옛 워커가 채점 중인 것을 마저
+      # grader 는 맨 끝에 바꾼다(#584, ADR-0059) — 옛 grader 가 채점 중인 것을 마저
       # 끝내는 따뜻한 종료를 최대 4분(`stop_grace_period`) 기다리므로, 앞에 두면
-      # backend·events 교체가 그만큼 늦어진다. 그동안 새 채점 태스크는 Redis 에서
+      # backend·events 교체가 그만큼 늦어진다. 그동안 큐에 넣은 시도는 DB 에서
       # 기다린다(채점 대기가 길어질 뿐 잃지 않는다).
-      log "celery-scoring 을 바꾼다 — 채점 중인 태스크를 마저 끝내느라 최대 4분 걸린다"
+      log "grader 를 바꾼다 — 채점 중인 것을 마저 끝내느라 최대 4분 걸린다"
       # shellcheck disable=SC2086
-      $COMPOSE up -d --no-deps $UP_FLAGS celery-scoring
+      $COMPOSE up -d --no-deps $UP_FLAGS grader
     else
       # **넷을 먼저 내리고 마이그레이션을 돌린다.** 뒤로 호환되지 않는 마이그레이션(표식)은
       # 옛 코드가 새 스키마 위에서 한순간도 돌면 안 된다 — 예전 순서(backend 만 다시
       # 만들고 그 기동 command 가 migrate)는 그 사이 옛 worker·beat·events 를 새 스키마
       # 위에 남겼다. 풀러를 바꾸는 배포면 위에서 이미 내려가 있다(stop 은 그대로 지나간다).
-      log "celery-scoring·backend·celery-worker·celery-beat·events 를 내리고 마이그레이션을 돌린다 — 이 동안 backend 가 없다"
-      # 채점 워커를 먼저 따로 내린다 — 따뜻한 종료가 최대 4분 걸리고(위 풀러 블록과 같은
+      log "grader·backend·celery-worker·celery-beat·events 를 내리고 마이그레이션을 돌린다 — 이 동안 backend 가 없다"
+      # grader 를 먼저 따로 내린다 — 따뜻한 종료가 최대 4분 걸리고(위 풀러 블록과 같은
       # 이유), 그동안 backend 는 아직 요청을 받는다. backend 가 없는 창을 늘리지 않는다.
-      $COMPOSE stop celery-scoring
+      retire_orphan_scoring
+      $COMPOSE stop grader
       $COMPOSE stop backend celery-worker celery-beat events
       if ! run_migrations; then
         # 내린 그 컨테이너(옛 이미지)를 되살린다 — 서비스가 통째로 비는 것보다 낫다.
         # Postgres 의 DDL 은 트랜잭션이라 실패한 마이그레이션 자체는 되감겼지만, 그 앞의
         # 것은 적용됐을 수 있다. 사람이 `showmigrations` 로 보고 판단한다.
         echo "마이그레이션이 실패했다 — 내렸던 옛 컨테이너를 다시 켠다. 앞선 마이그레이션은 적용됐을 수 있다."
-        $COMPOSE start backend celery-worker celery-beat events celery-scoring || true
+        $COMPOSE start backend celery-worker celery-beat events grader || true
         exit 1
       fi
       # shellcheck disable=SC2086
       $COMPOSE up -d --no-deps $UP_FLAGS backend
       # shellcheck disable=SC2086
-      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat events celery-scoring
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat events grader
     fi
   fi
   # shellcheck disable=SC2086
@@ -815,7 +895,7 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker celery-beat events celery-scoring frontend operator classroom search pgbouncer; do
+  for svc in backend celery-worker celery-beat events grader frontend operator classroom search pgbouncer; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
       echo "[$svc] 컨테이너가 없다"

@@ -210,7 +210,7 @@ services:
       # 첫 업로드 PUT이 NoSuchBucket으로 실패한다.
       minio-init:
         condition: service_completed_successfully
-    environment:
+    environment: &dev-backend-env
       <<: *default-postgres-env
       POSTGRES_HOST: db
       POSTGRES_PORT: "5432"
@@ -219,9 +219,9 @@ services:
       DJANGO_ALLOWED_HOSTS: "*"
       # Operator 세션(#43). Celery 브로커가 db 0 을 쓰므로 세션은 1 을 쓴다.
       SESSION_REDIS_URL: redis://redis:6379/1
-      # 강의실 채점 태스크(#378, #582)는 dev 에서 eager 로 이 컨테이너 안에서 돈다
-      # (`CELERY_TASK_ALWAYS_EAGER` 기본값이 배포가 아닌 곳에서 켜짐, ADR-0056) — 제출
-      # 요청과 스캔 요청 안에서 흉내 어댑터로 채점이 끝난다. 브로커 주소는 그래도 준다:
+      # 강의실 채점은 `grader` 서비스가 한다(#584, ADR-0059) — 이 컨테이너는 큐에 넣는 시각만
+      # 찍는다. 다른 Celery 태스크(공모전 이미지 최적화 등)는 dev 에서 eager 로 이 컨테이너 안에서
+      # 돈다(`CELERY_TASK_ALWAYS_EAGER` 기본값이 배포가 아닌 곳에서 켜짐). 브로커 주소는 그래도 준다:
       # eager 가 아닌 다른 발행(있다면)이 settings.py 기본값(`redis://127.0.0.1:6379/0`,
       # 이 컨테이너 안에서는 아무것도 안 듣는 주소)으로 떨어져 재연결을 반복하며 요청을
       # 수 초 멈추게 하지 않도록(#379 e2e 로 실측).
@@ -303,6 +303,32 @@ services:
       - ../backend:/app
     command: >
       sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --reload"
+
+  # 강의실 채점 grader(#584, ADR-0059) — 운영과 같은 길이다: dev·CI(e2e)도 제출이 「큐에 넣은
+  # 시각」만 찍고 이 상주 프로세스가 채점한다(흉내 어댑터라 빠르다). 큐를 0.5초마다 읽어
+  # 제출 뒤 채점이 3초(e2e 시험 하나 한도) 안에 끝난다. 기본 기동에 들어 있다 — beat 와 달리
+  # 시드를 건드리지 않는다(큐에 넣은 시도만 집는다). 마이그레이션은 `backend` 가 돌린다 —
+  # 그 전에 뜨면 큐를 읽다 실패하고 다음 바퀴에 다시 읽는다.
+  grader:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    # backend 와 같은 환경이다(YAML 앵커) — 제출 소스를 같은 스토리지에서 읽고 채점 결과 신호를
+    # 같은 버스로 발행한다.
+    environment: *dev-backend-env
+    volumes:
+      - ../backend:/app
+    command: python manage.py grader
 
   # Celery worker·beat (#40). **기본 기동에서는 빠져 있다** — `profiles` 때문에
   # `docker compose up -d` 로는 뜨지 않고, 필요할 때만 다음처럼 켠다:

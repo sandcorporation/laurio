@@ -26,7 +26,9 @@ RedisEventBus`) 둘이고, `EVENT_BUS_ADAPTER_MODE` 설정이 고른다.
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -133,6 +135,30 @@ def get_event_bus() -> EventBus:
 _logger = logging.getLogger(__name__)
 
 
+_deferred = threading.local()
+
+
+@contextlib.contextmanager
+def collect_instead_of_publishing(sink: list[Event]):
+    """이 스레드에서 `publish_after_commit` 이 부르는 발행을 보내지 않고 **커밋된 뒤에** `sink` 에
+    모은다(#584). DB 일만 해야 하는 스레드(grader 의 DB 스레드)가 버스(Redis) 네트워크를 타지 않게
+    하려는 것이다 — 모인 신호는 호출자가 다른 스레드에서 `publish_all` 로 보낸다. 롤백되면 모이지 않는다."""
+
+    previous = getattr(_deferred, "sink", None)
+    _deferred.sink = sink
+    try:
+        yield
+    finally:
+        _deferred.sink = previous
+
+
+def publish_all(events: list[Event]) -> None:
+    """모아 둔 신호를 보낸다 — 실패는 `publish_after_commit` 과 같이 경고로 남기고 넘어간다."""
+
+    for event in events:
+        _publish_safely(event)
+
+
 def publish_after_commit(event: Event) -> None:
     """지금 열린 트랜잭션이 커밋된 뒤에 발행하고, **발행 실패는 경고로 남기고 넘어간다**
     (ADR-0046). 커밋되지 않은 사실이 화면에 새지 않게 하고, 커밋 뒤에는 이미 저장된
@@ -140,6 +166,10 @@ def publish_after_commit(event: Event) -> None:
     빠르게 만드는 장치이지 진실의 출처가 아니고, 화면은 폴링으로 맞춰진다. 열린
     트랜잭션이 없으면 `on_commit` 이 곧바로 실행한다."""
 
+    sink = getattr(_deferred, "sink", None)
+    if sink is not None:
+        transaction.on_commit(lambda: sink.append(event))
+        return
     transaction.on_commit(lambda: _publish_safely(event))
 
 

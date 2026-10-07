@@ -607,14 +607,27 @@ class ClassroomSubmission(Submission):
     contest_entry_reason = models.CharField(max_length=300, blank=True, default="", db_default="")
     #: 결과가 정해진 때 — 강사 화면(#550)이 「지금 공모전 제출인 시도」를 가릴 때 쓴다.
     contest_entry_resolved_at = models.DateTimeField(null=True, blank=True)
-    #: 이 시도의 채점 태스크를 큐에 넣은 시각(#582, ADR-0056) — 비어 있으면 큐에 없다.
-    #: 즉시 채점과 60초 스캔이 둘 다 찍고, 태스크가 처리를 마치면 비운다. 찍힌 지
-    #: `classroom.scoring.SCORING_QUEUE_WINDOW`(5분) 안이면 스캔이 다시 넣지 않는다 —
-    #: 워커가 죽어 잃은 태스크만 그 뒤에 다시 줍힌다.
+    #: 이 시도를 grader 의 큐에 넣은 시각(#584, ADR-0059) — 비어 있으면 큐에 없다. 즉시 채점과
+    #: 60초 스캔이 찍기만 하고, `manage.py grader` 가 처리를 마치면(채점·실패 기록·건너뜀) 비운다.
+    #: 큐에 있다는 뜻일 뿐 누가 잡고 있다는 뜻이 아니다 — 잡고 있음은 아래 임대가 말한다.
     scoring_queued_at = models.DateTimeField(null=True, blank=True)
+    #: 채점 임대(#584) — grader 가 시도를 집을 때 짧은 트랜잭션으로 「누가·언제까지」를 찍고 닫은
+    #: 뒤 잠금 없이 벤더를 기다린다. 만료 전에는 다른 grader 가 집지 못해 「두 번 불러도 벤더
+    #: 한 번」을 지키고, grader 가 죽으면 만료 뒤 다시 줍힌다. 결과는 임대가 아직 내 것인지
+    #: 확인하는 짧은 트랜잭션으로 쓴다(`classroom.scoring.finish_scoring`).
+    scoring_lease_owner = models.CharField(max_length=64, blank=True, default="", db_default="")
+    scoring_lease_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-attempt_number"]
+        indexes = [
+            # grader 가 1초마다 보는 「큐에 있는 시도」 — 큐가 비어 있으면 아무것도 읽지 않는다(#584).
+            models.Index(
+                fields=["scoring_queued_at"],
+                name="classroom_sub_queued_idx",
+                condition=models.Q(scoring_queued_at__isnull=False),
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassroomSubmission(problem={self.problem_id}, member={self.member_id}, attempt={self.attempt_number})"

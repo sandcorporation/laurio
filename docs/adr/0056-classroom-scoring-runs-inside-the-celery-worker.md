@@ -1,6 +1,6 @@
 # 강의실 채점은 Celery 워커 안에서 돈다 — 「진입점은 내부 HTTP 하나」의 예외
 
-Status: Accepted (2026-10-06 결정)
+Status: Amended by ADR-0059 (2026-10-06 결정)
 
 ADR-0003 의 스캔은 진입점이 내부 인증 HTTP 하나다(`core.tasks`). beat·수동 curl·워커가 모두
 같은 경로를 거쳐야 「두 번 쏴도 한 번만 통과한다」를 지키는 코드가 하나로 남는다. 강의실 즉시

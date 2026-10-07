@@ -1,10 +1,9 @@
-"""제출하면 곧바로 채점이 시작된다 — 스캔은 안전망으로 남는다 (#378, #582, ADR-0046, ADR-0056).
+"""제출하면 곧바로 채점이 시작된다 — 스캔은 안전망으로 남는다 (#378, #584, ADR-0046, ADR-0059).
 
-핵심 대상 셋: (1) 강의실 제출이 커밋되면 그 시도의 채점 태스크가 큐에 들어간다,
-(2) 그 태스크(`classroom.score_attempt`)가 스캔과 같은 후보 조건으로 그 시도를 워커 안에서
-채점한다(#582 부터 내부 HTTP 를 거치지 않는다), (3) 두 경로(즉시 채점↔스캔)가 겹쳐도
-`ClassroomScore`는 시도당 정확히 하나다(ADR-0006). 큐 시각·동시 실행·실패 규율은
-`test_classroom_scoring_in_worker.py`가 본다.
+핵심 대상 셋: (1) 강의실 제출이 커밋되면 그 시도가 grader 의 큐에 들어간다(「큐에 넣은 시각」),
+(2) grader 가 스캔과 같은 후보 조건으로 그 시도를 채점한다(내부 HTTP 를 거치지 않는다),
+(3) 두 경로(즉시 채점↔스캔)가 겹쳐도 `ClassroomScore`는 시도당 정확히 하나다(ADR-0006). 임대·
+동시 실행·실패 규율은 `test_classroom_grader.py`가 본다.
 
 `test_classroom_scoring.py`·`test_classroom_scoring_fake_adapter.py`와 헬퍼가
 겹치지만 이 저장소의 관용구대로 파일마다 자기 것을 따로 갖는다 — 공유 conftest
@@ -15,8 +14,10 @@ from __future__ import annotations
 
 from django.conf import settings
 
-from classroom import tasks as classroom_tasks
-from classroom.models import ClassroomScore, ClassroomScoringAttempt
+from django.utils import timezone
+
+from classroom.grader import grade_inline
+from classroom.models import ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission
 from tests.classroom_scenarios import track_vendor_calls
 
 CLASSES_URL = "/api/classroom/classes"
@@ -24,9 +25,13 @@ SCAN_URL = "/api/internal/scans/classroom-submission-scoring"
 
 
 def _run_task(submission_id: int) -> dict:
-    """워커가 하듯 태스크를 돌린다 — 큐에 넣는 자리를 거치지 않고 태스크 하나만."""
+    """grader 가 하듯 한 시도를 처리한다 — 임대를 집을 수 없으면(큐에 없거나 이미 채점됨)
+    `not_claimed`."""
 
-    return classroom_tasks.score_attempt.apply(args=[submission_id]).result
+    ClassroomSubmission.objects.filter(pk=submission_id, scoring_queued_at__isnull=True).update(
+        scoring_queued_at=timezone.now()
+    )
+    return grade_inline(submission_id) or {"submission_id": submission_id, "status": "not_claimed"}
 
 
 def _internal_headers() -> dict:
@@ -167,16 +172,14 @@ def _setup_submission(client, *, with_key: bool = True) -> dict:
 # --- 제출 → 즉시 채점 작업이 큐에 들어간다 --------------------------------------
 
 
-def test_submitting_enqueues_the_immediate_scoring_task(
-    client, db, monkeypatch, django_capture_on_commit_callbacks
+def test_submitting_enqueues_the_attempt_after_the_commit(
+    client, db, settings, django_capture_on_commit_callbacks
 ):
     """제출 응답이 나가기 전이 아니라 **트랜잭션이 커밋된 뒤** 큐에 들어간다 —
     `on_commit` 콜백을 실제로 실행해 봐야 관찰된다(그냥 `db` 픽스처는 테스트를
-    통째로 롤백해 콜백이 평소엔 전혀 안 불린다)."""
+    통째로 롤백해 콜백이 평소엔 전혀 안 불린다). 큐에 넣는다는 것은 시각을 찍는다는 것이다."""
 
-    calls: list[int] = []
-    monkeypatch.setattr(classroom_tasks.score_attempt, "delay", lambda submission_id: calls.append(submission_id))
-
+    settings.CLASSROOM_GRADER_INLINE = False
     instructor = _login(client, uid="instructor-1")
     class_id = _create_class(client, instructor["access"])
     _set_key(client, instructor["access"], class_id)
@@ -184,28 +187,22 @@ def test_submitting_enqueues_the_immediate_scoring_task(
     participant = _login(client, uid="participant-1")
     _join(client, participant["access"], _join_code(client, instructor["access"], class_id))
 
-    with django_capture_on_commit_callbacks(execute=True):
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
         submitted = _submit_repository(
             client, participant["access"], class_id, problem_id, _PASSING_URL
         )
 
-    assert calls == [submitted["id"]]
+    assert callbacks
+    assert ClassroomSubmission.objects.get(pk=submitted["id"]).scoring_queued_at is not None
 
 
-def test_submission_survives_when_the_broker_is_unreachable(
-    client, db, monkeypatch, django_capture_on_commit_callbacks
+def test_submission_survives_when_the_grader_is_not_running(
+    client, db, settings, django_capture_on_commit_callbacks
 ):
-    """브로커에 닿지 못해도 제출은 성공한다 — 시도는 이미 커밋됐고 60초 스캔이 줍는다
-    (ADR-0046 「안전망」). 발행 실패가 커밋 뒤에 예외로 튀면 참여자는 500 을 받고 다시
-    내 시도가 중복된다(staging Redis 재시작, 호스트 runserver 의 기본 브로커 주소)."""
+    """grader 가 꺼져 있어도 제출은 성공한다 — 시도는 큐에서 기다리고 grader 가 뜨면 줍는다
+    (ADR-0046 「안전망」)."""
 
-    from kombu.exceptions import OperationalError
-
-    def _unreachable(submission_id):
-        raise OperationalError("Error 111 connecting to 127.0.0.1:6379. Connection refused.")
-
-    monkeypatch.setattr(classroom_tasks.score_attempt, "delay", _unreachable)
-
+    settings.CLASSROOM_GRADER_INLINE = False
     instructor = _login(client, uid="instructor-1")
     class_id = _create_class(client, instructor["access"])
     _set_key(client, instructor["access"], class_id)
@@ -220,11 +217,7 @@ def test_submission_survives_when_the_broker_is_unreachable(
 
     mine = _mine(client, participant["access"], class_id, problem_id)
     assert [s["id"] for s in mine["submissions"]] == [submitted["id"]]
-
-    # 발행에 실패한 시도는 「큐에 넣은 시각」을 남기지 않는다 — 다음 스캔이 5분을 기다리지
-    # 않고 곧바로 다시 넣는다(#582).
-    monkeypatch.undo()
-    assert _run_scan(client)["rows"] == [{"submission_id": submitted["id"], "status": "queued"}]
+    assert mine["submissions"][0]["status"] == "pending"
 
 
 def test_task_scores_a_pending_candidate(client, db):
@@ -247,7 +240,7 @@ def test_task_is_idempotent_when_run_twice(client, db):
     second = _run_task(ctx["submission_id"])
 
     assert first["status"] == "scored"
-    assert second["status"] == "not_a_candidate"
+    assert second["status"] == "not_claimed"
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).count() == 1
 
 
@@ -271,7 +264,7 @@ def test_task_skips_a_submission_whose_class_has_no_key(client, db, monkeypatch)
 def test_task_skips_an_unknown_submission_id(client, db):
     ctx = _setup_submission(client)
 
-    assert _run_task(ctx["submission_id"] + 100_000)["status"] == "not_a_candidate"
+    assert _run_task(ctx["submission_id"] + 100_000)["status"] == "not_claimed"
 
 
 def test_task_skips_what_the_scan_already_scored(client, db):
@@ -284,5 +277,5 @@ def test_task_skips_what_the_scan_already_scored(client, db):
     scanned = _run_scan(client)
     assert scanned["count"] == 1
 
-    assert _run_task(ctx["submission_id"])["status"] == "not_a_candidate"
+    assert _run_task(ctx["submission_id"])["status"] == "not_claimed"
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).count() == 1

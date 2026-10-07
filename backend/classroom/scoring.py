@@ -1,12 +1,18 @@
 """강의실 채점 (#287, #340, ADR-0006, ADR-0031, ADR-0037, ADR-0039, ADR-0043).
 
 **제출 즉시 비동기로 채점한다** — 마감이 없으니 "마감 직후 1회"(`scoring.
-services`, ADR-0006)가 성립하지 않는다. 제출이 커밋되면 그 시도의 채점 태스크
-(`classroom.tasks.score_attempt`)가 큐에 들어가고, 스캔(`CLASSROOM_SUBMISSION_SCORING_SCAN`)이
-매 tick마다 아직 `ClassroomScore`가 없는 시도를 찾아 **큐에 넣기만 한다**(안전망) — 채점은
-그 태스크가 Celery 워커 안에서 한다(#582, ADR-0056). 큐에 넣는 자리는 `enqueue_scoring`
-하나다. Score가 시도당 정확히 하나만 생기고 다시 채점되지 않는다는 계약(ADR-0006)은
-그대로다.
+services`, ADR-0006)가 성립하지 않는다. 제출이 커밋되면 그 시도를 큐에 넣고(「큐에 넣은
+시각」 `scoring_queued_at` 만 찍는다), 스캔(`CLASSROOM_SUBMISSION_SCORING_SCAN`)이 매 tick마다
+아직 `ClassroomScore`가 없는 시도를 찾아 **큐에 넣기만 한다**(안전망). 채점은 상주 프로세스
+`manage.py grader`(`classroom.grader`)가 한다(#584, ADR-0059 — #582 의 Celery 워커 채점을
+잇는다). 큐에 넣는 자리는 `enqueue_scoring` 하나다. Score가 시도당 정확히 하나만 생기고 다시
+채점되지 않는다는 계약(ADR-0006)은 그대로다.
+
+**잠금을 쥔 채 벤더를 기다리지 않는다(임대).** 한 시도의 채점은 세 걸음이다 — ① `claim_attempt`
+가 조건부 UPDATE 하나로 「누가·언제까지」 임대를 찍는다 ② `prepare_claimed_head`·`prepare_tail` 이 읽기만 해 요청을
+짓고 `call_vendor_async` 가 (아무 트랜잭션·잠금 없이) 벤더를 기다린다 ③ `conclude_scoring` 이
+**임대가 아직 내 것인지** 확인하는 짧은 트랜잭션 하나로 결과를 쓰고 임대를 놓는다. 「두 번 불러도
+벤더 한 번」은 ①이 지키고, 임대가 만료돼 다른 grader 가 집은 뒤에 도착한 결과는 ③이 버린다.
 
 **강사 본인의 OpenAI 키로 돈다**(CONTEXT.md 「Class」) — 플랫폼의
 `LLM_ADAPTER_MODE`/`OPEN_AI_API_KEY`(공모전이 쓰는 값)를 거치지 않는다.
@@ -55,16 +61,20 @@ Appeal을 모른다). **벤더가 키 자체를 거절했을 때(401·403,
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import models, transaction
+from django.db import OperationalError, connection, models, transaction
 from django.db.models import Count
+from psycopg import errors as psycopg_errors
 
 from core.adapters import resolve_adapter
 from core.clock import Clock
+from core.events import collect_instead_of_publishing
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
@@ -114,17 +124,15 @@ SCORING_FAILURE_LIMIT = 5
 
 #: 강의실 채점의 벤더 타임아웃(#582, ADR-0056) — 공모전의 20초(`core.llm_scoring`
 #: 기본값)보다 길다. 공모전 채점은 내부 HTTP 요청을 받은 gunicorn 워커 안에서 돌아 그
-#: 요청 예산(30초)에 묶이지만, 강의실 채점은 Celery 워커 안에서 직접 돌아 그 예산이 없다.
-#: 300KB 소스를 추론 모델(높은 추론 강도)이 읽는 응답도 담기는 값이다. 바깥을 태스크의
-#: soft·hard 한도(`classroom.tasks`)와 큐 창(`SCORING_QUEUE_WINDOW`)이 차례로 감싼다 —
-#: 이 값을 늘리면 그 셋도 함께 늘린다(`tests/test_classroom_scoring_in_worker.py`).
+#: 요청 예산(30초)에 묶이지만, 강의실 채점은 grader 안에서 돌아 그 예산이 없다.
+#: 300KB 소스를 추론 모델(높은 추론 강도)이 읽는 응답도 담기는 값이다. 바깥을 임대
+#: (`SCORING_LEASE`)가 감싼다 — 이 값을 늘리면 임대도 함께 늘어난다.
 CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS = 180
 
-#: 큐에 넣은 시각이 이만큼 지나지 않은 시도는 스캔이 다시 넣지 않는다(#582) — 태스크의
-#: hard 한도(4분)에 여유 1분. 태스크는 처리를 마치면 그 시각을 비우므로, 이 창이 뜻을 갖는
-#: 것은 태스크가 아직 큐에서 기다리거나 돌고 있을 때, 그리고 워커가 죽어 태스크를 잃었을
-#: 때(그 시도는 이 창이 지난 뒤 다시 줍힌다)뿐이다.
-SCORING_QUEUE_WINDOW = timedelta(minutes=5)
+#: 임대 시간(#584, ADR-0059) — 벤더 180초에 소스 읽기·프롬프트 구성·DB 의 여유 60초. grader 가
+#: 시도를 집을 때 이만큼 임대를 찍고, 그 안에는 다른 grader 가 같은 시도를 집지 못한다. grader 가
+#: 죽으면 이 시각이 지난 뒤 다시 줍힌다. 벤더 타임아웃을 늘리면 이 값도 함께 늘린다.
+SCORING_LEASE = timedelta(seconds=CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS + 60)
 
 #: 크레딧이 바닥났거나 호환 서버에 닿지 않는 클래스를 다시 쳐 보는 간격(#586, #603). 그동안
 #: 그 클래스의 시도는 스캔 후보가 아니다. 간격이 지나면 대기 시도 **하나**만 벤더를 부른다
@@ -186,6 +194,9 @@ class FakeClassroomScoringAdapter:
             )
         return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
 
+    async def score_async(self, scoring_input: ScoringInput) -> ScoringOutput:
+        return self.score(scoring_input)
+
     def check_key(self) -> LLMKeyCheckStatus:
         """dev·CI에서는 저장하는 키가 무엇이든 항상 유효하다(#354 AC) — 그래야
         가짜 키로 저장하는 기존 흐름이 그대로 돈다. 배포 환경에서는 이
@@ -200,6 +211,7 @@ def _scoring_adapter(
     model: str,
     reasoning_effort: str | None = None,
     timeout: float = CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS,
+    asynchronous: bool = False,
 ) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
@@ -237,9 +249,11 @@ def _scoring_adapter(
             "base_url": connection.base_url,
             # 호환 서버는 안전한 바깥 호출로만 나간다(#601, ADR-0058) — OpenAI 키 연결은 `None`.
             "transport": connection.transport(),
+            # grader 의 비동기 길(`score_async`)만 쓴다(#584) — 동기 길은 위 `transport`.
+            "async_transport": connection.async_transport() if asynchronous else None,
             "model": model,
             "reasoning_effort": reasoning_effort,
-            # 공모전의 20초가 아니라 3분이다 — 강의실 채점은 Celery 워커 안에서 돌아
+            # 공모전의 20초가 아니라 3분이다 — 강의실 채점은 grader 안에서 돌아
             # 내부 HTTP 요청(30초)·gunicorn `--timeout` 에 묶이지 않는다(#582, ADR-0056).
             # #581(오류 87)까지는 그 요청 안에서 돌아 20초로 줄여 두었다.
             # 모델 시험 호출(#602)은 저장 요청 안에서 돌아 더 짧게 준다.
@@ -541,7 +555,7 @@ def _mark_scoring_paused(class_obj: Class, field: str) -> None:
 def _claim_pause_recheck(class_obj: Class, *, as_of) -> bool:
     """멈춘 클래스(크레딧 소진·서버 연결 불가)를 이 시도로 다시 쳐 볼 차례를 잡는다(#586,
     #603). 찍힌 시각이 모두 `QUOTA_RECHECK_INTERVAL` 보다 오래됐을 때만 이기고, 이긴 쪽이 그
-    시각들을 지금으로 민다 — 조건부 UPDATE 하나라 같은 클래스의 태스크 여럿 중 하나만 벤더를
+    시각들을 지금으로 민다 — 조건부 UPDATE 하나라 같은 클래스의 시도 여럿 중 하나만 벤더를
     부른다. 행 잠금을 채점(벤더 대기) 동안 쥐지 않도록 채점 트랜잭션 밖에서 부른다."""
 
     paused = [field for field in PAUSE_FIELDS if getattr(class_obj, field) is not None]
@@ -690,29 +704,82 @@ def _record_failure_and_finalize(
     return {"submission_id": submission.id, "status": status_if_not_capped}
 
 
-def score_classroom_submission_once(
-    submission: ClassroomSubmission, *, pause_recheck: bool = False
-) -> dict:
-    """이 시도를 정확히 한 번만 채점한다. 이미 `ClassroomScore`가 있으면 그대로
-    돌아온다 — 재채점 코드 경로는 없다(ADR-0006).
+@dataclass
+class PreparedScoring:
+    """벤더를 부르기 직전까지 만든 것(#584) — DB 에서 읽은 값과 그것으로 지은 요청뿐이라 벤더를
+    기다리는 동안 어떤 트랜잭션·잠금도 쥐지 않는다."""
+
+    submission: ClassroomSubmission
+    owner: str
+    class_obj: Class
+    problem: Problem
+    checklist_items: list[ChecklistItem]
+    connection: ScoringConnection
+    model: str
+    reasoning_effort: str | None
+    prompt: str
+    scoring_input: ScoringInput
+    syntax_check: SyntaxCheckPass
+    pause_recheck: bool
+
+
+@dataclass
+class Concluded:
+    """벤더를 부를 일 없이 끝난 시도(#584) — `apply` 가 결과를 쓴다(임대를 확인한 짧은 트랜잭션
+    안에서 `conclude_scoring` 이 부른다)."""
+
+    apply: Callable[[], dict]
+
+
+@dataclass
+class VendorOutcome:
+    output: ScoringOutput | None = None
+    error: LLMAdapterError | None = None
+
+
+def _concluded(result: dict) -> Concluded:
+    return Concluded(apply=lambda: result)
+
+
+@dataclass
+class _Head:
+    """준비의 앞 절반(DB 일)이 끝난 것 — 소스를 읽기 전. 뒤 절반(`prepare_tail`)은 DB 를 쓰지 않는다."""
+
+    submission: ClassroomSubmission
+    owner: str
+    class_obj: Class
+    problem: Problem
+    checklist_items: list[ChecklistItem]
+    connection: ScoringConnection
+    asset: SubmissionAsset
+    pause_recheck: bool
+
+
+def _prepare_head(
+    submission: ClassroomSubmission, *, owner: str, pause_recheck: bool = False
+) -> _Head | Concluded:
+    """벤더를 부르기 전의 일 앞 절반 — 후보 확인·다시 읽기(DB). **읽기만 한다**:
+    쓰는 결말(상한 굳히기)은 `Concluded.apply` 로 미뤄 임대 확인 아래에서 쓴다.
 
     `pause_recheck`는 멈춘 클래스(크레딧 소진·서버 연결 불가)를 이 시도로 다시 쳐 볼 차례를
     잡았다는 뜻이다(`_claim_pause_recheck`, #586, #603) — 그때만 그 멈춤을 막는 사유로 보지
-    않는다.
+    않는다."""
 
-    `scoring.services.score_submission_once`처럼 예외를 밖으로 던지지 않는다 —
-    모든 실패는 `ClassroomScoringAttempt`에 남고 상태 문자열로 돌아온다."""
-
-    if ClassroomScore.objects.filter(submission_id=submission.id).exists():
-        return {"submission_id": submission.id, "status": "already_scored"}
+    sid = submission.id
+    if ClassroomScore.objects.filter(submission_id=sid).exists():
+        return _concluded({"submission_id": sid, "status": "already_scored"})
 
     problem = submission.problem
     class_obj = problem.classroom
     checklist_items = list(problem.checklist_items.all())
 
-    capped_score = _finalize_if_capped(submission, checklist_items)
-    if capped_score is not None:
-        return {"submission_id": submission.id, "status": "cap_reached", "score_id": capped_score.id}
+    if _scoring_cap_reached(submission):
+
+        def _cap() -> dict:
+            score = _finalize_platform_failure(submission, checklist_items)
+            return {"submission_id": sid, "status": "cap_reached", "score_id": score.id}
+
+        return Concluded(apply=_cap)
 
     # 후보 쿼리(pending_scoring.pending_submissions)가 이미 이 셋을 걸러
     # 고르지만, 같은 배치 안에서 앞선 행이 방금 이 클래스의 예산을 다
@@ -730,22 +797,46 @@ def score_classroom_submission_once(
         # 그대로, 「실패했다」가 아니다) — 화면의 `pending_reason`과 같은
         # 기준(`has_scoring_key`)이라 여기서 건너뛰는 시도는 화면에서도 같은
         # 사유로 보인다.
-        return {"submission_id": submission.id, "status": "no_key"}
+        return _concluded({"submission_id": sid, "status": "no_key"})
     if reason == pending_scoring.MODEL_REJECTED:
-        return {"submission_id": submission.id, "status": "model_rejected"}
+        return _concluded({"submission_id": sid, "status": "model_rejected"})
     if reason == pending_scoring.BUDGET_EXHAUSTED:
         # no_key와 같은 규율 — 시도로 남기지 않고 조용히 건너뛴다.
-        return {"submission_id": submission.id, "status": "budget_exhausted"}
+        return _concluded({"submission_id": sid, "status": "budget_exhausted"})
     connection = connection_for(class_obj)
     if connection is None:  # pragma: no cover - 위의 `blocking_reason` 이 같은 기준(`has_scoring_key`)으로 이미 걸렀다.
-        return {"submission_id": submission.id, "status": "no_key"}
+        return _concluded({"submission_id": sid, "status": "no_key"})
 
     asset = submission.assets.get()
+    return _Head(
+        submission=submission,
+        owner=owner,
+        class_obj=class_obj,
+        problem=problem,
+        checklist_items=checklist_items,
+        connection=connection,
+        asset=asset,
+        pause_recheck=pause_recheck,
+    )
+
+
+def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
+    """준비의 뒤 절반 — 소스 읽기(스토리지·GitHub clone)·문법 검사·프롬프트 구성. **DB 연결을 쥐지
+    않는다**(grader 는 이것을 DB 스레드가 아니라 소스 스레드 풀에서 돌린다). 쓰는 결말(소스 실패
+    기록·영구 실패)은 `Concluded.apply` 로 미룬다."""
+
+    submission, owner, class_obj, problem = head.submission, head.owner, head.class_obj, head.problem
+    checklist_items, connection, asset = head.checklist_items, head.connection, head.asset
+    sid = submission.id
 
     source = _read_scoring_source(submission, asset)
     if not source.ready:
-        _record_scoring_attempt(submission, error=source.error)
-        return {"submission_id": submission.id, "status": source.failure_status}
+
+        def _source_failed() -> dict:
+            _record_scoring_attempt(submission, error=source.error)
+            return {"submission_id": sid, "status": source.failure_status}
+
+        return Concluded(apply=_source_failed)
 
     # 문법 검사 기본 항목(#408/#409, #464) — 강사가 이 문제에서 꺼 두면(#410)
     # `syntax_check.needs_ai_fallback`이 애초에 거짓이다. 켜져 있으면 파서가
@@ -758,7 +849,7 @@ def score_classroom_submission_once(
     model = problem.effective_model()
     tag_error_scope(
         "classroom_scoring",
-        submission_id=submission.id,
+        submission_id=sid,
         class_id=class_obj.pk,
         problem_id=problem.id,
         scoring_model=model,
@@ -767,12 +858,14 @@ def score_classroom_submission_once(
         # Problem.model·Class.default_model은 저장 시점에 검증되지만(classroom.api),
         # 채점 시점의 이름 규칙이 그 사이 좁혀졌을 수 있다 — 재시도로 나을 수
         # 없는 설정 오류다.
-        return _record_failure_and_finalize(
-            submission,
-            checklist_items,
-            error=f"알 수 없는 채점 모델: {model!r}",
-            permanent=True,
-            status_if_not_capped="failed_permanently",
+        return Concluded(
+            apply=lambda: _record_failure_and_finalize(
+                submission,
+                checklist_items,
+                error=f"알 수 없는 채점 모델: {model!r}",
+                permanent=True,
+                status_if_not_capped="failed_permanently",
+            )
         )
 
     # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
@@ -809,7 +902,7 @@ def score_classroom_submission_once(
     if synthetic_requirement is not None:
         requirements = [*requirements, synthetic_requirement]
     scoring_input = ScoringInput(
-        submission_id=submission.id,
+        submission_id=sid,
         # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
         # 그 값을 실제로 읽지 않는다(어댑터는 prompt·requirements만 본다) —
         # 공유 dataclass를 건드리지 않으려고 problem.id로 채워 둔다.
@@ -823,66 +916,114 @@ def score_classroom_submission_once(
         source_files=source_files,
         requirements=requirements,
     )
+    return PreparedScoring(
+        submission=submission,
+        owner=owner,
+        class_obj=class_obj,
+        problem=problem,
+        checklist_items=checklist_items,
+        connection=connection,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        prompt=prompt,
+        scoring_input=scoring_input,
+        syntax_check=syntax_check,
+        pause_recheck=head.pause_recheck,
+    )
+
+
+def _build_adapter(prepared: PreparedScoring, *, asynchronous: bool = False) -> LLMScoringAdapter:
+    return _scoring_adapter(
+        connection=prepared.connection,
+        model=prepared.model,
+        reasoning_effort=prepared.reasoning_effort,
+        asynchronous=asynchronous,
+    )
+
+
+def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
+    """벤더 호출(동기) — 시험·즉시 채점 시임이 쓴다. 어댑터가 던진 `LLMAdapterError` 를 값으로 돌려준다."""
 
     try:
-        adapter = _scoring_adapter(
-            connection=connection, model=model, reasoning_effort=reasoning_effort
-        )
-        output = adapter.score(scoring_input)
-    except LLMAdapterAuthError:
-        # 강사의 계정 문제이지 이 제출물의 결함이 아니다(#355, ADR-0045) —
-        # ClassroomScore를 만들지 않는다. 키 상태가 "거부됨"으로 바뀌면
-        # _pending_submissions가 이 클래스를 후보에서 빼므로, 이 시도는
-        # "아직 시도하지 않았다"로 그대로 남아 강사가 새 키를 저장할 때까지
-        # 기다린다 — ClassroomScoringAttempt도 남기지 않는다(no_key와 같은
-        # 규율, 그래야 _scoring_cap_reached가 이 실패로 상한에 닿지 않는다).
-        _mark_scoring_key_rejected(class_obj)
-        return {"submission_id": submission.id, "status": "key_rejected"}
-    except LLMAdapterModelRejectedError:
-        # 키가 아니라 **이 모델**을 그 키로 못 쓴다(#403, CONTEXT.md 「채점
-        # 모델」) — 키 거부(#355)와 같은 규율이되 옮기는 상태가 다르다:
-        # Class.openai_api_key_status는 그대로 두고 이 Problem의
-        # scoring_model_rejected_at만 켠다. ClassroomScore도
-        # ClassroomScoringAttempt도 남기지 않는다 — key_rejected와 같은
-        # 이유로 "아직 시도하지 않았다"를 유지해야 _scoring_cap_reached가
-        # 이 실패로 상한에 닿지 않는다. 강사가 모델을 바꾸면(`classroom.api`)
-        # 이 값이 풀려 다음 시도부터 다시 채점 후보에 든다.
-        _mark_scoring_model_rejected(problem)
-        return {"submission_id": submission.id, "status": "model_rejected"}
-    except LLMAdapterQuotaExhaustedError:
-        # 키의 크레딧이 바닥났다(#586) — 소유자의 계정 문제이지 이 제출물의 결함이 아니다.
-        # key_rejected 와 같은 규율로 ClassroomScoringAttempt 를 남기지 않는다(실패 한도에
-        # 닿지 않는다). 그 클래스는 다시 확인 간격 동안 스캔 후보에서 빠진다.
-        _mark_scoring_paused(class_obj, QUOTA_EXHAUSTED_AT)
-        return {"submission_id": submission.id, "status": "quota_exhausted"}
-    except LLMAdapterUnreachableError:
-        # 호환 서버에 닿지 않았다(#603) — 이름·연결·인증서·막힌 주소·리다이렉트. 소유자의 서버
-        # 문제이지 이 제출물의 결함이 아니다 — 크레딧 소진과 같은 자리로 멈춘다. 닿았는데 늦거나
-        # 몸통이 깨진 것은 이 예외가 아니라 아래 `LLMAdapterError`(실패 시도)로 간다.
-        _mark_scoring_paused(class_obj, SERVER_UNREACHABLE_AT)
-        return {"submission_id": submission.id, "status": "server_unreachable"}
-    except LLMAdapterRateLimitedError as exc:
-        return _record_rate_limited(submission, checklist_items, error=str(exc))
-    except LLMAdapterPermanentError as exc:
-        return _record_failure_and_finalize(
-            submission,
-            checklist_items,
-            error=str(exc),
-            permanent=True,
-            status_if_not_capped="failed_permanently",
-        )
+        return VendorOutcome(output=_build_adapter(prepared).score(prepared.scoring_input))
     except LLMAdapterError as exc:
+        return VendorOutcome(error=exc)
+
+
+async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
+    """벤더 호출(비동기, #584) — grader 가 쓴다. 기다리는 동안 DB 도 스레드도 쥐지 않는다.
+    어댑터를 만드는 일(키 복호화)은 코루틴 밖의 짧은 동기 일이다."""
+
+    try:
+        adapter = _build_adapter(prepared, asynchronous=True)
+        return VendorOutcome(output=await adapter.score_async(prepared.scoring_input))
+    except LLMAdapterError as exc:
+        return VendorOutcome(error=exc)
+
+
+def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> dict:
+    """벤더가 돌려준 것을 DB 에 쓴다(#584) — 임대를 확인한 짧은 트랜잭션 안에서만 부른다.
+    예전에 `score_classroom_submission_once` 의 `except` 사슬과 그 뒤가 하던 일 그대로다."""
+
+    submission, class_obj, problem = prepared.submission, prepared.class_obj, prepared.problem
+    checklist_items, connection = prepared.checklist_items, prepared.connection
+    exc = outcome.error
+    if exc is not None:
+        if isinstance(exc, LLMAdapterAuthError):
+            # 강사의 계정 문제이지 이 제출물의 결함이 아니다(#355, ADR-0045) —
+            # ClassroomScore를 만들지 않는다. 키 상태가 "거부됨"으로 바뀌면
+            # _pending_submissions가 이 클래스를 후보에서 빼므로, 이 시도는
+            # "아직 시도하지 않았다"로 그대로 남아 강사가 새 키를 저장할 때까지
+            # 기다린다 — ClassroomScoringAttempt도 남기지 않는다(no_key와 같은
+            # 규율, 그래야 _scoring_cap_reached가 이 실패로 상한에 닿지 않는다).
+            _mark_scoring_key_rejected(class_obj)
+            return {"submission_id": submission.id, "status": "key_rejected"}
+        if isinstance(exc, LLMAdapterModelRejectedError):
+            # 키가 아니라 **이 모델**을 그 키로 못 쓴다(#403, CONTEXT.md 「채점
+            # 모델」) — 키 거부(#355)와 같은 규율이되 옮기는 상태가 다르다:
+            # Class.openai_api_key_status는 그대로 두고 이 Problem의
+            # scoring_model_rejected_at만 켠다. ClassroomScore도
+            # ClassroomScoringAttempt도 남기지 않는다 — key_rejected와 같은
+            # 이유로 "아직 시도하지 않았다"를 유지해야 _scoring_cap_reached가
+            # 이 실패로 상한에 닿지 않는다. 강사가 모델을 바꾸면(`classroom.api`)
+            # 이 값이 풀려 다음 시도부터 다시 채점 후보에 든다.
+            _mark_scoring_model_rejected(problem)
+            return {"submission_id": submission.id, "status": "model_rejected"}
+        if isinstance(exc, LLMAdapterQuotaExhaustedError):
+            # 키의 크레딧이 바닥났다(#586) — 소유자의 계정 문제이지 이 제출물의 결함이 아니다.
+            # key_rejected 와 같은 규율로 ClassroomScoringAttempt 를 남기지 않는다(실패 한도에
+            # 닿지 않는다). 그 클래스는 다시 확인 간격 동안 스캔 후보에서 빠진다.
+            _mark_scoring_paused(class_obj, QUOTA_EXHAUSTED_AT)
+            return {"submission_id": submission.id, "status": "quota_exhausted"}
+        if isinstance(exc, LLMAdapterUnreachableError):
+            # 호환 서버에 닿지 않았다(#603) — 이름·연결·인증서·막힌 주소·리다이렉트. 소유자의 서버
+            # 문제이지 이 제출물의 결함이 아니다 — 크레딧 소진과 같은 자리로 멈춘다. 닿았는데 늦거나
+            # 몸통이 깨진 것은 이 예외가 아니라 아래 `LLMAdapterError`(실패 시도)로 간다.
+            _mark_scoring_paused(class_obj, SERVER_UNREACHABLE_AT)
+            return {"submission_id": submission.id, "status": "server_unreachable"}
+        if isinstance(exc, LLMAdapterRateLimitedError):
+            return _record_rate_limited(submission, checklist_items, error=str(exc))
+        if isinstance(exc, LLMAdapterPermanentError):
+            return _record_failure_and_finalize(
+                submission,
+                checklist_items,
+                error=str(exc),
+                permanent=True,
+                status_if_not_capped="failed_permanently",
+            )
         return _record_failure_and_finalize(
             submission, checklist_items, error=str(exc), status_if_not_capped="failed"
         )
 
+    output = outcome.output
+    assert output is not None
     used_tokens, estimated = output.total_tokens, False
     if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 예산이 돌지 않으니 예상
         # 비용과 같은 셈으로 어림해 더하고, 어림한 몫을 따로 남긴다. OpenAI 는 늘 usage 를 준다.
-        used_tokens, estimated = scoring_cost.estimated_usage_tokens(prompt, reasoning_effort), True
+        used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
     _record_token_usage(class_obj, used_tokens, estimated=estimated)
-    if pause_recheck:
+    if prepared.pause_recheck:
         _clear_scoring_pause(class_obj)
 
     reasoning = [
@@ -890,17 +1031,106 @@ def score_classroom_submission_once(
         for v in output.verdicts
         if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
-    syntax_check_result = syntax_check.resolve(output.verdicts)
-    with transaction.atomic():
-        score = ClassroomScore.objects.create(
-            submission=submission,
-            model_version=output.model_version,
-            prompt=prompt,
-            reasoning=reasoning,
-            syntax_check_result=syntax_check_result,
-        )
-    _notify_submitter_of_score(submission, score, checklist_items)
+    syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
+    score = ClassroomScore.objects.create(
+        submission=submission,
+        model_version=output.model_version,
+        prompt=prepared.prompt,
+        reasoning=reasoning,
+        syntax_check_result=syntax_check_result,
+    )
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
+
+
+@contextlib.contextmanager
+def _collecting(events_out: list | None):
+    if events_out is None:
+        yield
+    else:
+        with collect_instead_of_publishing(events_out):
+            yield
+
+
+def conclude_scoring(
+    submission_id: int, *, owner: str, apply: Callable[[], dict], events_out: list | None = None
+) -> dict:
+    """결과를 쓰고 임대를 놓는다(#584) — **짧은 트랜잭션 하나**. 행을 잠그고 임대가 아직 내 것인지
+    확인한다: 임대가 만료돼 다른 grader 가 집었으면(`scoring_lease_owner` 가 바뀌었다) 내 결과는
+    버린다(`lease_lost`). 이미 `ClassroomScore` 가 있어도 쓰지 않는다. 쓰고 나면 큐에 넣은 시각과
+    임대를 같은 트랜잭션에서 비운다 — 실패한 시도는 다음 스캔 tick 에 다시 들어간다.
+
+    `events_out` 을 주면 이 안에서 만들어지는 실시간 신호(알림·`attempt-scored`)를 보내지 않고 커밋 뒤에
+    그 목록에 모은다 — grader 의 DB 스레드가 버스(Redis) 네트워크를 타지 않게 한다. 보내는 것은
+    호출자의 몫이다(`core.events.publish_all`).
+
+    **잠긴 행을 오래 기다리지 않는다** — 트랜잭션 안에서만 `lock_timeout`(`CLASSROOM_GRADER_LOCK_TIMEOUT_MS`)을
+    걸고, 걸리면 `lock_busy` 를 돌려준다(쓴 것은 없다). 호출자가 임대가 내 것인 동안 다시 부른다."""
+
+    try:
+        with _collecting(events_out), transaction.atomic():
+            _short_lock_timeout()
+            locked = (
+                ClassroomSubmission.objects.select_for_update()
+                .filter(pk=submission_id, scoring_lease_owner=owner)
+                .first()
+            )
+            if locked is None:
+                return {"submission_id": submission_id, "status": "lease_lost"}
+            if ClassroomScore.objects.filter(submission_id=submission_id).exists():
+                result = {"submission_id": submission_id, "status": "already_scored"}
+            else:
+                result = apply()
+            ClassroomSubmission.objects.filter(pk=submission_id).update(
+                scoring_queued_at=None, scoring_lease_owner="", scoring_lease_until=None
+            )
+        return result
+    except OperationalError as exc:
+        if is_lock_timeout(exc):
+            # 행(이나 안에서 만지는 다른 행)이 다른 연결에 잠겨 있다 — 아무것도 쓰지 않았다(트랜잭션이
+            # 되감겼다). 임대가 내 것이니 grader 가 벤더 결과를 쥐고 잠시 뒤 다시 쓴다.
+            return {"submission_id": submission_id, "status": "lock_busy"}
+        raise
+
+
+def finish_scoring(
+    prepared: PreparedScoring, outcome: VendorOutcome, *, events_out: list | None = None
+) -> dict:
+    with _collecting(events_out):
+        result = conclude_scoring(
+            prepared.submission.id,
+            owner=prepared.owner,
+            apply=lambda: _apply_vendor_outcome(prepared, outcome),
+            events_out=events_out,
+        )
+        if result["status"] == "scored":
+            # 알림은 커밋 뒤에 — 알림 실패·지연이 채점 결과를 붙잡지 않는다.
+            score = ClassroomScore.objects.get(pk=result["score_id"])
+            _notify_submitter_of_score(prepared.submission, score, prepared.checklist_items)
+    return result
+
+
+def record_unexpected_failure(
+    submission_id: int, *, owner: str, exc: Exception, events_out: list | None = None
+) -> dict:
+    """채점 처리 중 예상 밖 예외(#584) — 한 시도의 실패가 나머지를 막으면 안 된다. 실패한 시도로
+    남기고 임대를 놓는다(임대가 내 것일 때만)."""
+
+    logger.exception("ClassroomSubmission(pk=%s) 채점 처리 중 예외, 다음 건으로 계속", submission_id)
+    is_permanent = isinstance(exc, LLMAdapterPermanentError)
+    status = "failed_permanently" if is_permanent else "failed"
+
+    def _record() -> dict:
+        _record_scoring_attempt(
+            ClassroomSubmission.objects.get(pk=submission_id),
+            error=f"{type(exc).__name__}: {exc}",
+            permanent=is_permanent,
+        )
+        return {"submission_id": submission_id, "status": status, "error": str(exc)}
+
+    return conclude_scoring(submission_id, owner=owner, apply=_record, events_out=events_out)
+
+
+# --- 큐와 임대 -----------------------------------------------------------------------------
 
 
 def _pending_submissions(as_of, ctx):
@@ -913,83 +1143,175 @@ def _pending_submissions(as_of, ctx):
 
 
 def enqueue_scoring(submission_id: int, *, as_of) -> bool:
-    """이 시도의 채점 태스크를 큐에 넣고 그 시각을 찍는다(#582, ADR-0056) — 즉시 채점
-    (`classroom.api`)과 60초 스캔이 함께 쓰는 유일한 자리다.
+    """이 시도를 grader 의 큐에 넣는다 — 「큐에 넣은 시각」을 찍을 뿐이다(#584, ADR-0059).
+    즉시 채점(`classroom.api`)과 60초 스캔이 함께 쓰는 유일한 자리다.
 
-    큐에 넣은 시각이 비었거나 `SCORING_QUEUE_WINDOW` 보다 오래됐을 때만 넣는다. 그 판정과
-    찍기를 조건부 UPDATE 하나로 한다(ADR-0003) — 두 스캔이나 스캔과 즉시 채점이 겹쳐도 한
-    쪽만 이긴다. 넣었으면 `True`.
+    시각이 비었을 때만 찍는다 — 조건부 UPDATE 하나라(ADR-0003) 둘이 겹쳐도 한쪽만 이긴다. 이미
+    큐에 있으면(grader 가 잡고 있거나 줍기를 기다리는 중) 아무것도 하지 않는다. grader 가 죽어도
+    임대가 만료되면 다른 grader 가 줍으므로 시각이 오래됐다고 다시 찍지 않는다. 찍었으면 `True`.
 
-    찍기가 커밋된 뒤에 `.delay()` 한다 — 이 함수는 트랜잭션 밖(제출의 `on_commit` 콜백,
-    스캔의 행 처리)에서 불리고 UPDATE 는 자동 커밋이다. eager(dev·CI)면 `.delay()` 안에서
-    채점이 끝나고 태스크가 그 시각을 비운다. 발행이 실패하면 찍은 시각을 되돌리고 예외를
-    낸다 — 그대로 두면 스캔이 5분 동안 그 시도를 건너뛴다."""
+    `CLASSROOM_GRADER_INLINE`(pytest 만)이면 찍은 자리에서 한 바퀴를 돌려 채점한다 — 상주
+    grader 가 없는 시험이 제출 직후의 채점 결과를 바로 본다."""
 
-    from .tasks import score_attempt
-
-    claimed = (
-        ClassroomSubmission.objects.filter(pk=submission_id)
-        .filter(
-            models.Q(scoring_queued_at__isnull=True)
-            | models.Q(scoring_queued_at__lte=as_of - SCORING_QUEUE_WINDOW)
-        )
-        .update(scoring_queued_at=as_of)
-    )
-    if not claimed:
+    queued = ClassroomSubmission.objects.filter(
+        pk=submission_id, scoring_queued_at__isnull=True
+    ).update(scoring_queued_at=as_of)
+    if not queued:
         return False
-    try:
-        score_attempt.delay(submission_id)
-    except Exception:
-        ClassroomSubmission.objects.filter(pk=submission_id, scoring_queued_at=as_of).update(
-            scoring_queued_at=None
-        )
-        raise
+    if settings.CLASSROOM_GRADER_INLINE:
+        from .grader import grade_inline
+
+        grade_inline(submission_id)
     return True
 
 
+def claim_attempt(submission_id: int, *, owner: str, as_of) -> bool:
+    """시도에 임대를 찍는다(#584) — 짧은 트랜잭션 하나(자동 커밋 대신 `SKIP LOCKED` 로 고른 그 행만
+    UPDATE). 큐에 있고, 아직 채점되지 않았고, 임대가 비었거나 만료됐을 때만 `owner` 가
+    `SCORING_LEASE` 동안 갖는다. 둘이 동시에 불러도 한쪽만 `True` — 「두 번 불러도 벤더 한 번」을
+    이 걸음이 지킨다. 임대를 쥐고 있는 동안 DB 행도 연결도 잡지 않는다.
+
+    **다른 연결이 행을 잠그고 있으면 기다리지 않고 건너뛴다**(`False`). 롤백 리허설 실측: 옛 채점
+    워커가 벤더를 기다리며 행 잠금을 쥐는 동안 이 UPDATE 가 잠금을 기다려 — DB 스레드가 하나뿐이라 —
+    grader 전체가 몇 분 멈췄다. 잠긴 행은 다음 바퀴에 다시 본다(그때는 그 쪽이 끝나 있다).
+
+    조건은 갱신하는 행의 칸에 **직접** 건다 — 관계(`classroom_score__isnull`)로 걸면 Django 가 `id IN
+    (서브쿼리)` 로 만들어, 둘이 동시에 불렀을 때 기다렸다 깨어난 쪽이 서브쿼리를 다시 평가하지 않아
+    둘 다 이긴다(실측). 채점 여부는 상관 서브쿼리(`Exists`)로 건다. `of=("self",)` 는 부모 테이블
+    행(`submissions_submission`)을 잠그지 않는다는 뜻이다."""
+
+    with transaction.atomic():
+        row = (
+            ClassroomSubmission.objects.select_for_update(skip_locked=True, of=("self",))
+            .filter(pk=submission_id, scoring_queued_at__isnull=False)
+            .filter(~models.Exists(ClassroomScore.objects.filter(submission_id=models.OuterRef("pk"))))
+            .filter(models.Q(scoring_lease_until__isnull=True) | models.Q(scoring_lease_until__lte=as_of))
+            .values_list("pk", flat=True)
+            .first()
+        )
+        if row is None:
+            return False
+        ClassroomSubmission.objects.filter(pk=submission_id).update(
+            scoring_lease_owner=owner, scoring_lease_until=as_of + SCORING_LEASE
+        )
+    return True
+
+
+def _short_lock_timeout() -> None:
+    """이 트랜잭션 안에서만 잠금 대기에 상한을 둔다(`SET LOCAL` — 풀러의 트랜잭션 모드에서도 안전하다)."""
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT set_config('lock_timeout', %s, true)", [f"{settings.CLASSROOM_GRADER_LOCK_TIMEOUT_MS}ms"]
+        )
+
+
+def is_lock_timeout(exc: BaseException) -> bool:
+    """`lock_timeout` 에 걸려 실패한 것인가(SQLSTATE 55P03) — 연결이 죽은 `OperationalError` 와 가른다."""
+
+    return isinstance(exc, OperationalError) and isinstance(exc.__cause__, psycopg_errors.LockNotAvailable)
+
+
+def extend_lease(submission_id: int, *, owner: str, as_of) -> bool:
+    """벤더를 부르기 직전에 임대를 다시 `SCORING_LEASE` 만큼 늘린다(#584 점검) — **내 임대일 때만**
+    (조건부 UPDATE 하나). 소스 준비(저장소 clone)·스레드 대기가 길어 임대가 거의 다 닳았어도 벤더를
+    기다리는 180초는 늘 임대 안이다. 임대가 이미 다른 grader 에게 넘어갔으면 `False` — 그때는
+    벤더를 부르지 않는다(벤더 이중 호출 방지). 행이 다른 연결에 잠겨 있으면 짧게만 기다리고
+    `False` 다(임대는 만료 뒤 다시 줍힌다) — DB 스레드를 길게 붙잡지 않는다."""
+
+    try:
+        with transaction.atomic():
+            _short_lock_timeout()
+            return (
+                ClassroomSubmission.objects.filter(pk=submission_id, scoring_lease_owner=owner)
+                .filter(~models.Exists(ClassroomScore.objects.filter(submission_id=models.OuterRef("pk"))))
+                .update(scoring_lease_until=as_of + SCORING_LEASE)
+                == 1
+            )
+    except OperationalError as exc:
+        if is_lock_timeout(exc):
+            return False
+        raise
+
+
+def release_lease(submission_id: int, *, owner: str) -> None:
+    """임대를 놓고 큐에서도 뺀다 — 시도를 처리하지 않고 끝낼 때(내 임대일 때만)."""
+
+    ClassroomSubmission.objects.filter(pk=submission_id, scoring_lease_owner=owner).update(
+        scoring_queued_at=None, scoring_lease_owner="", scoring_lease_until=None
+    )
+
+
+def next_candidates(
+    as_of,
+    *,
+    limit: int,
+    exclude_class_ids: list[int] | None = None,
+    exclude_ids: set[int] | None = None,
+) -> list[tuple[int, int]]:
+    """grader 가 지금 집을 수 있는 시도 `(시도 id, 클래스 id)` — 큐에 있고, 스캔과 같은 후보
+    조건(`_pending_submissions`)이고, 임대가 비었거나 만료된 것. 시도 횟수 오름차순이다.
+    `exclude_class_ids` 는 연결당 상한에 닿은 클래스 — 한 클래스의 줄이 다른 클래스를 굶기지 않게 뺀다.
+    `exclude_ids` 는 이 grader 가 이미 처리 중인 시도 — 임대가 닳아 만료돼도 자기 것을 다시 집지 않는다."""
+
+    rows = (
+        _pending_submissions(as_of, {})
+        .exclude(problem__classroom_id__in=exclude_class_ids or [])
+        .exclude(id__in=exclude_ids or ())
+        .filter(scoring_queued_at__isnull=False)
+        .filter(models.Q(scoring_lease_until__isnull=True) | models.Q(scoring_lease_until__lte=as_of))
+        .order_by("attempt_count", "id")
+        .values_list("id", "problem__classroom_id")[:limit]
+    )
+    return list(rows)
+
+
+def prepare_claimed_head(submission_id: int, *, owner: str, as_of) -> _Head | Concluded:
+    """임대를 쥔 시도의 벤더 호출 전 일 앞 절반(DB) — 스캔과 **같은 후보 조건**으로 시도를 다시 읽는다. 시도가
+    그 조건 밖이면(키 없음·거부·예산 정지·이미 채점됨) 시도로 남기지 않고 조용히 건너뛴다 — 큐에서
+    기다리는 사이 강사가 키를 지웠거나 다른 grader 가 이미 채점을 끝냈을 수 있다.
+
+    멈춘 클래스(크레딧 소진·서버 연결 불가)가 다시 확인 간격을 넘겨 후보에 들었으면 같은 클래스의
+    시도 중 하나만 벤더를 부른다(#586, #603) — 진 쪽은 건너뛴다."""
+
+    # 오류에는 식별자만 싣는다(#590) — 프레임 지역 변수(키·소스)는 보내지 않는다.
+    tag_error_scope("classroom_scoring", submission_id=submission_id)
+    try:
+        submission = _pending_submissions(as_of, {}).get(pk=submission_id)
+    except ClassroomSubmission.DoesNotExist:
+        return _concluded({"submission_id": submission_id, "status": "not_a_candidate"})
+    class_obj = submission.problem.classroom
+    tag_error_scope(
+        "classroom_scoring",
+        submission_id=submission_id,
+        class_id=class_obj.pk,
+        problem_id=submission.problem_id,
+    )
+    pause_recheck = False
+    if class_obj.scoring_paused():
+        pause_recheck = _claim_pause_recheck(class_obj, as_of=as_of)
+        if not pause_recheck:
+            return _concluded({"submission_id": submission_id, "status": "scoring_paused"})
+    return _prepare_head(submission, owner=owner, pause_recheck=pause_recheck)
+
+
+def prepare_claimed_attempt(submission_id: int, *, owner: str, as_of) -> PreparedScoring | Concluded:
+    """앞 절반(`prepare_claimed_head`)과 뒤 절반(`prepare_tail`)을 이어 한 자리에서 한다 — 동기 길
+    (`classroom.grader.grade_inline`)과 시험이 쓴다. grader 는 둘을 다른 스레드 풀에서 돌린다."""
+
+    head = prepare_claimed_head(submission_id, owner=owner, as_of=as_of)
+    if isinstance(head, Concluded):
+        return head
+    return prepare_tail(head)
+
+
 def _queue_one(submission, as_of, ctx):
-    """스캔의 행 하나 처리 — 채점하지 않고 큐에 넣기만 한다(#582). 큐 창 안이라 넣지
-    않았으면 `None`("이번엔 아무 일도 없었다")."""
+    """스캔의 행 하나 처리 — 채점하지 않고 큐에 넣기만 한다(#584). 이미 큐에 있으면 `None`
+    ("이번엔 아무 일도 없었다")."""
 
     if not enqueue_scoring(submission.pk, as_of=as_of):
         return None
     return {"submission_id": submission.pk, "status": "queued"}
-
-
-def _score_one(submission, as_of, ctx):
-    """채점 태스크(`classroom.tasks.score_attempt`)의 행 하나 처리.
-
-    같은 시도의 태스크가 둘 돌 수 있어(즉시 채점과 스캔이 넣은 태스크가 겹치거나
-    메시지가 재전달될 때) 실제 채점(네트워크 호출 포함) 앞에
-    행을 잠근다 — `select_for_update(skip_locked=True)` 로, 다른 쪽이 이미
-    잡고 있으면 기다리지 않고 그 자리에서 `None`("이번엔 아무 일도 없었다")을
-    돌려준다. 잠금을 채점이 끝날 때까지(LLM 호출 포함) 들고 있는 이유는 락을
-    Score 생성 직전에만 걸면 두 경로가 그 사이에 나란히 벤더를 호출해 키 비용이
-    두 번 나갈 수 있기 때문이다(#377 AC14) — ADR-0006 이 지키는 "시도당 Score
-    하나"는 결국 이 잠금이 지킨다."""
-
-    try:
-        with transaction.atomic():
-            locked = (
-                ClassroomSubmission.objects.select_for_update(skip_locked=True)
-                .filter(pk=submission.pk)
-                .first()
-            )
-            if locked is None:
-                return None
-            return score_classroom_submission_once(
-                locked, pause_recheck=ctx.get("pause_recheck", False)
-            )
-    except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
-        logger.exception(
-            "ClassroomSubmission(pk=%s) 채점 처리 중 예외, 다음 건으로 계속", submission.id
-        )
-        is_permanent = isinstance(exc, LLMAdapterPermanentError)
-        _record_scoring_attempt(
-            submission, error=f"{type(exc).__name__}: {exc}", permanent=is_permanent
-        )
-        status = "failed_permanently" if is_permanent else "failed"
-        return {"submission_id": submission.id, "status": status, "error": str(exc)}
 
 
 CLASSROOM_SUBMISSION_SCORING_SCAN = ScanSpec(
@@ -997,49 +1319,5 @@ CLASSROOM_SUBMISSION_SCORING_SCAN = ScanSpec(
     candidates=_pending_submissions,
     handle_row=_queue_one,
     order_by=("attempt_count", "id"),
-    # 스캔은 큐에 넣기만 하므로(#582) 배치는 뼈대 기본값이다. 오류 91 때는 이 스캔이
-    # gunicorn 요청 안에서 시도를 이어 채점해 30초를 넘겨 `batch_size=1` 로 막았었다.
+    # 스캔은 큐에 넣기만 하므로(#584) 배치는 뼈대 기본값이다.
 )
-
-
-def score_classroom_attempt(submission_id: int) -> dict:
-    """채점 태스크(`classroom.tasks.score_attempt`)의 본문(#378, #582) — 스캔과 **같은 후보
-    조건**(`_pending_submissions`)으로 시도를 고르고 `_score_one`(잠금 포함)으로 채점한다.
-
-    시도가 그 조건 밖이면(키 없음·거부·예산 정지·이미 채점됨) 시도로 남기지 않고 조용히
-    건너뛴다 — 큐에서 기다리는 사이 강사가 키를 지웠거나 다른 태스크가 이미 채점을 끝냈을
-    수 있다.
-
-    처리를 마치면(채점·실패 기록·건너뜀) 큐에 넣은 시각을 비운다 — 실패한 시도는 5분이
-    아니라 다음 스캔 tick 에 다시 들어간다. 다른 태스크가 잠그고 있으면(`locked_elsewhere`)
-    비우지 않는다 — 그 태스크가 끝나며 비운다."""
-
-    # 오류에는 식별자만 싣는다(#590) — 프레임 지역 변수(키·소스)는 보내지 않는다.
-    tag_error_scope("classroom_scoring", submission_id=submission_id)
-    as_of = Clock.now()
-    ctx: dict = {}
-    try:
-        submission = _pending_submissions(as_of, ctx).get(pk=submission_id)
-    except ClassroomSubmission.DoesNotExist:
-        result = {"submission_id": submission_id, "status": "not_a_candidate"}
-    else:
-        class_obj = submission.problem.classroom
-        tag_error_scope(
-            "classroom_scoring",
-            submission_id=submission_id,
-            class_id=class_obj.pk,
-            problem_id=submission.problem_id,
-        )
-        if class_obj.scoring_paused():
-            # 멈춘 클래스(크레딧 소진·서버 연결 불가)가 다시 확인 간격을 넘겨 후보에 들었다
-            # (#586, #603) — 같은 클래스의 시도 중 하나만 벤더를 부른다. 진 쪽은 시도로 남기지
-            # 않고 건너뛴다.
-            ctx["pause_recheck"] = _claim_pause_recheck(class_obj, as_of=as_of)
-        if class_obj.scoring_paused() and not ctx["pause_recheck"]:
-            result = {"submission_id": submission_id, "status": "scoring_paused"}
-        else:
-            result = _score_one(submission, as_of, ctx)
-            if result is None:
-                return {"submission_id": submission_id, "status": "locked_elsewhere"}
-    ClassroomSubmission.objects.filter(pk=submission_id).update(scoring_queued_at=None)
-    return result
