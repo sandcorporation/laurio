@@ -27,6 +27,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { ACCESS_COOKIE, REFRESH_COOKIE } from "./lib/auth/cookies";
+import { loginNextPath } from "./lib/auth/login-next";
 
 export function middleware(request: NextRequest) {
   // 콘솔 현관 제거(#375, spec #371) — `/console` 자체(하위 경로 없이 정확히
@@ -44,7 +45,7 @@ export function middleware(request: NextRequest) {
 
   if (!hasAccess && !hasRefresh) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+    loginUrl.searchParams.set("next", loginNextPath(request.url));
     return NextResponse.redirect(loginUrl);
   }
 

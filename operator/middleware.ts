@@ -24,13 +24,14 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { SESSION_COOKIE_NAME } from "./lib/auth/cookies";
+import { loginNextPath } from "./lib/auth/login-next";
 
 export function middleware(request: NextRequest) {
   const hasSession = request.cookies.has(SESSION_COOKIE_NAME);
 
   if (!hasSession) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+    loginUrl.searchParams.set("next", loginNextPath(request.url));
     return NextResponse.redirect(loginUrl);
   }
 
