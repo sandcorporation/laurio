@@ -50,7 +50,7 @@ export async function forwardToBackend(
   // 실시간 신호 SSE(ADR-0046)만 이벤트 서비스로 간다 — 나머지 전부는 지금처럼
   // 동기 API 서버로 간다.
   const base = backendPath.startsWith("/api/classroom/events/") ? eventsBaseUrl() : backendBaseUrl();
-  const url = `${base}${backendPath}${request.nextUrl.search}`;
+  const url = `${base}${backendPath}${new URL(request.url).search}`;
   const body = await extractForwardBody(request);
 
   // 브라우저가 끊으면 위쪽 요청도 끊는다(2026-09-18) — 끝나지 않는 응답(SSE,
