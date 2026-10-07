@@ -844,6 +844,12 @@ if IS_DEPLOYED_ENVIRONMENT and CELERY_TASK_ALWAYS_EAGER:
 CLASSROOM_SCORING_QUEUE = "classroom-scoring"
 CELERY_TASK_ROUTES = {"classroom.score_attempt": {"queue": CLASSROOM_SCORING_QUEUE}}
 
+# --- 바깥으로 나가는 호출 (core.safe_outbound, #584) ------------------------------
+# 바깥(벤더·강사 서버)으로 나가는 호출의 한도 — 강사가 적은 서버는 믿지 않는다.
+# 응답 본문은 이 크기까지만 읽고 넘으면 끊는다(끝없이 흘려 메모리를 채우는 서버, 「닿았음」으로 센다).
+SAFE_OUTBOUND_RESPONSE_MAX_BYTES = int(_env("SAFE_OUTBOUND_RESPONSE_MAX_BYTES", str(2 * 1024 * 1024)))
+# 연결 단계만의 타임아웃(초) — 전체 타임아웃(채점은 180초)과 따로다. 응답 없는 서버가 슬롯을 길게 쥐지 않게.
+SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS = float(_env("SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS", "10"))
 # --- DB 백업 (core.backups) ----------------------------------------------------------
 # 매일 새벽 2시 pg_dump 결과를 비공개 버킷 db-backups/ 에 올린다. pg_dump 는 서버와 같은
 # 메이저(17)여야 한다 — backend 이미지가 PGDG 에서 postgresql-client-17 을 설치한다.

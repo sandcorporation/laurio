@@ -34,17 +34,19 @@ resolve_adapter`가 골라 쓴다. 이 값이 돈을 가르는 컷라인의 유�
 from __future__ import annotations
 
 import json
+import json as _json
 import os
 from dataclasses import dataclass
 from enum import Enum
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 
+import aiohttp
 import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
-from core.safe_outbound import OutboundRefused
+from core.safe_outbound import AsyncResponse, OutboundRefused, read_limited_async
 
 
 @dataclass(frozen=True)
@@ -264,6 +266,9 @@ _MODELS_PATH = "/models"
 #: 강의실의 「호환 서버」 연결은 강사가 적은 주소라 안전한 바깥 호출을 넘긴다(ADR-0058).
 Transport = Callable[..., Any]
 
+#: `Transport` 의 비동기 판(#584) — `SafeOutbound.arequest` 모양, 코루틴을 돌려준다.
+AsyncTransport = Callable[..., Awaitable[Any]]
+
 
 def _endpoint(base_url: str | None, path: str) -> str:
     return (base_url or OPENAI_API_BASE_URL).rstrip("/") + path
@@ -437,6 +442,24 @@ def _classify_openai_error(response: Any, *, context: str) -> Exception:
     return LLMAdapterError(message)
 
 
+def _round_trip_request(
+    api_key: str, timeout: float, json_body: dict | None
+) -> tuple[dict[str, str], dict[str, Any]]:
+    # 호환 서버는 인증 값을 비워 둘 수 있다(#601) — 그때는 헤더를 싣지 않는다.
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    kwargs: dict[str, Any] = {"headers": headers, "timeout": timeout}
+    if json_body is not None:
+        headers["Content-Type"] = "application/json"
+        kwargs["json"] = json_body
+    return headers, kwargs
+
+
+def _refused_error(exc: OutboundRefused, context: str) -> Exception:
+    detail = f", {context}" if context else ""
+    error = LLMAdapterError if exc.reached else LLMAdapterUnreachableError
+    return error(f"호환 서버 호출이 실패했다({exc.reason.value}{detail}).")
+
+
 def _openai_round_trip(
     method: str,
     url: str,
@@ -457,20 +480,13 @@ def _openai_round_trip(
     (타임아웃·연결 끊김) 재시도해도 결과가 달라질 수 있으니 `LLMAdapterError`
     (일시 실패)로 옮겨 던진다."""
 
-    # 호환 서버는 인증 값을 비워 둘 수 있다(#601) — 그때는 헤더를 싣지 않는다.
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-    kwargs: dict[str, Any] = {"headers": headers, "timeout": timeout}
-    if json_body is not None:
-        headers["Content-Type"] = "application/json"
-        kwargs["json"] = json_body
+    _, kwargs = _round_trip_request(api_key, timeout, json_body)
 
     if transport is not None:
         try:
             response = transport(method, url, **kwargs)
         except OutboundRefused as exc:
-            detail = f", {context}" if context else ""
-            error = LLMAdapterError if exc.reached else LLMAdapterUnreachableError
-            raise error(f"호환 서버 호출이 실패했다({exc.reason.value}{detail}).") from None
+            raise _refused_error(exc, context) from None
         if response.status_code == 200:
             return response
         raise _classify_openai_error(response, context=context)
@@ -487,6 +503,53 @@ def _openai_round_trip(
             f"OpenAI 호출이 네트워크 오류로 실패했다({type(exc).__name__}{detail})."
         ) from None
 
+    if response.status_code == 200:
+        return response
+    raise _classify_openai_error(response, context=context)
+
+
+async def _aiohttp_request(
+    method: str, url: str, *, headers: dict[str, str], timeout: float, json: Any = None
+) -> AsyncResponse:
+    """OpenAI 로 나가는 비동기 왕복(#584) — 주소가 고정된 OpenAI 라 푼 IP 고정은 필요 없다."""
+
+    body = None if json is None else _json.dumps(json).encode("utf-8")
+    async with aiohttp.ClientSession(
+        trust_env=False,
+        timeout=aiohttp.ClientTimeout(
+            total=timeout, sock_connect=min(settings.SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS, timeout)
+        ),
+    ) as session:
+        async with session.request(method, url, headers=headers, data=body) as response:
+            return AsyncResponse(
+                response.status,
+                await read_limited_async(response, settings.SAFE_OUTBOUND_RESPONSE_MAX_BYTES),
+            )
+
+
+async def _openai_round_trip_async(
+    method: str,
+    url: str,
+    *,
+    api_key: str,
+    timeout: float,
+    json_body: dict | None = None,
+    context: str = "",
+    transport: AsyncTransport | None = None,
+) -> Any:
+    """`_openai_round_trip` 의 비동기 판(#584) — 헤더·분류는 같은 함수를 쓴다. 호환 서버는 안전한
+    바깥 호출의 비동기 길(`SafeOutbound.arequest`)을, OpenAI 는 aiohttp 로 바로 나간다."""
+
+    _, kwargs = _round_trip_request(api_key, timeout, json_body)
+    try:
+        response = await (transport or _aiohttp_request)(method, url, **kwargs)
+    except OutboundRefused as exc:
+        raise _refused_error(exc, context) from None
+    except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+        detail = f", {context}" if context else ""
+        raise LLMAdapterError(
+            f"OpenAI 호출이 네트워크 오류로 실패했다({type(exc).__name__}{detail})."
+        ) from None
     if response.status_code == 200:
         return response
     raise _classify_openai_error(response, context=context)
@@ -660,6 +723,8 @@ class OpenAIScoringAdapter:
         #: 왕복을 대신 보내는 함수(#601, `Transport`). 강의실의 호환 서버 연결만 준다 — 그
         #: 연결은 인증 값을 비워 둘 수 있어 빈 키로도 만들어진다.
         transport: Transport | None = None,
+        #: `transport` 의 비동기 판(#584) — grader 가 `score_async` 에서 쓴다.
+        async_transport: AsyncTransport | None = None,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
         if not api_key and transport is None:
@@ -678,6 +743,7 @@ class OpenAIScoringAdapter:
         self._timeout = timeout
         self._base_url = base_url
         self._transport = transport
+        self._async_transport = async_transport
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
         # OpenAI 응답의 "model" 필드에서 새로 읽어 ScoringOutput.model_version으로
@@ -685,8 +751,7 @@ class OpenAIScoringAdapter:
         # 정확하다, #88 AC).
         self.model_version = self._model
 
-    def score(self, scoring_input: ScoringInput) -> ScoringOutput:
-        requirement_ids = [r.requirement_id for r in scoring_input.requirements]
+    def _scoring_payload(self, scoring_input: ScoringInput) -> dict:
         payload = {
             "model": self._model,
             "messages": [
@@ -704,17 +769,10 @@ class OpenAIScoringAdapter:
             payload["reasoning_effort"] = self._reasoning_effort
         else:
             payload["temperature"] = self._temperature
+        return payload
 
-        response = _openai_round_trip(
-            "POST",
-            _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
-            api_key=self._api_key,
-            timeout=self._timeout,
-            json_body=payload,
-            context=f"submission={scoring_input.submission_id}",
-            transport=self._transport,
-        )
-
+    def _scoring_output(self, response: Any, scoring_input: ScoringInput) -> ScoringOutput:
+        requirement_ids = [r.requirement_id for r in scoring_input.requirements]
         try:
             body = response.json()
         except ValueError:
@@ -735,6 +793,33 @@ class OpenAIScoringAdapter:
                 f"OpenAI 응답을 파싱하는 중 예상치 못한 오류가 났다({type(exc).__name__}, "
                 f"submission={scoring_input.submission_id})."
             ) from None
+
+    def score(self, scoring_input: ScoringInput) -> ScoringOutput:
+        response = _openai_round_trip(
+            "POST",
+            _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
+            api_key=self._api_key,
+            timeout=self._timeout,
+            json_body=self._scoring_payload(scoring_input),
+            context=f"submission={scoring_input.submission_id}",
+            transport=self._transport,
+        )
+        return self._scoring_output(response, scoring_input)
+
+    async def score_async(self, scoring_input: ScoringInput) -> ScoringOutput:
+        """`score` 의 비동기 판(#584) — 같은 요청·같은 분류, 기다리는 동안 스레드를 쥐지 않는다.
+        강의실 grader 가 쓴다(공모전은 `score` 그대로)."""
+
+        response = await _openai_round_trip_async(
+            "POST",
+            _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
+            api_key=self._api_key,
+            timeout=self._timeout,
+            json_body=self._scoring_payload(scoring_input),
+            context=f"submission={scoring_input.submission_id}",
+            transport=self._async_transport,
+        )
+        return self._scoring_output(response, scoring_input)
 
     def check_key(self) -> LLMKeyCheckStatus:
         """저장 시점에 이 키가 실제로 쓸 수 있는지 벤더에게 한 번 묻는다(#354).

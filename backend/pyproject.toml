@@ -53,6 +53,7 @@ dependencies = [
     # 않는다 — 실물 OpenSearch에 붙을 때만 TCP 를 연다.
     "opensearch-py>=2.8.0",
     "prometheus-client>=0.26.0",
+    "aiohttp>=3.14.4",
 ]
 
 [tool.uv]

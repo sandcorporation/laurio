@@ -255,6 +255,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/slow":
             self.server.release.wait(2)  # 시험이 끝나면 풀린다 — 손님이 먼저 포기한다.
             return
+        if self.path == "/big":
+            # 상한(시험은 64KB)보다 훨씬 큰 본문을 그대로 흘린다 — 손님이 상한에서 끊어야 한다.
+            size = 1_000_000
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            try:
+                for _ in range(size // 10_000):
+                    self.wfile.write(b"x" * 10_000)
+            except OSError:
+                pass  # 손님이 먼저 끊었다 — 기대한 일이다.
+            return
         if self.path == "/redirect":
             self.send_response(302)
             self.send_header("Location", "https://169.254.169.254/latest/meta-data/")
@@ -400,3 +413,141 @@ def test_fake_switch_checks_the_shape_without_resolving():
         with pytest.raises(OutboundRefused) as caught:
             outbound.check(url)
         assert caught.value.reason is reason
+
+
+# --- 비동기 길(`arequest`, #584) — grader 가 쓴다. 같은 보장을 같은 이유로 ----------------------
+
+
+def _arun(outbound: SafeOutbound, url: str, *, timeout: float = 2, body=None):
+    import asyncio
+
+    return asyncio.run(outbound.arequest("POST", url, headers={"X-T": "1"}, timeout=timeout, json=body))
+
+
+@REAL_MODE
+def test_async_request_goes_to_the_resolved_ip_and_verifies_the_original_name(tls, monkeypatch):
+    real_getaddrinfo = socket.getaddrinfo
+
+    def no_second_lookup(host, *args, **kwargs):
+        assert host != HOST, "푼 IP 로 붙어야 한다 — 이름을 다시 풀었다"
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", no_second_lookup)
+
+    response = _arun(_local(tls), f"https://{HOST}:{tls['good']}/v1/chat", body={"q": "안녕"})
+
+    assert response.status_code == 200
+    assert response.json() == {"host": f"{HOST}:{tls['good']}", "sni": HOST, "body": {"q": "안녕"}}
+
+
+@REAL_MODE
+def test_async_certificate_for_another_name_is_refused(tls):
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(_local(tls), f"https://{HOST}:{tls['wrong']}/v1", body={})
+    assert caught.value.reason is OutboundReason.CERTIFICATE
+
+
+@REAL_MODE
+def test_async_untrusted_certificate_is_refused(tls):
+    outbound = SafeOutbound(resolver=_resolver("127.0.0.1"), is_allowed=_only_loopback_counts_as_public)
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(outbound, f"https://{HOST}:{tls['good']}/v1", body={})
+    assert caught.value.reason is OutboundReason.CERTIFICATE
+
+
+@REAL_MODE
+def test_async_redirects_are_not_followed(tls):
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(_local(tls), f"https://{HOST}:{tls['good']}/redirect", body={})
+    assert caught.value.reason is OutboundReason.REDIRECT
+
+
+@REAL_MODE
+def test_async_rebinding_to_a_private_address_is_refused_at_connect_time():
+    outbound = SafeOutbound(resolver=_resolver("10.0.0.5"))
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(outbound, f"https://{HOST}/v1", body={})
+    assert caught.value.reason is OutboundReason.NOT_PUBLIC
+
+
+@REAL_MODE
+def test_async_closed_port_is_unreachable():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    outbound = SafeOutbound(resolver=_resolver("127.0.0.1"), is_allowed=_only_loopback_counts_as_public)
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(outbound, f"https://{HOST}:{port}/v1", timeout=1, body={})
+    assert caught.value.reason is OutboundReason.UNREACHABLE
+    assert caught.value.reached is False
+
+
+@REAL_MODE
+def test_async_a_server_that_answers_too_late_is_reached(tls):
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(_local(tls), f"https://{HOST}:{tls['good']}/slow", timeout=0.2, body={})
+    assert caught.value.reason is OutboundReason.RESPONSE_FAILED
+    assert caught.value.reached is True
+
+
+@override_settings(CLASSROOM_SCORING_ADAPTER_MODE="fake")
+def test_async_fake_switch_never_touches_the_network():
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(SafeOutbound(), "https://scoring.example.com/v1", body={})
+    assert caught.value.reason is OutboundReason.OFFLINE
+
+
+# --- 응답 본문 상한 (#584 점검) — 강사 서버가 끝없이 흘려도 메모리가 마르지 않는다 ------------------
+
+SMALL_LIMIT = override_settings(SAFE_OUTBOUND_RESPONSE_MAX_BYTES=65_536)
+
+
+@REAL_MODE
+@SMALL_LIMIT
+def test_a_body_over_the_limit_is_cut_as_a_response_failure_on_the_sync_path(tls):
+    with pytest.raises(OutboundRefused) as caught:
+        _local(tls).post_json(f"https://{HOST}:{tls['good']}/big", {}, headers={}, timeout=5)
+    assert caught.value.reason is OutboundReason.RESPONSE_FAILED
+    assert caught.value.reached is True
+
+
+@REAL_MODE
+@SMALL_LIMIT
+def test_a_body_over_the_limit_is_cut_as_a_response_failure_on_the_async_path(tls):
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(_local(tls), f"https://{HOST}:{tls['good']}/big", timeout=5, body={})
+    assert caught.value.reason is OutboundReason.RESPONSE_FAILED
+    assert caught.value.reached is True
+
+
+@REAL_MODE
+@SMALL_LIMIT
+def test_a_body_under_the_limit_still_comes_through_on_both_paths(tls):
+    url = f"https://{HOST}:{tls['good']}/v1/chat"
+    sync = _local(tls).post_json(url, {"q": "안녕"}, headers={}, timeout=2)
+    asynchronous = _arun(_local(tls), url, body={"q": "안녕"})
+    assert sync.json() == asynchronous.json()
+
+
+# --- 연결 타임아웃은 전체 타임아웃과 따로다 — 응답 없는 서버가 슬롯을 오래 쥐지 않는다 ------------------
+
+
+@REAL_MODE
+@override_settings(SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS=0.3)
+def test_connecting_gives_up_at_the_connect_timeout_not_the_total_one(monkeypatch):
+    import time
+
+    # 어디에도 응답하지 않는 주소(TEST-NET-1) — 연결 단계에서 멈춘다. 샌드박스에 라우트가 없으면
+    # 바로 UNREACHABLE 로 끝나므로, 어느 쪽이든 전체 타임아웃(30초)을 기다리지 않는다는 것만 못 박는다.
+    outbound = SafeOutbound(resolver=_resolver("192.0.2.1"), is_allowed=lambda address: True)
+    started = time.monotonic()
+    with pytest.raises(OutboundRefused) as caught:
+        outbound.post_json(f"https://{HOST}/v1", {}, headers={}, timeout=30)
+    assert caught.value.reason is OutboundReason.UNREACHABLE
+    assert time.monotonic() - started < 3
+
+    started = time.monotonic()
+    with pytest.raises(OutboundRefused) as caught:
+        _arun(outbound, f"https://{HOST}/v1", timeout=30, body={})
+    assert caught.value.reason is OutboundReason.UNREACHABLE
+    assert time.monotonic() - started < 3
