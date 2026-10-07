@@ -31,6 +31,9 @@ const nextConfig: NextConfig = {
   // 공개 표면은 서버에서 렌더링되어야 색인된다(ADR-0015). 실수로 클라이언트
   // 렌더링이 되면 조용히 깨지므로, e2e 가 JS 를 끈 HTML 을 직접 확인한다.
   reactStrictMode: true,
+  // 미들웨어의 request.url 을 NextURL 로 정규화하지 않는다(#622) — 정규화는 쿼리 안
+  // 127.0.0.1 을 localhost 로 바꿔 로그인 next 의 OAuth redirect_uri 를 깬다.
+  skipMiddlewareUrlNormalize: true,
   webpack: (config, { dev }) => {
     // dev 컨테이너는 소스를 바인드 마운트로 받는데(docker/compose.dev.yaml),
     // Windows 호스트 → Linux 컨테이너 바인드 마운트에서는 기본 fs 이벤트 감시가
