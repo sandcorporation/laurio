@@ -50,7 +50,7 @@ export async function forwardToBackend(
     shouldClearCookies = true;
   }
 
-  const url = `${backendBaseUrl()}${backendPath}${request.nextUrl.search}`;
+  const url = `${backendBaseUrl()}${backendPath}${new URL(request.url).search}`;
   // 바디는 한 번만 읽는다 — 아래 재시도 경로가 같은 바디를 다시 보낸다
   // (extractForwardBody 주석 참고).
   const body = await extractForwardBody(request);

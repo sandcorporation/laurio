@@ -26,7 +26,7 @@ export async function forwardToBackend(
   headers.set("origin", operatorOrigin());
 
   const body = await extractForwardBody(request);
-  const url = `${backendBaseUrl()}${backendPath}${request.nextUrl.search}`;
+  const url = `${backendBaseUrl()}${backendPath}${new URL(request.url).search}`;
 
   return forwardRequest(request.method, url, headers, body);
 }

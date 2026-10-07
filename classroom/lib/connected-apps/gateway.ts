@@ -40,7 +40,7 @@ export async function forwardConnectedAppRequest(request: NextRequest, backendPa
   if (origin) headers.set("x-codemit-public-origin", origin);
 
   const body = await extractForwardBody(request);
-  const url = `${backendBaseUrl()}${backendPath}${request.nextUrl.search}`;
+  const url = `${backendBaseUrl()}${backendPath}${new URL(request.url).search}`;
   const upstream = await retryWhileConnectionRefused(
     () => forwardRequest(request.method, url, headers, body, request.signal),
     { signal: request.signal },
