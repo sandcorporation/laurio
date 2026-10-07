@@ -35,6 +35,7 @@ import type { NextRequest } from "next/server";
 
 import { hasSessionCookie } from "./lib/auth/cookies";
 import { decideRootView } from "./lib/landing/decide-root-view";
+import { loginNextPath } from "./lib/auth/login-next";
 
 export function middleware(request: NextRequest) {
   const view = decideRootView({
@@ -49,7 +50,7 @@ export function middleware(request: NextRequest) {
 
   if (!hasSessionCookie(request.cookies)) {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
+    loginUrl.searchParams.set("next", loginNextPath(request.url));
     return NextResponse.redirect(loginUrl);
   }
 
