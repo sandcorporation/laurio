@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname, ".."),
   transpilePackages: ["@codemit/bff-shared", "@codemit/bff-client", "@codemit/markdown"],
   reactStrictMode: true,
+  // 미들웨어의 request.url 을 NextURL 로 정규화하지 않는다(#622) — 정규화는 쿼리 안
+  // 127.0.0.1 을 localhost 로 바꿔 로그인 next 의 OAuth redirect_uri 를 깬다.
+  skipMiddlewareUrlNormalize: true,
   webpack: (config, { dev }) => {
     // 운영자 앱과 같은 이유 — dev 컨테이너가 소스를 바인드 마운트로 받는데,
     // Windows 호스트 → Linux 컨테이너 바인드 마운트에서는 기본 fs 이벤트 감시가
