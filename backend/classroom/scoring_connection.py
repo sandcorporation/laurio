@@ -26,7 +26,7 @@ from django.conf import settings
 
 from core.adapters import is_fake_adapter_binding
 from core.crypto import decrypt
-from core.llm_scoring import OPENAI_API_BASE_URL, Transport
+from core.llm_scoring import OPENAI_API_BASE_URL, AsyncTransport, Transport
 from core.safe_outbound import OutboundReason, OutboundRefused, SafeOutbound
 
 from .models import Class
@@ -60,6 +60,14 @@ class ScoringConnection:
 
         if self.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
             return SafeOutbound().request
+        return None
+
+    def async_transport(self) -> AsyncTransport | None:
+        """`transport` 의 비동기 판(#584) — grader 가 쓴다. 호환 서버는 같은 보장(푼 IP·원래 이름
+        TLS·리다이렉트 안 따라감)을 지키는 `SafeOutbound.arequest`, OpenAI 키 연결은 `None`."""
+
+        if self.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+            return SafeOutbound().arequest
         return None
 
     @property

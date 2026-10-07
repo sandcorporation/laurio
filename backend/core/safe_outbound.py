@@ -25,18 +25,28 @@
 나가지 않는다: 요청은 `OFFLINE` 으로 거부하고, `check` 는 주소 모양(https·내부 이름·IP 리터럴)만
 보고 이름은 풀지 않는다.
 
+**비동기 길(`arequest`, #584).** grader 가 쓴다 — 같은 보장을 aiohttp 에서 그대로 지킨다: 푼 IP 만
+연결하는 `_PinnedResolver`(연결기가 이름을 다시 풀지 못한다), URL 은 원래 이름이라 SNI·인증서
+검증이 그 이름으로 되고(`ssl` 기본 컨텍스트가 `check_hostname`), `allow_redirects=False`,
+`trust_env` 끔(프록시 없음).
+
 시험은 `resolver`(주소 풀기)·`is_allowed`(공인 판정)·`ca_bundle`(신뢰할 CA)을 갈아끼운다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import enum
+import functools
 import ipaddress
+import json as jsonlib
 import socket
+import ssl
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import aiohttp
 import requests
 from django.conf import settings
 from requests.adapters import HTTPAdapter
@@ -120,6 +130,83 @@ class _PinnedHostAdapter(HTTPAdapter):
         super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
 
 
+class AsyncResponse:
+    """`arequest` 의 응답 — `requests.Response` 중 채점 어댑터가 읽는 것(`status_code`·`json()`)만."""
+
+    def __init__(self, status_code: int, body: bytes):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self) -> Any:
+        try:
+            return jsonlib.loads(self._body)
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ValueError(str(exc)) from None
+
+
+class _PinnedResolver(aiohttp.abc.AbstractResolver):
+    """연결기가 이름을 다시 풀지 못하게 한다 — 이미 확인한 주소만 돌려준다."""
+
+    def __init__(self, addresses: list[IPAddress]):
+        self._addresses = addresses
+
+    async def resolve(self, host, port=0, family=socket.AF_INET):
+        return [
+            {
+                "hostname": host,
+                "host": str(address),
+                "port": port,
+                "family": socket.AF_INET6 if address.version == 6 else socket.AF_INET,
+                "proto": 0,
+                "flags": socket.AI_NUMERICHOST,
+            }
+            for address in self._addresses
+        ]
+
+    async def close(self) -> None:
+        return None
+
+
+def _too_large(limit: int) -> OutboundRefused:
+    return OutboundRefused(OutboundReason.RESPONSE_FAILED, f"응답 본문이 {limit}바이트를 넘는다")
+
+
+def read_limited_sync(response: requests.Response, limit: int) -> bytes:
+    """조각으로 읽다 상한을 넘으면 끊는다 — 서버가 닿았으므로(`RESPONSE_FAILED`) 연결 불가가 아니다."""
+
+    chunks: list[bytes] = []
+    size = 0
+    try:
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            size += len(chunk)
+            if size > limit:
+                response.close()
+                raise _too_large(limit)
+            chunks.append(chunk)
+    except requests.RequestException:
+        response.close()
+        raise
+    return b"".join(chunks)
+
+
+async def read_limited_async(response: aiohttp.ClientResponse, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in response.content.iter_chunked(64 * 1024):
+        size += len(chunk)
+        if size > limit:
+            raise _too_large(limit)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@functools.lru_cache(maxsize=8)
+def _ssl_context_for(cafile: str | None) -> ssl.SSLContext:
+    """CA 번들별로 하나만 만든다 — 요청마다 시스템 CA 를 다시 읽지 않는다. 공유해도 안전하다."""
+
+    return ssl.create_default_context(cafile=cafile)
+
+
 class SafeOutbound:
     def __init__(
         self,
@@ -180,10 +267,13 @@ class SafeOutbound:
                 pinned_url,
                 headers={**headers, "Host": host_header},
                 json=json,
-                timeout=timeout,
+                # (연결, 읽기) — 연결만 따로 짧다. 응답 없는 서버가 전체 타임아웃을 다 쓰지 못한다.
+                timeout=(min(settings.SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS, timeout), timeout),
                 allow_redirects=False,
                 verify=self._verify,
+                stream=True,
             )
+            body = read_limited_sync(response, settings.SAFE_OUTBOUND_RESPONSE_MAX_BYTES)
         except requests.exceptions.SSLError as exc:
             raise OutboundRefused(OutboundReason.CERTIFICATE, str(exc)) from None
         except requests.exceptions.ConnectionError as exc:
@@ -196,9 +286,61 @@ class SafeOutbound:
             session.close()
 
         if 300 <= response.status_code < 400:
-            response.close()
             raise OutboundRefused(OutboundReason.REDIRECT, str(response.status_code))
+        # 본문을 이미 상한까지만 읽어 두었다 — 이후 `.json()`·`.content` 는 그 값을 쓴다.
+        response._content = body
+        response._content_consumed = True
         return response
+
+    async def arequest(
+        self, method: str, url: str, *, headers: dict[str, str], timeout: float, json: Any = None
+    ) -> AsyncResponse:
+        """`request` 의 비동기 판 — 같은 거부 이유·같은 보장. 주소 풀기는 블로킹이라 스레드에서 한다."""
+
+        host, port = self._split(url)
+        if self._offline():
+            raise OutboundRefused(OutboundReason.OFFLINE, "dev·CI 는 강사 주소로 나가지 않는다")
+        addresses = await asyncio.get_running_loop().run_in_executor(
+            None, self._resolve_allowed, host, port
+        )
+        # 확인한 첫 주소 하나만 쓴다 — 동기 길과 같다.
+        connector = aiohttp.TCPConnector(
+            resolver=_PinnedResolver(addresses[:1]),
+            ssl=self._ssl_context(),
+            use_dns_cache=False,
+            force_close=True,
+        )
+        body = None if json is None else jsonlib.dumps(json).encode("utf-8")
+        try:
+            async with aiohttp.ClientSession(
+                connector=connector,
+                trust_env=False,
+                timeout=aiohttp.ClientTimeout(
+                    total=timeout,
+                    sock_connect=min(settings.SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS, timeout),
+                ),
+            ) as session:
+                async with session.request(
+                    method, url.strip(), headers=headers, data=body, allow_redirects=False
+                ) as response:
+                    if 300 <= response.status < 400:
+                        raise OutboundRefused(OutboundReason.REDIRECT, str(response.status))
+                    return AsyncResponse(
+                        response.status,
+                        await read_limited_async(response, settings.SAFE_OUTBOUND_RESPONSE_MAX_BYTES),
+                    )
+        except OutboundRefused:
+            raise
+        except (ssl.SSLError, aiohttp.ClientSSLError, aiohttp.ClientConnectorCertificateError) as exc:
+            raise OutboundRefused(OutboundReason.CERTIFICATE, type(exc).__name__) from None
+        except (aiohttp.ClientConnectorError, aiohttp.ConnectionTimeoutError) as exc:
+            raise OutboundRefused(OutboundReason.UNREACHABLE, type(exc).__name__) from None
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+            # 읽기 타임아웃·끊긴 몸통 — 연결은 섰고 서버가 요청을 받았다(#603).
+            raise OutboundRefused(OutboundReason.RESPONSE_FAILED, type(exc).__name__) from None
+
+    def _ssl_context(self) -> ssl.SSLContext:
+        return _ssl_context_for(self._verify if isinstance(self._verify, str) else None)
 
     # --- 안쪽 ----------------------------------------------------------------------------
 
