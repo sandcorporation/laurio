@@ -88,6 +88,10 @@ services:
     ports: !override
       - "8001"
 
+  # 강의실 채점 grader(#584) — 코드가 이미지에 구워져 있다.
+  grader:
+    volumes: !reset []
+
   frontend:
     build:
       target: runner

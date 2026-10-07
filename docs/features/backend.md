@@ -396,18 +396,21 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 모양이다(공모전의 `submission:<contest_id>:<developer_user_id>:<slot>`과는 접두어로
 갈린다, `submissions.resolvers.SubmissionTargetStateResolver`).
 
-**제출 즉시 비동기로 채점된다**(#287, #378, #582, ADR-0046, ADR-0056) — 채점하는 길은
-Celery 태스크 `classroom.score_attempt` 하나이고, 그 태스크가 채점 전용 워커
-(`celery-scoring`, 큐 `classroom-scoring`) 안에서 직접 채점한다 — 내부 HTTP 를 거치지
-않는다. 제출이 커밋되면 그 시도의 태스크가 곧바로 큐에 들어가고,
-`classroom-submission-scoring` 스캔(60초 주기, `ClassroomScore`가 아직 없고 그 클래스에
-키가 있는 시도를 찾는다)이 안전망으로 남아 그런 시도를 **큐에 넣기만** 한다. 넣을 때마다
-시도에 「큐에 넣은 시각」(`scoring_queued_at`)을 찍고, 그 시각이 5분 안이면 스캔이 다시
-넣지 않는다 — 태스크가 처리를 마치면 비우므로 실패한 시도는 다음 tick 에, 워커가 죽어
-잃은 태스크는 5분 뒤에 다시 줍힌다. 같은 시도의 태스크가 둘 돌아도 행을 잠가(ADR-0006)
-벤더는 한 번, Score 는 하나다. 벤더 타임아웃은 3분, 태스크 한도는 soft 210초·hard 240초다.
-dev·CI 는 태스크가 eager(`CELERY_TASK_ALWAYS_EAGER`)라 제출·스캔 요청 안에서 흉내
-어댑터로 채점이 끝난다(배포 환경은 그 값이 켜지면 부팅을 거부한다) — 강사 본인의 키·그
+**제출 즉시 비동기로 채점된다**(#287, #378, #584, ADR-0046, ADR-0059) — 채점하는 길은
+상주 프로세스 `manage.py grader`(`classroom.grader`, 배포의 `grader` 서비스) 하나다 — 내부 HTTP·
+Celery 를 거치지 않는다. 제출이 커밋되면 그 시도에 「큐에 넣은 시각」(`scoring_queued_at`)을
+찍고(`enqueue_scoring`), `classroom-submission-scoring` 스캔(60초 주기, `ClassroomScore`가 아직
+없고 그 클래스에 키가 있는 시도를 찾는다)이 안전망으로 남아 그런 시도를 **큐에 넣기만** 한다.
+grader 가 0.5초마다 큐에 있는 후보를 읽어 **임대**(`scoring_lease_owner`·`scoring_lease_until`,
+240초)를 조건부 UPDATE 로 집고, 트랜잭션·잠금 없이 비동기 HTTP 로 벤더를 기다린 뒤(OpenAI·호환
+서버 모두, 호환 서버는 `core.safe_outbound` 의 보장 그대로), 임대가 아직 내 것인지 확인하는 짧은
+트랜잭션 하나로 결과를 쓴다. 같은 시도를 둘이 집어도 임대를 이긴 하나만 벤더를 부르고(ADR-0006),
+임대가 만료돼 다른 grader 가 집은 뒤에 늦게 온 결과는 버려진다. 동시성은 전역 64건·클래스(채점
+연결)당 8건(`CLASSROOM_GRADER_*`)이고 grader 는 하나만 띄운다. 임대는 다른 연결이 잠근 행을 기다리지 않고 건너뛰며(잠금 대기는 `CLASSROOM_GRADER_LOCK_TIMEOUT_MS` 2초에서 포기하고 결과 쓰기는 다시 한다), 벤더를 부르기 직전에 늘리고(내 임대일 때만 — 실패하면 벤더를 안 부른다) 처리 중인 시도는 다시 집지 않는다. DB 일은 스레드 하나가 연결 하나를 쥐고 하며(grader 의 DB 연결은 정확히 1개, 실시간 신호 발행은 그 스레드 밖), 소스 읽기(`CLASSROOM_GRADER_SOURCE_THREADS` 8)는 DB 를 쓰지 않는 따로 둔 풀이다. 벤더 응답 본문은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES`(2MB)까지만 읽고 연결은 `SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS`(10초)에 포기한다. 벤더 타임아웃은 3분이다. 처리를
+마치면 큐 시각·임대를 비워 실패한 시도는 다음 스캔 tick 에, grader 가 죽어 잃은 시도는 임대 만료
+뒤에 다시 줍힌다. SIGTERM 이면 새 후보를 잡지 않고 하던 채점을 끝낸다. dev compose·CI e2e 스택에도
+`grader` 가 뜬다(운영과 같은 길, 제출 뒤 0.5초 안에 줍는다) — pytest 만 상주 프로세스 없이
+`CLASSROOM_GRADER_INLINE` 으로 큐에 넣는 자리에서 한 시도를 동기 채점한다. 강사 본인의 키·그
 문제의 모델로 친다는 사실은 그대로다.
 `classroom.ClassroomScore`·`ClassroomScoringAttempt`가
 `scoring.Score`·`ScoringAttempt`와 같은 규율(ADR-0006 「시도당 하나, 재채점 없음」)을

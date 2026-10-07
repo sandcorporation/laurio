@@ -267,20 +267,49 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 받는다.** celery-worker·beat 는 지금처럼 내리고 올린다(beat 는 하나여야 하고 태스크는 Redis
 에서 기다린다).
 
-**강의실 채점 워커 `celery-scoring` 은 맨 끝에, 최대 4분 걸려 바뀐다**(#582, ADR-0056).
-강의실 채점은 이 서비스 안에서 직접 돈다 — backend 와 같은 이미지로 큐 `classroom-scoring`
-하나만 소비하는 prefork 워커(동시성 8, 미리 가져오기 1, 메모리 약 1GB)이고, 기존
-`celery-worker` 는 `-Q celery` 로 그 큐를 소비하지 않는다(스캔·알림·백업·색인). 벤더를
-3분까지 기다리므로 `stop_grace_period: 4m` 이다 — `up -d` 가 옛 컨테이너에 SIGTERM 을
-보내면 워커는 새 태스크를 받지 않고 채점 중인 것을 마저 끝낸다. 그래서 `deploy.sh` 는
-backend·worker·beat·events 를 다 바꾼 **뒤에** 이 서비스를 바꾼다 — 앞에 두면 사용자 요청을
-받는 쪽의 교체가 그만큼 늦어진다. 그동안 새 채점 태스크는 Redis 에서 기다린다(채점이
-늦어질 뿐 잃지 않는다). 물러서는 배포·풀러 교체에서는 이 서비스를 **먼저 따로** 내린다 —
-backend 가 아직 요청을 받는 동안 그 4분을 쓰고, backend 가 없는 창을 늘리지 않는다. 그래도
-4분 안에 끝나지 않아 SIGKILL 로 끊긴 채점은 기록 없이 남고, 「큐에 넣은 시각」 5분이 지난 뒤
-60초 스캔이 다시 넣는다. **트랜잭션을 쥔 채 벤더를 기다린다**(`_score_one` 의 행 잠금) —
-동시에 채점 중인 시도 수만큼(최대 8) 풀러의 서버 연결(`PGBOUNCER_DEFAULT_POOL_SIZE` 기본
-20)을 그동안 쥔다.
+**강의실 채점 `grader` 는 맨 끝에, 최대 4분 걸려 바뀐다**(#584, ADR-0059). 강의실 채점은 이
+상주 프로세스가 한다 — backend 와 같은 이미지로 `python manage.py grader` 하나(브로커 없이 DB 의
+「큐에 넣은 시각」을 읽고, 전역 64·클래스당 8 건을 비동기로 기다린다). 벤더를 3분까지 기다리므로
+`stop_grace_period: 4m` 이다 — `up -d` 가 옛 컨테이너에 SIGTERM 을 보내면 grader 는 새 후보를 잡지
+않고 채점 중인 것을 마저 끝낸다. 그래서 `deploy.sh` 는 backend·worker·beat·events 를 다 바꾼 **뒤에**
+이 서비스를 바꾼다 — 앞에 두면 사용자 요청을 받는 쪽의 교체가 그만큼 늦어진다. 그동안 큐에 넣은
+시도는 DB 에서 기다린다(채점이 늦어질 뿐 잃지 않는다). 물러서는 배포·풀러 교체에서는 이 서비스를
+**먼저 따로** 내린다 — backend 가 아직 요청을 받는 동안 그 4분을 쓴다. 그래도 4분 안에 끝나지 않아
+SIGKILL 로 끊긴 채점은 임대(240초)가 만료된 뒤 다른(새) grader 가 다시 줍는다. **벤더를 기다리는
+동안 DB 연결·트랜잭션을 쥐지 않는다** — 풀러의 서버 연결(`PGBOUNCER_DEFAULT_POOL_SIZE` 기본 20)은
+짧은 DB 일(임대 집기·읽기·결과 쓰기)에만 쓰고, **grader 의 몫은 정확히 1개**다 — DB 일은 스레드
+하나(`grader-db`)에서만 하고 그 스레드가 Django 연결 하나를 계속 쥔다(작업 전에 죽은 연결을 걷고, 연결
+오류면 닫고 한 번 다시 한다). 그 스레드에는 짧은 DB 일만 있다 — 알림이 내는 실시간 신호(Redis)는 모아
+두었다 다른 작은 풀에서 보낸다. 나머지 19 는 backend(gunicorn 워커 넷)·celery-worker·beat·events 의
+몫이다. 소스 읽기(저장소 clone 최대 20MB·
+스토리지·문법 검사)는 **DB 를 쓰지 않는 따로 둔 스레드 풀**(`CLASSROOM_GRADER_SOURCE_THREADS` 기본
+8)에서 돌아 DB 일을 막지 않고 DB 연결도 쥐지 않는다(시험이 DB 스레드 밖 쿼리 0번을 못 박는다). grader 컨테이너에는 **`mem_limit: 1g`** 가 있다 —
+64건의 요청·응답과 소스를 들고 있어도 호스트의 DB 까지 OOM 에 끌어들이지 않게 한다. 벤더(특히 강사의
+호환 서버) 응답 본문은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES`(기본 2MB)까지만 읽고 넘으면 끊는다(닿았으나
+실패한 시도로 센다), 연결 단계는 `SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS`(기본 10초)에 포기한다 — 응답
+없는 서버가 슬롯을 180초 쥐지 않는다. **첫 배포(#584)** 에는 `celery-scoring`(예전 채점
+워커)이 compose 에서 사라져 고아 컨테이너로 남는다 — `deploy.sh` 의 `retire_orphan_scoring` 이 그것을 4분
+기다려 멈추고 지우고, Redis 의 옛 큐 `classroom-scoring` 을 비운다(소비할 곳이 없다 — 시도는 DB 에 큐
+시각이 찍혀 있어 grader 가 줍는다). **마이그레이션보다 먼저**(겹쳐 바꾸는 길·내렸다 올리는 길·풀러 길
+모두) 부른다: 옛 워커는 벤더를 기다리는 동안 행 잠금 트랜잭션을 분 단위로 쥐고, 그 뒤에 0028 의 ALTER
+TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부 막힌다(리허설 실측: 마이그레이션
+174초, 그동안 옛 backend 의 제출 요청이 타임아웃). 먼저 걷는 동안 backend 는 계속 요청을 받고 제출은 DB
+큐에서 기다린다. 그래도 장기 트랜잭션이 남을 때를 대비해 마이그레이션 일회성 컨테이너는 **`lock_timeout`
+5초**(`MIGRATE_LOCK_TIMEOUT`)로 돌고, 잠금을 못 얻으면 되감긴 뒤 10초 간격으로 5번까지 다시 한다
+(`MIGRATE_LOCK_RETRIES`·`MIGRATE_LOCK_RETRY_SLEEP`) — 그래도 안 되면 이유를 로그에 남기고 배포를 멈춘다.
+풀러(pgbouncer, 트랜잭션 모드)는 `PGOPTIONS` 의 시작 매개변수 `options` 를 거부하므로 이 일회성 컨테이너만
+풀러가 붙는 실제 DB 주소(풀러 컨테이너의 `POSTGRES_HOST`/`POSTGRES_PORT`)로 직접 붙는다.
+
+**되돌릴 때는 grader 를 먼저 내린다**(#584 리허설). 옛 compose(`celery-scoring` 이 있고 `grader` 가 없는)로
+`up` 하면 grader 는 compose 에서 사라진 **고아**로 계속 돌며 옛 워커와 같은 큐를 본다 — 실측: 잠금을 기다리던
+때에는 grader 가 통째로 멈췄고(그 덕에 벤더 이중 호출은 안 났다), 잠긴 행을 건너뛰게 고친 뒤에는 멈추지
+않는 대신 grader 가 옛 워커가 아직 안 잡은 행(미리 받아 둔 것)을 같이 채점해 **40건 중 9건에서 벤더가
+두 번 불렸다** — 둘이 한 큐를 보면 안 된다. 그래서 ① **이 `deploy.sh` 로 되돌리면** `retire_orphan_scoring` 이 지금 compose 에 없는 채점
+프로세스(`grader`·`celery-scoring`)를 자동으로 걷는다. ② **옛 `deploy.sh`(이 변경 이전 커밋)로 되돌리면
+소용없다** — 그 스크립트는 grader 를 모른다. 되돌리기 전에 손으로 `docker stop -t 240 <grader 컨테이너>` 후
+`docker rm` 한다. ③ 순서는 항상 grader 를 내린 뒤 옛 compose 를 올린다. **강제 종료(SIGKILL·`docker kill`)
+에서는 그때 벤더를 기다리던 시도마다 벤더 비용이 두 번 나간다**(임대 만료 240초 뒤 다시 줍는다 — 리허설
+실측: 진행 중 6건이 호출 12번) — 그래서 정상 종료 유예(`stop_grace_period` 4분)를 기다리는 것이 기본이다.
 
 - **새 마이그레이션은 먼저 돌리고 겹쳐 바꾼다**(#526, ADR-0053). `deploy.sh` 가 새 이미지의
   일회성 컨테이너(`compose run --rm backend`, 풀러 경유)에서 `migrate` 를 돌리는 동안 옛
@@ -309,8 +338,8 @@ backend 가 아직 요청을 받는 동안 그 4분을 쓰고, backend 가 없�
 서비스든 받을 이미지는 있다). 기준점은 `.jenkins-staging-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 바꿔 끼운다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
-`backend/` 는 **backend + celery-worker + celery-beat + events + celery-scoring**(#380,
-ADR-0046, #582)을 함께 간다(다섯이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
+`backend/` 는 **backend + celery-worker + celery-beat + events + grader**(#380,
+ADR-0046, #584)을 함께 간다(다섯이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
 **이미지가 넷**이었고, `build backend` 만 하면 나머지 셋이 옛 이미지에 남아 배포가 초록으로
 끝난 채 스캔·강의실 실시간 신호만 옛 코드로 돌았다),
 `packages/` **아래 무엇이든** 과 `pnpm-lock.yaml`·`pnpm-workspace.yaml`·루트
@@ -354,7 +383,7 @@ rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — �
 
 **연결 풀러(pgbouncer)가 죽으면 검색·이벤트 서비스와 반대로 배포가 실패로
 끝난다 — 그리고 그래야 맞다**(#453/#458). `backend`·`celery-worker`·
-`celery-beat`·`events` 넷(과 채점 워커 `celery-scoring`)은 이제 DB 를 직접 가리키지 않고 `pgbouncer` 를
+`celery-beat`·`events` 넷(과 채점 `grader`)은 이제 DB 를 직접 가리키지 않고 `pgbouncer` 를
 가리킨다(`POSTGRES_HOST=pgbouncer`) — search 처럼 시작 순서만 기다리는
 `service_started` 가 아니라 `db` 와 같은 `service_healthy` 로 그 넷의
 `depends_on` 에 걸려 있다. **DB(`db`) 자신은 살아 있어도 풀러가 죽어 있으면
@@ -426,7 +455,7 @@ docker compose -f docker/compose.dev.yaml up -d
 **Celery 는 dev 기본 기동에 없다**(#40). beat 가 60초마다 쏘는 스캔이 마감 전이·채점·
 배분·환불을 실제로 진행시켜, e2e 가 심은 데이터를 테스트 도중에 다른 상태로
 옮겨버리기 때문이다. 워커가 없어도 태스크는 돈다 — dev·CI 는 `CELERY_TASK_ALWAYS_EAGER`
-라 `.delay()` 자리에서 그대로 실행된다(#582, [개발 환경](dev-environment.md)). 스캔
+라 `.delay()` 자리에서 그대로 실행된다(#582, [개발 환경](dev-environment.md)). 강의실 채점은 Celery 가 아니라 `grader` 서비스고, dev 기본 기동에 있다(#584). 스캔
 경로를 돌려보고 싶을 때만 프로필로 켠다:
 
 ```bash

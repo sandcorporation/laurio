@@ -406,7 +406,7 @@ services:
     logging: *default-logging
     # **이미지는 CI 가 굽고 여기서는 받기만 한다**(2026-09-17). amd64 태그는 이 호스트의
     # 아키텍처다 — staging(sub)은 amd64, prod(oracle)는 arm64. backend·celery-worker·
-    # celery-beat·events·celery-scoring 이 **같은 이미지 이름**을 쓴다 — 예전에는 공유 태그가 없어
+    # celery-beat·events·grader 가 **같은 이미지 이름**을 쓴다 — 예전에는 공유 태그가 없어
     # compose 가 이미지를 넷 만들었고, 하나만 갈면 나머지가 옛 코드로 남았다.
     # `build:` 은 비상용 로컬 빌드(`DEPLOY_IMAGE_SOURCE=build`)를 위해 남긴다.
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
@@ -458,22 +458,19 @@ services:
       search:
         condition: service_started
     environment: *backend-env
-    # 기본 큐(`celery`)만 소비한다 — 스캔·알림·백업·검색 색인. 강의실 채점 큐는
-    # 아래 `celery-scoring` 만 소비한다(#582, ADR-0056): 3분까지 벤더를 기다리는 채점이
-    # 60초 스캔 태스크를 막지 않게 한다.
+    # 기본 큐(`celery`)만 소비한다 — 스캔·알림·백업·검색 색인. 강의실 채점은 Celery 가
+    # 아니라 아래 `grader` 가 한다(#584, ADR-0059).
     command: celery -A config worker -Q celery --loglevel info
 
-  # 강의실 채점 전용 워커(#582, ADR-0056) — `classroom.score_attempt` 하나만 돈다. 채점은
-  # 이 프로세스 안에서 직접 벤더를 3분까지 기다린다(내부 HTTP·gunicorn 예산 밖). prefork
-  # 동시성 8: 시도 하나가 프로세스 하나를 길게 쥐므로 미리 가져오기는 하나씩
-  # (`--prefetch-multiplier 1`) — 그러지 않으면 한 프로세스 뒤에 태스크가 줄을 서 다른
-  # 프로세스가 놀아도 기다린다. 메모리는 약 1GB 다.
+  # 강의실 채점 grader(#584, ADR-0059) — 상주 프로세스 하나가 DB 의 큐(`scoring_queued_at`)에서
+  # 시도를 집어 비동기로 채점한다(브로커 없음). 벤더를 기다리는 건 코루틴이라 전역 64건·연결(클래스)
+  # 당 8건(`CLASSROOM_GRADER_*`)을 한 프로세스가 돌리고, 기다리는 동안 DB 연결·잠금이 없다. 한
+  # 개만 띄운다 — 둘이 떠도 임대가 「벤더 한 번」을 지키지만 연결당 상한은 프로세스 안의 값이다.
   #
-  # **따뜻한 종료를 4분 기다린다**(`stop_grace_period`) — 태스크의 hard 한도(240초)만큼.
-  # 배포가 이 컨테이너를 바꿀 때 SIGTERM 을 받은 워커는 새 태스크를 받지 않고 채점 중인
-  # 것을 마저 끝낸다. 그래도 끊기면(SIGKILL) 그 시도는 기록 없이 남고, 「큐에 넣은 시각」
-  # 5분이 지난 뒤 스캔이 다시 줍는다.
-  celery-scoring:
+  # **따뜻한 종료를 4분 기다린다**(`stop_grace_period`) — 임대 시간(240초)만큼. SIGTERM 을 받은
+  # grader 는 새 후보를 잡지 않고 하던 채점을 마저 끝낸다. 그래도 끊기면(SIGKILL) 그 시도는 임대가
+  # 만료된 뒤 다시 줍힌다.
+  grader:
     logging: *default-logging
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-backend:${CODEMIT_IMAGE_TAG:-local}-amd64
     build:
@@ -491,7 +488,10 @@ services:
         condition: service_started
     environment: *backend-env
     stop_grace_period: 4m
-    command: celery -A config worker -Q classroom-scoring --pool prefork --concurrency 8 --prefetch-multiplier 1 --loglevel info
+    # 상한이 없으면 메모리를 다 쓰는 일이 같은 호스트의 DB 까지 OOM 에 끌어들일 수 있다(#584 점검).
+    # 64건의 요청·응답 본문(응답은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES` 까지)·소스 읽기에 넉넉한 값이다.
+    mem_limit: 1g
+    command: python manage.py grader
 
   celery-beat:
     logging: *default-logging

@@ -88,7 +88,7 @@ case "$kind" in
     CODEMIT_MINIO_PORT=$(read_port minio 9000)
     export CODEMIT_MINIO_PORT
     echo "e2e 스택 굽고 띄우는 중($E2E_PROJECT, 캐시)…"
-    "${C[@]}" up -d --build frontend operator classroom >/dev/null
+    "${C[@]}" up -d --build frontend operator classroom grader >/dev/null
     docker ps -q --filter "label=com.docker.compose.project=$E2E_PROJECT" |
       xargs docker update --cpuset-cpus "$CPUSET" >/dev/null
 

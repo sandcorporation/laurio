@@ -51,15 +51,22 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 내부 HTTP 호출이 `Connection refused` 로 실패했다(수집기를 붙인 첫날 3건). 스캔은
 두 번 쏴도 한 번만 통과하므로(ADR-0003) 그 태스크가 **연결·타임아웃 실패만** 몇 번
 물러서서 재시도한다 — 2xx 가 아닌 응답(서버가 대답은 했다)은 재시도하지 않고 그대로
-실패로 남긴다. (강의실 채점 태스크 `classroom.score_attempt` 는 #582 부터 내부 HTTP 를
-부르지 않고 워커 안에서 직접 채점한다 — ADR-0056.)
+실패로 남긴다. (강의실 채점은 #582 부터 내부 HTTP 를 부르지 않는다 — #584 부터는 Celery 도
+아니고 `grader` 상주 프로세스가 한다, ADR-0059.)
 
-**dev·CI 는 Celery 태스크가 eager 다**(#582, ADR-0056) — `CELERY_TASK_ALWAYS_EAGER` 의
-기본값이 배포가 아닌 곳에서 켜짐이라, `.delay()` 자리에서 태스크가 그대로 돈다. 강의실
-채점은 태스크 하나로만 돌기 때문에(즉시 채점과 60초 스캔은 큐에 넣기만 한다) 워커 없는
-dev 에서도 제출 요청·스캔 요청 안에서 흉내 어댑터로 채점이 끝난다. `--profile celery` 의
-worker·beat 는 이 값을 `false` 로 받는다 — beat 가 쏜 태스크를 beat 자신이 돌리면
-`scripts/ci/celery-broker.sh` 가 보는 beat → worker 경로가 끊긴다. 배포 환경은 이 값이
+**강의실 채점은 `grader` 서비스가 한다**(#584, ADR-0059) — dev compose 의 기본 기동에 있고(`docker
+compose up -d` 에 들어간다), CI 의 e2e 스택도 띄운다. 제출·스캔은 「큐에 넣은 시각」만 찍고
+`python manage.py grader` 가 0.5초마다 큐를 읽어 흉내 어댑터로 채점하므로 제출 뒤 곧바로(e2e 시험
+하나 3초 안에) 끝난다. 로그는 `docker compose logs grader`(시도마다 `grader: submission=… status=…`
+한 줄). grader 의 DB 연결은 정확히 1개(DB 스레드 하나)고, 소스 읽기 스레드·잠금 대기 상한·응답 상한·연결 타임아웃은 `CLASSROOM_GRADER_SOURCE_THREADS`(8)·`CLASSROOM_GRADER_LOCK_TIMEOUT_MS`(2000)·`SAFE_OUTBOUND_RESPONSE_MAX_BYTES`(2MB)·`SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS`(10) 설정값이다. 마이그레이션보다 먼저 뜨면 큐를 읽다 실패해 간격을 늘려 다시 읽는다. **pytest 만**
+`CLASSROOM_GRADER_INLINE` 이다 — 상주 프로세스가 없으니 큐에 넣는 자리에서 한 시도를 동기로 채점한다
+(`classroom.grader.grade_inline`, 같은 임대·준비·결과 걸음에 벤더만 동기 길). 상주 grader 의 루프는
+`classroom.grader.run_round()` 로 시험한다.
+
+**그 밖의 Celery 태스크는 dev·CI 에서 eager 다**(#582) — `CELERY_TASK_ALWAYS_EAGER` 의 기본값이
+배포가 아닌 곳에서 켜짐이라 `.delay()` 자리에서 태스크가 그대로 돈다(공모전 이미지 최적화 등).
+`--profile celery` 의 worker·beat 는 이 값을 `false` 로 받는다 — beat 가 쏜 태스크를 beat 자신이
+돌리면 `scripts/ci/celery-broker.sh` 가 보는 beat → worker 경로가 끊긴다. 배포 환경은 이 값이
 켜지면 부팅을 거부한다.
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `CODEMIT_DB_PORT`를 따라간다

@@ -32,7 +32,7 @@ read_port() { "${C[@]}" port "$1" "$2" | head -n 1 | sed 's/.*://'; }
 CODEMIT_MINIO_PORT=$(read_port minio 9000)
 export CODEMIT_MINIO_PORT
 echo "스택 굽고 띄우는 중($project)…"
-"${C[@]}" up -d --build frontend operator classroom events || { echo "스택을 띄우지 못했다"; exit 1; }
+"${C[@]}" up -d --build frontend operator classroom events grader || { echo "스택을 띄우지 못했다"; exit 1; }
 
 CODEMIT_API_PORT=$(read_port backend 8000)
 CODEMIT_API_BASE_URL="http://127.0.0.1:$CODEMIT_API_PORT"

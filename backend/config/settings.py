@@ -826,30 +826,44 @@ INTERNAL_API_BASE_URL = _env("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
 CELERY_BROKER_URL = _env("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = _env("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
-# **dev·CI 는 태스크를 큐에 넣는 자리에서 그대로 돌린다**(#582, ADR-0056). 강의실 채점은
-# Celery 태스크 하나로만 돌고 즉시 채점·60초 스캔은 그 태스크를 큐에 넣기만 하므로, 워커가
-# 없는 dev·CI 에서 큐에 넣고 끝내면 아무것도 채점되지 않는다. eager 면 채점 경로가 환경마다
-# 갈리지 않는다(흉내 어댑터라 빠르다). 배포 환경은 꺼져 있어야 한다 — 켜지면 채점이 다시
-# gunicorn 요청 안에서 돈다(오류 87). 아래에서 부팅을 거부한다. dev compose 의 celery-worker·
-# beat 는 이 값을 false 로 받는다 — beat 가 쏜 태스크를 beat 자신이 돌리면 안 된다.
+# **dev·CI 는 태스크를 큐에 넣는 자리에서 그대로 돌린다**(#582, ADR-0056) — 공모전 이미지 최적화 같은
+# 일반 태스크가 워커 없이 도는 모양이다. 강의실 채점은 Celery 가 아니라 grader 가 한다(#584,
+# 아래 `CLASSROOM_GRADER_*`). dev compose 의 celery-worker·beat 는 이 값을 false 로 받는다 —
+# beat 가 쏜 태스크를 beat 자신이 돌리면 안 된다.
 CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", not IS_DEPLOYED_ENVIRONMENT)
 if IS_DEPLOYED_ENVIRONMENT and CELERY_TASK_ALWAYS_EAGER:
     raise ImproperlyConfigured(
-        "배포 환경에서 CELERY_TASK_ALWAYS_EAGER 가 켜져 있다 — 강의실 채점이 워커가 아니라 "
-        "요청 안에서 돌게 된다(#582, ADR-0056). 값을 지운다."
+        "배포 환경에서 CELERY_TASK_ALWAYS_EAGER 가 켜져 있다 — 태스크가 워커가 아니라 "
+        "요청 안에서 돌게 된다(#582). 값을 지운다."
     )
-#: 강의실 채점만 자기 큐로 간다(#582) — 배포의 `celery-scoring` 서비스만 이 큐를 소비하고,
-#: 스캔·알림·백업을 맡는 `celery-worker` 는 기본 큐(`celery`)만 소비한다. 3분까지 벤더를
-#: 기다리는 채점이 60초 스캔 태스크를 막지 않는다.
-CLASSROOM_SCORING_QUEUE = "classroom-scoring"
-CELERY_TASK_ROUTES = {"classroom.score_attempt": {"queue": CLASSROOM_SCORING_QUEUE}}
 
-# --- 바깥으로 나가는 호출 (core.safe_outbound, #584) ------------------------------
+# --- 강의실 채점 grader (#584, ADR-0059) ---------------------------------------------
+# `manage.py grader` 상주 프로세스가 DB 의 큐(`scoring_queued_at`)에서 시도를 집어 비동기로
+# 채점한다 — 브로커·채점 큐가 없다. 상한은 그 프로세스 안의 값이다.
+#
 # 바깥(벤더·강사 서버)으로 나가는 호출의 한도 — 강사가 적은 서버는 믿지 않는다.
 # 응답 본문은 이 크기까지만 읽고 넘으면 끊는다(끝없이 흘려 메모리를 채우는 서버, 「닿았음」으로 센다).
 SAFE_OUTBOUND_RESPONSE_MAX_BYTES = int(_env("SAFE_OUTBOUND_RESPONSE_MAX_BYTES", str(2 * 1024 * 1024)))
 # 연결 단계만의 타임아웃(초) — 전체 타임아웃(채점은 180초)과 따로다. 응답 없는 서버가 슬롯을 길게 쥐지 않게.
 SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS = float(_env("SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS", "10"))
+# grader 의 소스 읽기 스레드 풀(스토리지·GitHub clone·문법 검사 — **DB 를 쓰지 않는다**). DB 일은 스레드
+# 하나(`grader-db`)에서만 해 DB 연결이 정확히 1개다 — 여럿으로 늘리면 연결도 여럿이 되므로 설정값이 아니다.
+# grader 가 잠긴 행을 기다리는 상한(밀리초) — 결과 쓰기·임대 연장이 이 안에 잠금을 못 얻으면 포기하고
+# 다시 한다(옛 채점 워커가 행 잠금을 쥔 채 벤더를 기다리는 동안 DB 스레드 하나가 서 버리지 않게).
+CLASSROOM_GRADER_LOCK_TIMEOUT_MS = int(_env("CLASSROOM_GRADER_LOCK_TIMEOUT_MS", "2000"))
+# 결과 쓰기가 잠금에 막힐 때 같은 결과를 다시 쓰려고 시도하는 총 시간(초). 넘으면 결과를 버리고 임대
+# 만료 뒤 다시 줍는다.
+CLASSROOM_GRADER_LOCK_RETRY_SECONDS = int(_env("CLASSROOM_GRADER_LOCK_RETRY_SECONDS", "30"))
+CLASSROOM_GRADER_SOURCE_THREADS = int(_env("CLASSROOM_GRADER_SOURCE_THREADS", "8"))
+CLASSROOM_GRADER_GLOBAL_LIMIT = int(_env("CLASSROOM_GRADER_GLOBAL_LIMIT", "64"))
+CLASSROOM_GRADER_PER_CONNECTION_LIMIT = int(_env("CLASSROOM_GRADER_PER_CONNECTION_LIMIT", "8"))
+# 큐를 읽는 간격(초) — 제출 뒤 채점이 시작되기까지의 최대 지연이다. dev·CI(e2e 시험 하나 3초)도
+# 같은 값이라 운영과 같은 길을 탄다.
+CLASSROOM_GRADER_POLL_SECONDS = float(_env("CLASSROOM_GRADER_POLL_SECONDS", "0.5"))
+# pytest 만 켠다 — 큐에 넣는 자리에서 한 시도를 동기로 채점해 상주 프로세스 없이 시험이 결과를
+# 본다. 배포·dev·e2e 는 항상 꺼져 있고 `grader` 서비스가 채점한다.
+CLASSROOM_GRADER_INLINE = _RUNNING_TESTS
+
 # --- DB 백업 (core.backups) ----------------------------------------------------------
 # 매일 새벽 2시 pg_dump 결과를 비공개 버킷 db-backups/ 에 올린다. pg_dump 는 서버와 같은
 # 메이저(17)여야 한다 — backend 이미지가 PGDG 에서 postgresql-client-17 을 설치한다.

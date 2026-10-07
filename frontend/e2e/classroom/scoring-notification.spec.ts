@@ -20,8 +20,9 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 //
 // 준비 단계는 시임 규약(ADR-0017/0021)대로 `classroomApi`로 백엔드 API를
 // 직접 친다 — 화면으로 클래스·문제·체크리스트를 만드는 것은 각자의 전용
-// 스펙(problem-templates.spec.ts 등)이 이미 덮는다. 채점은 제출 요청 안에서
-// 끝난다 — dev·CI 는 채점 태스크를 큐에 넣는 자리에서 그대로 돌린다(#582, eager).
+// 스펙(problem-templates.spec.ts 등)이 이미 덮는다. 채점은 제출 요청 밖에서 끝난다 —
+// dev·CI 도 운영처럼 상주 `grader` 가 큐를 읽어 채점한다(#584). 그래서 알림 화면을 열기
+// 전에 「내 시도」가 채점 완료가 될 때까지 API 로 기다린다.
 
 test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도로 간다", async ({ page }) => {
   const seed = `scoring-notification-${test.info().workerIndex}-${Date.now()}`;
@@ -79,6 +80,18 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
   );
   expect(submitResponse.ok()).toBeTruthy();
   const submissionId = (await submitResponse.json()).id as number;
+
+  await expect
+    .poll(
+      async () => {
+        const mine = await api.get(
+          `/api/backend/classroom/classes/${classId}/problems/${problemId}/mine`,
+        );
+        return (await mine.json()).submissions[0]?.status;
+      },
+      { timeout: 2_500 },
+    )
+    .toBe("scored");
 
   await page.goto("/notifications");
   await expect(page.getByTestId("notifications-heading")).toBeVisible();
