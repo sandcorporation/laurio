@@ -6580,10 +6580,10 @@ export interface components {
              * @default []
              */
             instructor_display_names: string[];
+            /** Open Problem Count */
+            open_problem_count: number;
             /** Participant Count */
             participant_count: number;
-            /** Problem Count */
-            problem_count: number;
             /** Suggested Name */
             suggested_name?: string | null;
         };

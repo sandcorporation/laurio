@@ -341,10 +341,10 @@ def _last_submitted_by(key: str, **filters) -> dict[int, object]:
     return dict(rows)
 
 
-def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
-    """클래스 행 수치 — 클래스 수와 무관하게 질의 여섯 개."""
+def _active_member_ids_by_class(class_ids: list[int]) -> dict[int, set[int]]:
+    """클래스 id → 참여 중인 참여자 id(강사 전원·내보낸 사람 제외) — 질의 하나. 클래스 행의
+    `member_count` 와 가입 미리보기의 `participant_count`(#659)가 이것을 센다."""
 
-    class_ids = [c.id for c in classes]
     active_ids: dict[int, set[int]] = {cid: set() for cid in class_ids}
     for member_id, classroom_id in (
         ClassMember.objects.filter(classroom_id__in=class_ids, expelled_at__isnull=True)
@@ -353,6 +353,14 @@ def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
         .values_list("id", "classroom_id")
     ):
         active_ids[classroom_id].add(member_id)
+    return active_ids
+
+
+def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
+    """클래스 행 수치 — 클래스 수와 무관하게 질의 여섯 개."""
+
+    class_ids = [c.id for c in classes]
+    active_ids = _active_member_ids_by_class(class_ids)
 
     problems_by_class: dict[int, list[Problem]] = {cid: [] for cid in class_ids}
     for problem in Problem.objects.filter(classroom_id__in=class_ids).prefetch_related("checklist_items"):
@@ -1161,18 +1169,17 @@ def preview_join(request: HttpRequest, join_code: str):
     # GitHub·구글을 켤 때까지) 다른 제공자·미동의 사용자는 빈 문자열이 와
     # `suggested_name`도 `None`으로 떨어진다.
     suggested_name = _suggested_name(auth_user)
-    # `members.count()`는 강사 본인이 가입했으면 그 행도 센다 — CONTEXT.md
-    # 「ClassMember」가 강사를 빼라고 정한 것은 **달성률**의 분모뿐이다(그
-    # 계산은 아직 없는 티켓의 몫이다). 이 미리보기의 "참여자 수"는 그
-    # 지표가 아니라 문자 그대로 "이 클래스에 누가 있는가"라 뺄 이유가
-    # 없다.
+    # 두 수치는 내 클래스 행과 같은 기준이다(#659) — 참여자 수는 가르치는 행의
+    # `member_count`(강사 전원·내보낸 사람 제외, 같은 함수), 문제 수는 가입하면 보게 될
+    # 열린 문제 수라 참여 중 행의 `open_problem_count` 와 같다. 초안은 강사만 보고 숨긴
+    # 문제는 참여자 목록에서 빠지므로(CONTEXT.md 「Problem」) 가입할 사람에게 셀 것이 아니다.
     return 200, JoinPreviewOut(
         class_id=class_obj.id,
         class_name=class_obj.name,
         instructor_display_name=class_obj.instructor_display_name or None,
         instructor_display_names=co_instructors.instructor_names(class_obj),
-        problem_count=class_obj.problems.count(),
-        participant_count=class_obj.members.count(),
+        open_problem_count=class_obj.problems.filter(status=Problem.Status.OPEN).count(),
+        participant_count=len(_active_member_ids_by_class([class_obj.id])[class_obj.id]),
         archived=class_obj.archived_at is not None,
         already_joined=already_joined,
         suggested_name=suggested_name,
