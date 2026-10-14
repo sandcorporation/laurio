@@ -33,12 +33,15 @@ export function TemplatePickerSheet({
   classId,
   onClose,
   onImported,
+  initialTab = "public",
 }: {
   classId: number;
   onClose: () => void;
   onImported: (problem: ProblemRow) => void;
+  /** 클래스 상세의 입구(「템플릿에서 가져오기」·「다른 클래스에서 복사」)가 곧장 그 탭으로 연다(#633). */
+  initialTab?: PickerTab;
 }) {
-  const [tab, setTab] = useState<PickerTab>("public");
+  const [tab, setTab] = useState<PickerTab>(initialTab);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);

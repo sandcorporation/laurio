@@ -62,6 +62,17 @@ export type ClassRow = {
   role: "owner" | "co_instructor";
   // 대기 중인 소유권 이전 요청(#564) — 없으면 `null`. 강사 누구나 본다.
   pending_ownership_transfer: PendingOwnershipTransfer | null;
+  // 클래스 상세 머리의 통계 바와 채점 카드가 읽는 집계(#632) — 문제 목록에서 다시 세지 않는다.
+  // 강사 전원을 센다(내보낸 사람 제외).
+  member_count: number;
+  // 초안·숨김 포함.
+  problem_count: number;
+  // 열린 문제 중 참여자가 있는 문제의 달성률 평균 — 열린 문제가 없거나 참여자가 0명이면 null.
+  average_pass_rate: number | null;
+  // 참여자 제출 중 최신 — 제출이 없으면 null.
+  last_submitted_at: string | null;
+  // 채점 결과가 붙은 시도 수(강사 본인 시도 포함).
+  scored_attempt_count: number;
 };
 
 // 소유자가 공동 강사 한 사람에게 보낸 소유권 이전 요청(#564, CONTEXT.md 「소유권 이전」).
