@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SCORING_STATUS_LABEL, scoringStatus, settingsStatusBadges } from "./scoring-status";
+import { SCORING_STATUS_LABEL, scoringStatus, scoringStatusTone, settingsStatusBadges } from "./scoring-status";
 
 const base = {
   archived: false,
@@ -41,12 +41,44 @@ describe("scoringStatus — 배너 넷의 조건 그대로", () => {
   it("거부됨이 크레딧 소진·서버 불가보다 먼저다", () => {
     expect(
       scoringStatus({ ...base, openai_key_status: "rejected", scoring_quota_exhausted: true, scoring_server_unreachable: true }),
-    ).toEqual({ kind: "rejected" });
+    ).toEqual({ kind: "rejected", problem: true });
   });
 
   it("크레딧 소진, 서버 연결 불가", () => {
-    expect(scoringStatus({ ...base, scoring_quota_exhausted: true })).toEqual({ kind: "exhausted" });
-    expect(scoringStatus({ ...base, scoring_server_unreachable: true })).toEqual({ kind: "unreachable" });
+    expect(scoringStatus({ ...base, scoring_quota_exhausted: true })).toEqual({ kind: "exhausted", problem: true });
+    expect(scoringStatus({ ...base, scoring_server_unreachable: true })).toEqual({ kind: "unreachable", problem: true });
+  });
+});
+
+describe("scoringStatus — 보관된 클래스도 상태는 그대로, 톤만 낮춘다(#676)", () => {
+  const archived = { ...base, archived: true };
+
+  it("거부된 키는 「연결됨」이 아니라 거부됨이고 neutral 톤이다", () => {
+    const status = scoringStatus({ ...archived, openai_key_status: "rejected" });
+    expect(status).toEqual({ kind: "rejected", problem: false });
+    expect(scoringStatusTone(status)).toBe("neutral");
+  });
+
+  it("닿지 않는 호환 서버·크레딧 소진도 그대로 말한다", () => {
+    expect(
+      scoringStatus({
+        ...archived,
+        scoring_connection_kind: "compatible_server",
+        scoring_server_host: "llm.example.kr",
+        scoring_server_unreachable: true,
+      }),
+    ).toEqual({ kind: "unreachable", problem: false });
+    expect(scoringStatus({ ...archived, scoring_quota_exhausted: true })).toEqual({ kind: "exhausted", problem: false });
+  });
+
+  it("설정의 상태 한 줄도 거부됨(neutral)이다", () => {
+    expect(settingsStatusBadges({ ...archived, openai_key_status: "rejected" })).toEqual([
+      { label: SCORING_STATUS_LABEL.rejected, tone: "neutral" },
+    ]);
+  });
+
+  it("멀쩡한 연결은 보관돼도 연결됨이다", () => {
+    expect(scoringStatusTone(scoringStatus(archived))).toBe("verified");
   });
 });
 

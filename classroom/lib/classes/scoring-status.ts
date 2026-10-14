@@ -1,7 +1,8 @@
 // 클래스 상세 「채점」 카드의 상태 한 줄(#633). 새 조건을 만들지 않는다 — 예전 배너 넷
 // (`missing-scoring-key-banner.ts`)의 조건을 그대로 순서대로 읽는다: 연결 없음 → 거부됨 →
-// 크레딧 소진 → 서버 연결 불가, 어느 것도 아니면 연결됨. 보관된 클래스는 새 제출을 받지
-// 않으므로 배너가 뜨지 않던 것처럼 문제로 치지 않는다.
+// 크레딧 소진 → 서버 연결 불가, 어느 것도 아니면 연결됨. 보관된 클래스도 같은 상태를 그대로
+// 말하되(#676 — 거부된 키를 「연결됨」으로 보이지 않는다), 새 제출을 받지 않으므로 배너가 뜨지
+// 않던 것처럼 문제로 치지 않는다(`problem: false` → neutral 톤).
 import {
   shouldShowExhaustedCreditBanner,
   shouldShowMissingScoringKeyBanner,
@@ -23,9 +24,9 @@ type StatusInput = {
 export type ScoringStatus =
   | { kind: "connected"; connection: string }
   | { kind: "missing"; problem: boolean }
-  | { kind: "rejected" }
-  | { kind: "exhausted" }
-  | { kind: "unreachable" };
+  | { kind: "rejected"; problem: boolean }
+  | { kind: "exhausted"; problem: boolean }
+  | { kind: "unreachable"; problem: boolean };
 
 export const SCORING_STATUS_LABEL = {
   connected: "연결됨",
@@ -44,19 +45,21 @@ export function describeConnection(c: StatusInput): string {
 }
 
 export function scoringStatus(c: StatusInput): ScoringStatus {
-  if (shouldShowMissingScoringKeyBanner(c)) return { kind: "missing", problem: true };
-  if (shouldShowRejectedScoringKeyBanner(c)) return { kind: "rejected" };
-  if (shouldShowExhaustedCreditBanner(c)) return { kind: "exhausted" };
-  if (shouldShowUnreachableServerBanner(c)) return { kind: "unreachable" };
-  if (!c.has_openai_key) return { kind: "missing", problem: false };
+  // 배너 조건은 보관 클래스에서 모두 거짓이다 — 상태(kind)는 보관을 벗긴 채로 읽고, 보관은 문제 여부에만 싣는다.
+  const live = { ...c, archived: false };
+  const problem = !c.archived;
+  if (shouldShowMissingScoringKeyBanner(live)) return { kind: "missing", problem };
+  if (shouldShowRejectedScoringKeyBanner(live)) return { kind: "rejected", problem };
+  if (shouldShowExhaustedCreditBanner(live)) return { kind: "exhausted", problem };
+  if (shouldShowUnreachableServerBanner(live)) return { kind: "unreachable", problem };
   return { kind: "connected", connection: describeConnection(c) };
 }
 
-/** 배지 톤 — 문제(연결 없음·거부·소진·연결 불가)는 attention, 연결됨은 verified, 보관 클래스의 「연결 없음」은
- * 문제가 아니라 neutral. 클래스 상세의 채점 카드와 설정의 상태 한 줄이 같이 쓴다(#669). */
+/** 배지 톤 — 문제(연결 없음·거부·소진·연결 불가)는 attention, 연결됨은 verified, 보관 클래스의 그 넷은
+ * 문제가 아니라 neutral(#676). 클래스 상세의 채점 카드와 설정의 상태 한 줄이 같이 쓴다(#669). */
 export function scoringStatusTone(status: ScoringStatus): "verified" | "attention" | "neutral" {
   if (status.kind === "connected") return "verified";
-  if (status.kind === "missing" && !status.problem) return "neutral";
+  if (!status.problem) return "neutral";
   return "attention";
 }
 

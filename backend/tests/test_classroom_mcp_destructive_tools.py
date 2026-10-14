@@ -355,6 +355,19 @@ def test_expelling_names_who_leaves_then_expels(client, db):
     assert ConnectedAppWrite.objects.count() == 1
 
 
+def test_an_instructors_own_member_row_is_refused_like_the_screen(client, db):
+    # #669 의 거절(`assert_member_expellable`)이 연결된 앱 경로에도 선다(#676) — 표도 기록도 남지 않는다.
+    instructor, class_id, token = _setup(client)
+    join_class(client, instructor["access"], class_id, instructor_access=instructor["access"], display_name="소유자")
+    (own,) = _members(client, instructor["access"], class_id)
+
+    refused = _refused(client, token, "expel_member", {"class_id": class_id, "member_id": own["id"]})
+
+    assert refused == "강사는 내보낼 수 없습니다."
+    assert _members(client, instructor["access"], class_id)[0]["expelled"] is False
+    assert ConnectedAppWrite.objects.count() == 0
+
+
 def test_an_unknown_member_is_not_found_like_the_screen(client, db):
     instructor, class_id, token = _setup(client)
 
