@@ -203,6 +203,7 @@ ROUTES: list[Route] = [
     Route("list_members", "get", lambda w: f"{_c(w)}/members", None, 200),
     Route("expel_member", "post", lambda w: f"{_c(w)}/members/{w.member_id}/expel", None, 200),
     Route("get_roster_grid", "get", lambda w: f"{_c(w)}/roster-grid", None, 200),
+    Route("list_recent_attempts", "get", lambda w: f"{_c(w)}/recent-attempts", None, 200),
     # 문제
     Route("create_problem", "post", lambda w: f"{_c(w)}/problems", lambda w: {"title": "새 문제", "submission_formats": ["repository"]}, 201),
     Route("list_problems", "get", lambda w: f"{_c(w)}/problems", None, 200),
