@@ -59,6 +59,8 @@ type InteractiveProps = {
    *  강사가 학생 화면으로 보는 경우는 위 `InstructorViewingBanner`가 이미
    *  알리고, 실제 제출은 호출부의 핸들러가 따로 막는다. */
   submitBlockedReason: SubmitBlockedReason;
+  /** 소스 zip 업로드 상한(바이트, #671) — 운영자 정책 값 그대로, 드롭 칸이 MB 로 보인다. */
+  maxSourceAssetBytes: number;
   repositoryUrl: string;
   onRepositoryUrlChange: (value: string) => void;
   onRepositorySubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -138,6 +140,12 @@ function InstructorViewingBanner({
       ) : null}
     </div>
   );
+}
+
+// 업로드 상한을 MB 로 — 정수가 아니면 소수 한 자리(서버가 막는 바이트 수와 같은 단위, 1MB = 1024²).
+function formatMegabytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return Number.isInteger(mb) ? String(mb) : mb.toFixed(1);
 }
 
 export function ProblemParticipantView(props: ProblemParticipantViewProps) {
@@ -628,6 +636,7 @@ function InteractiveSubmissionForm(
 ) {
   const {
     submitBlockedReason,
+    maxSourceAssetBytes,
     repositoryUrl,
     onRepositoryUrlChange,
     onRepositorySubmit,
@@ -773,10 +782,8 @@ function InteractiveSubmissionForm(
           {/* 드롭 칸 — 투명한 파일 입력이 칸 전체를 덮어 끌어다 놓기와 고르기를 함께 받는다. */}
           <div className="relative border border-dashed border-rule bg-paper px-5 py-6 text-center text-[13.5px] text-ink/60">
             소스 zip 을 끌어다 놓거나 <span className="text-attention">고르기</span>
-            {/* 소스 슬롯의 업로드 상한 `policies.models.PlatformPolicy.max_source_asset_bytes` 기본값
-                (50 * 1024 * 1024)과 같은 수치다 — 운영자가 그 값을 바꾸면 여기도 고친다. */}
             <div data-testid="source-file-max-size" className="mt-1 text-[11.5px] text-ink/45">
-              최대 50MB
+              최대 {formatMegabytes(maxSourceAssetBytes)}MB
             </div>
             <input
               id="source-file"

@@ -113,7 +113,7 @@ from .models import (
     ClassroomSubmission,
     Problem,
 )
-from .scoring_connection import ScoringConnection, connection_for, openai_key_connection
+from .scoring_connection import ScoringConnection, connection_for, mark_verified, openai_key_connection
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
 
 logger = logging.getLogger(__name__)
@@ -996,6 +996,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     _record_token_usage(class_obj, used_tokens, estimated=estimated)
     if prepared.pause_recheck:
         _clear_scoring_pause(class_obj)
+    mark_verified(class_obj.pk, connection)
 
     reasoning = [
         {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}

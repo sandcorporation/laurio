@@ -11,13 +11,17 @@ from django.test.utils import CaptureQueriesContext
 
 from tests.classroom_scenarios import (
     CLASSES_URL,
+    add_co_instructor,
     auth_header,
     create_class,
     create_open_problem,
     force_real_scoring_adapter,
     join_class,
+    join_code,
+    join_preview,
     login,
     my_problems,
+    rename_my_instructor_name,
     respond_with_verdict,
     run_scan,
     submit_repository,
@@ -147,3 +151,20 @@ def test_query_count_does_not_grow_with_problems_or_attempts(client, db):
         submit_repository(client, learner["access"], class_id, extra.id)
 
     assert count() <= before
+
+
+def test_the_eyebrow_names_every_instructor_like_the_join_preview(client, db):
+    """눈썹의 강사 이름은 가입 미리보기와 같은 함수에서 나온다(#671, CONTEXT.md Class) — 소유자
+    먼저, 그다음 공동 강사를 수락한 순서로."""
+
+    owner, class_id, learner = _setup(client)
+    co = login(client, "co")
+    add_co_instructor(client, owner["access"], class_id, co["access"], display_name="김조교")
+    renamed = rename_my_instructor_name(client, owner["access"], class_id, "박강사")
+    assert renamed.status_code == 200, renamed.content
+
+    body = my_problems(client, learner["access"], class_id)
+
+    assert body["instructor_display_names"] == ["박강사", "김조교"]
+    code = join_code(client, owner["access"], class_id)
+    assert join_preview(client, code)["instructor_display_names"] == body["instructor_display_names"]

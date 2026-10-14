@@ -9,12 +9,23 @@ import type { FormEvent } from "react";
 
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
+import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
 
 type ConnectionKind = ClassRow["scoring_connection_kind"];
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
+
+// 연결이 마지막으로 실제로 닿은 날(#671) — 확인된 적 없으면 내지 않는다.
+function VerifiedDay({ classroom }: { classroom: ClassRow }) {
+  if (!classroom.scoring_connection_verified_at) return null;
+  return (
+    <span data-testid="scoring-connection-verified" className="text-[12px] text-ink/45">
+      {formatDay(classroom.scoring_connection_verified_at)} 확인
+    </span>
+  );
+}
 
 // 상태 한 줄(#636, 시안 v2) — 배지 · 종류 · 마스킹(또는 호스트). 문장은 두지 않는다: 배지가 상태를,
 // 오른쪽 「바꾸기」가 할 일을 말한다. 배지의 낱말·톤은 클래스 상세 「채점」 카드와 같은 함수가 정한다
@@ -43,6 +54,7 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
         {classroom.scoring_auth_masked ? (
           <span className="font-mono text-ink/50">{classroom.scoring_auth_masked}</span>
         ) : null}
+        <VerifiedDay classroom={classroom} />
       </p>
     );
   }
@@ -51,6 +63,7 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
       {badges}
       <span>OpenAI 키</span>
       <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
+      <VerifiedDay classroom={classroom} />
     </p>
   );
 }

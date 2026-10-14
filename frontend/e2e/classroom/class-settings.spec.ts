@@ -28,6 +28,7 @@ test("채점 연결은 「연결 없음」에서 시작해 키를 저장하면 �
 
   await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
   await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
+  await expect(page.getByTestId("scoring-connection-verified")).toHaveText(/^\d{1,2}\/\d{1,2} 확인$/);
   await expect(page.getByTestId("openai-key-input")).toHaveCount(0);
 
   await page.reload();

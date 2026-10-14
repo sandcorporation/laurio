@@ -42,6 +42,7 @@ from core.events import Event, EventBusDisconnected, get_event_bus
 from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
 from core.observability import tag_error_scope
+from policies.services import get_current_policy
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import (
@@ -138,7 +139,7 @@ from .schemas import (
 from . import pending_scoring
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
-from .instructors import classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_instructor_q, is_owner
+from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
@@ -239,6 +240,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None
         scoring_server_unreachable=(
             has_key and compatible and class_obj.scoring_server_unreachable_at is not None
         ),
+        scoring_connection_verified_at=class_obj.scoring_connection_verified_at if has_key else None,
         archived=class_obj.archived_at is not None,
         token_usage_total=class_obj.token_usage_total,
         token_usage_estimated=class_obj.token_usage_estimated,
@@ -321,9 +323,7 @@ def _problem_pass_stats(
 def _participant_submissions():
     """강사 본인·내보낸 참여자의 것이 아닌 시도 — `_active_member_ids`와 같은 사람들."""
 
-    return ClassroomSubmission.objects.filter(member__expelled_at__isnull=True).exclude(
-        is_instructor_q(user="member__user_id", classroom="problem__classroom")
-    )
+    return ClassroomSubmission.objects.filter(active_participant_q(member="member", classroom="problem__classroom"))
 
 
 def _last_submitted_by(key: str, **filters) -> dict[int, object]:
@@ -344,8 +344,7 @@ def _active_member_ids_by_class(class_ids: list[int]) -> dict[int, set[int]]:
 
     active_ids: dict[int, set[int]] = {cid: set() for cid in class_ids}
     for member_id, classroom_id in (
-        ClassMember.objects.filter(classroom_id__in=class_ids, expelled_at__isnull=True)
-        .exclude(is_instructor_q(user="user_id", classroom="classroom"))
+        ClassMember.objects.filter(active_participant_q(classroom="classroom"), classroom_id__in=class_ids)
         .order_by()
         .values_list("id", "classroom_id")
     ):
@@ -801,6 +800,9 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
         if check_result == LLMKeyCheckStatus.VALID
         else Class.ScoringKeyStatus.UNVERIFIED
     )
+    # 벤더가 키를 받았을 때만 「확인」이다(#671) — 닿지 못해 미검증으로 저장한 키는 아직 확인된 적
+    # 없는 새 연결이라 옛 연결의 확인 시각을 물려받지 않는다.
+    class_obj.scoring_connection_verified_at = Clock.now() if check_result == LLMKeyCheckStatus.VALID else None
     # 크레딧이 바닥나 멈춰 있었다면(#586) 다시 저장하는 것이 「충전했다」는 신호다 — 키 확인은
     # 크레딧을 보지 않으므로(`/v1/models`) 여기서 풀고, 다음 tick 의 채점이 실제로 확인한다.
     # 아직 바닥이면 그 채점이 다시 멈추고 다시 알린다.
@@ -826,6 +828,7 @@ def _save_scoring_connection(request: HttpRequest, class_obj: Class) -> None:
         # 호환 서버에 닿지 않아 멈춰 있었다면(#603) 다시 저장이 「고쳤다」는 신호다 — 저장 전
         # 확인이 이미 그 서버에 닿았다.
         scoring_server_unreachable_at=None,
+        scoring_connection_verified_at=class_obj.scoring_connection_verified_at,
     )
     if not saved:
         raise HttpError(403, OWNER_ONLY_MESSAGE)
@@ -860,6 +863,8 @@ def set_class_compatible_server(request: HttpRequest, class_id: int, payload: Co
     class_obj.openai_api_key_status = Class.ScoringKeyStatus.VERIFIED
     class_obj.scoring_quota_exhausted_at = None
     class_obj.scoring_server_unreachable_at = None
+    # 저장 전 확인이 그 서버에 닿았다(#671).
+    class_obj.scoring_connection_verified_at = Clock.now()
     _save_scoring_connection(request, class_obj)
 
     connection = scoring_connection.connection_for(class_obj)
@@ -1946,6 +1951,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
 
     return 200, ClassroomMyProblemsOut(
         class_name=member.classroom.name,
+        instructor_display_names=co_instructors.instructor_names(member.classroom),
         member_display_name=member.display_name,
         member_expelled=member.expelled_at is not None,
         archived=member.classroom.archived_at is not None,
@@ -2249,6 +2255,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         )
         return 200, ClassroomProblemSubmissionsOut(
             class_name=class_obj.name,
+            max_source_asset_bytes=get_current_policy().max_source_asset_bytes,
             problem=_serialize_problem_mine(
                 problem, passed=any(s.passed for s in submissions)
             ),
@@ -2270,6 +2277,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     )
     return 200, ClassroomProblemSubmissionsOut(
         class_name=problem.classroom.name,
+        max_source_asset_bytes=get_current_policy().max_source_asset_bytes,
         # 문제 자체의 통과 여부는 시도 전체의 OR이다(#288 AC "한 번 통과하면
         # 유지된다") — 최신 시도만 보지 않는다.
         problem=_serialize_problem_mine(

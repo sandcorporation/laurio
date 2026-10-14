@@ -26,7 +26,7 @@ from .models import ChecklistItem, Class, Problem
 from .problem_transitions import NO_REQUIRED_ITEM_MESSAGE, assert_required_item_floor
 from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn
 from .scoring_model_catalog import get_scoring_model_catalog
-from .scoring_connection import connection_for
+from .scoring_connection import connection_for, mark_verified
 from .scoring_model_probe import ScoringModelProbeFailed, ensure_model_keeps_scoring_format
 from .scoring_models import is_fallback_model, is_valid_reasoning_effort
 
@@ -114,10 +114,13 @@ def probe_scoring_model_choice(class_obj: Class, model_id: str, *, reasoning_eff
     같은 이유). 「OpenAI 키」 연결은 아무것도 하지 않는다. `reasoning_effort` 는 채점 때 실릴 값
     그대로다 — 「추론 모델」 스위치가 꺼져 있으면 `None`."""
 
+    connection = connection_for(class_obj)
     try:
-        ensure_model_keeps_scoring_format(connection_for(class_obj), model_id, reasoning_effort=reasoning_effort)
+        probed = ensure_model_keeps_scoring_format(connection, model_id, reasoning_effort=reasoning_effort)
     except ScoringModelProbeFailed as exc:
         raise HttpError(422, exc.message) from None
+    if probed:
+        mark_verified(class_obj.pk, connection)
 
 
 def validate_reasoning_effort(value: str) -> None:

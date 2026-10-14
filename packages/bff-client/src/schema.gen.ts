@@ -4969,6 +4969,8 @@ export interface components {
              * @default openai_key
              */
             scoring_connection_kind: string;
+            /** Scoring Connection Verified At */
+            scoring_connection_verified_at?: string | null;
             /**
              * Scoring Quota Exhausted
              * @default false
@@ -5221,6 +5223,11 @@ export interface components {
              * @default []
              */
             hidden_problems: components["schemas"]["ClassroomProblemListItemOut"][];
+            /**
+             * Instructor Display Names
+             * @default []
+             */
+            instructor_display_names: string[];
             /** Member Display Name */
             member_display_name: string;
             /** Member Expelled */
@@ -5333,6 +5340,8 @@ export interface components {
             class_name: string;
             /** Instructor Problem Status */
             instructor_problem_status?: string | null;
+            /** Max Source Asset Bytes */
+            max_source_asset_bytes: number;
             problem: components["schemas"]["ClassroomProblemMineOut"];
             /** Submissions */
             submissions: components["schemas"]["ClassroomSubmissionOut"][];

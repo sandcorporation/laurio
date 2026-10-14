@@ -108,6 +108,9 @@ class ClassOut(Schema):
     #: 수 있다. 서버를 고친 뒤 연결을 다시 저장하면 바로 풀리고, 그러지 않아도 10분마다 다시
     #: 쳐 본다.
     scoring_server_unreachable: bool = False
+    #: 이 채점 연결이 마지막으로 실제로 닿은 시각(#671) — 화면의 「M/D 확인」. 연결이 없거나 아직
+    #: 확인된 적 없으면 `None`. 강사 누구나 읽는다(비밀이 아니다).
+    scoring_connection_verified_at: datetime | None = None
     #: 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만
     #: 남는다. `archived_at`이 아니라 이 값을 내려주는 이유는 화면이 정확한
     #: 시각을 쓰지 않기 때문이다(진행중/보관 여부만 갈라 보이면 된다).
@@ -815,6 +818,10 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 이 문제가 속한 클래스의 이름(#372 후속) — `ClassroomMyProblemsOut.class_name`
     #: 과 같은 이유로 싣는다.
     class_name: str
+    #: 소스 zip 업로드 상한(바이트, #671) — 운영자 정책 `PlatformPolicy.max_source_asset_bytes`
+    #: 그대로다. 정책 API 는 운영자 라우터라 강의실이 읽지 못해 이 응답이 싣는다. 업로드를 실제로
+    #: 막는 상한(`submissions.resolvers`)과 같은 칸이다.
+    max_source_asset_bytes: int
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
     #: 이 요청을 보낸 사람이 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면
@@ -962,6 +969,9 @@ class ClassroomMyProblemsOut(Schema):
     #: 이 클래스의 이름(#372 후속) — 화면 눈썹이 「클래스」 대신 어느 클래스인지
     #: 말한다. 참여자는 강사용 클래스 상세를 부를 수 없어 이 응답이 싣는다.
     class_name: str
+    #: 이 클래스에서 불리는 강사 이름들(#671) — 가입 미리보기의 `instructor_display_names` 와 같은
+    #: 함수(`co_instructors.instructor_names`)에서 나온다: 소유자 먼저, 빈 이름은 빠진다.
+    instructor_display_names: list[str] = []
     member_display_name: str
     #: 내보내진 참여자인가(#300, #372 AC) — 참이면 화면이 이름 편집 칸을
     #: 내지 않는다. `get_my_problem`의 `member_expelled`와 같은 신호다.

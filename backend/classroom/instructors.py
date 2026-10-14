@@ -101,3 +101,16 @@ def is_instructor_q(*, user: str, classroom: str = "") -> Q:
         classroom_id=OuterRef(class_id_path), user_id=OuterRef(user)
     )
     return Q(**{user: F(instructor_path)}) | Q(Exists(co_instructor))
+
+
+def active_participant_q(*, member: str = "", classroom: str) -> Q:
+    """「`member` 가 가리키는 가입이 참여 중인 참여자의 것인가」 — 내보내지지 않았고 그 클래스의
+    강사(소유자·공동 강사)의 가입이 아니다(CONTEXT.md 「달성률」·「공동 강사」, #664·#671). 참여자 수
+    (`member_count`·연결된 앱의 `participant_count`)와 참여자 시도가 모두 이 `Q` 하나로 센다.
+    `member` 는 ClassMember 까지의 경로(ClassMember 자신이면 빈 문자열, 예: ``"members"``,
+    ``"member"``), `classroom` 은 그 가입의 Class 까지의 경로다(`is_instructor_q` 와 같은 뜻)."""
+
+    prefix = f"{member}__" if member else ""
+    return Q(**{f"{prefix}expelled_at__isnull": True}) & ~is_instructor_q(
+        user=f"{prefix}user_id", classroom=classroom
+    )

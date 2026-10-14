@@ -94,6 +94,11 @@ class Class(models.Model):
     #: 다시 저장하면 지워지고, 스캔이 `QUOTA_RECHECK_INTERVAL` 마다 대기 시도 하나로 다시 쳐 본다.
     #: 닿았는데 늦거나 몸통이 깨진 것은 여기 오지 않는다(실패 시도로 센다).
     scoring_server_unreachable_at = models.DateTimeField(null=True, blank=True, default=None)
+    #: 이 채점 연결이 마지막으로 실제로 닿은 시각(#671, CONTEXT.md 「채점 연결」) — 화면의 「M/D 확인」.
+    #: 키 저장 때 벤더가 받았을 때·호환 서버 저장·호환 서버 모델 시험 호출 통과·채점 성공이 찍고,
+    #: 확인되지 않은 연결로 바뀌거나(벤더에 닿지 못한 키 저장) 소유권이 넘어가면 지운다. null 이면
+    #: 아직 확인된 적 없는 연결이다. 채점 여부를 정하지 않는다 — 보이기만 한다.
+    scoring_connection_verified_at = models.DateTimeField(null=True, blank=True, default=None)
 
     #: 채점 연결의 종류(#599). 키 칸들(`openai_api_key_*`)과 크레딧 소진 시각은 이 연결의
     #: 인증 값과 상태다 — 키 상태(ADR-0045)·크레딧 멈춤(ADR-0057)은 연결의 상태로 읽힌다.
