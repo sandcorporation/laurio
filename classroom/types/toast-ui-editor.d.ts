@@ -32,6 +32,8 @@ declare module "@toast-ui/editor" {
     placeholder?: string;
     usageStatistics?: boolean;
     language?: string;
+    /** 기본값 true — 만들어지자마자 편집 영역으로 포커스를 옮긴다. */
+    autofocus?: boolean;
     events?: ToastUiEditorEventMap;
   }
 
