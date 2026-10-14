@@ -320,6 +320,8 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   배포가 실패로 끝난다. 배포 compose 의 backend 기동 command 는 migrate 를 부르지 않는다 —
   migrate 는 그 한 곳에서만 돈다. 그 몇 초 동안 옛 코드가 새 스키마 위에서 돌므로
   **마이그레이션은 뒤로 호환되어야 한다**(삭제·이름 바꾸기·NOT NULL 은 다음 배포로 나눈다).
+  예: 채점 상한 칸 셋은 `classroom.0029` 가 상태에서만 지우고, 그 배포가 prod 에 닿은 뒤
+  `classroom.0032` 가 `RunSQL` 로 DB 칸을 지운다(#629·#665).
   `backend/tests/test_migration_rolling_safety.py` 가 표식 없는 위험 연산을 막는다. 예전에는
   마이그레이션이 든 배포가 전부 내리고 올렸고, 2026-10-02 prod 에서 그 창이 공개 앱 재시도
   예산보다 길어 `/contests` 가 500 을 냈다(`0014_connected_apps`, GlitchTip 75·83).
