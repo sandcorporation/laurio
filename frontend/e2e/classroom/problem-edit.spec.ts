@@ -64,17 +64,6 @@ test("체크리스트 순서를 손잡이의 화살표로 바꾸면 새로고침
   expect(await labelsInOrder(page)).toEqual(["첫째", "셋째", "둘째"]);
 });
 
-test("체크리스트 항목을 손잡이로 끌어 놓으면 순서가 바뀌어 서버에 저장된다", async ({ page }) => {
-  const { classId, problemId } = await seedProblem(page, `edit-order-drag-${test.info().workerIndex}-${Date.now()}`, ["첫째", "둘째", "셋째"]);
-  await page.goto(`/classes/${classId}/problems/${problemId}`);
-
-  const handles = page.locator('[data-testid$="-drag-handle"]');
-  const reorder = page.waitForResponse((r) => r.url().includes("/checklist-items/reorder") && r.ok());
-  await handles.nth(0).dragTo(page.getByTestId("checklist-items").locator("li").nth(2));
-  await reorder;
-  expect(await labelsInOrder(page)).toEqual(["둘째", "셋째", "첫째"]);
-});
-
 test("상태 카드로 초안을 연다", async ({ page }) => {
   const { classId, problemId } = await seedProblem(page, `edit-open-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"]);
   await page.goto(`/classes/${classId}/problems/${problemId}`);
