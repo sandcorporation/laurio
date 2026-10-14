@@ -13,6 +13,14 @@
 남는다). 커밋 하나가 패키지마다 두 버전(staging·prod)을 만든다. 빌드 캐시는 더 적게 남긴다 —
 없으면 빌드가 느려질 뿐 깨지지 않는다.
 
+**살아 있는 커밋의 버전은 순서와 무관하게 남긴다**(#705). 이미지 잡이 바뀌지 않은 서비스를 굽지 않고
+옛 매니페스트에 커밋 태그만 더하므로(`scripts/ci/images.sh` — 같은 digest 라 같은 버전에 태그가 붙는다),
+지금 배포된 커밋의 이미지가 **오래전에 만든 버전**일 수 있다 — 만든 순서로만 자르면 staging·prod 가
+쓰는 이미지를 지운다. 그래서 `--protect-sha`(Jenkinsfile.ghcr-prune 이 main·staging·production 의 끝을
+넘긴다)로 시작하는 태그를 가진 버전은 몇 번째든 남기고, 순서는 `updated_at`(태그가 붙으면 바뀐다)으로
+센다. `ctx-<해시>-…` 태그만 남은 버전은 다른 버전과 똑같이 순서대로 지운다 — 지워지면 그 문맥을 다음에
+한 번 다시 구울 뿐이다.
+
 토큰은 classic PAT(`read:packages`·`delete:packages`)여야 한다 — fine-grained 토큰은 패키지 API 에
 닿지 못한다. 예전에는 Actions 의 GITHUB_TOKEN 으로 했다(.github/workflows/ghcr-prune.yaml).
 """
@@ -59,10 +67,21 @@ def versions(package: str) -> list[dict]:
         page += 1
 
 
-def prune(package: str, keep: int, dry_run: bool) -> int:
-    listed = sorted(versions(package), key=lambda v: v["created_at"], reverse=True)
-    doomed = listed[keep:]
-    print(f"{package}: 전체 {len(listed)} · 남김 {min(keep, len(listed))} · 지움 {len(doomed)}")
+def protected(version: dict, shas: list[str]) -> bool:
+    tags = version.get("metadata", {}).get("container", {}).get("tags", [])
+    return any(tag.startswith(sha) for tag in tags for sha in shas)
+
+
+def doomed_versions(listed: list[dict], keep: int, shas: list[str]) -> list[dict]:
+    """지울 버전 — 최근(태그가 붙은 때 기준) `keep` 개와 살아 있는 커밋의 태그를 가진 것을 뺀 나머지."""
+    ordered = sorted(listed, key=lambda v: max(v["created_at"], v.get("updated_at") or ""), reverse=True)
+    return [v for v in ordered[keep:] if not protected(v, shas)]
+
+
+def prune(package: str, keep: int, dry_run: bool, shas: list[str]) -> int:
+    listed = versions(package)
+    doomed = doomed_versions(listed, keep, shas)
+    print(f"{package}: 전체 {len(listed)} · 남김 {len(listed) - len(doomed)} · 지움 {len(doomed)}")
     failures = 0
     for version in doomed:
         tags = ",".join(version["metadata"]["container"]["tags"]) or "<태그없음>"
@@ -81,11 +100,15 @@ def main() -> int:
     parser.add_argument("--keep-images", type=int, default=12)
     parser.add_argument("--keep-cache", type=int, default=10)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--protect-sha", action="append", default=[], help="이 커밋의 태그를 가진 버전은 남긴다(여러 번)")
     args = parser.parse_args()
+    # 짧은 sha 로 지키면 엉뚱한 태그까지 지킨다 — 40자만 받는다.
+    shas = [s for s in (x.strip() for x in args.protect_sha) if len(s) == 40]
+    print("지키는 커밋: " + (" ".join(s[:12] for s in shas) or "없음"))
     failures = 0
     for package in IMAGES:
-        failures += prune(package, args.keep_images, args.dry_run)
-    failures += prune(CACHE, args.keep_cache, args.dry_run)
+        failures += prune(package, args.keep_images, args.dry_run, shas)
+    failures += prune(CACHE, args.keep_cache, args.dry_run, [])
     return 1 if failures else 0
 
 

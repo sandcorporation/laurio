@@ -76,10 +76,10 @@ ADR-0048이 amend). 스위치가 둘이다:
 
 **한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
 다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`/`.env.prod`에
-`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고, **저장소 변수**
-`STAGING_`/`PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED` 도 `true` 로 바꾼 뒤 CI 를 다시
-돌려 배포한다 — frontend 는 그 값을 빌드 인자로 굽고, 굽는 곳이 CI 라 원본이 저장소
-변수다(아래 「이미지는 CI 가 굽는다」, `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
+`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고, Jenkins 자격증명
+`codemit-images-env` 의 `STAGING_`/`PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED` 도 `true` 로 바꾼 뒤
+`laurio` 잡을 다시 돌려 배포한다 — frontend 는 그 값을 빌드 인자로 굽고, 굽는 곳이 Jenkins 라
+원본이 그 자격증명이다(아래 「이미지는 Jenkins `laurio` 잡이 굽는다」, `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
 줄이다(ADR-0037·ADR-0048).
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
@@ -138,18 +138,20 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
-**커밋이 prod 까지 가는 길은 넷이다**(2026-10-02):
+**커밋이 prod 까지 가는 길은 넷이다**(2026-10-02, 둘째·셋째는 2026-10-15 에 한 잡으로 — #705):
 
 1. **브랜치 → PR → `main`.** Jenkins `codemit-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
    sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit-train`(`Jenkinsfile.train`)이 줄 선
    PR 을 최신 `main` 위에 묶어 e2e 까지 한 번 시험한 뒤 차례로 **rebase 병합**한다(초안·`hold`
    라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 staging 까지 간다.
-2. **`main` → `staging`.** GitHub Actions(`.github/workflows/images.yaml`, 호스티드 러너)가
-   이미지 열둘과 부팅 가드 셋을 돌리고, 다 초록이면 `staging` 을 그 커밋으로 **fast-forward**
-   한다(저장소 **배포 키**, secret `PROMOTE_DEPLOY_KEY` — Actions 토큰은 워크플로 파일을 바꾼
-   커밋을 push 하지 못한다, 2026-09-17).
-3. **`staging` → staging 배포.** 웹훅이 Jenkins `laurio` 잡(`Jenkinsfile`)을 부른다.
+2. **`main` → `staging`.** `main` 의 push 가 웹훅으로 Jenkins `laurio` 잡(`Jenkinsfile`)을 부른다.
+   그 잡이 이미지(바뀐 서비스만, 아래)와 부팅 가드를 돌리고, 다 초록이면 `staging` 을 그 커밋으로
+   **fast-forward** 한다(`scripts/ci/fast_forward.py staging <sha>`, 자격증명
+   `github-sandcorporation-token`). 문서(`.md`·`docs/`)만 바뀐 커밋이면 여기서 초록으로 끝난다.
+3. **`staging` → staging 배포.** 같은 빌드가 이어서 배포 단계를 돈다(아래 「staging 배포는 …」).
+   예전(2026-10-02 ~ 10-15)에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging`
+   을 앞당겼고, 그 push 가 이 잡을 불렀다 — 조직의 Actions 분량이 바닥나 떠났다(ADR-0061).
 4. **staging 초록 → `production` → prod 배포.** 그 잡이 끝에서 `production` 을 같은 커밋으로
    fast-forward 하고(`scripts/ci/fast_forward.py`, Jenkins 자격증명 `github-sandcorporation-token`),
    웹훅이 `codemit` 잡(`Jenkinsfile.production`)을 부른다. **이 넷째 길은 지금 꺼져 있다**
@@ -173,47 +175,66 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 `/home/jenkins/agent`, 잡 이름은 `codemit` 이어야 호스트의 `/var/jenkins_home/workspace/codemit` 에 둔
 `docker/.env.prod`(chmod 600)·배포 표식을 쓴다. 잡·노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
-**이미지는 GitHub Actions 가 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17, 러너는
-2026-10-02 부터 호스티드). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는 배포마다
-제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 여섯 이미지를
-ghcr(`ghcr.io/sandcorporation/codemit-*`, 비공개)에 올린다(`images.yaml`):
+**이미지는 Jenkins `laurio` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
+2026-10-15 Jenkins — #705, ADR-0061). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
+배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 `Jenkinsfile` 의 「이미지」
+단계가 두 노드에서 함께 `scripts/ci/images.sh` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
+비공개)에 올린다:
 
-| 잡 | 러너 | 태그 |
+| 노드 | 명령 | 태그 |
 | --- | --- | --- |
-| `images-staging` | `ubuntu-latest`(amd64) | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451), `codemit-pgbouncer:<sha>-amd64`(#453/#458) |
-| `images-prod` | `ubuntu-24.04-arm`(arm64) | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`(#450/#451), `codemit-pgbouncer:<sha>-arm64`(#453/#458) |
+| sub(`laurio-staging`) | `images.sh amd64` | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451), `codemit-pgbouncer:<sha>-amd64`(#453/#458) |
+| macos | `images.sh arm64` | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`, `codemit-pgbouncer:<sha>-arm64` |
 
-잡은 서비스마다 하나(matrix, staging 6 + prod 6)이고 각자 제 아키텍처로 굽는다 — 에뮬레이션이
-없다. 캐시는 레지스트리(`codemit-buildcache`)에 있어 VM 이 매번 새것이어도 맞는다. 예전에는
-셀프호스티드 mac(그 전에는 sub)이 구웠다 — sub 는 테스트 잡과 staging 스택이 SATA SSD 하나를
-나눠 써 빌드를 얹자 디스크 대기가 14~84% 로 치솟았고, 호스티드는 그때 결제 문제로 못 썼다.
-**arm64 호스티드를 못 쓰게 되면** 저장소 변수 `ARM_RUNNER_LABELS` 에 다른 러너 라벨을 JSON 으로
-적는다(예: `["self-hosted","ARM64","mac-arm"]`).
+각 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
+를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
+내보내지 못한다)가 남아 제 캐시를 20GB 까지 둔다. 예전에는 GitHub 호스티드(그 전 셀프호스티드 mac, 그
+전 sub)가 커밋마다 열둘을 다 구웠다.
 
-- **backend·search 는 환경을 가리지 않아 아키텍처로만 가른다**(#450/#451 — search 는
-  Next 앱이 아니라 `NEXT_PUBLIC_*` 처럼 굳는 값이 없다). 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로
-  환경마다 따로 굽는다 — 그 값의 원본은 서버 env 가 아니라 **저장소 변수 `STAGING_*`·
-  `PROD_*`** 다(조직이 free 요금제라 비공개 저장소의 environment 기능을 못 써 접두어로
-  가른다). 값을 바꾸면 CI 를 다시 돌려야 이미지에 반영된다.
+- **바뀌지 않은 서비스는 굽지 않는다**(#705). `scripts/ci/image_context.py` 가 서비스마다 빌드
+  문맥 해시를 낸다 — Dockerfile 이 읽는 경로(`git rev-parse HEAD:<경로>`)·그 Dockerfile·루트
+  `.dockerignore`·빌드 대상·플랫폼·빌드 인자 값. 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면 굽지 않고
+  커밋 태그를 그 매니페스트에 더하기만 한다(`imagetools create --prefer-index=false` — 같은 digest,
+  수 초). 콘솔에 서비스마다 「굽는다/건너뛴다」 한 줄이 남는다. `deploy.sh plan` 이 어차피 바뀐
+  서비스만 바꿔 끼우므로 나머지 이미지는 굽자마자 버려지던 것이다. **어떤 경로가 문맥에 드는지는
+  Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
+  새 경로를 `COPY` 하는데 표에 없으면 빨갛다. 빠뜨리면 그 경로를 고친 커밋이 옛 이미지로 배포된다.
+- **backend·search·pgbouncer 는 환경을 가리지 않아 아키텍처로만 가른다**(#450/#451 — Next 앱이 아니라
+  `NEXT_PUBLIC_*` 처럼 굳는 값이 없다). 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로 환경마다 따로 굽는다 — 그
+  값의 원본은 서버 env 가 아니라 **Jenkins 자격증명 `codemit-images-env`**(Secret file, `STAGING_*`·`PROD_*`
+  를 `KEY=value` 줄로 — 옛 저장소 변수 스무 개를 옮겼다)다. 값이 해시에 들어가므로 **바꾸면 다음 빌드가
+  그 앱을 저절로 다시 굽는다** — 바로 반영하려면 `laurio` 잡을 손으로 한 번 돌린다.
+- **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
+  빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
+- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, sub)는 이번에 구운 앱만 본다 — 건너뛴 앱의 이미지는
+  이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
   `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
   에 `jenkins_docker` 를 붙였다). 로그인이 없으면 `deploy.sh preflight` 가 멈추고, PAT 가
   만료되면 pull 에서 멈춘다. ghcr 는 git SSH 키로 인증할 수 없다.
-- 사람 작업(PAT·Jenkins 토큰·저장소 변수)은 `scripts/ghcr-setup-wizard.sh` 가 단계별로
-  안내한다(그 안의 mac 러너·`deploy-staging` 단계는 2026-10-02 이전 구조의 것이다). ghcr·CI 가 막혔을 때의 비상구는 서버에서
-  `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그 자리에서 굽는다.
+- 사람 작업(PAT·두 자격증명)은 `scripts/ghcr-setup-wizard.sh` 가 단계별로 안내한다. ghcr·Jenkins 이미지
+  단계가 막혔을 때의 비상구는 서버에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그
+  자리에서 굽는다. 병합 전에 `Jenkinsfile` 을 바꾼 PR 을 돌려 보려면 그 브랜치를 가리키는 임시 잡으로
+  파라미터 `IMAGES_ONLY=true`(이미지·가드까지만, `staging`·배포는 건드리지 않는다) — PR CI 는 이 파일을
+  보지 못한다.
+- **전환 뒤 사람이 할 일**(2026-10-15): 저장소 변수 `STAGING_*`·`PROD_*`·`ARM_RUNNER_LABELS`·`JENKINS_*`
+  와 시크릿 `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN` 삭제(그 배포 키도 저장소 Deploy keys 에서),
+  조직의 GitHub 셀프호스티드 러너(sub 3대, mac-arm 3대) 해제와 그 컨테이너 내리기.
 
-**staging 배포는 `staging` 브랜치가 부른다**(2026-10-02). Jenkins 잡(`/var/jenkins_home/jobs/laurio`)은
-**Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/staging`,
-트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. `images.yaml` 이 이미지를 다 올린 **뒤에** 그
-브랜치를 움직이므로 웹훅이 잡을 부르는 순간 이미지는 ghcr 에 있다. 늦게 도착한 옛 커밋은
+**staging 배포는 `main` 의 push 가 부른다**(2026-10-15, #705). Jenkins 잡(`/var/jenkins_home/jobs/laurio`)은
+**Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main`,
+트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. 같은 빌드가 이미지 → 부팅 가드 → `staging` 앞당기기
+→ 배포를 차례로 돌므로 배포 단계에 닿는 순간 이미지는 ghcr 에 있다. 단계마다 노드가 달라 다시
+체크아웃하므로, 첫 단계가 적은 커밋(`DEPLOY_SHA`)으로 각 노드를 되돌려 놓는다 — 그 사이 `main` 이
+움직여도 한 빌드는 한 커밋이다. 2026-10-02 ~ 10-15 에는 브랜치 지정이 `*/staging` 이었고 Actions 가
+그 브랜치를 움직였다. 늦게 도착한 옛 커밋은
 `deploy.sh plan` 이 「더 새 커밋이 이미 배포돼 있다」로 건너뛰고, 배포 표식도 뒤로 옮기지
 않는다. 초록이면 끝에서 `production` 을 같은 커밋으로 앞당긴다(위 넷째 길). 예전에는 main 의
 CI 가 `buildWithParameters` 로 `DEPLOY_SHA` 를 채워 불렀다(그때 브랜치 지정은 `*/main`).
 
-**실제로 굽는 것은 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
-Jenkinsfile 이 「(staging 은 대상 확인 →) Preflight → 변경 계획 → 이미지(서비스별 병렬 pull) →
+**배포는 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
+Jenkinsfile 이 「(staging 은 대상 확인 → 이미지 → 부팅 가드 → staging 앞당기기 →) Preflight → 변경 계획 → 이미지 받기(서비스별 병렬 pull) →
 교체 → 확인 → 배포 표식 → 정리」를
 각각 한 단계로 보여주고, 단계 본문은 `sh ./deploy.sh <대상> <명령>` 한 줄이다 — `plan` 이
 `.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 파이프라인이 읽어 이미지 단계의 `when` 을
@@ -254,7 +275,10 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 멈췄다**. 그때 실측이 이미지 여섯 99 버전 · 빌드 캐시(`codemit-buildcache`) **176 버전**이다 —
 캐시 쪽은 대부분 태그 없는 블롭이라 화면에서 보이지도 않는다. **읽기는 그대로 됐다** — 쓰기만
 막히는 것이 용량 초과의 모양이다. 지금은 매일 새벽 4시(서울)와 손으로 도는 잡이 패키지마다
-최근 것만 남기고 지운다(이미지 12·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다). **레지스트리
+최근 것만 남기고 지운다(이미지 12·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다). **지금 `main`·`staging`·
+`production` 끝 커밋의 태그를 가진 버전은 몇 번째든 남긴다**(#705) — 바뀌지 않은 서비스는 옛 버전에 커밋
+태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
+센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **레지스트리
 쓰기가 막혀도 이 삭제는 된다.** 토큰은 Jenkins 자격증명 `ghcr-prune-token`(Secret text·Secret file·아이디/비밀번호 어느 종류든) — **classic PAT**
 (`read:packages`·`delete:packages`)여야 한다(fine-grained 토큰은 패키지 API 에 닿지 못한다).
 **되돌릴 수 없지만 돌고 있는 서비스는 영향이 없다**: 배포된 이미지는 이미 그 호스트에 있고,

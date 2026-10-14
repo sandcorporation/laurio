@@ -73,17 +73,25 @@ push 하면 옛 빌드를 끊는다.
 - **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
   운영자 4초 · 강의실 4초(이미지 굽기 제외).
 - **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
-  fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`)은 사람이
+  fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`·`codemit-images-env`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
-- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 는 `scripts/ci/changed.sh`, 이미지는 `images.yaml` 의 `paths-ignore`. 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
-- **GitHub Actions 에는 이미지 빌드와 부팅 가드만 남았다**(`images.yaml`, 호스티드 러너 — 위
-  「배포」 절). 부팅 가드 셋은 **images-staging 이 올린 바로 그 이미지를 ghcr 에서 받아**
-  배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다(2026-10-02 — 예전에는 같은 Dockerfile 을
-  CI 전용 값으로 따로 구워, 검사한 것과 배포되는 것이 달랐다). 방침의 문의 주소는 저장소 변수
-  `STAGING_SUPPORT_EMAIL` 이 실렸는지로, `.dockerignore` 는 가짜 시크릿을 심은 **빌드 컨텍스트**
-  (`COPY . /ctx` 만 하는 이미지)로 본다. 컨테이너 포트를 러너에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
-  붙여(`--network container:<이름>`) 친다(러너가 컨테이너일 때도 같은 모양이다).
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 와 `laurio` 잡 모두 `scripts/ci/changed.sh`(`laurio` 는 지금의 `staging` 과 견준다). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
+- **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
+  2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
+  가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `laurio` 잡(`Jenkinsfile`)의 앞 단계가 됐다
+  (「배포」 절). 이미지는 macos 가 arm64 여섯, sub 가 amd64 여섯을 함께 굽고(`scripts/ci/images.sh`),
+  **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, sub)은
+  **방금 올린 그 이미지를 ghcr 에서 받아** 배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다 — 이번에
+  구운 앱만(건너뛴 앱의 이미지는 이미 한 번 지났다). 방침의 문의 주소는 `codemit-images-env` 의
+  `STAGING_SUPPORT_EMAIL` 이 실렸는지로, `.dockerignore` 는 가짜 시크릿을 심은 **빌드 컨텍스트**(`COPY . /ctx`
+  만 하는 이미지)로 본다 — 표식에 빌드마다 다른 값을 섞는다(스크립트 자신이 문맥에 들어 고정 문자열이면
+  늘 걸린다). 컨테이너 포트를 노드에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
+  붙여(`--network container:<이름>`) 친다(sub 의 Jenkins 가 컨테이너라 바인드 마운트도 쓰지 않는다).
+- **`Jenkinsfile` 은 PR CI 가 보지 못한다** — 그 파일을 바꾼 PR 은 병합 전에 그 브랜치를 가리키는 임시
+  잡으로 `IMAGES_ONLY=true` 를 돌려 본다(이미지·가드까지만). 스크립트 쪽은 로컬에서 돈다: `CODEMIT_IMAGES_MODE=plan`
+  (해시와 판단만), `CODEMIT_IMAGE_REGISTRY=localhost:<포트>`(로컬 `registry:2` 에 실제로 굽고 건너뛰기),
+  `CODEMIT_GUARD_IMAGE=<이미지>`(가드가 받을 이미지). 두 스크립트는 macos 의 bash 3.2 에서도 돈다.
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
 `compose.dev.yaml` 의 `..:/app` 은 **개발용 핫리로드 장치**다. 러너 안에서 그 상대 경로는

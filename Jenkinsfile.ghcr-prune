@@ -30,7 +30,10 @@ pipeline {
     stage('정리') {
       steps {
         script {
-          def prune = 'python3 scripts/ci/ghcr_prune.py --keep-images "$KEEP_IMAGES" --keep-cache "$KEEP_CACHE" $( [ "$DRY_RUN" = true ] && echo --dry-run )'
+          // main·staging·production 의 끝 커밋 이미지는 몇 번째 버전이든 남긴다(#705 — 바뀌지 않은 서비스는
+          // 옛 버전에 태그만 더하므로 배포 중인 이미지가 오래된 버전일 수 있다). 체크아웃이 받아 둔 원격 브랜치를 읽는다.
+          def protect = '$(for b in main staging production; do s=$(git -c safe.directory="$PWD" rev-parse -q --verify "origin/$b") && echo "--protect-sha $s"; done)'
+          def prune = 'python3 scripts/ci/ghcr_prune.py --keep-images "$KEEP_IMAGES" --keep-cache "$KEEP_CACHE" $( [ "$DRY_RUN" = true ] && echo --dry-run ) ' + protect
           def fromFile = 'GH_TOKEN=$(tr -d "[:space:]" < "$GH_TOKEN_FILE") && export GH_TOKEN && '
           // 자격증명 종류가 맞지 않으면 withCredentials 가 본문을 돌기 전에 실패한다 — 그 실패만 다음 종류로 넘긴다.
           def kinds = [

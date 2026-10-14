@@ -570,7 +570,7 @@ services:
   frontend:
     logging: *default-logging
     # `-staging` — NEXT_PUBLIC_* 가 빌드 때 굳으므로 앱 이미지는 환경마다 따로다.
-    # CI 가 저장소 변수 STAGING_* 로 굽는다(아래 build args 는 비상용 로컬 빌드용).
+    # laurio 잡이 Jenkins 자격증명 codemit-images-env 의 STAGING_* 로 굽는다(아래 build args 는 비상용 로컬 빌드용).
     image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:-local}-staging
     build:
       context: ..

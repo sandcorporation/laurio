@@ -425,7 +425,7 @@ services:
       # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
       CODEMIT_API_BASE_URL: http://backend:8000
       # 약관·방침이 싣는 문의 주소(#472 후속). 배포에서는 빌드 인자로 굳지만
-      # (`docker/frontend.Dockerfile`, 저장소 변수 STAGING_/PROD_SUPPORT_EMAIL)
+      # (`docker/frontend.Dockerfile`, Jenkins 자격증명 codemit-images-env 의 STAGING_/PROD_SUPPORT_EMAIL)
       # dev 는 `next dev` 라 런타임 env 를 그대로 읽는다 — 값이 없으면 방침의
       # 문의처가 주소 없이 그려지므로 dev 전용 값을 준다.
       NEXT_PUBLIC_SUPPORT_EMAIL: dev@example.test
