@@ -3,7 +3,11 @@
 # (2026-10-02, Jenkinsfile.pr). macos 노드는 실행기가 하나라 다른 빌드와 겹치지 않으므로 노드를
 # 통째로 쓴다. 시험 하나 3초·재시도 0 은 playwright.config.ts 가 정한다.
 #
-# 끝나면(성공·실패·중단 모두) 스택을 지운다. 프로젝트 하나가 실패해도 나머지는 끝까지 돈다.
+# 끝나면(성공·실패·중단 모두) 스택을 지운다 — 그 실행이 구운 이미지까지(`--rmi local`). 프로젝트
+# 이름이 실행마다 달라(CODEMIT_CI_RUN_ID) 이미지가 새 이름으로 구워지므로, 남기면 Docker VM 디스크가
+# 찬다(2026-10-14, 이미지 1,283개·51GB). 빌드 캐시는 남으니 다음 실행의 굽기는 캐시 히트다.
+# 공용 base 이미지(postgres·redis·minio)는 compose 가 구운 것이 아니라 남는다.
+# 프로젝트 하나가 실패해도 나머지는 끝까지 돈다.
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 # playwright.config 의 입구 검사 — 이 노드는 Jenkins 가 통째로 쓰므로 test.sh 의 칸을 거치지 않는다.
@@ -18,7 +22,7 @@ WORKERS=$(( $(getconf _NPROCESSORS_ONLN) / 3 ))
 
 cleanup() {
   "${C[@]}" logs --tail 80 >test-results/e2e-stack.log 2>&1 || true
-  "${C[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+  "${C[@]}" down -v --remove-orphans --rmi local >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
