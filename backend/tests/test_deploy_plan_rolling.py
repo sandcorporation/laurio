@@ -65,7 +65,16 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _prepare(tmp_path: Path, change) -> tuple[Path, dict[str, str]]:
+# 문맥 해시(#712)가 도는 저장소 — `image_context.py` 의 표가 요구하는 경로를 다 둔다.
+CONTEXT_FILES = (
+    "backend/app.py", "frontend/app/page.tsx", "frontend/playwright.config.ts", "operator/page.tsx",
+    "classroom/page.tsx", "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
+    "docker/pgbouncer/entry.sh",
+    *(f"docker/{n}.Dockerfile" for n in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer")),
+)
+
+
+def _prepare(tmp_path: Path, change, *, touch: tuple[str, ...] = ()) -> tuple[Path, dict[str, str]]:
     """직전 배포·이번 배포 커밋이 든 임시 저장소와 가짜 `docker` 를 PATH 에 둔 환경.
 
     준비(git 서브프로세스 여럿)라 픽스처에서 부른다 — 시험 본문의 CPU 한도 밖이다(#701).
@@ -78,12 +87,21 @@ def _prepare(tmp_path: Path, change) -> tuple[Path, dict[str, str]]:
     (repo / COMPOSE).write_text(compose, encoding="utf-8")
     (repo / ".gitignore").write_text(".jenkins-*\ndocker/.env.prod\n", encoding="utf-8")
     (repo / "docker/.env.prod").write_text("", encoding="utf-8")
+    if touch:
+        (repo / "scripts/ci").mkdir(parents=True)
+        shutil.copy(REPO_ROOT / "scripts/ci/image_context.py", repo / "scripts/ci/image_context.py")
+        for rel in CONTEXT_FILES:
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(rel, encoding="utf-8")
+        (repo / ".dockerignore").write_text("**/playwright.config.ts\n", encoding="utf-8")
     _git(repo, "init", "-q")
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "직전 배포")
     (repo / ".jenkins-prod-deployed").write_text(_git(repo, "rev-parse", "HEAD") + "\n")
 
     (repo / COMPOSE).write_text(change(compose), encoding="utf-8")
+    for rel in touch:
+        (repo / rel).write_text("바뀜", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "이번 배포")
 
@@ -146,3 +164,29 @@ def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(pooler_ch
 
     assert plan["BUILD_PGBOUNCER"] == "true"
     assert plan["ROLLING_BACKEND"] == "false"
+
+
+# 이미지 문맥 해시로 고른다(#712, laurio #474) — 문맥 밖 파일만 바뀐 커밋은 그 앱을 다시 띄우지 않는다.
+@pytest.fixture
+def playwright_config_only(tmp_path):
+    return _prepare(tmp_path, lambda compose: compose, touch=("frontend/playwright.config.ts",))
+
+
+def test_a_file_outside_the_image_context_replaces_nothing(playwright_config_only):
+    plan = _plan(playwright_config_only)
+
+    assert plan["BUILD_FRONTEND"] == "false"
+    assert plan["BUILD_BACKEND"] == "false"
+
+
+@pytest.fixture
+def frontend_page_changed(tmp_path):
+    return _prepare(tmp_path, lambda compose: compose, touch=("frontend/app/page.tsx",))
+
+
+def test_a_file_in_the_image_context_replaces_only_that_app(frontend_page_changed):
+    plan = _plan(frontend_page_changed)
+
+    assert plan["BUILD_FRONTEND"] == "true"
+    assert plan["BUILD_OPERATOR"] == "false"
+    assert plan["BUILD_BACKEND"] == "false"

@@ -342,5 +342,67 @@ class IgnoredFilesDoNotMoveTheHash(unittest.TestCase):
         self.assertNotEqual(self.digest(), before)
 
 
+class ChangedServices(unittest.TestCase):
+    """deploy.sh plan 이 두 커밋 사이에 바꿔 끼울 서비스를 문맥 해시로 고른다(#712, laurio #474 —
+    `frontend/playwright.config.ts` 주석만 바뀐 커밋에 frontend 를 다시 띄웠다)."""
+
+    FILES = (
+        ".dockerignore", "backend/app.py", "frontend/page.tsx", "operator/page.tsx", "classroom/page.tsx",
+        "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
+        "docker/pgbouncer/entry.sh",
+        *(f"docker/{name}.Dockerfile" for name in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer")),
+    )
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = pathlib.Path(self._tmp.name)
+        _git(self.repo, "init", "-q")
+        for rel in self.FILES:
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_text(rel)
+        (self.repo / ".dockerignore").write_text("**/playwright.config.ts\n")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "one")
+        self.base = _git(self.repo, "rev-parse", "HEAD")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def commit(self, rel: str, text: str) -> str:
+        (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / rel).write_text(text)
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", rel)
+        return _git(self.repo, "rev-parse", "HEAD")
+
+    def changed(self, old: str, new: str) -> list[str]:
+        cwd = pathlib.Path.cwd()
+        os.chdir(self.repo)
+        try:
+            return ic.changed_services(old, new)
+        finally:
+            os.chdir(cwd)
+
+    def test_a_file_outside_the_context_changes_nothing(self) -> None:
+        head = self.commit("frontend/playwright.config.ts", "// 주석만")
+        self.assertEqual(self.changed(self.base, head), [])
+
+    def test_a_shared_package_changes_the_three_apps(self) -> None:
+        head = self.commit("packages/shared/index.ts", "changed")
+        self.assertEqual(self.changed(self.base, head), ["frontend", "operator", "classroom"])
+
+    def test_a_dockerfile_changes_only_its_service(self) -> None:
+        head = self.commit("docker/search.Dockerfile", "changed")
+        self.assertEqual(self.changed(self.base, head), ["search"])
+
+    def test_a_path_missing_at_the_old_commit_counts_as_changed(self) -> None:
+        # 표가 옛 커밋에 없는 경로를 요구하면 모른다 — 모르면 바꿔 끼운다.
+        _git(self.repo, "rm", "-q", "-r", "docker/pgbouncer")
+        _git(self.repo, "commit", "-qm", "no pgbouncer dir")
+        old = _git(self.repo, "rev-parse", "HEAD")
+        head = self.commit("docker/pgbouncer/entry.sh", "back")
+        self.assertEqual(self.changed(old, head), ["pgbouncer"])
+
+
 if __name__ == "__main__":
     unittest.main()

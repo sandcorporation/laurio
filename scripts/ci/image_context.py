@@ -6,6 +6,7 @@
     image_context.py paths <서비스>                   해시에 드는 경로
     image_context.py hash <서비스> <플랫폼> [빌드 인자 파일]
     image_context.py check                            Dockerfile 의 COPY 원본이 전부 문맥에 있는가
+    image_context.py changed <옛 커밋> <새 커밋>       문맥이 바뀐 서비스(한 줄에 하나) — deploy.sh plan
 
 `scripts/ci/images.sh` 가 서비스마다 이 해시를 내고, 태그 `ctx-<해시>-<arch>` 가 ghcr 에 있으면
 굽지 않고 커밋 태그만 그 매니페스트에 더한다. 해시에 드는 것: 아래 표의 경로마다 `git rev-parse
@@ -306,6 +307,25 @@ def service_objects(service: Service, rev: str = "HEAD") -> dict[str, str]:
     return objects
 
 
+def changed_services(old: str, new: str) -> list[str]:
+    """두 커밋 사이에 빌드 문맥이 바뀐 서비스(표의 순서) — `deploy.sh plan` 이 바꿔 끼울 것을 고른다(#712).
+
+    `images.sh` 가 굽기·건너뛰기를 정하는 바로 그 해시라, 「이미지가 같다」와 「다시 띄우지 않는다」가 한
+    기준이다(예전의 경로 패턴은 `.dockerignore` 가 빼는 파일도 「바뀜」으로 봤다). 대상·플랫폼은 양쪽이
+    같으니 경로별 객체만 견준다. 어느 쪽에서든 표의 경로가 없으면(옛 커밋이 그 디렉터리를 몰랐다) 모르는
+    것이고, 모르면 바꿔 끼운다.
+    """
+    changed = []
+    for svc in SERVICES.values():
+        try:
+            same = service_objects(svc, old) == service_objects(svc, new)
+        except (SystemExit, subprocess.CalledProcessError):
+            same = False
+        if not same:
+            changed.append(svc.name)
+    return changed
+
+
 def _service(name: str) -> Service:
     if name not in SERVICES:
         raise SystemExit(f"모르는 서비스: {name} (있는 것: {' '.join(SERVICES)})")
@@ -330,6 +350,12 @@ def main(argv: list[str]) -> int:
         platform = rest[1]
         args = parse_build_args(open(rest[2], encoding="utf-8").read()) if len(rest) > 2 else {}
         print(context_digest(service_objects(svc), svc.target, platform, args))
+    elif cmd == "changed":
+        if len(rest) != 2:
+            print(__doc__, file=sys.stderr)
+            return 2
+        for name in changed_services(rest[0], rest[1]):
+            print(name)
     elif cmd == "check":
         bad = 0
         for svc in SERVICES.values():
