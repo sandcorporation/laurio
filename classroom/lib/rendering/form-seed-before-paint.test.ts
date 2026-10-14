@@ -71,6 +71,9 @@ const SCREENS = walk(APP_ROOT).map((file) => ({ file, source: fs.readFileSync(fi
 
 // React 가 준 훅은 읽은 상태가 아니다 — 나머지 훅이 돌려준 이름을 읽은 상태로 본다.
 const REACT_HOOKS = new Set(["useRef", "useState", "useCallback", "useMemo", "useReducer", "useId"]);
+// Next 의 내비게이션 훅도 아니다 — 주소에서 첫 그리기부터 동기로 나오는 값이라 「뒤늦게 온 값이 먼저 친 칸을
+// 덮는」 원래 버그와 모양이 다르다(#697). 여기 걸려 붉어지면 정규식을 좁히지 말고 이 목록을 본다.
+const NAVIGATION_HOOKS = new Set(["useParams", "useSearchParams", "usePathname", "useRouter"]);
 
 /** 구조 분해 안의 이름들 — `{ state: classState, reload }` 는 classState·reload, `[a, b]` 는 a·b. */
 function boundNames(pattern: string): string[] {
@@ -87,7 +90,7 @@ function hookResultNames(source: string): string[] {
   const names = new Set(["state"]);
   const re = /\bconst\s+(?:(\w+)|\{([^}]*)\}|\[([^\]]*)\])\s*=\s*(use[A-Z]\w*)(?:<[^>]*>)?\(/g;
   for (const m of source.matchAll(re)) {
-    if (REACT_HOOKS.has(m[4])) continue;
+    if (REACT_HOOKS.has(m[4]) || NAVIGATION_HOOKS.has(m[4])) continue;
     for (const name of m[1] ? [m[1]] : boundNames(m[2] ?? m[3])) names.add(name);
   }
   return [...names];
@@ -168,6 +171,28 @@ describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌�
     expect(effectBodies(typed).some((body) => seedsFromState(body, hookResultNames(typed)))).toBe(true);
     // React 의 훅은 읽은 상태가 아니다.
     expect(hookResultNames("const [title, setTitle] = useState(x);")).toEqual(["state"]);
+  });
+
+  it("Next 내비게이션 훅이 돌려준 값은 읽은 상태가 아니다(#697)", () => {
+    const join = SCREENS.find((s) => s.file.endsWith(path.join("join", "[code]", "page.tsx")))!;
+    const params = "const params = useParams<{ code: string }>();";
+    expect(join.source).toContain(params);
+    expect(join.source).toContain("const router = useRouter();");
+    const names = hookResultNames(join.source);
+    expect(names).toEqual(expect.arrayContaining(["preview", "me"]));
+    expect(names).not.toContain("params");
+    expect(names).not.toContain("router");
+    const effect = "\n  useEffect(() => { setDisplayName(params.code); }, [params]);";
+    const navSeeded = join.source.replace(params, params + effect);
+    expect(effectBodies(navSeeded).some((body) => seedsFromState(body, hookResultNames(navSeeded)))).toBe(false);
+    // 반례 — 같은 자리의 값을 서버를 읽는 훅이 돌려주면 모이고, 효과로 칸에 넣으면 붉어진다.
+    const fetched = navSeeded.replace("useParams<{ code: string }>()", "useJoinCode<{ code: string }>()");
+    expect(hookResultNames(fetched)).toContain("params");
+    expect(effectBodies(fetched).some((body) => seedsFromState(body, hookResultNames(fetched)))).toBe(true);
+    // 앱 전체에서도 내비게이션 훅의 결과는 모이지 않는다.
+    for (const name of ["params", "router", "searchParams", "pathname"]) {
+      for (const screen of SCREENS) expect(hookResultNames(screen.source), screen.file).not.toContain(name);
+    }
   });
 
   it("함수형 갱신은 먼저 친 값(자기 매개변수)을 다시 쓸 때만 통과한다(#691)", () => {
