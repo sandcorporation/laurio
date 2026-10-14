@@ -22,6 +22,8 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
+import { ChecklistRows } from "@/app/components/ChecklistRows";
+import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
@@ -120,14 +122,13 @@ export default function NewProblemPage() {
     setItems((prev) => prev.filter((item) => item.key !== key));
   }
 
-  function handleItemMove(key: number, direction: "up" | "down") {
+  function handleReorder(orderedKeys: (string | number)[]) {
     setItems((prev) => {
-      const index = prev.findIndex((item) => item.key === key);
-      const swapWith = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || swapWith < 0 || swapWith >= prev.length) return prev;
-      const reordered = [...prev];
-      [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
-      return reordered;
+      const byKey = new Map(prev.map((item) => [item.key, item]));
+      return orderedKeys.flatMap((key) => {
+        const item = byKey.get(key as number);
+        return item ? [item] : [];
+      });
     });
   }
 
@@ -202,24 +203,20 @@ export default function NewProblemPage() {
     );
   }
 
+  const createDisabled =
+    submitting || title.trim() === "" || submissionFormats.length === 0 || !isGradingGuidelineValid(gradingGuideline);
+  const classLabel = classState.status === "ready" ? `${classState.classroom.name} › ` : "";
+
   return (
     <PageShell>
-      <PageHeader
-        eyebrow="클래스 · 문제"
-        title="새 문제"
-        titleTestId="new-problem-heading"
-        description="참여자는 몇 번이든 다시 낼 수 있고, 낼 때마다 바로 채점됩니다."
-      />
-
-      <div className="flex flex-col gap-5">
-        <div className="flex items-center justify-between gap-4 border border-rule bg-surface p-4">
-          <div>
-            <p className="text-[14px] font-semibold">이미 있는 문제로 시작하기</p>
-            <p className="mt-1 text-[12px] leading-relaxed text-ink/60">
-              다른 강사가 공개한 문제나 내가 지난 기수에 쓴 문제를 가져오면 체크리스트까지
-              따라옵니다 — 가져온 뒤 고칠 수 있습니다.
-            </p>
-          </div>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="text-[11px] tracking-[0.08em] text-ink/45">{classLabel}문제</div>
+          <h1 data-testid="new-problem-heading" className="text-[22px] font-semibold tracking-[-0.01em]">
+            새 문제
+          </h1>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
             data-testid="open-template-picker"
@@ -228,16 +225,6 @@ export default function NewProblemPage() {
           >
             템플릿에서 가져오기
           </button>
-        </div>
-
-        <div className="flex items-center justify-between gap-4 border border-rule bg-surface p-4">
-          <div>
-            <p className="text-[14px] font-semibold">공모전에서 들여오기</p>
-            <p className="mt-1 text-[12px] leading-relaxed text-ink/60">
-              개최자가 허용한 무료 공모전을 문제로 씁니다. 참여자는 낸 풀이를 그 공모전에도 낼 수
-              있습니다 — 제목·설명·체크리스트는 공모전을 따라갑니다.
-            </p>
-          </div>
           <button
             type="button"
             data-testid="open-contest-picker"
@@ -246,13 +233,37 @@ export default function NewProblemPage() {
           >
             공모전 고르기
           </button>
+          <button
+            type="submit"
+            form="new-problem-form"
+            data-testid="new-problem-submit"
+            disabled={createDisabled}
+            className={buttonClass("secondary")}
+          >
+            {submitting ? "만드는 중..." : "만들기"}
+          </button>
+          <button
+            type="button"
+            data-testid="new-problem-create-and-open-submit"
+            disabled={createDisabled || !hasRequiredItem}
+            onClick={handleCreateAndOpen}
+            className={buttonClass("primary")}
+          >
+            {submitting ? "만드는 중..." : "만들고 바로 열기"}
+          </button>
         </div>
+      </div>
 
-        <div
-          role="tablist"
-          aria-label="새 문제 화면"
-          className="flex items-end gap-0.5 border-b border-rule"
-        >
+      {error ? (
+        <div className="mb-5">
+          <ErrorNote>
+            <span data-testid="new-problem-error">{error}</span>
+          </ErrorNote>
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-5">
+        <div role="tablist" aria-label="새 문제 화면" className="flex items-end gap-0.5 border-b border-rule">
           {(
             [
               ["write", "작성", "new-problem-tab-write"],
@@ -277,218 +288,153 @@ export default function NewProblemPage() {
           ))}
         </div>
 
-        <div
-          data-testid="new-problem-write-panel"
-          // 폭을 묶지 않는다 — 설명 에디터가 720px 에 갇혀 쓰기 불편했다(2026-09-15).
-          // 페이지 폭(PageShell)을 그대로 써서 미리보기 탭(제출 칸까지)보다 좁지 않다.
-          className={tab === "write" ? "flex w-full flex-col gap-5" : "hidden"}
-        >
-        <Card>
-          <form id="new-problem-form" onSubmit={handleSubmit} className="flex flex-col gap-5 p-5">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="problem-title">
-                <FieldLabel>제목</FieldLabel>
-              </label>
-              <input
-                id="problem-title"
-                data-testid="new-problem-title-input"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                required
-                className={INPUT_CLASS}
-                placeholder="예: fetch 로 목록 그리기"
-              />
-            </div>
+        <div data-testid="new-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
+          <TwoColumnFrame
+            sideTestId="new-problem-side-rail"
+            main={
+              <>
+                <Card>
+                  <form id="new-problem-form" onSubmit={handleSubmit} className="flex flex-col gap-5 p-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="problem-title">
+                        <FieldLabel>제목</FieldLabel>
+                      </label>
+                      <input
+                        id="problem-title"
+                        data-testid="new-problem-title-input"
+                        value={title}
+                        onChange={(event) => setTitle(event.target.value)}
+                        required
+                        className={INPUT_CLASS}
+                        placeholder="예: fetch 로 목록 그리기"
+                      />
+                    </div>
 
-            <div className="flex flex-col gap-1.5">
-              <FieldLabel>설명</FieldLabel>
-              <MarkdownEditor
-                id="problem-description"
-                label="설명"
-                testId="new-problem-description-input"
-                value={description}
-                onChange={setDescription}
-                placeholder="무엇을 만들어야 하는지, 그리고 무엇이 이 문제의 핵심인지."
-              />
-            </div>
-          </form>
-        </Card>
+                    <div className="flex flex-col gap-1.5">
+                      <FieldLabel>설명</FieldLabel>
+                      <MarkdownEditor
+                        id="problem-description"
+                        label="설명"
+                        testId="new-problem-description-input"
+                        value={description}
+                        onChange={setDescription}
+                        placeholder="무엇을 만들어야 하는지, 그리고 무엇이 이 문제의 핵심인지."
+                      />
+                    </div>
+                  </form>
+                </Card>
 
-        <ProblemSettingsForm
-          mode="create"
-          testIdPrefix="new-problem"
-          submissionFormats={submissionFormats}
-          onToggleSubmissionFormat={toggleSubmissionFormat}
-          model={model}
-          onModelChange={setModel}
-          modelsState={modelsState}
-          reasoningEffort={reasoningEffort}
-          onReasoningEffortChange={setReasoningEffort}
-          defaultModelIsReasoning={
-            classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
-          }
-          reasoningSwitch={
-            classState.status === "ready" && classState.classroom.scoring_connection_kind === "compatible_server"
-              ? { checked: modelIsReasoning, onChange: setModelIsReasoning }
-              : undefined
-          }
-          classDefaults={
-            classState.status === "ready"
-              ? {
-                  model: classState.classroom.default_model,
-                  reasoningEffort: classState.classroom.default_reasoning_effort,
-                }
-              : null
-          }
-          costState={costState}
-          gradingGuideline={gradingGuideline}
-          onGradingGuidelineChange={setGradingGuideline}
-        />
-
-        <Card>
-          <CardHeader
-            title="체크리스트"
-            hint="채점이 항목마다 소스를 읽어 판정합니다 — 필수를 전부 충족하면 「통과」"
-          />
-          <div
-            data-testid="syntax-check-toggle-row"
-            className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface px-4 py-3"
-          >
-            <div className="flex flex-col gap-0.5">
-              <span className="flex items-center gap-1.5 text-[13px] font-medium">
-                <Badge>기본</Badge> 소스에 문법 오류가 없다
-              </span>
-              <span className="text-[12px] text-ink/45">
-                의사코드처럼 실행되는 코드가 아닌 문제라면 끄세요.
-              </span>
-            </div>
-            <label className="flex shrink-0 items-center gap-1.5 text-[12.5px]">
-              <input
-                type="checkbox"
-                data-testid="syntax-check-enabled-input"
-                checked={syntaxCheckEnabled}
-                onChange={(event) => setSyntaxCheckEnabled(event.target.checked)}
-                className="accent-attention"
-              />
-              켜짐
-            </label>
-          </div>
-          {items.length === 0 ? (
-            <EmptyState>
-              <span data-testid="new-problem-checklist-empty-state">
-                아직 항목이 없습니다. 항목 없이 만들면 초안으로 남아 나중에 이어서 추가할 수
-                있습니다.
-              </span>
-            </EmptyState>
-          ) : (
-            <ul data-testid="new-problem-checklist-items" className="divide-y divide-rule">
-              {items.map((item, index) => (
-                <li
-                  key={item.key}
-                  data-testid={`new-problem-checklist-item-${index}`}
-                  className="flex flex-wrap items-center gap-2 px-4 py-3"
-                >
-                  <span className="w-4 shrink-0 font-mono text-[11.5px] text-ink/30">{index + 1}</span>
-                  <input
-                    data-testid={`new-problem-checklist-item-${index}-label-input`}
-                    value={item.label}
-                    onChange={(event) => handleItemLabelChange(item.key, event.target.value)}
-                    className={`${INPUT_CLASS} min-w-[200px] flex-1`}
-                  />
-                  <label className="flex shrink-0 items-center gap-1.5 text-[12.5px]">
-                    <input
-                      type="checkbox"
-                      data-testid={`new-problem-checklist-item-${index}-required-input`}
-                      checked={item.required}
-                      onChange={(event) => handleItemRequiredChange(item.key, event.target.checked)}
-                      className="accent-attention"
+                <Card>
+                  <CardHeader title="체크리스트" />
+                  <div
+                    data-testid="syntax-check-toggle-row"
+                    className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-paper px-4 py-2.5"
+                  >
+                    <span className="flex items-center gap-2 text-[13px]">
+                      <Badge>기본</Badge> 소스에 문법 오류가 없다
+                    </span>
+                    <label className="flex shrink-0 items-center gap-1.5 text-[12.5px]">
+                      <input
+                        type="checkbox"
+                        data-testid="syntax-check-enabled-input"
+                        checked={syntaxCheckEnabled}
+                        onChange={(event) => setSyntaxCheckEnabled(event.target.checked)}
+                        className="accent-attention"
+                      />
+                      켜짐
+                    </label>
+                  </div>
+                  {items.length === 0 ? (
+                    <EmptyState>
+                      <span data-testid="new-problem-checklist-empty-state">항목 없음</span>
+                    </EmptyState>
+                  ) : (
+                    <ChecklistRows
+                      items={items.map((item) => ({ key: item.key, label: item.label, required: item.required }))}
+                      listTestId="new-problem-checklist-items"
+                      rowTestId={(_item, index) => `new-problem-checklist-item-${index}`}
+                      labelMode={{ kind: "change", onChange: (key, label) => handleItemLabelChange(key as number, label) }}
+                      onReorder={handleReorder}
+                      onRequiredChange={(key, required) => handleItemRequiredChange(key as number, required)}
+                      onDelete={(key) => handleItemDelete(key as number)}
                     />
-                    필수
-                  </label>
-                  <span className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      data-testid={`new-problem-checklist-item-${index}-move-up`}
-                      disabled={index === 0}
-                      onClick={() => handleItemMove(item.key, "up")}
-                      className={buttonClass("secondary", "sm")}
-                    >
-                      위로
-                    </button>
-                    <button
-                      type="button"
-                      data-testid={`new-problem-checklist-item-${index}-move-down`}
-                      disabled={index === items.length - 1}
-                      onClick={() => handleItemMove(item.key, "down")}
-                      className={buttonClass("secondary", "sm")}
-                    >
-                      아래로
-                    </button>
-                    <button
-                      type="button"
-                      data-testid={`new-problem-checklist-item-${index}-delete`}
-                      onClick={() => handleItemDelete(item.key)}
-                      className={buttonClass("secondary", "sm")}
-                    >
-                      삭제
-                    </button>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+                  )}
 
-          <form
-            onSubmit={handleAddItem}
-            className="flex flex-wrap items-center gap-2 border-t border-rule p-4"
-          >
-            <label htmlFor="new-item-label" className="sr-only">
-              새 항목
-            </label>
-            <input
-              id="new-item-label"
-              data-testid="new-problem-new-checklist-item-label-input"
-              value={newItemLabel}
-              onChange={(event) => setNewItemLabel(event.target.value)}
-              placeholder="새 항목 — 채점이 이 문장으로 판정합니다"
-              className={`${INPUT_CLASS} min-w-[220px] flex-1`}
-            />
-            <label className="flex shrink-0 items-center gap-1.5 text-[12.5px]">
-              <input
-                type="checkbox"
-                data-testid="new-problem-new-checklist-item-required-input"
-                checked={newItemRequired}
-                onChange={(event) => setNewItemRequired(event.target.checked)}
-                className="accent-attention"
+                  <form onSubmit={handleAddItem} className="flex items-center gap-2.5 border-t border-rule px-4 py-3">
+                    <label htmlFor="new-item-label" className="sr-only">
+                      새 항목
+                    </label>
+                    <input
+                      id="new-item-label"
+                      data-testid="new-problem-new-checklist-item-label-input"
+                      value={newItemLabel}
+                      onChange={(event) => setNewItemLabel(event.target.value)}
+                      placeholder="새 항목"
+                      className={`${INPUT_CLASS} min-w-0 flex-1`}
+                    />
+                    <button
+                      type="button"
+                      data-testid="new-problem-new-checklist-item-required-input"
+                      aria-pressed={newItemRequired}
+                      aria-label={`새 항목 ${newItemRequired ? "필수" : "선택"}`}
+                      onClick={() => setNewItemRequired((prev) => !prev)}
+                      className="shrink-0"
+                    >
+                      <Badge tone={newItemRequired ? "verified" : "neutral"}>{newItemRequired ? "필수" : "선택"}</Badge>
+                    </button>
+                    <button
+                      type="submit"
+                      data-testid="new-problem-new-checklist-item-submit"
+                      disabled={newItemLabel.trim() === ""}
+                      className={buttonClass("primary", "sm")}
+                    >
+                      추가
+                    </button>
+                  </form>
+                </Card>
+              </>
+            }
+            side={
+              <ProblemSettingsForm
+                testIdPrefix="new-problem"
+                submissionFormats={submissionFormats}
+                onToggleSubmissionFormat={toggleSubmissionFormat}
+                model={model}
+                onModelChange={setModel}
+                modelsState={modelsState}
+                reasoningEffort={reasoningEffort}
+                onReasoningEffortChange={setReasoningEffort}
+                defaultModelIsReasoning={
+                  classState.status === "ready" ? classState.classroom.default_model_is_reasoning : false
+                }
+                reasoningSwitch={
+                  classState.status === "ready" && classState.classroom.scoring_connection_kind === "compatible_server"
+                    ? { checked: modelIsReasoning, onChange: setModelIsReasoning }
+                    : undefined
+                }
+                classDefaults={
+                  classState.status === "ready"
+                    ? {
+                        model: classState.classroom.default_model,
+                        reasoningEffort: classState.classroom.default_reasoning_effort,
+                      }
+                    : null
+                }
+                costState={costState}
+                gradingGuideline={gradingGuideline}
+                onGradingGuidelineChange={setGradingGuideline}
               />
-              필수
-            </label>
-            <button
-              type="submit"
-              data-testid="new-problem-new-checklist-item-submit"
-              disabled={newItemLabel.trim() === ""}
-              className={buttonClass("primary", "sm")}
-            >
-              추가
-            </button>
-          </form>
-        </Card>
+            }
+          />
         </div>
 
         <div
           data-testid="new-problem-preview-panel"
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >
-          <div className="border border-rule bg-surface p-3 text-[12.5px] leading-relaxed text-ink/60">
-            <b className="font-medium text-ink">참여자가 보는 화면 그대로입니다.</b> 아직 저장하지
-            않은 내용도 지금 상태 그대로 비춥니다.
-          </div>
           {!hasRequiredItem ? (
             <Note tone="attention">
-              <span data-testid="new-problem-preview-not-ready-notice">
-                필수 체크리스트 항목이 하나도 없어 아직 열 수 없는 상태입니다 — 이대로 열면 무엇을
-                「통과」로 볼지가 정해지지 않습니다.
-              </span>
+              <span data-testid="new-problem-preview-not-ready-notice">필수 항목이 없어 아직 열 수 없습니다.</span>
             </Note>
           ) : null}
           <div className="border border-rule bg-paper p-6">
@@ -511,54 +457,6 @@ export default function NewProblemPage() {
             />
           </div>
         </div>
-
-        {!hasRequiredItem ? (
-          <Note tone="attention">
-            <span data-testid="new-problem-open-blocked-notice">
-              필수 항목이 하나도 없어 바로 열 수 없습니다. 항목을 추가하고 하나 이상을 필수로
-              표시하면 「만들고 바로 열기」를 쓸 수 있습니다 — 초안으로만 만들어 두고 나중에
-              이어 쓸 수도 있습니다.
-            </span>
-          </Note>
-        ) : null}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="submit"
-            form="new-problem-form"
-            data-testid="new-problem-submit"
-            disabled={
-              submitting ||
-              title.trim() === "" ||
-              submissionFormats.length === 0 ||
-              !isGradingGuidelineValid(gradingGuideline)
-            }
-            className={buttonClass("secondary")}
-          >
-            {submitting ? "만드는 중..." : "만들기"}
-          </button>
-          <button
-            type="button"
-            data-testid="new-problem-create-and-open-submit"
-            disabled={
-              submitting ||
-              title.trim() === "" ||
-              !hasRequiredItem ||
-              submissionFormats.length === 0 ||
-              !isGradingGuidelineValid(gradingGuideline)
-            }
-            onClick={handleCreateAndOpen}
-            className={buttonClass("primary")}
-          >
-            {submitting ? "만드는 중..." : "만들고 바로 열기"}
-          </button>
-        </div>
-
-        {error ? (
-          <ErrorNote>
-            <span data-testid="new-problem-error">{error}</span>
-          </ErrorNote>
-        ) : null}
       </div>
 
       {pickerOpen ? (

@@ -1,0 +1,188 @@
+"use client";
+
+// 체크리스트 항목 줄 — 끌기 손잡이·번호·라벨·필수/선택 배지·삭제 (#637).
+//
+// 문제 편집(항목마다 즉시 저장)과 새 문제(초안, 만들 때 함께 저장)가 이 줄 하나를 쓴다.
+// 두 화면은 저장 시점만 다르고 줄의 모양과 순서 바꾸기는 같다.
+//
+// **순서 바꾸기는 끌기와 키보드 둘 다다.** 손잡이(⋮⋮)를 끌어 놓거나, 손잡이에 포커스를 두고
+// 위·아래 화살표를 누른다. 끌기는 네이티브 HTML drag 라 의존성이 없다 — 포인터 없는 환경의
+// 길이 키보드다. 줄은 바뀐 순서를 곧바로 보이고(`onReorder` 가 서버 저장을 시작한다), 부모가
+// 새 `items` 를 내려주면 그 값으로 다시 맞춘다.
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+
+import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
+
+export type ChecklistRowItem = { key: string | number; label: string; required: boolean };
+
+export function ChecklistRows({
+  items,
+  rowTestId,
+  listTestId,
+  readOnly = false,
+  lockedStructure = false,
+  labelMode,
+  onReorder,
+  onRequiredChange,
+  onDelete,
+}: {
+  items: ChecklistRowItem[];
+  /** 줄 하나의 testid 접두 — `-label-input`·`-required-input`·`-delete`·`-drag-handle` 이 붙는다. */
+  rowTestId: (item: ChecklistRowItem, index: number) => string;
+  listTestId: string;
+  /** 보관된 클래스 — 모든 입력을 잠근다. */
+  readOnly?: boolean;
+  /** 공모전 문제 — 라벨·필수·순서·삭제 모두 공모전을 따라간다. */
+  lockedStructure?: boolean;
+  /** 라벨 칸: `commit` 은 포커스를 잃을 때 한 번 저장(편집), `change` 는 칠 때마다(초안). */
+  labelMode: { kind: "commit"; onCommit: (key: ChecklistRowItem["key"], label: string) => void } | {
+    kind: "change";
+    onChange: (key: ChecklistRowItem["key"], label: string) => void;
+  };
+  onReorder: (orderedKeys: ChecklistRowItem["key"][]) => void;
+  onRequiredChange: (key: ChecklistRowItem["key"], required: boolean) => void;
+  onDelete: (key: ChecklistRowItem["key"]) => void;
+}): ReactNode {
+  const [rows, setRows] = useState(items);
+  useEffect(() => setRows(items), [items]);
+
+  const [dragKey, setDragKey] = useState<ChecklistRowItem["key"] | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+  const handleRefs = useRef(new Map<ChecklistRowItem["key"], HTMLElement>());
+  const refocusKey = useRef<ChecklistRowItem["key"] | null>(null);
+
+  // 키보드로 옮긴 뒤에는 DOM 이 다시 놓이며 포커스가 풀리므로 같은 손잡이에 되돌린다.
+  useEffect(() => {
+    if (refocusKey.current !== null) {
+      handleRefs.current.get(refocusKey.current)?.focus();
+      refocusKey.current = null;
+    }
+  }, [rows]);
+
+  const locked = readOnly || lockedStructure;
+
+  function moveTo(key: ChecklistRowItem["key"], target: number) {
+    const from = rows.findIndex((row) => row.key === key);
+    if (from < 0 || target < 0 || target >= rows.length || target === from) return;
+    const next = [...rows];
+    const [moved] = next.splice(from, 1);
+    next.splice(target, 0, moved);
+    setRows(next);
+    onReorder(next.map((row) => row.key));
+  }
+
+  return (
+    <ul data-testid={listTestId} className="divide-y divide-rule">
+      {rows.map((item, index) => {
+        const testId = rowTestId(item, index);
+        return (
+          <li
+            key={item.key}
+            data-testid={testId}
+            onDragOver={(event) => {
+              if (dragKey === null) return;
+              event.preventDefault();
+              setOverIndex(index);
+            }}
+            onDrop={(event) => {
+              if (dragKey === null) return;
+              event.preventDefault();
+              moveTo(dragKey, index);
+              setDragKey(null);
+              setOverIndex(null);
+            }}
+            className={`flex items-center gap-2.5 px-4 py-2.5 ${
+              dragKey !== null && overIndex === index && dragKey !== item.key ? "bg-paper" : ""
+            } ${dragKey === item.key ? "opacity-40" : ""}`}
+          >
+            {locked ? (
+              <span aria-hidden className="w-3 shrink-0 text-ink/15">
+                ⋮⋮
+              </span>
+            ) : (
+              <span
+                ref={(node) => {
+                  if (node) handleRefs.current.set(item.key, node);
+                  else handleRefs.current.delete(item.key);
+                }}
+                role="button"
+                tabIndex={0}
+                draggable
+                data-testid={`${testId}-drag-handle`}
+                aria-label={`${index + 1}번 항목 순서 바꾸기 — 끌거나 위·아래 화살표`}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  // Firefox 는 setData 가 있어야 끌기가 시작된다.
+                  event.dataTransfer.setData("text/plain", String(item.key));
+                  const row = event.currentTarget.closest("li");
+                  if (row) event.dataTransfer.setDragImage(row, 16, 16);
+                  setDragKey(item.key);
+                }}
+                onDragEnd={() => {
+                  setDragKey(null);
+                  setOverIndex(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                    event.preventDefault();
+                    refocusKey.current = item.key;
+                    moveTo(item.key, index + (event.key === "ArrowUp" ? -1 : 1));
+                  }
+                }}
+                className="w-3 shrink-0 cursor-grab select-none text-ink/30 hover:text-ink focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink active:cursor-grabbing"
+              >
+                ⋮⋮
+              </span>
+            )}
+            <span className="w-4 shrink-0 font-mono text-[11.5px] text-ink/30">{index + 1}</span>
+            {labelMode.kind === "commit" ? (
+              <input
+                data-testid={`${testId}-label-input`}
+                aria-label={`${index + 1}번 항목`}
+                defaultValue={item.label}
+                disabled={locked}
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (value !== "" && event.target.value !== item.label) labelMode.onCommit(item.key, value);
+                }}
+                className={`${INPUT_CLASS} min-w-0 flex-1`}
+              />
+            ) : (
+              <input
+                data-testid={`${testId}-label-input`}
+                aria-label={`${index + 1}번 항목`}
+                value={item.label}
+                disabled={locked}
+                onChange={(event) => labelMode.onChange(item.key, event.target.value)}
+                className={`${INPUT_CLASS} min-w-0 flex-1`}
+              />
+            )}
+            <button
+              type="button"
+              data-testid={`${testId}-required-input`}
+              aria-pressed={item.required}
+              aria-label={`${index + 1}번 항목 ${item.required ? "필수" : "선택"}`}
+              disabled={locked}
+              onClick={() => onRequiredChange(item.key, !item.required)}
+              className="shrink-0 disabled:cursor-not-allowed"
+            >
+              <Badge tone={item.required ? "verified" : "neutral"}>{item.required ? "필수" : "선택"}</Badge>
+            </button>
+            {lockedStructure ? null : (
+              <button
+                type="button"
+                data-testid={`${testId}-delete`}
+                disabled={readOnly}
+                onClick={() => onDelete(item.key)}
+                className={`${buttonClass("danger", "sm")} shrink-0`}
+              >
+                삭제
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

@@ -6,11 +6,9 @@
 // (새 문제는 함께 저장, 수정은 항목마다 저장) 이 조각에 넣지 않고 각
 // 화면에 남긴다.
 //
-// `mode`가 두 화면의 실제 차이를 가른다: 「모델 거부」 배지·재시도 버튼과
-// 실제로 쓰일 모델·추론 강도는 이미 저장된 문제가 있는 수정 화면에만
-// 뜻이 있다(#437, #402) — 새 문제는 아직 거부 이력도 「실제로 쓰일 값」도
-// 없다. 제출 형식 칸의 안내 문구도 그래서 갈린다: 수정 화면은 이미 낸
-// 시도가 있을 수 있어 그 점수가 남는다는 것을 말한다.
+// 시안 v2(#637): 오른쪽 300px 열에 카드 셋으로 놓이고, 화면에는 설명 문장 없이
+// 라벨·값·배지·버튼만 둔다. 「모델 거부」 배지·재시도와 실제로 쓰일 모델·추론 강도는
+// 이미 저장된 문제가 있는 수정 화면에만 뜻이 있다(#437, #402) — 각각 prop 이 있을 때만 그린다.
 import {
   Badge,
   Card,
@@ -26,9 +24,9 @@ import {
   type GradingGuidelineValue,
 } from "@/app/components/GradingGuidelineEditor";
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
-import { ProblemScoringCost } from "@/app/components/ScoringCost";
+import { ProblemCostLine } from "@/app/components/ScoringCost";
 import type { SubmissionFormat } from "@/lib/problems/api";
-import { isSelectedModelReasoning, MODEL_PROBE_NOTE, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 import type { ScoringModelsState } from "@/lib/scoring/use-scoring-models";
 
@@ -41,18 +39,15 @@ export type ModelRejectionRetry = {
 };
 
 export function ProblemSettingsForm({
-  mode,
   testIdPrefix,
   submissionFormats,
   onToggleSubmissionFormat,
   model,
   onModelChange,
   modelsState,
-  effectiveModel,
   modelRejection,
   reasoningEffort,
   onReasoningEffortChange,
-  effectiveReasoningEffort,
   defaultModelIsReasoning,
   reasoningSwitch,
   classDefaults,
@@ -61,21 +56,16 @@ export function ProblemSettingsForm({
   onGradingGuidelineChange,
   disabled = false,
 }: {
-  mode: "create" | "edit";
   testIdPrefix: string;
   submissionFormats: SubmissionFormat[];
   onToggleSubmissionFormat: (format: SubmissionFormat, checked: boolean) => void;
   model: string;
   onModelChange: (value: string) => void;
   modelsState: ScoringModelsState;
-  /** 실제로 쓰일 모델(수정 화면만) — `model`이 빈 문자열일 때만 보인다. */
-  effectiveModel?: string;
   /** 「모델 거부」 배지·재시도 버튼(수정 화면만, #437). */
   modelRejection?: ModelRejectionRetry;
   reasoningEffort: string;
   onReasoningEffortChange: (value: string) => void;
-  /** 실제로 적용될 추론 강도(수정 화면만) — `reasoningEffort`가 빈 문자열일 때만 보인다. */
-  effectiveReasoningEffort?: string;
   defaultModelIsReasoning: boolean;
   /** 「호환 서버」 클래스일 때만 — 이 문제 자신의 모델의 「추론 모델」 스위치(#602). */
   reasoningSwitch?: { checked: boolean; onChange: (value: boolean) => void };
@@ -89,6 +79,9 @@ export function ProblemSettingsForm({
    *  `<fieldset disabled>` 하나가 안의 입력·선택·버튼을 전부 막는다. */
   disabled?: boolean;
 }) {
+  const defaultEffortLabel = REASONING_EFFORT_OPTIONS.find((o) => o.value === classDefaults?.reasoningEffort)?.label;
+  const effortInheritLabel = defaultEffortLabel ? `클래스 기본값 — ${defaultEffortLabel}` : "클래스 기본값";
+  const inheritLabel = classDefaults ? `클래스 기본값 — ${classDefaults.model}` : "클래스 기본값";
   const isReasoning =
     modelsState.status === "ready" &&
     isSelectedModelReasoning(model, modelsState.models, defaultModelIsReasoning, reasoningSwitch?.checked);
@@ -123,11 +116,6 @@ export function ProblemSettingsForm({
               GitHub 저장소
             </label>
           </div>
-          <span className="text-[11.5px] leading-relaxed text-ink/45">
-            {mode === "edit"
-              ? "둘 다 고르면 참여자는 낼 때마다 그중 하나를 고릅니다. 형식을 꺼도 그 형식으로 이미 낸 시도와 점수는 그대로 남습니다."
-              : "제출된 내용만 보고 채점합니다 — 참여자가 따로 근거를 적거나 스스로 체크할 필요는 없습니다. 둘 다 고르면 참여자는 낼 때마다 그중 하나를 고릅니다."}
-          </span>
           {submissionFormats.length === 0 ? (
             <span data-testid={`${testIdPrefix}-format-empty-notice`} className="text-[11.5px] text-attention">
               하나 이상 골라야 합니다.
@@ -144,7 +132,6 @@ export function ProblemSettingsForm({
               <div data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <Badge tone="attention">모델 거부</Badge>
-                  <span>이 키로 이 모델을 쓸 수 없어 시도가 채점되지 않습니다.</span>
                 </div>
                 <button
                   type="button"
@@ -169,13 +156,9 @@ export function ProblemSettingsForm({
           {modelsState.status === "ready" ? (
             <>
               {modelsState.source === "fallback" ? (
-                <Note>
-                  <span data-testid={`${testIdPrefix}-model-unavailable-note`}>
-                    {modelsState.unavailableReason === "no_api_key"
-                      ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
-                      : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
-                  </span>
-                </Note>
+                <span data-testid={`${testIdPrefix}-model-unavailable-note`} className="self-start">
+                  <Badge>기본 목록</Badge>
+                </span>
               ) : null}
               {modelsState.source === "manual" ? (
                 // 호환 서버가 모델 목록을 주지 않았다(#601) — 그 서버의 모델 이름을 직접 넣는다.
@@ -185,7 +168,7 @@ export function ProblemSettingsForm({
                   value={model}
                   onChange={(event) => onModelChange(event.target.value)}
                   className={`${INPUT_CLASS} font-mono`}
-                  placeholder="비워 두면 클래스 기본값을 따릅니다"
+                  placeholder={inheritLabel}
                   maxLength={200}
                 />
               ) : (
@@ -197,7 +180,7 @@ export function ProblemSettingsForm({
                 className={INPUT_CLASS}
               >
                 <option value="" data-testid={`${testIdPrefix}-model-option-inherit`}>
-                  클래스 기본값을 따릅니다
+                  {inheritLabel}
                 </option>
                 {modelsState.models.map((option) => (
                   <option
@@ -219,20 +202,6 @@ export function ProblemSettingsForm({
               모델 목록을 불러오는 중...
             </p>
           )}
-          {model === "" && effectiveModel !== undefined ? (
-            <p data-testid={`${testIdPrefix}-model-effective`} className="text-[12.5px] text-ink/60">
-              실제로 쓰일 모델: <span className="font-mono">{effectiveModel}</span>
-            </p>
-          ) : null}
-          {reasoningSwitch ? (
-            <span data-testid={`${testIdPrefix}-model-probe-note`} className="text-[11.5px] leading-relaxed text-ink/45">
-              {MODEL_PROBE_NOTE}
-            </span>
-          ) : null}
-          <span className="text-[11.5px] leading-relaxed text-ink/45">
-            문제 설명이 길면 컨텍스트가 작은 모델은 뒷부분이 잘린 채 채점됩니다 — 그래서
-            문제마다 다른 모델을 고를 수 있습니다.
-          </span>
           {reasoningSwitch && model !== "" ? (
             <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
               <ReasoningModelSwitch
@@ -255,7 +224,7 @@ export function ProblemSettingsForm({
                 className={`${INPUT_CLASS} max-w-[200px]`}
               >
                 <option value="" data-testid={`${testIdPrefix}-reasoning-effort-option-inherit`}>
-                  클래스 기본값을 따릅니다
+                  {effortInheritLabel}
                 </option>
                 {REASONING_EFFORT_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -263,28 +232,14 @@ export function ProblemSettingsForm({
                   </option>
                 ))}
               </select>
-              {reasoningEffort === "" && effectiveReasoningEffort !== undefined ? (
-                <p
-                  data-testid={`${testIdPrefix}-reasoning-effort-effective`}
-                  className="text-[12.5px] text-ink/60"
-                >
-                  실제로 적용될 추론 강도: {effectiveReasoningEffort}
-                </p>
-              ) : null}
-              <span className="text-[11.5px] leading-relaxed text-ink/45">
-                높을수록 느리고 토큰을 더 씁니다.
-              </span>
             </div>
           ) : null}
           {modelsState.status === "ready" && classDefaults ? (
-            <ProblemScoringCost
+            <ProblemCostLine
               state={costState}
               testIdPrefix={testIdPrefix}
               modelId={model || classDefaults.model}
               reasoningEffort={reasoningEffort || classDefaults.reasoningEffort}
-              isReasoning={isReasoning}
-              selectableModelIds={modelsState.models.map((option) => option.id)}
-              onUseBaseline={() => onModelChange("gpt-4.1-mini")}
             />
           ) : null}
         </div>

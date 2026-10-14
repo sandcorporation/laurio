@@ -157,3 +157,22 @@ export function classCostSummary(estimate: ScoringCostEstimate, current: Scoring
   if (!cost || chars === undefined) return `${head} · 비용 미확인`;
   return `${head} · 소스 약 ${formatManCount(chars)} 자면 시도 1건 ${formatKrw(cost.krw, current.open_ended)}`;
 }
+
+/**
+ * 문제 편집의 채점 모델 카드에 놓는 비용 한 줄(#637) — 「시도 1건 약 30원 · 참여자 24명 × 평균 1.6번 ≈ 약 1,150원」.
+ * 기준이 소스 크기별이면 가운데(「보통」) 크기의 시도 1건만, 참여자가 없으면 시도 1건만 적는다.
+ * 호환 서버(토큰 단위)는 같은 모양으로 토큰을 적는다. 단가를 모르면 null — 카드는 줄을 그리지 않는다.
+ */
+export function problemCostLine(estimate: ScoringCostEstimate, row: ScoringCostRow | null): string | null {
+  if (!row) return null;
+  const tokens = estimate.unit === "tokens";
+  if (!tokens && !row.priced) return null;
+  const attempt = representativeAttempt(row);
+  if (!attempt) return null;
+  const amount = (krw: number | null, tok: number) => (tokens ? formatTokens(tok, row.open_ended) : formatKrw(krw, row.open_ended));
+  const head = `시도 1건 ${amount(attempt.krw, attempt.tokens)}`;
+  const perProblem = tokens ? row.per_problem_tokens : row.per_problem_krw;
+  if (estimate.participant_count <= 0 || !perProblem) return head;
+  const whole = tokens ? formatTokens(perProblem, row.open_ended) : formatKrw(perProblem, row.open_ended);
+  return `${head} · 참여자 ${estimate.participant_count}명 × 평균 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)} ≈ ${whole}`;
+}
