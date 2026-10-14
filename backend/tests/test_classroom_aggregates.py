@@ -56,10 +56,10 @@ def _row(client, access: str, class_id: int) -> dict:
     return next(c for c in list_taught_classes(client, access) if c["id"] == class_id)
 
 
-def _class_with_two_learners(client, monkeypatch=None):
+def _class_with_two_learners(client, monkeypatch=None, *, syntax_check_enabled: bool = True):
     owner = login(client, "owner")
     class_id = create_class(client, owner["access"])
-    problem = create_open_problem(client, owner["access"], class_id)
+    problem = create_open_problem(client, owner["access"], class_id, syntax_check_enabled=syntax_check_enabled)
     a, b = login(client, "learner-a"), login(client, "learner-b")
     join_class(client, a["access"], class_id, instructor_access=owner["access"], display_name="가")
     join_class(client, b["access"], class_id, instructor_access=owner["access"], display_name="나")
@@ -258,10 +258,20 @@ def test_grid_member_rows_carry_joined_at_and_last_submitted_at(client, db):
     assert rows["나"]["last_submitted_at"] is None
 
 
-def test_recent_attempts_lists_ten_newest_with_the_four_statuses(client, db, monkeypatch):
-    owner, class_id, problem, a, b = _class_with_two_learners(client)
+@pytest.fixture
+def eleven_unscored_attempts(client, db):
+    """「열 개를 넘게 쌓였다」는 준비다 — 제출 11건(HTTP)은 시험 본문의 CPU 한도 밖에서
+    올린다(#701: 본문에 두면 조용할 때도 0.7초였다). 문법 검사는 끈다 — 이 시험은
+    상태를 보고, 켜 두면 채점마다 파서 프로세스가 하나씩 떠 스캔 둘에 CPU 0.2초가 든다."""
+
+    owner, class_id, problem, a, b = _class_with_two_learners(client, syntax_check_enabled=False)
     for _ in range(11):
         submit_repository(client, a["access"], class_id, problem.id)
+    return owner, class_id, problem, b
+
+
+def test_recent_attempts_lists_ten_newest_with_the_four_statuses(client, monkeypatch, eleven_unscored_attempts):
+    owner, class_id, problem, b = eleven_unscored_attempts
 
     unscored = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
     assert len(unscored) == 10
@@ -308,19 +318,31 @@ def test_recent_attempts_skip_the_instructor_and_the_expelled_and_are_instructor
     assert _get(client, a["access"], f"/{class_id}/recent-attempts").status_code == 404
 
 
-def test_listing_query_count_does_not_grow_with_classes_problems_or_members(client, db):
+def _build_listed_class(client, owner, name: str):
+    class_id = create_class(client, owner["access"], name=name)
+    create_open_problem(client, owner["access"], class_id)
+    create_open_problem(client, owner["access"], class_id, title="2주차")
+    learner = login(client, f"{name}-learner")
+    join_class(client, learner["access"], class_id, instructor_access=owner["access"], display_name="학생")
+    return class_id, learner
+
+
+@pytest.fixture
+def first_listed_class(client, db):
+    """질의 수를 처음 세는 상태(클래스 하나·제출 하나)는 준비다 — 시험 본문의 CPU
+    한도 밖에서 만든다(#701)."""
+
     owner = login(client, "owner")
+    first, learner = _build_listed_class(client, owner, "하나")
+    submit_repository(client, learner["access"], first, list_problems(client, owner["access"], first)[0]["id"])
+    return owner, first, learner
+
+
+def test_listing_query_count_does_not_grow_with_classes_problems_or_members(client, first_listed_class):
+    owner, first, learner = first_listed_class
 
     def build(name: str):
-        class_id = create_class(client, owner["access"], name=name)
-        create_open_problem(client, owner["access"], class_id)
-        create_open_problem(client, owner["access"], class_id, title="2주차")
-        learner = login(client, f"{name}-learner")
-        join_class(client, learner["access"], class_id, instructor_access=owner["access"], display_name="학생")
-        return class_id, learner
-
-    first, learner = build("하나")
-    submit_repository(client, learner["access"], first, list_problems(client, owner["access"], first)[0]["id"])
+        return _build_listed_class(client, owner, name)
 
     def count(path: str, access: str) -> int:
         with CaptureQueriesContext(connection) as ctx:

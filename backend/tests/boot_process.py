@@ -37,16 +37,48 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 # 설정을 읽지 않고 임포트되는 것만 — 여기에 앱 모듈이나 `ninja`(임포트 시점에
 # 설정을 읽는다)를 넣으면 forkserver 가 기본 설정으로 평가해 버려 가드를 다시
-# 태울 수 없게 된다.
+# 태울 수 없게 된다. 마지막의 `tests.boot_preload_check` 가 그것을 지킨다 —
+# 앞의 것이 하나라도 설정을 건드렸거나 임포트되지 못했으면 forkserver 가 뜨지 않는다.
+#
+# 2026-10-15(#701): 자식 하나가 CPU 0.55초를 썼고 그 0.41이 `django.setup()` 이었다.
+# 그 가운데 설정과 무관한 서드파티(psycopg·aiohttp·bleach…)와 Django 모듈을 여기로
+# 옮겼다 — 앱 모듈·`ninja`·설정 모듈은 여전히 자식이 처음부터 평가한다.
 _PRELOAD = [
     "pydantic",
+    "pydantic.fields",
+    "pydantic.types",
+    "pydantic.networks",
     "celery",
     "sentry_sdk",
     "requests",
+    "psycopg",
+    "aiohttp",
+    "bleach",
+    "bleach.linkifier",
+    "prometheus_client",
+    "jwt",
+    "cryptography.fernet",
+    "sqlparse",
     "django.core.management",
     "django.db.models",
+    "django.db.migrations",
+    "django.db.backends.postgresql.base",
     "django.urls",
     "django.http",
+    "django.forms",
+    "django.template.defaulttags",
+    "django.template.loader_tags",
+    "django.template.backends.django",
+    "django.views.generic",
+    "django.middleware.csrf",
+    "django.core.mail",
+    "django.core.paginator",
+    "django.core.serializers.json",
+    "django.core.files.storage",
+    "django.core.files.images",
+    "django.contrib.auth.hashers",
+    "django.contrib.auth.password_validation",
+    "tests.boot_preload_check",
 ]
 
 _context: multiprocessing.context.BaseContext | None = None

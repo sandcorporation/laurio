@@ -20,33 +20,42 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from django.conf import settings
 
 REPO_ROOT = settings.BASE_DIR.parent
 COMPOSE = "docker/compose.prod.yaml"
 
-FAKE_DOCKER = f"""#!{sys.executable}
+# 가짜 `docker` 는 `sh` 다 — `plan` 은 서비스마다 `compose ps -q` 를 부르는데(열두 번 남짓),
+# 그때마다 파이썬을 띄우면 그것만으로 CPU 0.4초가 든다(#701). 정의를 렌더해야 하는
+# `config` 만 파이썬(`docker-config`)에 넘긴다.
+FAKE_DOCKER = """#!/bin/sh
+[ "$1" = compose ] || exit 0  # docker inspect 등 — 이 시험에서는 볼 것이 없다
+shift
+compose_file=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f) compose_file=$2; shift 2 ;;
+    --env-file) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+case "$1" in
+  ps) [ "$2" = -q ] && echo "cid-$3" ;;
+  config) shift; exec "$(dirname "$0")/docker-config" "$compose_file" "$@" ;;
+esac
+exit 0
+"""
+
+FAKE_DOCKER_CONFIG = f"""#!{sys.executable}
 import json, sys
 import yaml
 
-args = sys.argv[1:]
-if args[:1] != ["compose"]:
-    sys.exit(0)  # docker inspect 등 — 이 시험에서는 볼 것이 없다
-rest = args[1:]
-compose_file = None
-while rest and rest[0].startswith("-"):
-    if rest[0] in ("-f", "--env-file"):
-        if rest[0] == "-f":
-            compose_file = rest[1]
-        rest = rest[2:]
-    else:
-        rest = rest[1:]
-if rest[:2] == ["ps", "-q"]:
-    print("cid-" + rest[2])
-elif rest[:1] == ["config"]:
-    with open(compose_file, encoding="utf-8") as f:
-        services = yaml.safe_load(f)["services"]
-    print(json.dumps({{s: services[s] for s in rest[1:]}}, sort_keys=True))
+compose_file, *names = sys.argv[1:]
+with open(compose_file, encoding="utf-8") as f:
+    services = yaml.safe_load(f)["services"]
+print(json.dumps({{s: services[s] for s in names}}, sort_keys=True))
 """
 
 
@@ -56,7 +65,12 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def _plan(tmp_path: Path, change) -> dict[str, str]:
+def _prepare(tmp_path: Path, change) -> tuple[Path, dict[str, str]]:
+    """직전 배포·이번 배포 커밋이 든 임시 저장소와 가짜 `docker` 를 PATH 에 둔 환경.
+
+    준비(git 서브프로세스 여럿)라 픽스처에서 부른다 — 시험 본문의 CPU 한도 밖이다(#701).
+    본문에는 `plan` 호출과 단언만 남는다."""
+
     repo = tmp_path / "repo"
     (repo / "docker").mkdir(parents=True)
     shutil.copy(REPO_ROOT / "deploy.sh", repo / "deploy.sh")
@@ -75,9 +89,15 @@ def _plan(tmp_path: Path, change) -> dict[str, str]:
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "docker").write_text(FAKE_DOCKER, encoding="utf-8")
-    (bin_dir / "docker").chmod(0o755)
+    for name, body in (("docker", FAKE_DOCKER), ("docker-config", FAKE_DOCKER_CONFIG)):
+        (bin_dir / name).write_text(body, encoding="utf-8")
+        (bin_dir / name).chmod(0o755)
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
+    return repo, env
+
+
+def _plan(prepared: tuple[Path, dict[str, str]]) -> dict[str, str]:
+    repo, env = prepared
     result = subprocess.run(
         ["sh", "deploy.sh", "prod", "plan"], cwd=repo, env=env, capture_output=True, text=True
     )
@@ -86,7 +106,8 @@ def _plan(tmp_path: Path, change) -> dict[str, str]:
     return dict(line.split("=", 1) for line in plan.splitlines() if "=" in line)
 
 
-def test_compose_change_that_leaves_the_pooler_alone_still_rolls_the_backend(tmp_path):
+@pytest.fixture
+def other_service_changed(tmp_path):
     # #582 의 모양 — 다른 서비스의 command 만 바꾼다.
     def change(compose: str) -> str:
         changed = compose.replace(
@@ -96,14 +117,19 @@ def test_compose_change_that_leaves_the_pooler_alone_still_rolls_the_backend(tmp
         assert changed != compose
         return changed
 
-    plan = _plan(tmp_path, change)
+    return _prepare(tmp_path, change)
+
+
+def test_compose_change_that_leaves_the_pooler_alone_still_rolls_the_backend(other_service_changed):
+    plan = _plan(other_service_changed)
 
     assert plan["BUILD_BACKEND"] == "true"
     assert plan["BUILD_PGBOUNCER"] == "false"
     assert plan["ROLLING_BACKEND"] == "true"
 
 
-def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(tmp_path):
+@pytest.fixture
+def pooler_changed(tmp_path):
     def change(compose: str) -> str:
         changed = compose.replace(
             "      PGBOUNCER_POOL_MODE: transaction\n",
@@ -112,7 +138,11 @@ def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(tmp_path)
         assert changed != compose
         return changed
 
-    plan = _plan(tmp_path, change)
+    return _prepare(tmp_path, change)
+
+
+def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(pooler_changed):
+    plan = _plan(pooler_changed)
 
     assert plan["BUILD_PGBOUNCER"] == "true"
     assert plan["ROLLING_BACKEND"] == "false"

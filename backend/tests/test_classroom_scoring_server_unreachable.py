@@ -67,7 +67,7 @@ def _after_intervals(start, n: int):
     return start + n * (classroom_scoring.QUOTA_RECHECK_INTERVAL + timedelta(seconds=1))
 
 
-def _setup(client, monkeypatch, *, submissions: int = 1):
+def _setup(client, monkeypatch, *, submissions: int = 1, syntax_check_enabled: bool = True):
     """닿는 서버로 저장해 두고 시도를 낸 뒤, 그 서버가 닿지 않게 된다."""
 
     fake = FakeCompatibleServer(model_ids=["llama-3.1-8b-instruct"]).install(monkeypatch)
@@ -77,7 +77,7 @@ def _setup(client, monkeypatch, *, submissions: int = 1):
     class_id = create_class(client, owner["access"], with_key=False)
     set_compatible_server(client, owner["access"], class_id, SERVER_URL)
     add_co_instructor(client, owner["access"], class_id, co["access"], display_name="보조 강사")
-    problem = create_open_problem(client, owner["access"], class_id)
+    problem = create_open_problem(client, owner["access"], class_id, syntax_check_enabled=syntax_check_enabled)
     fake.verdicts = openai_success_body(problem.item_id)
     join_class(client, participant["access"], class_id, instructor_access=owner["access"])
     for n in range(submissions):
@@ -112,7 +112,9 @@ def _unreachable(client, ctx) -> bool:
 def test_an_unreachable_server_never_turns_into_an_automatic_fail_and_waits_on_the_key(
     client, monkeypatch, start
 ):
-    _, ctx = _setup(client, monkeypatch)
+    # 문법 검사는 끈다 — 스캔마다 시도를 다시 준비하며 파서 프로세스를 띄워, 열 번이면
+    # 그것만으로 CPU 0.2초가 든다(#701). 이 시험이 보는 것은 서버가 닿지 않을 때다.
+    _, ctx = _setup(client, monkeypatch, syntax_check_enabled=False)
 
     # 실패 한도(5회)의 두 배를, 다시 확인 간격을 넘겨 가며 돌린다.
     for n in range(2 * classroom_scoring.SCORING_FAILURE_LIMIT):

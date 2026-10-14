@@ -114,6 +114,9 @@ def pytest_runtest_makereport(item, call):
     report = yield
     spent = getattr(item, "_codemit_cpu_seconds", None)
     if report.when == "call" and spent is not None:
+        # junitxml 은 teardown 보고서의 user_properties 만 쓰고, pytest 는 보고서마다
+        # item 의 목록을 복사한다 — item 에도 넣어야 junit 에 남는다(#701).
+        item.user_properties.append(("cpu_seconds", round(spent, 3)))
         report.user_properties.append(("cpu_seconds", round(spent, 3)))
         if _CPU_LIMIT_SECONDS > 0 and spent > _CPU_LIMIT_SECONDS and report.passed:
             report.outcome = "failed"

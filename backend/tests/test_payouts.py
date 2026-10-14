@@ -3441,8 +3441,23 @@ def test_toss_payout_webhook_does_not_apply_an_unknown_vendor_payout_id(
     assert not PayoutWebhookDelivery.objects.exists()
 
 
+@pytest.fixture
+def one_payout_in_the_operator_queue(db, client, category, landing_type):
+    """질의 수를 처음 세는 상태(큐에 지급 하나)는 준비다 — 시험 본문의 CPU 한도 밖에서
+    HTTP 로 만든다(#701)."""
+
+    _sponsor1, dev1, contest1, _s1 = _ready_for_payout(
+        client, category, landing_type, sponsor_uid="sponsor-nplus1-1", dev_uid="dev-nplus1-1"
+    )
+    requested1 = _request_payout(client, dev1, contest1["id"])
+    _confirm_payout(client, dev1, requested1["idempotency_key"], seller_simulate="review_required")
+    return _operator_client(username="payouts-op-nplus1")
+
+
 @pytest.mark.django_db
-def test_operator_payout_queue_does_not_query_per_row(client, category, landing_type):
+def test_operator_payout_queue_does_not_query_per_row(
+    client, category, landing_type, one_payout_in_the_operator_queue
+):
     """운영자 지급 큐는 행이 늘어도 질의 수가 늘지 않는다 (#91).
 
     `hold_of` 는 「조회를 내지 않는다 — 호출부가 Seller 와 신원 제출 여부를 미리
@@ -3454,13 +3469,7 @@ def test_operator_payout_queue_does_not_query_per_row(client, category, landing_
     from django.db import connection
     from django.test.utils import CaptureQueriesContext
 
-    sponsor1, dev1, contest1, _s1 = _ready_for_payout(
-        client, category, landing_type, sponsor_uid="sponsor-nplus1-1", dev_uid="dev-nplus1-1"
-    )
-    requested1 = _request_payout(client, dev1, contest1["id"])
-    _confirm_payout(client, dev1, requested1["idempotency_key"], seller_simulate="review_required")
-
-    operator = _operator_client(username="payouts-op-nplus1")
+    operator = one_payout_in_the_operator_queue
 
     with CaptureQueriesContext(connection) as one_row:
         resp = operator.get("/api/operator/payouts")

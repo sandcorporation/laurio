@@ -401,9 +401,25 @@ def test_a_round_does_not_end_when_in_flight_attempts_finish_during_a_pick(djang
     assert ClassroomScore.objects.count() == 3
 
 
-@pytest.mark.django_db(transaction=True)
-def test_concurrency_is_capped_per_connection_and_globally(django_db_blocker, monkeypatch, settings):
+@pytest.fixture
+def two_classes_with_queued_attempts(settings):
+    """두 클래스(연결 둘)에 시도 4건·2건이 줄 서 있다 — 준비라 픽스처에서 HTTP 로 만든다
+    (#701: 시험 본문의 CPU 한도 밖)."""
+
     settings.CLASSROOM_GRADER_INLINE = False
+    client = Client()
+    a = _class_with_open_problem(client, uid="instructor-a", participant_uid="participant-a")
+    b = _class_with_open_problem(client, uid="instructor-b", participant_uid="participant-b")
+    _queue_attempts(client, a, 4)
+    _queue_attempts(client, b, 2)
+    return a, b
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrency_is_capped_per_connection_and_globally(
+    django_db_blocker, monkeypatch, two_classes_with_queued_attempts
+):
+    a, b = two_classes_with_queued_attempts
     in_flight: Counter = Counter()
     peak: Counter = Counter()
     problem_class: dict[int, int] = {}
@@ -420,13 +436,8 @@ def test_concurrency_is_capped_per_connection_and_globally(django_db_blocker, mo
         return self.score(scoring_input)
 
     monkeypatch.setattr(FakeClassroomScoringAdapter, "score_async", _slow)
-    client = Client()
-    a = _class_with_open_problem(client, uid="instructor-a", participant_uid="participant-a")
-    b = _class_with_open_problem(client, uid="instructor-b", participant_uid="participant-b")
     problem_class[a["problem"].id] = a["class_id"]
     problem_class[b["problem"].id] = b["class_id"]
-    _queue_attempts(client, a, 4)
-    _queue_attempts(client, b, 2)
 
     results = classroom_grader.run_round(global_limit=3, per_connection_limit=2, poll_seconds=0.03)
 
