@@ -45,7 +45,10 @@ export function ChecklistRows({
   onDelete: (key: ChecklistRowItem["key"]) => void;
 }): ReactNode {
   const [rows, setRows] = useState(items);
-  useEffect(() => setRows(items), [items]);
+  // 부모는 렌더마다 새 배열을 내려주므로 identity 가 아니라 내용(순서·라벨·필수)이 바뀔 때만 맞춘다 —
+  // 아니면 끌어 놓은 순서가 저장이 끝나기도 전에 되돌아간다.
+  const signature = items.map((item) => `${item.key}\u0000${item.label}\u0000${item.required}`).join("\u0001");
+  useEffect(() => setRows(items), [signature]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [dragKey, setDragKey] = useState<ChecklistRowItem["key"] | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -97,7 +100,7 @@ export function ChecklistRows({
             } ${dragKey === item.key ? "opacity-40" : ""}`}
           >
             {locked ? (
-              <span aria-hidden className="w-3 shrink-0 text-ink/15">
+              <span aria-hidden className="w-5 shrink-0 text-center text-ink/15">
                 ⋮⋮
               </span>
             ) : (
@@ -130,7 +133,7 @@ export function ChecklistRows({
                     moveTo(item.key, index + (event.key === "ArrowUp" ? -1 : 1));
                   }
                 }}
-                className="w-3 shrink-0 cursor-grab select-none text-ink/30 hover:text-ink focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink active:cursor-grabbing"
+                className="w-5 shrink-0 cursor-grab text-center select-none text-ink/30 hover:text-ink focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-ink active:cursor-grabbing"
               >
                 ⋮⋮
               </span>
