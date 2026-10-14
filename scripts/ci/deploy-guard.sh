@@ -58,6 +58,8 @@ cleanup() {
   exit "$rc"
 }
 trap cleanup EXIT
+# Jenkins 가 중단하면(SIGTERM) EXIT trap 이 돌도록 — 안 그러면 컨테이너와 토큰이 담긴 임시 DOCKER_CONFIG 가 남는다.
+trap 'exit 130' INT TERM
 
 step() { echo; echo "── $*"; }
 

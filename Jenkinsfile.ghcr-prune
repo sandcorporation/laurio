@@ -27,12 +27,36 @@ pipeline {
   }
 
   stages {
+    // main·staging·production 의 끝 커밋 이미지는 몇 번째 버전이든 남긴다(#705 — 바뀌지 않은 서비스는 옛
+    // 버전에 태그만 더하므로 배포 중인 이미지가 오래된 버전일 수 있다). 그 셋을 **GitHub 에서 지금** 읽는다 —
+    // 체크아웃이 받아 둔 원격 브랜치는 낡았거나(이 잡은 main 만 받는다) 없을 수 있고, 예전 식은 없는 ref 를
+    // 조용히 빼고 보호 없이 지웠다(#709). 셋 중 하나라도 못 풀면 지우지 않고 멈춘다.
+    stage('보호할 커밋') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+          sh '''
+            set +x
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+            git -c credential.helper= -c "http.extraHeader=AUTHORIZATION: basic $auth" \
+              ls-remote https://github.com/sandcorporation/laurio.git \
+              refs/heads/main refs/heads/staging refs/heads/production > .prune-heads
+            : > .prune-protect
+            for b in main staging production; do
+              s=$(awk -v r="refs/heads/$b" '$2 == r { print $1 }' .prune-heads)
+              if [ -z "$s" ]; then echo "GitHub 의 $b 를 못 풀었다 — 보호 없이 지우지 않는다"; exit 1; fi
+              echo "--protect-sha $s" >> .prune-protect
+            done
+            cat .prune-protect
+          '''
+        }
+      }
+    }
+
     stage('정리') {
       steps {
         script {
-          // main·staging·production 의 끝 커밋 이미지는 몇 번째 버전이든 남긴다(#705 — 바뀌지 않은 서비스는
-          // 옛 버전에 태그만 더하므로 배포 중인 이미지가 오래된 버전일 수 있다). 체크아웃이 받아 둔 원격 브랜치를 읽는다.
-          def protect = '$(for b in main staging production; do s=$(git -c safe.directory="$PWD" rev-parse -q --verify "origin/$b") && echo "--protect-sha $s"; done)'
+          // 「보호할 커밋」이 남긴 `--protect-sha …` 셋.
+          def protect = '$(cat .prune-protect)'
           def prune = 'python3 scripts/ci/ghcr_prune.py --keep-images "$KEEP_IMAGES" --keep-cache "$KEEP_CACHE" $( [ "$DRY_RUN" = true ] && echo --dry-run ) ' + protect
           def fromFile = 'GH_TOKEN=$(tr -d "[:space:]" < "$GH_TOKEN_FILE") && export GH_TOKEN && '
           // 자격증명 종류가 맞지 않으면 withCredentials 가 본문을 돌기 전에 실패한다 — 그 실패만 다음 종류로 넘긴다.

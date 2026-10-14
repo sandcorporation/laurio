@@ -146,9 +146,10 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
    라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 staging 까지 간다.
 2. **`main` → `staging`.** `main` 의 push 가 웹훅으로 Jenkins `laurio` 잡(`Jenkinsfile`)을 부른다.
-   그 잡이 이미지(바뀐 서비스만, 아래)와 부팅 가드를 돌리고, 다 초록이면 `staging` 을 그 커밋으로
+   그 잡이 이미지(바뀐 서비스만, 아래)와 부팅 가드를 돌리고, 다 초록이면 구운 이미지에 문맥 태그를 붙인 뒤 `staging` 을 그 커밋으로
    **fast-forward** 한다(`scripts/ci/fast_forward.py staging <sha>`, 자격증명
-   `github-sandcorporation-token`). 문서(`.md`·`docs/`)만 바뀐 커밋이면 여기서 초록으로 끝난다.
+   `github-sandcorporation-token`). 마지막 staging 배포(배포 표식) 뒤로 문서(`.md`·`docs/`)만 바뀌었으면
+   여기서 초록으로 끝난다 — 배포가 실패한 커밋 뒤에 문서 커밋이 와도 그 배포를 다시 시도한다(#709).
 3. **`staging` → staging 배포.** 같은 빌드가 이어서 배포 단계를 돈다(아래 「staging 배포는 …」).
    예전(2026-10-02 ~ 10-15)에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging`
    을 앞당겼고, 그 push 가 이 잡을 불렀다 — 조직의 Actions 분량이 바닥나 떠났다(ADR-0061).
@@ -193,9 +194,11 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 
 - **바뀌지 않은 서비스는 굽지 않는다**(#705). `scripts/ci/image_context.py` 가 서비스마다 빌드
   문맥 해시를 낸다 — Dockerfile 이 읽는 경로(`git rev-parse HEAD:<경로>`)·그 Dockerfile·루트
-  `.dockerignore`·빌드 대상·플랫폼·빌드 인자 값. 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면 굽지 않고
+  `.dockerignore`(와, 있으면 BuildKit 이 그 대신 쓰는 `docker/<서비스>.Dockerfile.dockerignore`)·빌드 대상·플랫폼·빌드 인자 값. 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면 굽지 않고
   커밋 태그를 그 매니페스트에 더하기만 한다(`imagetools create --prefer-index=false` — 같은 digest,
-  수 초). 콘솔에 서비스마다 「굽는다/건너뛴다」 한 줄이 남는다. `deploy.sh plan` 이 어차피 바뀐
+  수 초). **구운 이미지는 커밋 태그로만 올리고, `ctx-` 태그는 이미지 두 가지와 부팅 가드가 모두 초록인 뒤에**
+  「문맥 태그」 단계(`scripts/ci/images-ctx.sh`)가 붙인다(#709) — 가드에서 떨어졌거나 다른 가지가 실패한
+  빌드의 이미지는 ctx 가 없어 다음 빌드가 다시 굽고 가드도 다시 돈다(같은 커밋을 다시 돌려도). 콘솔에 서비스마다 「굽는다/건너뛴다」 한 줄이 남는다. `deploy.sh plan` 이 어차피 바뀐
   서비스만 바꿔 끼우므로 나머지 이미지는 굽자마자 버려지던 것이다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
   새 경로를 `COPY` 하는데 표에 없으면 빨갛다. 빠뜨리면 그 경로를 고친 커밋이 옛 이미지로 배포된다.
@@ -207,7 +210,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
 - **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, sub)는 이번에 구운 앱만 본다 — 건너뛴 앱의 이미지는
-  이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
+  ctx 태그가 가드 뒤에만 붙으므로 이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
   `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
@@ -276,7 +279,8 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 캐시 쪽은 대부분 태그 없는 블롭이라 화면에서 보이지도 않는다. **읽기는 그대로 됐다** — 쓰기만
 막히는 것이 용량 초과의 모양이다. 지금은 매일 새벽 4시(서울)와 손으로 도는 잡이 패키지마다
 최근 것만 남기고 지운다(이미지 12·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다). **지금 `main`·`staging`·
-`production` 끝 커밋의 태그를 가진 버전은 몇 번째든 남긴다**(#705) — 바뀌지 않은 서비스는 옛 버전에 커밋
+`production` 끝 커밋의 태그를 가진 버전은 몇 번째든 남긴다**(#705 — 셋은 지울 때마다 GitHub 에서 다시 읽고,
+하나라도 못 읽으면 지우지 않고 멈춘다, #709) — 바뀌지 않은 서비스는 옛 버전에 커밋
 태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
 센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **레지스트리
 쓰기가 막혀도 이 삭제는 된다.** 토큰은 Jenkins 자격증명 `ghcr-prune-token`(Secret text·Secret file·아이디/비밀번호 어느 종류든) — **classic PAT**
