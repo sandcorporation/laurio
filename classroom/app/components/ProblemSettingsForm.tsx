@@ -272,7 +272,7 @@ export function ProblemSettingsForm({
                 </p>
               ) : null}
               <span className="text-[11.5px] leading-relaxed text-ink/45">
-                높을수록 느리고 채점 예산을 더 씁니다.
+                높을수록 느리고 토큰을 더 씁니다.
               </span>
             </div>
           ) : null}

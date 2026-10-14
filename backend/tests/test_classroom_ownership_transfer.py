@@ -75,7 +75,7 @@ def _role(client, access: str, class_id: int) -> str | None:
 
 
 def _owner_only_calls(client, access: str, class_id: int) -> dict[str, int]:
-    """소유자 전용 넷의 응답 — 키, 예산, 공동 강사 내보내기(없는 줄이라 소유자면 404), 이전 요청
+    """소유자 전용 넷의 응답 — 키, 소유자의 강사 이름 칸, 공동 강사 내보내기(없는 줄이라 소유자면 404), 이전 요청
     (없는 줄이라 소유자면 404). 삭제는 클래스를 없애므로 따로 본다."""
 
     return {
@@ -85,9 +85,9 @@ def _owner_only_calls(client, access: str, class_id: int) -> dict[str, int]:
             content_type="application/json",
             **auth_header(access),
         ).status_code,
-        "budget": client.patch(
+        "owner_name": client.patch(
             f"{CLASSES_URL}/{class_id}",
-            data={"token_budget": 5000},
+            data={"instructor_display_name": "넘겨받은 강사"},
             content_type="application/json",
             **auth_header(access),
         ).status_code,
@@ -110,7 +110,7 @@ def test_nothing_changes_before_the_recipient_accepts(client, db):
     after = get_class(client, owner["access"], class_id)
     assert (after["has_openai_key"], after["openai_key_masked"]) == (True, before["openai_key_masked"])
     assert _owner_only_calls(client, co["access"], class_id) == {
-        "key": 403, "budget": 403, "remove": 403, "transfer": 403,
+        "key": 403, "owner_name": 403, "remove": 403, "transfer": 403,
     }
     # 두 사람 모두 클래스 화면에서 같은 대기 요청을 본다 — 받는 사람에게는 「나」로.
     seen_by_owner = pending_ownership_transfer(client, owner["access"], class_id)
@@ -187,7 +187,7 @@ def test_accepting_moves_owner_only_work_to_the_recipient_and_keeps_the_giver_as
     assert _role(client, owner["access"], class_id) == "co_instructor"
     # 넘긴 사람에게 소유자 전용 넷은 403 이고, 공동 강사로 클래스를 계속 다룬다.
     assert _owner_only_calls(client, owner["access"], class_id) == {
-        "key": 403, "budget": 403, "remove": 403, "transfer": 403,
+        "key": 403, "owner_name": 403, "remove": 403, "transfer": 403,
     }
     assert client.delete(f"{CLASSES_URL}/{class_id}", **auth_header(owner["access"])).status_code == 403
     problem = create_open_problem(client, owner["access"], class_id)
@@ -199,7 +199,7 @@ def test_accepting_moves_owner_only_work_to_the_recipient_and_keeps_the_giver_as
     assert pending_ownership_transfer(client, co["access"], class_id) is None
     # 새 소유자에게는 소유자 전용이 열린다(키는 위에서 따로 본다).
     calls = _owner_only_calls(client, co["access"], class_id)
-    assert (calls["budget"], calls["remove"], calls["transfer"]) == (200, 404, 404)
+    assert (calls["owner_name"], calls["remove"], calls["transfer"]) == (200, 404, 404)
     giver_row = co_instructor_id_of(client, co["access"], class_id, "주강사")
     assert remove_co_instructor(client, co["access"], class_id, giver_row).status_code == 204
     assert _role(client, owner["access"], class_id) is None
@@ -216,12 +216,11 @@ def test_the_new_owner_can_hand_it_back(client, db):
     assert rows == [("owner", "주강사"), ("co_instructor", "보조 강사")]
 
 
-def test_accepting_empties_the_scoring_key_but_keeps_budget_and_usage(client, db, monkeypatch):
+def test_accepting_empties_the_scoring_key_but_keeps_usage(client, db, monkeypatch):
     owner, co, class_id = _owner_with_co(client)
     problem = create_open_problem(client, owner["access"], class_id)
     learner = login(client, "learner")
     join_class(client, learner["access"], class_id, instructor_access=owner["access"])
-    patch_class(client, owner["access"], class_id, {"token_budget": 10000})
     with force_real_scoring_adapter():
         submit_repository(client, learner["access"], class_id, problem.id)
         respond_with_verdict(monkeypatch, problem.item_id, total_tokens=120)
@@ -233,8 +232,7 @@ def test_accepting_empties_the_scoring_key_but_keeps_budget_and_usage(client, db
 
     after = get_class(client, co["access"], class_id)
     assert (after["has_openai_key"], after["openai_key_masked"], after["openai_key_status"]) == (False, None, None)
-    assert (after["token_budget"], after["token_usage_total"]) == (10000, 120)
-    assert after["token_budget_warning_threshold_percent"] == before["token_budget_warning_threshold_percent"]
+    assert after["token_usage_total"] == 120
 
     # 키가 빈 동안 낸 시도는 「키」 사유로 대기하다 새 키 저장 뒤 채점된다.
     with force_real_scoring_adapter():

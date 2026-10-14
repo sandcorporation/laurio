@@ -46,29 +46,6 @@ describe("describeNotification — classroom_submission_scored", () => {
   });
 });
 
-describe("describeNotification — classroom_token_budget_warning", () => {
-  it("무슨 일이 일어났고 무엇을 하면 되는지를 말한다", () => {
-    const text = describeNotification(
-      row({
-        notification_type: "classroom_token_budget_warning",
-        context: { class_name: "알고리즘 1반", token_usage_total: 8200, token_budget: 10000 },
-      }),
-    );
-    expect(text).toContain("알고리즘 1반");
-    expect(text).toContain("82%");
-    expect(text).toContain("채점 예산");
-    expect(text).toContain("클래스 설정");
-  });
-
-  it("사용량 정보가 없어도 크래시하지 않고 일반적인 경고를 말한다", () => {
-    const text = describeNotification(
-      row({ notification_type: "classroom_token_budget_warning", context: { class_name: "1반" } }),
-    );
-    expect(text).toContain("1반");
-    expect(text).toContain("채점 예산");
-  });
-});
-
 describe("describeNotification — classroom_scoring_key_rejected", () => {
   it("무엇이 일어났고 무엇을 해야 하는지를 말한다(#356)", () => {
     const text = describeNotification(

@@ -133,28 +133,16 @@ class Class(models.Model):
     #: 이력 테이블이 필요 없다, 죽은 코드는 그냥 아무 행에도 없는 값이다.
     join_code = models.CharField(max_length=32, unique=True, default=_generate_join_code)
 
-    #: 채점 토큰 예산 상한(#295) — `None`이면 무제한이다. 강사가 정하기
-    #: 전까지는 이 기능 자체가 꺼져 있는 것과 같아, 기존 클래스는 전부
-    #: 지금처럼 계속 채점된다.
-    token_budget = models.PositiveIntegerField(null=True, blank=True, default=None)
-    #: 경고 알림을 보낼 임계, 예산 대비 백분율(#295). `token_budget`이 없으면
-    #: 쓰이지 않는다.
-    token_budget_warning_threshold_percent = models.PositiveIntegerField(default=80)
-    #: 이 클래스의 채점이 지금까지 실제로 쓴 토큰 누적합(#295). 성공한
+    #: 이 클래스의 채점이 지금까지 실제로 쓴 토큰 누적합(#295) — 화면의 「사용량」이다. 상한은
+    #: 없다(#629, ADR-0060): 지출의 상한은 OpenAI 쪽(프로젝트 한도·크레딧)에 있다. 성공한
     #: 채점 호출이 끝날 때마다 OpenAI 응답이 보고한 만큼만 더해진다 —
     #: 실패한 호출(인증 오류 등, 토큰을 쓰지 않고 끝난 시도)은 더하지 않는다.
     token_usage_total = models.PositiveIntegerField(default=0)
     #: `token_usage_total` 가운데 어림으로 더한 몫(#604) — 호환 서버가 응답에 usage 를 주지
     #: 않으면 프롬프트 길이로 어림해 더하고(`classroom.scoring_cost.estimated_usage_tokens`), 화면이
-    #: 사용량이 일부 어림임을 밝힌다. 예산 판정은 이 몫을 따로 보지 않는다 — 합계로 센다.
+    #: 사용량이 일부 어림임을 밝힌다.
     #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     token_usage_estimated = models.PositiveIntegerField(default=0, db_default=0)
-    #: 경고 임계를 넘겨 강사에게 알림을 보낸 시각(#295). 강사가 `token_budget`을
-    #: 바꾸면(새 예산 주기로 본다) 이 값을 지워, 다음 임계 통과에서 다시
-    #: 알릴 수 있게 한다 — 그러지 않으면 한 번 경고한 뒤로는 예산을 아무리
-    #: 늘려도 다시는 경고가 가지 않는다.
-    token_budget_warning_sent_at = models.DateTimeField(null=True, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     #: 강사가 수업을 보관한 시각(#294, 뜻은 #438이 **읽기 전용**으로 넓혔다).
@@ -162,7 +150,7 @@ class Class(models.Model):
     #: (되돌리기) 그대로 진행중으로 돌아온다. 새 내용을 만들거나 바꾸는 문은
     #: `classroom.participation.assert_class_mutable`이 한 곳에서 막는다
     #: (가입·제출·이름 바꾸기만 예외로 각 엔드포인트가 직접 본다) — 읽기,
-    #: 클래스 설정(이름·강사 이름·키·기본 모델·예산), 보관 되돌리기, 복사해서
+    #: 클래스 설정(이름·강사 이름·키·기본 모델), 보관 되돌리기, 복사해서
     #: 새로 열기, 클래스 삭제, 클래스 템플릿 공개는 이 값과 무관하게 그대로
     #: 연다(CONTEXT.md 「Class」).
     archived_at = models.DateTimeField(null=True, blank=True)
@@ -172,11 +160,6 @@ class Class(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Class(id={self.pk}, name={self.name!r})"
-
-    def token_budget_exhausted(self) -> bool:
-        """예산이 없으면(`token_budget is None`) 항상 거짓 — 무제한이다(#295)."""
-
-        return self.token_budget is not None and self.token_usage_total >= self.token_budget
 
     def has_scoring_key(self) -> bool:
         """이 클래스에 채점에 실제로 쓸 수 있는 키가 있는가(#346) — 공백만
@@ -439,7 +422,7 @@ class ClassCoInstructor(models.Model):
 
     소유자는 지금처럼 `Class.instructor` 하나다 — 이 행은 그 밖의 강사다. 클래스를
     꾸리는 일은 소유자와 똑같이 하고(문은 `classroom.instructors.classes_taught_by`),
-    소유자 전용 넷(채점 키·예산, 클래스 삭제, 소유권 이전, 공동 강사 내보내기)만
+    소유자 전용 넷(채점 키, 클래스 삭제, 소유권 이전, 공동 강사 내보내기)만
     막힌다(`classroom.instructor_scope`의 `owner=True`). 공동 강사 초대
     (`CoInstructorInvite`)를 수락해야만 생긴다.
 

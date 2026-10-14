@@ -13,7 +13,7 @@
 **호환 서버는 토큰만이다**(#604). 단가를 모른다 — 서버가 OpenAI 와 같은 모델 이름을 내놓아도
 그 값을 받는다는 보장이 없다. 그래서 그 클래스의 표는 지금 설정만 원화·배율 없이 토큰으로
 보이고(`unit="tokens"`), 서버가 usage 를 주지 않은 시도는 같은 어림(`estimated_usage_tokens`)으로
-예산에 더해진다.
+사용량에 더해진다.
 
 **셈의 기준은 내려간다**: 이 문제의 지난 시도 평균 프롬프트 길이 → (시도가
 `MIN_SAMPLE_COUNT` 건 미만이면) 이 클래스 전체 평균 → (그것도 미만이면) 소스 크기별(약
@@ -50,7 +50,7 @@ _OPEN_ENDED_EFFORTS = frozenset({"high"})
 
 #: 이 클래스에 아직 시도가 없을 때 보일 소스 크기(글자 수) — 작은 과제·보통·큰 프로젝트.
 SOURCE_SIZE_BANDS = (10_000, 50_000, 200_000)
-#: 소스 크기별로 셈할 때 배율·예산 안내가 기대는 「보통」 크기.
+#: 소스 크기별로 셈할 때 배율 안내가 기대는 「보통」 크기.
 _REFERENCE_CHARS = 50_000
 
 #: 평균을 낼 최소 시도 수 — 이보다 적으면 다음 기준으로 내려간다(#617). 시험 삼아 낸 짧은 제출
@@ -140,7 +140,7 @@ def attempt_tokens(reasoning_effort: str | None, *, prompt_chars: int) -> Attemp
 
 
 def estimated_usage_tokens(prompt: str, reasoning_effort: str | None) -> int:
-    """응답에 usage 가 없을 때 이 시도를 예산에 더할 어림(#604) — 예상 비용과 같은 셈이다."""
+    """응답에 usage 가 없을 때 이 시도를 사용량에 더할 어림(#604) — 예상 비용과 같은 셈이다."""
 
     return attempt_tokens(reasoning_effort, prompt_chars=len(prompt)).total_tokens
 

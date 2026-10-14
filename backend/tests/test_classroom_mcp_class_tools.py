@@ -159,8 +159,6 @@ def test_settings_change_only_what_was_sent_and_refuse_like_the_screen(client, d
             "instructor_display_name": "새 강사 이름",
             "default_model": "gpt-4o",
             "default_reasoning_effort": "high",
-            "token_budget": 50000,
-            "token_budget_warning_threshold_percent": 70,
         },
     )["class"]
     screen = get_class(client, instructor["access"], class_id)
@@ -169,12 +167,10 @@ def test_settings_change_only_what_was_sent_and_refuse_like_the_screen(client, d
         "instructor_display_name",
         "default_model",
         "default_reasoning_effort",
-        "token_budget",
-        "token_budget_warning_threshold_percent",
     ):
         assert updated[field] == screen[field], field
     assert screen["name"] == "웹 스터디"  # 보내지 않은 칸은 그대로
-    assert (screen["default_model"], screen["token_budget"]) == ("gpt-4o", 50000)
+    assert screen["default_model"] == "gpt-4o"
 
     def screen_patch(payload: dict) -> str:
         return _screen_detail(
@@ -193,7 +189,7 @@ def test_settings_change_only_what_was_sent_and_refuse_like_the_screen(client, d
         ), payload
 
     assert _records() == [("update_class_settings", class_id)]
-    assert "token_budget" in ConnectedAppWrite.objects.get().summary
+    assert "default_model" in ConnectedAppWrite.objects.get().summary
 
 
 def test_create_refuses_banned_names_like_the_screen(client, db):
@@ -210,10 +206,9 @@ def test_create_refuses_banned_names_like_the_screen(client, db):
 
 
 def test_misshapen_arguments_are_refused_without_writing(client, db):
-    _, class_id, token = _setup(client)
+    _, _, token = _setup(client)
     assert _refused(client, token, "create_class", {"name": "이름만"}) == "빠진 인자가 있습니다: instructor_display_name"
     assert _refused(client, token, "update_class_settings", {"class_id": "1"}) == "class_id 는 정수여야 합니다."
-    assert "token_budget" in _refused(client, token, "update_class_settings", {"class_id": class_id, "token_budget": 0})
     assert _refused(client, token, "import_class_template", {"share_code": "", "name": "x"}).startswith("share_code")
     assert not ConnectedAppWrite.objects.exists()
 

@@ -292,7 +292,7 @@ runtime-config.test.ts`가 그 구조를 지킨다).
 
 **강의실 알림은 이 화면에 나타나지 않는다**(#345) — `GET /notifications/me`의
 기본값(이 화면이 쓰는 값)이 강의실 알림(`classroom_submission_scored`·
-`classroom_token_budget_warning`)을 뺀 나머지만 준다. 강의실은 자기 화면
+채점 키 거부 등 `CLASSROOM_NOTIFICATION_TYPES`)을 뺀 나머지만 준다. 강의실은 자기 화면
 (`classroom/app/notifications`)에서 따로 센다.
 
 행마다 알림 내용과 **채널별 발송 이력**(채널·상태·시각)이 보인다 — 도달하지 않아도 배분이

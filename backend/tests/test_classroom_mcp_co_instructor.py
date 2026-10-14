@@ -2,7 +2,7 @@
 (#566, spec #558, ADR-0052·ADR-0055).
 
 연결된 앱은 토큰 주인이 강사인 클래스 전부에 닿고, 화면에서 공동 강사가 하는 일을 똑같이
-한다. 소유자 전용 도구(`OWNER_ONLY_MCP_TOOLS` — 클래스 삭제, 클래스 설정의 예산·소유자 강사
+한다. 소유자 전용 도구(`OWNER_ONLY_MCP_TOOLS` — 클래스 삭제, 클래스 설정의 소유자 강사
 이름 칸)는 소유자일 때만이고, 공동 강사가 부르면 화면과 같은 문장(`OWNER_ONLY_MESSAGE`)으로
 거절된다. 공동 강사 초대·내보내기·이전 도구는 없다.
 
@@ -106,10 +106,9 @@ def test_deleting_the_co_taught_class_is_refused_with_the_screens_sentence(clien
     assert get_class(client, owner["access"], shared)["name"] == "함께 가르치는 반"
 
 
-def test_class_settings_open_to_the_co_instructor_except_the_budget_and_the_owners_name(client, db):
+def test_class_settings_open_to_the_co_instructor_except_the_owners_name(client, db):
     owner, _, shared, _, token = _co_instructors_app(client)
 
-    assert _refused(client, token, "update_class_settings", {"class_id": shared, "token_budget": 1000}) == OWNER_ONLY_MESSAGE
     # 강사 이름 칸은 소유자의 이름이다 — 공동 강사의 앱이 보내면 남의 이름을 바꾸게 되므로 거절된다(#565).
     assert (
         _refused(client, token, "update_class_settings", {"class_id": shared, "instructor_display_name": "보조 강사"})
@@ -118,7 +117,7 @@ def test_class_settings_open_to_the_co_instructor_except_the_budget_and_the_owne
     _ok(client, token, "update_class_settings", {"class_id": shared, "name": "함께 가르치는 반 2기"})
 
     screen = get_class(client, owner["access"], shared)
-    assert (screen["name"], screen["token_budget"], screen["instructor_display_name"]) == ("함께 가르치는 반 2기", None, "강사")
+    assert (screen["name"], screen["instructor_display_name"]) == ("함께 가르치는 반 2기", "강사")
 
 
 def test_the_app_has_no_tools_for_co_instructors_or_ownership(client, db):

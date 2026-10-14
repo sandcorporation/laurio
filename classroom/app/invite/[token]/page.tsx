@@ -103,7 +103,7 @@ export default function CoInstructorInvitePage() {
       {info.status === "pending" && !info.already_instructor ? (
         <p data-testid="invite-what-it-means" className="mt-3 text-[13px] leading-relaxed text-ink/60">
           수락하면 이 클래스의 공동 강사가 됩니다. 문제·체크리스트·참여자 명단·보관을 소유자와 똑같이
-          다루고, 채점 키·예산과 클래스 삭제는 소유자가 맡습니다.
+          다루고, 채점 키와 클래스 삭제는 소유자가 맡습니다.
         </p>
       ) : null}
 

@@ -2,7 +2,7 @@
 // context에 실어 뒀다 — 여기서는 그것으로 주소만 짓는다, 새로 만들지 않는다.
 //
 // **받는 사람에 따라 가는 곳이 다르다**(티켓 「가장 틀리기 쉬운 곳」): 채점
-// 완료는 낸 사람(참여자)에게 가므로 참여자 화면으로, 예산 경고는 강사에게
+// 완료는 낸 사람(참여자)에게 가므로 참여자 화면으로, 채점 키 거부는 소유자에게
 // 가므로 클래스 설정으로 — 그 갈림은 백엔드가 수신자를 정하는 규칙
 // (`backend/classroom/scoring.py`)과 같은 축이라, notification_type 하나가
 // 목적지 하나를 정한다. 잘못 짝지으면 받는 사람에게 없는 화면(404)으로 보낸다.
@@ -28,11 +28,6 @@ export function notificationHref(notification: NotificationRow): string | null {
       const submissionId = typeof context.submission_id === "number" ? context.submission_id : null;
       const base = `/classes/${classId}/problems/${problemId}/submit`;
       return submissionId === null ? base : `${base}#submission-${submissionId}`;
-    }
-    case "classroom_token_budget_warning": {
-      const classId = context.class_id;
-      if (typeof classId !== "number") return null;
-      return `/classes/${classId}/settings#token-budget`;
     }
     case "classroom_scoring_key_rejected":
     case "classroom_scoring_quota_exhausted":

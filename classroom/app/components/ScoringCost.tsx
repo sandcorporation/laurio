@@ -8,7 +8,6 @@ import { useEffect, useId, useState } from "react";
 
 import { Badge, buttonClass } from "@/app/components/ui";
 import {
-  attemptsWithinBudget,
   classCostSummary,
   costBasisText,
   costRowLabel,
@@ -27,7 +26,7 @@ import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 const BILLING_NOTE = "실제 청구액은 OpenAI 사용량 화면이 기준입니다.";
 // 호환 서버(#604) — 단가를 몰라 토큰으로만 보인다.
 const TOKEN_NOTE =
-  "호환 서버는 단가를 알 수 없어 토큰으로만 셈합니다. 채점 예산도 토큰으로 세고, 서버가 사용량을 알려 주지 않으면 프롬프트 길이로 어림해 셉니다.";
+  "호환 서버는 단가를 알 수 없어 토큰으로만 셈합니다. 사용량도 토큰으로 세고, 서버가 사용량을 알려 주지 않으면 프롬프트 길이로 어림해 셉니다.";
 const BAND_NAMES = ["작은 과제", "보통", "큰 프로젝트"];
 const UNPRICED = "비용 미확인";
 
@@ -291,32 +290,6 @@ function browserStorage(): Storage | null {
   } catch {
     return null;
   }
-}
-
-/** 예산 칸 아래 한 줄 — 「이 한도면 시도 약 N건」. */
-export function BudgetAttemptsHint({
-  state,
-  modelId,
-  reasoningEffort,
-  budgetText,
-}: {
-  state: ScoringCostState;
-  modelId: string;
-  reasoningEffort: string;
-  budgetText: string;
-}) {
-  if (state.status !== "ready") return null;
-  const row = findCostRow(state.estimate, modelId, reasoningEffort);
-  const attempts = attemptsWithinBudget(budgetText, row);
-  if (attempts === null) return null;
-  const count = attempts.toLocaleString("ko-KR");
-  return (
-    <span data-testid="token-budget-attempts-hint" className="text-[11.5px] leading-relaxed text-ink/45">
-      {state.estimate.basis === "source_sizes"
-        ? `소스가 5만 자 안팎이면 시도 약 ${count}건을 채점합니다(지금 설정 기준).`
-        : `이 한도면 시도 약 ${count}건을 채점합니다(지금 설정 기준).`}
-    </span>
-  );
 }
 
 function CostCell({ label, value, tone, last }: { label: string; value: string; tone?: string; last?: boolean }) {

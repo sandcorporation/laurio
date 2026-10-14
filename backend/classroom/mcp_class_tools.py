@@ -132,17 +132,6 @@ _UPDATE_CLASS_INPUT = _object(
             "enum": [v for v, _ in REASONING_EFFORT_CHOICES],
             "description": "기본 추론 강도(low·medium·high) — 채점 모델이 추론 모델일 때만 뜻이 있다.",
         },
-        "token_budget": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "채점 토큰 예산 상한. 다 쓰면 채점이 멈춘다. 무제한으로 되돌리는 값은 없다.",
-        },
-        "token_budget_warning_threshold_percent": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "description": "예산의 몇 %를 쓰면 경고 알림을 보낼지(1~100).",
-        },
     },
     ["class_id"],
 )
@@ -306,8 +295,8 @@ CLASS_TOOLS: list[Tool] = [
         name="update_class_settings",
         title="클래스 설정 고치기",
         description=(
-            "클래스의 이름·강사로 불릴 이름·기본 채점 모델·기본 추론 강도·채점 토큰 예산·경고 임계를 고친다. "
-            "보낸 칸만 바뀐다. 보관된 클래스도 고칠 수 있다. 채점 토큰 예산·경고 임계·강사로 불릴 이름(소유자의 "
+            "클래스의 이름·강사로 불릴 이름·기본 채점 모델·기본 추론 강도를 고친다. "
+            "보낸 칸만 바뀐다. 보관된 클래스도 고칠 수 있다. 강사로 불릴 이름(소유자의 "
             "이름이다)은 소유자만 고친다 — 공동 강사가 그 칸을 보내면 아무것도 바뀌지 않고 거절된다. "
             "소유자든 공동 강사든 내 강사 이름은 rename_my_instructor_name 으로 바꾼다. "
             "채점 연결(OpenAI 키·호환 서버)은 이 도구로 넣거나 바꿀 수 없다 — 소유자가 화면에서만 넣는다."

@@ -3,7 +3,7 @@
 // 클래스 설정 (#284/#285/#323). 「채점 설정」이던 이름이 넓어졌다 — 강사 본인의
 // 채점 키를 넣고 클래스 기본 채점 모델을 고르는 일 말고도, 채점과 무관한 이름들
 // (클래스 이름·강사 이름 #299)과 클래스를 템플릿으로 공개하는 일(#319)까지 이
-// 화면 하나가 담는다. 카드는 「이름」 → 「채점」(키·기본 모델·예산 세 구획) →
+// 화면 하나가 담는다. 카드는 「이름」 → 「채점」(키·기본 모델·사용량 세 구획) →
 // 템플릿 공개 → 삭제 순이다.
 // 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
 import Link from "next/link";
@@ -12,7 +12,7 @@ import { useEffect, useState } from "react";
 
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ScoringConnectionSection } from "@/app/components/ScoringConnectionSection";
-import { BudgetAttemptsHint, ClassScoringCostTable } from "@/app/components/ScoringCost";
+import { ClassScoringCostTable } from "@/app/components/ScoringCost";
 import type { FormEvent } from "react";
 
 import {
@@ -46,6 +46,7 @@ import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-chec
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, MODEL_PROBE_NOTE, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import { findCostRow, formatKrw, usageKrw } from "@/lib/scoring/cost";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
@@ -356,11 +357,6 @@ export default function ClassSettingsPage() {
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
 
-  const [tokenBudget, setTokenBudget] = useState("");
-  const [warningThreshold, setWarningThreshold] = useState("");
-  const [budgetSaving, setBudgetSaving] = useState(false);
-  const [budgetError, setBudgetError] = useState<string | null>(null);
-
   useClassroomTabTitle({
     screenName: "클래스 설정",
     className: state.status === "ready" ? state.classroom.name : undefined,
@@ -373,10 +369,6 @@ export default function ClassSettingsPage() {
       setDefaultModelIsReasoning(state.classroom.default_model_is_reasoning);
       setClassNameDraft(state.classroom.name);
       setInstructorDisplayName(state.classroom.my_instructor_display_name);
-      setTokenBudget(
-        state.classroom.token_budget === null ? "" : String(state.classroom.token_budget),
-      );
-      setWarningThreshold(String(state.classroom.token_budget_warning_threshold_percent));
     }
   }, [state]);
 
@@ -407,11 +399,19 @@ export default function ClassSettingsPage() {
   }
 
   const { classroom } = state;
-  // 채점 키·예산·클래스 삭제는 소유자만 바꾼다(#561, ADR-0055) — 공동 강사에게는 그 입력을
+  // 채점 키·클래스 삭제는 소유자만 바꾼다(#561, ADR-0055) — 공동 강사에게는 그 입력을
   // 그리지 않고, 지금 값과 「소유자만」이라는 사실만 보여 준다. 강사 이름은 누구나 **자기**
   // 것을 바꾼다(#565) — 이 칸은 보는 사람의 이름이다.
   const isOwner = classroom.role === "owner";
   const isCompatibleServer = classroom.scoring_connection_kind === "compatible_server";
+  const usageKrwValue =
+    costState.status === "ready" && costState.estimate.unit === "krw"
+      ? usageKrw(
+          classroom.token_usage_total,
+          findCostRow(costState.estimate, classroom.default_model, classroom.default_reasoning_effort),
+        )
+      : null;
+  const usageKrwText = usageKrwValue !== null && usageKrwValue > 0 ? formatKrw(usageKrwValue) : null;
   const selectedIsReasoning =
     modelsState.status === "ready" &&
     isSelectedModelReasoning(
@@ -478,32 +478,6 @@ export default function ClassSettingsPage() {
     setModelSaving(false);
   }
 
-  async function handleBudgetSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const parsedBudget = Number(tokenBudget);
-    const parsedThreshold = Number(warningThreshold);
-    if (!Number.isInteger(parsedBudget) || parsedBudget < 1) {
-      setBudgetError("예산 한도는 1 이상의 정수여야 합니다.");
-      return;
-    }
-    if (!Number.isInteger(parsedThreshold) || parsedThreshold < 1 || parsedThreshold > 100) {
-      setBudgetError("경고 기준은 1~100 사이의 정수여야 합니다.");
-      return;
-    }
-    setBudgetSaving(true);
-    setBudgetError(null);
-    const result = await updateClass(classId, {
-      token_budget: parsedBudget,
-      token_budget_warning_threshold_percent: parsedThreshold,
-    });
-    if (result.ok) {
-      reload();
-    } else {
-      setBudgetError(result.detail);
-    }
-    setBudgetSaving(false);
-  }
-
   return (
     <PageShell>
       <PageHeader
@@ -511,8 +485,8 @@ export default function ClassSettingsPage() {
         title="클래스 설정"
         description={
           isOwner
-            ? "클래스·강사 이름, 채점 연결과 모델·예산, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
-            : "클래스 이름과 내 강사 이름, 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 연결·예산과 클래스 삭제는 소유자가 맡습니다."
+            ? "클래스·강사 이름, 채점 연결과 모델, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
+            : "클래스 이름과 내 강사 이름, 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 연결과 클래스 삭제는 소유자가 맡습니다."
         }
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
@@ -713,7 +687,7 @@ export default function ClassSettingsPage() {
                           ))}
                         </select>
                         <span className="text-[11.5px] leading-relaxed text-ink/45">
-                          높을수록 느리고 채점 예산을 더 씁니다.
+                          높을수록 느리고 토큰을 더 씁니다.
                         </span>
                       </div>
                     ) : null}
@@ -735,135 +709,33 @@ export default function ClassSettingsPage() {
               </div>
             </CardSection>
 
-            {/* `id`는 예산 경고 알림(#329)이 이 자리를 가리킬 때 쓰는 앵커다 —
-                `lib/notifications/link.ts`가 같은 이름을 짓는다. */}
-            <CardSection id="token-budget" title="채점 예산" hint="한도에 닿으면 채점만 멈추고 제출은 쌓입니다">
-              <div className="flex flex-col gap-4 p-4">
-                {classroom.token_budget === null ? (
-                  <p data-testid="token-budget-status" className="text-[13.5px] text-ink/60">
-                    예산이 설정되지 않았습니다 — 채점 사용량에 상한이 없습니다.
-                  </p>
-                ) : (
-                  <div data-testid="token-budget-status" className="flex flex-col gap-2">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2 text-[13px]">
-                      <span className="text-ink/60">사용량</span>
-                      <span className="font-mono">
-                        {classroom.token_usage_total.toLocaleString("ko-KR")} /{" "}
-                        {classroom.token_budget.toLocaleString("ko-KR")} 토큰
-                      </span>
-                    </div>
-                    <div className="h-1.5 w-full border border-rule bg-paper">
-                      <div
-                        className={classroom.token_budget_exhausted ? "h-full bg-attention" : "h-full bg-ink"}
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            Math.round((classroom.token_usage_total / classroom.token_budget) * 100),
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2.5 text-[12.5px] text-ink/45">
-                      <span>
-                        남은 양{" "}
-                        <Num className="text-ink/60">
-                          {(classroom.token_budget_remaining ?? 0).toLocaleString("ko-KR")}
-                        </Num>{" "}
-                        토큰
-                      </span>
-                      {classroom.token_budget_exhausted ? (
-                        <strong data-testid="token-budget-exhausted-badge" className="font-normal">
-                          <Badge tone="attention">채점 정지 중 · 예산 소진</Badge>
-                        </strong>
-                      ) : null}
-                    </div>
-                  </div>
-                )}
-
-                {classroom.token_usage_estimated > 0 ? (
-                  <p data-testid="token-usage-estimated" className="text-[12.5px] leading-relaxed text-ink/60">
-                    {classroom.token_budget === null
-                      ? `지금까지 ${classroom.token_usage_total.toLocaleString("ko-KR")} 토큰을 썼습니다. `
-                      : ""}
-                    이 가운데 {classroom.token_usage_estimated.toLocaleString("ko-KR")} 토큰은 어림입니다 — 서버가
-                    사용량을 알려 주지 않아 프롬프트 길이로 셈했습니다.
-                  </p>
-                ) : null}
-
-                {!isOwner ? (
-                  <Note>
-                    <span data-testid="token-budget-owner-only">
-                      예산 한도와 경고 기준은 소유자만 바꿀 수 있습니다.
+            {/* 누적 사용량(#629) — 상한은 없다. 원화는 OpenAI 키 연결일 때 지금 기본 모델의 단가로 셈한
+                어림이고, 호환 서버는 토큰만이다. */}
+            <CardSection id="token-usage" title="사용량">
+              <dl data-testid="token-usage" className="flex flex-col gap-2 p-4 text-[13px]">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <dt className="text-ink/60">누적</dt>
+                  <dd className="font-mono">
+                    <span data-testid="token-usage-total">
+                      {classroom.token_usage_total.toLocaleString("ko-KR")} 토큰
                     </span>
-                  </Note>
-                ) : (
-                  <form onSubmit={handleBudgetSubmit} className="flex flex-col gap-3">
-                    <div className="flex flex-wrap items-end gap-3">
-                      <div className="flex min-w-[200px] flex-1 flex-col gap-1.5">
-                        <label htmlFor="token-budget-input">
-                          <FieldLabel>예산 한도(토큰)</FieldLabel>
-                        </label>
-                        <input
-                          id="token-budget-input"
-                          data-testid="token-budget-input"
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={tokenBudget}
-                          onChange={(event) => setTokenBudget(event.target.value)}
-                          placeholder="예: 1000000"
-                          className={`${INPUT_CLASS} font-mono`}
-                        />
-                        <BudgetAttemptsHint
-                          state={costState}
-                          modelId={defaultModel}
-                          reasoningEffort={defaultReasoningEffort}
-                          budgetText={tokenBudget}
-                        />
-                      </div>
-                      <div className="flex w-[150px] flex-col gap-1.5">
-                        <label htmlFor="token-budget-warning-threshold-input">
-                          <FieldLabel>경고 기준(%)</FieldLabel>
-                        </label>
-                        <input
-                          id="token-budget-warning-threshold-input"
-                          data-testid="token-budget-warning-threshold-input"
-                          type="number"
-                          min={1}
-                          max={100}
-                          step={1}
-                          value={warningThreshold}
-                          onChange={(event) => setWarningThreshold(event.target.value)}
-                          className={`${INPUT_CLASS} font-mono`}
-                        />
-                      </div>
-                      <button
-                        type="submit"
-                        data-testid="token-budget-submit"
-                        disabled={budgetSaving || tokenBudget.trim() === ""}
-                        className={buttonClass("primary")}
-                      >
-                        {budgetSaving ? "저장하는 중..." : "저장"}
-                      </button>
-                    </div>
-                    {budgetError ? (
-                      <ErrorNote>
-                        <span data-testid="token-budget-error">{budgetError}</span>
-                      </ErrorNote>
+                    {usageKrwText ? (
+                      <span data-testid="token-usage-krw" className="text-ink/60">
+                        {" "}
+                        · {usageKrwText}
+                      </span>
                     ) : null}
-                  </form>
-                )}
-
-                {/* 예산 경고 알림은 소유자에게만 간다(ADR-0055) — 공동 강사에게 「알립니다」는
-                    거짓이 된다. */}
-                {isOwner ? (
-                  <Note>
-                    기준에 닿으면 <b className="text-ink">서비스 안 알림</b>으로 알립니다 — 메일이나 문자가
-                    아니라 이 서비스에 들어오면 보이는 알림입니다. 한도에 닿아도 제출은 계속 쌓이고,
-                    예산을 채우면 쌓인 시도부터 순서대로 이어서 채점됩니다.
-                  </Note>
+                  </dd>
+                </div>
+                {classroom.token_usage_estimated > 0 ? (
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 text-ink/60">
+                    <dt>어림</dt>
+                    <dd data-testid="token-usage-estimated" className="font-mono">
+                      {classroom.token_usage_estimated.toLocaleString("ko-KR")} 토큰
+                    </dd>
+                  </div>
                 ) : null}
-              </div>
+              </dl>
             </CardSection>
           </div>
         </Card>

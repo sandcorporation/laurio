@@ -69,7 +69,7 @@ UNSUPPORTED_PROTOCOL_VERSION = -32022
 
 INSTRUCTIONS = (
     "Codemit 강의실에서 내가 강사인 클래스를 다루는 도구들이다. 강사는 소유자 한 명과 공동 강사들이고, "
-    "둘은 같은 일을 하되 채점 키·예산과 클래스 삭제는 소유자만 한다. 클래스는 보관될 수 있고, "
+    "둘은 같은 일을 하되 채점 키와 클래스 삭제는 소유자만 한다. 클래스는 보관될 수 있고, "
     "문제는 열림·초안·숨김 중 하나다. 클래스에 가입한 사람은 「참여자」라고 부른다."
 )
 
@@ -104,7 +104,7 @@ _COUNT = {"type": "integer", "minimum": 0}
 _ROLE = {
     "type": "string",
     "enum": ["owner", "co_instructor"],
-    "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사. 채점 키·예산·클래스 삭제는 소유자만 한다.",
+    "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사. 채점 키·클래스 삭제는 소유자만 한다.",
 }
 
 TOOLS: dict[str, Tool] = {

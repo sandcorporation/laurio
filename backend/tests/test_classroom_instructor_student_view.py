@@ -148,7 +148,7 @@ def test_instructor_can_open_hidden_problem_and_sees_empty_submissions(client, d
 
 def test_instructors_own_attempts_appear_in_the_instructor_view(client, db):
     """강사 자신의 시도는 이 화면에 보인다(2026-09-17 개정) — 남의 시도는
-    여전히 이 질의에 없다(`member=member`). 명단·달성률·토큰 예산이 강사를
+    여전히 이 질의에 없다(`member=member`). 명단·달성률이 강사를
     세지 않는 것은 그대로다(#290)."""
 
     instructor = _login(client)

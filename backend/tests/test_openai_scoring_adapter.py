@@ -127,7 +127,7 @@ def test_score_returns_verdicts_and_records_actual_model_from_response(monkeypat
 
 
 def test_score_reports_total_tokens_from_usage(monkeypatch):
-    """강의실 채점 예산(#295)이 이 값에 기댄다 — 응답의 `usage.total_tokens`를
+    """강의실 채점 사용량(#295, #629)이 이 값에 기댄다 — 응답의 `usage.total_tokens`를
     그대로 옮겨 담는다."""
 
     body = _chat_completion_body([{"requirement_id": 10, "is_met": True, "reasoning": "ok"}])

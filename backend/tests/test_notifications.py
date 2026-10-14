@@ -113,19 +113,19 @@ def test_list_types_exposes_transactional_and_promotional_flags(client):
 @pytest.mark.django_db
 def test_list_types_exposes_internal_only_flag(client):
     """#301: 유형이 「밖으로 안 나감」 성질을 갖는지가 목록에 드러난다 — 클래스
-    예산 경고는 internal-only고, 기존 유형(예: 마감 임박)은 아니다."""
+    채점 키 거부는 internal-only고, 기존 유형(예: 마감 임박)은 아니다."""
 
     response = client.get(TYPES_URL, **_auth_headers())
 
     by_value = {row["value"]: row for row in response.json()}
-    assert by_value[NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING]["is_internal_only"] is True
+    assert by_value[NotificationType.CLASSROOM_SCORING_KEY_REJECTED]["is_internal_only"] is True
     assert by_value[NotificationType.DEADLINE_REMINDER]["is_internal_only"] is False
 
 
 @pytest.mark.django_db
 def test_internal_only_notification_is_not_dispatched_to_any_channel(client):
     """#301: internal-only 유형은 만들어지는 즉시 NOT_DISPATCHED로 끝나고, 어떤
-    채널도 시도되지 않는다 — 채점 예산 경고가 그 대표 사례다."""
+    채널도 시도되지 않는다 — 채점 키 거부가 그 대표 사례다."""
 
     _freeze(datetime(2026, 1, 10, 14, 0, tzinfo=KST))
     user = _make_user()
@@ -134,7 +134,7 @@ def test_internal_only_notification_is_not_dispatched_to_any_channel(client):
         CREATE_URL,
         data={
             "recipient_id": user.id,
-            "notification_type": NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+            "notification_type": NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
         },
         content_type="application/json",
         **_auth_headers(),
@@ -159,7 +159,7 @@ def test_internal_only_notification_ignores_quiet_hours(client):
         CREATE_URL,
         data={
             "recipient_id": user.id,
-            "notification_type": NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+            "notification_type": NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
         },
         content_type="application/json",
         **_auth_headers(),

@@ -194,7 +194,7 @@ def test_the_known_bypass_shapes_are_caught(source: str):
 #
 # 강사 전용 범위는 `write`와 같은 관용구로 `owner`도 키워드 전용·기본값 없이
 # 받는다 — 호출부가 "이 라우트가 소유자 전용인가"를 매번 답한다. 소유자 전용은
-# `CONTEXT.md` 「공동 강사」가 말하는 넷뿐이다: 채점 키·예산, 클래스 삭제,
+# `CONTEXT.md` 「공동 강사」가 말하는 넷뿐이다: 채점 키, 클래스 삭제,
 # (앞으로 생길) 소유권 이전·공동 강사 내보내기. 이 표 밖의 라우트는 공동 강사(#561)에게도
 # 열리고 이 표 안의 라우트만 403 을 낸다 — 그 경계를 사람의 주의가 아니라 이 스캔이 지킨다.
 # 실제 응답은 `tests/test_classroom_co_instructor_permissions.py`가 HTTP 로 본다.
@@ -218,7 +218,7 @@ OWNER_ONLY_ROUTES: dict[Path, dict[str, str]] = {
         "cancel_ownership_transfer": "이전 요청 취소도 소유자 몫이다(#564) — class_scope(owner=True).",
         "remove_co_instructor": "공동 강사 내보내기는 소유자 몫이다(CONTEXT.md 「공동 강사」, #563) — class_scope(owner=True).",
         "update_class": (
-            "클래스 설정 전체는 강사 누구나 고치지만 예산 칸(token_budget·경고 임계)이나 소유자의 "
+            "클래스 설정 전체는 강사 누구나 고치지만 소유자의 "
             "강사 이름 칸(#561)을 보낼 때만 소유자 전용이다 — class_scope(owner=False) 뒤 scope.require_owner()."
         ),
     },
@@ -283,7 +283,7 @@ def test_every_scope_call_states_owner_explicitly_as_a_literal():
 
 
 def test_owner_only_routes_pass_through_the_owner_scope():
-    """키·예산·삭제 라우트는 소유자 범위를 지난다."""
+    """키·삭제 라우트는 소유자 범위를 지난다."""
 
     missing = []
     for relative_path, owner_only in OWNER_ONLY_ROUTES.items():
@@ -357,8 +357,7 @@ DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
         "import_class_template": "copy_class 와 같다 — 가져온 사람이 새 클래스의 소유자다.",
     },
     Path("classroom/scoring.py"): {
-        "_record_token_usage": "예산 경고의 수신자 — 키·예산 알림은 소유자에게만 간다(비용이 그 사람의 몫, ADR-0055).",
-        "_mark_scoring_key_rejected": "키 거부 알림의 수신자 — _record_token_usage 와 같은 이유.",
+        "_mark_scoring_key_rejected": "키 거부 알림의 수신자 — 키 알림은 소유자에게만 간다(비용이 그 사람의 몫, ADR-0055).",
         "_mark_scoring_paused": "크레딧 소진·서버 연결 불가 알림의 수신자 — 크레딧도 서버도 소유자의 것이다(#586, #603).",
     },
     Path("classroom/ownership_transfers.py"): {
@@ -495,7 +494,7 @@ OWNER_ONLY_MCP_TOOLS: dict[Path, dict[str, str]] = {
         "_delete_class": "화면의 delete_class 와 같다 — class_scope(owner=True).",
     },
     Path("classroom/mcp_class_tools.py"): {
-        "_update_class_settings": "화면의 update_class 와 같다 — 예산 칸이나 소유자의 강사 이름 칸을 보낼 때만 scope.require_owner().",
+        "_update_class_settings": "화면의 update_class 와 같다 — 소유자의 강사 이름 칸을 보낼 때만 scope.require_owner().",
     },
 }
 

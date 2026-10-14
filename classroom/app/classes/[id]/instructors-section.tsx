@@ -150,7 +150,7 @@ function InstructorRow({
           </p>
           <p className="text-[12.5px] leading-relaxed text-ink/70">
             넘어가는 순간 지금 채점 키가 비워져, 새 소유자가 자기 키를 넣을 때까지 참여자의 제출은 채점되지
-            않고 기다립니다. 예산과 지금까지 쓴 양은 그대로 남습니다. 요청은 7일 동안 유효합니다.
+            않고 기다립니다. 지금까지 쓴 양은 그대로 남습니다. 요청은 7일 동안 유효합니다.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -502,7 +502,7 @@ export function InstructorsSection({
             <div className="flex flex-wrap items-center justify-between gap-3 px-4">
               <span className="text-[12px] leading-relaxed text-ink/45">
                 링크는 7일 뒤 만료됩니다. 여러 사람을 초대하려면 사람마다 하나씩 만드세요. 수락한 사람은
-                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키·예산, 클래스 삭제, 소유권 이전, 공동 강사 내보내기는 소유자만 합니다.
+                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키, 클래스 삭제, 소유권 이전, 공동 강사 내보내기는 소유자만 합니다.
               </span>
               <button
                 type="button"

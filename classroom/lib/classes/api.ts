@@ -49,22 +49,16 @@ export type ClassRow = {
   scoring_auth_masked: string | null;
   // 강사가 보관했는가(#294) — 참이면 새 가입·새 제출이 닫히고 읽기만 남는다.
   archived: boolean;
-  // `null`이면 무제한(#295) — 강사가 아직 예산을 정하지 않았다는 뜻이다.
-  token_budget: number | null;
-  token_budget_warning_threshold_percent: number;
+  // 지금까지 채점에 쓴 토큰 누적합 — 설정의 「사용량」(#629). 상한은 없다.
   token_usage_total: number;
   // `token_usage_total` 가운데 서버가 사용량을 주지 않아 프롬프트 길이로 어림한 몫(#604).
   token_usage_estimated: number;
-  // `token_budget - token_usage_total` — 예산이 없으면(무제한) `null`이다.
-  token_budget_remaining: number | null;
-  // 지금 채점이 예산 때문에 멈춰 있는가.
-  token_budget_exhausted: boolean;
   // 이 클래스의 어느 문제에도 제출이 하나라도 있는가(#330) — 백엔드가
   // 판정해 내려준다. 참이면 삭제할 수 없고 보관만 된다.
   has_submissions: boolean;
   published_template: PublishedClassTemplateSummary | null;
   // 부른 사람이 이 클래스에서 무엇인가(#561) — 공동 강사에게는 소유자 전용 컨트롤
-  // (채점 키·예산·클래스 삭제)을 감추고, 클래스 목록에 「공동 강사」를 표시한다.
+  // (채점 키·클래스 삭제)을 감추고, 클래스 목록에 「공동 강사」를 표시한다.
   role: "owner" | "co_instructor";
   // 대기 중인 소유권 이전 요청(#564) — 없으면 `null`. 강사 누구나 본다.
   pending_ownership_transfer: PendingOwnershipTransfer | null;
@@ -84,7 +78,7 @@ export type PendingOwnershipTransfer = {
 };
 
 // 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassRow`와 달리
-// join_code·OpenAI 키·토큰 예산이 없다. 남의 클래스를 관리하는 정보가 아니라
+// join_code·OpenAI 키·토큰 사용량이 없다. 남의 클래스를 관리하는 정보가 아니라
 // "나는 이 클래스에 어떤 상태로 있는가"만 담는다.
 export type JoinedClassRow = {
   id: number;
@@ -117,8 +111,6 @@ export function updateClass(
     default_reasoning_effort: string;
     // 「호환 서버」의 「추론 모델」 스위치(#602) — OpenAI 키 연결은 서버가 이름으로 판단한다.
     default_model_is_reasoning: boolean;
-    token_budget: number;
-    token_budget_warning_threshold_percent: number;
   }>,
 ): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);

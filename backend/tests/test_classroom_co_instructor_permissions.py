@@ -132,7 +132,6 @@ ROUTES: list[Route] = [
     # 클래스
     Route("get_class", "get", _c, None, 200),
     Route("update_class[name]", "patch", _c, lambda w: {"name": "새 이름", "default_reasoning_effort": "low"}, 200),
-    Route("update_class[budget]", "patch", _c, lambda w: {"token_budget": 1000}, 200, owner_only=True),
     Route(
         "update_class[instructor_display_name]",
         "patch",

@@ -16,7 +16,7 @@ QuerySet 경로는 막지 않기 때문이다.
 어떤 경로로도 이 명령에 닿지 않는다.
 
 **채점을 실제로 돌리지 않는다.** `ClassroomScore` 행을 직접 만든다 — 데모를 심는
-데 강사의 OpenAI 키를 쓰고 토큰 예산을 깎을 이유가 없고, 심는 사람이 통과·미통과를
+데 강사의 OpenAI 키로 토큰을 쓸 이유가 없고, 심는 사람이 통과·미통과를
 의도대로 배치할 수 있어야 화면의 모든 갈래가 보인다. 같은 이유로 클래스에 OpenAI
 키를 넣지 않는다 — 그건 그 강사의 실제 비밀이고 시드가 지어낼 것이 아니다.
 
@@ -29,7 +29,7 @@ QuerySet 경로는 막지 않기 때문이다.
 알림을 만들 기회가 없고, 그러면 데모 계정으로 알림 화면(#304)을 열어도 늘 비어
 있다. 그래서 `ClassroomScore` 를 직접 만드는 그 자리마다 스캔이 부르는 바로 그
 알림 함수를 그대로 부른다(`classroom.scoring._notify_submitter_of_score` — 참여자에게
-채점 완료, `notifications.services.create_notification` — 강사에게 예산 경고). 문구·
+채점 완료). 문구·
 context 모양이 스캔이 실제로 만드는 것과 달라지면 화면의 링크(#329)가 끊기므로,
 새로 짓지 않고 그 함수를 재사용한다. 알림 걷기는 Score 걷기와 같은 class_ids 로
 닫혀 있다 — 실사용자의 알림에는 닿지 않는다.
@@ -43,7 +43,6 @@ from django.db import transaction
 from django.utils import timezone
 
 from notifications.models import Notification, NotificationType
-from notifications.services import create_notification
 from submissions.models import Submission, SubmissionAsset
 
 from classroom.models import (
@@ -144,10 +143,7 @@ class Command(BaseCommand):
         # 강사·실사용자의 알림은 다른 Class.pk 를 가리킨다). 재시드가 「겹겹이
         # 쌓이지 않는다」는 계약(CLAUDE.md)이 여기서 성립한다.
         Notification.objects.filter(
-            notification_type__in=[
-                NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
-                NotificationType.CLASSROOM_SUBMISSION_SCORED,
-            ],
+            notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED,
             context__class_id__in=class_ids,
         ).delete()
 
@@ -179,7 +175,6 @@ class Command(BaseCommand):
             # 가 돌린다 — 이 메서드 자체는 `handle()` 의 `transaction.atomic()` 안에서
             # 돈다(아래 `_dispatch_notifications` 독스트링 참고).
             "score_jobs": [],
-            "budget_warning_jobs": [],
         }
 
         # --- 클래스 1: 진행중, 제출과 채점이 쌓여 있다 -----------------------
@@ -187,8 +182,7 @@ class Command(BaseCommand):
             instructor=instructor,
             name=f"{DEMO_PREFIX} 웹 프론트엔드 스터디",
             instructor_display_name="김강사",
-            token_budget=2_000_000,
-            token_usage_total=1_740_000,  # 임계(80%)를 넘긴 상태 — 경고 화면이 보인다
+            token_usage_total=1_740_000,  # 설정 화면의 「사용량」이 0 이 아니게 보인다
         )
         members = self._add_members(
             web,
@@ -241,7 +235,6 @@ class Command(BaseCommand):
         # 정다은(내보내진 사람): 1주차 한 번 내고 통과한 기록이 남아 있다
         self._attempts(p1, members[3], [True], made)
 
-        self._maybe_notify_budget_warning(web, made)
         made["classes"].append(web)
 
         # --- 클래스 2: 진행중, 아직 아무도 안 냈다 --------------------------
@@ -413,60 +406,25 @@ class Command(BaseCommand):
             )
             made["score_jobs"].append((submission, score, items))
 
-    def _maybe_notify_budget_warning(self, class_obj: Class, made) -> None:
-        """`classroom.scoring._record_token_usage` 가 예산 경고를 보내는 것과 같은
-        조건이다 — 그 함수는 실제 채점 뒤 토큰을 누적하며 판정하는데, 이 시드는
-        채점을 돌리지 않고 `token_usage_total` 을 미리 심으므로 여기서 한 번만
-        같은 조건을 확인한다(#341). 알림 자체는 바로 보내지 않고
-        `made["budget_warning_jobs"]` 에 쌓는다 — `_dispatch_notifications`
-        독스트링 참고. `token_budget_warning_sent_at` 을 채우는 것은 순수한
-        모델 저장이라 트랜잭션 안에서 해도 안전하다 — 미루는 것은 알림 발송
-        (`create_notification`) 뿐이다."""
-
-        if class_obj.token_budget is None:
-            return
-        if class_obj.token_budget_warning_sent_at is not None:
-            return
-        if (
-            class_obj.token_usage_total * 100
-            < class_obj.token_budget * class_obj.token_budget_warning_threshold_percent
-        ):
-            return
-
-        class_obj.token_budget_warning_sent_at = timezone.now()
-        class_obj.save(update_fields=["token_budget_warning_sent_at"])
-        made["budget_warning_jobs"].append(class_obj)
-
     # ---------------------------------------------------------------- 알림
 
     def _dispatch_notifications(self, made: dict) -> None:
         """`_seed` 가 쌓아 둔 알림 job 을 실제로 만든다 — 반드시 `_seed` 를 감싼
         `transaction.atomic()` 이 끝난(커밋된) **뒤**에 불러야 한다.
 
-        `_notify_submitter_of_score`·`create_notification` 은 실패해도 예외를
+        `_notify_submitter_of_score` 는 실패해도 예외를
         호출자에게 흘리지 않는다(`notifications.services.notify_safely`). 그런데
         그 삼킴은 파이썬 레벨일 뿐이다 — 이 호출이 `transaction.atomic()` **안**에서
         일어나면, 실패한 SQL 이 postgres 트랜잭션 자체를 이미 깨뜨린 채로 예외만
         삼켜져, 바로 다음 쿼리가 그 트랜잭션과 전혀 무관한 이유로 죽는다(원인을
         알 수 없는 오류로 보인다 — #341 코드리뷰 지적). 실제 스캔
         (`classroom.scoring.score_classroom_submission_once`·`_finalize_platform_failure`)
-        도 이 두 알림 호출 모두 `transaction.atomic()` 밖에서 부른다 — 그 관례를
+        도 이 알림 호출을 `transaction.atomic()` 밖에서 부른다 — 그 관례를
         그대로 따라, `_seed` 안에서는 job 만 쌓고 여기서 트랜잭션 밖에 실제로
         내보낸다."""
 
         for submission, score, items in made["score_jobs"]:
             _notify_submitter_of_score(submission, score, items)
-        for class_obj in made["budget_warning_jobs"]:
-            create_notification(
-                recipient=class_obj.instructor,
-                notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
-                context={
-                    "class_id": class_obj.id,
-                    "class_name": class_obj.name,
-                    "token_usage_total": class_obj.token_usage_total,
-                    "token_budget": class_obj.token_budget,
-                },
-            )
 
     # ---------------------------------------------------------------- 보고
 

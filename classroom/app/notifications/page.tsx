@@ -60,7 +60,7 @@ export default function NotificationsPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
-  // 강사인 클래스가 있는가 — 채점 예산 경고는 강사에게만 오므로(#295) 빈
+  // 강사인 클래스가 있는가 — 채점 연결 알림(키 거부·크레딧 소진)은 강사에게만 오므로 빈
   // 상태 문구가 그것을 언급할지 여기 판정으로 가른다(#343).
   const teacherGate = useTeacherClassGate();
   // 헤더 종과 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
@@ -189,7 +189,7 @@ export default function NotificationsPage() {
             <EmptyState>
               <span data-testid="notifications-empty">
                 {teacherGate.hasTaughtClasses
-                  ? "아직 알림이 없습니다 — 제출이 채점되거나 채점 예산 경고가 생기면 여기 나타납니다."
+                  ? "아직 알림이 없습니다 — 제출이 채점되거나 채점 연결에 문제가 생기면 여기 나타납니다."
                   : "아직 알림이 없습니다 — 제출이 채점되면 여기 나타납니다."}
               </span>
             </EmptyState>
@@ -254,7 +254,7 @@ function NotificationGroupRow({
 }: { group: NotificationGroup } & MarkHandlers) {
   const [expanded, setExpanded] = useState(false);
   // 크기 1인 그룹(문제에 딸리지 않은 알림 전부, 그리고 시도가 한 번뿐인 문제)은
-  // 접을 게 없다 — 그대로 한 줄이다(AC: "예산 경고처럼 문제에 딸리지 않은
+  // 접을 게 없다 — 그대로 한 줄이다(AC: "문제에 딸리지 않은
   // 알림은 접히지 않고 그대로 한 줄이다").
   if (group.notifications.length === 1) {
     return <NotificationListRow notification={group.notifications[0]} onMarkOneRead={onMarkOneRead} />;

@@ -91,10 +91,10 @@ export type ClassroomScore = {
 // 「채점 중」을 구별하는 유일한 근거다(#287).
 export type SubmissionStatus = "pending" | "scored";
 
-// "no_api_key"(#346) | "budget_exhausted"(#295) | `null`. `status`가
-// "pending"일 때만 채워진다 — 강사가 채점 키를 아직 넣지 않았으면 예산과
-// 무관하게 "no_api_key", 키는 있는데 예산이 바닥났으면 "budget_exhausted"다.
-export type PendingReason = "no_api_key" | "budget_exhausted" | "model_rejected" | null;
+// "no_api_key"(#346) | "model_rejected"(#403) | `null`. `status`가 "pending"일 때만
+// 채워진다 — 강사가 채점 키를 아직 넣지 않았으면 "no_api_key", 키는 있는데 이 문제의
+// 채점 모델을 그 키로 못 쓰면 "model_rejected"다(#629 로 사유가 둘이 됐다).
+export type PendingReason = "no_api_key" | "model_rejected" | null;
 
 export type ClassroomSubmissionRow = {
   id: number;

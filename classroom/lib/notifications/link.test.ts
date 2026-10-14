@@ -39,22 +39,6 @@ describe("notificationHref — classroom_submission_scored", () => {
   });
 });
 
-describe("notificationHref — classroom_token_budget_warning", () => {
-  it("그 클래스의 설정 화면 — 예산 자리까지 짓는다", () => {
-    const href = notificationHref(
-      row({ notification_type: "classroom_token_budget_warning", context: { class_id: 7 } }),
-    );
-    expect(href).toBe("/classes/7/settings#token-budget");
-  });
-
-  it("클래스 id가 없으면 링크를 짓지 않는다", () => {
-    const href = notificationHref(
-      row({ notification_type: "classroom_token_budget_warning", context: {} }),
-    );
-    expect(href).toBeNull();
-  });
-});
-
 describe("notificationHref — classroom_scoring_key_rejected", () => {
   it("그 클래스의 설정 화면 — 채점 키 자리까지 짓는다(#356, #329)", () => {
     const href = notificationHref(

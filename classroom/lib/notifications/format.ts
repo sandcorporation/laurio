@@ -20,19 +20,6 @@ export function describeNotification(notification: NotificationRow): string {
         passed ? "통과" : "미통과"
       }.`;
     }
-    case "classroom_token_budget_warning": {
-      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
-      const usageTotal =
-        typeof context.token_usage_total === "number" ? context.token_usage_total : null;
-      const budget = typeof context.token_budget === "number" ? context.token_budget : null;
-      const percent =
-        usageTotal !== null && budget ? Math.min(999, Math.round((usageTotal / budget) * 100)) : null;
-      const usageLabel =
-        percent !== null
-          ? `사용량이 채점 예산의 ${percent}%를 넘었습니다`
-          : "채점 예산이 얼마 남지 않았습니다";
-      return `'${className}' 클래스, ${usageLabel} — 다 쓰면 새 채점이 멈추고 제출만 쌓입니다. 클래스 설정에서 채점 예산을 확인해 주세요.`;
-    }
     case "classroom_scoring_key_rejected": {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       return `'${className}' 클래스의 채점 키가 거부되어 채점이 멈췄습니다 — 클래스 설정에서 새 키를 저장해 주세요.`;

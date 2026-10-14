@@ -209,11 +209,6 @@ def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None
     viewer_is_owner = is_owner(class_obj, viewer_id)
     if row_stats is None:
         row_stats = _class_row_stats([class_obj])[class_obj.id]
-    token_budget_remaining = (
-        max(class_obj.token_budget - class_obj.token_usage_total, 0)
-        if class_obj.token_budget is not None
-        else None
-    )
     return ClassOut(
         id=class_obj.id,
         name=class_obj.name,
@@ -245,12 +240,8 @@ def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None
             has_key and compatible and class_obj.scoring_server_unreachable_at is not None
         ),
         archived=class_obj.archived_at is not None,
-        token_budget=class_obj.token_budget,
-        token_budget_warning_threshold_percent=class_obj.token_budget_warning_threshold_percent,
         token_usage_total=class_obj.token_usage_total,
         token_usage_estimated=class_obj.token_usage_estimated,
-        token_budget_remaining=token_budget_remaining,
-        token_budget_exhausted=class_obj.token_budget_exhausted(),
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
         published_template=_published_template_summary(_live_class_template(class_obj)),
         role="owner" if viewer_is_owner else "co_instructor",
@@ -592,12 +583,12 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
 
 
 def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
-    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#295, #346, #355, #403, #434) —
+    """아직 채점되지 않은 시도가 왜 멈춰 있는지(#346, #355, #403, #434) —
     참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다.
     `classroom.pending_scoring.pending_reason`에 그대로 맡긴다 — 스캔 후보
     (`scoring.pending_submissions`)가 거르는 것과 **같은 기준**이어야 한다는
-    불변식이 이제 그 모듈 하나에 산다. 셋이 겹치면 키(없음·거부) → 모델
-    거부 → 예산 소진 순서로 하나만 말한다. **키가 거부된 것과 아예 없는
+    불변식이 이제 그 모듈 하나에 산다. 둘이 겹치면 키(없음·거부) → 모델
+    거부 순서로 하나만 말한다. **키가 거부된 것과 아예 없는
     것, 그리고 모델이 거부된 것을 참여자 화면에서는 구별하지 않는다**
     (#355 AC, #403 AC "참여자에게는 기존 「채점하지 못함」 안내를 보인다")
     — 강사의 계정·설정 문제가 참여자에게 새어 나가지 않는다, 강사 전용
@@ -761,7 +752,7 @@ def update_class(request: HttpRequest, class_id: int, payload: ClassPatchIn):
     # 모듈 docstring 「열어 두는 것」) — write=False, 소유권·존재만 본다.
     scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
     if class_authoring.touches_owner_only_fields(payload):
-        # 예산은 소유자의 비용이고(ADR-0055) 강사 이름 칸은 소유자의 이름이다(#561) —
+        # 강사 이름 칸은 소유자의 이름이다(#561) —
         # 클래스 이름·모델 같은 나머지 칸은 강사 누구나.
         scope.require_owner()
     class_obj = scope.class_obj
@@ -1566,8 +1557,7 @@ def _cell_status(
     안 바뀐다는 것을 하나로 묶어 보여준다, #434 — 이 격자는 강사 전용
     화면이지만 참여자별 칸 하나하나까지 세 사유를 따로 말할 자리는 아니다,
     강사는 클래스 상세 배너·설정 화면·문제별 제출 현황에서 이미 그 사실을
-    본다) — 아니면(예산 소진뿐이면) "scoring"(예산을 채우면 저절로 풀려
-    아직 뒤집힐 여지가 있다는 뜻이다). 전부 채점됐는데 하나도 통과가 없으면
+    본다) — 아니면 "scoring"(아직 뒤집힐 여지가 있다는 뜻이다). 전부 채점됐는데 하나도 통과가 없으면
     "attempted_not_passed". 시도 자체가 없으면 "not_submitted".
 
     통과 판정은 `Problem.is_score_passed`(#436)에 맡긴다 — 필수 항목·문법
@@ -2223,7 +2213,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
     이 질의에 없다), 문제가 열려 있고 클래스가 보관되지 않았으면 제출 잠금이
     풀린다. 「강사가 보는 중」은 `viewing_as_instructor`가 따로 말한다 —
     초안·숨김처럼 참여자라면 못 낼 상태에서는 그 사유가 여전히 잠금을 건다.
-    명단·달성률·토큰 예산이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
+    명단·달성률이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
     격자에 표시만 되고 집계에서 빠진다)."""
 
     # 강사 전용 라우트가 아니다 — 참여자와 강사가 같은 주소를 걷는 혼합

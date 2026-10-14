@@ -436,66 +436,35 @@ def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
 
 
 def _record_token_usage(class_obj: Class, total_tokens: int, *, estimated: bool = False) -> None:
-    """이 클래스의 누적 토큰 사용량에 더하고, 경고 임계를 **처음** 넘는
-    순간에만 강사에게 서비스 내부 알림을 보낸다(#295).
+    """이 클래스의 누적 토큰 사용량(화면의 「사용량」)에 더한다(#295, #629). 상한은 없다 —
+    사용량은 채점을 멈추지 않는다(ADR-0060).
 
     `total_tokens`가 0 이하면(어댑터가 사용량을 보고하지 않았을 때, `core.
-    llm_scoring.ScoringOutput.total_tokens`의 기본값) 아무것도 하지 않는다 —
-    쓰지 않은 것으로 기록하면 예산이 실제보다 빨리 도는 셈이 된다.
+    llm_scoring.ScoringOutput.total_tokens`의 기본값) 아무것도 하지 않는다.
 
-    `select_for_update`로 잠그고 다시 읽어 누적하는 이유는 같은 tick 안에서도
-    한 클래스의 시도 여러 개가 순서대로 처리되기 때문이다 — 그냥 파이썬 값에
-    더하면 경합 없이도 마지막에 처리된 시도의 계산이 앞선 것들을 덮어쓴다.
+    `F()` 로 DB 에서 더하는 이유는 같은 tick 안에서도 한 클래스의 시도 여러 개가 처리되기
+    때문이다 — 파이썬 값에 더해 저장하면 마지막에 처리된 시도의 계산이 앞선 것들을 덮어쓴다.
 
     `estimated` 면(호환 서버가 usage 를 주지 않아 어림한 값, #604) 같은 양을
-    `token_usage_estimated` 에도 더한다 — 예산·경고는 합계로 똑같이 센다."""
+    `token_usage_estimated` 에도 더한다."""
 
     if total_tokens <= 0:
         return
 
-    should_notify = False
-    with transaction.atomic():
-        locked = Class.objects.select_for_update().get(pk=class_obj.pk)
-        locked.token_usage_total += total_tokens
-        update_fields = ["token_usage_total"]
-        if estimated:
-            locked.token_usage_estimated += total_tokens
-            update_fields.append("token_usage_estimated")
-
-        if (
-            locked.token_budget is not None
-            and locked.token_budget_warning_sent_at is None
-            and locked.token_usage_total * 100
-            >= locked.token_budget * locked.token_budget_warning_threshold_percent
-        ):
-            locked.token_budget_warning_sent_at = Clock.now()
-            update_fields.append("token_budget_warning_sent_at")
-            should_notify = True
-
-        locked.save(update_fields=update_fields)
-
-    if should_notify:
-        create_notification(
-            recipient=locked.instructor,
-            notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
-            context={
-                "class_id": locked.id,
-                "class_name": locked.name,
-                "token_usage_total": locked.token_usage_total,
-                "token_budget": locked.token_budget,
-            },
-        )
+    changes = {"token_usage_total": models.F("token_usage_total") + total_tokens}
+    if estimated:
+        changes["token_usage_estimated"] = models.F("token_usage_estimated") + total_tokens
+    Class.objects.filter(pk=class_obj.pk).update(**changes)
 
 
 def _mark_scoring_key_rejected(class_obj: Class) -> None:
     """벤더가 401·403으로 이 클래스의 채점 키를 거절했다(#355) — 상태를
     「거부됨」으로 옮기고, **새로 거부된 순간에만**(#356) 강사에게 알린다.
     이미 「거부됨」이면 상태도 알림도 건드리지 않는다 — 밀린 제출이 몇
-    건이든, 스캔이 몇 번을 돌든 상태 전이 한 번에 알림 하나다(#295의 예산
-    경고와 같은 규율). 강사가 새 키를 저장해 상태가 벗어났다가 그 키도
+    건이든, 스캔이 몇 번을 돌든 상태 전이 한 번에 알림 하나다. 강사가 새 키를 저장해 상태가 벗어났다가 그 키도
     거절당하면, 그때는 다시 "새로 거부된 순간"이라 다시 알린다.
 
-    `_record_token_usage`와 같은 이유로 `select_for_update`로 잠그고 다시
+    `select_for_update`로 잠그고 다시
     읽는다 — 같은 tick 안에서 이 클래스의 시도 여러 개가 순서대로 이
     함수를 부를 수 있어, 잠그지 않으면 각자 손에 쥔 옛 값을 기준으로
     판단해 "새로 거부됨"을 여러 번 셀 수 있다."""
@@ -601,7 +570,7 @@ def _record_rate_limited(
 def _mark_scoring_model_rejected(problem) -> None:
     """벤더가 이 Problem의 채점 모델을 그 클래스의 키로 거부했다(#403) —
     `_mark_scoring_key_rejected`와 같은 자리지만 알림은 없다(#403 AC에
-    없다 — 강사는 시도·제출 현황 화면의 배너로 안다, 예산 경고·키 거부처럼
+    없다 — 강사는 시도·제출 현황 화면의 배너로 안다, 키 거부처럼
     "새로 거부된 순간"을 세어 알릴 필요가 없는 조용한 상태 전이다). 이미
     켜져 있어도 다시 쓴다 — 값이 최신 실패 시각으로 갱신되는 것 자체는
     문제가 없고, 별도 잠금이 필요할 만큼 경합이 문제되는 값도 아니다(하나의
@@ -785,12 +754,12 @@ def _prepare_head(
 
         return Concluded(apply=_cap)
 
-    # 후보 쿼리(pending_scoring.pending_submissions)가 이미 이 셋을 걸러
-    # 고르지만, 같은 배치 안에서 앞선 행이 방금 이 클래스의 예산을 다
-    # 써버렸거나(#295) 이 문제의 모델을 방금 거부당했을 수 있다(#403) —
+    # 후보 쿼리(pending_scoring.pending_submissions)가 이미 이 둘을 걸러
+    # 고르지만, 같은 배치 안에서 앞선 행이 방금 이 클래스의 키나 이 문제의
+    # 모델을 거부당했을 수 있다(#355, #403) —
     # `class_obj`·`problem`은 배치를 만들 때 한 번 읽은 값이라 그 갱신을
     # 못 본다. 다시 읽어 확인한다. 순서는 화면의 `pending_reason`과 같은
-    # 순서(키 → 모델 → 예산, `pending_scoring.blocking_reason`)다 — 어긋나면
+    # 순서(키 → 모델, `pending_scoring.blocking_reason`)다 — 어긋나면
     # 화면이 "채점할 수 있다"고 말하는 시도를 스캔이 건너뛰거나 그 반대가
     # 될 수 있다(#434).
     problem = Problem.objects.select_related("classroom").get(pk=problem.pk)
@@ -804,9 +773,6 @@ def _prepare_head(
         return _concluded({"submission_id": sid, "status": "no_key"})
     if reason == pending_scoring.MODEL_REJECTED:
         return _concluded({"submission_id": sid, "status": "model_rejected"})
-    if reason == pending_scoring.BUDGET_EXHAUSTED:
-        # no_key와 같은 규율 — 시도로 남기지 않고 조용히 건너뛴다.
-        return _concluded({"submission_id": sid, "status": "budget_exhausted"})
     connection = connection_for(class_obj)
     if connection is None:  # pragma: no cover - 위의 `blocking_reason` 이 같은 기준(`has_scoring_key`)으로 이미 걸렀다.
         return _concluded({"submission_id": sid, "status": "no_key"})
@@ -1024,7 +990,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     assert output is not None
     used_tokens, estimated = output.total_tokens, False
     if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
-        # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 예산이 돌지 않으니 예상
+        # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 사용량이 비니 예상
         # 비용과 같은 셈으로 어림해 더하고, 어림한 몫을 따로 남긴다. OpenAI 는 늘 usage 를 준다.
         used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
     _record_token_usage(class_obj, used_tokens, estimated=estimated)
@@ -1273,7 +1239,7 @@ def next_candidates(
 
 def prepare_claimed_head(submission_id: int, *, owner: str, as_of) -> _Head | Concluded:
     """임대를 쥔 시도의 벤더 호출 전 일 앞 절반(DB) — 스캔과 **같은 후보 조건**으로 시도를 다시 읽는다. 시도가
-    그 조건 밖이면(키 없음·거부·예산 정지·이미 채점됨) 시도로 남기지 않고 조용히 건너뛴다 — 큐에서
+    그 조건 밖이면(키 없음·거부·모델 거부·이미 채점됨) 시도로 남기지 않고 조용히 건너뛴다 — 큐에서
     기다리는 사이 강사가 키를 지웠거나 다른 grader 가 이미 채점을 끝냈을 수 있다.
 
     멈춘 클래스(크레딧 소진·서버 연결 불가)가 다시 확인 간격을 넘겨 후보에 들었으면 같은 클래스의
