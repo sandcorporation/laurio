@@ -325,7 +325,7 @@ def mine_row(title, k, tries, when):
             f'<div style="flex:1;min-width:0;font-size:14px;">{title}</div>{t}{label}</div>')
 
 MINE_PAGE = body(
-    pagehead(CLASS_NAME + " · 김선우, 이수진", "문제", None,
+    pagehead(CLASS_NAME + " · 김선우, 박조교", "문제", None,
              actions=f'<span style="font-size:12.5px;color:{MUTED};">내 이름 <b style="color:{INK};">서지우</b> · <span style="text-decoration:underline;">바꾸기</span></span>')
     + f'<div style="display:flex;align-items:center;gap:14px;"><div style="font-family:{MONO};font-size:15px;font-weight:600;">3/6 통과</div>{bar(50, 320, VER, 8)}<span style="font-size:12px;color:{DIM};">채점 중 1 · 미제출 1</span></div>'
     + card("".join(mine_row(*r) for r in MINE))

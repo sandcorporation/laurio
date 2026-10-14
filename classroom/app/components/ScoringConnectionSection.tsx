@@ -17,7 +17,8 @@ type ConnectionKind = ClassRow["scoring_connection_kind"];
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
-// 연결이 마지막으로 실제로 닿은 날(#671) — 확인된 적 없으면 내지 않는다.
+// 연결이 마지막으로 확인된 날(#671) — 채점이 한 번 성공했거나, 저장 때 벤더·서버가 받아들였거나,
+// 호환 서버 모델 시험 호출이 통과한 날. 확인된 적 없으면 내지 않는다.
 function VerifiedDay({ classroom }: { classroom: ClassRow }) {
   if (!classroom.scoring_connection_verified_at) return null;
   return (

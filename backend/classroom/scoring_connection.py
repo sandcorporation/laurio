@@ -117,8 +117,9 @@ def connection_for(class_obj: Class) -> ScoringConnection | None:
 
 
 def mark_verified(class_id: int, connection: ScoringConnection) -> None:
-    """이 연결이 방금 실제로 닿았다(#671) — 클래스의 확인 시각(`Class.scoring_connection_verified_at`)을
-    지금으로 민다. 채점 성공과 호환 서버 모델 시험 호출이 부른다. 벤더를 기다리는 사이 연결이 바뀌었으면
+    """이 연결로 방금 채점이 성공했거나 호환 서버 모델 시험 호출이 통과했다(#671) — 클래스의 확인
+    시각(`Class.scoring_connection_verified_at`)을 지금으로 민다. 부르는 곳은 그 둘뿐이다(`scoring.py` 의
+    채점 성공 끝, `problem_authoring.py` 의 시험 호출 통과). 벤더를 기다리는 사이 연결이 바뀌었으면
     (다른 키·다른 서버로 다시 저장, 소유권 이전) 아무것도 하지 않는다 — 옛 연결의 성공은 새 연결의
     확인이 아니다. 암호문은 저장할 때마다 새로 만들어지므로 같은 연결인지를 그것으로 가른다."""
 
@@ -129,8 +130,9 @@ def mark_verified(class_id: int, connection: ScoringConnection) -> None:
         same_connection = same_connection.filter(scoring_server_url=connection.base_url)
         same_connection.update(scoring_connection_verified_at=Clock.now())
         return
-    # 「미검증」은 「벤더에 닿아 본 적 없음」이다(#681) — 닿았으니 같은 UPDATE 에서 검증됨으로 올린다.
-    # 거부됨은 그대로 둔다. 호환 서버는 저장 전 확인이 늘 닿으므로 이 상태가 뜻이 없다.
+    # 「미검증」은 「저장 때 벤더의 확인을 못 받았고 그 뒤 채점도 성공한 적 없음」이다(#681) — 방금
+    # 성공했으니 같은 UPDATE 에서 검증됨으로 올린다. 거부됨은 그대로 둔다. 호환 서버는 저장 때 서버가 받아들여야(모델 목록·인증)
+    # 저장되므로 이 상태가 뜻이 없다.
     same_connection.update(
         scoring_connection_verified_at=Clock.now(),
         openai_api_key_status=Case(
