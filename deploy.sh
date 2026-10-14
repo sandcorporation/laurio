@@ -324,36 +324,56 @@ cmd_plan() {
     BUILD_SEARCH=true
     BUILD_PGBOUNCER=true
   else
-    # 한 경로가 여러 서비스를 건드린다. 그 팬아웃이 이 스크립트의 전부다.
-    if touched '^(backend/|docker/backend\.Dockerfile$)'; then
-      BUILD_BACKEND=true
-    fi
+    # **이미지 문맥 해시로 고른다**(#712). 이미지 잡(`scripts/ci/images.sh`)이 굽기·건너뛰기를 정하는 바로
+    # 그 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로 중 `.dockerignore` 가 빼지 않는 것)를
+    # 직전 배포와 지금 커밋에서 내어 다른 서비스만 바꿔 끼운다. 그래서 「이미지가 같다」와 「다시 띄우지
+    # 않는다」가 한 기준이다 — 경로 패턴은 문맥 밖의 파일(e2e 스펙·playwright 설정)만 바뀐 커밋에도 그 앱을
+    # 다시 띄웠다(laurio #474). python3 가 없거나 해시를 내지 못하면 아래 경로 패턴으로 떨어진다.
+    if CTX_CHANGED=$(python3 scripts/ci/image_context.py changed "$PREVIOUS" HEAD 2>/dev/null); then
+      log "문맥 해시로 고른다 — 바뀐 서비스: $(echo $CTX_CHANGED)"
+      for svc in $CTX_CHANGED; do
+        case "$svc" in
+          backend) BUILD_BACKEND=true ;;
+          frontend) BUILD_FRONTEND=true ;;
+          operator) BUILD_OPERATOR=true ;;
+          classroom) BUILD_CLASSROOM=true ;;
+          search) BUILD_SEARCH=true ;;
+          pgbouncer) BUILD_PGBOUNCER=true ;;
+        esac
+      done
+    else
+      log "문맥 해시를 내지 못했다 — 경로로 고른다."
+      # 한 경로가 여러 서비스를 건드린다. 그 팬아웃이 이 스크립트의 전부다.
+      if touched '^(backend/|docker/backend\.Dockerfile$)'; then
+        BUILD_BACKEND=true
+      fi
 
-    SHARED=false
-    if touched '^(packages/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|package\.json$)'; then
-      SHARED=true
-    fi
+      SHARED=false
+      if touched '^(packages/|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|package\.json$)'; then
+        SHARED=true
+      fi
 
-    if [ "$SHARED" = true ] || touched '^(frontend/|docker/frontend\.Dockerfile$)'; then
-      BUILD_FRONTEND=true
-    fi
-    if [ "$SHARED" = true ] || touched '^(operator/|docker/operator\.Dockerfile$)'; then
-      BUILD_OPERATOR=true
-    fi
-    if [ "$SHARED" = true ] || touched '^(classroom/|docker/classroom\.Dockerfile$)'; then
-      BUILD_CLASSROOM=true
-    fi
+      if [ "$SHARED" = true ] || touched '^(frontend/|docker/frontend\.Dockerfile$)'; then
+        BUILD_FRONTEND=true
+      fi
+      if [ "$SHARED" = true ] || touched '^(operator/|docker/operator\.Dockerfile$)'; then
+        BUILD_OPERATOR=true
+      fi
+      if [ "$SHARED" = true ] || touched '^(classroom/|docker/classroom\.Dockerfile$)'; then
+        BUILD_CLASSROOM=true
+      fi
 
-    # nori 플러그인을 넣은 OpenSearch(#450/#451) — backend 코드와 무관하게
-    # 이 Dockerfile 하나로만 갈린다.
-    if touched '^docker/search\.Dockerfile$'; then
-      BUILD_SEARCH=true
-    fi
+      # nori 플러그인을 넣은 OpenSearch(#450/#451) — backend 코드와 무관하게
+      # 이 Dockerfile 하나로만 갈린다.
+      if touched '^docker/search\.Dockerfile$'; then
+        BUILD_SEARCH=true
+      fi
 
-    # 연결 풀러(pgbouncer, #453/#458) — backend 코드와 무관하게 이 Dockerfile과
-    # 그 entrypoint 스크립트로만 갈린다(search와 같은 원칙).
-    if touched '^docker/pgbouncer\.Dockerfile$|^docker/pgbouncer/'; then
-      BUILD_PGBOUNCER=true
+      # 연결 풀러(pgbouncer, #453/#458) — backend 코드와 무관하게 이 Dockerfile과
+      # 그 entrypoint 스크립트로만 갈린다(search와 같은 원칙).
+      if touched '^docker/pgbouncer\.Dockerfile$|^docker/pgbouncer/'; then
+        BUILD_PGBOUNCER=true
+      fi
     fi
 
     # compose 파일 자체가 바뀌면 어느 서비스의 환경이 바뀌었는지 알 수 없다.
