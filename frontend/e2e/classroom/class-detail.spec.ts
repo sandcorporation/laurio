@@ -24,6 +24,8 @@ test("방금 연 클래스는 시작하기 카드와 빈 목록의 입구를 보
   await expect(page.getByTestId("join-link")).toContainText("/join/");
   await expect(page.getByTestId("getting-started")).toBeVisible();
   await expect(page.getByTestId("getting-started-connect")).toHaveAttribute("data-done", "false");
+  // 시작하기 1단계와 채점 카드는 같은 행동을 같은 말로 부른다(#669).
+  await expect(page.getByTestId("classroom-missing-api-key-settings-link")).toHaveText("채점 연결 넣기");
   await expect(page.getByTestId("problems-empty-state")).toBeVisible();
   await expect(page.getByTestId("problems-empty-copy")).toBeVisible();
   // 방금 연 클래스에는 「채점」 카드가 아직 없다 — 시작하기가 그 자리다.
@@ -34,7 +36,7 @@ test("방금 연 클래스는 시작하기 카드와 빈 목록의 입구를 보
   await expect(page.getByTestId("class-instructors")).toBeVisible();
   await page.getByTestId("detail-tab-participants").click();
   await expect(page).toHaveURL(`/classes/${classId}?tab=participants`);
-  await expect(page.getByTestId("participants-empty")).toBeVisible();
+  await expect(page.getByTestId("participants-empty")).toHaveText("—");
 });
 
 test("문제와 참여자가 생기면 표와 채점 카드가 들어오고, 키가 없으면 연결 없음을 말한다", async ({ page }) => {

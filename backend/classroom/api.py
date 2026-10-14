@@ -1477,7 +1477,7 @@ def _serialize_members(class_obj: Class) -> list[MemberOut]:
 
 @router.post(
     "/classes/{class_id}/members/{member_id}/expel",
-    response={200: MemberOut, 404: ErrorOut},
+    response={200: MemberOut, 403: ErrorOut, 404: ErrorOut},
     auth=jwt_auth,
 )
 def expel_member(request: HttpRequest, class_id: int, member_id: int):
@@ -1487,7 +1487,9 @@ def expel_member(request: HttpRequest, class_id: int, member_id: int):
     # 보관된 클래스에서도 명단 정리는 열어 둔다 — 새 가입·새 제출처럼 새
     # 활동을 만드는 것이 아니라 이미 있는 명단을 표시만 바꾸는 것이다.
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
-    member = expel_class_member(class_member_or_404(class_obj, member_id))
+    member = class_member_or_404(class_obj, member_id)
+    assert_member_expellable(class_obj, member)
+    member = expel_class_member(member)
     return 200, _serialize_member(member, class_obj)
 
 
@@ -1498,6 +1500,15 @@ def class_member_or_404(class_obj: Class, member_id: int) -> ClassMember:
         return class_obj.members.get(id=member_id)
     except ClassMember.DoesNotExist as exc:
         raise HttpError(404, "참여자를 찾을 수 없습니다.") from exc
+
+
+def assert_member_expellable(class_obj: Class, member: ClassMember) -> None:
+    """강사(소유자·공동 강사)의 자기 참여자 행은 내보내지 않는다(#669) — 집계에서 이미 빠지므로
+    내보낼 이유가 없고, 내보내면 그 강사가 자기 클래스에 다시 낼 길만 막힌다. 참여자였다가 공동
+    강사가 된 사람도 강사다. 화면(`expel_member`)과 연결된 앱(#515)이 같은 문장으로 거절한다."""
+
+    if is_instructor(class_obj, member.user_id):
+        raise HttpError(403, "강사는 내보낼 수 없습니다.")
 
 
 def expel_class_member(member: ClassMember) -> ClassMember:

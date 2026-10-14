@@ -24,6 +24,12 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
     data: { label: "통과 조건", required: true },
   });
   await api.post(`/api/backend/classroom/classes/${classId}/problems/${problemId}/open`);
+  // 초안은 열리지 않았으니 n/N 의 N 에 들지 않고 달성률은 「—」다(#669).
+  const draftId = (await (
+    await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+      data: { title: "초안 문제", submission_formats: ["repository"] },
+    })
+  ).json()).id as number;
 
   await page.context().clearCookies();
   await establishClassroomSession(page, `${seed}-participant`);
@@ -39,8 +45,14 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
   }[];
   const memberId = members.find((m) => m.display_name === "나가는사람")!.id;
   await expect(page.getByTestId(`participant-row-${memberId}-name`)).toContainText("나가는사람");
-  await expect(page.getByTestId(`participant-row-${memberId}-joined-at`)).toContainText("가입");
+  await expect(page.getByTestId(`participant-row-${memberId}-joined-at`)).toHaveText(/^\d{1,2}\/\d{1,2} 가입$/);
   await expect(page.getByTestId(`participant-row-${memberId}-passed`)).toHaveText("0/1");
+  await expect(page.getByTestId(`participants-header-problem-${draftId}-draft-badge`)).toHaveText("초안");
+  await expect(page.getByTestId(`participants-achievement-${draftId}`)).toHaveText("—");
+  // 강사 본인 행은 내보낼 수 없다 — ⋮ 가 없다.
+  const instructorId = members.find((m) => m.display_name === "강사")!.id;
+  await expect(page.getByTestId(`participant-row-${instructorId}-instructor-badge`)).toBeVisible();
+  await expect(page.getByTestId(`participant-row-${instructorId}-menu`)).toHaveCount(0);
   await expect(page.getByTestId(`participant-cell-${memberId}-${problemId}`)).toHaveAttribute("data-status", "not_submitted");
 
   await page.getByTestId(`participant-row-${memberId}-menu`).click();

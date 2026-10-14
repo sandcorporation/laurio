@@ -12,6 +12,8 @@
 // 여기서는 알 수 없다(`context`는 FK가 아니라 그때의 값을 그대로 둔 JSON
 // 스냅샷이다) — 그 경우는 도착한 화면 자신의 "찾을 수 없습니다" 상태가 이미
 // 처리한다.
+import { detailTabHref } from "../classes/detail-tab";
+
 import type { NotificationRow } from "./api";
 
 export function notificationHref(notification: NotificationRow): string | null {
@@ -36,14 +38,18 @@ export function notificationHref(notification: NotificationRow): string | null {
       if (typeof classId !== "number") return null;
       return `/classes/${classId}/settings#scoring-key`;
     }
-    // 소유권 이전(#575) — 받는 사람은 클래스 화면 맨 위의 요청 카드로, 넘긴 사람은 강사 카드가
-    // 있는 같은 화면으로 간다.
-    case "classroom_ownership_transfer_requested":
+    // 소유권 이전(#575) — 받는 사람은 클래스 화면 맨 위의 요청 카드로, 넘긴 사람은 강사 목록이
+    // 있는 강사 탭(#635)으로 간다(#669).
+    case "classroom_ownership_transfer_requested": {
+      const classId = context.class_id;
+      if (typeof classId !== "number") return null;
+      return detailTabHref(classId, "problems");
+    }
     case "classroom_ownership_transfer_accepted":
     case "classroom_ownership_transfer_declined": {
       const classId = context.class_id;
       if (typeof classId !== "number") return null;
-      return `/classes/${classId}`;
+      return detailTabHref(classId, "instructors");
     }
     default:
       return null;

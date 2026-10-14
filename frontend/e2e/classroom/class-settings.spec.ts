@@ -16,13 +16,13 @@ async function newClass(page: import("@playwright/test").Page, label: string) {
   return { api, classId: (await created.json()).id as number };
 }
 
-test("채점 연결은 없음에서 시작해 키를 저장하면 상태 줄이 연결됨이 되고, 새로고침해도 남고, 바꾸기를 눌러야 폼이 열린다", async ({
+test("채점 연결은 「연결 없음」에서 시작해 키를 저장하면 상태 줄이 연결됨이 되고, 새로고침해도 남고, 바꾸기를 눌러야 폼이 열린다", async ({
   page,
 }) => {
   const { classId } = await newClass(page, "key");
   await page.goto(`/classes/${classId}/settings#scoring-key`);
 
-  await expect(page.getByTestId("openai-key-status")).toContainText("없음");
+  await expect(page.getByTestId("openai-key-status")).toContainText("연결 없음");
   await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
   await page.getByTestId("openai-key-submit").click();
 

@@ -24,6 +24,7 @@ from collections import Counter
 
 from .api import (
     _reject_if_banned_name,
+    assert_member_expellable,
     class_member_or_404,
     ensure_class_deletable,
     ensure_problem_deletable,
@@ -223,6 +224,7 @@ def _expel_member(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult
     # 화면(`classroom.api.expel_member`)과 같다 — 보관된 클래스에서도 명단 정리는 열려 있다.
     class_obj = class_scope(_id(arguments, "class_id"), grant.instructor_id, write=False, owner=False).class_obj
     member = class_member_or_404(class_obj, _id(arguments, "member_id"))
+    assert_member_expellable(class_obj, member)
     if member.expelled_at is not None:
         return _nothing_to_do("이미 내보낸 참여자입니다.", member=_member_out(member, class_obj))
 

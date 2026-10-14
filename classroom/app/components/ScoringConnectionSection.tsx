@@ -10,31 +10,32 @@ import type { FormEvent } from "react";
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
+import { settingsStatusBadges } from "@/lib/classes/scoring-status";
 
 type ConnectionKind = ClassRow["scoring_connection_kind"];
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
 // 상태 한 줄(#636, 시안 v2) — 배지 · 종류 · 마스킹(또는 호스트). 문장은 두지 않는다: 배지가 상태를,
-// 오른쪽 「바꾸기」가 할 일을 말한다.
+// 오른쪽 「바꾸기」가 할 일을 말한다. 배지의 낱말·톤은 클래스 상세 「채점」 카드와 같은 함수가 정한다
+// (`settingsStatusBadges`, #669) — 여기서 따로 셈하지 않는다.
 function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
+  const badges = settingsStatusBadges(classroom).map((badge) => (
+    <Badge key={badge.label} tone={badge.tone}>
+      {badge.label}
+    </Badge>
+  ));
   if (!classroom.has_openai_key) {
     return (
       <p data-testid="openai-key-status" className={STATUS_CLASS}>
-        <Badge tone="attention">없음</Badge>
+        {badges}
       </p>
     );
   }
   if (classroom.scoring_connection_kind === "compatible_server") {
     return (
       <p data-testid="scoring-connection-status" className={STATUS_CLASS}>
-        {classroom.openai_key_status === "rejected" ? (
-          <Badge tone="attention">거부됨</Badge>
-        ) : classroom.scoring_server_unreachable ? (
-          <Badge tone="attention">연결 불가</Badge>
-        ) : (
-          <Badge tone="verified">연결됨</Badge>
-        )}
+        {badges}
         <span>호환 서버</span>
         <span data-testid="scoring-server-host" className="font-mono text-ink/70">
           {classroom.scoring_server_host}
@@ -45,19 +46,9 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
       </p>
     );
   }
-  const badge =
-    classroom.openai_key_status === "rejected" ? (
-      <Badge tone="attention">거부됨</Badge>
-    ) : classroom.scoring_quota_exhausted ? (
-      <Badge tone="attention">크레딧 소진</Badge>
-    ) : classroom.openai_key_status === "unverified" ? (
-      <Badge tone="neutral">미검증</Badge>
-    ) : (
-      <Badge tone="verified">연결됨</Badge>
-    );
   return (
     <p data-testid="openai-key-status" className={STATUS_CLASS}>
-      {badge}
+      {badges}
       <span>OpenAI 키</span>
       <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
     </p>
