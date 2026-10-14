@@ -27,34 +27,63 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
 
-function ProblemListRow({ classId, problem }: { classId: number; problem: ProblemListItem }) {
+const STATUS_BADGE: Record<
+  ProblemListItem["status"],
+  { label: string; tone: "neutral" | "attention" | "verified" }
+> = {
+  passed: { label: "통과", tone: "verified" },
+  attempted_not_passed: { label: "미통과", tone: "attention" },
+  scoring: { label: "채점 중", tone: "neutral" },
+  not_submitted: { label: "미제출", tone: "neutral" },
+};
+
+// 한 줄 — 행 전체가 링크다(#639). 제목 · 「시도 k회 · 마지막 …」(시도가 없으면 비운다) · 배지 하나.
+function ProblemListRow({
+  classId,
+  problem,
+}: {
+  classId: number;
+  problem: ProblemListItem;
+}) {
+  const badge = STATUS_BADGE[problem.status];
   return (
-    <li
-      data-testid={`my-problem-row-${problem.id}`}
-      className="flex items-center justify-between gap-4 px-4 py-3.5"
-    >
+    <li data-testid={`my-problem-row-${problem.id}`}>
       <Link
         href={`/classes/${classId}/problems/${problem.id}/submit`}
         data-testid={`my-problem-row-${problem.id}-link`}
-        className="min-w-0 text-[14px] hover:underline"
+        className="flex items-center gap-3.5 px-4 py-2.5 hover:bg-ink/[0.03]"
       >
-        {problem.title}
+        <span className="min-w-0 flex-1 truncate text-[14px]">
+          {problem.title}
+        </span>
+        {problem.attempt_count > 0 ? (
+          <span
+            data-testid={`my-problem-row-${problem.id}-attempts`}
+            className="shrink-0 text-[12px] whitespace-nowrap text-ink/45"
+          >
+            시도 {problem.attempt_count}회 · 마지막{" "}
+            {formatRelativeTime(problem.last_attempted_at)}
+          </span>
+        ) : null}
+        <span
+          data-testid={`my-problem-row-${problem.id}-status`}
+          className="shrink-0"
+        >
+          <Badge tone={badge.tone}>{badge.label}</Badge>
+        </span>
       </Link>
-      <span data-testid={`my-problem-row-${problem.id}-status`} className="shrink-0">
-        <Badge tone={problem.passed ? "verified" : "neutral"}>{problem.passed ? "통과" : "미통과"}</Badge>
-      </span>
     </li>
   );
 }
 
-// 목록 아래 접힌 「숨겨진 문제」 섹션(#406) — 강사가 숨겼지만 한 번이라도
-// 낸 문제만 여기 있다. 해당 문제가 있을 때만 자리를 차지하고, 기본은
-// 접힌 채다 — 지금 풀 문제(위 목록)가 이 화면의 주인공이다.
+// 목록 아래 접힌 「▸ 숨겨진 문제 N」 한 줄(#406, #639) — 강사가 숨겼지만 한 번이라도
+// 낸 문제만 여기 있다. 해당 문제가 있을 때만 자리를 차지하고, 기본은 접힌 채다.
 function HiddenProblemsSection({
   classId,
   hiddenProblems,
@@ -67,25 +96,78 @@ function HiddenProblemsSection({
   if (hiddenProblems.length === 0) return null;
 
   return (
-    <div className="mt-4 flex flex-col gap-2">
+    <div className="flex flex-col gap-2">
       <button
         type="button"
         data-testid="hidden-problems-toggle"
         aria-expanded={expanded}
         onClick={() => setExpanded((prev) => !prev)}
-        className="flex items-center gap-1.5 self-start text-[12.5px] text-ink/60 hover:text-ink"
+        className="flex items-center gap-1.5 self-start text-[12.5px] text-ink/45 hover:text-ink"
       >
         <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
-        숨겨진 문제 ({hiddenProblems.length})
+        숨겨진 문제 {hiddenProblems.length}
       </button>
       {expanded ? (
         <Card>
-          <ul data-testid="hidden-problems-list" className="divide-y divide-rule">
+          <ul
+            data-testid="hidden-problems-list"
+            className="divide-y divide-rule"
+          >
             {hiddenProblems.map((problem) => (
-              <ProblemListRow key={problem.id} classId={classId} problem={problem} />
+              <ProblemListRow
+                key={problem.id}
+                classId={classId}
+                problem={problem}
+              />
             ))}
           </ul>
         </Card>
+      ) : null}
+    </div>
+  );
+}
+
+// 머리 아래 진행 한 줄(#639) — 「n/m 통과」 · 막대 · 「채점 중 a · 미제출 b」. 열린 문제만 센다.
+function ProgressLine({ problems }: { problems: ProblemListItem[] }) {
+  const passed = problems.filter((p) => p.status === "passed").length;
+  const scoring = problems.filter((p) => p.status === "scoring").length;
+  const notSubmitted = problems.filter(
+    (p) => p.status === "not_submitted",
+  ).length;
+  const rest = [
+    scoring > 0 ? `채점 중 ${scoring}` : null,
+    notSubmitted > 0 ? `미제출 ${notSubmitted}` : null,
+  ].filter((part): part is string => part !== null);
+  return (
+    <div
+      data-testid="my-problems-progress"
+      className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5"
+    >
+      <span
+        data-testid="my-problems-progress-count"
+        className="font-mono text-[15px] font-semibold"
+      >
+        {passed}/{problems.length} 통과
+      </span>
+      <div
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={problems.length}
+        aria-valuenow={passed}
+        className="relative h-2 w-full max-w-[320px] border border-rule bg-paper"
+      >
+        <div
+          className="absolute inset-y-0 left-0 bg-verified"
+          style={{ width: `${(passed / problems.length) * 100}%` }}
+        />
+      </div>
+      {rest.length > 0 ? (
+        <span
+          data-testid="my-problems-progress-rest"
+          className="text-[12px] text-ink/45"
+        >
+          {rest.join(" · ")}
+        </span>
       ) : null}
     </div>
   );
@@ -147,7 +229,10 @@ function MyDisplayName({
   return (
     <div className="flex flex-col items-end gap-1">
       {editing ? (
-        <form onSubmit={handleSubmit} className="flex flex-wrap items-center justify-end gap-2">
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-wrap items-center justify-end gap-2"
+        >
           <input
             id="my-display-name-input"
             data-testid="my-display-name-input"
@@ -199,7 +284,10 @@ function MyDisplayName({
         </p>
       )}
       {error ? (
-        <span data-testid="my-display-name-error" className="text-[12px] text-attention">
+        <span
+          data-testid="my-display-name-error"
+          className="text-[12px] text-attention"
+        >
           {error}
         </span>
       ) : null}
@@ -220,7 +308,10 @@ export default function MyProblemsPage() {
   if (state.status === "loading") {
     return (
       <PageShell>
-        <p data-testid="my-problems-loading" className="text-[13.5px] text-ink/45">
+        <p
+          data-testid="my-problems-loading"
+          className="text-[13.5px] text-ink/45"
+        >
           불러오는 중...
         </p>
       </PageShell>
@@ -230,7 +321,10 @@ export default function MyProblemsPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="my-problems-not-found" className="text-[22px] font-semibold">
+        <h1
+          data-testid="my-problems-not-found"
+          className="text-[22px] font-semibold"
+        >
           클래스를 찾을 수 없습니다
         </h1>
       </PageShell>
@@ -241,29 +335,28 @@ export default function MyProblemsPage() {
     return (
       <PageShell>
         <ErrorNote>
-          <span data-testid="my-problems-error">문제 목록을 불러오지 못했습니다.</span>
+          <span data-testid="my-problems-error">
+            문제 목록을 불러오지 못했습니다.
+          </span>
         </ErrorNote>
       </PageShell>
     );
   }
 
-  const { className, problems, hiddenProblems, memberDisplayName, memberExpelled, archived } = state;
-  const passed = problems.filter((p) => p.passed).length;
+  const {
+    className,
+    problems,
+    hiddenProblems,
+    memberDisplayName,
+    memberExpelled,
+    archived,
+  } = state;
 
   return (
     <PageShell>
       <PageHeader
         eyebrow={className}
-        title="문제 목록"
-        description={
-          problems.length > 0 ? (
-            <>
-              {problems.length}개 중 <span className="font-mono text-ink">{passed}</span>개를
-              통과했습니다. 한 번이라도 통과하면 계속 통과로 남으니, 남은 문제는 몇 번이든
-              다시 내서 통과할 수 있습니다.
-            </>
-          ) : undefined
-        }
+        title="문제"
         actions={
           // 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다(#372 AC) —
           // 어차피 서버가 403으로 거절할 요청을 화면에서 미리 막는다.
@@ -276,25 +369,36 @@ export default function MyProblemsPage() {
         }
       />
 
-      {problems.length === 0 ? (
-        <Card>
-          <EmptyState>
-            <span data-testid="my-problems-empty-state">
-              아직 열린 문제가 없습니다. 강사가 문제를 열면 여기에 나타납니다.
-            </span>
-          </EmptyState>
-        </Card>
-      ) : (
-        <Card>
-          <ul data-testid="my-problems-list" className="divide-y divide-rule">
-            {problems.map((problem) => (
-              <ProblemListRow key={problem.id} classId={classId} problem={problem} />
-            ))}
-          </ul>
-        </Card>
-      )}
+      <div className="flex flex-col gap-5">
+        {problems.length > 0 ? <ProgressLine problems={problems} /> : null}
 
-      <HiddenProblemsSection classId={classId} hiddenProblems={hiddenProblems} />
+        {problems.length === 0 ? (
+          <Card>
+            <EmptyState>
+              <span data-testid="my-problems-empty-state">
+                열린 문제가 없습니다
+              </span>
+            </EmptyState>
+          </Card>
+        ) : (
+          <Card>
+            <ul data-testid="my-problems-list" className="divide-y divide-rule">
+              {problems.map((problem) => (
+                <ProblemListRow
+                  key={problem.id}
+                  classId={classId}
+                  problem={problem}
+                />
+              ))}
+            </ul>
+          </Card>
+        )}
+
+        <HiddenProblemsSection
+          classId={classId}
+          hiddenProblems={hiddenProblems}
+        />
+      </div>
     </PageShell>
   );
 }
