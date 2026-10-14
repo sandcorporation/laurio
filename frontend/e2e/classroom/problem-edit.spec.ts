@@ -29,6 +29,7 @@ async function seedProblem(page: Page, seed: string, labels: string[], open = fa
 }
 
 async function labelsInOrder(page: Page): Promise<string[]> {
+  await expect(page.getByTestId("checklist-items")).toBeVisible();
   return page.getByTestId("checklist-items").getByRole("textbox").evaluateAll((inputs) =>
     inputs.map((input) => (input as HTMLInputElement).value),
   );
@@ -77,19 +78,23 @@ test("체크리스트 항목을 손잡이로 끌어 놓으면 새로고침 뒤�
   expect(await labelsInOrder(page)).toEqual(["둘째", "셋째", "첫째"]);
 });
 
-test("상태 카드로 초안을 열고, 숨기고, 다시 연다", async ({ page }) => {
-  const { classId, problemId } = await seedProblem(page, `edit-state-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"]);
+test("상태 카드로 초안을 연다", async ({ page }) => {
+  const { classId, problemId } = await seedProblem(page, `edit-open-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"]);
   await page.goto(`/classes/${classId}/problems/${problemId}`);
   const badge = page.getByTestId("edit-problem-status-badge");
   await expect(badge).toHaveText("초안");
-
   await page.getByTestId("open-problem-button").click();
   await expect(badge).toHaveText("열림");
+});
 
+test("상태 카드로 열린 문제를 숨기고 다시 연다", async ({ page }) => {
+  const { classId, problemId } = await seedProblem(page, `edit-hide-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"], true);
+  await page.goto(`/classes/${classId}/problems/${problemId}`);
+  const badge = page.getByTestId("edit-problem-status-badge");
+  await expect(badge).toHaveText("열림");
   await page.getByTestId("hide-problem-button").click();
   await page.getByTestId("hide-problem-confirm").click();
   await expect(badge).toHaveText("숨김");
-
   await page.getByTestId("reopen-problem-button").click();
   await expect(badge).toHaveText("열림");
 });
