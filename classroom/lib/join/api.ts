@@ -16,7 +16,7 @@ export type JoinPreview = {
   // 비면 빈 목록이라 화면이 그 줄을 생략한다.
   instructor_display_names: string[];
   open_problem_count: number;
-  participant_count: number;
+  member_count: number;
   // 보관된 클래스인가(#294) — 참이면 화면이 가입 폼 대신 "끝났다" 안내를
   // 보여준다. 죽은 링크(404)와 달리 미리보기 자체는 그대로 온다.
   archived: boolean;

@@ -40,7 +40,7 @@ test("로그아웃 상태로 가입 링크를 열고 로그인하면 같은 가�
   await expect(page.getByTestId("join-preview-heading")).toHaveText(className);
   await expect(page.getByTestId("join-preview-instructor")).toContainText("김소유");
   await expect(page.getByTestId("join-preview-problem-count")).toHaveText("1 문제");
-  await expect(page.getByTestId("join-preview-participant-count")).toHaveText("0 참여자");
+  await expect(page.getByTestId("join-preview-member-count")).toHaveText("0 참여자");
   await expect(page.getByTestId("join-display-name-input")).toHaveCount(0);
   await expect(page.getByTestId("join-login-link")).toHaveText("로그인하고 가입하기");
   await page.getByTestId("join-login-link").click();

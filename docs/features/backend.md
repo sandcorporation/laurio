@@ -249,7 +249,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
 | `POST .../archive`·`.../unarchive` | 클래스를 보관하고 되돌린다 — 지우지 않는다(#294) |
 | `DELETE /api/classroom/classes/{id}` | 클래스를 지운다 — 어느 문제에도 제출이 없을 때만, 되돌릴 수 없다(#330) |
-| `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요 — 강사 전원의 강사 이름, 소유자 먼저·빈 이름 빼고, #565; 열린 문제 수·참여 중인 참여자 수는 내 클래스 행과 같은 기준, #659)와 가입(#280) |
+| `GET`·`POST /api/classroom/join/{code}` | 가입 링크 미리보기(인증 불필요 — 강사 전원의 강사 이름, 소유자 먼저·빈 이름 빼고, #565; 열린 문제 수·참여 중인 참여자 수는 내 클래스 행과 같은 기준·같은 이름 `open_problem_count`·`member_count`, #659·#664)와 가입(#280) |
 | `POST /api/classroom/classes/{id}/co-instructor-invites` | 공동 강사 초대를 하나 만든다 — 강사 누구나, 보관된 클래스에서도, 여러 개를 동시에(#561) |
 | `GET /api/classroom/classes/{id}/instructors` | 강사 목록 — 소유자 먼저, 그다음 공동 강사를 수락한 순서로(이름·역할·공동 강사가 된 때와 그 길 — 초대 수락 또는 소유권을 넘김(#565) — ·나인가, 공동 강사 줄의 id). 강사 누구나, 보관된 클래스에서도(#562) |
 | `PATCH /api/classroom/classes/{id}/instructors/me` | 부른 강사가 이 클래스에서 불릴 **자기** 강사 이름을 바꾼다 — 소유자든 공동 강사든, 보관된 클래스에서도. 경로에 다른 강사를 가리킬 자리가 없다(#565) |

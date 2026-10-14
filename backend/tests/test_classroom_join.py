@@ -47,7 +47,7 @@ def _join_url(code: str) -> str:
     return f"/api/classroom/join/{code}"
 
 
-def test_join_preview_shows_class_name_instructor_display_name_problem_count_and_participant_count(
+def test_join_preview_shows_class_name_instructor_display_name_problem_count_and_member_count(
     client, db
 ):
     instructor = _login(client, uid="instructor-1", email="teacher@example.com")
@@ -69,7 +69,7 @@ def test_join_preview_shows_class_name_instructor_display_name_problem_count_and
     assert body["instructor_display_name"] == "김강사"
     # 막 만든 문제는 초안이라 가입할 사람에게 보이지 않는다(#659).
     assert body["open_problem_count"] == 0
-    assert body["participant_count"] == 0
+    assert body["member_count"] == 0
 
 
 def test_join_preview_never_leaks_the_instructors_email(client, db):
@@ -175,7 +175,7 @@ def test_joined_participant_is_counted_in_the_preview(client, db):
     )
 
     preview = client.get(_join_url(created["join_code"]))
-    assert preview.json()["participant_count"] == 1
+    assert preview.json()["member_count"] == 1
 
 
 def test_the_same_person_does_not_join_the_same_class_twice(client, db):

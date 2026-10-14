@@ -82,6 +82,27 @@ def test_class_row_counts_skip_the_instructor_the_co_instructor_and_the_expelled
     assert row["member_count"] == list_problems(client, owner["access"], class_id)[0]["member_count"]
 
 
+def test_one_active_member_rule_for_a_single_class_and_for_many(client, db):
+    """「강사 전원·내보낸 사람 제외」는 함수 하나다(#664) — 클래스 하나짜리(문제 목록의 분모)와
+    여러 클래스용(클래스 행·가입 미리보기)이 같은 수를 낸다. 한 클래스의 강사가 다른 클래스에서는
+    참여자로 세어지는지까지 본다."""
+
+    owner, class_id, _problem, a, _b = _class_with_two_learners(client)
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    gone = login(client, "gone")
+    join_class(client, gone["access"], class_id, instructor_access=owner["access"], display_name="떠난 학생")
+    _expel(client, owner, class_id, "떠난 학생")
+    other_id = create_class(client, a["access"], name="가의 클래스")
+    create_open_problem(client, a["access"], other_id)
+    join_class(client, owner["access"], other_id, instructor_access=a["access"], display_name="참여자가 된 강사")
+
+    for access, cid, expected in ((owner["access"], class_id, 2), (a["access"], other_id, 1)):
+        row = _row(client, access, cid)
+        denominators = {p["member_count"] for p in list_problems(client, access, cid)}
+        preview = join_preview(client, join_code(client, access, cid))
+        assert (row["member_count"], denominators, preview["member_count"]) == (expected, {expected}, expected)
+
+
 def test_class_row_problem_count_includes_drafts_and_the_average_is_over_open_problems(client, db, monkeypatch):
     owner, class_id, problem, a, _b = _class_with_two_learners(client)
     create_open_problem(client, owner["access"], class_id, title="초안", open=False)
@@ -118,8 +139,8 @@ def test_join_preview_counts_match_the_class_rows(client, db):
     joined = _get(client, a["access"], "/joined").json()[0]
     teaching = _row(client, owner["access"], class_id)
 
-    assert (preview["participant_count"], preview["open_problem_count"]) == (2, 1)
-    assert preview["participant_count"] == teaching["member_count"]
+    assert (preview["member_count"], preview["open_problem_count"]) == (2, 1)
+    assert preview["member_count"] == teaching["member_count"]
     assert preview["open_problem_count"] == joined["open_problem_count"]
 
     for name in ("다", "라"):
@@ -127,7 +148,7 @@ def test_join_preview_counts_match_the_class_rows(client, db):
         join_class(client, extra["access"], class_id, instructor_access=owner["access"], display_name=name)
     create_open_problem(client, owner["access"], class_id, title="2주차")
     with CaptureQueriesContext(connection) as after:
-        assert join_preview(client, code)["participant_count"] == 4
+        assert join_preview(client, code)["member_count"] == 4
     assert len(after) == len(before)
 
 

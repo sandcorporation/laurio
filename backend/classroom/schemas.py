@@ -486,8 +486,9 @@ class JoinPreviewOut(Schema):
     instructor_display_names: list[str] = []
     #: 열린 문제 수(#659) — 가입하면 보게 될 것. 참여 중 행의 `open_problem_count` 와 같다(초안·숨김 제외).
     open_problem_count: int
-    #: 참여 중인 참여자 수(#659) — 가르치는 행의 `member_count` 와 같다(강사 전원·내보낸 사람 제외).
-    participant_count: int
+    #: 참여 중인 참여자 수(#659) — 가르치는 행의 `member_count` 와 같은 이름·같은 함수(#664,
+    #: 강사 전원·내보낸 사람 제외).
+    member_count: int
     #: 보관된 클래스인가(#294). 죽은 링크(404)와 달리 미리보기 자체는 계속
     #: 보여준다 — "고장"이 아니라 "끝났다"로 읽혀야 하기 때문이다. 참이면
     #: 화면이 가입 폼 대신 안내문을 보여준다.
