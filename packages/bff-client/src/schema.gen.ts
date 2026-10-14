@@ -7613,6 +7613,11 @@ export interface components {
             model_is_reasoning: boolean;
             /** Order */
             order: number;
+            /**
+             * Participant Attempt Count
+             * @default 0
+             */
+            participant_attempt_count: number;
             /** Pass Rate */
             pass_rate?: number | null;
             /**

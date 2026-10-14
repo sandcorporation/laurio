@@ -48,7 +48,6 @@ import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
-import { useSubmissionCount } from "@/lib/submissions/use-submission-count";
 
 const STATUS_LABEL: Record<string, string> = {
   draft: "초안",
@@ -77,7 +76,6 @@ export default function EditProblemPage() {
   const { state, reload } = useProblem(classId, problemId);
   const { state: modelsState } = useScoringModels(classId);
   const costState = useScoringCost(classId, problemId);
-  const submissionCount = useSubmissionCount(classId, problemId);
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -364,7 +362,11 @@ export default function EditProblemPage() {
             data-testid="problem-submissions-link"
             className={buttonClass()}
           >
-            제출 현황{submissionCount === null ? "" : <span className="ml-1.5 font-mono text-ink/60">{submissionCount}</span>}
+            제출 현황{state.status === "ready" ? (
+              <span className="ml-1.5 font-mono text-ink/60">{state.problem.participant_attempt_count}</span>
+            ) : (
+              ""
+            )}
           </Link>
           <button
             type="submit"

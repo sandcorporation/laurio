@@ -84,8 +84,8 @@ describe("제출 현황 계산", () => {
         ],
       },
     });
-    expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 2, unmet: ["오류 화면"] });
-    expect(requiredSummary(row({ status: "pending" }), items, false)).toEqual({ met: null, total: 2, unmet: [] });
+    expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 2, unmet: ["오류 화면"], syntaxMet: null });
+    expect(requiredSummary(row({ status: "pending" }), items, false)).toEqual({ met: null, total: 2, unmet: [], syntaxMet: null });
   });
 
   // #670 — 분모와 문법 항목은 문제의 지금 `syntax_check_enabled` 로 센다(백엔드 `is_score_passed` 와 같은 기준).
@@ -93,7 +93,7 @@ describe("제출 현황 계산", () => {
   const verdicts = [{ checklist_item_id: 10, is_met: true, reasoning: "" }];
 
   it("문법 검사가 켜져 있으면 채점 전에도 분모에 센다", () => {
-    expect(requiredSummary(row({ status: "pending" }), items, true)).toEqual({ met: null, total: 2, unmet: [] });
+    expect(requiredSummary(row({ status: "pending" }), items, true)).toEqual({ met: null, total: 2, unmet: [], syntaxMet: null });
   });
 
   it("문법 결과 없이 만든 자동 미달 점수도 분모가 같고 문법 항목은 미충족이다", () => {
@@ -104,6 +104,7 @@ describe("제출 현황 계산", () => {
       met: 0,
       total: 2,
       unmet: ["오류 화면", "문법 검사"],
+      syntaxMet: false,
     });
   });
 
@@ -117,7 +118,7 @@ describe("제출 현황 계산", () => {
         reasoning: verdicts,
       },
     });
-    expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 1, unmet: [] });
+    expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 1, unmet: [], syntaxMet: null });
   });
 
   it("문법 검사가 켜져 있고 오류가 있으면 「문법 오류」", () => {
@@ -129,6 +130,18 @@ describe("제출 현황 계산", () => {
         reasoning: verdicts,
       },
     });
-    expect(requiredSummary(scored, items, true)).toEqual({ met: 1, total: 2, unmet: ["문법 오류"] });
+    expect(requiredSummary(scored, items, true)).toEqual({ met: 1, total: 2, unmet: ["문법 오류"], syntaxMet: false });
+  });
+
+  it("문법 검사를 통과하면 문법 줄은 충족이다", () => {
+    const scored = row({
+      score: {
+        model_version: "m",
+        created_at: "",
+        syntax_check: { is_met: true, reasoning: "", judged_by: "parser", findings: [] },
+        reasoning: verdicts,
+      },
+    });
+    expect(requiredSummary(scored, items, true)).toEqual({ met: 2, total: 2, unmet: [], syntaxMet: true });
   });
 });

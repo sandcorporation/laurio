@@ -266,7 +266,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281). 강사(소유자·공동 강사)의 자기 참여자 행은 403 「강사는 내보낼 수 없습니다.」(#669) |
 | `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
 | `GET .../recent-attempts` | 참여자의 최근 시도 열 건(고정) — 이름·문제 제목·상태(`passed`·`attempted_not_passed`·`scoring`·`needs_setup`)·시각, 강사 전용(#632) |
-| `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다, 채점 지침(#386)도 함께 받는다 |
+| `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 마감 필드가 없다, 채점 지침(#386)도 함께 받는다. 응답에 참여자(강사 본인·내보낸 사람 제외)의 마지막 제출 시각과 시도 수(`participant_attempt_count`, #674 — 제출 현황의 「시도」와 같은 집합, 목록에서도 질의 하나)를 싣는다 |
 | `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·「추론 모델」 스위치(`model_is_reasoning`, #602)·채점 지침(#386)을 고친다 — 호환 서버면 자기 모델을 고르거나 스위치를 바꿀 때 클래스 기본과 같은 시험 호출을 거친다(만들 때도) |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open`·`.../hide`·`.../reopen` | 초안→열림→숨김→열림 전이(#440, `classroom.problem_transitions`) — 표에 없는 상태에서 부르면 400, 열림·숨김으로 가는 전이는 필수 체크리스트 항목이 없으면 400 |
