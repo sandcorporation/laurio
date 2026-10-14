@@ -30,6 +30,15 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       "리다이렉트만 한다. 이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
   },
   {
+    route: "/classes/[id]/members",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지
+      // 사용자에게 렌더링되는 화면 문자열이 아니다 — 이슈 번호가 바로 그 근거다.
+      "참여자 명단 화면은 클래스 상세의 참여자 탭으로 합쳐졌다(#634) — 예전 주소를 " +
+      "북마크한 사람만 밟고, 이 라우트는 /classes/<id>?tab=participants 로 리다이렉트만 " +
+      "한다. 이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
+  },
+  {
     route: "/oauth/authorize",
     reason:
       // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지

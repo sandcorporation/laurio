@@ -38,6 +38,9 @@ export type GridMemberRow = {
   display_name: string;
   is_instructor: boolean;
   expelled: boolean;
+  // 가입한 때·마지막으로 낸 때(#632) — 강사 본인·내보낸 행에도 채워지고, 낸 적이 없으면 null.
+  joined_at: string | null;
+  last_submitted_at: string | null;
   cells: GridCell[];
 };
 

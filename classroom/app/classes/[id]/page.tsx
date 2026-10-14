@@ -7,12 +7,11 @@
 //
 // 화면에 설명 문장을 두지 않는다 — 라벨·값·배지·버튼만. 채점 연결의 문제(키 없음·거부됨·크레딧
 // 소진·서버 연결 불가)는 배너가 아니라 「채점」 카드의 상태 한 줄이 말한다.
-// 참여자·강사 탭의 내용은 각자 티켓(#634·#635)이 다시 짠다 — 그때까지는 예전 화면을 그 자리에 둔다.
-import Link from "next/link";
+// 강사 탭의 내용은 #635 가 다시 짠다 — 그때까지는 예전 화면을 그 자리에 둔다.
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
-import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
+import { ErrorNote, PageShell } from "@/app/components/ui";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { copyClass } from "@/lib/classes/api";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
@@ -28,9 +27,9 @@ import { GettingStartedCard, startSteps } from "./getting-started-card";
 import { InstructorsSection } from "./instructors-section";
 import { JoinLinkStrip } from "./join-link-strip";
 import { OwnershipTransferAcceptedNote, OwnershipTransferOffer } from "./ownership-transfer-offer";
+import { ParticipantsTab } from "./participants-tab";
 import { ProblemsTable } from "./problems-table";
 import { RecentAttemptsCard } from "./recent-attempts-card";
-import { RosterGridTab } from "./roster-grid-tab";
 import { ScoringCard } from "./scoring-card";
 
 function joinLinkUrl(joinCode: string): string {
@@ -181,15 +180,7 @@ function ClassDetail() {
               </div>
             </div>
           ) : tab === "participants" ? (
-            <div className="flex flex-col gap-3 border border-t-0 border-rule bg-surface p-4">
-              {/* 명단(가입일·내보내기)은 아직 따로 있는 화면이다 — 참여자 탭(#634)이 격자와 하나로 합친다. */}
-              <div>
-                <Link href={`/classes/${classId}/members`} data-testid="members-link" className={buttonClass("secondary", "sm")}>
-                  참여자 명단
-                </Link>
-              </div>
-              <RosterGridTab classId={classId} />
-            </div>
+            <ParticipantsTab classId={classId} onChanged={reloadClass} />
           ) : (
             <div className="flex flex-col gap-4 border border-t-0 border-rule bg-surface p-4">
               {/* 역할과 대기 요청이 바뀌면(넘겨받기·요청·취소) 강사 목록을 처음부터 다시 읽는다. */}
