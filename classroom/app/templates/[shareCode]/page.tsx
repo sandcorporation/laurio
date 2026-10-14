@@ -4,7 +4,7 @@
 // 이미 보장한다 — `/join/[code]`와 달리 needsLogin 분기가 없다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
@@ -22,6 +22,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import type { ClassRow } from "@/lib/classes/api";
 import { defaultCopyTarget, selectCopyTargets } from "@/lib/classes/copy-targets";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate } from "@/lib/problem-templates/api";
@@ -40,12 +41,14 @@ export default function ProblemTemplatePreviewPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (myClassesState.status !== "ready") return;
+  // 복사 대상의 기본값은 렌더 중에 맞춘다(#675·#691) — 효과로 넣으면 빈 선택칸이 먼저 그려지고, 그 틈에
+  // 고른 값을 효과가 덮는다. 목록을 다시 읽어 새 배열이 오면 같은 자리에서 다시 맞춘다.
+  const [seededClasses, setSeededClasses] = useState<ClassRow[] | null>(null);
+  if (myClassesState.status === "ready" && myClassesState.classes !== seededClasses) {
+    setSeededClasses(myClassesState.classes);
     const target = defaultCopyTarget(myClassesState.classes);
     if (target) setTargetClassId(String(target.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myClassesState]);
+  }
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState("");
