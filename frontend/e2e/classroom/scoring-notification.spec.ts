@@ -105,8 +105,8 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
   await expect(page).toHaveURL(
     new RegExp(`/classes/${classId}/problems/${problemId}/submit#submission-${submissionId}$`),
   );
-  await expect(page.getByTestId(`submission-row-${submissionId}-status`)).toContainText(
-    "채점 완료 · 통과",
-  );
-  await expect(page.getByTestId(`submission-row-${submissionId}-verdicts`)).toContainText("충족");
+  await expect(page.getByTestId(`submission-row-${submissionId}-status`)).toHaveText("통과");
+  // 가장 최근 채점의 판정은 체크리스트 카드가 품는다(#640) — 그 시도의 줄에는 판정을 또 펼치지 않는다.
+  await expect(page.getByTestId("my-problem-checklist-badge")).toContainText("통과");
+  await expect(page.getByTestId("my-problem-checklist")).toContainText("충족");
 });

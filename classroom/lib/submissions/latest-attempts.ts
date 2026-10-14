@@ -59,7 +59,7 @@ export type RequiredSummary = {
 
 /** 「필수 m/n」 — 필수 체크리스트 항목과(결과에 실렸다면) 문법 검사 기본 항목을 센다. */
 export function requiredSummary(
-  row: InstructorSubmissionRow,
+  row: Pick<InstructorSubmissionRow, "status" | "score">,
   items: ReadonlyArray<{ id: number; label: string; required: boolean }>,
 ): RequiredSummary {
   const required = items.filter((item) => item.required);
