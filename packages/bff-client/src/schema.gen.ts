@@ -1282,6 +1282,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/recent-attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recent Attempts
+         * @description 클래스의 최근 시도 열 건(#632) — 강사 전용. 강사 본인·내보낸 참여자의 시도는
+         *     달성률과 같은 이유로 뺀다. 상태는 격자 칸의 낱말이다: 통과 이력이 아니라 **그 시도
+         *     하나**의 결과(통과·미통과)이고, 아직 채점 전이면 「설정 필요」(`needs_setup`) 또는
+         *     「채점 중」(`scoring`)이다.
+         */
+        get: operations["classroom_api_list_recent_attempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/roster-grid": {
         parameters: {
             query?: never;
@@ -4875,6 +4898,8 @@ export interface components {
              * @default false
              */
             archived: boolean;
+            /** Average Pass Rate */
+            average_pass_rate?: number | null;
             /**
              * Created At
              * Format: date-time
@@ -4902,6 +4927,13 @@ export interface components {
             instructor_display_name: string;
             /** Join Code */
             join_code: string;
+            /** Last Submitted At */
+            last_submitted_at?: string | null;
+            /**
+             * Member Count
+             * @default 0
+             */
+            member_count: number;
             /**
              * My Instructor Display Name
              * @default
@@ -4914,12 +4946,22 @@ export interface components {
             /** Openai Key Status */
             openai_key_status?: string | null;
             pending_ownership_transfer?: components["schemas"]["PendingOwnershipTransferOut"] | null;
+            /**
+             * Problem Count
+             * @default 0
+             */
+            problem_count: number;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /**
              * Role
              * @enum {string}
              */
             role: "owner" | "co_instructor";
+            /**
+             * Scored Attempt Count
+             * @default 0
+             */
+            scored_attempt_count: number;
             /** Scoring Auth Masked */
             scoring_auth_masked?: string | null;
             /**
@@ -5126,6 +5168,10 @@ export interface components {
             id: number;
             /** Is Instructor */
             is_instructor: boolean;
+            /** Joined At */
+            joined_at?: string | null;
+            /** Last Submitted At */
+            last_submitted_at?: string | null;
         };
         /**
          * ClassroomInstructorSubmissionOut
@@ -5300,6 +5346,32 @@ export interface components {
              * @default false
              */
             viewing_as_instructor: boolean;
+        };
+        /**
+         * ClassroomRecentAttemptOut
+         * @description 클래스의 최근 시도 한 줄(#632) — 강사 전용. `status`는 격자 칸과 같은 낱말이다:
+         *     "passed" | "attempted_not_passed" | "scoring" | "needs_setup".
+         */
+        ClassroomRecentAttemptOut: {
+            /** Attempt Number */
+            attempt_number: number;
+            /** Id */
+            id: number;
+            /** Member Display Name */
+            member_display_name: string;
+            /** Member Id */
+            member_id: number;
+            /** Problem Id */
+            problem_id: number;
+            /** Problem Title */
+            problem_title: string;
+            /** Status */
+            status: string;
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
         };
         /** ClassroomRosterGridOut */
         ClassroomRosterGridOut: {
@@ -6556,6 +6628,16 @@ export interface components {
             joined_at: string;
             /** Name */
             name: string;
+            /**
+             * Open Problem Count
+             * @default 0
+             */
+            open_problem_count: number;
+            /**
+             * Passed Count
+             * @default 0
+             */
+            passed_count: number;
         };
         /** JournalEntryIn */
         JournalEntryIn: {
@@ -7518,6 +7600,8 @@ export interface components {
              * @default
              */
             instructor_note: string;
+            /** Last Submitted At */
+            last_submitted_at?: string | null;
             /**
              * Member Count
              * @default 0
@@ -11004,6 +11088,37 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_recent_attempts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomRecentAttemptOut"][];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

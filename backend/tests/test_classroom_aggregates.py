@@ -1,0 +1,261 @@
+"""강의실 집계 필드 — 클래스 행 수치·문제 행 최근 제출·최근 제출 목록·격자 행 가입일 (#632, 시안 v2).
+
+세는 사람은 달성률과 같다(강사 전원·내보낸 참여자 제외, CONTEXT.md 「공동 강사」). 준비와 확인은
+전부 마운트된 HTTP API 로 한다(`tests.classroom_scenarios`).
+"""
+
+from __future__ import annotations
+
+import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
+from tests.classroom_scenarios import (
+    CLASSES_URL,
+    add_co_instructor,
+    auth_header,
+    create_class,
+    create_open_problem,
+    force_real_scoring_adapter,
+    get_class,
+    join_class,
+    list_problems,
+    list_taught_classes,
+    login,
+    respond_with_verdict,
+    roster_grid,
+    run_scan,
+    submit_repository,
+)
+
+
+@pytest.fixture(autouse=True)
+def _real_scoring():
+    with force_real_scoring_adapter():
+        yield
+
+
+def _get(client, access: str, path: str):
+    return client.get(f"{CLASSES_URL}{path}", **auth_header(access))
+
+
+def _expel(client, owner: dict, class_id: int, display_name: str) -> None:
+    members = _get(client, owner["access"], f"/{class_id}/members").json()
+    member = next(m for m in members if m["display_name"] == display_name)
+    response = client.post(
+        f"{CLASSES_URL}/{class_id}/members/{member['id']}/expel",
+        content_type="application/json",
+        **auth_header(owner["access"]),
+    )
+    assert response.status_code == 200, response.content
+
+
+def _row(client, access: str, class_id: int) -> dict:
+    return next(c for c in list_taught_classes(client, access) if c["id"] == class_id)
+
+
+def _class_with_two_learners(client, monkeypatch=None):
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"])
+    problem = create_open_problem(client, owner["access"], class_id)
+    a, b = login(client, "learner-a"), login(client, "learner-b")
+    join_class(client, a["access"], class_id, instructor_access=owner["access"], display_name="가")
+    join_class(client, b["access"], class_id, instructor_access=owner["access"], display_name="나")
+    return owner, class_id, problem, a, b
+
+
+def test_class_row_counts_skip_the_instructor_the_co_instructor_and_the_expelled(client, db):
+    owner, class_id, _problem, _a, _b = _class_with_two_learners(client)
+    helper = login(client, "helper")
+    join_class(client, helper["access"], class_id, instructor_access=owner["access"], display_name="조교였던 학생")
+    gone = login(client, "gone")
+    join_class(client, gone["access"], class_id, instructor_access=owner["access"], display_name="떠난 학생")
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    add_co_instructor(client, owner["access"], class_id, helper["access"], display_name="조교")
+    _expel(client, owner, class_id, "떠난 학생")
+
+    row = _row(client, owner["access"], class_id)
+
+    assert row["member_count"] == 2
+    assert row["member_count"] == list_problems(client, owner["access"], class_id)[0]["member_count"]
+
+
+def test_class_row_problem_count_includes_drafts_and_the_average_is_over_open_problems(client, db, monkeypatch):
+    owner, class_id, problem, a, _b = _class_with_two_learners(client)
+    create_open_problem(client, owner["access"], class_id, title="초안", open=False)
+    second = create_open_problem(client, owner["access"], class_id, title="2주차")
+    submit_repository(client, a["access"], class_id, problem.id)
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True)
+    run_scan(client)
+
+    row = _row(client, owner["access"], class_id)
+
+    rates = [p["pass_rate"] for p in list_problems(client, owner["access"], class_id) if p["status"] == "open"]
+    assert rates == [0.5, 0.0]
+    assert row["problem_count"] == 3
+    assert row["average_pass_rate"] == pytest.approx(0.25)
+    assert second.id
+
+
+def test_class_row_average_pass_rate_is_null_without_open_problems_or_participants(client, db):
+    owner = login(client, "owner")
+    empty = create_class(client, owner["access"], name="빈 클래스")
+    only_draft = create_class(client, owner["access"], name="초안만")
+    create_open_problem(client, owner["access"], only_draft, open=False)
+    no_learners = create_class(client, owner["access"], name="참여자 없음")
+    create_open_problem(client, owner["access"], no_learners)
+
+    for class_id in (empty, only_draft, no_learners):
+        assert _row(client, owner["access"], class_id)["average_pass_rate"] is None
+    assert _row(client, owner["access"], only_draft)["problem_count"] == 1
+
+
+def test_class_row_last_submitted_at_ignores_the_instructors_own_attempts(client, db):
+    owner, class_id, problem, a, _b = _class_with_two_learners(client)
+    assert _row(client, owner["access"], class_id)["last_submitted_at"] is None
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    submit_repository(client, a["access"], class_id, problem.id)
+    submit_repository(client, owner["access"], class_id, problem.id)
+
+    row = _row(client, owner["access"], class_id)
+
+    mine = _get(client, a["access"], f"/{class_id}/problems/{problem.id}/mine").json()
+    assert row["last_submitted_at"] == mine["submissions"][0]["created_at"]
+
+
+def test_class_detail_counts_every_scored_attempt(client, db, monkeypatch):
+    owner, class_id, problem, a, b = _class_with_two_learners(client)
+    assert get_class(client, owner["access"], class_id)["scored_attempt_count"] == 0
+    submit_repository(client, a["access"], class_id, problem.id)
+    submit_repository(client, a["access"], class_id, problem.id)
+    submit_repository(client, b["access"], class_id, problem.id)
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=False)
+    run_scan(client)
+
+    scored = get_class(client, owner["access"], class_id)["scored_attempt_count"]
+
+    assert 1 <= scored <= 3
+
+
+def test_problem_row_last_submitted_at_is_per_problem(client, db):
+    owner, class_id, problem, a, _b = _class_with_two_learners(client)
+    other = create_open_problem(client, owner["access"], class_id, title="2주차")
+    submit_repository(client, a["access"], class_id, problem.id)
+
+    rows = {p["id"]: p for p in list_problems(client, owner["access"], class_id)}
+
+    assert rows[problem.id]["last_submitted_at"] is not None
+    assert rows[other.id]["last_submitted_at"] is None
+
+
+def test_joined_row_reports_my_passed_and_open_problem_counts(client, db, monkeypatch):
+    owner, class_id, problem, a, _b = _class_with_two_learners(client)
+    create_open_problem(client, owner["access"], class_id, title="2주차")
+    create_open_problem(client, owner["access"], class_id, title="초안", open=False)
+    submit_repository(client, a["access"], class_id, problem.id)
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True)
+    run_scan(client)
+
+    mine = _get(client, a["access"], "/joined").json()
+    theirs = _get(client, _b["access"], "/joined").json()
+
+    assert (mine[0]["passed_count"], mine[0]["open_problem_count"]) == (1, 2)
+    assert (theirs[0]["passed_count"], theirs[0]["open_problem_count"]) == (0, 2)
+
+
+def test_grid_member_rows_carry_joined_at_and_last_submitted_at(client, db):
+    owner, class_id, problem, a, _b = _class_with_two_learners(client)
+    submit_repository(client, a["access"], class_id, problem.id)
+
+    rows = {m["display_name"]: m for m in roster_grid(client, owner["access"], class_id)["members"]}
+
+    assert rows["가"]["joined_at"] is not None
+    assert rows["가"]["last_submitted_at"] is not None
+    assert rows["나"]["joined_at"] is not None
+    assert rows["나"]["last_submitted_at"] is None
+
+
+def test_recent_attempts_lists_ten_newest_with_the_four_statuses(client, db, monkeypatch):
+    owner, class_id, problem, a, b = _class_with_two_learners(client)
+    for _ in range(11):
+        submit_repository(client, a["access"], class_id, problem.id)
+
+    unscored = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
+    assert len(unscored) == 10
+    assert {r["status"] for r in unscored} == {"scoring"}
+
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True)
+    run_scan(client)
+    submit_repository(client, b["access"], class_id, problem.id)
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=False)
+    run_scan(client)
+
+    rows = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
+    assert rows[0]["member_display_name"] == "나"
+    assert rows[0]["problem_title"] == "1주차"
+    assert rows[0]["status"] == "attempted_not_passed"
+    assert "passed" in {r["status"] for r in rows}
+    assert [r["submitted_at"] for r in rows] == sorted((r["submitted_at"] for r in rows), reverse=True)
+
+
+def test_recent_attempts_marks_needs_setup_when_there_is_no_scoring_key(client, db):
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"], with_key=False)
+    problem = create_open_problem(client, owner["access"], class_id)
+    a = login(client, "learner-a")
+    join_class(client, a["access"], class_id, instructor_access=owner["access"], display_name="가")
+    submit_repository(client, a["access"], class_id, problem.id)
+
+    rows = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
+
+    assert [r["status"] for r in rows] == ["needs_setup"]
+
+
+def test_recent_attempts_skip_the_instructor_and_the_expelled_and_are_instructor_only(client, db):
+    owner, class_id, problem, a, b = _class_with_two_learners(client)
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    submit_repository(client, owner["access"], class_id, problem.id)
+    submit_repository(client, b["access"], class_id, problem.id)
+    submit_repository(client, a["access"], class_id, problem.id)
+    _expel(client, owner, class_id, "나")
+
+    rows = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
+
+    assert [r["member_display_name"] for r in rows] == ["가"]
+    assert _get(client, a["access"], f"/{class_id}/recent-attempts").status_code == 404
+
+
+def test_listing_query_count_does_not_grow_with_classes_problems_or_members(client, db):
+    owner = login(client, "owner")
+
+    def build(name: str):
+        class_id = create_class(client, owner["access"], name=name)
+        create_open_problem(client, owner["access"], class_id)
+        create_open_problem(client, owner["access"], class_id, title="2주차")
+        learner = login(client, f"{name}-learner")
+        join_class(client, learner["access"], class_id, instructor_access=owner["access"], display_name="학생")
+        return class_id, learner
+
+    first, learner = build("하나")
+    submit_repository(client, learner["access"], first, list_problems(client, owner["access"], first)[0]["id"])
+
+    def count(path: str, access: str) -> int:
+        with CaptureQueriesContext(connection) as ctx:
+            assert _get(client, access, path).status_code == 200
+        return len(ctx)
+
+    before_classes = count("", owner["access"])
+    before_joined = count("/joined", learner["access"])
+    before_problems = count(f"/{first}/problems", owner["access"])
+    for name in ("둘", "셋", "넷"):
+        build(name)
+    extra = login(client, "extra")
+    join_class(client, extra["access"], first, instructor_access=owner["access"], display_name="더")
+    create_open_problem(client, owner["access"], first, title="3주차")
+
+    # 클래스 행의 기존 직렬화(보관 여부·템플릿·소유권 이전)는 클래스마다 질의 넷(제출 유무·템플릿·시계·소유권 이전)이 따로 든다 — 이 티켓의
+    # 집계 필드는 클래스를 몇 개 더해도 질의를 늘리지 않는다.
+    assert count("", owner["access"]) <= before_classes + 4 * 3
+    assert count("/joined", learner["access"]) <= before_joined
+    # 문제 행의 기존 직렬화(달성률의 제출 질의·템플릿)는 문제마다 질의 둘이 따로 든다 — 마지막 제출은 더하지 않는다.
+    assert count(f"/{first}/problems", owner["access"]) <= before_problems + 2
