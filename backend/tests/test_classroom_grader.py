@@ -365,6 +365,43 @@ def test_a_round_scores_what_is_queued(django_db_blocker, settings):
 
 
 @pytest.mark.django_db(transaction=True)
+def test_a_round_does_not_end_when_in_flight_attempts_finish_during_a_pick(django_db_blocker, monkeypatch, settings):
+    """#648 — 집기(`pick`)는 시작할 때의 상태(상한에 닿은 클래스·처리 중인 시도)로 후보를 읽는다. 그 DB
+    걸음 사이에 하던 채점이 **모두** 끝나면 그 집기는 0을 돌려주고 `_tasks` 도 비어 있다 — 그래도 큐에는
+    상한 때문에 빠졌던 시도가 남아 있다. 바퀴는 그때 끝나면 안 된다. CI 의 CPU 경쟁에서 둘이 같은 틱에
+    끝나며 나던 흔들림을, 그 둘이 집기 도중에 끝나도록 순서를 고정해 재현한다."""
+
+    settings.CLASSROOM_GRADER_INLINE = False
+    gate = asyncio.Event()
+    real_score_async = FakeClassroomScoringAdapter.score_async
+
+    async def _gated(self, scoring_input):
+        await gate.wait()
+        return await real_score_async(self, scoring_input)
+
+    real_pick = classroom_grader.Grader.pick
+
+    async def _pick_while_both_finish(self):
+        in_flight_at_start = set(self._tasks)
+        started = await real_pick(self)
+        if len(in_flight_at_start) == 2 and not gate.is_set():
+            gate.set()  # 집기가 상한을 읽은 뒤에 둘 다 끝난다
+            await asyncio.wait(in_flight_at_start)
+        return started
+
+    monkeypatch.setattr(FakeClassroomScoringAdapter, "score_async", _gated)
+    monkeypatch.setattr(classroom_grader.Grader, "pick", _pick_while_both_finish)
+    client = Client()
+    ctx = _class_with_open_problem(client)
+    ids = _queue_attempts(client, ctx, 3)
+
+    results = classroom_grader.run_round(global_limit=4, per_connection_limit=2, poll_seconds=0.01)
+
+    assert sorted(r["submission_id"] for r in results) == sorted(ids)
+    assert ClassroomScore.objects.count() == 3
+
+
+@pytest.mark.django_db(transaction=True)
 def test_concurrency_is_capped_per_connection_and_globally(django_db_blocker, monkeypatch, settings):
     settings.CLASSROOM_GRADER_INLINE = False
     in_flight: Counter = Counter()
