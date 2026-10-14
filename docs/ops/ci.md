@@ -71,7 +71,10 @@ push 하면 옛 빌드를 끊는다.
   trace 의 정지 시각을 `backend.log`·`db.log` 의 같은 시각과 맞춰 본다(열차 #1840 은 이것이 없어 원인을
   못 남겼다). ④ `test-results/host/*.log` — macos 호스트의 1초 샘플(#716, `scripts/ci/host-sample.sh`):
   `memory.log`(memory_pressure 의 남은 %·vm_stat 의 free/compressed/swapins/swapouts·스왑·load),
-  `vm-top.log`(Docker VM 프로세스의 CPU·메모리), `docker-stats.log`(컨테이너마다, 따로 돌아 VM 이 멈추면
+  `vm-top.log`(Docker VM 프로세스의 CPU·메모리 — 첫 줄은 이름이 맞는 후보 전부의 pid·RSS·실행 파일이고, 그중
+  RSS 가 가장 큰 것을 VM 본체로 본다. CPU 는 `top -l 2 -s 1` 의 둘째 샘플이라 줄이 1.5초쯤마다 찍힌다 — 열차
+  #1899 는 `pgrep | head -1` 이 RSS 39M 짜리 보조 프로세스를 집었고 `top -l 1` 의 첫 샘플이라 내내 0.0 이었다,
+  #719), `docker-stats.log`(컨테이너마다, 따로 돌아 VM 이 멈추면
   줄 사이가 빈다). 줄마다 UTC 초 시각이라 스택 로그·trace 와 맞춰 본다. 명령이 없거나 권한이 없으면 그 칸이
   빌 뿐 e2e 를 붉게 만들지 않는다. ⑤ `test-results/e2e-verdict.json` — 아래 인프라 판정. 로컬 `scripts/test.sh e2e` 는 같은 trace 를 `frontend/test-results/`(뒤 패스는
   `frontend/test-results/exclusive/`)에 두고, 스택 로그는 `CODEMIT_E2E_KEEP=1` 로 남긴 스택에서
@@ -81,7 +84,11 @@ push 하면 옛 빌드를 끊는다.
   (앞뒤는 초당 50~146건, 틈 앞뒤 요청은 8~25ms)이고, 시험 넷의 마지막 요청이 서로 다른 두 Next 컨테이너에서
   같은 시각에 미완료였다 — 코드가 아니라 Docker VM(또는 포트 전달) 전체가 멈췄다. macos 단계가 e2e 뒤에
   `scripts/ci/e2e_stall.py` 로 판정한다: 실패가 하나 이상이고 전부 「Test timeout」이며, 시험마다 그 마감
-  (trace 의 시작 + 한도)이 backend 접근 로그의 **3초 이상 요청 0건 틈** 안에 있다. celery-broker 와 sub
+  (trace 의 시작 + 한도)이 backend 접근 로그의 **3초 이상 요청 0건 틈** 안에 있다. `.last-run.json` 이
+  `status: failed` 인데 `failedTests` 가 빈 프로젝트(「No tests found」·globalSetup 오류)가 있으면 판정하지
+  않는다(#719). 한도는 trace 첫 줄의 `testTimeout`(설정의 한도)이라 **스펙에서 `test.setTimeout`·`test.slow`·
+  `test.describe.configure({ timeout })` 로 시험 한도를 바꾸면 마감이 어긋난다** — 지금 스펙은 아무도 쓰지
+  않는다(2026-10-15 `git grep`). celery-broker 와 sub
   검사까지 초록이면 `train.py fail --verdict` 가 PR 에 `failure` 를 주지 않고 같은 묶음을 다시 부르며
   콘솔에 `인프라 고장으로 분류: backend 요청 0건 3.9초 틈 @…` 한 줄을 남긴다. **재실행은 가르기 사슬
   전체에 한 번이다**(#718) — 다시 붉으면(`INFRA_RETRY=1` 빌드) 지금 규칙대로 가르거나 `failure` 이고,
@@ -102,7 +109,7 @@ push 하면 옛 빌드를 끊는다.
 
   | 항목 | 값 | 읽은 날 |
   | --- | --- | --- |
-  | VM 메모리 | (적을 자리 — `playwright.config.ts` 주석은 24GB) | |
+  | VM 메모리 | 11.67GiB — `test-results/host/docker-stats.log` 의 분모(`/ 11.67GiB`)로 읽을 수 있다(`playwright.config.ts` 주석은 24GB) | 2026-10-15(열차 #1899) |
   | VM CPU 수 | (적을 자리) | |
   | 스왑 | (적을 자리) | |
   | 가상화 프레임워크(Apple Virtualization·Docker VMM·QEMU) | (적을 자리) | |

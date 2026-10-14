@@ -11,7 +11,11 @@
 #   memory.log        memory_pressure -Q(남은 메모리 %) · vm_stat 의 free/compressed/swapins/swapouts ·
 #                     vm.swapusage · vm.loadavg
 #   vm-top.log        Docker VM 프로세스(com.docker.virtualization·com.apple.Virtualization.VirtualMachine·
-#                     com.docker.krun·qemu-system)의 pid·CPU·메모리(top -l 1)
+#                     com.docker.krun·qemu-system)의 pid·CPU·메모리. 첫 줄은 이름이 맞는 후보 전부(pid·RSS·
+#                     실행 파일) — 열차 #1899 에서 `pgrep | head -1` 이 RSS 39M 짜리 보조 프로세스를 집어(#719)
+#                     지금은 후보 중 RSS 가 가장 큰 것을 VM 본체로 본다. CPU 는 `top -l 2 -s 1` 의 둘째
+#                     샘플(첫 샘플의 %CPU 는 무효라 #1899 는 내내 0.0 이었다) — 앞 1초의 값이고, top 을 띄우는
+#                     몫까지 한 줄에 1.5초쯤 걸린다
 #   docker-stats.log  docker stats --no-stream(컨테이너마다 CPU·메모리) — 한 번에 1~2초 걸리고, VM 이
 #                     멈추면 그 자체가 멈추므로 다른 둘과 따로 돈다(줄 사이 틈이 곧 증거다)
 #
@@ -37,23 +41,38 @@ memory_line() {
   echo "$(now) mem_free=${free:-?} pages[$vm] swap[$swap] load=$load"
 }
 
-vm_pid() {
-  local name pid
-  for name in com.docker.virtualization com.apple.Virtualization.VirtualMachine com.docker.krun qemu-system; do
-    pid=$(pgrep -f "$name" 2>/dev/null | head -n 1)
-    [ -n "$pid" ] && { echo "$pid"; return; }
-  done
+# 「pid RSS(KB) 실행 파일」 — 이름이 맞는 프로세스 전부. 실행 파일 경로(comm)에만 대므로 awk 자신은 안 걸린다.
+vm_candidates() {
+  ps -axo pid=,rss=,comm= 2>/dev/null | awk '
+    /com\.docker\.virtualization|com\.apple\.Virtualization\.VirtualMachine|com\.docker\.krun|qemu-system/ {
+      pid = $1; rss = $2; $1 = ""; $2 = ""; sub(/^ +/, ""); print pid, rss, $0 }'
+}
+
+# 같은 이름의 보조 프로세스가 있다 — RSS 가 가장 큰 것을 VM 본체로 본다.
+vm_pid() { vm_candidates | sort -k2,2 -n -r | head -n 1 | awk '{print $1}'; }
+
+candidates_line() {
+  local list
+  list=$(vm_candidates | awk '{pid = $1; rss = $2; $1 = ""; $2 = ""; sub(/^ +/, "");
+                              printf "%s[pid=%s rss=%dM %s]", sep, pid, rss / 1024, $0; sep = " "}')
+  echo "$(now) 후보 ${list:-없음}"
 }
 
 vm_line() {
-  local pid
+  local pid sample
   pid=$(vm_pid)
-  [ -n "$pid" ] || { echo "$(now) Docker VM 프로세스를 찾지 못했다"; return; }
-  echo "$(now) $(top -l 1 -stats pid,cpu,mem,command -pid "$pid" 2>/dev/null | tail -n 1)"
+  [ -n "$pid" ] || { echo "$(now) Docker VM 프로세스를 찾지 못했다"; sleep 1; return; }
+  # 둘째 샘플의 줄 — top 이 1초를 기다린 뒤에 끝나므로 시각은 그 뒤에 찍는다.
+  sample=$(top -l 2 -s 1 -stats pid,cpu,mem,command -pid "$pid" 2>/dev/null | tail -n 1)
+  echo "$(now) ${sample:-top 이 줄을 주지 않았다}"
+  [ -n "$sample" ] || sleep 1   # top 이 없거나 곧바로 실패하면 헛돌지 않게
 }
 
 loop_memory() { while :; do memory_line >>"$out/memory.log" 2>/dev/null; sleep 1; done; }
-loop_vm() { while :; do vm_line >>"$out/vm-top.log" 2>/dev/null; sleep 1; done; }
+loop_vm() {
+  candidates_line >>"$out/vm-top.log" 2>/dev/null
+  while :; do vm_line >>"$out/vm-top.log" 2>/dev/null; done
+}
 loop_docker() {
   has docker || return 0
   while :; do
@@ -65,10 +84,16 @@ loop_docker() {
 
 children=""
 stop() {
-  # 자식 루프와 그 안의 sleep·docker 까지 — 남으면 다음 빌드까지 노드에서 돈다.
+  # 자식 루프와 그 안의 sleep·docker, 명령 치환 속의 top 까지 — 남으면 다음 빌드까지 노드에서 돈다.
+  # 루프를 먼저 죽인다 — 손주(top)를 먼저 죽이면 루프가 빈 줄 하나를 더 적는다.
+  local pid kids kid
   for pid in $children; do
-    pkill -P "$pid" 2>/dev/null
+    kids=$(pgrep -P "$pid" 2>/dev/null)
     kill "$pid" 2>/dev/null
+    for kid in $kids; do
+      pkill -P "$kid" 2>/dev/null
+      kill "$kid" 2>/dev/null
+    done
   done
   exit 0
 }
