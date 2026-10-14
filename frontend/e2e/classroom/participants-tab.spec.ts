@@ -31,6 +31,9 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
     })
   ).json()).id as number;
 
+  // 강사가 자기 클래스에 참여자로도 들어온다 — 그 행은 「강사 본인」이고 내보낼 수 없다.
+  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "강사" } })).ok()).toBeTruthy();
+
   await page.context().clearCookies();
   await establishClassroomSession(page, `${seed}-participant`);
   const joined = await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "나가는사람" } });
