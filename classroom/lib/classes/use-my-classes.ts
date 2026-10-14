@@ -20,9 +20,9 @@ export type MyClassesState =
 export function useMyClasses(): MyClassesState {
   const { state: queryState } = useBackendQuery<ClassRow[]>(bffClient, "/api/backend/classroom/classes");
 
-  // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
-  // 호출부(템플릿 가져오기 화면의 대상 클래스 기본값 채우기 등)가 폭주할 수
-  // 있다(#462 코드 리뷰).
+  // useMemo 없이 매 렌더 새 객체를 만들면 이 값의 동일성을 렌더 중에 비교해
+  // 기본값을 맞추는 호출부(템플릿 가져오기 화면의 대상 클래스 기본값 등, #691)가
+  // 매 렌더 다시 맞추느라 멈추지 않는다(#462 코드 리뷰, #695).
   return useMemo<MyClassesState>(() => {
     if (queryState.status === "loading") return { status: "loading" };
     if (queryState.status === "error") return { status: "error" };

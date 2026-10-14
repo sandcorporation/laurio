@@ -82,10 +82,10 @@ function boundNames(pattern: string): string[] {
 }
 
 /** 이 소스에서 훅이 돌려준 변수 이름들(`state` 는 늘 든다). `const x =`·`const { a: x } =`·`const [x] =`
- * 셋을 모은다(#691). */
+ * 셋을 모은다(#691). `useBackendQuery<T>(` 처럼 타입 인자가 끼어도 모은다(#695). */
 function hookResultNames(source: string): string[] {
   const names = new Set(["state"]);
-  const re = /\bconst\s+(?:(\w+)|\{([^}]*)\}|\[([^\]]*)\])\s*=\s*(use[A-Z]\w*)\(/g;
+  const re = /\bconst\s+(?:(\w+)|\{([^}]*)\}|\[([^\]]*)\])\s*=\s*(use[A-Z]\w*)(?:<[^>]*>)?\(/g;
   for (const m of source.matchAll(re)) {
     if (REACT_HOOKS.has(m[4])) continue;
     for (const name of m[1] ? [m[1]] : boundNames(m[2] ?? m[3])) names.add(name);
@@ -93,12 +93,16 @@ function hookResultNames(source: string): string[] {
   return [...names];
 }
 
+// 이름이 set 으로 시작해도 setter 가 아니다 — 콜백이 매개변수 없이 상태를 읽으면 함수형 갱신으로 잘못 읽힌다(#695).
+const TIMERS = new Set(["setTimeout", "setInterval", "setImmediate"]);
+
 /** 이 효과 본문이 읽은 상태의 필드로 칸을 채우는가 — `setTitle(state.problem.title)` 같은 모양.
  * 함수형 갱신은 자기 매개변수(먼저 친 값)를 본문에서 다시 쓸 때만 통과한다 — `setX((c) => c === "" ? … : c)`
  * 는 먼저 친 값을 덮지 않지만, `setX(() => state.…)`·`setX((c) => state.…)` 는 옛 버그와 똑같이 덮는다(#691). */
 function seedsFromState(body: string, names: string[]): boolean {
   const read = new RegExp(`\\b(?:${names.join("|")})\\??\\.`);
   for (const m of body.matchAll(/\bset[A-Z]\w*\(/g)) {
+    if (TIMERS.has(m[0].slice(0, -1))) continue;
     const arg = firstArg(parenInner(body, m.index + m[0].length - 1));
     const updater = /^\s*(?:\(\s*(\w*)\s*(?::[^)]*)?\)|(\w+))\s*=>([\s\S]*)$/.exec(arg);
     if (!updater) {
@@ -155,6 +159,13 @@ describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌�
       const source = `${binding}\n${effect}`;
       expect(effectBodies(source).some((body) => seedsFromState(body, hookResultNames(source))), binding).toBe(true);
     }
+    // 타입 인자가 낀 훅 호출도 모은다 — 강사 구역의 두 목록 상태(#695).
+    const instructors = SCREENS.find((s) => s.file.endsWith(path.join("[id]", "instructors-section.tsx")))!;
+    expect(instructors.source).toContain("useBackendQuery<ClassInstructor[]>(");
+    expect(hookResultNames(instructors.source)).toEqual(expect.arrayContaining(["rosterState", "invitesState"]));
+    // 반례 — 타입 인자가 낀 훅의 결과를 효과로 칸에 넣으면 붉어진다.
+    const typed = "const roster = useBackendQuery<Row[]>(client, path);\nuseEffect(() => { setName(roster.data[0].name); }, [roster]);";
+    expect(effectBodies(typed).some((body) => seedsFromState(body, hookResultNames(typed)))).toBe(true);
     // React 의 훅은 읽은 상태가 아니다.
     expect(hookResultNames("const [title, setTitle] = useState(x);")).toEqual(["state"]);
   });
@@ -165,6 +176,15 @@ describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌�
     // 반례 둘 — 매개변수가 없거나 쓰지 않으면 옛 버그와 똑같이 덮는다.
     expect(seedsFromState("setTitle(() => state.problem.title);", names)).toBe(true);
     expect(seedsFromState("setTitle((c) => state.problem.title);", names)).toBe(true);
+  });
+
+  it("타이머는 setter 가 아니다 — 콜백이 상태를 읽어도 통과한다(#695)", () => {
+    const names = ["state"];
+    for (const timer of ["setTimeout", "setInterval", "setImmediate"]) {
+      expect(seedsFromState(`${timer}(() => reload(state.id), 100);`, names), timer).toBe(false);
+    }
+    // 반례 — 타이머 안의 진짜 setter 는 여전히 잡는다.
+    expect(seedsFromState("setTimeout(() => setTitle(state.problem.title), 100);", names)).toBe(true);
   });
 
   it("본문이 표현식인 효과도 본다(#691)", () => {
