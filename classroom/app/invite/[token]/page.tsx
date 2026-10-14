@@ -13,7 +13,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { Card, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
+import { Badge, Card, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
 import { useMe } from "@/lib/auth/use-me";
 import { acceptCoInstructorInvite } from "@/lib/co-instructors/api";
 import { useInvitePreview } from "@/lib/co-instructors/use-invite-preview";
@@ -89,34 +89,28 @@ export default function CoInstructorInvitePage() {
 
   return (
     <Shell>
-      <div className="text-[11px] tracking-[0.08em] text-ink/45">공동 강사 초대</div>
-      <h1 data-testid="invite-class-name" className="mt-1.5 text-[21px] font-semibold leading-snug">
-        {info.class_name}
-      </h1>
-      {info.instructor_names.length > 0 ? (
-        <p data-testid="invite-instructors" className="mt-2 text-[13px] text-ink/60">
-          강사 {info.instructor_names.join(", ")}
-        </p>
-      ) : null}
-      {/* 수락할 수 있는 사람에게만 무엇을 수락하는지 말한다 — 쓸 수 없는 초대나 이미 강사인
-          사람에게 「수락하면」은 일어나지 않을 일이다. */}
-      {info.status === "pending" && !info.already_instructor ? (
-        <p data-testid="invite-what-it-means" className="mt-3 text-[13px] leading-relaxed text-ink/60">
-          수락하면 이 클래스의 공동 강사가 됩니다. 문제·체크리스트·참여자 명단·보관을 소유자와 똑같이
-          다루고, 채점 키와 클래스 삭제는 소유자가 맡습니다.
-        </p>
-      ) : null}
+      <div className="flex flex-col gap-2">
+        <div className="text-[11px] tracking-[0.08em] text-ink/45">공동 강사 초대</div>
+        <h1 data-testid="invite-class-name" className="text-[24px] font-semibold leading-[1.3] tracking-[-0.01em]">
+          {info.class_name}
+        </h1>
+        {info.instructor_names.length > 0 ? (
+          <p data-testid="invite-instructors" className="text-[13px] text-ink/60">
+            강사 {info.instructor_names.join(", ")}
+          </p>
+        ) : null}
+      </div>
 
-      <div className="mt-6">
-        {info.status !== "pending" ? (
-          <Note tone="attention">
-            <span data-testid="invite-unusable">{info.status_message}</span>
-          </Note>
-        ) : info.already_instructor ? (
+      {info.status !== "pending" ? (
+        <Note tone="attention">
+          <span data-testid="invite-unusable">{info.status_message}</span>
+        </Note>
+      ) : info.already_instructor ? (
+        <Card className="p-5">
           <div className="flex flex-col gap-3">
-            <Note>
-              <span data-testid="invite-already-instructor">이미 이 클래스의 강사입니다.</span>
-            </Note>
+            <span data-testid="invite-already-instructor" className="text-[13.5px]">
+              이미 이 클래스의 강사입니다.
+            </span>
             <Link
               href={`/classes/${info.class_id}`}
               data-testid="invite-go-to-class"
@@ -125,67 +119,59 @@ export default function CoInstructorInvitePage() {
               클래스로 가기
             </Link>
           </div>
-        ) : me.status === "error" ? (
-          <div className="flex flex-col gap-3">
-            <Note>
-              <span data-testid="invite-needs-login">
-                수락하려면 먼저 로그인해야 합니다. 로그인하면 이 초대 링크로 자동으로 돌아옵니다.
+        </Card>
+      ) : me.status === "error" ? (
+        <Card className="p-5">
+          <Link
+            href={`/login?next=${encodeURIComponent(`/invite/${token}`)}`}
+            data-testid="invite-login-link"
+            className={`${buttonClass("primary")} w-full`}
+          >
+            로그인하고 수락하기
+          </Link>
+        </Card>
+      ) : me.status === "loading" ? (
+        <p data-testid="invite-login-status-loading" className="text-[13.5px] text-ink/45">
+          확인하는 중...
+        </p>
+      ) : (
+        <Card className="p-5">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="invite-display-name">
+                <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
+              </label>
+              <input
+                id="invite-display-name"
+                data-testid="invite-display-name-input"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                required
+                maxLength={100}
+                className={INPUT_CLASS}
+              />
+            </div>
+            {info.archived ? (
+              <span data-testid="invite-archived">
+                <Badge>보관됨</Badge>
               </span>
-            </Note>
-            <Link
-              href={`/login?next=${encodeURIComponent(`/invite/${token}`)}`}
-              data-testid="invite-login-link"
-              className={`${buttonClass("primary")} w-full`}
+            ) : null}
+            <button
+              type="submit"
+              data-testid="invite-accept"
+              disabled={submitting || displayName.trim() === ""}
+              className={`${buttonClass("primary")} w-full sm:w-auto sm:self-start`}
             >
-              로그인하러 가기
-            </Link>
-          </div>
-        ) : me.status === "loading" ? (
-          <p data-testid="invite-login-status-loading" className="text-[13.5px] text-ink/45">
-            확인하는 중...
-          </p>
-        ) : (
-          <Card className="p-4">
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="invite-display-name">
-                  <FieldLabel>이 클래스에서 불릴 강사 이름</FieldLabel>
-                </label>
-                <input
-                  id="invite-display-name"
-                  data-testid="invite-display-name-input"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  required
-                  maxLength={100}
-                  className={INPUT_CLASS}
-                />
-              </div>
-              {info.archived ? (
-                <p data-testid="invite-archived" className="text-[12px] leading-relaxed text-ink/60">
-                  보관된 클래스입니다 — 읽기 전용인 지금도 함께 맡을 수 있고, 보관을 되돌리면 문제를
-                  다시 고칠 수 있습니다.
-                </p>
-              ) : null}
-              <button
-                type="submit"
-                data-testid="invite-accept"
-                disabled={submitting || displayName.trim() === ""}
-                className={`${buttonClass("primary")} w-full`}
-              >
-                {submitting ? "수락하는 중..." : "공동 강사로 수락"}
-              </button>
-            </form>
-          </Card>
-        )}
-      </div>
+              {submitting ? "수락하는 중..." : "공동 강사로 수락"}
+            </button>
+          </form>
+        </Card>
+      )}
 
       {error ? (
-        <div className="mt-4">
-          <ErrorNote>
-            <span data-testid="invite-error">{error}</span>
-          </ErrorNote>
-        </div>
+        <ErrorNote>
+          <span data-testid="invite-error">{error}</span>
+        </ErrorNote>
       ) : null}
     </Shell>
   );
@@ -193,5 +179,5 @@ export default function CoInstructorInvitePage() {
 
 /** 폰 우선 — 가입 링크 화면과 같은 폭. */
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto w-full max-w-[440px] px-5 py-8">{children}</main>;
+  return <main className="mx-auto flex w-full flex-col gap-7 max-w-[440px] px-5 py-12">{children}</main>;
 }

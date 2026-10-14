@@ -101,6 +101,9 @@ export type JoinedClassRow = {
   // 강사가 내보냈는가(#281) — 참이면 새 제출만 막히고, 지난 시도·판정은
   // 그대로 읽힌다.
   expelled: boolean;
+  // 열린 문제 수와 그중 내가 한 번이라도 통과한 수(#632) — 둘 다 항상 정수다.
+  open_problem_count: number;
+  passed_count: number;
 };
 
 export function createClass(
