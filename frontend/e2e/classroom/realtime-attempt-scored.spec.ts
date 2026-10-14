@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { runInternalScan } from "../lib/seed-http";
 import { classroomApi, establishClassroomSession } from "./lib/cross-app-session";
 
-// 강의실 — 참여자 「내 시도」가 새로고침 없이 「채점 완료」로 바뀐다
+// 강의실 — 참여자 「내 시도」가 새로고침 없이 「통과」·「미통과」로 바뀐다
 // (#379, ADR-0046). `scoring-notification.spec.ts`는 화면을 새로 연 뒤(알림
 // 링크를 눌러) 판정을 확인하지만, 이 스펙은 **화면을 열어 둔 채로** 채점이
 // 끝나는 것을 본다 — `page.reload()`를 어디서도 부르지 않는다는 것 자체가
@@ -19,7 +19,7 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 // 내고(「채점 대기」), 화면을 연 채로 강사가 키를 넣은 뒤 스캔을 돌린다 — 스캔이 그 시도를
 // 큐에 넣으면 grader 가 곧 집어 채점한다. 강사는 다른 브라우저 컨텍스트에 둔다(참여자
 // 화면의 쿠키를 갈아 끼우지 않는다).
-test("제출 화면을 연 채로 채점이 끝나면 새로고침 없이 「채점 완료」로 바뀐다", async ({
+test("제출 화면을 연 채로 채점이 끝나면 새로고침 없이 「통과」·「미통과」로 바뀐다", async ({
   page,
   browser,
 }) => {
@@ -84,5 +84,5 @@ test("제출 화면을 연 채로 채점이 끝나면 새로고침 없이 「채
 
   // page.reload()를 호출하지 않는다 — 이벤트 서비스가 attempt-scored를
   // 밀어주고, 화면이 그 신호를 받아 기존 API를 다시 불러 이 값이 바뀐다.
-  await expect(row).toContainText("채점 완료", { timeout: 15_000 });
+  await expect(row).toContainText(/통과/, { timeout: 15_000 });
 });

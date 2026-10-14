@@ -5,6 +5,7 @@
 // 강사 전용 편집 화면(app/classes/[id]/problems/[problemId]/page.tsx)과는
 // 다른 라우트다 — 참여자는 문제를 고치지 않고 그 정의를 읽고 낸다.
 //
+// 시안 v2(#640): 왼쪽에 설명·체크리스트(가장 최근 채점의 판정을 품는다)·내 시도, 오른쪽 360px 에 제출 카드와 진행.
 // 실제로 그리는 일은 `ProblemParticipantView`(#325)가 한다 — 문제 만들기/
 // 편집의 「미리보기」 탭이 **같은 조각**을 쓴다. 이 파일은 데이터를 불러오고
 // 제출 요청을 보내는 배선만 맡는다.
@@ -206,18 +207,14 @@ export default function ProblemSubmitPage() {
 
   return (
     <PageShell>
-      <BackToMyProblems
-        classId={classId}
-        href={viewingAsInstructor ? `/classes/${classId}` : undefined}
-      />
       <ProblemParticipantView
         interactive
+        backHref={viewingAsInstructor ? `/classes/${classId}` : `/classes/${classId}/problems/mine`}
         eyebrow={className}
         title={problem.title}
         titleTestId="my-problem-title"
         // 강사가 아직 한 번도 안 냈으면 「통과」/「미통과」 어느 쪽도 사실이
-        // 아니다 — 미리보기와 같은 이유로 배지 자체를 내지 않는다. 내 본
-        // 뒤에는 참여자와 똑같이 자기 결과를 본다.
+        // 아니다 — 미리보기와 같은 이유로 배지 자체를 내지 않는다.
         passed={viewingAsInstructor && submissions.length === 0 ? undefined : problem.passed}
         description={problem.description}
         instructorNote={problem.instructor_note}

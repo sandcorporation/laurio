@@ -2,8 +2,13 @@
 // 강사의 제출 현황이 「판정」을 펼칠 때 쓰고, 참여자 제출 화면(#640)도 같은 컴포넌트를 쓴다.
 // testid 는 `${testIdPrefix}-verdicts` · `-syntax-check` · `-syntax-check-finding-n`.
 import { Badge } from "@/app/components/ui";
-import { judgedByLabel } from "@/app/components/ProblemParticipantView";
 import type { ClassroomScore } from "@/lib/submissions/api";
+
+// 판정 주체 표시(#409) — 파서 판정은 신뢰도가 높고(파이썬 표준 파서·tree-sitter), AI 판정은 파서가 없는
+// 언어이거나 크기·시간 제한에 걸렸을 때만 쓰인다.
+export function judgedByLabel(judgedBy: "parser" | "ai"): string {
+  return judgedBy === "parser" ? "파서 판정" : "AI 판정";
+}
 
 export function SubmissionVerdictList({
   score,

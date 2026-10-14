@@ -9,13 +9,22 @@ export function TwoColumnFrame({
   main,
   side,
   sideTestId,
+  wideSide = false,
 }: {
   main: ReactNode;
   side: ReactNode;
   sideTestId?: string;
+  /** 오른쪽 열을 360px 로 — 참여자 제출 화면(#640)의 제출 카드가 쓴다. 기본은 300px. */
+  wideSide?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-1 gap-5 min-[1200px]:grid-cols-[minmax(0,1fr)_300px] min-[1200px]:items-start">
+    <div
+      className={`grid grid-cols-1 gap-5 min-[1200px]:items-start ${
+        wideSide
+          ? "min-[1200px]:grid-cols-[minmax(0,1fr)_360px]"
+          : "min-[1200px]:grid-cols-[minmax(0,1fr)_300px]"
+      }`}
+    >
       <div className="flex min-w-0 flex-col gap-5">{main}</div>
       <aside
         data-testid={sideTestId}
