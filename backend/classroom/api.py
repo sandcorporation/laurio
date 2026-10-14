@@ -1914,16 +1914,17 @@ def list_my_problems(request: HttpRequest, class_id: int):
     def _list_items(problem_list: list[Problem]) -> list[ClassroomProblemListItemOut]:
         items = []
         for problem in problem_list:
-            passed = any(
-                problem.is_score_passed(getattr(s, "classroom_score", None))
-                for s in submissions_by_problem.get(problem.id, [])
-            )
+            own = submissions_by_problem.get(problem.id, [])
+            status = _cell_status(own, member.classroom, problem)
             items.append(
                 ClassroomProblemListItemOut(
                     id=problem.id,
                     title=problem.title,
                     submission_formats=problem.submission_formats,
-                    passed=passed,
+                    passed=status == "passed",
+                    status="scoring" if status == "needs_setup" else status,
+                    attempt_count=len(own),
+                    last_attempted_at=max((s.created_at for s in own), default=None),
                 )
             )
         return items
