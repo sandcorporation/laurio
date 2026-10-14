@@ -29,7 +29,6 @@ import {
   ErrorNote,
   FieldLabel,
   INPUT_CLASS,
-  Note,
   buttonClass,
 } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
@@ -108,50 +107,36 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   submissionFormats: SubmissionFormat[];
   submissions: ClassroomSubmissionRow[];
   /** 강사가 「학생 화면으로」를 눌러 이 화면을 열었는가(#429) — 참이면 맨 위에
-   *  「강사로 보고 있습니다」 띠가 뜬다. 미리보기(`interactive={false}`)는
+   *  「강사로 보는 중」 배지 띠가 뜬다. 미리보기(`interactive={false}`)는
    *  이 값을 쓰지 않는다 — 미리보기는 애초에 참여자도 강사도 아닌, 아직
    *  아무도 아닌 화면이다. */
   viewingAsInstructor?: boolean;
   /** `viewingAsInstructor`가 참일 때만 뜻이 있다 — 띠가 몇 줄을 더 말할지
-   *  정한다(초안·숨김이면 한 줄 더, 열림이면 띠 한 줄뿐). */
+   *  상태 배지를 정한다(초안·숨김이면 배지 하나 더, 열림이면 「강사로 보는 중」뿐). */
   instructorProblemStatus?: "draft" | "open" | "hidden" | null;
 };
 
-/** 강사가 학생 화면을 열었을 때의 안내 문구(#429) — 기본 한 줄에 상태별로
- *  한 줄을 더한다. 판정 로직이 아니라 문구 조립이라 별도 순수 함수 시임을
- *  두지 않는다(#429 Testing Decisions).
- *
- *  **강사는 상태와 무관하게 낸다**(2026-09-17) — 그래서 첫 줄이 「지금 낼 수
- *  있는가」에 따라 갈린다(잠기는 것은 보관된 클래스뿐이다). 예전의 「제출은
- *  되지 않습니다」를 그대로 두면 화면이 거짓말을 한다 — 제출 칸이 실제로
- *  동작한다. 아래 두 줄(초안·숨김)은 그대로다: 낼 수 있다는 것과, 학생에게
- *  아직 보이지 않는다는 것은 서로 다른 사실이다. */
+/** 강사가 학생 화면을 열었을 때의 띠(#429) — 배지 둘(#660): 「강사로 보는 중」과 문제 상태
+ *  (초안·숨김). 낼 수 있다는 것과 학생에게 보인다는 것은 다른 사실이라 상태 배지를 따로 둔다.
+ *  보관된 클래스라 낼 수 없으면 그 이유는 제출 카드 자리의 한 줄이 말한다. */
 function InstructorViewingBanner({
   status,
-  canSubmit,
 }: {
   status: "draft" | "open" | "hidden" | null | undefined;
-  canSubmit: boolean;
 }) {
   return (
-    <Note tone="attention">
-      <div className="flex flex-col gap-1">
-        <span data-testid="instructor-viewing-banner">
-          {canSubmit
-            ? "강사로 보고 있습니다 — 직접 내 볼 수 있고, 학생 명단에는 들어가지 않습니다."
-            : "강사로 보고 있습니다 — 제출은 되지 않습니다."}
+    <div data-testid="instructor-viewing-banner" className="flex flex-wrap items-center gap-2">
+      <Badge tone="attention">강사로 보는 중</Badge>
+      {status === "draft" ? (
+        <span data-testid="instructor-viewing-banner-draft">
+          <Badge>초안</Badge>
         </span>
-        {status === "draft" ? (
-          <span data-testid="instructor-viewing-banner-draft">
-            아직 초안이니 학생에게는 이 화면이 보이지 않습니다.
-          </span>
-        ) : status === "hidden" ? (
-          <span data-testid="instructor-viewing-banner-hidden">
-            숨긴 문제입니다 — 이미 낸 학생만 봅니다.
-          </span>
-        ) : null}
-      </div>
-    </Note>
+      ) : status === "hidden" ? (
+        <span data-testid="instructor-viewing-banner-hidden">
+          <Badge>숨김</Badge>
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -177,8 +162,8 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
   const checklistLabelById = new Map(checklistItems.map((item) => [item.id, item.label]));
   const sorted = [...submissions].sort((a, b) => b.attempt_number - a.attempt_number);
-  // 체크리스트 카드가 품는 판정 — 가장 최근에 **채점이 끝난** 시도 하나. 그 시도의 줄에서는
-  // 같은 판정을 또 펼치지 않는다.
+  // 체크리스트 카드가 품는 판정 — 가장 최근에 **채점이 끝난** 시도 하나. 그 시도의 줄에도
+  // 다른 채점된 줄처럼 접힌 「판정 보기」가 있다(#660) — 처음부터 펼쳐 두지만 않는다.
   const judged = sorted.find((submission) => submission.status === "scored" && submission.score) ?? null;
   const judgedSummary = judged ? requiredSummary(judged, checklistItems) : null;
   // 문법 검사 기본 항목(#408)도 필수라 분모에 함께 센다.
@@ -249,7 +234,6 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 submission={submission}
                 items={checklistItems}
                 checklistLabelById={checklistLabelById}
-                verdictShownAbove={judged !== null && judged.id === submission.id}
                 open={openIds.has(submission.id)}
                 onToggle={() =>
                   setOpenIds((current) => {
@@ -290,10 +274,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   return (
     <div className="flex flex-col gap-5">
       {viewingAsInstructor ? (
-        <InstructorViewingBanner
-          status={instructorProblemStatus}
-          canSubmit={props.interactive ? props.submitBlockedReason === null : false}
-        />
+        <InstructorViewingBanner status={instructorProblemStatus} />
       ) : null}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1.5">
@@ -415,7 +396,7 @@ function ChecklistWithVerdict({
                 {syntax.findings.map((finding, index) => (
                   <div
                     key={index}
-                    data-testid={`submission-row-${judged?.id}-syntax-check-finding-${index}`}
+                    data-testid={`my-problem-checklist-syntax-check-finding-${index}`}
                     className="font-mono text-[12px] text-ink/60"
                   >
                     {finding.path}
@@ -523,14 +504,12 @@ function AttemptRow({
   submission,
   items,
   checklistLabelById,
-  verdictShownAbove,
   open,
   onToggle,
 }: {
   submission: ClassroomSubmissionRow;
   items: ParticipantChecklistItem[];
   checklistLabelById: Map<number, string>;
-  verdictShownAbove: boolean;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -583,7 +562,7 @@ function AttemptRow({
               강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다
             </span>
           ) : null}
-          {scored && !verdictShownAbove ? (
+          {scored ? (
             <button
               type="button"
               data-testid={`submission-row-${submission.id}-verdict-toggle`}
@@ -629,7 +608,7 @@ function AttemptRow({
         </p>
       ) : null}
 
-      {open && scored && !verdictShownAbove && submission.score ? (
+      {open && scored && submission.score ? (
         <div className="mt-3 border-t border-rule pt-3">
           <SubmissionVerdictList
             score={submission.score}
@@ -792,6 +771,11 @@ function InteractiveSubmissionForm(
           {/* 드롭 칸 — 투명한 파일 입력이 칸 전체를 덮어 끌어다 놓기와 고르기를 함께 받는다. */}
           <div className="relative border border-dashed border-rule bg-paper px-5 py-6 text-center text-[13.5px] text-ink/60">
             소스 zip 을 끌어다 놓거나 <span className="text-attention">고르기</span>
+            {/* 소스 슬롯의 업로드 상한 `policies.models.PlatformPolicy.max_source_asset_bytes` 기본값
+                (50 * 1024 * 1024)과 같은 수치다 — 운영자가 그 값을 바꾸면 여기도 고친다. */}
+            <div data-testid="source-file-max-size" className="mt-1 text-[11.5px] text-ink/45">
+              최대 50MB
+            </div>
             <input
               id="source-file"
               data-testid="source-file-input"
