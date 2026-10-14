@@ -165,10 +165,9 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   // 체크리스트 카드가 품는 판정 — 가장 최근에 **채점이 끝난** 시도 하나. 그 시도의 줄에도
   // 다른 채점된 줄처럼 접힌 「판정 보기」가 있다(#660) — 처음부터 펼쳐 두지만 않는다.
   const judged = sorted.find((submission) => submission.status === "scored" && submission.score) ?? null;
-  const judgedSummary = judged ? requiredSummary(judged, checklistItems) : null;
-  // 문법 검사 기본 항목(#408)도 필수라 분모에 함께 센다.
-  const requiredCount =
-    checklistItems.filter((item) => item.required).length + (syntaxCheckEnabled ? 1 : 0);
+  // 분모는 채점 전후 모두 `syntaxCheckEnabled` 로 센다(#670) — `requiredSummary` 하나가 정한다.
+  const judgedSummary = judged ? requiredSummary(judged, checklistItems, syntaxCheckEnabled) : null;
+  const requiredCount = requiredSummary({ status: "pending", score: null }, checklistItems, syntaxCheckEnabled).total;
 
   // 알림 링크(`#submission-{id}`)가 가리키는 시도의 판정을 펼치고 그 줄로 옮긴다 — 시도
   // 목록은 늦게 도착하므로 목록이 바뀔 때마다 다시 본다.
@@ -233,6 +232,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 key={submission.id}
                 submission={submission}
                 items={checklistItems}
+                syntaxCheckEnabled={syntaxCheckEnabled}
                 checklistLabelById={checklistLabelById}
                 open={openIds.has(submission.id)}
                 onToggle={() =>
@@ -503,12 +503,14 @@ function ProblemProgressCard({
 function AttemptRow({
   submission,
   items,
+  syntaxCheckEnabled,
   checklistLabelById,
   open,
   onToggle,
 }: {
   submission: ClassroomSubmissionRow;
   items: ParticipantChecklistItem[];
+  syntaxCheckEnabled: boolean;
   checklistLabelById: Map<number, string>;
   open: boolean;
   onToggle: () => void;
@@ -516,7 +518,7 @@ function AttemptRow({
   // `id`는 채점 완료 알림(#329)이 특정 시도를 가리킬 때 쓰는 앵커다 —
   // `lib/notifications/link.ts`가 같은 이름을 짓는다.
   const scored = submission.status === "scored" && submission.score !== null;
-  const summary = scored ? requiredSummary(submission, items) : null;
+  const summary = scored ? requiredSummary(submission, items, syntaxCheckEnabled) : null;
   const waitingOnInstructor =
     submission.status === "pending" &&
     (submission.pending_reason === "no_api_key" || submission.pending_reason === "model_rejected");

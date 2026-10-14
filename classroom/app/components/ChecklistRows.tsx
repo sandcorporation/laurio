@@ -8,11 +8,14 @@
 // **순서 바꾸기는 끌기와 키보드 둘 다다.** 손잡이(⋮⋮)를 끌어 놓거나, 손잡이에 포커스를 두고
 // 위·아래 화살표를 누른다. 끌기는 네이티브 HTML drag 라 의존성이 없다 — 포인터 없는 환경의
 // 길이 키보드다. 줄은 바뀐 순서를 곧바로 보이고(`onReorder` 가 서버 저장을 시작한다), 부모가
-// 새 `items` 를 내려주면 그 값으로 다시 맞춘다.
+// 새 `items` 를 내려주면 그 값으로 다시 맞춘다. `onReorder` 가 `Promise<boolean>` 을 돌려주면
+// 그 저장이 끝날 때까지 다음 이동을 막고, 실패하면 `items`(서버 순서)로 되돌린다(#670 —
+// `lib/problems/checklist-reorder.ts`).
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
+import { type ChecklistReorderSave, createChecklistMover } from "@/lib/problems/checklist-reorder";
 
 export type ChecklistRowItem = { key: string | number; label: string; required: boolean };
 
@@ -40,7 +43,7 @@ export function ChecklistRows({
     kind: "change";
     onChange: (key: ChecklistRowItem["key"], label: string) => void;
   };
-  onReorder: (orderedKeys: ChecklistRowItem["key"][]) => void;
+  onReorder: ChecklistReorderSave<ChecklistRowItem["key"]>;
   onRequiredChange: (key: ChecklistRowItem["key"], required: boolean) => void;
   onDelete: (key: ChecklistRowItem["key"]) => void;
 }): ReactNode {
@@ -49,6 +52,27 @@ export function ChecklistRows({
   // 아니면 끌어 놓은 순서가 저장이 끝나기도 전에 되돌아간다.
   const signature = items.map((item) => `${item.key}\u0000${item.label}\u0000${item.required}`).join("\u0001");
   useEffect(() => setRows(items), [signature]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 옮기기는 렌더 사이에도 지금 값을 읽어야 해서(연타·저장 완료 콜백) ref 로 들고 있다.
+  const rowsRef = useRef(rows);
+  const itemsRef = useRef(items);
+  const onReorderRef = useRef(onReorder);
+  useEffect(() => {
+    rowsRef.current = rows;
+    itemsRef.current = items;
+    onReorderRef.current = onReorder;
+  });
+  const [moveTo] = useState(() =>
+    createChecklistMover<ChecklistRowItem>({
+      getRows: () => rowsRef.current,
+      getServerRows: () => itemsRef.current,
+      setRows: (next) => {
+        rowsRef.current = next;
+        setRows(next);
+      },
+      save: (keys) => onReorderRef.current(keys),
+    }),
+  );
 
   const [dragKey, setDragKey] = useState<ChecklistRowItem["key"] | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
@@ -64,16 +88,6 @@ export function ChecklistRows({
   }, [rows]);
 
   const locked = readOnly || lockedStructure;
-
-  function moveTo(key: ChecklistRowItem["key"], target: number) {
-    const from = rows.findIndex((row) => row.key === key);
-    if (from < 0 || target < 0 || target >= rows.length || target === from) return;
-    const next = [...rows];
-    const [moved] = next.splice(from, 1);
-    next.splice(target, 0, moved);
-    setRows(next);
-    onReorder(next.map((row) => row.key));
-  }
 
   return (
     <ul data-testid={listTestId} className="divide-y divide-rule">

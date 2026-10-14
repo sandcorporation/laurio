@@ -99,14 +99,21 @@ def test_passed_stays_passed_after_a_later_unscored_attempt(client, db, monkeypa
     assert item["attempt_count"] == 2
 
 
-def test_without_a_scoring_key_the_waiting_attempt_still_reads_as_scoring(client, db):
-    owner, class_id, learner = _setup(client)
+def test_without_a_scoring_key_the_stuck_attempt_reads_as_needs_setup(client, db):
+    """키가 없어 멈춘 시도(#670) — 격자와 같은 낱말 `needs_setup` 으로 내려 화면이
+    「채점 중」이 아니라 「채점 대기」로 보이게 한다(CONTEXT.md 「채점 대기」)."""
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"], with_key=False)
+    learner = login(client, "learner")
+    join_class(client, learner["access"], class_id, instructor_access=owner["access"], display_name="서지우")
     problem = create_open_problem(client, owner["access"], class_id)
     submit_repository(client, learner["access"], class_id, problem.id)
 
     item = my_problems(client, learner["access"], class_id)["problems"][0]
 
-    assert item["status"] == "scoring"
+    assert item["status"] == "needs_setup"
+    assert item["attempt_count"] == 1
+    assert item["passed"] is False
 
 
 def test_hidden_problem_carries_the_same_fields(client, db):

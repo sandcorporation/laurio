@@ -1,5 +1,7 @@
 // 제출 현황(#638, 시안 v2)의 계산 — 화면이 받는 시도 목록에서 통계 바·참여자별 최신 시도·필수 m/n 을 센다.
 // 사람 집합은 참여자 격자에서 온다(강사·내보낸 사람 제외) — 클래스 상세의 달성률과 같은 집합이다.
+import type { RosterGrid } from "@/lib/roster-grid/api";
+
 import type { InstructorSubmissionRow } from "./api";
 
 export type SubmissionStats = {
@@ -11,6 +13,11 @@ export type SubmissionStats = {
   scoring: number;
   waiting: number;
 };
+
+/** 제출 현황의 사람 집합 — 격자의 참여자에서 강사 본인과 내보낸 사람을 뺀다. */
+export function participantIdsOf(grid: Pick<RosterGrid, "members">): Set<number> {
+  return new Set(grid.members.filter((m) => !m.is_instructor && !m.expelled).map((m) => m.id));
+}
 
 /** 참여자 집합이 있으면 그 밖의 시도(강사 본인·내보낸 사람)는 뺀다. */
 export function participantAttempts(
@@ -57,17 +64,28 @@ export type RequiredSummary = {
   unmet: string[];
 };
 
-/** 「필수 m/n」 — 필수 체크리스트 항목과(결과에 실렸다면) 문법 검사 기본 항목을 센다. */
+/**
+ * 「필수 m/n」 — 필수 체크리스트 항목과 문법 검사 기본 항목을 센다.
+ *
+ * 문법 항목은 **문제의 지금 `syntax_check_enabled`** 로 센다(#670) — 통과 배지를 정하는
+ * 백엔드 `Problem.is_score_passed` 와 같은 기준이다. 저장된 결과(`score.syntax_check`)의
+ * 유무로 세면 문법 결과 없이 만든 자동 미달 점수(실패 상한)만 분모가 하나 작고, 채점 뒤
+ * 문법 검사를 끄면 「통과」와 「문법 오류」가 함께 보인다. 진행 막대의 분모도 이 값을 쓴다.
+ */
 export function requiredSummary(
   row: Pick<InstructorSubmissionRow, "status" | "score">,
   items: ReadonlyArray<{ id: number; label: string; required: boolean }>,
+  syntaxCheckEnabled: boolean,
 ): RequiredSummary {
   const required = items.filter((item) => item.required);
-  const syntaxTotal = row.score?.syntax_check ? 1 : 0;
-  const total = required.length + (row.status === "scored" ? syntaxTotal : 0);
+  const total = required.length + (syntaxCheckEnabled ? 1 : 0);
   if (row.status !== "scored" || !row.score) return { met: null, total, unmet: [] };
   const verdicts = new Map(row.score.reasoning.map((v) => [v.checklist_item_id, v.is_met]));
   const unmet = required.filter((item) => verdicts.get(item.id) !== true).map((item) => item.label);
-  if (row.score.syntax_check && !row.score.syntax_check.is_met) unmet.push("문법 오류");
+  if (syntaxCheckEnabled) {
+    const syntax = row.score.syntax_check;
+    if (!syntax) unmet.push("문법 검사");
+    else if (!syntax.is_met) unmet.push("문법 오류");
+  }
   return { met: total - unmet.length, total, unmet };
 }

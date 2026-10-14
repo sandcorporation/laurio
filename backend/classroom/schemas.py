@@ -944,8 +944,9 @@ class ClassroomProblemListItemOut(Schema):
     submission_formats: list[str]
     passed: bool
     #: 통과 이력 상태(#639) — 격자·최근 시도와 같은 낱말이다: "passed" |
-    #: "attempted_not_passed" | "scoring" | "not_submitted". 격자의 "needs_setup"
-    #: (키·모델 사정)은 참여자가 손댈 수 없는 대기라 "scoring" 으로 접어 싣는다.
+    #: "attempted_not_passed" | "scoring" | "needs_setup" | "not_submitted".
+    #: "needs_setup" 은 키·모델 사정으로 멈춘 시도다 — 화면은 「채점 대기」로 보인다
+    #: (#670, CONTEXT.md 「채점 대기」; 예전에는 "scoring" 으로 접었다).
     status: str = "not_submitted"
     #: 이 참여자가 이 문제에 낸 시도 수와 마지막 시도 시각(#639). 시도가 없으면 0·None.
     attempt_count: int = 0

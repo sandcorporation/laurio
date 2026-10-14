@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstructorSubmissionRow } from "./api";
-import { latestPerMember, participantAttempts, requiredSummary, submissionStats } from "./latest-attempts";
+import {
+  latestPerMember,
+  participantAttempts,
+  participantIdsOf,
+  requiredSummary,
+  submissionStats,
+} from "./latest-attempts";
 
 function row(over: Partial<InstructorSubmissionRow>): InstructorSubmissionRow {
   return {
@@ -25,6 +31,17 @@ function row(over: Partial<InstructorSubmissionRow>): InstructorSubmissionRow {
 }
 
 describe("제출 현황 계산", () => {
+  it("사람 집합은 강사 본인과 내보낸 사람을 뺀 참여자다(「제출 현황 N」과 「시도」가 같은 집합)", () => {
+    const members = [
+      { id: 1, is_instructor: false, expelled: false },
+      { id: 2, is_instructor: true, expelled: false },
+      { id: 3, is_instructor: false, expelled: true },
+    ];
+    const ids = participantIdsOf({ members } as never);
+    expect([...ids]).toEqual([1]);
+    expect(participantAttempts([row({ member_id: 1 }), row({ member_id: 2 }), row({ member_id: 3 })], ids)).toHaveLength(1);
+  });
+
   it("참여자 집합 밖의 시도는 통계에서 빠진다", () => {
     const rows = [row({ id: 1, member_id: 1 }), row({ id: 2, member_id: 9 })];
     expect(participantAttempts(rows, new Set([1])).map((r) => r.id)).toEqual([1]);
@@ -67,7 +84,51 @@ describe("제출 현황 계산", () => {
         ],
       },
     });
-    expect(requiredSummary(scored, items)).toEqual({ met: 1, total: 2, unmet: ["오류 화면"] });
-    expect(requiredSummary(row({ status: "pending" }), items)).toEqual({ met: null, total: 2, unmet: [] });
+    expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 2, unmet: ["오류 화면"] });
+    expect(requiredSummary(row({ status: "pending" }), items, false)).toEqual({ met: null, total: 2, unmet: [] });
+  });
+
+  // #670 — 분모와 문법 항목은 문제의 지금 `syntax_check_enabled` 로 센다(백엔드 `is_score_passed` 와 같은 기준).
+  const items = [{ id: 10, label: "오류 화면", required: true }];
+  const verdicts = [{ checklist_item_id: 10, is_met: true, reasoning: "" }];
+
+  it("문법 검사가 켜져 있으면 채점 전에도 분모에 센다", () => {
+    expect(requiredSummary(row({ status: "pending" }), items, true)).toEqual({ met: null, total: 2, unmet: [] });
+  });
+
+  it("문법 결과 없이 만든 자동 미달 점수도 분모가 같고 문법 항목은 미충족이다", () => {
+    const autoFail = row({
+      score: { model_version: "m", created_at: "", syntax_check: null, reasoning: [] },
+    });
+    expect(requiredSummary(autoFail, items, true)).toEqual({
+      met: 0,
+      total: 2,
+      unmet: ["오류 화면", "문법 검사"],
+    });
+  });
+
+  it("채점 뒤 문법 검사를 끄면 저장된 문법 오류는 세지 않는다", () => {
+    const scored = row({
+      passed: true,
+      score: {
+        model_version: "m",
+        created_at: "",
+        syntax_check: { is_met: false, reasoning: "", judged_by: "parser", findings: [] },
+        reasoning: verdicts,
+      },
+    });
+    expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 1, unmet: [] });
+  });
+
+  it("문법 검사가 켜져 있고 오류가 있으면 「문법 오류」", () => {
+    const scored = row({
+      score: {
+        model_version: "m",
+        created_at: "",
+        syntax_check: { is_met: false, reasoning: "", judged_by: "parser", findings: [] },
+        reasoning: verdicts,
+      },
+    });
+    expect(requiredSummary(scored, items, true)).toEqual({ met: 1, total: 2, unmet: ["문법 오류"] });
   });
 });

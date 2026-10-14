@@ -40,6 +40,7 @@ const STATUS_BADGE: Record<
   passed: { label: "통과", tone: "verified" },
   attempted_not_passed: { label: "미통과", tone: "attention" },
   scoring: { label: "채점 중", tone: "neutral" },
+  needs_setup: { label: "채점 대기", tone: "attention" },
   not_submitted: { label: "미제출", tone: "neutral" },
 };
 
@@ -127,15 +128,18 @@ function HiddenProblemsSection({
   );
 }
 
-// 머리 아래 진행 한 줄(#639) — 「n/m 통과」 · 막대 · 「채점 중 a · 미제출 b」. 열린 문제만 센다.
+// 머리 아래 진행 한 줄(#639) — 「n/m 통과」 · 막대 · 「채점 중 a · 채점 대기 c · 미제출 b」.
+// 열린 문제만 센다.
 function ProgressLine({ problems }: { problems: ProblemListItem[] }) {
   const passed = problems.filter((p) => p.status === "passed").length;
   const scoring = problems.filter((p) => p.status === "scoring").length;
+  const waiting = problems.filter((p) => p.status === "needs_setup").length;
   const notSubmitted = problems.filter(
     (p) => p.status === "not_submitted",
   ).length;
   const rest = [
     scoring > 0 ? `채점 중 ${scoring}` : null,
+    waiting > 0 ? `채점 대기 ${waiting}` : null,
     notSubmitted > 0 ? `미제출 ${notSubmitted}` : null,
   ].filter((part): part is string => part !== null);
   return (

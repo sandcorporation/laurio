@@ -1926,7 +1926,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
                     title=problem.title,
                     submission_formats=problem.submission_formats,
                     passed=status == "passed",
-                    status="scoring" if status == "needs_setup" else status,
+                    status=status,
                     attempt_count=len(own),
                     last_attempted_at=max((s.created_at for s in own), default=None),
                 )
