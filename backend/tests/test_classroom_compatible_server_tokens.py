@@ -1,8 +1,8 @@
-"""호환 서버 클래스는 비용 대신 토큰을 보이고, usage 가 없으면 어림으로 예산을 센다 (#604, 상위 #598).
+"""호환 서버 클래스는 비용 대신 토큰을 보이고, usage 가 없으면 어림으로 사용량을 센다 (#604, 상위 #598).
 
 호환 서버는 단가를 모른다 — 서버가 내놓는 모델 이름이 OpenAI 단가표의 이름과 같아도 그
-서버가 그 값을 받는다는 보장이 없다. 그래서 예상 비용은 원화·배율 없이 토큰만이고, 채점 예산은
-지금처럼 토큰으로 센다: 응답에 usage 가 있으면 그 값, 없으면 프롬프트 길이로 어림하고 그 몫을
+서버가 그 값을 받는다는 보장이 없다. 그래서 예상 비용은 원화·배율 없이 토큰만이고, 채점 사용량은
+토큰으로 센다: 응답에 usage 가 있으면 그 값, 없으면 프롬프트 길이로 어림하고 그 몫을
 따로 남겨 화면이 「어림」을 밝힌다. 마운트된 HTTP API 와 흉내 호환 서버(`FakeCompatibleServer`)로 본다.
 """
 
@@ -11,7 +11,6 @@ from __future__ import annotations
 import pytest
 
 from classroom import scoring_cost
-from notifications.models import Notification, NotificationType
 from tests.classroom_scenarios import (
     CLASSES_URL,
     FakeCompatibleServer,
@@ -154,29 +153,6 @@ def test_without_usage_the_attempt_is_counted_from_the_prompt_length_and_marked_
     seen = get_class(client, instructor["access"], class_id)
     assert seen["token_usage_total"] == expected
     assert seen["token_usage_estimated"] == expected
-
-
-def test_estimated_usage_warns_and_exhausts_the_budget_like_reported_usage(client, db, monkeypatch, real_adapter):
-    fake, instructor, class_id = _compatible_class(client, monkeypatch)
-    patch_class(
-        client, instructor["access"], class_id, {"token_budget": 100, "token_budget_warning_threshold_percent": 50}
-    )
-    problem = create_open_problem(client, instructor["access"], class_id)
-
-    _score_one(client, fake, instructor, class_id, problem)
-
-    seen = get_class(client, instructor["access"], class_id)
-    assert seen["token_budget_exhausted"] is True
-    assert Notification.objects.filter(
-        notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING
-    ).count() == 1
-
-    participant = login(client, uid="participant-2")
-    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
-    submit_repository(client, participant["access"], class_id, problem.id)
-    calls = len(fake.requests)
-    assert run_scan(client)["count"] == 0
-    assert len(fake.requests) == calls
 
 
 def test_a_problem_marked_as_reasoning_counts_the_output_of_its_effort(client, db, monkeypatch, real_adapter):

@@ -3,8 +3,8 @@
 핵심 대상: 시도 하나가 지금 채점될 수 있는지, 아니라면 사유가 무엇인지를
 `classroom.pending_scoring` 한 모듈이 답한다 — 스캔 후보 질의·채점 직전
 확인·참여자 화면의 `pending_reason`·강사 참여자별 격자의 칸 상태가 모두 그
-답을 쓴다. 사유가 여럿이면 키(없음·거부) → 모델 거부 → 예산 소진 순서로
-하나만 말한다. 강사 격자는 키 문제와 모델 거부를 합쳐 「설정 필요」
+답을 쓴다. 사유가 여럿이면 키(없음·거부) → 모델 거부 순서로
+하나만 말한다(누적 토큰 상한 사유는 #629 에서 걷었다). 강사 격자는 키 문제와 모델 거부를 합쳐 「설정 필요」
 (`needs_setup`)로 보인다 — 지금까지는 모델이 거부된 시도가 「채점 중」으로
 잘못 보였다(이 파일의 첫 테스트가 그 버그를 빨갛게 드러낸다).
 
@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from classroom.models import Class, Problem
+from classroom.models import Problem
 
 from tests.classroom_scenarios import (
     create_class,
@@ -88,27 +88,8 @@ def test_grid_cell_for_a_missing_key_attempt_also_shows_needs_setup(client, db):
     assert cell["status"] == "needs_setup"
 
 
-def test_grid_cell_for_a_budget_exhausted_attempt_still_shows_scoring(client, db):
-    """예산 소진은 강사가 손대지 않아도 예산을 채우면 풀리므로 "설정 필요"가
-    아니라 여전히 "채점 중"이다(#434 AC)."""
-
-    instructor = login(client, uid="instructor-1")
-    class_id = create_class(client, instructor["access"])
-    problem = create_open_problem(client, instructor["access"], class_id)
-    participant = login(client, uid="participant-1")
-    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
-    submit_repository(client, participant["access"], class_id, problem.id)
-    Class.objects.filter(id=class_id).update(token_budget=100, token_usage_total=100)
-
-    grid = roster_grid(client, instructor["access"], class_id)
-
-    participant_row = next(m for m in grid["members"] if not m["is_instructor"])
-    cell = _grid_cell(grid, participant_row["id"], problem.id)
-    assert cell["status"] == "scoring"
-
-
-def test_pending_reason_priority_is_key_then_model_then_budget(client, db):
-    """셋 다 동시에 걸려 있어도 참여자 화면은 키 사유 하나만 말한다."""
+def test_pending_reason_priority_is_key_then_model(client, db):
+    """둘 다 걸려 있어도 참여자 화면은 키 사유 하나만 말한다."""
 
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"], with_key=False)
@@ -118,27 +99,17 @@ def test_pending_reason_priority_is_key_then_model_then_budget(client, db):
     submit_repository(client, participant["access"], class_id, problem.id)
 
     Problem.objects.filter(id=problem.id).update(scoring_model_rejected_at="2026-01-01T00:00:00Z")
-    Class.objects.filter(id=class_id).update(token_budget=100, token_usage_total=100)
 
     mine_out = mine(client, participant["access"], class_id, problem.id)
     assert mine_out["submissions"][0]["pending_reason"] == "no_api_key"
 
 
-def test_pending_reason_is_model_rejected_when_key_is_fine_but_budget_is_also_gone(client, db):
-    """키가 멀쩡하면 모델 거부가 예산 소진보다 먼저 말해진다."""
+def test_pending_reasons_are_only_key_and_model():
+    """누적 토큰 상한 사유는 없다(#629) — 누적 사용량은 채점을 멈추지 않는다."""
 
-    instructor = login(client, uid="instructor-1")
-    class_id = create_class(client, instructor["access"])
-    problem = create_open_problem(client, instructor["access"], class_id, model="gpt-5-mini")
-    participant = login(client, uid="participant-1")
-    join_class(client, participant["access"], class_id, instructor_access=instructor["access"])
-    submit_repository(client, participant["access"], class_id, problem.id)
+    from classroom import pending_scoring
 
-    Problem.objects.filter(id=problem.id).update(scoring_model_rejected_at="2026-01-01T00:00:00Z")
-    Class.objects.filter(id=class_id).update(token_budget=100, token_usage_total=100)
-
-    mine_out = mine(client, participant["access"], class_id, problem.id)
-    assert mine_out["submissions"][0]["pending_reason"] == "model_rejected"
+    assert pending_scoring.REASONS == (pending_scoring.NO_API_KEY, pending_scoring.MODEL_REJECTED)
 
 
 def test_scan_skips_a_submission_whose_screen_reason_is_model_rejected(client, db, monkeypatch):

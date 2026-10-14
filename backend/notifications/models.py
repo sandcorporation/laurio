@@ -29,12 +29,9 @@ class NotificationType(models.TextChoices):
     # HoldKind) — 상태마다 유형을 만들면 Hold → 문구 규칙이 두 곳에 생긴다(#130 이 세
     # 렌더러에서 하나로 모은 것을 다시 쪼개는 셈이다).
     PAYOUT_AWAITS_YOU = "payout_awaits_you", "지급이 당신을 기다린다"
-    # 강의실 채점 예산이 경고 임계를 넘었다(#295) — 강사가 자기 클래스의
-    # `classroom.Class.token_budget`을 정했을 때만 쓰인다. 강의실은 공모전
-    # 가족이 아니라(ADR-0037) 이 유형을 만드는 쪽(`classroom.scoring`)이
-    # `notifications`를 부르지 이 앱이 강의실을 알지 않는다 — 유형 어휘만
-    # 여기 산다.
-    CLASSROOM_TOKEN_BUDGET_WARNING = "classroom_token_budget_warning", "강의실 채점 예산 경고"
+    # 강의실은 공모전 가족이 아니라(ADR-0037) 강의실 유형을 만드는 쪽(`classroom.scoring` 등)이
+    # `notifications`를 부르지 이 앱이 강의실을 알지 않는다 — 유형 어휘만 여기 산다.
+    # (예전의 누적 토큰 경고 유형은 #629 에서 상한과 함께 걷었다.)
     # 강의실 제출 하나의 채점이 끝났다(#303) — 통과든 미통과든, 플랫폼 자동
     # 미달이든 매 시도마다 정확히 한 번. 낸 사람(`ClassMember.user`)에게만
     # 간다 — 강사에게는 자기가 낸 것이 아니면 가지 않는다(#301과 같은 이유로
@@ -102,7 +99,6 @@ class NotificationType(models.TextChoices):
 #: 답한다. 나중에 강의실 알림 중 밖으로 나가는 것이 생겨도 이 목록만 늘리면 된다.
 CLASSROOM_NOTIFICATION_TYPES = frozenset(
     {
-        NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
         NotificationType.CLASSROOM_SUBMISSION_SCORED,
         NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
         NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
@@ -184,17 +180,9 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
         "is_quiet_hours_exempt": True,
         "is_internal_only": False,
     },
-    # 강사 본인의 지출에 대한 경고다 — 거래성이고 옵트인이 필요 없다. **서비스
-    # 안에서만 보낸다**(#301) — 학습용 도구라 밤에 휴대폰이 울릴 일이 아니고,
-    # 예산이 찼다는 사실 자체는 채점 정지 상태로 이미 보존돼 다음 아침에 봐도
-    # 늦지 않는다. 강의실 알림은 전부 이 규칙 하나로 묶인다 — 만드는 쪽마다
-    # "이건 문자로 안 나가도 된다"고 따로 주장하지 않는다.
-    NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING: {
-        "is_transactional": True,
-        "is_promotional": False,
-        "is_quiet_hours_exempt": False,
-        "is_internal_only": True,
-    },
+    # 강의실 알림은 전부 **서비스 안에서만** 보낸다(#301) — 학습용 도구라 밤에 휴대폰이 울릴
+    # 일이 아니다. 만드는 쪽마다 "이건 문자로 안 나가도 된다"고 따로 주장하지 않고 이 규칙
+    # 하나로 묶인다.
     # 낸 사람 자신의 제출에 대한 처리 결과다 — 거래성이고 옵트인이 필요 없다.
     # 강의실 알림은 전부 서비스 안에서만이라는 같은 규칙을 받는다(#301, #303).
     NotificationType.CLASSROOM_SUBMISSION_SCORED: {

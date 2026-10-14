@@ -172,7 +172,7 @@ def test_mark_one_read_on_classroom_notification_publishes(
         client,
         django_capture_on_commit_callbacks,
         recipient_id=user_id,
-        notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+        notification_type=NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
     )
     FakeEventBus._queues.pop(user_id, None)
 

@@ -28,26 +28,12 @@ def _web_class(instructor) -> Class:
     return Class.objects.get(instructor=instructor, name__contains="웹 프론트엔드 스터디")
 
 
-def test_seed_notifies_instructor_of_budget_warning(db):
-    instructor = _instructor("chain-g-budget-inst@example.test")
+def test_seed_leaves_usage_on_the_class_for_the_settings_screen(db):
+    instructor = _instructor("chain-g-usage-inst@example.test")
 
     call_command("seed_demo_classroom", email=instructor.email)
 
-    web_class = _web_class(instructor)
-    notification = Notification.objects.get(
-        recipient=instructor,
-        notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
-    )
-    assert notification.context["class_id"] == web_class.id
-    assert notification.context["class_name"] == web_class.name
-    assert notification.context["token_usage_total"] == web_class.token_usage_total
-    assert notification.context["token_budget"] == web_class.token_budget
-    # 강의실 알림은 화면 전용이다(#301) — 어느 채널도 시도하지 않는다.
-    assert notification.status == Notification.Status.NOT_DISPATCHED
-    assert not notification.dispatches.exists()
-
-    web_class.refresh_from_db()
-    assert web_class.token_budget_warning_sent_at is not None
+    assert _web_class(instructor).token_usage_total > 0
 
 
 def test_seed_notifies_participant_of_each_scored_attempt(db):
@@ -83,21 +69,21 @@ def test_reseed_does_not_duplicate_notifications(db):
 
     call_command("seed_demo_classroom", email=instructor.email)
     first_total = Notification.objects.count()
-    first_budget_warnings = Notification.objects.filter(
-        recipient=instructor,
-        notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+    first_scored = Notification.objects.filter(
+        notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED,
+        context__class_id=_web_class(instructor).id,
     ).count()
 
     call_command("seed_demo_classroom", email=instructor.email)
 
     assert Notification.objects.count() == first_total
+    assert first_scored > 0
     assert (
         Notification.objects.filter(
-            recipient=instructor,
-            notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
+            notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED,
+            context__class_id=_web_class(instructor).id,
         ).count()
-        == first_budget_warnings
-        == 1
+        == first_scored
     )
 
 
@@ -118,7 +104,3 @@ def test_purge_only_removes_this_instructors_notifications(db):
 
     assert not Notification.objects.filter(context__class_id=class_a.id).exists()
     assert Notification.objects.filter(context__class_id=class_b.id).exists()
-    assert Notification.objects.filter(
-        recipient=instructor_b,
-        notification_type=NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING,
-    ).exists()

@@ -39,10 +39,10 @@ describe("groupNotifications", () => {
     expect(groups[0].className).toBe("1반");
   });
 
-  it("문제에 딸리지 않은 알림(예산 경고)은 절대 묶이지 않는다", () => {
+  it("문제에 딸리지 않은 알림(채점 키 거부)은 절대 묶이지 않는다", () => {
     const items = [
-      row({ id: 1, notification_type: "classroom_token_budget_warning", context: { class_name: "1반" } }),
-      row({ id: 2, notification_type: "classroom_token_budget_warning", context: { class_name: "1반" } }),
+      row({ id: 1, notification_type: "classroom_scoring_key_rejected", context: { class_name: "1반" } }),
+      row({ id: 2, notification_type: "classroom_scoring_key_rejected", context: { class_name: "1반" } }),
     ];
     const groups = groupNotifications(items);
     expect(groups).toHaveLength(2);

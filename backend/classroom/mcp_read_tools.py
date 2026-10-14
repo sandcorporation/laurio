@@ -202,7 +202,6 @@ CONTEST_ENTRY_CELL_SCHEMA = {
 _CLASS_ID = {"type": "integer", "description": "클래스 번호(내 클래스 목록의 id)"}
 _PROBLEM_ID = {"type": "integer", "description": "문제 번호(문제 목록의 id)"}
 _COUNT = {"type": "integer", "minimum": 0}
-_NULLABLE_INT = {"type": ["integer", "null"]}
 _DATETIME = {"type": "string", "description": "ISO 8601 시각"}
 _PROBLEM_STATUS = {
     "type": "string",
@@ -388,7 +387,7 @@ CLASS_OUTPUT_SCHEMA = {
         "role": {
             "type": "string",
             "enum": ["owner", "co_instructor"],
-            "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사. 채점 키·예산·클래스 삭제는 소유자만 한다",
+            "description": "이 클래스에서 내 역할 — owner 소유자, co_instructor 공동 강사. 채점 키·클래스 삭제는 소유자만 한다",
         },
         "join_code": {"type": "string", "description": "가입 링크의 코드"},
         "created_at": _DATETIME,
@@ -421,15 +420,11 @@ CLASS_OUTPUT_SCHEMA = {
             "type": "boolean",
             "description": "채점 연결의 호환 서버에 닿지 않아 채점이 멈춰 있는가 — 서버가 돌아오면 이어진다",
         },
-        "token_budget": {**_NULLABLE_INT, "description": "채점 토큰 예산. null 이면 무제한"},
-        "token_budget_warning_threshold_percent": {"type": "integer", "description": "경고 알림 임계(예산 대비 %)"},
         "token_usage_total": {**_COUNT, "description": "지금까지 채점에 쓴 토큰"},
         "token_usage_estimated": {
             **_COUNT,
             "description": "token_usage_total 가운데 서버가 사용량을 주지 않아 프롬프트 길이로 어림한 몫",
         },
-        "token_budget_remaining": {**_NULLABLE_INT, "description": "남은 토큰. 예산이 없으면 null"},
-        "token_budget_exhausted": {"type": "boolean", "description": "예산이 다 떨어져 채점이 멈춰 있는가"},
         "has_submissions": {"type": "boolean", "description": "어느 문제에든 제출이 하나라도 있는가"},
         "published_template": _TEMPLATE_SUMMARY,
     },
@@ -443,8 +438,8 @@ READ_TOOL_SPECS: list[dict] = [
         "title": "클래스 상세",
         "description": (
             "클래스 하나의 설정을 돌려준다 — 이름, 내 역할(소유자·공동 강사), 소유자의 강사 이름, 가입 코드, 보관 여부, 기본 채점 모델과 "
-            "추론 강도, 채점 연결이 있는가와 그 상태·종류(OpenAI 키·호환 서버)·호환 서버의 호스트(키·주소·인증 값은 주지 않는다), 채점 토큰 예산·사용량·남은 양·"
-            "경고 임계, 제출이 있는가, 공개된 템플릿, 기본 모델·추론 강도로 채점할 때의 예상 비용(시도 1건·문제 "
+            "추론 강도, 채점 연결이 있는가와 그 상태·종류(OpenAI 키·호환 서버)·호환 서버의 호스트(키·주소·인증 값은 주지 않는다), 채점 토큰 사용량(어림한 몫 포함), "
+            "제출이 있는가, 공개된 템플릿, 기본 모델·추론 강도로 채점할 때의 예상 비용(시도 1건·문제 "
             "하나, 원). 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,

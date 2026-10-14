@@ -484,7 +484,7 @@ _REPORT_OUTPUT = {
                                         "passed": {"type": "boolean", "description": "이 시도가 통과인가"},
                                         "pending_reason": {
                                             "type": ["string", "null"],
-                                            "description": "채점을 기다리는 이유 — no_api_key·model_rejected·budget_exhausted, 없으면 null",
+                                            "description": "채점을 기다리는 이유 — no_api_key·model_rejected, 없으면 null",
                                         },
                                         "met_count": {**_NULLABLE_COUNT, "description": "충족한 체크리스트 항목 수(점수). 미채점이면 null"},
                                         "item_count": {**_NULLABLE_COUNT, "description": "판정된 체크리스트 항목 수. 미채점이면 null"},

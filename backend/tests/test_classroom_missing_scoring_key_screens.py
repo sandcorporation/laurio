@@ -1,15 +1,14 @@
 """채점 키가 없는 클래스의 제출이 「채점 중」에 영원히 멈추는 대신, 그 사실과
 사유를 학생·강사 화면 모두에 말한다 (#346, CONTEXT.md 「강의실」).
 
-핵심 대상: `pending_reason`이 이제 "no_api_key" | "budget_exhausted" | `None`
-셋을 서로 다르게 낸다 — 키가 없음(#346)은 예산 소진(#295)과 다른 사유이고,
-둘 다 참여자가 스스로 어쩔 수 없다는 점은 같다. 참여자용 `.../mine`, 강사용
+핵심 대상: `pending_reason`이 키가 없으면 "no_api_key"를 낸다(#346) — 참여자가
+스스로 어쩔 수 없는 사유다(다른 하나는 모델 거부, #403). 참여자용 `.../mine`, 강사용
 제출 현황(`.../submissions`), 참여자별 현황 격자(`.../roster-grid`) 셋이 모두
 같은 값을 읽어 구별해 보여준다. 채점이 실제로 도는 방식(`classroom.scoring`의
 후보 쿼리)은 이 티켓의 범위가 아니다 — 그대로 둔다.
 
 **공용 시나리오 빌더(#433) 위로 옮겼다** — `tests/classroom_scenarios.py` 참고.
-예산 소진·공백 키는 정상 경로(HTTP)로는 만들 수 없는 상태라 빌더가 아니라 이
+공백 키는 정상 경로(HTTP)로는 만들 수 없는 상태라 빌더가 아니라 이
 파일이 직접 ORM으로 만든다(스펙 #432 「Testing Decisions」).
 """
 
@@ -87,20 +86,6 @@ def test_roster_grid_cell_shows_needs_setup_status(client, db):
     member = next(m for m in grid["members"] if not m["is_instructor"])
     cell = next(c for c in member["cells"] if c["problem_id"] == ctx["problem_id"])
     assert cell["status"] == "needs_setup"
-
-
-def test_no_api_key_takes_priority_over_budget_exhausted(client, db):
-    """키가 없으면 예산이 어떤 값이든 상관없다 — "제출은 쌓이는데 예산이
-    바닥났다"는 사유는 키가 있어야만 성립한다. 순서를 직접 확인해 둔다:
-    키가 아예 없는 채로 예산도 소진된 것처럼 값을 억지로 만들어도(정상
-    경로로는 키 없이 토큰이 쌓이지 않는다) "no_api_key"가 이긴다."""
-
-    ctx = _setup_submission_without_key(client)
-    Class.objects.filter(id=ctx["class_id"]).update(token_budget=100, token_usage_total=100)
-
-    mine_out = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
-
-    assert mine_out["submissions"][0]["pending_reason"] == "no_api_key"
 
 
 def test_whitespace_only_key_is_treated_as_no_key_everywhere(client, db):

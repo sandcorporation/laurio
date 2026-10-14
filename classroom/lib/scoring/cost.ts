@@ -126,20 +126,21 @@ export function formatAttemptsPerParticipant(n: number): string {
   return `${(Math.round(n * 10) / 10).toLocaleString("ko-KR")}번`;
 }
 
-/** 시도 1건이 쓰는 토큰 — 기준이 소스 크기별이면 「보통」(가운데) 크기로 본다. */
-export function tokensPerAttempt(row: ScoringCostRow): number | null {
-  if (row.per_attempt) return row.per_attempt.tokens;
-  const middle = row.by_source_size[Math.floor(row.by_source_size.length / 2)];
-  return middle ? middle.tokens : null;
+/** 시도 1건 — 기준이 소스 크기별이면 「보통」(가운데) 크기로 본다. */
+function representativeAttempt(row: ScoringCostRow): ScoringCostAttempt | null {
+  if (row.per_attempt) return row.per_attempt;
+  return row.by_source_size[Math.floor(row.by_source_size.length / 2)] ?? null;
 }
 
-/** 예산(토큰)으로 채점할 수 있는 시도 수 — 예산 칸이 비었거나 셈할 수 없으면 null. */
-export function attemptsWithinBudget(budgetText: string, row: ScoringCostRow | null): number | null {
-  const budget = Number(budgetText);
-  if (!row || budgetText.trim() === "" || !Number.isFinite(budget) || budget <= 0) return null;
-  const tokens = tokensPerAttempt(row);
-  if (!tokens) return null;
-  return Math.floor(budget / tokens);
+/**
+ * 누적 사용량(토큰)의 원화 어림(#629) — 지금 설정(기본 모델·강도)의 토큰당 단가로 셈한다. 지난 시도가
+ * 다른 모델이었어도 가리지 않는 어림이다. 단가를 모르면(호환 서버·비용 미확인) null.
+ */
+export function usageKrw(tokens: number, row: ScoringCostRow | null): number | null {
+  if (!row || !row.priced) return null;
+  const attempt = representativeAttempt(row);
+  if (!attempt || attempt.krw === null || attempt.tokens <= 0) return null;
+  return Math.round((tokens * attempt.krw) / attempt.tokens);
 }
 
 /**

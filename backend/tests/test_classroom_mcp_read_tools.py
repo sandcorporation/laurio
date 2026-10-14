@@ -81,16 +81,10 @@ def _screen(client, access: str, path: str):
 
 
 def _a_class_with_everything(client):
-    """키·예산·초안 문제·열린 문제·참여자 둘(하나는 시도)·내보낸 참여자까지 있는 클래스."""
+    """키·초안 문제·열린 문제·참여자 둘(하나는 시도)·내보낸 참여자까지 있는 클래스."""
 
     instructor = login(client, uid="mcp-read-teacher", email="teacher@school.example")
     class_id = create_class(client, instructor["access"], name="자료구조", key=KEY)
-    client.patch(
-        f"{CLASSES_URL}/{class_id}",
-        data={"token_budget": 50000},
-        content_type="application/json",
-        **auth_header(instructor["access"]),
-    )
     opened = create_open_problem(
         client, instructor["access"], class_id, title="스택", optional_labels=["주석이 있다"]
     )
@@ -146,7 +140,7 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     withheld = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked"}
     assert tool_class == {k: v for k, v in screen_class.items() if k not in withheld}
     assert class_estimate["model"] == screen_class["default_model"]
-    assert tool_class["token_budget"] == 50000
+    assert tool_class["token_usage_total"] == screen_class["token_usage_total"]
 
     # 목록은 문제마다 요약만 싣는다(#579) — 설명·체크리스트 원문은 get_problem 에서 읽는다.
     problems = _structured(client, token, "list_problems", class_id=class_id)["problems"]

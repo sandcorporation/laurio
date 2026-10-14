@@ -14,12 +14,10 @@ export type NotificationDispatchRow = {
   failure_reason: string;
 };
 
-// 지금 강의실이 만드는 유형 둘 — 배지·목록·묶기(#305)가 이 값으로 분기한다.
+// 강의실이 만드는 유형 가운데 묶기(#305)가 분기하는 것 — 배지·목록·묶기가 이 값으로 분기한다.
 // 문자열 그대로 비교한다: 백엔드 `NotificationType`과 같은 값이어야 하고, 새
 // 유형이 생기면 여기 추가한다(`fallback` 문구가 있어 빠뜨려도 화면이 죽지 않는다).
-export type ClassroomNotificationType =
-  | "classroom_submission_scored"
-  | "classroom_token_budget_warning";
+export type ClassroomNotificationType = "classroom_submission_scored";
 
 export type NotificationRow = {
   id: number;

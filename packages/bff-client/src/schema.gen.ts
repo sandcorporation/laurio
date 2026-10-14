@@ -1129,7 +1129,7 @@ export interface paths {
          *     이 질의에 없다), 문제가 열려 있고 클래스가 보관되지 않았으면 제출 잠금이
          *     풀린다. 「강사가 보는 중」은 `viewing_as_instructor`가 따로 말한다 —
          *     초안·숨김처럼 참여자라면 못 낼 상태에서는 그 사유가 여전히 잠금을 건다.
-         *     명단·달성률·토큰 예산이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
+         *     명단·달성률이 강사를 세지 않는 것은 그대로다(#290 — 강사 행은
          *     격자에 표시만 되고 집계에서 빠진다).
          */
         get: operations["classroom_api_get_my_problem"];
@@ -4983,17 +4983,6 @@ export interface components {
             scoring_server_unreachable: boolean;
             /** Scoring Server Url */
             scoring_server_url?: string | null;
-            /** Token Budget */
-            token_budget?: number | null;
-            /**
-             * Token Budget Exhausted
-             * @default false
-             */
-            token_budget_exhausted: boolean;
-            /** Token Budget Remaining */
-            token_budget_remaining?: number | null;
-            /** Token Budget Warning Threshold Percent */
-            token_budget_warning_threshold_percent: number;
             /**
              * Token Usage Estimated
              * @default 0
@@ -5014,10 +5003,6 @@ export interface components {
             instructor_display_name?: string | null;
             /** Name */
             name?: string | null;
-            /** Token Budget */
-            token_budget?: number | null;
-            /** Token Budget Warning Threshold Percent */
-            token_budget_warning_threshold_percent?: number | null;
         };
         /**
          * ClassTemplateListItemOut
@@ -6602,7 +6587,7 @@ export interface components {
         /**
          * JoinedClassOut
          * @description 「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassOut`과
-         *     달리 `join_code`·OpenAI 키·토큰 예산을 싣지 않는다: 그 값들은 강사만의
+         *     달리 `join_code`·OpenAI 키·토큰 사용량을 싣지 않는다: 그 값들은 강사만의
          *     것이라 참여자가 자기 가입 목록을 볼 때 남의 클래스 관리 정보를 함께
          *     받으면 안 된다.
          */
@@ -6950,7 +6935,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_token_budget_warning" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -8158,7 +8143,7 @@ export interface components {
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
         /**
          * ScoringCostAttemptOut
-         * @description 시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰. 호환 서버는 원화가 `None`(#604).
+         * @description 시도 1건의 어림(#591) — 원화와 그 시도가 사용량에 더할 토큰. 호환 서버는 원화가 `None`(#604).
          */
         ScoringCostAttemptOut: {
             /** Krw */

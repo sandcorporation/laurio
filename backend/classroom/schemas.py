@@ -37,12 +37,6 @@ class ClassPatchIn(Schema):
     #: 「호환 서버」의 기본 모델이 추론 모델인가 — 소유자의 「추론 모델」 스위치(#602). 켜면 채점
     #: 호출에 추론 강도가 실린다. 「OpenAI 키」 연결은 이름으로 판단해 이 값을 보지 않는다.
     default_model_is_reasoning: bool | None = None
-    #: 채점 토큰 예산 상한(#295). 필드를 생략하면(`None`) 바꾸지 않는다 —
-    #: 기존 PATCH 관례 그대로다. 이 API에는 "다시 무제한으로 되돌리는" 값이
-    #: 없다 — 그 요구가 아직 없어 짓지 않는다.
-    token_budget: int | None = Field(default=None, ge=1)
-    #: 경고 알림을 보낼 임계, 예산 대비 백분율(1~100, #295).
-    token_budget_warning_threshold_percent: int | None = Field(default=None, ge=1, le=100)
 
 
 class PublishedTemplateSummaryOut(Schema):
@@ -118,18 +112,10 @@ class ClassOut(Schema):
     #: 남는다. `archived_at`이 아니라 이 값을 내려주는 이유는 화면이 정확한
     #: 시각을 쓰지 않기 때문이다(진행중/보관 여부만 갈라 보이면 된다).
     archived: bool = False
-    #: `None`이면 무제한(#295) — 강사가 아직 예산을 정하지 않았다는 뜻이다.
-    token_budget: int | None = None
-    token_budget_warning_threshold_percent: int
-    #: 지금까지 실제로 쓴 토큰 누적합.
+    #: 지금까지 실제로 쓴 토큰 누적합 — 설정 화면의 「사용량」(#629). 상한은 없다.
     token_usage_total: int
     #: `token_usage_total` 가운데 서버가 usage 를 주지 않아 프롬프트 길이로 어림한 몫(#604).
     token_usage_estimated: int = 0
-    #: `token_budget - token_usage_total` — 예산이 없으면(무제한) `None`이다.
-    token_budget_remaining: int | None = None
-    #: 지금 채점이 예산 때문에 멈춰 있는가 — 강사 화면이 이 값 하나로
-    #: "채점 정지 중" 배지를 낸다.
-    token_budget_exhausted: bool = False
     #: 이 클래스의 어느 문제에도 제출이 하나라도 있는가(#330). 삭제 가능
     #: 여부를 화면이 문제·제출물 목록을 합쳐 스스로 셈하지 않도록 백엔드가
     #: 판정해 내려준다 — `DELETE .../classes/{id}`도 같은 사실로 거절한다.
@@ -139,7 +125,7 @@ class ClassOut(Schema):
     #: 새로고침 뒤에도 정확히 가른다.
     published_template: PublishedTemplateSummaryOut | None = None
     #: 부른 사람이 이 클래스에서 무엇인가(#561, CONTEXT.md 「공동 강사」) — "owner"(소유자)
-    #: 또는 "co_instructor"(공동 강사). 화면이 이 값으로 소유자 전용 컨트롤(채점 키·예산·
+    #: 또는 "co_instructor"(공동 강사). 화면이 이 값으로 소유자 전용 컨트롤(채점 키·
     #: 클래스 삭제)을 감추고 클래스 목록에 「공동 강사」를 표시한다.
     role: Literal["owner", "co_instructor"]
     #: 대기 중인 소유권 이전 요청(#564) — 없으면 `None`. 강사 누구나 본다: 소유자는 취소하고,
@@ -173,7 +159,7 @@ class CompatibleServerIn(Schema):
 
 class JoinedClassOut(Schema):
     """「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassOut`과
-    달리 `join_code`·OpenAI 키·토큰 예산을 싣지 않는다: 그 값들은 강사만의
+    달리 `join_code`·OpenAI 키·토큰 사용량을 싣지 않는다: 그 값들은 강사만의
     것이라 참여자가 자기 가입 목록을 볼 때 남의 클래스 관리 정보를 함께
     받으면 안 된다."""
 
@@ -217,7 +203,7 @@ class ScoringModelCatalogOut(Schema):
 
 
 class ScoringCostAttemptOut(Schema):
-    """시도 1건의 어림(#591) — 원화와 그 시도가 예산에서 쓸 토큰. 호환 서버는 원화가 `None`(#604)."""
+    """시도 1건의 어림(#591) — 원화와 그 시도가 사용량에 더할 토큰. 호환 서버는 원화가 `None`(#604)."""
 
     krw: float | None = None
     tokens: int
@@ -811,18 +797,12 @@ class ClassroomSubmissionOut(Schema):
     #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
     #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
     passed: bool = False
-    #: "no_api_key" | "budget_exhausted" | "model_rejected" | `None` —
-    #: `classroom.pending_scoring.pending_reason`이 이 우선순위(키 → 모델 →
-    #: 예산)로 정한다(#434). `status`가 "pending"일 때만 채워진다 — 강사가
-    #: 채점 키를 아직 설정하지 않았으면(#346) 예산과 무관하게 "no_api_key",
-    #: 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰면(#403)
-    #: "model_rejected", 키·모델 둘 다 멀쩡한데 예산이 바닥났으면(#295)
-    #: "budget_exhausted"다. 셋 다 참여자가 스스로 어쩔 수 없는 사유라
-    #: 문구도 "당신 잘못이 아니고 다시 낼 필요도 없다"는 같은 모양을 낸다
-    #: (참여자 화면은 "model_rejected"를 "no_api_key"와 같은 안내로
-    #: 보여준다 — #403 AC "참여자에게는 기존 「채점하지 못함」 안내를
-    #: 보인다") — 강사 화면만 셋을 다르게 말하며, 강사가 무엇을 해야
-    #: 풀리는가(키를 넣는다/예산을 늘린다/모델을 바꾼다)가 다를 뿐이다.
+    #: "no_api_key" | "model_rejected" | `None` — `classroom.pending_scoring.pending_reason`이
+    #: 이 우선순위(키 → 모델)로 정한다(#434, #629). `status`가 "pending"일 때만 채워진다 —
+    #: 강사가 채점 키를 아직 설정하지 않았으면(#346) "no_api_key", 키는 멀쩡한데 이 문제의
+    #: 채점 모델을 그 키로 못 쓰면(#403) "model_rejected"다. 둘 다 참여자가 스스로 어쩔 수
+    #: 없는 사유라 참여자 화면은 같은 안내로 보이고, 강사 화면만 무엇을 해야 풀리는가(키를
+    #: 넣는다/모델을 바꾼다)로 갈라 말한다.
     pending_reason: str | None = None
     #: 이 시도를 「공모전에도 내기」로 냈을 때만 채워진다(#549) — 끄고 낸 시도는 None.
     contest_entry: ClassroomContestEntryOut | None = None
@@ -882,7 +862,7 @@ class ClassroomGridCellOut(Schema):
     #: 무관하게 "passed"다. "needs_setup"(#434)은 그 클래스에 채점 키가
     #: 아예 없거나 거부됐거나(#346, #355), 이 문제의 채점 모델이 거부돼
     #: (#403) 미채점 시도가 애초에 후보에도 못 드는 경우다 —
-    #: "scoring"(정말 채점을 기다리는 중, 예산 소진 포함)과 다르게, 이
+    #: "scoring"(정말 채점을 기다리는 중)과 다르게, 이
     #: 셀은 강사가 직접 손대기 전까지는 절대 바뀌지 않는다
     #: (`classroom.pending_scoring.needs_setup`).
     status: str

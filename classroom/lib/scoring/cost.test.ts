@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  attemptsWithinBudget,
   classCostSummary,
   costBasisText,
   costRowLabel,
@@ -10,6 +9,7 @@ import {
   formatManCount,
   formatRatio,
   formatTokens,
+  usageKrw,
   type ScoringCostEstimate,
   type ScoringCostRow,
 } from "./cost";
@@ -104,9 +104,9 @@ describe("예상 채점 비용 적기 (#591)", () => {
     );
   });
 
-  it("예산 칸의 토큰을 시도 1건의 토큰으로 나눈다 — 소스 크기별이면 가운데 크기로", () => {
+  it("사용량의 원화 어림은 지금 설정의 토큰당 단가로 — 소스 크기별이면 가운데 크기로 (#629)", () => {
     const measured = row({ per_attempt: { krw: 15, tokens: 20_000 } });
-    expect(attemptsWithinBudget("500000", measured)).toBe(25);
+    expect(usageKrw(500_000, measured)).toBe(375);
     const bySize = row({
       by_source_size: [
         { krw: 8, tokens: 5_500 },
@@ -114,9 +114,9 @@ describe("예상 채점 비용 적기 (#591)", () => {
         { krw: 40, tokens: 63_000 },
       ],
     });
-    expect(attemptsWithinBudget("176500", bySize)).toBe(10);
-    expect(attemptsWithinBudget("", measured)).toBeNull();
-    expect(attemptsWithinBudget("500000", null)).toBeNull();
+    expect(usageKrw(176_500, bySize)).toBe(140);
+    expect(usageKrw(500_000, null)).toBeNull();
+    expect(usageKrw(500_000, row({ priced: false, per_attempt: { krw: null, tokens: 20_000 } }))).toBeNull();
   });
 });
 
@@ -127,7 +127,7 @@ describe("호환 서버 — 토큰으로 (#604)", () => {
     expect(formatTokens(22_500, true)).toBe("약 2.3만 토큰~");
   });
 
-  it("토큰 줄은 강도가 이미 풀려 있어 모델로 찾고, 예산 안 시도 수도 그 토큰으로 센다", () => {
+  it("토큰 줄은 강도가 이미 풀려 있어 모델로 찾고, 원화 어림은 없다", () => {
     const tokenRow = row({
       priced: false,
       ratio_to_baseline: null,
@@ -136,7 +136,7 @@ describe("호환 서버 — 토큰으로 (#604)", () => {
     });
     const found = findCostRow(estimate({ unit: "tokens", rows: [tokenRow] }), "gpt-4.1-mini", "medium");
     expect(found).toBe(tokenRow);
-    expect(attemptsWithinBudget("1000000", found)).toBe(50);
+    expect(usageKrw(1_000_000, found)).toBeNull();
   });
 });
 

@@ -88,11 +88,4 @@ def render_message(notification: Notification) -> str:
         if message:
             return f"{_BRAND_PREFIX} {message}"
 
-    if notification_type == NotificationType.CLASSROOM_TOKEN_BUDGET_WARNING:
-        class_name = context.get("class_name", "")
-        return (
-            f"{_BRAND_PREFIX} '{class_name}' 클래스의 채점 예산이 경고 임계를 "
-            "넘었습니다. codemit에서 사용량을 확인해 주세요."
-        )
-
     return f"{_BRAND_PREFIX} 새 알림이 있습니다. codemit에서 확인하세요."

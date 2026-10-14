@@ -159,4 +159,4 @@ def test_joined_response_never_leaks_the_instructors_join_code_or_openai_key(cli
     assert "join_code" not in body[0]
     assert created["join_code"] not in response.content.decode()
     assert "has_openai_key" not in body[0]
-    assert "token_budget" not in body[0]
+    assert "token_usage_total" not in body[0]
