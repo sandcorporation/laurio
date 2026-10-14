@@ -30,8 +30,8 @@ export function useClassTemplatePreview(shareCode: string) {
     refetch();
   }, [refetch]);
 
-  // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
-  // 호출부(미리보기 화면의 이름 초기값 채우기)가 폭주할 수 있다(#462 코드 리뷰).
+  // useMemo 없이 매 렌더 새 객체를 만들면 이 값의 동일성으로 「새로 읽었나」를 가리는
+  // 호출부(미리보기 화면이 렌더 중 이름 칸을 맞추는 자리, #675)가 폭주한다(#462 코드 리뷰).
   const state: ClassTemplatePreviewState = useMemo(() => {
     if (queryState.status === "loading") return { status: "loading" };
     if (queryState.status === "error") return { status: "error" };

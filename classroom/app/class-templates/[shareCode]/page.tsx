@@ -5,7 +5,7 @@
 // 없어 만들지 않는다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
 import {
@@ -21,7 +21,7 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { importClassTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
+import { importClassTemplate, takedownClassTemplate, type ClassTemplateRow } from "@/lib/class-templates/api";
 import { useClassTemplatePreview } from "@/lib/class-templates/use-class-template-preview";
 import { formatSubmissionFormats } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
@@ -36,10 +36,13 @@ export default function ClassTemplatePreviewPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (state.status === "ready") setName(state.template.name);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
+  // 읽은 템플릿 이름으로 칸을 맞추는 일은 렌더 중에 한다(#675) — 효과로 넣으면 빈 칸이 먼저 그려져
+  // 그 틈에 친 이름을 덮는다.
+  const [seededTemplate, setSeededTemplate] = useState<ClassTemplateRow | null>(null);
+  if (state.status === "ready" && state.template !== seededTemplate) {
+    setSeededTemplate(state.template);
+    setName(state.template.name);
+  }
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);

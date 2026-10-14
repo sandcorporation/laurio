@@ -433,15 +433,17 @@ export default function ClassSettingsPage() {
     className: state.status === "ready" ? state.classroom.name : undefined,
   });
 
-  useEffect(() => {
-    if (state.status === "ready") {
-      setDefaultModel(state.classroom.default_model);
-      setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
-      setDefaultModelIsReasoning(state.classroom.default_model_is_reasoning);
-      setClassNameDraft(state.classroom.name);
-      setInstructorDisplayName(state.classroom.my_instructor_display_name);
-    }
-  }, [state]);
+  // 읽은 클래스로 칸을 맞추는 일은 렌더 중에 한다(#675) — 효과로 넣으면 빈 칸이 먼저 그려져 그 틈에
+  // 친 값을 덮는다. 다시 읽어 새 객체가 오면(저장·보관 뒤) 다시 맞춘다.
+  const [seededClassroom, setSeededClassroom] = useState<ClassRow | null>(null);
+  if (state.status === "ready" && state.classroom !== seededClassroom) {
+    setSeededClassroom(state.classroom);
+    setDefaultModel(state.classroom.default_model);
+    setDefaultReasoningEffort(state.classroom.default_reasoning_effort);
+    setDefaultModelIsReasoning(state.classroom.default_model_is_reasoning);
+    setClassNameDraft(state.classroom.name);
+    setInstructorDisplayName(state.classroom.my_instructor_display_name);
+  }
 
   // 주소의 `#구획`(예: 보관 행·보관 클래스 머리의 `#class-archive`, #658)은 구획이 클래스를 읽은
   // 뒤에야 그려져 브라우저의 첫 이동이 놓친다 — 처음 그려졌을 때 한 번 그 구획으로 옮긴다.

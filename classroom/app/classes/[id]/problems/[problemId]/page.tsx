@@ -26,7 +26,7 @@ import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemSideActions } from "@/app/components/ProblemSideActions";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { useClass } from "@/lib/classes/use-class";
@@ -41,6 +41,7 @@ import {
   reorderChecklistItems,
   updateChecklistItem,
   updateProblem,
+  type ProblemRow,
   type ProblemTransitionBlockedReason,
   type SubmissionFormat,
 } from "@/lib/problems/api";
@@ -86,7 +87,7 @@ export default function EditProblemPage() {
   const [reasoningEffort, setReasoningEffort] = useState("");
   // 「호환 서버」의 「추론 모델」 스위치(#602) — 이 문제 자신의 모델에만 뜻이 있다.
   const [modelIsReasoning, setModelIsReasoning] = useState(false);
-  // 채점 지침(#386) — 불러온 문제 값으로 아래 effect가 채운다.
+  // 채점 지침(#386) — 불러온 문제 값으로 아래 렌더 중 맞춤이 채운다.
   const [gradingGuideline, setGradingGuideline] = useState<GradingGuidelineValue>({
     grading_strictness: "normal",
     grading_guideline_text: "",
@@ -121,21 +122,24 @@ export default function EditProblemPage() {
     problemTitle: state.status === "ready" ? state.problem.title : undefined,
   });
 
-  useEffect(() => {
-    if (state.status === "ready") {
-      setTitle(state.problem.title);
-      setDescription(state.problem.description);
-      setInstructorNote(state.problem.instructor_note);
-      setSubmissionFormats(state.problem.submission_formats);
-      setModel(state.problem.model);
-      setReasoningEffort(state.problem.reasoning_effort);
-      setModelIsReasoning(state.problem.model_is_reasoning);
-      setGradingGuideline({
-        grading_strictness: state.problem.grading_strictness,
-        grading_guideline_text: state.problem.grading_guideline_text,
-      });
-    }
-  }, [state]);
+  // 읽은 문제로 칸을 맞추는 일은 렌더 중에 한다(#675) — 효과로 넣으면 빈 칸이 먼저 그려지고, 그 틈에
+  // 친 값을 효과가 서버 값으로 덮는다. React 는 렌더 중의 setState 를 커밋 전에 다시 렌더해 반영하므로
+  // 첫 그리기부터 칸에 서버 값이 있다. `reload()` 가 새 객체를 주면(변이 성공·다른 탭의 변경) 다시 맞춘다.
+  const [seededProblem, setSeededProblem] = useState<ProblemRow | null>(null);
+  if (state.status === "ready" && state.problem !== seededProblem) {
+    setSeededProblem(state.problem);
+    setTitle(state.problem.title);
+    setDescription(state.problem.description);
+    setInstructorNote(state.problem.instructor_note);
+    setSubmissionFormats(state.problem.submission_formats);
+    setModel(state.problem.model);
+    setReasoningEffort(state.problem.reasoning_effort);
+    setModelIsReasoning(state.problem.model_is_reasoning);
+    setGradingGuideline({
+      grading_strictness: state.problem.grading_strictness,
+      grading_guideline_text: state.problem.grading_guideline_text,
+    });
+  }
 
   if (state.status === "loading") {
     return (
