@@ -15,13 +15,16 @@
 // 보고, 넘기면 채점 키가 비워진다는 것을 확인한 뒤 요청한다. 요청은 클래스마다 하나라 대기 중이면
 // 받는 사람의 줄에 「이전 요청 대기」와 (소유자에게) 「요청 취소」가 붙는다. 받는 사람의 수락·거절은
 // 클래스 화면 맨 위의 `OwnershipTransferOffer` 가 묻는다.
-import Link from "next/link";
+//
+// 배치(시안 v2, #635): 「강사」 탭의 왼쪽에 「이 클래스의 강사 N명」과 「공동 강사 초대」 두 카드,
+// 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 소유자 전용 행동은
+// 공동 강사에게 그 버튼이 없는 것으로 말하고, 소유자는 떠나기 버튼이 비활성이다.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
-import { Badge, Card, CardHeader, CardSection, ErrorNote, buttonClass } from "@/app/components/ui";
+import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import {
@@ -38,13 +41,14 @@ import {
   type PendingCoInstructorInvite,
 } from "@/lib/co-instructors/api";
 
-function formatWhen(iso: string): string {
-  return new Date(iso).toLocaleString("ko-KR", {
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+// 시안의 줄 끝 행동 — 테두리 없는 밑줄 글자.
+const LINK_ACTION =
+  "inline-flex items-center whitespace-nowrap px-3 py-1.5 text-xs text-ink/60 underline underline-offset-[3px] " +
+  "transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-45";
+
+function formatDay(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 type RowConfirm = "remove" | "transfer" | null;
@@ -80,28 +84,34 @@ function InstructorRow({
   const owner = instructor.role === "owner";
   const name = instructor.display_name || (owner ? "이름을 정하지 않은 소유자" : "이름 없음");
   return (
-    <li data-testid="class-instructor-row" className="flex flex-col gap-2 px-4 py-2.5">
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-        <span data-testid="class-instructor-name" className="text-[13.5px]">
+    <li data-testid="class-instructor-row" className="flex flex-col gap-2 border-t border-rule px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span data-testid="class-instructor-name" className="text-[14px]">
           {name}
         </span>
-        {instructor.is_me ? <span className="text-[12px] text-ink/45">나</span> : null}
         <span data-testid="class-instructor-role">
-          <Badge tone={owner ? "verified" : "neutral"}>{owner ? "소유자" : "공동 강사"}</Badge>
+          <Badge>{owner ? "소유자" : "공동 강사"}</Badge>
         </span>
-        <span className="ml-auto flex items-center gap-2.5">
-          {instructor.accepted_at ? (
-            <span className="text-[12px] text-ink/45">
-              {formatWhen(instructor.accepted_at)}{" "}
-              {instructor.joined_by === "ownership_transfer" ? "소유권 넘김" : "수락"}
-            </span>
-          ) : null}
+        {transferPending ? <Badge tone="attention">소유권 이전 대기</Badge> : null}
+        {instructor.is_me ? (
+          <span className="text-[12px] text-ink/45">나</span>
+        ) : instructor.accepted_at ? (
+          <span className="text-[12px] text-ink/45">
+            {formatDay(instructor.accepted_at)} {instructor.joined_by === "ownership_transfer" ? "소유권 넘김" : "수락"}
+          </span>
+        ) : null}
+        {transferPending ? (
+          <span data-testid="ownership-transfer-pending" className="text-[12px] text-ink/45">
+            {formatDay(transferPending.expires_at)} 까지 답을 기다립니다
+          </span>
+        ) : null}
+        <span className="ml-auto flex items-center gap-1.5">
           {canTransfer && !confirming ? (
             <button
               type="button"
               data-testid="ownership-transfer-start"
               onClick={() => onAsk("transfer")}
-              className={buttonClass("secondary", "sm")}
+              className={LINK_ACTION}
             >
               소유권 넘기기
             </button>
@@ -111,37 +121,24 @@ function InstructorRow({
               type="button"
               data-testid="co-instructor-remove"
               onClick={() => onAsk("remove")}
-              className={buttonClass("danger", "sm")}
+              className={LINK_ACTION}
             >
               내보내기
             </button>
           ) : null}
-        </span>
-      </div>
-      {transferPending ? (
-        <div
-          data-testid="ownership-transfer-pending"
-          className="flex flex-wrap items-center justify-between gap-2 border border-rule bg-paper px-3 py-2"
-        >
-          <span className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink/70">
-            <Badge tone="attention">소유권 이전 대기</Badge>
-            {instructor.is_me
-              ? `${formatWhen(transferPending.expires_at)}까지 답할 수 있습니다.`
-              : `${name}님의 수락을 기다립니다 · ${formatWhen(transferPending.expires_at)}에 만료`}
-          </span>
-          {canRemove ? (
+          {transferPending && canRemove ? (
             <button
               type="button"
               data-testid="ownership-transfer-cancel"
               onClick={onCancelTransfer}
               disabled={busy}
-              className={buttonClass("secondary", "sm")}
+              className={LINK_ACTION}
             >
               {busy ? "취소하는 중..." : "요청 취소"}
             </button>
           ) : null}
-        </div>
-      ) : null}
+        </span>
+      </div>
       {canTransfer && confirming === "transfer" ? (
         <div data-testid="ownership-transfer-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
           <p className="text-[12.5px] leading-relaxed text-ink/70">
@@ -210,14 +207,17 @@ function PendingInviteRow({
   const url = typeof window === "undefined" ? "" : coInstructorInviteUrl(window.location.origin, invite.token);
   const maker = invite.created_by_me ? "내가" : `${invite.created_by_name || "소유자"}님이`;
   return (
-    <li data-testid="co-instructor-invite-row" className="flex flex-col gap-1.5 px-4 py-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <p
-          data-testid="co-instructor-invite-link"
-          className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap border border-rule bg-paper px-3 py-2 font-mono text-[13px]"
-        >
-          {url}
-        </p>
+    <li data-testid="co-instructor-invite-row" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-rule px-4 py-2.5">
+      <p
+        data-testid="co-instructor-invite-link"
+        className="min-w-0 flex-1 basis-64 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12.5px]"
+      >
+        {url}
+      </p>
+      <span data-testid="co-instructor-invite-meta" className="text-[12px] text-ink/45">
+        {maker} {formatDay(invite.created_at)} 만듦 · {formatDay(invite.expires_at)} 까지
+      </span>
+      <span className="flex items-center gap-1.5">
         <button
           type="button"
           data-testid="co-instructor-invite-copy"
@@ -231,14 +231,11 @@ function PendingInviteRow({
           data-testid="co-instructor-invite-cancel"
           onClick={onCancel}
           disabled={cancelling}
-          className={buttonClass("danger", "sm")}
+          className={LINK_ACTION}
         >
           {cancelling ? "취소하는 중..." : "취소"}
         </button>
-      </div>
-      <p data-testid="co-instructor-invite-meta" className="text-[12px] text-ink/50">
-        {maker} {formatWhen(invite.created_at)}에 만듦 · {formatWhen(invite.expires_at)}까지 쓸 수 있음
-      </p>
+      </span>
     </li>
   );
 }
@@ -262,26 +259,11 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
     setLeaving(false);
   }
 
-  if (owner) {
-    return (
-      <CardSection title="이 클래스 떠나기">
-        <p data-testid="class-leave-owner-note" className="px-4 pb-4 pt-2 text-[12.5px] leading-relaxed text-ink/60">
-          소유자는 클래스를 떠날 수 없습니다. 떠나려면 먼저 위 강사 목록에서 공동 강사에게 소유권을
-          넘기세요 — 넘기면 공동 강사가 되어 떠날 수 있습니다. 수업을 끝내려면 이 화면에서 클래스를
-          보관하고, 없던 일로 하려면{" "}
-          <Link href={`/classes/${classId}/settings`} className="underline underline-offset-2">
-            클래스 설정
-          </Link>
-          에서 삭제하세요.
-        </p>
-      </CardSection>
-    );
-  }
-
   return (
-    <CardSection title="이 클래스 떠나기">
-      <div className="flex flex-col gap-3 px-4 pb-4 pt-2">
-        {confirming ? (
+    <Card>
+      <h2 className="border-b border-rule px-4 py-3 text-[15px] font-semibold tracking-[-0.005em]">이 클래스 떠나기</h2>
+      <div className="flex flex-col gap-3 px-4 py-3">
+        {confirming && !owner ? (
           <div data-testid="class-leave-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
             <p className="text-[12.5px] leading-relaxed text-ink/70">
               이 클래스를 떠날까요? 내 클래스 목록에서 사라지고, 다시 함께 가르치려면 새 초대를 받아야
@@ -309,13 +291,11 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-[12px] leading-relaxed text-ink/45">
-              공동 강사는 언제든 스스로 떠날 수 있습니다.
-            </span>
+          <div>
             <button
               type="button"
               data-testid="class-leave"
+              disabled={owner}
               onClick={() => setConfirming(true)}
               className={buttonClass("danger", "sm")}
             >
@@ -329,7 +309,7 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
           </ErrorNote>
         ) : null}
       </div>
-    </CardSection>
+    </Card>
   );
 }
 
@@ -437,94 +417,91 @@ export function InstructorsSection({
   const invites = invitesState.status === "ready" ? invitesState.data : [];
 
   return (
-    <Card>
-      <CardHeader title="강사" hint="이 클래스를 함께 가르치는 사람들" />
-      <div className="divide-y divide-rule">
-        {rosterState.status === "ready" ? (
-          <ul data-testid="class-instructors" className="divide-y divide-rule">
-            {rosterState.data.map((instructor) => {
-              const id = instructor.co_instructor_id;
-              const pendingHere =
-                pendingTransfer !== null && id !== null && pendingTransfer.recipient_co_instructor_id === id
-                  ? pendingTransfer
-                  : null;
-              return (
-                <InstructorRow
-                  key={id ?? "owner"}
-                  instructor={instructor}
-                  canRemove={iAmOwner && id !== null}
-                  confirming={id !== null && confirming?.id === id ? confirming.what : null}
-                  busy={id !== null && busyId === id}
-                  transferPending={pendingHere}
-                  canTransfer={iAmOwner && id !== null && pendingTransfer === null}
-                  onAsk={(what) => id !== null && setConfirming({ id, what })}
-                  onRemove={() => id !== null && void remove(id)}
-                  onTransfer={() => id !== null && void transfer(id)}
-                  onCancelTransfer={() => id !== null && pendingHere && void cancelTransfer(id, pendingHere.id)}
-                  onKeep={() => setConfirming(null)}
-                />
-              );
-            })}
-          </ul>
-        ) : rosterState.status === "error" ? (
-          <div className="px-4 py-3">
-            <ErrorNote>강사 목록을 불러오지 못했습니다.</ErrorNote>
-          </div>
-        ) : null}
-
-        <CardSection
-          title="공동 강사 초대"
-          hint="함께 가르칠 사람에게 건넬 링크입니다 — 한 사람이 한 번만 쓸 수 있습니다"
-        >
-          <div className="flex flex-col gap-3 pb-4 pt-2">
-            {invites.length > 0 ? (
-              <ul data-testid="co-instructor-invites" className="divide-y divide-rule border-y border-rule">
-                {invites.map((invite) => (
-                  <PendingInviteRow
-                    key={invite.id}
-                    invite={invite}
-                    copied={copiedId === invite.id}
-                    cancelling={cancellingId === invite.id}
-                    onCopy={(url) => void copy(invite.id, url)}
-                    onCancel={() => void cancel(invite.id)}
-                  />
-                ))}
-              </ul>
-            ) : invitesState.status === "ready" ? (
-              <p data-testid="co-instructor-invites-empty" className="px-4 text-[12.5px] text-ink/60">
-                아직 쓰이지 않은 초대가 없습니다.
-              </p>
-            ) : invitesState.status === "error" ? (
-              <div className="px-4">
-                <ErrorNote>초대 목록을 불러오지 못했습니다.</ErrorNote>
-              </div>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4">
-              <span className="text-[12px] leading-relaxed text-ink/45">
-                링크는 7일 뒤 만료됩니다. 여러 사람을 초대하려면 사람마다 하나씩 만드세요. 수락한 사람은
-                문제·명단·보관을 소유자와 똑같이 다루고, 채점 키, 클래스 삭제, 소유권 이전, 공동 강사 내보내기는 소유자만 합니다.
+    <div className="flex flex-col gap-5 pt-5 lg:flex-row lg:items-start">
+      <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <Card>
+          <h2 className="flex items-baseline gap-2.5 px-4 py-3 text-[15px] font-semibold tracking-[-0.005em]">
+            이 클래스의 강사
+            {rosterState.status === "ready" ? (
+              <span data-testid="class-instructors-count" className="text-[12.5px] font-normal text-ink/45">
+                {rosterState.data.length}명
               </span>
-              <button
-                type="button"
-                data-testid="co-instructor-invite-create"
-                onClick={() => void create()}
-                disabled={creating}
-                className={buttonClass("secondary", "sm")}
-              >
-                {creating ? "만드는 중..." : "초대 링크 만들기"}
-              </button>
-            </div>
-            {error ? (
-              <div className="px-4">
-                <ErrorNote>
-                  <span data-testid="co-instructor-invite-error">{error}</span>
-                </ErrorNote>
-              </div>
             ) : null}
+          </h2>
+          {rosterState.status === "ready" ? (
+            <ul data-testid="class-instructors">
+              {rosterState.data.map((instructor) => {
+                const id = instructor.co_instructor_id;
+                const pendingHere =
+                  pendingTransfer !== null && id !== null && pendingTransfer.recipient_co_instructor_id === id
+                    ? pendingTransfer
+                    : null;
+                return (
+                  <InstructorRow
+                    key={id ?? "owner"}
+                    instructor={instructor}
+                    canRemove={iAmOwner && id !== null}
+                    confirming={id !== null && confirming?.id === id ? confirming.what : null}
+                    busy={id !== null && busyId === id}
+                    transferPending={pendingHere}
+                    canTransfer={iAmOwner && id !== null && pendingTransfer === null}
+                    onAsk={(what) => id !== null && setConfirming({ id, what })}
+                    onRemove={() => id !== null && void remove(id)}
+                    onTransfer={() => id !== null && void transfer(id)}
+                    onCancelTransfer={() => id !== null && pendingHere && void cancelTransfer(id, pendingHere.id)}
+                    onKeep={() => setConfirming(null)}
+                  />
+                );
+              })}
+            </ul>
+          ) : rosterState.status === "error" ? (
+            <div className="border-t border-rule px-4 py-3">
+              <ErrorNote>강사 목록을 불러오지 못했습니다.</ErrorNote>
+            </div>
+          ) : null}
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
+            <h2 className="text-[15px] font-semibold tracking-[-0.005em]">공동 강사 초대</h2>
+            <button
+              type="button"
+              data-testid="co-instructor-invite-create"
+              onClick={() => void create()}
+              disabled={creating}
+              className={buttonClass("primary", "sm")}
+            >
+              {creating ? "만드는 중..." : "초대 링크 만들기"}
+            </button>
           </div>
-        </CardSection>
-        {me ? <LeaveSection classId={classId} owner={iAmOwner} /> : null}
+          {invites.length > 0 ? (
+            <ul data-testid="co-instructor-invites">
+              {invites.map((invite) => (
+                <PendingInviteRow
+                  key={invite.id}
+                  invite={invite}
+                  copied={copiedId === invite.id}
+                  cancelling={cancellingId === invite.id}
+                  onCopy={(url) => void copy(invite.id, url)}
+                  onCancel={() => void cancel(invite.id)}
+                />
+              ))}
+            </ul>
+          ) : invitesState.status === "error" ? (
+            <div className="border-t border-rule px-4 py-3">
+              <ErrorNote>초대 목록을 불러오지 못했습니다.</ErrorNote>
+            </div>
+          ) : null}
+          {error ? (
+            <div className="border-t border-rule px-4 py-3">
+              <ErrorNote>
+                <span data-testid="co-instructor-invite-error">{error}</span>
+              </ErrorNote>
+            </div>
+          ) : null}
+        </Card>
       </div>
-    </Card>
+      <div className="w-full shrink-0 lg:w-80">{me ? <LeaveSection classId={classId} owner={iAmOwner} /> : null}</div>
+    </div>
   );
 }
