@@ -30,8 +30,10 @@ export function useClassTemplatePreview(shareCode: string) {
     refetch();
   }, [refetch]);
 
-  // useMemo 없이 매 렌더 새 객체를 만들면 이 값의 동일성으로 「새로 읽었나」를 가리는
-  // 호출부(미리보기 화면이 렌더 중 이름 칸을 맞추는 자리, #675)가 폭주한다(#462 코드 리뷰).
+  // 호출부(미리보기 화면이 렌더 중 이름 칸을 맞추는 자리)는 안쪽 데이터 객체
+  // (`state.template` = `queryState.data`)의 동일성으로 「새로 읽었나」를 가린다 — 바깥
+  // `state` 는 오류 플래그가 섞여 비교 대상으로 쓰지 않는다(#675). useMemo 는
+  // 바깥 `state` 도 같은 읽기 동안 같은 객체로 남겨 둘 뿐이다(#462 코드 리뷰).
   const state: ClassTemplatePreviewState = useMemo(() => {
     if (queryState.status === "loading") return { status: "loading" };
     if (queryState.status === "error") return { status: "error" };

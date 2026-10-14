@@ -6,7 +6,10 @@
 // 효과가 서버 제목으로 덮고 → 이미 풀린 「저장」이 옛 제목을 저장했다. 사람은 그 틈에 칠 수 없지만
 // 자동화는 그리는 순간 친다(붙여넣기·자동 채움도 같다).
 //
-// 그래서 규칙은 이렇다: **`useEffect` 안에서 읽은 상태(`state.…`)로 `setX` 를 부르지 않는다.**
+// 그래서 규칙은 이렇다: **효과(`useEffect`·`useLayoutEffect`) 안에서 훅이 돌려준 읽은 상태
+// (`state`·`preview`·`problemState`·… — 이름은 가리지 않는다, #687)의 필드로 `setX` 를 바로 부르지
+// 않는다.** 함수형 갱신(`setX((current) => current === "" ? preview.… : current)`)은 된다 — 먼저 친
+// 값을 덮지 않으니 같은 흔들림이 나지 않는다(가입·초대 화면의 이름 칸이 이 모양이다).
 // 읽은 값으로 칸을 채우는 것은 렌더 중 「읽은 객체가 바뀌었으면 맞춘다」로 한다 — React 는 렌더 중의
 // setState 를 커밋 전에 다시 렌더해 반영하므로 첫 그리기부터 칸에 서버 값이 있다. `reload()` 뒤 새
 // 객체가 오면 같은 자리에서 다시 맞춘다.
@@ -42,15 +45,30 @@ function blockFrom(source: string, from: number): string {
 
 function effectBodies(source: string): string[] {
   const bodies: string[] = [];
-  const re = /useEffect\(\s*\(\)\s*=>\s*\{/g;
+  const re = /use(?:Layout)?Effect\(\s*(?:\(\)\s*=>|function\s*\w*\s*\(\))\s*\{/g;
   for (let m = re.exec(source); m; m = re.exec(source)) bodies.push(blockFrom(source, m.index));
   return bodies;
 }
 
 const SCREENS = walk(APP_ROOT).map((file) => ({ file, source: fs.readFileSync(file, "utf8") }));
 
-// 읽은 상태로 칸을 채우는 setter 호출 — `setTitle(state.problem.title)` 같은 모양.
-const SEEDS_FROM_STATE = /\bset[A-Z]\w*\(\s*state\./;
+// React 가 준 훅은 읽은 상태가 아니다 — 나머지 `const x = useY(…)` 의 x 를 읽은 상태로 본다.
+const REACT_HOOKS = new Set(["useRef", "useState", "useCallback", "useMemo", "useReducer", "useId"]);
+
+/** 이 소스에서 훅이 돌려준 변수 이름들(`state` 는 늘 든다). */
+function hookResultNames(source: string): string[] {
+  const names = new Set(["state"]);
+  for (const m of source.matchAll(/\bconst\s+(\w+)\s*=\s*(use[A-Z]\w*)\(/g)) {
+    if (!REACT_HOOKS.has(m[2])) names.add(m[1]);
+  }
+  return [...names];
+}
+
+/** 읽은 상태의 필드로 칸을 채우는 setter 호출 — `setTitle(state.problem.title)` 같은 모양.
+ * 첫 인자가 `(` 로 시작하는 함수형 갱신은 걸리지 않는다. */
+function seedsFromState(names: string[]): RegExp {
+  return new RegExp(`\\bset[A-Z]\\w*\\(\\s*(?:${names.join("|")})\\??\\.`);
+}
 
 describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌더 중에 한다", () => {
   it("이 규칙이 지키는 화면을 실제로 찾는다", () => {
@@ -59,11 +77,25 @@ describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌�
   });
 
   it.each(SCREENS.map((s) => [path.relative(APP_ROOT, s.file), s] as const))(
-    "%s 의 useEffect 는 읽은 상태로 칸을 채우지 않는다",
+    "%s 의 효과는 읽은 상태로 칸을 채우지 않는다",
     (_rel, screen) => {
-      for (const body of effectBodies(screen.source)) expect(body).not.toMatch(SEEDS_FROM_STATE);
+      const seeds = seedsFromState(hookResultNames(screen.source));
+      for (const body of effectBodies(screen.source)) expect(body).not.toMatch(seeds);
     },
   );
+
+  it("이름이 state 가 아니어도, useLayoutEffect 여도 잡고 함수형 갱신은 통과시킨다", () => {
+    const join = SCREENS.find((s) => s.file.endsWith(path.join("join", "[code]", "page.tsx")))!;
+    const seeds = seedsFromState(hookResultNames(join.source));
+    const functional = 'setDisplayName((current) => (current === "" ? preview.preview.suggested_name! : current));';
+    expect(join.source).toContain(functional);
+    expect(functional).not.toMatch(seeds);
+    // 반례 — 효과가 먼저 친 이름을 덮는 모양이면 붉어진다.
+    const direct = join.source.replace(functional, "setDisplayName(preview.preview.suggested_name);");
+    expect(effectBodies(direct).some((body) => seeds.test(body))).toBe(true);
+    const layout = "useLayoutEffect(function seed() { setTitle(problemState.problem.title); }, [problemState]);";
+    expect(effectBodies(layout).some((body) => seedsFromState(["problemState"]).test(body))).toBe(true);
+  });
 
   it("문제 편집 화면은 문제를 읽은 그 렌더에서 칸을 맞춘다", () => {
     const page = SCREENS.find((s) => s.file.endsWith(path.join("[problemId]", "page.tsx")))!;
