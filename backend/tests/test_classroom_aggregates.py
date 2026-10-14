@@ -314,3 +314,24 @@ def test_listing_query_count_does_not_grow_with_classes_problems_or_members(clie
     assert count("/joined", learner["access"]) <= before_joined
     # 문제 행의 기존 직렬화(달성률의 제출 질의·템플릿)는 문제마다 질의 둘이 따로 든다 — 마지막 제출은 더하지 않는다.
     assert count(f"/{first}/problems", owner["access"]) <= before_problems + 2
+
+
+def test_problem_participant_attempt_count_is_the_submissions_screens_attempts(client, db):
+    """문제 편집 머리의 「제출 현황 N」(#674) — 강사 본인·내보낸 사람의 시도는 세지 않는다.
+    문제 상세와 문제 목록이 같은 수를 내고, 제출 현황의 「시도」(참여자 행)와 같다."""
+
+    owner, class_id, problem, a, b = _class_with_two_learners(client)
+    other = create_open_problem(client, owner["access"], class_id, title="2주차")
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    submit_repository(client, a["access"], class_id, problem.id)
+    submit_repository(client, a["access"], class_id, problem.id)
+    submit_repository(client, b["access"], class_id, problem.id)
+    submit_repository(client, owner["access"], class_id, problem.id)
+    _expel(client, owner, class_id, "나")
+
+    detail = _get(client, owner["access"], f"/{class_id}/problems/{problem.id}").json()
+    rows = {p["id"]: p for p in list_problems(client, owner["access"], class_id)}
+
+    assert detail["participant_attempt_count"] == 2
+    assert rows[problem.id]["participant_attempt_count"] == 2
+    assert rows[other.id]["participant_attempt_count"] == 0

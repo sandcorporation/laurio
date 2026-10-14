@@ -62,6 +62,11 @@ export type RequiredSummary = {
   total: number;
   /** 미충족 필수 항목의 이름. */
   unmet: string[];
+  /**
+   * 문법 검사 줄의 판정(#674) — 문법 검사가 꺼져 있거나 채점 전이면 null. 문법 결과 없이 만든
+   * 자동 미달 점수(실패 상한)는 거짓이다 — 카드의 문법 줄이 머리 배지·미충족 목록과 같은 판정을 그린다.
+   */
+  syntaxMet: boolean | null;
 };
 
 /**
@@ -79,13 +84,15 @@ export function requiredSummary(
 ): RequiredSummary {
   const required = items.filter((item) => item.required);
   const total = required.length + (syntaxCheckEnabled ? 1 : 0);
-  if (row.status !== "scored" || !row.score) return { met: null, total, unmet: [] };
+  if (row.status !== "scored" || !row.score) return { met: null, total, unmet: [], syntaxMet: null };
   const verdicts = new Map(row.score.reasoning.map((v) => [v.checklist_item_id, v.is_met]));
   const unmet = required.filter((item) => verdicts.get(item.id) !== true).map((item) => item.label);
+  let syntaxMet: boolean | null = null;
   if (syntaxCheckEnabled) {
     const syntax = row.score.syntax_check;
+    syntaxMet = syntax ? syntax.is_met : false;
     if (!syntax) unmet.push("문법 검사");
     else if (!syntax.is_met) unmet.push("문법 오류");
   }
-  return { met: total - unmet.length, total, unmet };
+  return { met: total - unmet.length, total, unmet, syntaxMet };
 }

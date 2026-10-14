@@ -349,6 +349,8 @@ function ChecklistWithVerdict({
   const score = judged?.score ?? null;
   const verdictById = new Map((score?.reasoning ?? []).map((verdict) => [verdict.checklist_item_id, verdict]));
   const syntax = score?.syntax_check ?? null;
+  // 문법 결과 없이 만든 자동 미달 점수(#674) — 줄의 판정은 `requiredSummary` 가, 사유는 그 점수의 공통 문구가.
+  const autoFailReasoning = score && !syntax ? (score.reasoning[0]?.reasoning ?? "") : "";
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-4 py-3">
@@ -380,7 +382,7 @@ function ChecklistWithVerdict({
       )}
       <ul data-testid="my-problem-checklist" className="divide-y divide-rule border-t border-rule">
         {syntaxCheckEnabled ? (
-          <ChecklistLine testId="checklist-item-syntax-check" met={syntax ? syntax.is_met : null}>
+          <ChecklistLine testId="checklist-item-syntax-check" met={judgedSummary?.syntaxMet ?? null}>
             <div className="text-[13.5px]">
               {SYNTAX_CHECK_LABEL} <Badge>기본</Badge>
               {syntax ? (
@@ -404,6 +406,8 @@ function ChecklistWithVerdict({
                   </div>
                 ))}
               </>
+            ) : autoFailReasoning ? (
+              <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{autoFailReasoning}</div>
             ) : null}
           </ChecklistLine>
         ) : null}

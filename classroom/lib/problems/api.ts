@@ -90,6 +90,8 @@ export type ProblemRow = {
   pass_rate: number | null;
   // 이 문제의 참여자 제출 중 최신(#632) — 없으면 null.
   last_submitted_at: string | null;
+  // 참여자(강사 본인·내보낸 사람 제외)의 시도 수(#674) — 제출 현황의 「시도」와 같은 집합.
+  participant_attempt_count: number;
   published_template: PublishedProblemTemplateSummary | null;
   // 이 문제를 지금 지울 수 있는가(#430/#431, ADR-0050) — 화면은 시도를 세지
   // 않고 이 칸만 본다(`ClassRow.has_submissions`와 같은 관용구, 반대 극성).

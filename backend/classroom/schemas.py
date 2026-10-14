@@ -464,6 +464,9 @@ class ProblemOut(Schema):
     instructor_note: str = ""
     #: 참여자(강사 본인·내보낸 사람 제외)의 가장 최근 제출 시각(#632). 없으면 `None`.
     last_submitted_at: datetime | None = None
+    #: 참여자(강사 본인·내보낸 사람 제외)의 시도 수(#674) — 제출 현황의 「시도」와 같은 집합.
+    #: 문제 편집 머리의 「제출 현황 N」 이 이 값을 보인다.
+    participant_attempt_count: int = 0
 
 
 class ProblemReorderIn(Schema):

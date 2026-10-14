@@ -326,16 +326,22 @@ def _participant_submissions():
     )
 
 
-def _last_submitted_by(key: str, **filters) -> dict[int, object]:
+def _participant_submission_marks(key: str, **filters) -> dict[int, tuple[object, int]]:
+    """`key` → (참여자의 마지막 시도 시각, 참여자 시도 수) — 질의 하나(#632·#674)."""
+
     rows = (
         _participant_submissions()
         .filter(**filters)
         .order_by()
         .values(key)
-        .annotate(last=Max("created_at"))
-        .values_list(key, "last")
+        .annotate(last=Max("created_at"), n=Count("id"))
+        .values_list(key, "last", "n")
     )
-    return dict(rows)
+    return {k: (last, n) for k, last, n in rows}
+
+
+def _last_submitted_by(key: str, **filters) -> dict[int, object]:
+    return {k: last for k, (last, _n) in _participant_submission_marks(key, **filters).items()}
 
 
 def _active_member_ids_by_class(class_ids: list[int]) -> dict[int, set[int]]:
@@ -473,10 +479,11 @@ def _serialize_problem(
     *,
     active_member_ids: set[int] | None = None,
     blocking_problem_ids: set[int] | None = None,
-    last_submitted_by_problem: dict[int, object] | None = None,
+    submission_marks_by_problem: dict[int, tuple[object, int]] | None = None,
 ) -> ProblemOut:
-    if last_submitted_by_problem is None:
-        last_submitted_by_problem = _last_submitted_by("problem_id", problem_id=problem.id)
+    if submission_marks_by_problem is None:
+        submission_marks_by_problem = _participant_submission_marks("problem_id", problem_id=problem.id)
+    last_submitted_at, participant_attempt_count = submission_marks_by_problem.get(problem.id, (None, 0))
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
     passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
@@ -514,7 +521,8 @@ def _serialize_problem(
         ],
         contest=_contest_out(problem),
         instructor_note=problem.instructor_note,
-        last_submitted_at=last_submitted_by_problem.get(problem.id),
+        last_submitted_at=last_submitted_at,
+        participant_attempt_count=participant_attempt_count,
     )
 
 
@@ -1750,14 +1758,14 @@ def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
     problems = class_obj.problems.prefetch_related("checklist_items").all()
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
-    last_submitted = _last_submitted_by("problem_id", problem__classroom_id=class_obj.id)
+    submission_marks = _participant_submission_marks("problem_id", problem__classroom_id=class_obj.id)
     return [
         _serialize_problem(
             p,
             class_obj,
             active_member_ids=active_member_ids,
             blocking_problem_ids=blocking_problem_ids,
-            last_submitted_by_problem=last_submitted,
+            submission_marks_by_problem=submission_marks,
         )
         for p in problems
     ]
