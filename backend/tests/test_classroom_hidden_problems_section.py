@@ -181,7 +181,9 @@ def test_hidden_bundle_carries_pass_status(client, db, monkeypatch):
 
     body = _my_problems(client, participant["access"], class_id)
 
-    assert body["hidden_problems"] == [
+    assert [
+        {k: row[k] for k in ("id", "title", "submission_formats", "passed")} for row in body["hidden_problems"]
+    ] == [
         {
             "id": problem_id,
             "title": "1주차",

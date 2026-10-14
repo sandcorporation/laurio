@@ -5234,10 +5234,22 @@ export interface components {
          *     상세보다 훨씬 좁다.
          */
         ClassroomProblemListItemOut: {
+            /**
+             * Attempt Count
+             * @default 0
+             */
+            attempt_count: number;
             /** Id */
             id: number;
+            /** Last Attempted At */
+            last_attempted_at?: string | null;
             /** Passed */
             passed: boolean;
+            /**
+             * Status
+             * @default not_submitted
+             */
+            status: string;
             /** Submission Formats */
             submission_formats: string[];
             /** Title */
