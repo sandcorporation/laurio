@@ -20,12 +20,28 @@ push 하면 옛 빌드를 끊는다.
 `pull_request` 웹훅이 hold 를 떼거나·초안을 풀거나·다시 연 PR 에서 부르며(아래 「줄에서 빠지는 법·돌아오는
 법」), 30분마다 스스로도 돈다(뒷받침). 규칙은 `scripts/ci/train.py` 머리말에 있다.
 
+**배포 이미지는 열차가 굽는다**(#712). 시험 두 가지가 묶음의 트리로 여섯 서비스를 아키텍처마다
+`images.sh` 로 굽고(바뀌지 않은 문맥은 ctx 로 건너뛴다) 커밋 태그 `<묶음 머리 sha>-<arch>` 로 올린다. macos 의
+e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈다(`docker/compose.ci-images.yaml`,
+`CODEMIT_IMAGE_TAG`) — 그래서 **e2e 가 본 digest 가 prod 에 가는 digest 다**(`test-results/images.txt` 에
+남는다). ctx 태그는 「병합」이 하나라도 합친 뒤에만 붙는다(#709 의 「초록 뒤에만」) — 붉은 묶음의 이미지는
+커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시 굽는다. 병합 뒤 `laurio` 의
+이미지 단계는 같은 트리의 해시를 내므로 전부 「건너뛴다」가 되어 main 커밋 태그만 더하고, 가드·문맥 태그
+단계도 할 일이 없다.
+
+- **왜 laurio 가 건너뛰나 — sha 가 아니라 트리다.** 쌓기는 cherry-pick 이라 노드마다 머리 커밋 sha 가 다르고
+  GitHub 의 rebase 병합도 새 커밋을 만든다. 같은 것은 트리다: `train.py merge` 는 마지막 PR 까지 합친 뒤 main 의
+  트리가 계획의 트리(`train.plan` 의 `tree`, 시험 두 가지가 `assemble` 에서 같은지 확인한다)와 같은지 콘솔에
+  적는다. 같으면 서비스마다 문맥 해시도 같다. 다르면(그 사이 main 에 다른 커밋이 들어왔다·중간에 멈췄다)
+  다른 문맥만 laurio 가 굽고 가드한다 — 해시가 판단하므로 틀린 이미지가 건너뛰어지지는 않는다.
+- **이미지가 붉은 것도 묶음이 붉은 것이다** — 레지스트리 고장으로 굽기가 실패해도 지금은 반으로 가른다
+  (인프라 재실행 판정은 e2e 정지 모양만 본다, #716).
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
 | 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
-| 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` |
-| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨·이미지를 걷고 빌드 캐시를 30GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
-| 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
+| 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` → 초록이면 `scripts/ci/images.sh amd64`(staging 여섯, #712) → 이번에 구운 앱만 부팅 가드(`scripts/ci/deploy-guard.sh`) |
+| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
+| 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 하나라도 합쳤으면 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
 | 붉으면 | sub | macos 가 「인프라 고장」으로 판정했고 sub 검사가 초록이면 **같은 묶음을 한 번 더**(아래 「Docker VM 정지로 본 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
 - **왜 묶나**(2026-10-03). PR 마다 macos e2e 를 따로 돌리면 이미지 셋 굽기 포함 약 8분이 노드
@@ -46,11 +62,13 @@ push 하면 옛 빌드를 끊는다.
 - **macos 의 Docker VM 디스크는 96GiB 이고, 묶음마다 무엇이 남는지 정해 두어야 찬다.** 맥 호스트
   디스크가 남아도 Docker Desktop 의 `Docker.raw` 가 차면 MinIO 가 `XMinioStorageFull` 로 업로드를
   거절하고 db 컨테이너가 죽는다 — 코드와 무관하게 묶음이 붉다. 실행마다 compose 프로젝트 이름이
-  달라(`CODEMIT_CI_RUN_ID`) 쌓이는 것은 그 실행의 볼륨·이미지(`jenkins-codemit-…-e2e-<서비스>`, 다섯
-  개·수 GB)와 빌드 캐시다. `e2e.sh`·`celery-broker.sh` 는 내릴 때 `down -v --rmi local` 로 볼륨과
-  **자기가 구운 이미지**를 지우고(공용 base 이미지 postgres·redis·minio 는 남는다), 빌드 캐시는 남겨
-  다음 굽기가 캐시 히트다. trap 이 못 돈 중단 빌드의 찌꺼기는 다음 빌드 첫머리의 `macos-sweep.sh` 가
-  걷고, 빌드 캐시는 나이가 아니라 크기(30GB, 오래 안 쓴 것부터)로 자른다. 사고 둘: 2026-10-03 중단된
+  달라(`CODEMIT_CI_RUN_ID`) 쌓이는 것은 그 실행의 볼륨과 이미지다. 지금(#712) 열차의 스택은 굽지 않고
+  `images.sh` 가 올린 `ghcr.io/sandcorporation/codemit-<서비스>:<sha>-arm64` 를 받는다 — 커밋마다 새 태그라
+  `macos-sweep.sh` 가 저장소마다 **가장 새것 하나**만 남긴다(다음 실행이 바뀌지 않은 층을 다시 받지 않는 층
+  캐시). 굽는 쪽 캐시는 빌더 `codemit-images` 의 것이고 `images.sh` 가 20GB 로 자른다. `e2e.sh`·
+  `celery-broker.sh` 는 내릴 때 `down -v --rmi local` 로 볼륨과 (굽는 길이면) 자기가 구운 이미지를 지운다.
+  trap 이 못 돈 중단 빌드의 찌꺼기는 다음 빌드 첫머리의 `macos-sweep.sh` 가 걷고, 기본 빌더 캐시(이제
+  로컬 굽기 길만 쓴다)는 나이가 아니라 크기(10GB, 오래 안 쓴 것부터)로 자른다. 사고 둘: 2026-10-03 중단된
   스택의 볼륨 400여 개(30GB), 2026-10-14 지워지지 않은 이미지 1,283개(51GB)와 캐시 48GB.
 - **노드는 실행기가 하나라 통째로 쓴다.** 예전에는 GitHub Actions 의 셀프호스티드 러너
   셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
@@ -153,10 +171,11 @@ push 하면 옛 빌드를 끊는다.
   만 하는 이미지)로 본다 — 표식에 빌드마다 다른 값을 섞는다(스크립트 자신이 문맥에 들어 고정 문자열이면
   늘 걸린다). 컨테이너 포트를 노드에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
   붙여(`--network container:<이름>`) 친다(sub 의 Jenkins 가 컨테이너라 바인드 마운트도 쓰지 않는다).
-- **`Jenkinsfile` 은 PR CI 가 보지 못한다** — 그 파일을 바꾼 PR 은 병합 전에 그 브랜치를 가리키는 임시
+- **`Jenkinsfile` 은 PR CI 가 보지 못한다**(`Jenkinsfile.train` 도 — 그 PR 을 실은 열차는 아직 main 의 것으로 돈다) — 그 파일을 바꾼 PR 은 병합 전에 그 브랜치를 가리키는 임시
   잡으로 `IMAGES_ONLY=true` 를 돌려 본다(이미지·가드까지만). 스크립트 쪽은 로컬에서 돈다: `CODEMIT_IMAGES_MODE=plan`
   (해시와 판단만), `CODEMIT_IMAGE_REGISTRY=localhost:<포트>`(로컬 `registry:2` 에 실제로 굽고 건너뛰기),
-  `CODEMIT_GUARD_IMAGE=<이미지>`(가드가 받을 이미지). 두 스크립트는 macos 의 bash 3.2 에서도 돈다.
+  `CODEMIT_GUARD_IMAGE=<이미지>`(가드가 받을 이미지), `CODEMIT_IMAGE_TAG=<sha>-<arch> scripts/test.sh e2e`(올린
+이미지로 e2e — 열차의 길). 두 스크립트는 macos 의 bash 3.2 에서도 돈다.
 
 **CI 는 `docker/compose.ci.yaml` 을 dev compose 위에 겹쳐 쓴다 — 지우면 CI 가 깨진다.**
 `compose.dev.yaml` 의 `..:/app` 은 **개발용 핫리로드 장치**다. 러너 안에서 그 상대 경로는
@@ -168,6 +187,10 @@ push 하면 옛 빌드를 끊는다.
 - 세 앱(frontend·operator·classroom, #277)의 빌드 `target` 을 `runner` 로 — dev 서버가
   아니라 **배포되는 그 이미지**를 친다.
 - 세 앱의 `command` 를 `!reset null` — 이미지의 `node server.js` 가 산다.
+
+열차는 셋째 장 `docker/compose.ci-images.yaml` 을 더 얹는다(#712) — 위 셋은 그대로 받고 `build` 를 걷어
+`images.sh` 가 올린 `codemit-<서비스>:${CODEMIT_IMAGE_TAG}` 를 받는다(backend 계열 다섯은 `codemit-backend`
+하나). `CODEMIT_IMAGE_TAG` 가 없으면 `e2e.sh`·`celery-broker.sh`·`scripts/test.sh e2e` 는 예전처럼 스택이 굽는다.
 
 **그래서 e2e 가 검증하는 대상이 바뀌었다.** 예전엔 `next dev` 를, 지금은 프로덕션 빌드를
 친다 — 배포되는 것과 테스트되는 것이 같아졌다. 위 `next dev` 메모리 주의는 이제
