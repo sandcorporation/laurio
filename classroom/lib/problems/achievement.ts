@@ -26,3 +26,11 @@ export function formatAchievementRate(problem: AchievementInput): string {
 export function describeAchievementRate(problem: AchievementInput): string {
   return `달성률 ${hasMembers(problem) ? formatAchievementRate(problem) : "참여자 없음"}`;
 }
+
+/** 달성률 막대·숫자의 색(#633, 시안 v2) — 60% 이상 verified, 30% 미만 attention, 사이는 ink. 비율은 0~1. */
+export function achievementTone(rate: number): "verified" | "attention" | "ink" {
+  const pct = Math.round(rate * 100);
+  if (pct >= 60) return "verified";
+  if (pct < 30) return "attention";
+  return "ink";
+}

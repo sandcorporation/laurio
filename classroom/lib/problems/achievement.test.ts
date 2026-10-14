@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeAchievementRate, formatAchievementRate } from "./achievement";
+import { achievementTone, describeAchievementRate, formatAchievementRate } from "./achievement";
 
 describe("달성률 표시 문구", () => {
   it("참여자가 있으면 「비율 · 통과/전체명」으로 쓴다", () => {
@@ -20,5 +20,16 @@ describe("달성률 표시 문구", () => {
     expect(describeAchievementRate({ passed_count: 5, member_count: 12, pass_rate: 5 / 12 })).toBe(
       "달성률 42% · 5/12명",
     );
+  });
+});
+
+describe("achievementTone (#633)", () => {
+  it("60% 이상 verified · 30% 미만 attention · 사이 ink", () => {
+    expect(achievementTone(0.6)).toBe("verified");
+    expect(achievementTone(0.92)).toBe("verified");
+    expect(achievementTone(0.29)).toBe("attention");
+    expect(achievementTone(0)).toBe("attention");
+    expect(achievementTone(0.3)).toBe("ink");
+    expect(achievementTone(0.59)).toBe("ink");
   });
 });
