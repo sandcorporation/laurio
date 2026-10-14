@@ -103,8 +103,8 @@ class ScoringOutput:
     model_version: str
     #: 이 채점 호출이 실제로 쓴 토큰 수(OpenAI 응답의 `usage.total_tokens`,
     #: #295) — 강의실의 채점 사용량이 여기 기댄다. `FakeLLMScoringAdapter`를
-    #: 포함해 이 값을 채우지 않는 호출자는 기본값 0이 그대로 남는다(공모전은
-    #: 예산 기능이 없어 이 필드를 쓰지 않는다).
+    #: 포함해 이 값을 채우지 않는 호출자는 기본값 0이 그대로 남는다(강의실 채점
+    #: 사용량만 이 필드를 쓴다).
     total_tokens: int = 0
     #: 입력·출력 토큰(`usage.prompt_tokens`·`completion_tokens`, #585) — 지표가 센다. 없으면 0.
     input_tokens: int = 0
