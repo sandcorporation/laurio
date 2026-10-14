@@ -1,25 +1,22 @@
 "use client";
 
-// 클래스 설정 (#284/#285/#323). 「채점 설정」이던 이름이 넓어졌다 — 강사 본인의
-// 채점 키를 넣고 클래스 기본 채점 모델을 고르는 일 말고도, 채점과 무관한 이름들
-// (클래스 이름·강사 이름 #299)과 클래스를 템플릿으로 공개하는 일(#319)까지 이
-// 화면 하나가 담는다. 카드는 「이름」 → 「채점」(키·기본 모델·사용량 세 구획) →
-// 템플릿 공개 → 삭제 순이다.
+// 클래스 설정 (#284/#285/#323, 시안 v2 #636). 왼쪽 목차(sticky 180px)와 구획 여섯: 채점 연결(`#scoring-key`) ·
+// 기본 모델(`#scoring-model`) · 사용량(`#token-usage`) · 이름 · 템플릿으로 공개 · 보관과 삭제. 앵커 둘은
+// 알림이 가리킨다. 공동 강사에게는 소유자 전용 입력(채점 연결 폼·클래스 삭제)을 그리지 않는다.
 // 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
+
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ScoringConnectionSection } from "@/app/components/ScoringConnectionSection";
-import { ClassScoringCostTable } from "@/app/components/ScoringCost";
 import type { FormEvent } from "react";
 
 import {
   Badge,
   Card,
   CardHeader,
-  CardSection,
   ErrorNote,
   FieldLabel,
   INPUT_CLASS,
@@ -31,6 +28,7 @@ import {
 } from "@/app/components/ui";
 import { publishClassAsTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
 import {
+  copyClass,
   deleteClass,
   renameMyInstructorName,
   updateClass,
@@ -45,11 +43,14 @@ import { useMembers } from "@/lib/members/use-members";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
-import { isSelectedModelReasoning, MODEL_PROBE_NOTE, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
+import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import { findCostRow, formatKrw, usageKrw } from "@/lib/scoring/cost";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
+
+import { DefaultModelTable } from "./model-table";
+import { SettingsToc, type SettingsSection } from "./settings-toc";
 
 function ClassTemplatePublishCard({
   classId,
@@ -116,13 +117,11 @@ function ClassTemplatePublishCard({
   }
 
   return (
-    <Card>
-      <CardHeader title="클래스를 템플릿으로 공개" hint="문제와 순서까지 통째로 다른 강사에게 공유" />
-      <div className="flex flex-col gap-2.5 p-4">
+    <div className="flex flex-col gap-2.5 p-4">
         {liveTemplate ? (
           <div className="flex flex-col gap-2">
-            <p data-testid="publish-class-template-done" className="text-[13px] leading-relaxed">
-              공개되었습니다. 아래 주소를 다른 강사에게 전달하세요.
+            <p data-testid="publish-class-template-done">
+              <Badge tone="verified">공개됨</Badge>
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <Link
@@ -151,11 +150,8 @@ function ClassTemplatePublishCard({
         ) : (
           <>
             {justTakenDown ? (
-              <p data-testid="publish-class-template-taken-down" className="flex items-start gap-2 text-[13px]">
+              <p data-testid="publish-class-template-taken-down">
                 <Badge tone="neutral">내려짐</Badge>
-                <span className="text-ink/60">
-                  더 이상 다른 강사가 가져갈 수 없습니다. 다시 공개하면 새 주소가 나옵니다.
-                </span>
               </p>
             ) : null}
             {takedownError ? (
@@ -173,7 +169,6 @@ function ClassTemplatePublishCard({
               value={publisherDisplayName}
               onChange={(event) => setPublisherDisplayName(event.target.value)}
               required
-              placeholder="계정 이름과 달라도 됩니다"
               className={INPUT_CLASS}
             />
             <button
@@ -192,17 +187,96 @@ function ClassTemplatePublishCard({
             <span data-testid="publish-class-template-error">{publishError}</span>
           </ErrorNote>
         ) : null}
-        <span className="text-[11.5px] leading-relaxed text-ink/45">
-          공개하는 순간 문제와 그 순서, 체크리스트까지 통째로 사본이 떠집니다 — 이후 이
-          클래스를 고치거나 지워도 템플릿은 그대로입니다. 참여자·제출물·판정·가입 코드·채점
-          키·채점 모델은 담기지 않습니다.
-        </span>
-      </div>
-    </Card>
+    </div>
   );
 }
 
-function DeleteClassCard({ classId, classroom }: { classId: number; classroom: ClassRow }) {
+const ROW = "flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3";
+
+// 「보관과 삭제」(#636, 시안 v2) — 복사·보관·삭제. 클래스 상세의 머리와 가입 링크 띠에 있던 「복사해서
+// 새로 열기」·「보관하기」·「보관 되돌리기」가 여기로 왔다. 보관된 클래스에서는 복사가 주 행동이라
+// 주 버튼으로 그린다 — 지난 클래스를 복사해 다음 기수를 여는 것이 흔한 쓰임이다. 삭제는 소유자만.
+function ClassLifecycleCard({
+  classId,
+  classroom,
+  isOwner,
+  archiveError,
+  onSetArchived,
+}: {
+  classId: number;
+  classroom: ClassRow;
+  isOwner: boolean;
+  archiveError: boolean;
+  onSetArchived: (archived: boolean) => void;
+}) {
+  const router = useRouter();
+  const [copying, setCopying] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+
+  async function handleCopy() {
+    setCopyError(null);
+    setCopying(true);
+    const result = await copyClass(classId);
+    if (result.ok) {
+      router.push(`/classes/${result.data.id}`);
+    } else {
+      setCopyError(result.detail);
+      setCopying(false);
+    }
+  }
+
+  return (
+    <div className="divide-y divide-rule">
+      <div className={ROW}>
+        <span className="text-[13.5px]">복사</span>
+        <button
+          type="button"
+          data-testid="copy-class-button"
+          onClick={handleCopy}
+          disabled={copying}
+          className={buttonClass(classroom.archived ? "primary" : "secondary", "sm")}
+        >
+          {copying ? "복사하는 중..." : "복사해서 새로 열기"}
+        </button>
+      </div>
+      {copyError ? (
+        <div className="px-4 py-3">
+          <ErrorNote>
+            <span data-testid="copy-class-error">{copyError}</span>
+          </ErrorNote>
+        </div>
+      ) : null}
+      <div className={ROW}>
+        <span className="flex items-center gap-2.5 text-[13.5px]">
+          보관
+          <span data-testid="class-archive-status">
+            <Badge tone={classroom.archived ? "neutral" : "verified"}>{classroom.archived ? "보관됨" : "진행중"}</Badge>
+          </span>
+        </span>
+        <button
+          type="button"
+          data-testid={classroom.archived ? "classroom-unarchive" : "classroom-archive"}
+          onClick={() => onSetArchived(!classroom.archived)}
+          className={buttonClass("secondary", "sm")}
+        >
+          {classroom.archived ? "보관 되돌리기" : "보관하기"}
+        </button>
+      </div>
+      {archiveError ? (
+        <div className="px-4 py-3">
+          <ErrorNote>
+            <span data-testid="classroom-archive-error">
+              {classroom.archived ? "되돌리지 못했습니다. 다시 시도해주세요." : "보관하지 못했습니다. 다시 시도해주세요."}
+            </span>
+          </ErrorNote>
+        </div>
+      ) : null}
+      {isOwner ? <DeleteClassRow classId={classId} classroom={classroom} /> : null}
+    </div>
+  );
+}
+
+function DeleteClassRow({ classId, classroom }: { classId: number; classroom: ClassRow }) {
   // 삭제 — 없던 일로 한다(#330). 보관과 달리 되돌릴 수 없다. 제출이 있으면
   // 백엔드가 판정해 내려준 `has_submissions`를 그대로 믿는다 — 이 화면이 문제·
   // 제출물 목록을 다시 합쳐 스스로 셈하지 않는다.
@@ -249,25 +323,19 @@ function DeleteClassCard({ classId, classroom }: { classId: number; classroom: C
 
   if (classroom.has_submissions) {
     return (
-      <Card>
-        <CardHeader title="클래스 삭제" hint="되돌릴 수 없습니다" />
-        <div className="p-4">
-          <Note tone="attention">
-            <span data-testid="delete-class-blocked">
-              제출이 있어 지울 수 없습니다 — 참여자가 낸 제출과 판정은 그 사람의
-              기록이라 강사가 지울 수 없습니다. 수업이 끝났다면 클래스 상세에서
-              대신 보관해주세요.
-            </span>
-          </Note>
-        </div>
-      </Card>
+      <div className={ROW}>
+        <span className="text-[13.5px]">삭제</span>
+        <span data-testid="delete-class-blocked">
+          <Badge tone="attention">제출이 있어 지울 수 없습니다</Badge>
+        </span>
+      </div>
     );
   }
 
   return (
-    <Card>
-      <CardHeader title="클래스 삭제" hint="제출이 없을 때만 가능합니다 — 되돌릴 수 없습니다" />
-      <div className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col gap-3">
+      <div className={ROW}>
+        <span className="text-[13.5px]">삭제</span>
         {!confirming ? (
           <button
             type="button"
@@ -278,7 +346,10 @@ function DeleteClassCard({ classId, classroom }: { classId: number; classroom: C
           >
             {previewReady ? "클래스 삭제" : "불러오는 중..."}
           </button>
-        ) : (
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-3 px-4 pb-4 empty:hidden">
+        {!confirming ? null : (
           <div className="flex flex-col gap-3">
             <Note tone="attention">
               <div className="flex flex-col gap-1">
@@ -334,14 +405,14 @@ function DeleteClassCard({ classId, classroom }: { classId: number; classroom: C
           </ErrorNote>
         ) : null}
       </div>
-    </Card>
+    </div>
   );
 }
 
 export default function ClassSettingsPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
-  const { state, reload } = useClass(classId);
+  const { state, reload, setArchived } = useClass(classId);
   const { state: modelsState, reload: reloadModels } = useScoringModels(classId);
   const costState = useScoringCost(classId);
 
@@ -478,16 +549,27 @@ export default function ClassSettingsPage() {
     setModelSaving(false);
   }
 
+  const costReady = costState.status === "ready" ? costState.estimate : null;
+  const scoredCount = classroom.scored_attempt_count;
+  const averageTokens = scoredCount > 0 ? Math.round(classroom.token_usage_total / scoredCount) : null;
+  const averageKrw =
+    averageTokens !== null && costReady?.unit === "krw"
+      ? usageKrw(averageTokens, findCostRow(costReady, classroom.default_model, classroom.default_reasoning_effort))
+      : null;
+  const sections: SettingsSection[] = [
+    { id: "scoring-key", label: "채점 연결" },
+    { id: "scoring-model", label: "기본 모델" },
+    { id: "token-usage", label: "사용량" },
+    { id: "class-names", label: "이름" },
+    { id: "class-template", label: "템플릿으로 공개" },
+    { id: "class-archive", label: "보관과 삭제" },
+  ];
+
   return (
     <PageShell>
       <PageHeader
         eyebrow={classroom.name}
         title="클래스 설정"
-        description={
-          isOwner
-            ? "클래스·강사 이름, 채점 연결과 모델, 템플릿 공개까지 이 클래스의 설정을 여기서 관리합니다."
-            : "클래스 이름과 내 강사 이름, 채점 모델, 템플릿 공개를 여기서 관리합니다. 채점 연결과 클래스 삭제는 소유자가 맡습니다."
-        }
         actions={
           <Link href={`/classes/${classId}`} className={buttonClass()}>
             클래스로 돌아가기
@@ -495,18 +577,164 @@ export default function ClassSettingsPage() {
         }
       />
 
-      <div className="flex flex-col gap-5">
-        <Card>
-          <CardHeader
-            title="이름"
-            hint={
-              isOwner
-                ? "참여자 화면과 가입 미리보기에 이 이름들이 보입니다"
-                : "가입 미리보기에 내 강사 이름이 소유자의 이름과 함께 보입니다"
-            }
-          />
-          <div className="flex flex-col gap-3 p-4">
-            <form onSubmit={handleNameSubmit} className="flex flex-col gap-3">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-7">
+        <SettingsToc sections={sections} />
+
+        <div className="flex min-w-0 flex-1 flex-col gap-5">
+          <SettingsCard id="scoring-key" title="채점 연결">
+            <ScoringConnectionSection
+              key={`${classroom.scoring_connection_kind}:${classroom.scoring_server_url ?? ""}`}
+              classroom={classroom}
+              isOwner={isOwner}
+              onSaved={() => {
+                reload();
+                // 연결이 바뀌면 그 연결로 실제로 쓸 수 있는 모델이 달라진다(#401, #601) — 이 화면을
+                // 떠나지 않아도 모델 선택지가 바로 갱신된다.
+                reloadModels();
+              }}
+            />
+          </SettingsCard>
+
+          <SettingsCard id="scoring-model" title="기본 모델">
+            <div className="flex flex-col gap-3 p-4">
+              {modelsState.status === "loading" ? (
+                <p data-testid="scoring-models-loading" className="text-[13px] text-ink/45">
+                  불러오는 중...
+                </p>
+              ) : modelsState.status === "error" ? (
+                <ErrorNote>
+                  <span data-testid="scoring-models-error">모델 목록을 불러오지 못했습니다.</span>
+                </ErrorNote>
+              ) : (
+                <form onSubmit={handleModelSubmit} className="flex flex-col gap-3">
+                  {modelsState.source === "fallback" ? (
+                    <span data-testid="scoring-models-unavailable-note">
+                      <Badge>기본 목록</Badge>
+                    </span>
+                  ) : null}
+                  {modelsState.source === "manual" ? (
+                    <div className="flex flex-col gap-1.5">
+                      <label htmlFor="class-default-model">
+                        <FieldLabel>모델 이름</FieldLabel>
+                      </label>
+                      <input
+                        id="class-default-model"
+                        data-testid="class-default-model-input"
+                        value={defaultModel}
+                        onChange={(event) => setDefaultModel(event.target.value)}
+                        required
+                        maxLength={200}
+                        className={`${INPUT_CLASS} font-mono`}
+                      />
+                    </div>
+                  ) : (
+                    <DefaultModelTable
+                      models={modelsState.models}
+                      savedModel={classroom.default_model}
+                      selected={defaultModel}
+                      onSelect={setDefaultModel}
+                      costState={costState}
+                      reasoningEffort={defaultReasoningEffort}
+                    />
+                  )}
+                  {isCompatibleServer ? (
+                    <ReasoningModelSwitch
+                      checked={defaultModelIsReasoning}
+                      onChange={setDefaultModelIsReasoning}
+                      testId="class-default-reasoning-switch"
+                      showHint={false}
+                    />
+                  ) : null}
+                  {selectedIsReasoning ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label htmlFor="class-default-reasoning-effort">
+                        <FieldLabel>추론 강도</FieldLabel>
+                      </label>
+                      <select
+                        id="class-default-reasoning-effort"
+                        data-testid="class-default-reasoning-effort-select"
+                        value={defaultReasoningEffort}
+                        onChange={(event) => setDefaultReasoningEffort(event.target.value)}
+                        className={`${INPUT_CLASS} max-w-[200px]`}
+                      >
+                        {REASONING_EFFORT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                  <div>
+                    <button
+                      type="submit"
+                      data-testid="class-default-model-submit"
+                      disabled={modelSaving || defaultModel.trim() === ""}
+                      className={buttonClass("primary")}
+                    >
+                      {modelSaving ? "저장하는 중..." : "저장"}
+                    </button>
+                  </div>
+                </form>
+              )}
+              {modelError ? (
+                <ErrorNote>
+                  <span data-testid="class-default-model-error">{modelError}</span>
+                </ErrorNote>
+              ) : null}
+            </div>
+          </SettingsCard>
+
+          {/* 누적 사용량(#629) — 상한은 없다. 원화는 OpenAI 키 연결일 때 지금 기본 모델의 단가로 셈한
+              어림이고, 호환 서버는 토큰만이다. 1회 평균은 누적 / 채점 횟수(#632). */}
+          <SettingsCard id="token-usage" title="사용량">
+            <div data-testid="token-usage" className="flex flex-col gap-3 p-4">
+              <div className="flex flex-wrap items-baseline gap-x-3.5 gap-y-1">
+                <span data-testid="token-usage-total" className="font-mono text-[26px] font-semibold">
+                  {classroom.token_usage_total.toLocaleString("ko-KR")}
+                </span>
+                <span className="text-[13px] text-ink/60">토큰</span>
+                {usageKrwText ? (
+                  <span data-testid="token-usage-krw" className="font-mono text-[15px] sm:ml-auto">
+                    {usageKrwText}
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-baseline gap-x-7 gap-y-1.5 text-[12.5px]">
+                <span data-testid="token-usage-count">
+                  <span className="text-ink/60">채점</span> <Num>{scoredCount.toLocaleString("ko-KR")}회</Num>
+                </span>
+                <span data-testid="token-usage-average">
+                  <span className="text-ink/60">1회 평균</span>{" "}
+                  <Num>
+                    {averageTokens === null
+                      ? "—"
+                      : `${averageTokens.toLocaleString("ko-KR")} 토큰${averageKrw ? ` · ${formatKrw(averageKrw)}` : ""}`}
+                  </Num>
+                </span>
+                {classroom.token_usage_estimated > 0 ? (
+                  <span data-testid="token-usage-estimated">
+                    <span className="text-ink/60">어림</span>{" "}
+                    <Num>{classroom.token_usage_estimated.toLocaleString("ko-KR")} 토큰</Num>
+                  </span>
+                ) : null}
+                {isCompatibleServer ? null : (
+                  <a
+                    href="https://platform.openai.com/usage"
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    data-testid="token-usage-openai-link"
+                    className="text-ink/45 hover:text-ink sm:ml-auto"
+                  >
+                    OpenAI 사용량 화면 ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          </SettingsCard>
+
+          <SettingsCard id="class-names" title="이름">
+            <form onSubmit={handleNameSubmit} className="flex flex-col gap-3 p-4">
               <div className="flex flex-col gap-1.5">
                 <label htmlFor="class-name-input">
                   <FieldLabel>클래스 이름</FieldLabel>
@@ -534,10 +762,6 @@ export default function ClassSettingsPage() {
                   maxLength={100}
                   className={INPUT_CLASS}
                 />
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  참여자 명단과 제출물에 보이는 이름과는 별개입니다 — 그곳은 참여자 본인이 정한
-                  이름을 그대로 씁니다.
-                </span>
               </div>
               <div className="flex justify-end">
                 <button
@@ -549,204 +773,41 @@ export default function ClassSettingsPage() {
                   {nameSaving ? "저장하는 중..." : "저장"}
                 </button>
               </div>
+              {nameError ? (
+                <ErrorNote>
+                  <span data-testid="class-instructor-display-name-error">{nameError}</span>
+                </ErrorNote>
+              ) : null}
             </form>
-            {nameError ? (
-              <ErrorNote>
-                <span data-testid="class-instructor-display-name-error">{nameError}</span>
-              </ErrorNote>
-            ) : null}
-          </div>
-        </Card>
+          </SettingsCard>
 
-        <Card>
-          <CardHeader title="채점" hint="어디로, 어떤 모델로, 얼마까지 채점할지" />
-          <div className="divide-y divide-rule">
-            <ScoringConnectionSection
-              key={`${classroom.scoring_connection_kind}:${classroom.scoring_server_url ?? ""}`}
+          <SettingsCard id="class-template" title="템플릿으로 공개">
+            <ClassTemplatePublishCard classId={classId} initialPublishedTemplate={classroom.published_template} />
+          </SettingsCard>
+
+          <SettingsCard id="class-archive" title="보관과 삭제">
+            <ClassLifecycleCard
+              classId={classId}
               classroom={classroom}
               isOwner={isOwner}
-              onSaved={() => {
-                reload();
-                // 연결이 바뀌면 그 연결로 실제로 쓸 수 있는 모델이 달라진다(#401, #601) — 이 화면을
-                // 떠나지 않아도 모델 선택지가 바로 갱신된다.
-                reloadModels();
-              }}
+              archiveError={state.archiveError}
+              onSetArchived={setArchived}
             />
-
-            <CardSection id="scoring-model" title="기본 채점 모델" hint="문제가 자기 모델을 갖지 않으면 이 값을 씁니다">
-              <div className="flex flex-col gap-3 p-4">
-                {modelsState.status === "loading" ? (
-                  <p data-testid="scoring-models-loading" className="text-[13px] text-ink/45">
-                    불러오는 중...
-                  </p>
-                ) : modelsState.status === "error" ? (
-                  <ErrorNote>
-                    <span data-testid="scoring-models-error">모델 목록을 불러오지 못했습니다.</span>
-                  </ErrorNote>
-                ) : (
-                  <form onSubmit={handleModelSubmit} className="flex flex-col gap-2.5">
-                    {modelsState.source === "fallback" ? (
-                      <Note>
-                        <span data-testid="scoring-models-unavailable-note">
-                          {modelsState.unavailableReason === "no_api_key"
-                            ? isOwner
-                              ? "키를 넣으면 이 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
-                              : "소유자가 키를 넣으면 그 키로 쓸 수 있는 모델을 보여드립니다 — 지금은 기본 목록입니다."
-                            : "지금은 모델 목록을 확인할 수 없어 기본 목록을 보여드립니다."}
-                        </span>
-                      </Note>
-                    ) : modelsState.source === "manual" ? (
-                      <Note>
-                        <span data-testid="scoring-models-unavailable-note">
-                          이 서버는 모델 목록을 주지 않습니다 — 서버에서 쓰는 모델 이름을 그대로 넣어주세요.
-                        </span>
-                      </Note>
-                    ) : null}
-                    <label htmlFor="class-default-model">
-                      <FieldLabel>기본 모델</FieldLabel>
-                    </label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {modelsState.source === "manual" ? (
-                        <input
-                          id="class-default-model"
-                          data-testid="class-default-model-input"
-                          value={defaultModel}
-                          onChange={(event) => setDefaultModel(event.target.value)}
-                          required
-                          maxLength={200}
-                          className={`${INPUT_CLASS} min-w-[280px] flex-1 font-mono`}
-                        />
-                      ) : (
-                      <select
-                        id="class-default-model"
-                        data-testid="class-default-model-select"
-                        value={defaultModel}
-                        onChange={(event) => setDefaultModel(event.target.value)}
-                        className={`${INPUT_CLASS} min-w-[280px] flex-1`}
-                      >
-                        {/* 연결을 바꾼 뒤 지금 값이 그 연결의 목록에 없으면(#601) 고르라고 먼저 말한다. */}
-                        {modelsState.models.some((model) => model.id === defaultModel) ? null : (
-                          <option value={defaultModel} disabled>
-                            {defaultModel} · 이 연결에서 쓸 수 없습니다 — 모델을 고르세요
-                          </option>
-                        )}
-                        {modelsState.models.map((model) => (
-                          <option key={model.id} value={model.id} data-testid={`scoring-model-option-${model.id}`}>
-                            {model.label} · 컨텍스트{" "}
-                            {model.context_window ? `${model.context_window.toLocaleString("ko-KR")} 토큰` : "크기 미확인"}
-                          </option>
-                        ))}
-                      </select>
-                      )}
-                      <button
-                        type="submit"
-                        data-testid="class-default-model-submit"
-                        disabled={modelSaving}
-                        className={buttonClass("primary")}
-                      >
-                        {modelSaving ? "저장하는 중..." : "저장"}
-                      </button>
-                    </div>
-                    <span className="text-[11.5px] leading-relaxed text-ink/45">
-                      모델마다 한 번에 받을 수 있는 소스의 양이 다릅니다 — 긴 문제에 작은 모델을 고르면
-                      소스 뒷부분이 잘린 채 채점됩니다.
-                    </span>
-                    {isCompatibleServer ? (
-                      <>
-                        <span
-                          data-testid="class-default-model-probe-note"
-                          className="text-[11.5px] leading-relaxed text-ink/45"
-                        >
-                          {MODEL_PROBE_NOTE}
-                        </span>
-                        <div className="border-t border-rule pt-3">
-                          <ReasoningModelSwitch
-                            checked={defaultModelIsReasoning}
-                            onChange={setDefaultModelIsReasoning}
-                            testId="class-default-reasoning-switch"
-                          />
-                        </div>
-                      </>
-                    ) : null}
-                    {selectedIsReasoning ? (
-                      <div className="flex flex-col gap-1.5 border-t border-rule pt-3">
-                        <label htmlFor="class-default-reasoning-effort">
-                          <FieldLabel>기본 추론 강도</FieldLabel>
-                        </label>
-                        <select
-                          id="class-default-reasoning-effort"
-                          data-testid="class-default-reasoning-effort-select"
-                          value={defaultReasoningEffort}
-                          onChange={(event) => setDefaultReasoningEffort(event.target.value)}
-                          className={`${INPUT_CLASS} max-w-[200px]`}
-                        >
-                          {REASONING_EFFORT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                        <span className="text-[11.5px] leading-relaxed text-ink/45">
-                          높을수록 느리고 토큰을 더 씁니다.
-                        </span>
-                      </div>
-                    ) : null}
-                    <div className="border-t border-rule pt-3">
-                      <ClassScoringCostTable
-                        state={costState}
-                        modelId={defaultModel}
-                        reasoningEffort={defaultReasoningEffort}
-                        isReasoning={selectedIsReasoning}
-                      />
-                    </div>
-                  </form>
-                )}
-                {modelError ? (
-                  <ErrorNote>
-                    <span data-testid="class-default-model-error">{modelError}</span>
-                  </ErrorNote>
-                ) : null}
-              </div>
-            </CardSection>
-
-            {/* 누적 사용량(#629) — 상한은 없다. 원화는 OpenAI 키 연결일 때 지금 기본 모델의 단가로 셈한
-                어림이고, 호환 서버는 토큰만이다. */}
-            <CardSection id="token-usage" title="사용량">
-              <dl data-testid="token-usage" className="flex flex-col gap-2 p-4 text-[13px]">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <dt className="text-ink/60">누적</dt>
-                  <dd className="font-mono">
-                    <span data-testid="token-usage-total">
-                      {classroom.token_usage_total.toLocaleString("ko-KR")} 토큰
-                    </span>
-                    {usageKrwText ? (
-                      <span data-testid="token-usage-krw" className="text-ink/60">
-                        {" "}
-                        · {usageKrwText}
-                      </span>
-                    ) : null}
-                  </dd>
-                </div>
-                {classroom.token_usage_estimated > 0 ? (
-                  <div className="flex flex-wrap items-baseline justify-between gap-2 text-ink/60">
-                    <dt>어림</dt>
-                    <dd data-testid="token-usage-estimated" className="font-mono">
-                      {classroom.token_usage_estimated.toLocaleString("ko-KR")} 토큰
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-            </CardSection>
-          </div>
-        </Card>
-
-        <ClassTemplatePublishCard
-          classId={classId}
-          initialPublishedTemplate={classroom.published_template}
-        />
-
-        {isOwner ? <DeleteClassCard classId={classId} classroom={classroom} /> : null}
+          </SettingsCard>
+        </div>
       </div>
     </PageShell>
+  );
+}
+
+// 설정의 구획 하나 — 목차가 가리키는 `id` 를 단 카드. 알림·배너가 `#scoring-key` 로 곧장 온다.
+function SettingsCard({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="scroll-mt-6">
+      <Card>
+        <CardHeader title={title} />
+        {children}
+      </Card>
+    </section>
   );
 }

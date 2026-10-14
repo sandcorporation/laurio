@@ -6,11 +6,14 @@ export function ReasoningModelSwitch({
   onChange,
   testId,
   disabled = false,
+  showHint = true,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   testId: string;
   disabled?: boolean;
+  // 설정 화면은 설명 문장을 두지 않는다(#636) — 문제 편집은 그대로 보인다.
+  showHint?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -25,9 +28,11 @@ export function ReasoningModelSwitch({
         />
         추론 모델
       </label>
-      <span className="text-[11.5px] leading-relaxed text-ink/45">
-        이 모델이 추론 모델이면 켜세요 — 추론 강도를 정해 채점 요청에 함께 보냅니다.
-      </span>
+      {showHint ? (
+        <span className="text-[11.5px] leading-relaxed text-ink/45">
+          이 모델이 추론 모델이면 켜세요 — 추론 강도를 정해 채점 요청에 함께 보냅니다.
+        </span>
+      ) : null}
     </div>
   );
 }

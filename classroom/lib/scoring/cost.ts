@@ -176,3 +176,17 @@ export function problemCostLine(estimate: ScoringCostEstimate, row: ScoringCostR
   const whole = tokens ? formatTokens(perProblem, row.open_ended) : formatKrw(perProblem, row.open_ended);
   return `${head} · 참여자 ${estimate.participant_count}명 × 평균 ${formatAttemptsPerParticipant(estimate.attempts_per_participant)} ≈ ${whole}`;
 }
+
+/**
+ * 기본 모델 표의 한 칸(#636) — 그 모델의 시도 1건 비용. 호환 서버(토큰 단위)는 토큰을, OpenAI 키는
+ * 원화를 적고, 단가를 모르면 「비용 미확인」이다. 기준이 소스 크기별이면 가운데(「보통」) 크기로 본다.
+ */
+export function modelCostCell(estimate: ScoringCostEstimate, row: ScoringCostRow | null): string {
+  if (!row) return UNPRICED_TEXT;
+  const attempt = representativeAttempt(row);
+  if (estimate.unit === "tokens") return attempt ? formatTokens(attempt.tokens, row.open_ended) : UNPRICED_TEXT;
+  if (!row.priced || !attempt) return UNPRICED_TEXT;
+  return formatKrw(attempt.krw, row.open_ended);
+}
+
+const UNPRICED_TEXT = "비용 미확인";

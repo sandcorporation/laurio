@@ -26,7 +26,10 @@ test("보관된 클래스는 강사 화면에서 새 문제 만들기가 막힌 
   await page.goto(`/classes/${classId}`);
   await expect(page.getByTestId("new-problem-link")).toBeVisible();
 
-  await page.getByTestId("classroom-archive").click();
+  // 보관 버튼은 설정의 「보관과 삭제」에 있다(#636, class-settings.spec.ts 가 누른다) — 여기서는 API 로 보관한다.
+  const archived = await api.post(`/api/backend/classroom/classes/${classId}/archive`);
+  expect(archived.ok()).toBeTruthy();
+  await page.reload();
   await expect(page.getByTestId("classroom-archived-banner")).toBeVisible();
 
   // 보관되면 「새 문제」가 눌러도 아무 일도 하지 않는 자리로 바뀐다 — 링크가
