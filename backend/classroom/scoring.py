@@ -212,6 +212,7 @@ def _scoring_adapter(
     reasoning_effort: str | None = None,
     timeout: float = CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS,
     asynchronous: bool = False,
+    log_context: dict | None = None,
 ) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
@@ -258,6 +259,9 @@ def _scoring_adapter(
             # #581(오류 87)까지는 그 요청 안에서 돌아 20초로 줄여 두었다.
             # 모델 시험 호출(#602)은 저장 요청 안에서 돌아 더 짧게 준다.
             "timeout": timeout,
+            # 지표의 제품 라벨과 호출별 로그의 클래스·문제 번호(#585) — 라벨이 아니라 로그 필드다.
+            "product": "classroom",
+            "log_context": log_context or {},
         },
     )
 
@@ -938,6 +942,7 @@ def _build_adapter(prepared: PreparedScoring, *, asynchronous: bool = False) -> 
         model=prepared.model,
         reasoning_effort=prepared.reasoning_effort,
         asynchronous=asynchronous,
+        log_context={"class_id": prepared.class_obj.id, "problem_id": prepared.problem.id},
     )
 
 
