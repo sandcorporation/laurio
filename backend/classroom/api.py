@@ -884,7 +884,7 @@ def set_class_compatible_server(request: HttpRequest, class_id: int, payload: Co
     class_obj.openai_api_key_status = Class.ScoringKeyStatus.VERIFIED
     class_obj.scoring_quota_exhausted_at = None
     class_obj.scoring_server_unreachable_at = None
-    # 저장 전 확인이 그 서버에 닿았다(#671).
+    # 저장 전 확인(모델 목록·인증)을 서버가 받아들였다(#671).
     class_obj.scoring_connection_verified_at = Clock.now()
     _save_scoring_connection(request, class_obj)
 
