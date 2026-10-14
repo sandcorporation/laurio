@@ -162,9 +162,9 @@ function ClassList({
               {archived ? (
                 // 보관의 약속은 "새 가입·새 제출은 닫히고 읽기는 남는다"다(#294,
                 // CONTEXT.md 「Class」) — 첫 화면도 그 읽기를 가장 눈에 띄는
-                // 자리에 둔다(#331). 복사해서 새로 여는 것도 흔한 쓰임이라
-                // 여전히 할 수 있지만 부차 행동이다. 둘 다 같은 상세 화면으로
-                // 간다 — 복사 자체는 그 화면이 한다.
+                // 자리, 앞에 둔다(#331). 둘 다 보조 모양이다(시안 Home.dc.html).
+                // 복사 버튼은 설정의 「보관과 삭제」 구획에 있어(#636) 그 자리로
+                // 곧장 보낸다(#658).
                 <div className="flex shrink-0 gap-1.5">
                   <Link
                     href={`/classes/${classroom.id}`}
@@ -174,7 +174,7 @@ function ClassList({
                     지난 기록 보기
                   </Link>
                   <Link
-                    href={`/classes/${classroom.id}`}
+                    href={`/classes/${classroom.id}/settings#class-archive`}
                     data-testid={`classroom-row-${classroom.id}-copy`}
                     className={buttonClass("secondary", "sm")}
                   >

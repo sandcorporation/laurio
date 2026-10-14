@@ -106,6 +106,8 @@ test("보관된 클래스 상세에서 설정 링크 한 번이면 복사에 닿
   await expect(page.getByTestId("classroom-archived-banner")).toBeVisible();
   await page.getByTestId("class-settings-link").click();
   await expect(page).toHaveURL(new RegExp(`/classes/${classId}/settings#class-archive$`));
+  // 구획은 클래스를 읽은 뒤 그려진다 — 그래도 도착하면 「보관과 삭제」가 화면 안이다(#658).
+  await expect(page.getByTestId("copy-class-button")).toBeInViewport();
 
   await page.getByTestId("copy-class-button").click();
   await expect(page).toHaveURL(/\/classes\/\d+$/);

@@ -78,6 +78,11 @@ test("내 클래스가 가르치는·참여 중·보관 순으로 수치와 함�
   const archivedRow = page.getByTestId(`classroom-row-${old.id}`);
   await expect(archivedRow.getByTestId(`classroom-row-${old.id}-view`)).toHaveText("지난 기록 보기");
   await expect(archivedRow.getByTestId(`classroom-row-${old.id}-copy`)).toHaveText("복사해서 새 기수 열기");
+  // 복사 버튼은 설정의 「보관과 삭제」 구획에 있다 — 거기로 곧장 간다(#658).
+  await expect(archivedRow.getByTestId(`classroom-row-${old.id}-copy`)).toHaveAttribute(
+    "href",
+    `/classes/${old.id}/settings#class-archive`,
+  );
 
   // 순서 — 가르치는 → 참여 중 → 보관.
   const headings = await page.locator("main h2").allTextContents();
