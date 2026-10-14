@@ -39,6 +39,21 @@ services:
     # 서브프로세스 시드 둘이 HTTP 로 옮겨졌다 — pytest 는 이 스택을 쓰지 않고
     # (GitHub `services:` 의 postgres 를 쓴다) 나머지는 전부 컨테이너 안이다.
     ports: !reset []
+    # **느린 질의와 잠금 대기를 적는다**(#699). e2e 시험 하나는 3초 한도라, 스택이 몇 초
+    # 멈추면 여러 시험이 한꺼번에 붉어지는데(열차 #1840) 무엇이 멈췄는지 남는 줄이 없었다.
+    # 300ms 넘는 문장과 300ms 넘게 잠금을 기다린 세션을 적는다 — 잠금 대기 줄은
+    # `deadlock_timeout` 이 지나야 찍히므로 그것도 300ms 로 당긴다. dev 의
+    # `synchronous_commit=off` 는 command 를 통째로 덮으므로 여기서 다시 적는다.
+    command:
+      - postgres
+      - -c
+      - synchronous_commit=off
+      - -c
+      - log_min_duration_statement=300
+      - -c
+      - log_lock_waits=on
+      - -c
+      - deadlock_timeout=300ms
 
   minio:
     # **콘솔(9001)은 CI 에서 아무도 안 연다** — 사람이 브라우저로 보는 관리 UI 다.
@@ -74,10 +89,16 @@ services:
     # 줄을 섰다 — 혼자 돌면 1.2초인 이의 시험이 병렬에서는 시드 대기만으로
     # 3초(시험 하나 한도)를 넘었다. 코드가 이미지에 구워진 CI 에서는 자동
     # 재시작도 필요 없다. 워커 수는 prod compose 와 같다.
+    #
+    # **요청마다 한 줄을 stdout 에 적는다**(#699) — 메서드·경로·상태·응답 바이트·걸린 ms·
+    # 워커 pid. 시각은 `e2e.sh` 가 로그를 거둘 때 붙이는 Docker 타임스탬프(나노초)가 맡는다
+    # (gunicorn 의 `%(t)s` 는 초 단위라 3초 정지를 가르지 못한다). 배포 compose 는 그대로다.
+    # 옵션은 gunicorn 과 한 줄에 둔다 — 더 들여 쓴 줄은 접힘(`>`)에서도 줄바꿈이 남아 sh 가
+    # 다른 명령으로 읽고, 줄 끝 `\` 은 compose 가 먹는다(실측).
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py seed_dev_data &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --access-logfile - --access-logformat '%(r)s %(s)s %(B)s %(M)sms pid=%(p)s'"
 
   # 이벤트 서비스(ADR-0046, #379) — `backend`와 같은 이유로 마운트를 걷는다.
   # dev 의 `--reload`(uvicorn watchfiles)는 코드가 이미지에 구워진 CI 에서는

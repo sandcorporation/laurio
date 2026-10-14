@@ -48,6 +48,21 @@ push 하면 옛 빌드를 끊는다.
   셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
   넘었다(#499 의 첫 CI — 공개 e2e 10건·단위 2건 타임아웃). 오래 걸리는 e2e 를 성능이 좋은
   macos 에, 짧은 것을 staging 배포와 실행기를 나눠 쓰는 sub 에 둔다.
+- **e2e 가 흔들리면 무엇을 보나**(#699). 열차 빌드의 산출물(`test-results/**`, macos 단계가 거둔다)에
+  셋이 있다. ① `test-results/playwright/<프로젝트>[-exclusive]/<시험>/` — 실패한 시험의 `trace.zip`
+  (`pnpm --dir frontend exec playwright show-trace <파일>` 로 연다)과 `error-context.md`. 성공한 시험의
+  것은 남지 않는다(`retain-on-failure`). 패스마다 폴더가 다른 것은 Playwright 가 실행마다 출력 폴더를
+  비우기 때문이다 — 한 폴더면 뒤의 `@exclusive` 패스(시험 0개여도)가 앞 패스의 trace 를 지운다.
+  ② `test-results/stack/<서비스>.log` — 스택의 서비스마다 로그 전체, 줄마다 Docker 타임스탬프(나노초).
+  `backend.log` 에는 gunicorn 접근 로그가 요청마다 한 줄 있다(`POST /api/… HTTP/1.1 201 128 24ms pid=<13>`
+  — 상태·응답 바이트·걸린 ms·워커). `db.log` 에는 300ms 넘은 문장(`LOG:  duration: 400.691 ms  statement: …`)과
+  300ms 넘게 잠금을 기다린 세션(`still waiting for AccessShareLock … after 300.082 ms` · 쥔 프로세스 ·
+  `acquired … after`)이 찍힌다 — `compose.ci.yaml` 의 db·backend 오버라이드가 켠다(dev·배포는 그대로).
+  ③ `test-results/summary.txt` — 프로젝트별 통과·실패와 걸린 초. 여러 시험이 한꺼번에 3초를 넘었으면
+  trace 의 정지 시각을 `backend.log`·`db.log` 의 같은 시각과 맞춰 본다(열차 #1840 은 이것이 없어 원인을
+  못 남겼다). 로컬 `scripts/test.sh e2e` 는 같은 trace 를 `frontend/test-results/`(뒤 패스는
+  `frontend/test-results/exclusive/`)에 두고, 스택 로그는 `CODEMIT_E2E_KEEP=1` 로 남긴 스택에서
+  `docker compose -p <워크트리>-e2e … logs --timestamps <서비스>` 로 본다.
 - **sub 의 Jenkins 는 컨테이너라 node·pnpm·uv 가 없다** — 그래서 sub 쪽은 저장소를 담은
   시험 이미지(`docker/ci.Dockerfile`)를 굽고 사이드카 postgres(tmpfs·fsync 끔)와 같은 망에서
   `scripts/ci/sub-checks-inside.sh` 를 돈다. 바인드 마운트는 쓰지 않는다(컨테이너와 호스트의

@@ -20,8 +20,15 @@ C=(docker compose -p "$project" -f docker/compose.dev.yaml -f docker/compose.ci.
 WORKERS=$(( $(getconf _NPROCESSORS_ONLN) / 3 ))
 [ "$WORKERS" -ge 2 ] || WORKERS=2
 
+# 스택 로그는 **서비스마다 통째로** `test-results/stack/<서비스>.log` 에 남긴다(#699). 예전의
+# `--tail 80` 한 파일은 앞선 celery 줄로 다 차서, 시험이 붉어진 그 몇 초의 줄이 하나도 없었다
+# (열차 #1840). 줄마다 Docker 타임스탬프(나노초)를 붙여 서비스끼리, 그리고 Playwright trace 와
+# 시각으로 맞춰 본다. 무엇을 거둘지 실패해도 `down` 까지는 간다.
 cleanup() {
-  "${C[@]}" logs --tail 80 >test-results/e2e-stack.log 2>&1 || true
+  mkdir -p test-results/stack
+  for service in $("${C[@]}" ps -a --services 2>/dev/null); do
+    "${C[@]}" logs --no-color --timestamps "$service" >"test-results/stack/$service.log" 2>&1 || true
+  done
   "${C[@]}" down -v --remove-orphans --rmi local >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -57,10 +64,24 @@ corepack enable >/dev/null 2>&1 || true
 pnpm install --frozen-lockfile >/dev/null || { echo "pnpm install 실패"; exit 1; }
 pnpm --dir frontend exec playwright install chromium >/dev/null || { echo "Playwright 브라우저를 받지 못했다"; exit 1; }
 
+# package.json 의 `test:*` 와 같은 두 패스(`@exclusive` 는 일꾼 하나로 따로)를 여기서 직접 부른다 —
+# Playwright 는 실행마다 출력 폴더를 비우므로, 한 폴더를 쓰면 뒤 패스가 앞 패스의 실패 trace 를
+# 지운다(#699). 패스마다 `test-results/playwright/<프로젝트>[-exclusive]/` 에 따로 둔다
+# (`--output` 은 frontend 기준이라 `../`). 성공한 시험의 것은 `retain-on-failure` 가 남기지 않는다.
+pw=(pnpm --dir frontend exec playwright test)
+run_target() {
+  local target=$1 status=0
+  PLAYWRIGHT_WORKERS=$WORKERS "${pw[@]}" --project="$target" --grep-invert @exclusive \
+    --output="../test-results/playwright/$target" || status=1
+  "${pw[@]}" --project="$target" --grep @exclusive --workers=1 --pass-with-no-tests \
+    --output="../test-results/playwright/$target-exclusive" || status=1
+  return "$status"
+}
+
 failed=0
 for target in public operator classroom; do
   started=$SECONDS
-  if PLAYWRIGHT_WORKERS=$WORKERS pnpm --dir frontend run "test:$target"; then
+  if run_target "$target"; then
     echo "통과  e2e $target ($((SECONDS - started))초)" | tee -a "$summary"
   else
     echo "실패  e2e $target ($((SECONDS - started))초)" | tee -a "$summary"
