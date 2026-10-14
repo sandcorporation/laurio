@@ -26,7 +26,9 @@ WORKERS=$(( $(getconf _NPROCESSORS_ONLN) / 3 ))
 # `--tail 80` 한 파일은 앞선 celery 줄로 다 차서, 시험이 붉어진 그 몇 초의 줄이 하나도 없었다
 # (열차 #1840). 줄마다 Docker 타임스탬프(나노초)를 붙여 서비스끼리, 그리고 Playwright trace 와
 # 시각으로 맞춰 본다. 무엇을 거둘지 실패해도 `down` 까지는 간다.
+sampler=""
 cleanup() {
+  [ -n "$sampler" ] && kill "$sampler" 2>/dev/null
   mkdir -p test-results/stack
   for service in $("${C[@]}" ps -a --services 2>/dev/null); do
     "${C[@]}" logs --no-color --timestamps "$service" >"test-results/stack/$service.log" 2>&1 || true
@@ -38,6 +40,11 @@ trap 'exit 130' INT TERM
 rm -rf test-results && mkdir -p test-results
 summary=test-results/summary.txt
 : >"$summary"
+# 호스트(mac)의 1초 샘플 — 메모리 압력·스왑·load·Docker VM 프로세스·docker stats 를
+# `test-results/host/*.log` 에(#716). 열차 #1890 의 4초 정지는 Docker VM 전체였고 컨테이너 로그로는 더
+# 가릴 수 없었다. macOS 가 아니면 곧바로 끝나고, 명령이 없어도 e2e 를 붉게 만들지 않는다.
+bash scripts/ci/host-sample.sh test-results/host </dev/null >/dev/null 2>&1 &
+sampler=$!
 
 read_port() { "${C[@]}" port "$1" "$2" | head -n 1 | sed 's/.*://'; }
 

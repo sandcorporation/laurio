@@ -13,6 +13,7 @@ pipeline {
 
   parameters {
     string(name: 'MAX_PRS', defaultValue: '0', description: '이번 묶음의 PR 상한 — 0 이면 기본(8). 붉은 묶음을 반으로 가를 때 잡이 스스로 채운다')
+    string(name: 'INFRA_RETRY', defaultValue: '0', description: '1 이면 앞 묶음이 인프라 고장(Docker VM 정지)으로 붉어 같은 묶음을 다시 도는 빌드다 — 잡이 스스로 채운다, 또 붉으면 가른다(#716)')
   }
 
   triggers {
@@ -93,6 +94,8 @@ pipeline {
               sh 'python3 scripts/ci/train.py assemble'
             }
             sh 'bash scripts/ci/sub-checks.sh'
+            // 묶음이 붉었을 때 macos 의 인프라 판정을 믿어도 되는지 — sub 가 초록이어야 e2e 만 붉은 것이다.
+            script { env.TRAIN_SUB_OK = '1' }
           }
           post {
             always {
@@ -118,7 +121,11 @@ pipeline {
             catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
               sh 'bash scripts/ci/e2e.sh'
             }
+            // 붉은 e2e 가 Docker VM 정지(3초 초과 + 그 시각 backend 요청 0건) 모양인지 판정한다(#716).
+            // celery-broker 까지 초록일 때만 넘긴다 — 다른 단계가 붉으면 인프라 재실행 대상이 아니다.
+            sh 'python3 scripts/ci/e2e_stall.py test-results > test-results/e2e-verdict.json || rm -f test-results/e2e-verdict.json'
             sh 'bash scripts/ci/celery-broker.sh'
+            stash name: 'e2e-verdict', includes: 'test-results/e2e-verdict.json', allowEmpty: true
           }
           post {
             always {
@@ -179,11 +186,26 @@ pipeline {
         if (env.TRAIN_COUNT && env.TRAIN_COUNT != '0') {
           node('laurio-staging') {
             unstash 'plan'
-            withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-              sh 'python3 scripts/ci/train.py fail'
+            // 인프라 판정(#716) — 앞 빌드가 이 작업 공간에 남긴 것을 지우고, 이번 macos 가 남긴 것만 읽는다.
+            sh 'rm -f test-results/e2e-verdict.json'
+            def failArgs = ''
+            if (env.TRAIN_SUB_OK == '1') {
+              try { unstash 'e2e-verdict' } catch (ignored) { }
+              if (fileExists('test-results/e2e-verdict.json')) { failArgs += ' --verdict test-results/e2e-verdict.json' }
             }
-            def next = readFile('train.next').trim().tokenize('=')[1]
-            build job: env.JOB_NAME, wait: false, parameters: [string(name: 'MAX_PRS', value: next)]
+            if ((params.INFRA_RETRY ?: '0') == '1') { failArgs += ' --infra-retried' }
+            withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+              sh "python3 scripts/ci/train.py fail${failArgs}"
+            }
+            def next = [:]
+            readFile('train.next').trim().split('\n').each { line ->
+              def kv = line.tokenize('=')
+              next[kv[0]] = kv[1]
+            }
+            build job: env.JOB_NAME, wait: false, parameters: [
+              string(name: 'MAX_PRS', value: next.NEXT_MAX),
+              string(name: 'INFRA_RETRY', value: next.INFRA_RETRY ?: '0'),
+            ]
           }
         }
       }

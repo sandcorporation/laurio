@@ -5,7 +5,7 @@
     GH_TOKEN=… scripts/ci/train.py plan [--max N]    # 줄 선 PR 을 main 위에 쌓고 train.plan 을 쓴다
     GH_TOKEN=… scripts/ci/train.py assemble          # train.plan 그대로 다시 쌓는다(다른 노드·단계)
     GH_TOKEN=… scripts/ci/train.py merge             # 묶음이 초록이면 차례로 rebase 병합한다
-    GH_TOKEN=… scripts/ci/train.py fail              # 묶음이 붉으면 다음 묶음 크기를 정한다
+    GH_TOKEN=… scripts/ci/train.py fail [--verdict F] [--infra-retried]  # 묶음이 붉으면 다음 묶음 크기를 정한다
 
 `TRAIN_DRY_RUN=1` 이면 GitHub 에 상태도 병합도 쓰지 않는다(손으로 시험할 때).
 
@@ -25,8 +25,13 @@
 노드·단계가 바뀌면 같은 계획으로 다시 쌓고, 트리 해시가 계획과 같은지 확인한다.
 
 **붉으면 반으로 가른다.** 묶음이 둘 이상이면 앞의 절반만으로 다시 돈다(`fail` 이 다음 크기를
-적는다). 하나만 묶은 시험이 붉으면 그 PR 에 `failure` 를 남긴다. 인프라 고장이면 이 가르기가 PR
-하나를 억울하게 잡을 수 있다 — PR CI 를 다시 돌리면 줄로 돌아온다.
+적는다). 하나만 묶은 시험이 붉으면 그 PR 에 `failure` 를 남긴다.
+
+**인프라 고장이면 가르지 않고 같은 묶음을 한 번 더 돈다**(#716). macos 단계가 e2e 뒤에
+`scripts/ci/e2e_stall.py` 로 판정을 남기고(실패가 전부 3초 한도 초과이고, 시험마다 그 마감이
+backend 접근 로그의 3초 이상 요청 0건 틈 안에 있다 — Docker VM 전체의 정지), sub 검사도 초록이면
+`fail --verdict` 가 그것을 읽는다. 재실행은 한 번뿐이다 — 다시 붉으면(`--infra-retried`) 위의 가르기대로
+간다. 그 밖의 인프라 고장은 이 가르기가 PR 하나를 억울하게 잡을 수 있다 — PR CI 를 다시 돌리면 줄로 돌아온다.
 
 표준 라이브러리만 쓴다 — Jenkins 컨테이너(sub)에는 gh 가 없다. 토큰은 URL 이 아니라 헤더로
 넘겨 git 의 오류 출력에 실리지 않게 한다.
@@ -283,10 +288,31 @@ def merge() -> int:
     return 0
 
 
-def fail() -> int:
+def infra_stall(verdict_path: str | None) -> dict | None:
+    """macos 단계가 남긴 e2e 판정(`scripts/ci/e2e_stall.py`)이 「인프라 고장」이면 그 판정을 돌려준다."""
+    if not verdict_path:
+        return None
+    try:
+        with open(verdict_path) as source:
+            verdict = json.load(source)
+    except (OSError, ValueError):
+        return None
+    return verdict if isinstance(verdict, dict) and verdict.get("infra") is True else None
+
+
+def fail(verdict_path: str | None = None, infra_retried: bool = False) -> int:
     data = load_plan()
     entries = data["entries"]
-    if len(entries) > 1:
+    stall = None if infra_retried else infra_stall(verdict_path)
+    infra_retry = 0
+    if stall and entries:
+        print(f"인프라 고장으로 분류: {stall.get('reason', '')}")
+        print(f"{build_label()}({len(entries)}개)을 가르지 않고 같은 묶음으로 한 번 더 돈다.")
+        for entry in entries:
+            status(entry["head"], "pending", f"{build_label()}이 인프라 고장으로 붉었다 — 같은 묶음을 다시 돈다")
+        next_max = len(entries)
+        infra_retry = 1
+    elif len(entries) > 1:
         half = math.ceil(len(entries) / 2)
         print(f"{build_label()}({len(entries)}개)이 붉었다 — 앞의 {half}개로 다시 돈다.")
         for entry in entries:
@@ -297,7 +323,7 @@ def fail() -> int:
             status(entry["head"], "failure", f"이 PR 하나만 묶은 {build_label()}이 붉었다 — 빌드 기록을 보세요")
         next_max = 0
     with open("train.next", "w") as out:
-        out.write(f"NEXT_MAX={next_max}\n")
+        out.write(f"NEXT_MAX={next_max}\nINFRA_RETRY={infra_retry}\n")
     return 0
 
 
@@ -308,13 +334,17 @@ def main() -> int:
     sub.add_parser("plan").add_argument("--max", type=lambda v: int(v or 0), default=0)  # 첫 빌드는 매개변수가 아직 없어 빈 값이다
     sub.add_parser("assemble")
     sub.add_parser("merge")
-    sub.add_parser("fail")
+    failing = sub.add_parser("fail")
+    failing.add_argument("--verdict", default=None)  # macos 의 e2e 판정 — sub 검사가 초록일 때만 넘긴다
+    failing.add_argument("--infra-retried", action="store_true")  # 이 빌드가 이미 인프라 재실행이었다
     args = parser.parse_args()
     if args.command == "enqueue":
         return enqueue(args.sha)
     if args.command == "plan":
         return plan(args.max)
-    return {"assemble": assemble, "merge": merge, "fail": fail}[args.command]()
+    if args.command == "fail":
+        return fail(args.verdict, args.infra_retried)
+    return {"assemble": assemble, "merge": merge}[args.command]()
 
 
 if __name__ == "__main__":
