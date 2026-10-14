@@ -44,9 +44,13 @@ pipeline {
   }
 
   parameters {
-    // 끄면 staging 에 배포만 하고 production 은 앞당기지 않는다 — prod 를 붙잡아 둘 때 손으로 쓴다.
-    // 웹훅 빌드는 기본값(켜짐)으로 돈다.
-    booleanParam(name: 'PROMOTE_PRODUCTION', defaultValue: true,
+    // 켜면 staging 이 초록일 때 production 을 같은 커밋으로 앞당긴다. **기본은 꺼짐이다**(2026-10-14)
+    // — 강의실 화면을 시안 v2 로 크게 고치는 동안 prod 를 붙잡아 둔다. 웹훅 빌드는 기본값으로
+    // 도므로 그동안 main 의 커밋은 staging 까지만 간다. prod 로 보내려면 이 잡을 손으로
+    // 「Build with Parameters」 로 켜서 돌리거나, 다시 기본값을 true 로 되돌린다. 선언형
+    // 파이프라인은 이 블록을 빌드 시작 때 잡 설정에 다시 쓰므로 Jenkins 의 저장된 기본값도
+    // 이 값을 따라간다.
+    booleanParam(name: 'PROMOTE_PRODUCTION', defaultValue: false,
                  description: '초록이면 production 을 이 커밋으로 앞당긴다(→ prod 배포)')
   }
 

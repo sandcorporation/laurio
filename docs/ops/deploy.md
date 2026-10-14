@@ -152,7 +152,10 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 3. **`staging` → staging 배포.** 웹훅이 Jenkins `laurio` 잡(`Jenkinsfile`)을 부른다.
 4. **staging 초록 → `production` → prod 배포.** 그 잡이 끝에서 `production` 을 같은 커밋으로
    fast-forward 하고(`scripts/ci/fast_forward.py`, Jenkins 자격증명 `github-sandcorporation-token`),
-   웹훅이 `codemit` 잡(`Jenkinsfile.production`)을 부른다.
+   웹훅이 `codemit` 잡(`Jenkinsfile.production`)을 부른다. **이 넷째 길은 지금 꺼져 있다**
+   (2026-10-14, `Jenkinsfile` 의 `PROMOTE_PRODUCTION` 기본값 `false`) — 강의실 화면을 시안 v2 로
+   고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `laurio` 잡을 「Build with
+   Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다.
 
 `staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
