@@ -106,3 +106,12 @@ export function syntaxLineReasoning(score: InstructorSubmissionRow["score"]): st
   if (!score || score.syntax_check || !score.is_platform_failure) return "";
   return score.reasoning[0]?.reasoning ?? "";
 }
+
+/**
+ * 참여자 체크리스트 꼬리의 판정 주체(#684) — AI 가 판정했으면 모델 이름, 플랫폼이 미달로 닫은
+ * 점수(실패 상한)면 「채점 실패」. 저장된 `model_version` 은 내부 표식이라 문자열을 비교하지 않고
+ * 서버가 판정한 `is_platform_failure` 로 가른다(공모전 쪽 #251 과 같은 이유).
+ */
+export function scoreJudgeLabel(score: { model_version: string; is_platform_failure: boolean }): string {
+  return score.is_platform_failure ? "채점 실패" : score.model_version;
+}

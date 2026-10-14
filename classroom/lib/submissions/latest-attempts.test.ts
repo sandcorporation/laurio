@@ -7,6 +7,7 @@ import {
   participantIdsOf,
   requiredSummary,
   submissionStats,
+  scoreJudgeLabel,
   syntaxLineReasoning,
 } from "./latest-attempts";
 
@@ -167,5 +168,17 @@ describe("syntaxLineReasoning — 문법 줄 밑의 사유(#679)", () => {
 
   it("점수가 없으면 사유도 없다", () => {
     expect(syntaxLineReasoning(null)).toBe("");
+  });
+});
+
+describe("scoreJudgeLabel — 참여자 체크리스트 꼬리의 판정 주체(#684)", () => {
+  it("AI 가 판정한 점수는 모델 이름을 그대로 보인다", () => {
+    expect(scoreJudgeLabel({ model_version: "gpt-5-mini", is_platform_failure: false })).toBe("gpt-5-mini");
+  });
+
+  it("플랫폼이 미달로 닫은 점수는 내부 표식 대신 「채점 실패」를 보인다", () => {
+    const label = scoreJudgeLabel({ model_version: "platform-auto (채점 실패 상한)", is_platform_failure: true });
+    expect(label).toBe("채점 실패");
+    expect(label).not.toContain("platform-auto");
   });
 });

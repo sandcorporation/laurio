@@ -480,13 +480,24 @@ def _serialize_problem(
     active_member_ids: set[int] | None = None,
     blocking_problem_ids: set[int] | None = None,
     submission_marks_by_problem: dict[int, tuple[object, int]] | None = None,
+    submissions_by_problem: dict[int, list[ClassroomSubmission]] | None = None,
+    live_template_by_problem: dict[int, ProblemTemplate] | None = None,
 ) -> ProblemOut:
     if submission_marks_by_problem is None:
         submission_marks_by_problem = _participant_submission_marks("problem_id", problem_id=problem.id)
     last_submitted_at, participant_attempt_count = submission_marks_by_problem.get(problem.id, (None, 0))
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
-    passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+    passed_count, member_count = _problem_pass_stats(
+        problem,
+        active_member_ids,
+        submissions=None if submissions_by_problem is None else submissions_by_problem.get(problem.id, []),
+    )
+    live_template = (
+        _live_problem_template(problem)
+        if live_template_by_problem is None
+        else live_template_by_problem.get(problem.id)
+    )
     effective_model = problem.effective_model()
     effective_reasoning_effort = problem.effective_reasoning_effort()
     return ProblemOut(
@@ -513,7 +524,7 @@ def _serialize_problem(
         passed_count=passed_count,
         member_count=member_count,
         pass_rate=(passed_count / member_count) if member_count else None,
-        published_template=_published_template_summary(_live_problem_template(problem)),
+        published_template=_published_template_summary(live_template),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
         available_transitions=[
             ProblemTransitionOut(name=t.name, to_state=t.to_state, blocked_reason=t.blocked_reason)
@@ -1762,10 +1773,28 @@ def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
     """클래스의 문제 전부를 순서대로 — 화면(`list_problems`)과 연결된 앱의 읽기
     도구(`classroom.mcp_read_tools`, #513)가 함께 부른다."""
 
-    problems = class_obj.problems.prefetch_related("checklist_items").all()
+    return _serialize_problems(class_obj, class_obj.problems.prefetch_related("checklist_items").all())
+
+
+def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
+    """문제 여럿을 한 번에(#679·#684) — 목록과 순서 바꾸기 응답이 함께 쓴다. 문제마다 따로 들던
+    질의(제출 표식·달성률의 제출·살아 있는 템플릿)를 클래스 단위로 한 번씩 세어 넘기므로, 질의 수가
+    문제 수와 무관하다. `problems` 는 체크리스트를 미리 불러 둔 것이어야 한다."""
+
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
     submission_marks = _participant_submission_marks("problem_id", problem__classroom_id=class_obj.id)
+    submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
+    for submission in ClassroomSubmission.objects.filter(
+        problem__classroom_id=class_obj.id, member_id__in=active_member_ids
+    ).select_related("classroom_score"):
+        submissions_by_problem.setdefault(submission.problem_id, []).append(submission)
+    # `_live_problem_template` 의 `.first()` 와 같은 고름 — 문제마다 살아 있는 것 중 id 가 가장 작은 것.
+    live_template_by_problem: dict[int, ProblemTemplate] = {}
+    for template in ProblemTemplate.objects.filter(
+        source_problem__classroom_id=class_obj.id, taken_down_at__isnull=True
+    ).order_by("-pk"):
+        live_template_by_problem[template.source_problem_id] = template
     return [
         _serialize_problem(
             p,
@@ -1773,6 +1802,8 @@ def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
             active_member_ids=active_member_ids,
             blocking_problem_ids=blocking_problem_ids,
             submission_marks_by_problem=submission_marks,
+            submissions_by_problem=submissions_by_problem,
+            live_template_by_problem=live_template_by_problem,
         )
         for p in problems
     ]
@@ -1792,20 +1823,8 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
 
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     ordered = problem_authoring.reorder_problems(class_obj, payload.problem_ids)
-    active_member_ids = _active_member_ids(class_obj)
-    blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
-    # 목록(`_serialize_problem_list`)과 같이 제출 표식을 한 번에 센다(#679) — 넘기지 않으면 문제마다 질의 하나.
-    submission_marks = _participant_submission_marks("problem_id", problem__classroom_id=class_obj.id)
-    return 200, [
-        _serialize_problem(
-            p,
-            class_obj,
-            active_member_ids=active_member_ids,
-            blocking_problem_ids=blocking_problem_ids,
-            submission_marks_by_problem=submission_marks,
-        )
-        for p in ordered
-    ]
+    # 목록(`_serialize_problem_list`)과 같이 문제 행을 클래스 단위로 한 번에 센다(#679·#684).
+    return 200, _serialize_problems(class_obj, ordered)
 
 
 #: 들여오기 목록 한 쪽의 크기(#548) — 공모전이 수백 개여도 시트가 한 번에 다 받지 않는다.
