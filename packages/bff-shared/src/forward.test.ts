@@ -66,12 +66,18 @@ describe("buildForwardHeaders — 방문자 주소", () => {
 // 아무에게도 답하지 않았다(열차 macos 강의실 e2e, #1902·#1906·#1907).
 // 실제 소켓을 여는 이유: 그 소켓은 fetch 를 흉내 내서는 보이지 않는다.
 
-type Upstream = { url: string; idle: () => number; open: () => number; close: () => Promise<void> };
+type Upstream = {
+  url: string;
+  idle: () => number;
+  serving: () => number;
+  close: () => Promise<void>;
+};
 
 /**
  * gunicorn sync 처럼 요청 하나에 답하고 끊는 서버 — 답은 20ms 뒤(backend 가 처리하는 시간).
  * `stream` 이면 머리만 곧바로 보내고 열어 둔다(SSE). `idle()` 은 요청을 한 줄도 받지 못한 채
  * 열려 있는 연결 수다 — gunicorn sync 워커라면 그 하나하나가 워커 하나를 붙잡는다.
+ * `serving()` 은 요청을 받아 아직 답하는 중인 연결 수다.
  */
 async function upstream(stream = false): Promise<Upstream> {
   const sockets = new Map<Socket, boolean>();
@@ -91,7 +97,7 @@ async function upstream(stream = false): Promise<Upstream> {
   return {
     url: `http://127.0.0.1:${port}/api/x`,
     idle: () => [...sockets.values()].filter((sent) => !sent).length,
-    open: () => sockets.size,
+    serving: () => [...sockets.values()].filter((sent) => sent).length,
     close: () =>
       new Promise((resolve) => {
         for (const socket of sockets.keys()) socket.destroy();
@@ -126,10 +132,11 @@ describe("forwardRequest — 끊김 전달", () => {
       const browser = new AbortController();
       const response = await forwardRequest("GET", server.url, new Headers(), undefined, browser.signal);
       expect(response.status).toBe(200);
-      expect(server.open()).toBe(1);
+      expect(server.serving()).toBe(1);
       browser.abort();
-      await settle(100);
-      expect(server.open()).toBe(0);
+      // 느린 러너에서도 닫힘을 기다린다 — 닫히지 않으면 2초 뒤 붉다.
+      for (let waited = 0; server.serving() > 0 && waited < 2000; waited += 20) await settle(20);
+      expect(server.serving()).toBe(0);
     } finally {
       await server.close();
     }
