@@ -297,11 +297,19 @@ window 커스텀 이벤트 방식)로, 운영체제 설정이 바뀌면 `matchMe
 경로(`/icon`·`/apple-icon`)도 인증 구역에서 뺀다**(`classroom/middleware.ts`) — 안 그러면
 비로그인 탭이 아이콘을 요청할 때마다 `/login`으로 튕긴다.
 
-**`test:classroom` 만 `--pass-with-no-tests` 를 붙인다.** 세 스크립트는 2단계다 —
-`@exclusive` 아닌 것을 병렬로 돌리고, `@exclusive` 를 워커 하나로 다시 돈다. 그런데
-강의실에는 아직 `@exclusive` 스펙이 없어 둘째 명령이 「No tests found」로 **exit 1**
-한다(CI 가 실제로 그렇게 빨갛게 났다). 스크립트 모양은 그대로 두고 그 한 자리만
-연다 — 나중에 강의실에 배타 스펙이 생기면 아무것도 안 고쳐도 돌아간다.
+**두 패스는 `frontend/scripts/e2e-two-pass.sh` 하나가 정의한다(#702).** `@exclusive` 아닌 것을
+병렬로(`--grep-invert @exclusive`) 돌리고, `@exclusive` 를 워커 하나로(`--grep @exclusive --workers=1`)
+다시 돈다. 첫 패스가 붉어도 둘째 패스까지 간다. `package.json` 의 `test:public`·`test:operator`·
+`test:classroom`, CI 의 `scripts/ci/e2e.sh`, 로컬의 `scripts/test.sh e2e` 셋이 모두 이 스크립트를
+부른다 — 패스를 바꾸려면 여기만 고친다. 셋이 다른 것은 출력 폴더(환경변수 `E2E_OUTPUT_DIR`·
+`E2E_EXCLUSIVE_OUTPUT_DIR`)와 일꾼 수(`PLAYWRIGHT_WORKERS`)뿐이다.
+
+**`--pass-with-no-tests` 는 강의실의 둘째 패스에만 붙는다.** 강의실에는 아직 `@exclusive` 스펙이
+없어 둘째 명령이 「No tests found」로 **exit 1** 한다(CI 가 실제로 그렇게 빨갛게 났다). 공개 앱·운영자
+앱에는 붙이지 않는다 — 그쪽 `@exclusive` 스펙이 태그가 바뀌어 grep 에서 빠지면 CI 가 붉어져야 한다.
+강의실에 배타 스펙이 생기면 아무것도 안 고쳐도 돌아간다(그때 이 예외를 지운다). 예외는 하나 더 —
+파일 하나로 좁히는 `scripts/test.sh e2e` 는 그 파일에 한쪽 패스의 시험이 없을 수 있어
+`E2E_ALLOW_EMPTY=1` 로 두 패스 모두에 붙인다.
 
 **293건이 102건이 됐다.** 남긴 기준은 위 「남길 것」이다. 지운 것의 대부분은 「로그인된
 상태에서 화면이 서버 값을 어떻게 그리는가」였고, 그 사실들은 대개 백엔드 테스트가 이미

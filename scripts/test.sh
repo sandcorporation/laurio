@@ -115,12 +115,11 @@ case "$kind" in
       exit 4
     fi
 
-    # package.json 의 test:* 와 같은 두 패스 — 전역 상태를 건드리는 `@exclusive` 는 일꾼 하나로 따로 돈다.
-    # Playwright 는 실행마다 출력 폴더를 비우므로 뒤 패스는 `test-results/exclusive/` 에 둔다 — 같은
-    # 폴더면 뒤 패스(시험 0개여도)가 앞 패스의 실패 trace 를 지운다(#699).
-    status=0
-    "${pw[@]}" --workers="$E2E_WORKERS" --grep-invert @exclusive --pass-with-no-tests "$@" || status=$?
-    "${pw[@]}" --workers=1 --grep @exclusive --pass-with-no-tests --output=test-results/exclusive "$@" || status=$?
-    exit "$status"
+    # 두 패스는 package.json 의 test:*·CI 와 같은 frontend/scripts/e2e-two-pass.sh 다(#702) — 전역 상태를
+    # 건드리는 `@exclusive` 는 일꾼 하나로 따로 돈다. 뒤 패스의 출력은 `test-results/exclusive/` 다 — 같은
+    # 폴더면 뒤 패스(시험 0개여도)가 앞 패스의 실패 trace 를 지운다(#699). 파일 하나로 좁히면 한쪽 패스가
+    # 빌 수 있어 E2E_ALLOW_EMPTY 로 두 패스 모두 「시험 없음」을 통과로 친다.
+    PLAYWRIGHT_WORKERS="$E2E_WORKERS" E2E_ALLOW_EMPTY=1 \
+      taskset -c "$CPUSET" frontend/scripts/e2e-two-pass.sh all "$@"
     ;;
 esac
