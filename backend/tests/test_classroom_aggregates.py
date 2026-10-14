@@ -344,6 +344,36 @@ def test_listing_query_count_does_not_grow_with_classes_problems_or_members(clie
     assert count(f"/{first}/problems", owner["access"]) <= before_problems + 2
 
 
+def test_reorder_query_count_does_not_grow_with_problems(client, db):
+    """순서 바꾸기 응답(#679) — 문제 목록과 같이 제출 표식(마지막 제출·시도 수)을 한 번에 센다."""
+
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"])
+    create_open_problem(client, owner["access"], class_id)
+    learner = login(client, "learner")
+    join_class(client, learner["access"], class_id, instructor_access=owner["access"], display_name="학생")
+    submit_repository(client, learner["access"], class_id, list_problems(client, owner["access"], class_id)[0]["id"])
+
+    def count() -> int:
+        ids = [p["id"] for p in list_problems(client, owner["access"], class_id)]
+        with CaptureQueriesContext(connection) as ctx:
+            response = client.post(
+                f"{CLASSES_URL}/{class_id}/problems/reorder",
+                data={"problem_ids": list(reversed(ids))},
+                content_type="application/json",
+                **auth_header(owner["access"]),
+            )
+            assert response.status_code == 200
+        return len(ctx)
+
+    before = count()
+    create_open_problem(client, owner["access"], class_id, title="2주차")
+    create_open_problem(client, owner["access"], class_id, title="3주차")
+
+    # 문제 행의 기존 직렬화(달성률의 제출 질의·템플릿)는 문제마다 질의 둘이 따로 든다 — 목록과 같다.
+    assert count() <= before + 2 * 2
+
+
 def test_problem_participant_attempt_count_is_the_submissions_screens_attempts(client, db):
     """문제 편집 머리의 「제출 현황 N」(#674) — 강사 본인·내보낸 사람의 시도는 세지 않는다.
     문제 상세와 문제 목록이 같은 수를 내고, 제출 현황의 「시도」(참여자 행)와 같다."""

@@ -306,7 +306,8 @@ def reorder_problems(class_obj: Class, problem_ids: list[int]) -> list[Problem]:
     """클래스의 문제 전부를 빠짐없이 새 순서로 받는다 — 하나라도 빠지거나 남의
     문제가 섞이면 422다. 새 순서대로 정렬한 문제 목록을 돌려준다."""
 
-    problems = {p.id: p for p in class_obj.problems.all()}
+    # 응답이 문제마다 체크리스트를 그린다 — 목록처럼 한 번에 받는다(#679).
+    problems = {p.id: p for p in class_obj.problems.prefetch_related("checklist_items")}
     if set(problem_ids) != set(problems):
         raise HttpError(422, "이 클래스의 문제 목록과 일치하지 않습니다.")
 

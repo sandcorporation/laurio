@@ -463,6 +463,9 @@ tree-sitter 문법으로 제출 아카이브의 코드 파일 전부를 실행 �
 없음) — 채점 지침과 무관한 별도 requirement로 판정을 받는다. 판정은
 `ClassroomScore.syntax_check_result`에 강사 항목(`reasoning`)과 별도로
 append-only 저장되고, 통과·달성률 계산이 이 항목을 필수로 포함한다.
+점수 응답(`ClassroomScoreOut`)의 `is_platform_failure` 는 채점이 끝내 실패해 플랫폼이 미달로
+닫은 점수인지(`model_version == PLATFORM_FAILURE_MODEL_VERSION`)를 서버가 판정해 싣는다(#679) —
+화면은 그 문자열을 다시 쓰지 않는다.
 tree-sitter 문법은 `tree-sitter-language-pack`으로 쓴다. **이 패키지는 문법을 설치 때가
 아니라 처음 쓸 때 인터넷에서 받으므로, 백엔드 이미지를 구울 때 `manage.py
 prefetch_syntax_grammars`로 여덟 언어 문법을 미리 넣는다**(`XDG_CACHE_HOME=/opt/codemit-cache`,

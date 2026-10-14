@@ -166,6 +166,27 @@ def test_non_auth_permanent_failure_still_finalizes_immediately(client, db, monk
     assert ClassroomScoringAttempt.objects.filter(submission_id=ctx["submission_id"], permanent=True).exists()
 
 
+def test_the_score_says_whether_the_platform_closed_it_as_unmet(client, db, monkeypatch):
+    """`is_platform_failure`(#679) — 화면이 실패 상한의 문자열을 다시 쓰지 않고 이 값으로 가른다."""
+
+    failed = _setup_submission(client)
+    respond_with_permanent_failure(monkeypatch)
+    run_scan(client)
+    failed_score = mine(client, failed["participant"]["access"], failed["class_id"], failed["problem_id"])[
+        "submissions"
+    ][0]["score"]
+
+    scored = _setup_submission(client)
+    respond_with_verdict(monkeypatch, scored["item_id"], is_met=True)
+    run_scan(client)
+    judged_score = mine(client, scored["participant"]["access"], scored["class_id"], scored["problem_id"])[
+        "submissions"
+    ][0]["score"]
+
+    assert failed_score["is_platform_failure"] is True
+    assert judged_score["is_platform_failure"] is False
+
+
 def test_transient_failures_retry_up_to_the_cap_then_finalize(client, db, monkeypatch):
     ctx = _setup_submission(client)
     submission = ClassroomSubmission.objects.get(id=ctx["submission_id"])

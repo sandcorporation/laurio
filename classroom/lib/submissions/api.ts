@@ -93,6 +93,8 @@ export type SyntaxCheckVerdict = {
 
 export type ClassroomScore = {
   model_version: string;
+  // 채점이 끝내 실패해 플랫폼이 미달로 닫은 점수인가(#679) — 서버가 판정해 싣는다.
+  is_platform_failure: boolean;
   reasoning: ChecklistVerdict[];
   // 채점 시점에 그 문제의 기본 항목이 꺼져 있었으면 `null`이다(#408).
   syntax_check: SyntaxCheckVerdict | null;

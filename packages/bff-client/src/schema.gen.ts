@@ -5397,6 +5397,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Is Platform Failure
+             * @default false
+             */
+            is_platform_failure: boolean;
             /** Model Version */
             model_version: string;
             /** Reasoning */
