@@ -10,9 +10,10 @@
 
 `scripts/ci/images.sh` 가 서비스마다 이 해시를 내고, 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면
 굽지 않고 커밋 태그만 그 매니페스트에 더한다. 해시에 드는 것: 아래 표의 경로마다 `git rev-parse
-HEAD:<경로>`(트리·blob 해시 — 그 경로 아래 무엇이 바뀌어도 달라진다), Dockerfile, 루트
-`.dockerignore`와 (있으면) `docker/<서비스>.Dockerfile.dockerignore`(무엇이 문맥에 드는지를 바꾼다), 빌드 대상·플랫폼, 빌드 인자 값(NEXT_PUBLIC 값이
-바뀌면 다시 굽는다).
+HEAD:<경로>` 대신 그 경로 아래 파일 중 **`.dockerignore` 가 문맥에서 빼지 않는 것**의 blob 목록(#714 —
+e2e 스펙·단위 시험만 고친 커밋은 해시가 그대로다), Dockerfile, 루트 `.dockerignore`와 (있으면)
+`docker/<서비스>.Dockerfile.dockerignore`(무엇이 문맥에 드는지를 바꾼다 — BuildKit 처럼 그것이 있으면
+루트 것 대신 그 규칙을 적용한다), 빌드 대상·플랫폼, 빌드 인자 값(NEXT_PUBLIC 값이 바뀌면 다시 굽는다).
 
 **가장 위험한 자리는 표가 Dockerfile 보다 좁은 것이다** — Dockerfile 이 읽는 파일이 표에 없으면 그
 파일을 고친 커밋이 옛 이미지로 배포된다. 그래서 `check` 와 `scripts/test_image_context.py` 가
@@ -25,13 +26,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
 
 # 해시 계산 방식을 바꾸면 올린다 — 옛 ctx 태그와 섞이지 않게.
-HASH_VERSION = "1"
+HASH_VERSION = "2"
 
 # 모든 서비스의 문맥에 드는 것(Dockerfile 자신은 서비스마다 더한다).
 COMMON_PATHS = (".dockerignore",)
@@ -65,14 +67,82 @@ SERVICES: dict[str, Service] = {
 }
 
 
+def own_ignore(service: Service) -> str:
+    return f"{service.dockerfile}.dockerignore"
+
+
 def context_paths(service: Service) -> list[str]:
     paths = {*COMMON_PATHS, service.dockerfile, *service.paths}
     # BuildKit 은 `<Dockerfile>.dockerignore` 가 있으면 루트 `.dockerignore` 대신 그것을 쓴다 — 있을 때만
     # 표에 넣는다(지금 있는 것은 ci 이미지의 것뿐이다, #709). 지금 디렉터리(저장소 루트)를 기준으로 본다.
-    own_ignore = f"{service.dockerfile}.dockerignore"
-    if os.path.exists(own_ignore):
-        paths.add(own_ignore)
+    if os.path.exists(own_ignore(service)):
+        paths.add(own_ignore(service))
     return sorted(paths)
+
+
+# ── .dockerignore ───────────────────────────────────────────────────────────
+# BuildKit 이 쓰는 moby `patternmatcher` 를 그대로 옮긴다. **여기가 BuildKit 보다 더 많이 빼면 위험하다** —
+# 문맥에 드는 파일의 변경을 해시가 못 봐 옛 이미지가 배포된다. 덜 빼는 쪽은 덜 건너뛸 뿐이다.
+
+_REGEX_SPECIAL = set(".+()|{}$^")
+
+
+def _pattern_regex(pattern: str) -> re.Pattern[str]:
+    out = "^"
+    i = 0
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "*":
+            if pattern[i + 1 : i + 2] == "*":
+                i += 1
+                if pattern[i + 1 : i + 2] == "/":
+                    i += 1  # `**/` 는 `**` 로 본다
+                out += ".*" if i + 1 >= len(pattern) else "(.*/)?"
+            else:
+                out += "[^/]*"
+        elif ch == "?":
+            out += "[^/]"
+        elif ch == "\\":
+            i += 1
+            out += re.escape(pattern[i]) if i < len(pattern) else "\\\\"
+        elif ch in _REGEX_SPECIAL:
+            out += "\\" + ch
+        else:
+            out += ch  # `[...]` 문자 묶음은 그대로 정규식으로 간다(moby 와 같다)
+        i += 1
+    return re.compile(out + "$")
+
+
+def parse_dockerignore(text: str) -> list[tuple[bool, re.Pattern[str]]]:
+    """(제외를 뒤집는 `!` 인가, 정규식) 목록 — 순서대로, 마지막에 맞은 것이 이긴다."""
+    rules: list[tuple[bool, re.Pattern[str]]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        negate = line.startswith("!")
+        if negate:
+            line = line[1:].strip()
+            if not line:
+                continue
+        line = os.path.normpath(line).replace(os.sep, "/")
+        if len(line) > 1 and line.startswith("/"):
+            line = line.lstrip("/") or "/"
+        rules.append((negate, _pattern_regex(line)))
+    return rules
+
+
+def is_ignored(path: str, rules: list[tuple[bool, re.Pattern[str]]]) -> bool:
+    """moby `MatchesOrParentMatches` — 파일 자신이나 그 상위 디렉터리 하나가 규칙에 맞으면 그 규칙이 정한다."""
+    parts = path.split("/")
+    parents = ["/".join(parts[: i + 1]) for i in range(len(parts) - 1)]
+    ignored = False
+    for negate, regex in rules:
+        if negate != ignored:
+            continue
+        if regex.match(path) or any(regex.match(p) for p in parents):
+            ignored = not negate
+    return ignored
 
 
 # ── Dockerfile 읽기 ─────────────────────────────────────────────────────────
@@ -211,11 +281,50 @@ def git_objects(paths: list[str], rev: str = "HEAD") -> dict[str, str]:
     return objects
 
 
+def service_objects(service: Service, rev: str = "HEAD") -> dict[str, str]:
+    """`git_objects` 에서 디렉터리 경로를 「`.dockerignore` 가 남기는 파일들의 blob 목록」의 해시로 바꾼다.
+
+    Dockerfile 과 ignore 파일 자신은 그대로 둔다(빌드가 늘 읽는다). 적용하는 규칙은 BuildKit 과 같이
+    `docker/<서비스>.Dockerfile.dockerignore` 가 `rev` 에 있으면 그것, 없으면 루트 `.dockerignore` 다.
+    """
+    paths = context_paths(service)
+    objects = git_objects(paths, rev)
+    try:
+        ignore_text = _git("show", f"{rev}:{own_ignore(service)}")
+    except subprocess.CalledProcessError:
+        ignore_text = _git("show", f"{rev}:.dockerignore")
+    rules = parse_dockerignore(ignore_text)
+    fixed = {service.dockerfile, own_ignore(service), *COMMON_PATHS}
+    for path in paths:
+        if path in fixed:
+            continue
+        listing = _git("ls-tree", "-r", "-z", "--full-tree", rev, "--", path)
+        kept = [
+            entry
+            for entry in listing.split("\0")
+            if entry and not is_ignored(entry.split("\t", 1)[1], rules)
+        ]
+        objects[path] = hashlib.sha256("\n".join(kept).encode()).hexdigest()
+    return objects
+
+
 def release(service: Service) -> str:
-    """그 이미지의 문맥을 마지막으로 바꾼 커밋 — 얕은 클론이면 틀린 값이 나오므로 멈춘다."""
+    """그 이미지의 문맥을 마지막으로 바꾼 커밋 — 얕은 클론이면 틀린 값이 나오므로 멈춘다.
+
+    경로를 건드린 커밋 가운데 `.dockerignore` 가 빼는 파일만 고친 것은 넘긴다 — 이 값이 빌드 인자
+    (`NEXT_PUBLIC_SENTRY_RELEASE`)로 해시에 들어가므로, 넘기지 않으면 시험만 고친 커밋이 다시 굽는다(#714).
+    """
     if _git("rev-parse", "--is-shallow-repository") == "true":
         raise SystemExit("얕은 클론이다 — release(경로별 마지막 커밋)를 셀 수 없다. 전체 이력으로 체크아웃한다")
-    return _git("log", "-1", "--format=%H", "--", *context_paths(service))
+    commits = _git("log", "--format=%H", "--", *context_paths(service)).split()
+    for commit in commits:
+        try:
+            before = service_objects(service, f"{commit}^")
+        except (SystemExit, subprocess.CalledProcessError):
+            return commit  # 부모에 표의 경로가 없다 — 이 커밋이 문맥을 처음 만들었다
+        if service_objects(service, commit) != before:
+            return commit
+    return commits[-1] if commits else ""
 
 
 def _service(name: str) -> Service:
@@ -243,7 +352,7 @@ def main(argv: list[str]) -> int:
         svc = _service(rest[0])
         platform = rest[1]
         args = parse_build_args(open(rest[2], encoding="utf-8").read()) if len(rest) > 2 else {}
-        print(context_digest(git_objects(context_paths(svc)), svc.target, platform, args))
+        print(context_digest(service_objects(svc), svc.target, platform, args))
     elif cmd == "check":
         bad = 0
         for svc in SERVICES.values():
