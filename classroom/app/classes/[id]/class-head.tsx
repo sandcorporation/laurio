@@ -3,8 +3,8 @@
 // 클래스 상세의 머리(#633, 시안 v2) — 눈썹 크럼 「내 클래스 › 이름」, 제목 옆 상태 배지, 오른쪽에
 // 통계 바(참여자·문제·평균 달성률)와 「클래스 설정」. 통계는 클래스 응답의 집계(#632)를 그대로 쓴다.
 //
-// 「복사해서 새로 열기」·「보관하기」는 시안에서 설정·참여자 탭으로 가지만 그 화면(#636)에는 아직
-// 없다 — 기능이 사라지지 않도록 그때까지 머리에 글자 버튼으로 남긴다. 설정 티켓이 옮기면 여기서 뺀다.
+// 「복사해서 새로 열기」·「보관하기」·「보관 되돌리기」는 설정의 「보관과 삭제」 구획(`#class-archive`)으로
+// 옮겼다(#636). 보관된 클래스는 복사가 주 행동이라 「클래스 설정」이 그 구획으로 곧장 가는 주 버튼이다.
 import Link from "next/link";
 
 import { Badge, buttonClass } from "@/app/components/ui";
@@ -38,17 +38,7 @@ export function ClassStatBar({ classroom }: { classroom: ClassRow }) {
   );
 }
 
-export function ClassHead({
-  classroom,
-  copying,
-  onCopy,
-  onArchive,
-}: {
-  classroom: ClassRow;
-  copying: boolean;
-  onCopy: () => void;
-  onArchive: () => void;
-}) {
+export function ClassHead({ classroom }: { classroom: ClassRow }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -73,26 +63,13 @@ export function ClassHead({
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {/* 보관된 클래스에서는 복사가 주 행동이다 — 지난 클래스를 복사해 다음 기수를 여는 것이 흔한 쓰임이다. */}
-          <button
-            type="button"
-            data-testid="copy-class-button"
-            onClick={onCopy}
-            disabled={copying}
-            className={buttonClass(classroom.archived ? "primary" : "secondary", "sm")}
-          >
-            {copying ? "복사하는 중..." : "복사해서 새로 열기"}
-          </button>
-          {classroom.archived ? null : (
-            <button type="button" data-testid="classroom-archive" onClick={onArchive} className={buttonClass("secondary", "sm")}>
-              보관하기
-            </button>
-          )}
-          <Link href={`/classes/${classroom.id}/settings`} data-testid="class-settings-link" className={buttonClass("secondary", "sm")}>
-            클래스 설정
-          </Link>
-        </div>
+        <Link
+          href={`/classes/${classroom.id}/settings${classroom.archived ? "#class-archive" : ""}`}
+          data-testid="class-settings-link"
+          className={buttonClass(classroom.archived ? "primary" : "secondary", "sm")}
+        >
+          클래스 설정
+        </Link>
         <ClassStatBar classroom={classroom} />
       </div>
     </div>

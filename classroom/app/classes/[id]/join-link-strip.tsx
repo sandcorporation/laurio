@@ -1,7 +1,7 @@
 "use client";
 
 // 클래스 상세의 가입 링크 띠(#633, 시안 v2) — 라벨·주소·복사·「다시 뽑기」 글자 링크가 한 줄이다.
-// 보관된 클래스는 새 가입을 받지 않으므로(#351) 주소를 보이지 않고, 배지와 되돌리기만 둔다.
+// 보관된 클래스는 새 가입을 받지 않으므로(#351) 주소를 보이지 않고 배지만 둔다 — 되돌리기는 설정의 「보관과 삭제」(#636).
 import { useState } from "react";
 
 import { Badge, ErrorNote, buttonClass } from "@/app/components/ui";
@@ -18,16 +18,12 @@ export function JoinLinkStrip({
   joinCode,
   archived,
   regenerateError,
-  archiveError,
   onRegenerate,
-  onUnarchive,
 }: {
   joinCode: string;
   archived: boolean;
   regenerateError: boolean;
-  archiveError: boolean;
   onRegenerate: () => void;
-  onUnarchive: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const url = joinLinkUrl(joinCode);
@@ -44,23 +40,13 @@ export function JoinLinkStrip({
 
   if (archived) {
     return (
-      <div className="flex flex-col gap-2">
-        <div className={STRIP}>
-          <span className={LABEL}>가입 링크</span>
-          <span data-testid="classroom-archived-banner" className="flex-1">
-            <span data-testid="join-link-archived-note">
-              <Badge>보관됨</Badge>
-            </span>
+      <div className={STRIP}>
+        <span className={LABEL}>가입 링크</span>
+        <span data-testid="classroom-archived-banner" className="flex-1">
+          <span data-testid="join-link-archived-note">
+            <Badge>보관됨</Badge>
           </span>
-          <button type="button" data-testid="classroom-unarchive" onClick={onUnarchive} className={buttonClass("secondary", "sm")}>
-            보관 되돌리기
-          </button>
-        </div>
-        {archiveError ? (
-          <ErrorNote>
-            <span data-testid="classroom-archive-error">되돌리지 못했습니다. 다시 시도해주세요.</span>
-          </ErrorNote>
-        ) : null}
+        </span>
       </div>
     );
   }

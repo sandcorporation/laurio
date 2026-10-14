@@ -1,25 +1,27 @@
 "use client";
 
-// 「채점 연결」(#601, CONTEXT.md 「채점 연결」) — 클래스 설정 「채점」 카드의 첫 구획. 이 클래스의
-// 채점이 모델에 닿는 길을 소유자가 고른다: 「OpenAI 키」 또는 「호환 서버」(소유자가 바깥에 열어 둔
-// OpenAI 호환 주소와 Bearer 값). 공동 강사는 지금 연결의 종류와 호스트만 본다(ADR-0055).
+// 「채점 연결」(#601, CONTEXT.md 「채점 연결」) — 클래스 설정의 첫 구획(`#scoring-key`, 카드는 쪽이
+// 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: 「OpenAI 키」 또는 「호환 서버」(소유자가
+// 바깥에 열어 둔 OpenAI 호환 주소와 Bearer 값). 상태 한 줄이 먼저 보이고(#636) 폼은 「바꾸기」 뒤에
+// 열린다. 공동 강사는 상태 한 줄만 본다(ADR-0055).
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
-import { Badge, CardSection, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
+import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 
 type ConnectionKind = ClassRow["scoring_connection_kind"];
 
-const STATUS_CLASS = "flex flex-wrap items-center gap-2.5 text-[13.5px]";
+const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
+// 상태 한 줄(#636, 시안 v2) — 배지 · 종류 · 마스킹(또는 호스트). 문장은 두지 않는다: 배지가 상태를,
+// 오른쪽 「바꾸기」가 할 일을 말한다.
 function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
   if (!classroom.has_openai_key) {
     return (
       <p data-testid="openai-key-status" className={STATUS_CLASS}>
         <Badge tone="attention">없음</Badge>
-        <span className="text-ink/60">채점 연결이 없으면 이 클래스의 제출은 채점되지 않습니다.</span>
       </p>
     );
   }
@@ -31,62 +33,32 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
         ) : classroom.scoring_server_unreachable ? (
           <Badge tone="attention">연결 불가</Badge>
         ) : (
-          <Badge tone="verified">호환 서버</Badge>
+          <Badge tone="verified">연결됨</Badge>
         )}
+        <span>호환 서버</span>
         <span data-testid="scoring-server-host" className="font-mono text-ink/70">
           {classroom.scoring_server_host}
         </span>
         {classroom.scoring_auth_masked ? (
           <span className="font-mono text-ink/50">{classroom.scoring_auth_masked}</span>
         ) : null}
-        {classroom.openai_key_status === "rejected" ? (
-          <span className="text-ink/60">
-            서버가 인증 값을 거절했습니다 — 다시 저장해야 채점이 다시 시작됩니다.
-          </span>
-        ) : classroom.scoring_server_unreachable ? (
-          <span className="text-ink/60">
-            이 서버에 닿지 않아 채점이 멈췄습니다 — 서버를 살린 뒤 다시 저장하면 바로 이어지고, 저장하지
-            않아도 10분 안에 다시 확인해 이어집니다.
-          </span>
-        ) : null}
       </p>
     );
   }
-  if (classroom.openai_key_status === "rejected") {
-    return (
-      <p data-testid="openai-key-status" className={STATUS_CLASS}>
-        <Badge tone="attention">거부됨</Badge>
-        <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-        <span className="text-ink/60">벤더가 이 키를 거절했습니다 — 새 키를 저장해야 채점이 다시 시작됩니다.</span>
-      </p>
+  const badge =
+    classroom.openai_key_status === "rejected" ? (
+      <Badge tone="attention">거부됨</Badge>
+    ) : classroom.scoring_quota_exhausted ? (
+      <Badge tone="attention">크레딧 소진</Badge>
+    ) : classroom.openai_key_status === "unverified" ? (
+      <Badge tone="neutral">미검증</Badge>
+    ) : (
+      <Badge tone="verified">연결됨</Badge>
     );
-  }
-  if (classroom.scoring_quota_exhausted) {
-    return (
-      <p data-testid="openai-key-status" className={STATUS_CLASS}>
-        <Badge tone="attention">크레딧 소진</Badge>
-        <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-        <span className="text-ink/60">
-          이 키의 OpenAI 크레딧이 떨어져 채점이 멈췄습니다 — 충전한 뒤 키를 다시 저장하면 바로 이어지고,
-          저장하지 않아도 10분 안에 다시 확인해 이어집니다.
-        </span>
-      </p>
-    );
-  }
-  if (classroom.openai_key_status === "unverified") {
-    return (
-      <p data-testid="openai-key-status" className={STATUS_CLASS}>
-        <Badge tone="neutral">미검증</Badge>
-        <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
-        <span className="text-ink/60">
-          저장할 때 벤더에 닿지 못해 확인하지 못했습니다 — 채점 시도에서 다시 확인됩니다.
-        </span>
-      </p>
-    );
-  }
   return (
-    <p data-testid="openai-key-status" className="flex items-center gap-2.5 text-[13.5px]">
-      <Badge tone="verified">OpenAI 키</Badge>
+    <p data-testid="openai-key-status" className={STATUS_CLASS}>
+      {badge}
+      <span>OpenAI 키</span>
       <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
     </p>
   );
@@ -160,7 +132,7 @@ function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => v
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
       <label htmlFor="openai-api-key">
-        <FieldLabel>새 채점 키</FieldLabel>
+        <FieldLabel>채점 키</FieldLabel>
       </label>
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -199,10 +171,6 @@ function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => v
           <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
         </p>
       ) : null}
-      <span className="text-[11.5px] leading-relaxed text-ink/45">
-        저장 뒤에는 다시 볼 수 없습니다 — 화면에도 로그에도 남지 않고, 채점 요청을 보낼 때만 복호화됩니다.
-        참여자에게는 어떤 형태로도 보이지 않습니다.
-      </span>
       {error ? (
         <ErrorNote>
           <span data-testid="openai-key-error">{error}</span>
@@ -263,7 +231,7 @@ function CompatibleServerForm({
           value={authValue}
           onChange={(event) => setAuthValue(event.target.value)}
           className={`${INPUT_CLASS} font-mono`}
-          placeholder="인증을 받지 않는 서버면 비워 두세요"
+          placeholder="선택"
         />
       </label>
       <div>
@@ -276,10 +244,6 @@ function CompatibleServerForm({
           {saving ? "서버에 닿아 보는 중..." : "확인하고 저장"}
         </button>
       </div>
-      <span className="text-[11.5px] leading-relaxed text-ink/45">
-        https 이고 바깥에서 열려 있는 서버만 받습니다. 저장할 때 서버에 한 번 닿아 모델 목록을 받아 보고,
-        학생의 소스는 채점할 때 이 서버로 갑니다. 인증 값은 저장 뒤에 다시 볼 수 없습니다.
-      </span>
       {error ? (
         <ErrorNote>
           <span data-testid="scoring-server-error">{error}</span>
@@ -299,38 +263,52 @@ export function ScoringConnectionSection({
   onSaved: () => void;
 }) {
   const [kind, setKind] = useState<ConnectionKind>(classroom.scoring_connection_kind);
+  // 연결이 없으면 바꿀 것이 없다 — 폼이 처음부터 열려 있고, 있으면 「바꾸기」를 눌러야 열린다.
+  const [open, setOpen] = useState(!classroom.has_openai_key);
   const switching = classroom.has_openai_key && kind !== classroom.scoring_connection_kind;
+  const formOpen = isOwner && open;
+  const handleSaved = () => {
+    setOpen(false);
+    onSaved();
+  };
 
   return (
-    <CardSection id="scoring-key" title="채점 연결" hint="이 클래스의 채점이 모델에 닿는 길입니다">
-      <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <ConnectionStatus classroom={classroom} />
         {!isOwner ? (
-          <Note>
-            <span data-testid="openai-key-owner-only">
-              채점 연결은 소유자만 바꿀 수 있습니다 — 채점 비용이 소유자의 몫입니다.
-            </span>
-          </Note>
-        ) : (
-          <>
-            <KindChoice value={kind} onChange={setKind} />
-            {switching ? (
-              <Note>
-                <span data-testid="scoring-connection-switch-note">
-                  {kind === "compatible_server"
-                    ? "호환 서버를 저장하면 지금의 OpenAI 키는 지워집니다."
-                    : "OpenAI 키를 저장하면 지금의 호환 서버 주소와 인증 값은 지워집니다."}
-                </span>
-              </Note>
-            ) : null}
-            {kind === "openai_key" ? (
-              <OpenAIKeyForm classId={classroom.id} onSaved={onSaved} />
-            ) : (
-              <CompatibleServerForm classroom={classroom} onSaved={onSaved} />
-            )}
-          </>
-        )}
+          <span data-testid="openai-key-owner-only">
+            <Badge>소유자만</Badge>
+          </span>
+        ) : classroom.has_openai_key ? (
+          <button
+            type="button"
+            data-testid="scoring-connection-change"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            className={buttonClass("secondary", "sm")}
+          >
+            {open ? "닫기" : "바꾸기"}
+          </button>
+        ) : null}
       </div>
-    </CardSection>
+      {formOpen ? (
+        <div className="flex flex-col gap-4 border-t border-rule pt-4">
+          <KindChoice value={kind} onChange={setKind} />
+          {switching ? (
+            <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-attention">
+              {kind === "compatible_server"
+                ? "저장하면 지금의 OpenAI 키가 지워집니다."
+                : "저장하면 지금의 호환 서버 주소와 인증 값이 지워집니다."}
+            </p>
+          ) : null}
+          {kind === "openai_key" ? (
+            <OpenAIKeyForm classId={classroom.id} onSaved={handleSaved} />
+          ) : (
+            <CompatibleServerForm classroom={classroom} onSaved={handleSaved} />
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }

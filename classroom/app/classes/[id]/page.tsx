@@ -13,7 +13,6 @@ import { Suspense, useState } from "react";
 
 import { ErrorNote, PageShell } from "@/app/components/ui";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
-import { copyClass } from "@/lib/classes/api";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
 import { useClass } from "@/lib/classes/use-class";
@@ -41,13 +40,11 @@ function ClassDetail() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const tab = parseDetailTab(useSearchParams().get("tab"));
-  const { state: classState, reload: reloadClass, regenerateJoinCode, setArchived } = useClass(classId);
+  const { state: classState, reload: reloadClass, regenerateJoinCode } = useClass(classId);
   // 방금 소유권을 넘겨받았는가(#564) — 키 넣기로 가는 안내를 한 번 보인다.
   const [justTookOver, setJustTookOver] = useState(false);
   const { state: problemsState, move } = useProblems(classId);
   const router = useRouter();
-  const [copying, setCopying] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
   const [pickerTab, setPickerTab] = useState<PickerTab | null>(null);
 
@@ -55,18 +52,6 @@ function ClassDetail() {
     screenName: "클래스 상세",
     className: classState.status === "ready" ? classState.classroom.name : undefined,
   });
-
-  async function handleCopyClass() {
-    setCopyError(null);
-    setCopying(true);
-    const result = await copyClass(classId);
-    if (result.ok) {
-      router.push(`/classes/${result.data.id}`);
-    } else {
-      setCopyError(result.detail);
-      setCopying(false);
-    }
-  }
 
   if (classState.status === "loading") {
     return (
@@ -109,25 +94,9 @@ function ClassDetail() {
 
   return (
     <PageShell>
-      <ClassHead
-        classroom={classroom}
-        copying={copying}
-        onCopy={handleCopyClass}
-        onArchive={() => setArchived(true)}
-      />
+      <ClassHead classroom={classroom} />
 
       <div className="flex flex-col gap-5">
-        {copyError ? (
-          <ErrorNote>
-            <span data-testid="copy-class-error">{copyError}</span>
-          </ErrorNote>
-        ) : null}
-        {!classroom.archived && classState.archiveError ? (
-          <ErrorNote>
-            <span data-testid="classroom-archive-error">보관하지 못했습니다. 다시 시도해주세요.</span>
-          </ErrorNote>
-        ) : null}
-
         {/* 나에게 온 소유권 이전 요청(#564) — 답을 기다리는 일이라 맨 위에 둔다. */}
         {classroom.pending_ownership_transfer?.recipient_is_me ? (
           <OwnershipTransferOffer
@@ -146,9 +115,7 @@ function ClassDetail() {
           joinCode={classroom.join_code}
           archived={classroom.archived}
           regenerateError={classState.regenerateError}
-          archiveError={classState.archiveError}
           onRegenerate={regenerateJoinCode}
-          onUnarchive={() => setArchived(false)}
         />
 
         <div>
