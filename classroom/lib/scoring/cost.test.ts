@@ -9,6 +9,7 @@ import {
   formatManCount,
   formatRatio,
   formatTokens,
+  problemCostLine,
   usageKrw,
   type ScoringCostEstimate,
   type ScoringCostRow,
@@ -167,5 +168,26 @@ describe("접힌 비용 표의 머리줄 (#619)", () => {
     expect(classCostSummary(estimate({}), row({ model_id: "o3", priced: false, ratio_to_baseline: null }))).toBe(
       "지금 설정 o3 · 비용 미확인",
     );
+  });
+});
+
+describe("문제 편집의 비용 한 줄 (#637)", () => {
+  it("시도 1건과 문제 하나를 한 줄로, 참여자가 없으면 시도 1건만", () => {
+    const priced = row({ per_attempt: { krw: 30, tokens: 19_000 }, per_problem_krw: 1_150 });
+    expect(problemCostLine(estimate({ participant_count: 24, attempts_per_participant: 1.6 }), priced)).toBe(
+      "시도 1건 약 30원 · 참여자 24명 × 평균 1.6번 ≈ 약 1,200원",
+    );
+    expect(problemCostLine(estimate({ participant_count: 0 }), priced)).toBe("시도 1건 약 30원");
+  });
+
+  it("단가를 모르면 줄이 없고, 호환 서버는 토큰으로 적는다", () => {
+    expect(problemCostLine(estimate({}), row({ priced: false }))).toBeNull();
+    expect(problemCostLine(estimate({}), null)).toBeNull();
+    expect(
+      problemCostLine(
+        estimate({ unit: "tokens", participant_count: 2, attempts_per_participant: 2 }),
+        row({ priced: false, per_attempt: { krw: null, tokens: 17_650 }, per_problem_tokens: 70_000 }),
+      ),
+    ).toBe("시도 1건 약 1.8만 토큰 · 참여자 2명 × 평균 2번 ≈ 약 7만 토큰");
   });
 });

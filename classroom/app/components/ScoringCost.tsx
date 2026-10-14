@@ -17,6 +17,7 @@ import {
   formatManCount,
   formatRatio,
   formatTokens,
+  problemCostLine,
   type ScoringCostEstimate,
   type ScoringCostRow,
 } from "@/lib/scoring/cost";
@@ -482,5 +483,31 @@ function TokenEstimate({
         {TOKEN_NOTE}
       </p>
     </div>
+  );
+}
+
+/** 문제 편집의 채점 모델 카드 한 줄(#637) — 이 문제가 실제로 쓸 설정의 시도 1건과 문제 하나. */
+export function ProblemCostLine({
+  state,
+  testIdPrefix,
+  modelId,
+  reasoningEffort,
+}: {
+  state: ScoringCostState;
+  testIdPrefix: string;
+  modelId: string;
+  reasoningEffort: string;
+}) {
+  if (state.status !== "ready") return null;
+  const { estimate } = state;
+  const row =
+    estimate.unit === "tokens"
+      ? (estimate.rows.find((candidate) => candidate.model_id === modelId) ?? estimate.rows[0] ?? null)
+      : findCostRow(estimate, modelId, reasoningEffort);
+  const line = problemCostLine(estimate, row);
+  return (
+    <p data-testid={`${testIdPrefix}-scoring-cost`} className="border-t border-rule pt-3 text-[12.5px] text-ink/75">
+      {line ?? `${modelId} · ${UNPRICED}`}
+    </p>
   );
 }
