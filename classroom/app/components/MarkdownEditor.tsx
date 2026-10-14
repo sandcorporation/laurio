@@ -90,6 +90,11 @@ export function MarkdownEditor({
           placeholder,
           usageStatistics: false,
           language: "ko-KR",
+          // **포커스를 가져가지 않는다**(#712, 열차 #1922). Toast UI 는 기본값이 `autofocus: true` 라 동적
+          // import 가 늦게 끝나면 이미 제목 칸에 치고 있던 사람의 커서를 설명으로 옮긴다 — 친 제목이 설명에
+          // 들어가 저장되고(`problem-edit.spec.ts` 「머리의 저장이…」), 손잡이에 둔 포커스도 빼앗아 화살표
+          // 재정렬이 가지 않았다. 에디터는 사람이 누를 때만 포커스를 받는다.
+          autofocus: false,
           events: {
             change: () => {
               if (!editor) return;
