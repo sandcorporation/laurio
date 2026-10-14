@@ -11,6 +11,8 @@
 # - 한 번에 400개를 넘게 돌리지 않는다 — pytest 는 conftest 가, e2e 는 이 스크립트가 미리 세어 거절한다.
 # - e2e 는 CI 와 같은 프로덕션 이미지 스택(compose.dev + compose.ci)을 이 워크트리 전용 이름으로 띄우고,
 #   끝나면 지운다. 되풀이할 때는 CODEMIT_E2E_KEEP=1 로 남겨 두고, 다 쓰면 `scripts/test.sh e2e-down`.
+#   CODEMIT_IMAGE_TAG=<sha>-<arch> 를 주면 굽지 않고 `images.sh` 가 올린 이미지를 받아 띄운다 — 열차와 같은 길
+#   (`compose.ci-images.yaml`, 레지스트리는 CODEMIT_IMAGE_REGISTRY).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -27,12 +29,17 @@ CPUS=$((NCPU / 3))
 E2E_WORKERS=$(((CPUS + 1) / 2))
 LOCK_DIR="${CODEMIT_TEST_LOCK_DIR:-/tmp/codemit-test-slots}"
 
-usage() { sed -n '2,15p' "$0"; exit 2; }
+usage() { sed -n '2,17p' "$0"; exit 2; }
 case "$kind" in backend|e2e|e2e-down) ;; *) usage ;; esac
 
 eval "$(sh docker/dev-env.sh)"
 E2E_PROJECT="${COMPOSE_PROJECT_NAME}-e2e"
 C=(docker compose -p "$E2E_PROJECT" -f docker/compose.dev.yaml -f docker/compose.ci.yaml)
+E2E_BUILD=(--build)
+if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then
+  C+=(-f docker/compose.ci-images.yaml)
+  E2E_BUILD=()
+fi
 
 if [ "$kind" = e2e-down ]; then
   "${C[@]}" down -v --remove-orphans
@@ -87,8 +94,8 @@ case "$kind" in
     "${C[@]}" up -d minio >/dev/null
     CODEMIT_MINIO_PORT=$(read_port minio 9000)
     export CODEMIT_MINIO_PORT
-    echo "e2e 스택 굽고 띄우는 중($E2E_PROJECT, 캐시)…"
-    "${C[@]}" up -d --build frontend operator classroom grader >/dev/null
+    echo "e2e 스택 띄우는 중($E2E_PROJECT, ${CODEMIT_IMAGE_TAG:-캐시로 굽는다})…"
+    "${C[@]}" up -d ${E2E_BUILD[@]+"${E2E_BUILD[@]}"} frontend operator classroom grader >/dev/null
     docker ps -q --filter "label=com.docker.compose.project=$E2E_PROJECT" |
       xargs docker update --cpuset-cpus "$CPUSET" >/dev/null
 

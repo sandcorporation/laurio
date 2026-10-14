@@ -1,5 +1,5 @@
 #!/bin/bash
-# macos 노드의 PR CI 단계 첫머리 — 앞 빌드가 남긴 스택과 디스크를 걷는다(2026-10-03).
+# macos 노드의 열차 단계 첫머리 — 앞 빌드가 남긴 스택과 디스크를 걷는다(2026-10-03).
 #
 # e2e.sh·celery-broker.sh 는 끝날 때 trap 으로 스택을 지우지만, Jenkins 가 빌드를 중단하면
 # 프로세스 나무를 곧장 죽여 trap 이 돌지 못한다. 그렇게 남은 스택 둘(볼륨 400여 개·30GB)이
@@ -30,11 +30,24 @@ docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E '^jenkins-codemit-
   grep -qxF "${img%:latest}" <<<"$in_use" && continue
   docker image rm "$img" >/dev/null 2>&1
 done
+# 열차가 받아 띄운 배포 이미지(#712, `compose.ci-images.yaml`) — `ghcr.io/sandcorporation/codemit-<서비스>:<sha>-<arch>`.
+# 커밋마다 태그가 새로 생기므로 저장소마다 **가장 새것 하나**만 남긴다 — 다음 실행이 받을 때 바뀌지 않은
+# 층(의존성·기반 이미지)을 다시 받지 않게 하는 층 캐시다. 컨테이너가 쓰는 것은 건드리지 않는다.
+# `docker image ls` 는 새것부터 나온다.
+seen=""
+docker image ls --format '{{.Repository}} {{.Tag}} {{.ID}}' | grep -E '^ghcr\.io/sandcorporation/codemit-[a-z]+ ' | while read -r repo tag id; do
+  case " $seen " in
+    *" $repo "*) ;;
+    *) seen="$seen $repo"; continue ;;
+  esac
+  grep -qxF "$repo:$tag" <<<"$in_use" && continue
+  docker image rm "$repo:$tag" >/dev/null 2>&1
+done
 docker image prune -f >/dev/null 2>&1
-# 빌드 캐시는 나이가 아니라 크기로 자른다 — 오래 안 바뀐 의존성 층이 72시간을 넘겼다고 지워지면
-# 다음 굽기가 처음부터다. 묶음이 캐시 히트로 도는 지금 캐시가 21.6GB 라 30GB 를 상한으로 두고,
-# 넘치면 오래 안 쓴 것부터 버린다. VM 디스크 96GiB 가운데 이미지(정리 뒤 ~10GB)·스택 볼륨과 함께
-# 쓰고도 절반 넘게 남는다.
-docker builder prune -f --keep-storage 30GB >/dev/null 2>&1
+# 기본 빌더의 캐시는 이제 로컬에서 스택을 굽는 길(CODEMIT_IMAGE_TAG 없이 e2e.sh·celery-broker.sh)만
+# 쓴다 — 열차의 이미지는 `images.sh` 의 빌더 `codemit-images` 가 굽고 레지스트리 캐시를 쓰며 그 빌더의
+# 캐시는 images.sh 가 스스로 자른다(`CODEMIT_IMAGES_KEEP_STORAGE`). 그래서 30GB 였던 상한을 10GB 로
+# 줄인다 — 크기로 자르는 이유는 그대로다(오래 안 바뀐 의존성 층이 나이로 지워지면 처음부터 굽는다).
+docker builder prune -f --keep-storage 10GB >/dev/null 2>&1
 docker system df 2>/dev/null || true
 exit 0

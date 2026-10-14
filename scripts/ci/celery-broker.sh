@@ -5,13 +5,27 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 project=$(printf '%s' "${CODEMIT_CI_RUN_ID:-codemit-celery-$$}-celery" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' | cut -c1-60)
-C=(docker compose -p "$project" -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml --profile celery)
+C=(docker compose -p "$project" -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml)
+# 이미지의 두 길은 e2e.sh 와 같다(#712) — CODEMIT_IMAGE_TAG 가 있으면 images.sh 가 올린 backend 를 받고,
+# 없으면 여기서 굽는다.
+build_flag=(--build)
+if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then
+  C+=(-f docker/compose.ci-images.yaml)
+  build_flag=()
+  # shellcheck source=scripts/ci/ghcr-login.sh
+  . scripts/ci/ghcr-login.sh
+fi
+C+=(--profile celery)
 # 구운 이미지까지 지운다(--rmi local) — 프로젝트 이름이 실행마다 달라 남기면 쌓인다(e2e.sh 머리 주석).
-cleanup() { "${C[@]}" down -v --remove-orphans --rmi local >/dev/null 2>&1 || true; }
+cleanup() {
+  "${C[@]}" down -v --remove-orphans --rmi local >/dev/null 2>&1 || true
+  if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then ghcr_logout; fi
+}
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then ghcr_login; fi
 
-"${C[@]}" up -d --build || { echo "스택을 띄우지 못했다"; exit 1; }
+"${C[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} || { echo "스택을 띄우지 못했다"; exit 1; }
 
 # 브로커 드라이버가 이미지에 들어 있다.
 "${C[@]}" exec -T celery-worker python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)" || exit 1
