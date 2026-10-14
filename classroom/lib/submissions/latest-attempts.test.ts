@@ -7,6 +7,7 @@ import {
   participantIdsOf,
   requiredSummary,
   submissionStats,
+  syntaxLineReasoning,
 } from "./latest-attempts";
 
 function row(over: Partial<InstructorSubmissionRow>): InstructorSubmissionRow {
@@ -76,6 +77,7 @@ describe("제출 현황 계산", () => {
     const scored = row({
       score: {
         model_version: "m",
+        is_platform_failure: false,
         created_at: "",
         syntax_check: null,
         reasoning: [
@@ -98,7 +100,8 @@ describe("제출 현황 계산", () => {
 
   it("문법 결과 없이 만든 자동 미달 점수도 분모가 같고 문법 항목은 미충족이다", () => {
     const autoFail = row({
-      score: { model_version: "m", created_at: "", syntax_check: null, reasoning: [] },
+      score: { model_version: "m",
+        is_platform_failure: false, created_at: "", syntax_check: null, reasoning: [] },
     });
     expect(requiredSummary(autoFail, items, true)).toEqual({
       met: 0,
@@ -113,6 +116,7 @@ describe("제출 현황 계산", () => {
       passed: true,
       score: {
         model_version: "m",
+        is_platform_failure: false,
         created_at: "",
         syntax_check: { is_met: false, reasoning: "", judged_by: "parser", findings: [] },
         reasoning: verdicts,
@@ -125,6 +129,7 @@ describe("제출 현황 계산", () => {
     const scored = row({
       score: {
         model_version: "m",
+        is_platform_failure: false,
         created_at: "",
         syntax_check: { is_met: false, reasoning: "", judged_by: "parser", findings: [] },
         reasoning: verdicts,
@@ -137,11 +142,30 @@ describe("제출 현황 계산", () => {
     const scored = row({
       score: {
         model_version: "m",
+        is_platform_failure: false,
         created_at: "",
         syntax_check: { is_met: true, reasoning: "", judged_by: "parser", findings: [] },
         reasoning: verdicts,
       },
     });
     expect(requiredSummary(scored, items, true)).toEqual({ met: 2, total: 2, unmet: [], syntaxMet: true });
+  });
+});
+
+describe("syntaxLineReasoning — 문법 줄 밑의 사유(#679)", () => {
+  const verdict = { checklist_item_id: 1, is_met: false, reasoning: "첫 항목에 대한 사유" };
+
+  it("일반 점수에 문법 결과가 없으면(채점 뒤 문법 검사를 켰다) 사유를 붙이지 않는다", () => {
+    const score = { model_version: "m", is_platform_failure: false, created_at: "", syntax_check: null, reasoning: [verdict] };
+    expect(syntaxLineReasoning(score)).toBe("");
+  });
+
+  it("플랫폼이 미달로 닫은 점수면 그 점수의 공통 문구를 붙인다", () => {
+    const score = { model_version: "x", is_platform_failure: true, created_at: "", syntax_check: null, reasoning: [verdict] };
+    expect(syntaxLineReasoning(score)).toBe("첫 항목에 대한 사유");
+  });
+
+  it("점수가 없으면 사유도 없다", () => {
+    expect(syntaxLineReasoning(null)).toBe("");
   });
 });

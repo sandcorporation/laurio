@@ -779,6 +779,10 @@ class ClassroomScoreOut(Schema):
     비춘다. append-only라 이 값은 한 번 나오면 바뀌지 않는다."""
 
     model_version: str
+    #: 채점이 끝내 실패해 플랫폼이 미달로 닫은 점수인가(#679) —
+    #: `model_version == PLATFORM_FAILURE_MODEL_VERSION`. 화면이 그 문자열을
+    #: 다시 쓰지 않도록 서버가 판정해 싣는다.
+    is_platform_failure: bool = False
     reasoning: list[ClassroomChecklistVerdictOut]
     #: 문법 검사 기본 항목의 판정(#408) — 채점 시점에 그 문제의 기본 항목이
     #: 꺼져 있었으면 `None`이다.

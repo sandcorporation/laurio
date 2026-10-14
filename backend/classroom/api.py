@@ -51,6 +51,7 @@ from submissions.models import (
     SubmissionAsset,
     normalize_github_repo_url,
 )
+from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
 from .models import (
     ChecklistItem,
@@ -581,6 +582,7 @@ def _serialize_syntax_check(result: dict | None) -> ClassroomSyntaxCheckOut | No
 def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
     return ClassroomScoreOut(
         model_version=score.model_version,
+        is_platform_failure=score.model_version == PLATFORM_FAILURE_MODEL_VERSION,
         reasoning=[
             ClassroomChecklistVerdictOut(
                 checklist_item_id=r["checklist_item_id"],
@@ -1792,9 +1794,15 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     ordered = problem_authoring.reorder_problems(class_obj, payload.problem_ids)
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
+    # 목록(`_serialize_problem_list`)과 같이 제출 표식을 한 번에 센다(#679) — 넘기지 않으면 문제마다 질의 하나.
+    submission_marks = _participant_submission_marks("problem_id", problem__classroom_id=class_obj.id)
     return 200, [
         _serialize_problem(
-            p, class_obj, active_member_ids=active_member_ids, blocking_problem_ids=blocking_problem_ids
+            p,
+            class_obj,
+            active_member_ids=active_member_ids,
+            blocking_problem_ids=blocking_problem_ids,
+            submission_marks_by_problem=submission_marks,
         )
         for p in ordered
     ]

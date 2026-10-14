@@ -32,7 +32,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
-import { requiredSummary, type RequiredSummary } from "@/lib/submissions/latest-attempts";
+import { requiredSummary, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
@@ -357,8 +357,8 @@ function ChecklistWithVerdict({
   const score = judged?.score ?? null;
   const verdictById = new Map((score?.reasoning ?? []).map((verdict) => [verdict.checklist_item_id, verdict]));
   const syntax = score?.syntax_check ?? null;
-  // 문법 결과 없이 만든 자동 미달 점수(#674) — 줄의 판정은 `requiredSummary` 가, 사유는 그 점수의 공통 문구가.
-  const autoFailReasoning = score && !syntax ? (score.reasoning[0]?.reasoning ?? "") : "";
+  // 문법 결과 없이 만든 자동 미달 점수(#674·#679) — 줄의 판정은 `requiredSummary` 가, 사유는 그 점수의 공통 문구가.
+  const autoFailReasoning = syntaxLineReasoning(score);
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-4 py-3">

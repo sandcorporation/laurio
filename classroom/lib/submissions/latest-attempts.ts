@@ -96,3 +96,13 @@ export function requiredSummary(
   }
   return { met: total - unmet.length, total, unmet, syntaxMet };
 }
+
+/**
+ * 문법 줄 밑에 붙일 사유(#674·#679) — 문법 결과 없이 플랫폼이 미달로 닫은 점수(실패 상한)일 때만
+ * 그 점수의 공통 문구를 낸다. 일반 AI 점수에 문법 결과가 없는 것(채점 뒤 문법 검사를 켰다)은 사유가
+ * 없다 — 첫 항목에 대한 AI 의 사유는 문법 줄의 사유가 아니다. 줄의 판정은 `requiredSummary` 가 정한다.
+ */
+export function syntaxLineReasoning(score: InstructorSubmissionRow["score"]): string {
+  if (!score || score.syntax_check || !score.is_platform_failure) return "";
+  return score.reasoning[0]?.reasoning ?? "";
+}
