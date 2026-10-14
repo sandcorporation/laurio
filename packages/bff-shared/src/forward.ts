@@ -37,8 +37,9 @@ export async function extractForwardBody(request: NextRequest): Promise<ArrayBuf
  * backend 전체가 4.0초 동안 **아무에게도** 답하지 않는다 — 열차 macos 강의실 e2e 에서
  * 시험이 끝나 브라우저 맥락이 닫힐 때마다 그렇게 멈췄다(#1902·#1906·#1907, 로컬
  * 패킷 캡처: 강의실 컨테이너가 맺은 연결 다섯이 요청 없이 정확히 4.00초 뒤 FIN).
- * 머리가 오기 전에 떠났으면 응답을 마저 받은 뒤 끊는다 — 보통 수십 ms 이고, SSE 는
- * 머리를 곧바로 보내므로 SSE 가 끊기는 시점은 그대로다.
+ * 그래서 끊김은 응답 머리를 받은 뒤, 그것도 끝나지 않는 응답(`text/event-stream`)에만
+ * 넘긴다 — SSE 는 머리를 곧바로 보내므로 끊기는 시점이 그대로이고, 보통 응답은 수십 ms 안에
+ * 끝까지 받는다.
  */
 export async function forwardRequest(
   method: string,
@@ -50,6 +51,9 @@ export async function forwardRequest(
   if (!signal) return fetch(url, { method, headers, body, cache: "no-store" });
   const upstream = new AbortController();
   const response = await fetch(url, { method, headers, body, cache: "no-store", signal: upstream.signal });
+  // 끝나지 않는 응답만 끊는다. 소켓을 응답 도중에 부수면 Node 22 의 undici 는 그 자리에 빈
+  // 연결을 또 하나 맺어 두므로(위와 같은 4초), 곧 끝날 보통 응답은 끝까지 받게 둔다.
+  if (!response.headers.get("content-type")?.startsWith("text/event-stream")) return response;
   if (signal.aborted) upstream.abort(signal.reason);
   else signal.addEventListener("abort", () => upstream.abort(signal.reason), { once: true });
   return response;
