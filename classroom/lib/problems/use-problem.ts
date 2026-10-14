@@ -25,9 +25,9 @@ export function useProblem(classId: number, problemId: number) {
     refetch();
   }, [refetch]);
 
-  // useMemo 없이 매 렌더 새 객체를 만들면 그 객체를 effect 의존성으로 쓰는
-  // 호출부(문제 편집 화면의 초기값 채우기 effect)가 매 렌더 다시 실행돼
-  // 무한 렌더 루프로 번진다 — 실제로 그렇게 났다(#462 코드 리뷰).
+  // useMemo 없이 매 렌더 새 객체를 만들면 그 객체의 동일성으로 「새로 읽었나」를
+  // 가리는 호출부(문제 편집 화면이 렌더 중 칸을 맞추는 자리, #675)가 매 렌더 다시
+  // 맞춰 무한 렌더 루프로 번진다 — effect 시절에도 실제로 그렇게 났다(#462 코드 리뷰).
   const state: ProblemDetailState = useMemo(
     () =>
       queryState.status === "loading"
