@@ -54,16 +54,6 @@ COPY packages/bff-client/ ./packages/bff-client/
 COPY packages/markdown/ ./packages/markdown/
 COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/classroom
-# 오류 수집(GlitchTip, 2026-09-16) — `NEXT_PUBLIC_*` 이라 브라우저 번들에
-# 빌드타임에 굳는다. 값이 비면 SDK 가 꺼진 채로 돌므로 dev/CI 빌드는 지금과 같다.
-# runner 에도 같은 인자를 다시 두는 이유: 서버(Node)에서 난 오류를 보내는
-# 초기화(instrumentation.ts)는 런타임 env 를 읽는다 — 빌드 값과 같아야 한다.
-ARG NEXT_PUBLIC_SENTRY_DSN=""
-ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT=""
-ARG NEXT_PUBLIC_SENTRY_RELEASE=""
-ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
-    NEXT_PUBLIC_SENTRY_ENVIRONMENT=${NEXT_PUBLIC_SENTRY_ENVIRONMENT} \
-    NEXT_PUBLIC_SENTRY_RELEASE=${NEXT_PUBLIC_SENTRY_RELEASE}
 
 RUN pnpm build
 
@@ -79,16 +69,6 @@ WORKDIR /app
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs nextjs
 
-# 오류 수집(GlitchTip, 2026-09-16) — `NEXT_PUBLIC_*` 이라 브라우저 번들에
-# 빌드타임에 굳는다. 값이 비면 SDK 가 꺼진 채로 돌므로 dev/CI 빌드는 지금과 같다.
-# runner 에도 같은 인자를 다시 두는 이유: 서버(Node)에서 난 오류를 보내는
-# 초기화(instrumentation.ts)는 런타임 env 를 읽는다 — 빌드 값과 같아야 한다.
-ARG NEXT_PUBLIC_SENTRY_DSN=""
-ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT=""
-ARG NEXT_PUBLIC_SENTRY_RELEASE=""
-ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
-    NEXT_PUBLIC_SENTRY_ENVIRONMENT=${NEXT_PUBLIC_SENTRY_ENVIRONMENT} \
-    NEXT_PUBLIC_SENTRY_RELEASE=${NEXT_PUBLIC_SENTRY_RELEASE}
 
 COPY --from=builder --chown=nextjs:nodejs /app/classroom/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/classroom/.next/static ./classroom/.next/static

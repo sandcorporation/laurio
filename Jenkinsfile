@@ -10,6 +10,7 @@
 //   대상 확인(built-in)     main 인지, 마지막 staging 배포 뒤로 문서만 바뀌었는지(`scripts/ci/changed.sh` —
 //                           그러면 여기서 초록)
 //   이미지                  macos 가 arm64 여섯(prod), sub 가 amd64 여섯(staging) — `scripts/ci/images.sh`.
+//                           앱도 환경을 모른다 — 공개 값은 서버의 `.env.<target>` 에서 실행 때(#711, ADR-0062).
 //                           바뀌지 않은 서비스는 굽지 않고 커밋 태그만 더한다(빌드 문맥 해시 = `ctx-` 태그)
 //   부팅 가드(sub)          이번에 구운 앱만 — `scripts/ci/deploy-guard.sh`
 //   문맥 태그(sub)          여기까지 초록이면 이번에 구운 것에 `ctx-` 태그 — `scripts/ci/images-ctx.sh`. 그래서
@@ -138,8 +139,7 @@ pipeline {
           options { timeout(time: 60, unit: 'MINUTES') }
           steps {
             pin()
-            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN'),
-                             file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
               sh 'bash scripts/ci/images.sh arm64'
             }
             // 구운 것의 ctx 태그 목록 — 「문맥 태그」 단계가 sub 에서 붙인다.
@@ -152,8 +152,7 @@ pipeline {
           options { timeout(time: 60, unit: 'MINUTES') }
           steps {
             pin()
-            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN'),
-                             file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
               sh 'bash scripts/ci/images.sh amd64'
             }
             script { readImageResult('amd64') }
@@ -183,8 +182,7 @@ pipeline {
         stage('frontend 가드') {
           when { expression { env.IMAGE_AMD64_FRONTEND == 'built' } }
           steps {
-            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN'),
-                             file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
               sh 'bash scripts/ci/deploy-guard.sh frontend'
             }
           }

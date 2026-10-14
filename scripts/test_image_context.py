@@ -110,7 +110,7 @@ class Digest(unittest.TestCase):
         self.assertNotEqual(plain, self.digest(objects={"backend": "c" * 40, "docker/backend.Dockerfile": "b" * 40}))
         self.assertNotEqual(plain, self.digest(target="runner"))
         self.assertNotEqual(plain, self.digest(platform="linux/arm64"))
-        self.assertNotEqual(plain, self.digest(build_args={"NEXT_PUBLIC_SUPPORT_EMAIL": "a@b"}))
+        self.assertNotEqual(plain, self.digest(build_args={"SOME_ARG": "a@b"}))
         self.assertNotEqual(
             self.digest(build_args={"K": "1"}), self.digest(build_args={"K": "2"})
         )
@@ -316,21 +316,18 @@ class IgnoredFilesDoNotMoveTheHash(unittest.TestCase):
         _git(self.repo, "commit", "-qm", rel)
         return _git(self.repo, "rev-parse", "HEAD")
 
-    def test_e2e_and_unit_test_changes_keep_the_hash_and_the_release(self) -> None:
+    def test_e2e_and_unit_test_changes_keep_the_hash(self) -> None:
         first = self.digest()
-        app_commit = _git(self.repo, "rev-parse", "HEAD")
         self.commit("frontend/e2e/auth.spec.ts", "spec changed")
         self.commit("frontend/e2e/new.spec.ts", "new spec")
         self.commit("frontend/lib/a.test.ts", "unit changed")
         self.assertEqual(self.digest(), first)
-        self.assertEqual(self.in_repo(lambda: ic.release(self.svc)), app_commit)
 
-    def test_app_source_changes_move_the_hash_and_the_release(self) -> None:
+    def test_app_source_changes_move_the_hash(self) -> None:
         first = self.digest()
-        changed = self.commit("frontend/app/page.tsx", "page changed")
+        self.commit("frontend/app/page.tsx", "page changed")
         self.commit("frontend/e2e/auth.spec.ts", "spec changed")
         self.assertNotEqual(self.digest(), first)
-        self.assertEqual(self.in_repo(lambda: ic.release(self.svc)), changed)
 
     def test_a_new_ignore_rule_moves_the_hash(self) -> None:
         first = self.digest()

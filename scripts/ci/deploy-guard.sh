@@ -8,7 +8,7 @@
 #
 # **왜 실행 중인 앱을 치는 e2e 시임이 아닌가.** ADR-0017 은 프론트 시험 시임을 「실행 중인 Next 앱
 # 하나」로 못 박는데, 여기서 증명할 것은 정반대다 — **앱이 뜨지 않는 것**. 그래서 배포되는 바로 그
-# 이미지(ghcr 의 `<sha>-staging`)를 받아 컨테이너로 띄우고 종료 코드와 로그를 본다. 처음에는
+# 이미지(ghcr 의 `<sha>-amd64`)를 받아 컨테이너로 띄우고 종료 코드와 로그를 본다. 처음에는
 # instrumentation.ts 의 register() 가 throw 만 하면 될 줄 알았지만, standalone(`node server.js`)은
 # 그 에러를 unhandledRejection 으로 로그만 찍고 삼켜 컨테이너가 Up 인 채 모든 요청에 500 을 냈다 —
 # 그래서 instrumentation.ts 가 `process.exit(1)` 로 끊고, 이 가드는 「빌드가 됐다」가 아니라
@@ -18,8 +18,11 @@
 # (`--network container:<이름>`) 친다. sub 의 Jenkins 는 컨테이너라 바인드 마운트도 쓰지 않는다.
 #
 # 환경변수: GHCR_TOKEN/GHCR_USER(읽기에 쓴다, 없으면 노드의 로그인), CODEMIT_IMAGE_REGISTRY,
-# CODEMIT_GUARD_IMAGE(받을 이미지를 통째로 바꾼다 — 로컬 시험용), CODEMIT_IMAGES_ENV(frontend 의
-# `/privacy` 문의 주소 = STAGING_SUPPORT_EMAIL). bash 3.2 문법만 쓴다.
+# CODEMIT_GUARD_IMAGE(받을 이미지를 통째로 바꾼다 — 로컬 시험용). bash 3.2 문법만 쓴다.
+#
+# 앱 이미지는 환경을 모른다(#711, ADR-0062) — 공개 값(`CODEMIT_PUBLIC_*`)은 실행 env 로 받는다. 그래서
+# 이 가드도 값을 `-e` 로 주고, 그 값이 서버 렌더(/privacy)와 브라우저(`window.__CODEMIT_PUBLIC__`)에
+# 닿는지 본다. 서버의 `.env.<target>` 에 값이 있는지는 compose 의 `${…:?}` 가 배포 때 본다.
 set -euo pipefail
 
 app="${1:-}"
@@ -34,7 +37,7 @@ cd "$(dirname "$0")/../.."
 
 registry="${CODEMIT_IMAGE_REGISTRY:-ghcr.io/sandcorporation}"
 sha="$(git -c safe.directory="$PWD" rev-parse HEAD)"
-image="${CODEMIT_GUARD_IMAGE:-$registry/codemit-$app:$sha-staging}"
+image="${CODEMIT_GUARD_IMAGE:-$registry/codemit-$app:$sha-amd64}"
 local_image="codemit-$app-runner-ci"
 box="$app-boot-ok"
 probe="codemit-$app-context-probe"
@@ -167,8 +170,8 @@ if [ "$app" = frontend ]; then
     -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
     -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
     -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
-    -e NEXT_PUBLIC_TOSS_CLIENT_KEY=
-  must_say NEXT_PUBLIC_TOSS_CLIENT_KEY
+    -e CODEMIT_PUBLIC_TOSS_CLIENT_KEY=
+  must_say CODEMIT_PUBLIC_TOSS_CLIENT_KEY
 fi
 
 # ── 완전한 설정으로는 뜨는가 ────────────────────────────────────────────────────
@@ -200,7 +203,9 @@ case "$app" in
       -e KAKAO_REST_API_KEY=ci-guard-only-kakao-rest-api-key \
       -e KAKAO_SECRET_KEY=ci-guard-only-kakao-secret-key \
       -e KAKAO_REDIRECT_URI=https://codemit.example/api/auth/social/kakao/callback \
-      -e NEXT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
+      -e CODEMIT_PUBLIC_TOSS_CLIENT_KEY=ci-guard-only-toss-client-key \
+      -e CODEMIT_PUBLIC_SUPPORT_EMAIL=privacy-guard@codemit.example \
+      -e TOSS_SECRET_KEY=ci-guard-only-toss-secret-key \
       "$local_image" >/dev/null
     ;;
   operator)
@@ -251,16 +256,21 @@ case "$app" in
       fail "public/ 의 정적 자산이 프로덕션 이미지에서 서빙되지 않는다(원본=${asset:-000}, 최적화=${optimized:-000}) — Dockerfile 의 public 복사를 확인한다"
     fi
 
-    step "방침이 빌드 때 굳힌 문의 주소를 싣는다"
-    support_email="${SUPPORT_EMAIL:-}"
-    if [ -z "$support_email" ] && [ -n "${CODEMIT_IMAGES_ENV:-}" ] && [ -f "$CODEMIT_IMAGES_ENV" ]; then
-      support_email="$(env_value "$CODEMIT_IMAGES_ENV" STAGING_SUPPORT_EMAIL || true)"
-    fi
-    [ -n "$support_email" ] || fail "STAGING_SUPPORT_EMAIL 이 비어 있다(codemit-images-env) — 방침에 문의 주소 없이 배포된다"
+    step "방침이 실행 env 의 문의 주소를 싣는다"
     html="$(c -sS --max-time 10 http://127.0.0.1:3000/privacy)"
     case "$html" in
-      *"$support_email"*) echo "방침이 빌드 인자의 문의 주소를 싣는다" ;;
-      *) printf '%s' "$html" | head -c 2000; fail "구운 /privacy 에 문의 주소가 없다 — NEXT_PUBLIC_SUPPORT_EMAIL 빌드 인자가 빠졌는가?" ;;
+      *privacy-guard@codemit.example*) echo "방침이 실행 env 의 문의 주소를 싣는다" ;;
+      *) printf '%s' "$html" | head -c 2000; fail "/privacy 에 문의 주소가 없다 — CODEMIT_PUBLIC_SUPPORT_EMAIL 을 실행 때 읽지 않는가?" ;;
+    esac
+
+    step "공개 설정이 브라우저로 가고 비밀은 가지 않는다"
+    html="$(c -sS --max-time 10 http://127.0.0.1:3000/)"
+    case "$html" in
+      *__CODEMIT_PUBLIC__*ci-guard-only-toss-client-key*) echo "토스 클라이언트 키가 window.__CODEMIT_PUBLIC__ 로 간다" ;;
+      *) printf '%s' "$html" | head -c 2000; fail "첫 화면 HTML 에 공개 설정(토스 클라이언트 키)이 없다 — 결제창이 키 없이 열린다" ;;
+    esac
+    case "$html" in
+      *ci-guard-only-toss-secret-key*) fail "토스 시크릿 키가 HTML 에 실렸다 — lib/public-config.ts 의 목록을 확인한다" ;;
     esac
     ;;
   operator)

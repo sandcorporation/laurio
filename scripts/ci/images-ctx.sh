@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 이번 빌드가 구운 이미지에 문맥 태그(`ctx-<해시>-<arch|env>`)를 붙인다(#709, Jenkinsfile 「문맥 태그」).
+# 이번 빌드가 구운 이미지에 문맥 태그(`ctx-<해시>-<arch>`)를 붙인다(#709, Jenkinsfile 「문맥 태그」).
 #
 #   scripts/ci/images-ctx.sh .images-amd64.ctx .images-arm64.ctx
 #

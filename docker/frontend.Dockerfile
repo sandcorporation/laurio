@@ -62,51 +62,10 @@ COPY packages/bff-client/ ./packages/bff-client/
 COPY packages/markdown/ ./packages/markdown/
 COPY packages/route-audit/ ./packages/route-audit/
 WORKDIR /app/frontend
-# NEXT_PUBLIC_*는 브라우저에서 도는 코드에 빌드타임에 인라인된다 — 런타임
-# environment로 넘겨도 이미 굳어진 번들에는 반영되지 않는다(#85 코드리뷰 지적
-# 2). 포트원 브라우저 SDK가 인증창을 열 때 쓰는 두 값을 여기서 ARG로 받아
-# ENV로 노출해야 `pnpm build`가 실제 값을 인라인한다 — 비워 두면
-# `lib/verification/portone.ts`의 getPortOneBrowserConfig()가 null을 돌려줘
-# "실제 본인확인하기" 버튼 자체가 렌더링되지 않는다(기능이 죽은 채가 아니라
-# 조용히 숨는다 — 자격증명이 없는 dev/CI 이미지가 이 버튼으로 죽지 않는 이유).
-ARG NEXT_PUBLIC_PORTONE_STORE_ID=""
-ARG NEXT_PUBLIC_PORTONE_CHANNEL_KEY=""
-ENV NEXT_PUBLIC_PORTONE_STORE_ID=${NEXT_PUBLIC_PORTONE_STORE_ID}
-ENV NEXT_PUBLIC_PORTONE_CHANNEL_KEY=${NEXT_PUBLIC_PORTONE_CHANNEL_KEY}
-# 토스 결제창 브라우저 SDK가 결제창을 열 때 쓰는 값(#112) — 같은 이유로 여기서
-# ARG로 받아 ENV로 노출해야 `pnpm build`가 실제 값을 인라인한다. 비어 있어도
-# 빌드는 죽지 않는다 — 위젯을 쓸지는 이 값이 아니라 백엔드의
-# PAYMENT_ADAPTER_MODE가 가른다(payments.api의 checkout_flow, ADR-0007). 값이
-# 비었는데 서버가 "widget"을 요구하면 lib/payments/toss.ts가 결제창을 열지
-# 못했다는 것을 화면에 곧바로 보여준다 — 부팅 시점에 이 값 자체를 요구하는
-# 것은 #115의 범위다.
-ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
-ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
-# 약관·방침이 싣는 문의 주소(#472 후속) — 개인정보 보호책임자와 문의처는 방침의
-# 필수 기재사항이라(개인정보 보호법 제30조 제1항) 값을 코드에 박지 않고 여기서
-# 받는다. 비어 있어도 빌드는 죽지 않는다: dev/CI 는 주소 없이 그리고, 배포
-# 이미지에 값이 빠진 것은 frontend-deploy-guard 가 구운 /privacy 에서 잡는다.
-ARG NEXT_PUBLIC_SUPPORT_EMAIL=""
-ENV NEXT_PUBLIC_SUPPORT_EMAIL=${NEXT_PUBLIC_SUPPORT_EMAIL}
-# 공모전 제품 스위치(#271, `frontend/lib/contest-switch.ts`) — 기본값 "true"라
-# ARG를 안 주는 dev/CI 빌드는 지금과 똑같이 공모전이 보인다. staging·prod는
-# compose 파일이 이 build.args를 겹쳐 준다.
-ARG NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED="true"
-ENV NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED}
-# 유료 공모전 스위치(#413) — 위와 같은 이유로 기본값 "true", staging·prod만
-# compose 파일이 "false"로 겹쳐 쓴다(ADR-0048: 공모전 켜짐·유료 꺼짐).
-ARG NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED="true"
-ENV NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED}
-# 오류 수집(GlitchTip, 2026-09-16) — `NEXT_PUBLIC_*` 이라 브라우저 번들에
-# 빌드타임에 굳는다. 값이 비면 SDK 가 꺼진 채로 돌므로 dev/CI 빌드는 지금과 같다.
-# runner 에도 같은 인자를 다시 두는 이유: 서버(Node)에서 난 오류를 보내는
-# 초기화(instrumentation.ts)는 런타임 env 를 읽는다 — 빌드 값과 같아야 한다.
-ARG NEXT_PUBLIC_SENTRY_DSN=""
-ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT=""
-ARG NEXT_PUBLIC_SENTRY_RELEASE=""
-ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
-    NEXT_PUBLIC_SENTRY_ENVIRONMENT=${NEXT_PUBLIC_SENTRY_ENVIRONMENT} \
-    NEXT_PUBLIC_SENTRY_RELEASE=${NEXT_PUBLIC_SENTRY_RELEASE}
+# 공개 값(Sentry·토스·포트원·문의 주소·공모전 스위치)은 여기서 받지 않는다 — 실행 때
+# 컨테이너 env(`CODEMIT_PUBLIC_*`)에서 읽고 루트 레이아웃이 브라우저로 넘긴다(#711,
+# ADR-0062, `frontend/lib/public-config.ts`). 그래서 이 이미지는 환경을 모른다 —
+# 같은 이미지가 e2e·staging·prod 어디서든 뜬다.
 
 RUN pnpm build
 
@@ -119,41 +78,6 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
-
-# builder 가 브라우저 번들에 인라인한 값을, 이 스테이지의 **컨테이너 런타임
-# env** 로도 다시 노출한다. `docker build --build-arg` 는 그 이름을 선언한 모든
-# 스테이지에 전역으로 적용되므로, compose 의 build.args 가 주는 한 값이
-# builder(번들 인라인용)와 runner(여기) 양쪽에 똑같이 들어간다 — 갈릴 여지가
-# 없다. NEXT_PUBLIC_* 는 build.args 로만 오고 frontend 서비스의 `environment:`
-# 블록에는 **없다**. 그 사실이 이 등식을 떠받치므로 깨뜨리지 마라.
-#
-# 소비자가 둘이다.
-#
-# 1. **부팅 가드**(#115). `instrumentation.ts` 는 Next 의 컴파일 그래프 밖에서
-#    도는 별도 Node 진입점이라 인라인의 혜택을 받지 못한다 — 직접 확인했다:
-#    builder 만 --build-arg 로 채워 빌드해도 그 파일이 읽는
-#    `process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY` 는 여전히 빈 문자열이었다.
-#    이 ENV 가 있어야 가드가 실제로 구워진 값을 읽는다.
-#
-# 2. **deploy.sh 의 변경 감지**(#112 코드리뷰 지적 3). 이 값이 남아 있으면
-#    「이 컨테이너가 지금 서빙 중인 값」을 컨테이너에게 물어볼 수 있다.
-#    재배포 때 `.env.<target>` 의 현재 값과 비교해, 키가 회전(rotate)됐는데
-#    frontend 를 다시 굽지 않아 옛 키를 문 채로 뜨는 것을 잡는다 —
-#    `.env.<target>` 은 gitignore 라 git diff 기반 감지로는 절대 보이지 않는다.
-ARG NEXT_PUBLIC_TOSS_CLIENT_KEY=""
-ENV NEXT_PUBLIC_TOSS_CLIENT_KEY=${NEXT_PUBLIC_TOSS_CLIENT_KEY}
-
-# 공모전 제품 스위치(#271) — builder 와 같은 기본값("true")을 다시 노출한다.
-# 이 값을 읽는 부팅 가드는 없지만(`frontend/lib/contest-switch.ts`는 요청
-# 처리 코드 안에서만 읽히고 이미 번들에 굳어 있다), deploy.sh 의 변경 감지가
-# "이 컨테이너가 지금 서빙 중인 값"을 컨테이너에게 그대로 물어볼 수 있게
-# NEXT_PUBLIC_TOSS_CLIENT_KEY 와 같은 자리를 지킨다.
-ARG NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED="true"
-ENV NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED}
-
-# 유료 공모전 스위치(#413) — 위와 같은 이유로 같은 자리를 지킨다.
-ARG NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED="true"
-ENV NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED=${NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED}
 
 WORKDIR /app
 
@@ -170,16 +94,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./frontend/public
 # standalone 산출물이 워크스페이스 구조를 그대로 담고 있으므로(위 builder
 # 스테이지 주석), 통째로 옮기면 "frontend/server.js"·루트 node_modules가 함께
 # 옮겨진다 — 실행에 필요한 워크스페이스 형태가 그대로 보존된다.
-# 오류 수집(GlitchTip, 2026-09-16) — `NEXT_PUBLIC_*` 이라 브라우저 번들에
-# 빌드타임에 굳는다. 값이 비면 SDK 가 꺼진 채로 돌므로 dev/CI 빌드는 지금과 같다.
-# runner 에도 같은 인자를 다시 두는 이유: 서버(Node)에서 난 오류를 보내는
-# 초기화(instrumentation.ts)는 런타임 env 를 읽는다 — 빌드 값과 같아야 한다.
-ARG NEXT_PUBLIC_SENTRY_DSN=""
-ARG NEXT_PUBLIC_SENTRY_ENVIRONMENT=""
-ARG NEXT_PUBLIC_SENTRY_RELEASE=""
-ENV NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN} \
-    NEXT_PUBLIC_SENTRY_ENVIRONMENT=${NEXT_PUBLIC_SENTRY_ENVIRONMENT} \
-    NEXT_PUBLIC_SENTRY_RELEASE=${NEXT_PUBLIC_SENTRY_RELEASE}
 
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./frontend/.next/static
