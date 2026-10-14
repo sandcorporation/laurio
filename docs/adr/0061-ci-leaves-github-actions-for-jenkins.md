@@ -57,3 +57,18 @@ arm64, sub 가 amd64, `scripts/ci/images.sh`) → 부팅 가드(sub, `scripts/ci
 - 이미지 굽기가 다시 sub 에 얹힌다. 디스크 대기가 다시 오르면 amd64 를 Jenkins 노드 `desktop`(Linux
   amd64)으로 옮긴다 — 그때는 거기 buildx 가 필요하다.
 - 둘째 단계(Next 세 앱을 한 이미지로, #706)는 따로 간다.
+
+## 보강 — 열차가 굽고 laurio 는 태그·가드·배포만(#712, 2026-10-15)
+
+열차(`codemit-train`)는 이미 묶음을 병합 뒤 main 과 같은 트리로 시험했는데, e2e 용으로 스택을 따로
+굽고(`up --build`) 병합 뒤 `laurio` 가 **같은 코드를 다시** 구웠다. 그래서 굽기를 열차로 옮긴다 — sub
+가지가 검사 뒤 amd64 여섯(+ 구운 앱의 부팅 가드), macos 가지가 arm64 여섯을 `images.sh` 로 굽고 e2e·celery 는
+그 arm64 이미지를 받아 돈다(`docker/compose.ci-images.yaml`). ctx 태그는 「병합」 뒤에만 붙는다(#709 규칙).
+병합 뒤 `laurio` 는 같은 트리의 해시를 내 전부 건너뛰고 main 커밋 태그만 더한다. 열차를 거치지 않은 main
+push 는 예전처럼 `laurio` 가 굽는다 — 판단이 sha 가 아니라 문맥 해시라 두 길이 저절로 갈린다.
+
+- e2e 가 본 이미지와 배포되는 이미지가 digest 로 같다 — 예전에는 같은 Dockerfile 로 따로 구운 이미지였다.
+- 열차의 macos 단계가 여섯을 굽는 시간만큼 길어진다(레지스트리 캐시 `codemit-buildcache:<서비스>-<arch>` 는
+  `laurio` 와 같이 쓴다). 대신 병합에서 staging 까지의 `laurio` 빌드는 이미지·가드·문맥 태그가 비고
+  대부분 「교체」만 남는다. `deploy.sh plan` 도 같은 해시로 바꿔 끼울 서비스를 고른다.
+- 붉은 묶음의 이미지는 커밋 태그만 남는다(ctx 없음) — 정리 잡이 순서대로 지운다.
