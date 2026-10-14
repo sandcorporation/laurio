@@ -1789,7 +1789,8 @@ def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
         problem__classroom_id=class_obj.id, member_id__in=active_member_ids
     ).select_related("classroom_score"):
         submissions_by_problem.setdefault(submission.problem_id, []).append(submission)
-    # `_live_problem_template` 의 `.first()` 와 같은 고름 — 문제마다 살아 있는 것 중 id 가 가장 작은 것.
+    # `_live_problem_template` 과 같은 답 — 살아 있는 템플릿은 `unique_live_problem_template_per_source`
+    # 제약으로 문제당 하나뿐이라, 어느 순서로 고르든 같은 것이 나온다.
     live_template_by_problem: dict[int, ProblemTemplate] = {}
     for template in ProblemTemplate.objects.filter(
         source_problem__classroom_id=class_obj.id, taken_down_at__isnull=True

@@ -262,7 +262,7 @@ SETTINGS = body(
       f'<div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:18px;">'
       + card(cardhead("채점 연결")
              + f'<div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;">'
-               f'<div style="display:flex;align-items:center;gap:10px;">{badge("연결됨", "ver")}<span style="font-size:13px;">OpenAI 키 · <span style="font-family:{MONO};">sk-proj-••••7f2a</span></span><span style="font-size:12px;color:{DIM};">10/02 확인함</span><span style="margin-left:auto;">{btn("바꾸기", small=True)}</span></div>'
+               f'<div style="display:flex;align-items:center;gap:10px;">{badge("연결됨", "ver")}<span style="font-size:13px;">OpenAI 키 · <span style="font-family:{MONO};">sk-proj-••••7f2a</span></span><span style="font-size:12px;color:{DIM};">10/02 확인</span><span style="margin-left:auto;">{btn("바꾸기", small=True)}</span></div>'
                f'<div style="display:flex;gap:6px;">{btn("OpenAI 키", primary=True, small=True)}{btn("호환 서버", small=True)}</div></div>')
       + card(cardhead("기본 모델")
              + model_row("gpt-5-mini", "400K", "시도 1건 약 6원", True, "클래스 기본값")
@@ -325,7 +325,7 @@ def mine_row(title, k, tries, when):
             f'<div style="flex:1;min-width:0;font-size:14px;">{title}</div>{t}{label}</div>')
 
 MINE_PAGE = body(
-    pagehead(CLASS_NAME + " · 강사 김선우", "문제", None,
+    pagehead(CLASS_NAME + " · 김선우, 이수진", "문제", None,
              actions=f'<span style="font-size:12.5px;color:{MUTED};">내 이름 <b style="color:{INK};">서지우</b> · <span style="text-decoration:underline;">바꾸기</span></span>')
     + f'<div style="display:flex;align-items:center;gap:14px;"><div style="font-family:{MONO};font-size:15px;font-weight:600;">3/6 통과</div>{bar(50, 320, VER, 8)}<span style="font-size:12px;color:{DIM};">채점 중 1 · 미제출 1</span></div>'
     + card("".join(mine_row(*r) for r in MINE))
