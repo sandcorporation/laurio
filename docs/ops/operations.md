@@ -149,9 +149,11 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
   본문·키·벤더의 `error.message` 는 어떤 필드에도 없다**(시험이 비밀 문자열이 줄에 없음을 못 박는다).
   예) 크레딧 소진 429 를 가려내려면 `| json | result="quota_exhausted"`.
 
-**사람이 할 일 — 대시보드·경보·긁기 대상은 저장소 밖(oracle `/server/prometheus`)이라 에이전트가 적용하지 않았다.**
+**대시보드·경보·긁기 대상은 저장소 밖(oracle `/server/prometheus`)에 2026-10-14 에 적용했다** — 아래가 들어간
+그대로다. 바꾸기 전 파일은 같은 자리에 `*.bak-20261014-*` 로 남겼다. 대시보드는 「prod 백엔드 요청」과 「호스트 자원」
+사이의 「LLM 채점」 줄이고, 경보는 `alerts.yml` 의 `codemit-llm` 그룹(6개)이다. 고칠 때는 이 절과 그 파일을 같이 고친다.
 
-1. **긁기 대상 추가**(`prometheus.yml`) — grader 는 prod 네트워크의 `grader:9102` 다(prometheus 컨테이너가 이미
+1. **긁기 대상**(`prometheus.yml`) — grader 는 prod 네트워크의 `grader:9102` 다(prometheus 컨테이너가 이미
    `codemit-prod_default` 에 붙어 있다). 백엔드 대상은 이미 있어 공모전 지표는 따로 할 일이 없다. grader 는
    배포 때마다 새 컨테이너가 되므로 서비스 이름(`grader`)으로 긁는다.
 
@@ -165,13 +167,13 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 
    배포한 뒤 한 번 `curl -s http://grader:9102/metrics | grep codemit_llm_` (prometheus 컨테이너 안에서)로 줄이
    나오는지 본다. staging 은 긁지 않는다.
-2. **「Codemit prod」 대시보드 패널**(LLM 줄 하나, 패널 PromQL):
+2. **「Codemit prod」 대시보드 패널**(「LLM 채점」 줄, 패널 PromQL):
    - 결과별 호출률(누적 막대): `sum by (product, result) (rate(codemit_llm_calls_total[5m]))`
    - 응답 시간 p50 / p95: `histogram_quantile(0.5|0.95, sum by (le, product) (rate(codemit_llm_call_duration_seconds_bucket[5m])))`
    - 토큰률: `sum by (product, direction) (rate(codemit_llm_tokens_total[5m]))`
    - 동시 채점: `sum by (product) (codemit_llm_in_flight)`
    - 큐 대기 p95: `histogram_quantile(0.95, sum by (le) (rate(codemit_llm_queue_wait_seconds_bucket[5m])))`
-3. **경보 규칙**(`prometheus/alerts.yml` 에 그룹으로 더한다, 기존 Discord 채널로). 임계값 근거:
+3. **경보 규칙**(`prometheus/alerts.yml` 의 `codemit-llm` 그룹, 기존 Discord 채널로). 임계값 근거:
 
    ```yaml
    - name: codemit-llm
