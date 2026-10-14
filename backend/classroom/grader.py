@@ -282,12 +282,19 @@ class Grader:
 
     async def run_round(self) -> list[dict]:
         """한 바퀴 — 루프와 같게 집고, 하나가 끝날 때마다(또는 간격마다) 다시 집어, 큐가 비고 하던 것이
-        모두 끝날 때까지 돈다."""
+        모두 끝날 때까지 돈다.
+
+        「큐가 비었다」는 **하던 것이 없을 때 시작한** 집기가 0건일 때만 믿는다(#648). 집기는 시작할 때의
+        상한·처리 중 목록으로 후보를 읽으므로, 그 DB 걸음 사이에 하던 채점이 모두 끝나면 상한 때문에 뺀
+        시도를 못 본 채 0을 돌려준다 — 그때는 한 번 더 집는다."""
 
         self._collect = True
         while True:
+            had_in_flight = bool(self._tasks)
             await self.pick()
             if not self._tasks:
+                if had_in_flight:
+                    continue
                 break
             await asyncio.wait(set(self._tasks), timeout=self.poll_seconds, return_when=asyncio.FIRST_COMPLETED)
         self._shutdown_pools()
