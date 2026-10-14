@@ -58,8 +58,7 @@ test("로그아웃 상태로 가입 링크를 열고 로그인하면 같은 가�
   await expect(page.getByTestId("join-submit")).toHaveText("가입하고 문제 보기");
   await page.getByTestId("join-submit").click();
 
-  await expect(page.getByTestId("join-done-heading")).toBeVisible();
-  await page.getByTestId("join-done-problems-link").click();
+  // 중간 「가입 완료」 화면 없이 곧장 문제 목록이다(#658).
   await expect(page).toHaveURL(`/classes/${classId}/problems/mine`);
   await expect(page.getByTestId("my-problems-progress-count")).toHaveText("0/1 통과");
 });

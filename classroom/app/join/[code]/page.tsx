@@ -29,8 +29,7 @@ import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check
 type SubmitState =
   | { status: "idle" }
   | { status: "submitting" }
-  | { status: "error"; message: string }
-  | { status: "done"; classId: number; className: string; displayName: string };
+  | { status: "error"; message: string };
 
 export default function JoinPage() {
   const params = useParams<{ code: string }>();
@@ -81,12 +80,10 @@ export default function JoinPage() {
     // 문구가 보일 수 있지만 곧 이동이 이어진다.
     const result = await joinClass(code, trimmedName);
     if (result.ok) {
-      setSubmit({
-        status: "done",
-        classId: result.data.class_id,
-        className: result.data.class_name,
-        displayName: result.data.display_name,
-      });
+      // 버튼이 「가입하고 문제 보기」라 말한 대로 곧장 문제 목록이다(#658) — 중간
+      // 「가입 완료」 화면을 두지 않는다. 이동이 끝날 때까지 버튼은 「submitting」
+      // 그대로 잠겨 두 번째 가입 요청이 나가지 않는다.
+      router.replace(`/classes/${result.data.class_id}/problems/mine`);
     } else {
       setSubmit({ status: "error", message: result.detail });
     }
@@ -139,26 +136,6 @@ export default function JoinPage() {
   // 강사 전원의 이름(#565) — 소유자 먼저. 이 칸을 모르는 옛 백엔드면 소유자의 이름 하나로 읽는다.
   const instructorNames =
     info.instructor_display_names ?? (info.instructor_display_name ? [info.instructor_display_name] : []);
-
-  if (submit.status === "done") {
-    return (
-      <Shell>
-        <h1 data-testid="join-done-heading" className="text-[21px] font-semibold">가입 완료</h1>
-        <p data-testid="join-done-message" className="mt-3 text-[13.5px] leading-relaxed text-ink/60">
-          {submit.className}에 &quot;{submit.displayName}&quot;(으)로 참여했습니다.
-        </p>
-        <p className="mt-6">
-          <Link
-            href={`/classes/${submit.classId}/problems/mine`}
-            data-testid="join-done-problems-link"
-            className={`${buttonClass("primary")} w-full`}
-          >
-            문제 목록 보러 가기
-          </Link>
-        </p>
-      </Shell>
-    );
-  }
 
   return (
     <Shell>
