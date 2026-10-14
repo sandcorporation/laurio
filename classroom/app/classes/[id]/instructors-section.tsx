@@ -27,6 +27,7 @@ import { useBackendQuery } from "@codemit/bff-client";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
+import { formatDay } from "@/lib/classes/format-day";
 import {
   cancelCoInstructorInvite,
   cancelOwnershipTransfer,
@@ -45,11 +46,6 @@ import {
 const LINK_ACTION =
   "inline-flex items-center whitespace-nowrap px-3 py-1.5 text-xs text-ink/60 underline underline-offset-[3px] " +
   "transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-45";
-
-function formatDay(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}/${d.getDate()}`;
-}
 
 type RowConfirm = "remove" | "transfer" | null;
 
@@ -116,7 +112,8 @@ function InstructorRow({
               소유권 넘기기
             </button>
           ) : null}
-          {canRemove && !confirming ? (
+          {/* 이전 요청이 대기 중이면 「요청 취소」만 — 내보내려면 요청부터 거둔다(#669, 시안 Instructors). */}
+          {canRemove && !confirming && !transferPending ? (
             <button
               type="button"
               data-testid="co-instructor-remove"
@@ -182,7 +179,7 @@ function InstructorRow({
               {busy ? "내보내는 중..." : "내보내기"}
             </button>
             <button type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
-              그대로 두기
+              취소
             </button>
           </div>
         </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { scoringStatus } from "./scoring-status";
+import { SCORING_STATUS_LABEL, scoringStatus, settingsStatusBadges } from "./scoring-status";
 
 const base = {
   archived: false,
@@ -47,5 +47,37 @@ describe("scoringStatus — 배너 넷의 조건 그대로", () => {
   it("크레딧 소진, 서버 연결 불가", () => {
     expect(scoringStatus({ ...base, scoring_quota_exhausted: true })).toEqual({ kind: "exhausted" });
     expect(scoringStatus({ ...base, scoring_server_unreachable: true })).toEqual({ kind: "unreachable" });
+  });
+});
+
+describe("settingsStatusBadges — 설정의 상태 한 줄은 카드와 같은 낱말이다(#669)", () => {
+  it("키가 없으면 카드와 같은 「연결 없음」", () => {
+    expect(settingsStatusBadges({ ...base, has_openai_key: false, openai_key_status: null })).toEqual([
+      { label: SCORING_STATUS_LABEL.missing, tone: "attention" },
+    ]);
+  });
+
+  it("호환 서버에 닿지 못하면 카드와 같은 「서버 연결 불가」", () => {
+    expect(
+      settingsStatusBadges({
+        ...base,
+        scoring_connection_kind: "compatible_server",
+        scoring_server_host: "llm.example.kr",
+        scoring_server_unreachable: true,
+      }),
+    ).toEqual([{ label: SCORING_STATUS_LABEL.unreachable, tone: "attention" }]);
+  });
+
+  it("보관된 클래스의 연결 없음은 문제 톤이 아니다", () => {
+    expect(settingsStatusBadges({ ...base, archived: true, has_openai_key: false, openai_key_status: null })).toEqual([
+      { label: SCORING_STATUS_LABEL.missing, tone: "neutral" },
+    ]);
+  });
+
+  it("검증 전 OpenAI 키는 「연결됨」에 「미검증」만 덧붙인다", () => {
+    expect(settingsStatusBadges({ ...base, openai_key_status: "unverified" })).toEqual([
+      { label: SCORING_STATUS_LABEL.connected, tone: "verified" },
+      { label: "미검증", tone: "neutral" },
+    ]);
   });
 });

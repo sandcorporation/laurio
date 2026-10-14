@@ -97,7 +97,7 @@ export function GettingStartedCard({ classroom, joinUrl }: { classroom: ClassRow
                 data-testid="classroom-missing-api-key-settings-link"
                 className={buttonClass(currentStep === 1 ? "primary" : "secondary", "sm")}
               >
-                설정 열기
+                채점 연결 넣기
               </Link>
             ) : null
           }

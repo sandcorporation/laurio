@@ -12,11 +12,15 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
+import { formatDay } from "@/lib/classes/format-day";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { achievementTone, describeAchievementRate } from "@/lib/problems/achievement";
 import type { GridCell, GridCellStatus, GridMemberRow } from "@/lib/roster-grid/api";
 import { gridEntryLabel } from "@/lib/submissions/contest-entry";
+import { openPassedSummary } from "@/lib/roster-grid/passed";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
+
+const PROBLEM_STATUS_LABEL: Record<string, string> = { draft: "초안", hidden: "숨김" };
 
 const STATUS_LABEL: Record<GridCellStatus, string> = {
   passed: "통과",
@@ -68,11 +72,6 @@ const STICKY_BASE = "sticky left-0 z-[1] whitespace-nowrap border-b border-rule 
 const STICKY = `${STICKY_BASE} bg-surface`;
 const HEAD = "text-[11px] font-normal text-ink/45";
 const TONE_CLASS = { verified: "text-verified", attention: "text-attention", ink: "text-ink" } as const;
-
-/** 통과 n/N — 격자 셀의 「통과」 표식을 센다(달성률과 같은 기준이다). */
-function passedCount(member: GridMemberRow): number {
-  return member.cells.filter((cell) => cell.status === "passed").length;
-}
 
 function RowMenu({ member, onExpel }: { member: GridMemberRow; onExpel: () => void }) {
   const [open, setOpen] = useState(false);
@@ -164,7 +163,7 @@ function ExpelDialog({
             data-testid="expel-confirm"
             disabled={busy}
             onClick={onConfirm}
-            className={buttonClass("danger", "sm")}
+            className={buttonClass("dangerFilled", "sm")}
           >
             내보내기
           </button>
@@ -227,7 +226,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
     return (
       <Card className="border-t-0">
         <EmptyState>
-          <span data-testid="participants-empty">아직 참여자가 없습니다.</span>
+          <span data-testid="participants-empty">—</span>
         </EmptyState>
       </Card>
     );
@@ -257,12 +256,14 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                   data-testid={`participants-header-problem-${problem.id}`}
                 >
                   {problem.title}
-                  {problem.status === "hidden" ? (
+                  {PROBLEM_STATUS_LABEL[problem.status] ? (
                     <span
-                      data-testid={`participants-header-problem-${problem.id}-hidden-badge`}
+                      data-testid={`participants-header-problem-${problem.id}-${problem.status}-badge`}
                       className="ml-1.5 inline-block"
                     >
-                      <Badge tone="attention">숨김</Badge>
+                      <Badge tone={problem.status === "hidden" ? "attention" : "neutral"}>
+                        {PROBLEM_STATUS_LABEL[problem.status]}
+                      </Badge>
                     </span>
                   ) : null}
                 </th>
@@ -278,19 +279,13 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                 <td className={STICKY} data-testid={`participant-row-${member.id}-name`}>
                   <span className={member.expelled ? "text-ink/40 line-through" : ""}>{member.display_name}</span>
                   {member.is_instructor ? (
-                    <span
-                      data-testid={`participant-row-${member.id}-instructor-badge`}
-                      className="ml-2 text-[11px] text-ink/40"
-                    >
-                      강사 본인
+                    <span data-testid={`participant-row-${member.id}-instructor-badge`} className="ml-2 inline-block">
+                      <Badge>강사 본인</Badge>
                     </span>
                   ) : null}
                   {member.expelled ? (
-                    <span
-                      data-testid={`participant-row-${member.id}-expelled-badge`}
-                      className="ml-2 text-[11px] text-attention"
-                    >
-                      내보냄
+                    <span data-testid={`participant-row-${member.id}-expelled-badge`} className="ml-2 inline-block">
+                      <Badge tone="attention">내보냄</Badge>
                     </span>
                   ) : null}
                   {member.joined_at ? (
@@ -298,7 +293,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                       data-testid={`participant-row-${member.id}-joined-at`}
                       className="ml-2 text-[11px] text-ink/35 max-sm:ml-0 max-sm:block"
                     >
-                      {new Date(member.joined_at).toLocaleDateString("ko-KR")} 가입
+                      {formatDay(member.joined_at)} 가입
                     </span>
                   ) : null}
                 </td>
@@ -322,7 +317,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                   className={`${CELL} text-right font-mono text-[12.5px] text-ink/60`}
                   data-testid={`participant-row-${member.id}-passed`}
                 >
-                  {problems.length === 0 ? "—" : `${passedCount(member)}/${problems.length}`}
+                  {openPassedSummary(problems, member)}
                 </td>
                 <td
                   className={`${CELL} text-right text-[12px] text-ink/45`}
@@ -331,7 +326,10 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                   {formatRelativeTime(member.last_submitted_at)}
                 </td>
                 <td className={`${CELL} text-right`}>
-                  {member.expelled ? null : <RowMenu member={member} onExpel={() => setExpelling(member)} />}
+                  {/* 강사의 자기 참여자 행은 집계에서 이미 빠진다 — 내보낼 이유가 없고 서버도 거절한다(#669). */}
+                  {member.expelled || member.is_instructor ? null : (
+                    <RowMenu member={member} onExpel={() => setExpelling(member)} />
+                  )}
                 </td>
               </tr>
             ))}
@@ -342,19 +340,23 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
               >
                 달성률
               </td>
-              {problems.map((problem) => (
-                <td
-                  key={problem.id}
-                  className={`${CELL} bg-paper font-mono font-semibold ${
-                    problem.pass_rate === null ? "text-ink/45" : TONE_CLASS[achievementTone(problem.pass_rate)]
-                  }`}
-                  data-testid={`participants-achievement-${problem.id}`}
-                  aria-label={describeAchievementRate(problem)}
-                  title={describeAchievementRate(problem)}
-                >
-                  {problem.pass_rate === null ? "—" : `${Math.round(problem.pass_rate * 100)}%`}
-                </td>
-              ))}
+              {problems.map((problem) => {
+                // 초안은 아직 아무도 풀 수 없다 — 문제 탭의 달성률 칸처럼 0% 가 아니라 「—」.
+                const rate = problem.status === "draft" ? null : problem.pass_rate;
+                return (
+                  <td
+                    key={problem.id}
+                    className={`${CELL} bg-paper font-mono font-semibold ${
+                      rate === null ? "text-ink/45" : TONE_CLASS[achievementTone(rate)]
+                    }`}
+                    data-testid={`participants-achievement-${problem.id}`}
+                    aria-label={describeAchievementRate({ ...problem, pass_rate: rate })}
+                    title={describeAchievementRate({ ...problem, pass_rate: rate })}
+                  >
+                    {rate === null ? "—" : `${Math.round(rate * 100)}%`}
+                  </td>
+                );
+              })}
               <td className={`${CELL} bg-paper`} />
               <td className={`${CELL} bg-paper`} />
               <td className={`${CELL} bg-paper`} />

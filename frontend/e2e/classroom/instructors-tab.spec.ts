@@ -51,6 +51,8 @@ test("강사 탭 — 소유자가 초대 링크를 만들고 소유권을 넘기
   await page.getByTestId("ownership-transfer-confirm-button").click();
   await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
   await expect(page.getByTestId("ownership-transfer-start")).toHaveCount(0);
+  // 대기 중인 줄에는 「요청 취소」만 — 내보내기가 없다(#669).
+  await expect(page.getByTestId("co-instructor-remove")).toHaveCount(0);
 
   // 새로고침해도 대기 중이고, 취소하면 다시 넘길 수 있다.
   await page.reload();
@@ -58,6 +60,7 @@ test("강사 탭 — 소유자가 초대 링크를 만들고 소유권을 넘기
   await page.getByTestId("ownership-transfer-cancel").click();
   await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0);
   await expect(page.getByTestId("ownership-transfer-start")).toBeVisible();
+  await expect(page.getByTestId("co-instructor-remove")).toBeVisible();
 });
 
 test("강사 탭 — 공동 강사는 소유자 전용 행동 없이 떠나기만 보고, 떠나면 내 클래스 목록으로 간다", async ({

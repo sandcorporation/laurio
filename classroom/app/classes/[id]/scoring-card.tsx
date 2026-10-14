@@ -8,7 +8,12 @@ import Link from "next/link";
 
 import { Badge, Card, buttonClass } from "@/app/components/ui";
 import type { ClassRow } from "@/lib/classes/api";
-import { SCORING_STATUS_LABEL, scoringStatus, type ScoringStatus } from "@/lib/classes/scoring-status";
+import {
+  SCORING_STATUS_LABEL,
+  scoringStatus,
+  scoringStatusTone,
+  type ScoringStatus,
+} from "@/lib/classes/scoring-status";
 import { findCostRow, formatKrw, usageKrw } from "@/lib/scoring/cost";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 
@@ -53,7 +58,6 @@ export function ScoringCard({ classroom }: { classroom: ClassRow }) {
   const status = scoringStatus(classroom);
   const isOwner = classroom.role === "owner";
   const settings = `/classes/${classId}/settings`;
-  const isProblem = status.kind !== "connected" && !(status.kind === "missing" && !status.problem);
 
   return (
     <Card>
@@ -84,7 +88,7 @@ export function ScoringCard({ classroom }: { classroom: ClassRow }) {
                 status.kind === "missing" ? "classroom-missing-api-key-banner" : PROBLEM_TESTID[status.kind]
               }
             >
-              <Badge tone={isProblem ? "attention" : "neutral"}>{SCORING_STATUS_LABEL[status.kind]}</Badge>
+              <Badge tone={scoringStatusTone(status)}>{SCORING_STATUS_LABEL[status.kind]}</Badge>
             </span>
           )}
         </div>
@@ -102,7 +106,7 @@ export function ScoringCard({ classroom }: { classroom: ClassRow }) {
         ) : null}
 
         {/* 갈 곳은 키를 바꿀 수 있는 소유자에게만 — 공동 강사에게는 갈 곳 없는 버튼을 보이지 않는다(#561). */}
-        {isProblem && isOwner ? (
+        {scoringStatusTone(status) === "attention" && isOwner ? (
           <div>
             <Link
               href={`${settings}#scoring-key`}
