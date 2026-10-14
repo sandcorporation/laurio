@@ -27,8 +27,8 @@
 # **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `laurio` 잡의
 # 앞 단계가 커밋마다 여섯 이미지를 ghcr 에 올린다(scripts/ci/images.sh — amd64 는 sub, arm64 는
 # macos 가 굽고, 바뀌지 않은 서비스는 옛 이미지에 커밋 태그만 더한다, #705) — backend·
-# search·pgbouncer 는 `<sha>-amd64`·`<sha>-arm64`, 세 앱은 NEXT_PUBLIC_* 가 굳으므로
-# `<sha>-staging`·`<sha>-prod` 다. compose 파일의 `image:` 가 그 이름을 가리키고, 태그의
+# search·pgbouncer 와 세 앱 모두 `<sha>-amd64`(staging)·`<sha>-arm64`(prod) 다 — 앱도 환경을
+# 모르고 공개 값은 실행 env 로 받는다(#711, ADR-0062). compose 파일의 `image:` 가 그 이름을 가리키고, 태그의
 # <sha> 는 여기서 체크아웃한 커밋이다(`CODEMIT_IMAGE_TAG`). 그래서 배포 단계는 굽지 않고, prod 는
 # oracle 이 더 이상 굽지 않는다 — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
 #
@@ -414,35 +414,37 @@ cmd_plan() {
     BUILD_PGBOUNCER=true
   fi
 
-  # NEXT_PUBLIC_TOSS_CLIENT_KEY 회전 감지 (#112 코드리뷰 지적 3). 이 값은
-  # 빌드타임에만 굳는다 — .env.<target>은 gitignore라 위 git diff 기반 변경
-  # 감지는 이 값이 바뀐 것을 절대 보지 못한다. #115의 부팅 가드는 값이 "비어
-  # 있으면" 부팅을 거부하지만, 있던 값을 다른 값으로 돌린(rotate) 경우는
-  # 여전히 통과한다 — 이미 뜬 컨테이너는 예전 키를 문 채로 계속 돈다. 그래서
-  # 이미 뜬 frontend 컨테이너가 실제로 구운 값(docker/frontend.Dockerfile의
-  # runner 스테이지가 ENV로 남긴다)과, 지금 env 파일이 주는 값을 직접
-  # 비교한다 — 다르면 다시 굽는다. 컨테이너가 없으면(missing) 위에서 이미
-  # BUILD_FRONTEND=true다.
-  if [ "$BUILD_FRONTEND" = false ] && ! missing frontend; then
-    case "$TARGET" in
-      staging) TOSS_KEY_VAR=TOSS_SANDBOX_CLIENT_KEY ;;
-      prod) TOSS_KEY_VAR=TOSS_LIVE_CLIENT_KEY ;;
-    esac
-    CURRENT_TOSS_KEY=$(grep -E "^${TOSS_KEY_VAR}=" "$ENV_FILE" | tail -1 | cut -d= -f2-)
-    FRONTEND_CID=$($COMPOSE ps -q frontend 2>/dev/null | head -1)
-    BAKED_TOSS_KEY=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$FRONTEND_CID" 2>/dev/null \
-      | grep '^NEXT_PUBLIC_TOSS_CLIENT_KEY=' | cut -d= -f2-)
-    if [ "$BAKED_TOSS_KEY" != "$CURRENT_TOSS_KEY" ]; then
-      if [ "$IMAGE_SOURCE" = build ]; then
-        log "NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 과 어긋난다(떠 있는 컨테이너가 구운 값과 다르다) — frontend 를 다시 굽는다."
-        BUILD_FRONTEND=true
-      else
-        # registry 이미지의 값은 이미지 단계가 Jenkins 자격증명 codemit-images-env(STAGING_/PROD_TOSS_CLIENT_KEY)로
-        # 굽는다 — 여기서 다시 받아도 고쳐지지 않는다. 어긋남만 크게 알린다.
-        log "경고: 떠 있는 frontend 가 구운 NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 의 ${TOSS_KEY_VAR} 와 다르다."
-        log "      Jenkins 자격증명 codemit-images-env 의 $(echo "$TARGET" | tr a-z A-Z)_TOSS_CLIENT_KEY 를 고치고 laurio 잡을 다시 돌려야 한다."
-      fi
-    fi
+  # 세 앱의 실행 env 가 바뀌었는가 (#711, 옛 #112 코드리뷰 지적 3의 토스 키 회전 감지를 넓혔다).
+  # 앱 이미지는 환경을 모르고 공개 값(`CODEMIT_PUBLIC_*`)은 compose 가 .env.<target> 에서 넣는다 —
+  # .env.<target> 은 gitignore 라 위 git diff 기반 감지는 값이 바뀐 것을 보지 못하고, 코드가 안
+  # 바뀐 앱은 다시 띄우지 않으므로 옛 키를 문 채로 계속 돈다. 그래서 떠 있는 컨테이너에 compose 가
+  # 붙여 둔 설정 해시(`com.docker.compose.config-hash`)를 **그 컨테이너의 이미지 태그·release 로
+  # 다시 낸 지금 설정의 해시**와 견준다 — 커밋마다 바뀌는 그 둘을 옛 값으로 고정하면 남는 차이는
+  # env 파일이 바꾼 것뿐이다. 다르면 그 앱을 다시 띄운다(같은 이미지를 받아 env 만 새로).
+  app_env_drifted() {
+    local cid image tag release was now
+    cid=$($COMPOSE ps -q "$1" 2>/dev/null | head -1)
+    [ -n "$cid" ] || return 1
+    image=$(docker inspect --format '{{.Config.Image}}' "$cid" 2>/dev/null) || return 1
+    tag=${image##*:}
+    tag=${tag%-*}
+    release=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null \
+      | sed -n 's/^CODEMIT_PUBLIC_SENTRY_RELEASE=//p' | head -1)
+    was=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$cid" 2>/dev/null)
+    now=$(CODEMIT_IMAGE_TAG="$tag" SENTRY_RELEASE="$release" $COMPOSE config --hash "$1" 2>/dev/null | awk '{print $2}')
+    [ -n "$now" ] && [ "$now" != "$was" ]
+  }
+  if [ "$BUILD_FRONTEND" = false ] && app_env_drifted frontend; then
+    log "frontend 의 실행 설정이 .env.${TARGET} 과 어긋난다(공개 값 등) — 다시 띄운다."
+    BUILD_FRONTEND=true
+  fi
+  if [ "$BUILD_OPERATOR" = false ] && app_env_drifted operator; then
+    log "operator 의 실행 설정이 .env.${TARGET} 과 어긋난다 — 다시 띄운다."
+    BUILD_OPERATOR=true
+  fi
+  if [ "$BUILD_CLASSROOM" = false ] && app_env_drifted classroom; then
+    log "classroom 의 실행 설정이 .env.${TARGET} 과 어긋난다 — 다시 띄운다."
+    BUILD_CLASSROOM=true
   fi
 
   # **backend·events 를 겹쳐 바꿀 수 있는가**(#485, #526·ADR-0053). 겹쳐 바꾸면 옛
@@ -563,8 +565,7 @@ load_plan() {
 # 스캔·강의실 스트림만 옛 코드로 돌았다(빌드 23). 지금은 넷이 한 이름을 가리키므로
 # 로컬로 구울 때도 backend 하나만 구우면 된다.
 #
-# NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — 로컬로 구울 때의 build args 는 compose 가
-# .env.<target> 에서 읽어 넘긴다(#85). 이미지 단계는 같은 값을 Jenkins 자격증명 codemit-images-env 에서 읽는다.
+# 세 앱은 빌드 인자가 없다 — 공개 값은 실행 env 다(#711). 로컬로 구운 이미지도 레지스트리 것과 같다.
 cmd_build() {
   compose_services "$1" >/dev/null
   log "$1 빌드 (이 호스트에서)"

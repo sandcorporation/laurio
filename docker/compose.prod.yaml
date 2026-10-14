@@ -542,45 +542,13 @@ services:
   # 값이 안 채워지면 재시작을 반복할 뿐 절대 뜨지 않는다(의도된 동작).
   frontend:
     logging: *default-logging
-    # `-prod` — NEXT_PUBLIC_* 가 빌드 때 굳으므로 앱 이미지는 환경마다 따로다.
-    # laurio 잡이 Jenkins 자격증명 codemit-images-env 의 PROD_* 로 굽는다(아래 build args 는 비상용 로컬 빌드용).
-    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:-local}-prod
+    # `-arm64` — 앱 이미지는 환경을 모르고 아키텍처로만 갈린다(#711, ADR-0062). 공개 값은
+    # 아래 `environment:` 의 `CODEMIT_PUBLIC_*` 로 실행 때 받는다(`build:` 은 비상용 로컬 빌드용).
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
       dockerfile: docker/frontend.Dockerfile
       target: runner
-      # staging과 같은 이유(compose.staging.yaml 참고, #85 코드리뷰 지적 2·7) —
-      # NEXT_PUBLIC_*는 빌드타임에 인라인되므로 build.args로만 전달할 수 있다.
-      args:
-        # 오류 수집(GlitchTip, 2026-09-16) — 앱마다 다른 프로젝트(DSN)를 쓴다.
-        # `NEXT_PUBLIC_*` 이라 브라우저 번들에 굳으므로 DSN 을 바꾸면 다시 굽는다.
-        NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
-        NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
-        NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
-        NEXT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
-        NEXT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
-        # 토스 결제창 브라우저 SDK가 쓰는 공개 키(#112) — TOSS_LIVE_SECRET_KEY와
-        # 짝을 이루는 클라이언트 키다. **비어 있으면 compose 자체가 여기서
-        # 기동을 거부한다(#115)** — compose.staging.yaml과 같은 이유·같은
-        # `${VAR:?...}` 형태다. production의 PAYMENT_ADAPTER_MODE는 언제나
-        # 실물 어댑터를 가리켜야 하므로(#83이 fake를 거부한다) 위젯은 반드시
-        # 쓰인다 — "필수값이 아니다"는 예전 판단은 더는 맞지 않는다.
-        #
-        # **이 값은 build.args로만 존재해야 한다 — 아래 frontend 서비스의
-        # environment: 블록에 절대 추가하지 않는다.** compose.staging.yaml의
-        # 같은 주석 참고 — 부팅 가드(frontend/instrumentation.ts)가 읽는 것은
-        # 컨테이너의 런타임 env이고, docker/frontend.Dockerfile의 runner
-        # 스테이지가 이 ARG를 다시 ENV로 노출해 두었기 때문에 지금은 "런타임
-        # env == 빌드에 실제로 구운 값"이 성립한다(#115). environment:에도
-        # 넣으면 그 등식이 깨져 번들은 비어 있는데 가드만 통과하는 사고가
-        # 재현된다.
-        NEXT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_LIVE_CLIENT_KEY:?토스 결제창 브라우저 SDK 클라이언트 키를 .env.prod 의 TOSS_LIVE_CLIENT_KEY 에 설정하라 — 빌드타임에 인라인되므로 부팅 후에는 되돌릴 수 없다}
-        # 공모전 제품 스위치 — 「공모전 / 유료 공모전」 둘(#271/#413) — 위 backend 의
-        # `CODEMIT_CONTEST_PRODUCT_ENABLED`/`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED` 와
-        # **같은 `.env.prod` 줄을 나눠 읽는다**(compose.staging.yaml 의 같은 자리와 같다).
-        # 빌드 인자라 값을 바꾸면 이미지를 다시 굽어야 반영된다.
-        NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${CODEMIT_CONTEST_PRODUCT_ENABLED:-true}
-        NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED: ${CODEMIT_PAID_CONTEST_PRODUCT_ENABLED:-false}
     restart: unless-stopped
     depends_on:
       db:
@@ -590,11 +558,24 @@ services:
       backend:
         condition: service_started
     environment:
-      # 서버(Node)에서 난 오류도 같은 프로젝트로 보낸다 — 빌드 인자와 **같은 줄을
-      # 나눠 읽는다**(값이 갈리면 브라우저와 서버가 다른 곳에 보고한다).
-      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
-      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
-      NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # 공개 설정(#711, ADR-0062) — 서버가 읽고 루트 레이아웃이 브라우저로 넘긴다
+      # (`frontend/lib/public-config.ts`). 비밀을 `CODEMIT_PUBLIC_*` 이름으로 넣지 않는다.
+      # 오류 수집(GlitchTip) — 앱마다 다른 프로젝트(DSN). release 는 deploy.sh 가 export 하는 배포 커밋이다.
+      CODEMIT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
+      CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: production
+      CODEMIT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # 포트원 본인확인 브라우저 SDK — 백엔드가 서버-투-서버 조회에 쓰는 것과 같은 줄을 나눠 읽는다.
+      CODEMIT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
+      CODEMIT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
+      # 토스 결제창 브라우저 SDK의 클라이언트 키(#112·#115) — 비면 compose 가 여기서 거부하고,
+      # 그래도 빈 값으로 뜨면 instrumentation.ts 의 부팅 가드가 컨테이너를 죽인다.
+      CODEMIT_PUBLIC_TOSS_CLIENT_KEY: ${TOSS_LIVE_CLIENT_KEY:?토스 결제창 브라우저 SDK 클라이언트 키를 .env.prod 의 TOSS_LIVE_CLIENT_KEY 에 설정하라}
+      # 약관·방침의 문의 주소(개인정보 보호법 제30조 제1항의 필수 기재사항, #472 후속).
+      CODEMIT_PUBLIC_SUPPORT_EMAIL: ${SUPPORT_EMAIL:?방침에 싣는 문의 주소를 .env.prod 의 SUPPORT_EMAIL 에 설정하라}
+      # 공모전 제품 스위치(#271/#413) — 백엔드의 CODEMIT_CONTEST_PRODUCT_ENABLED 등과 같은 줄을 나눠
+      # 읽는다(둘이 어긋나면 링크는 보이는데 API 가 404 다). ADR-0048: 공모전 켜짐·유료 꺼짐.
+      CODEMIT_PUBLIC_CONTEST_PRODUCT_ENABLED: ${CODEMIT_CONTEST_PRODUCT_ENABLED:-true}
+      CODEMIT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED: ${CODEMIT_PAID_CONTEST_PRODUCT_ENABLED:-false}
       # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
       # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
@@ -646,17 +627,11 @@ services:
   # 수준의 방어다.
   operator:
     logging: *default-logging
-    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-operator:${CODEMIT_IMAGE_TAG:-local}-prod
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-operator:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
       dockerfile: docker/operator.Dockerfile
       target: runner
-      args:
-        # 오류 수집(GlitchTip, 2026-09-16) — 앱마다 다른 프로젝트(DSN)를 쓴다.
-        # `NEXT_PUBLIC_*` 이라 브라우저 번들에 굳으므로 DSN 을 바꾸면 다시 굽는다.
-        NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_OPERATOR:-}
-        NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
-        NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     restart: unless-stopped
     depends_on:
       db:
@@ -666,11 +641,12 @@ services:
       backend:
         condition: service_started
     environment:
-      # 서버(Node)에서 난 오류도 같은 프로젝트로 보낸다 — 빌드 인자와 **같은 줄을
-      # 나눠 읽는다**(값이 갈리면 브라우저와 서버가 다른 곳에 보고한다).
-      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_OPERATOR:-}
-      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
-      NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # 공개 설정(#711, ADR-0062) — 서버가 읽고 루트 레이아웃이 브라우저로 넘긴다
+      # (`operator/lib/public-config.ts`). 비밀을 `CODEMIT_PUBLIC_*` 이름으로 넣지 않는다.
+      # 오류 수집(GlitchTip) — 앱마다 다른 프로젝트(DSN). release 는 deploy.sh 가 export 하는 배포 커밋이다.
+      CODEMIT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_OPERATOR:-}
+      CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: production
+      CODEMIT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
       CODEMIT_DEPLOYMENT_TARGET: production
       CODEMIT_API_BASE_URL: http://backend:8000
       # backend의 OPERATOR_WEB_ORIGIN(위 x-backend-env)과 같은 변수, 같은 값 —
@@ -688,17 +664,11 @@ services:
   # 따른다(classroom/instrumentation.ts).
   classroom:
     logging: *default-logging
-    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-classroom:${CODEMIT_IMAGE_TAG:-local}-prod
+    image: ${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}/codemit-classroom:${CODEMIT_IMAGE_TAG:-local}-arm64
     build:
       context: ..
       dockerfile: docker/classroom.Dockerfile
       target: runner
-      args:
-        # 오류 수집(GlitchTip, 2026-09-16) — 앱마다 다른 프로젝트(DSN)를 쓴다.
-        # `NEXT_PUBLIC_*` 이라 브라우저 번들에 굳으므로 DSN 을 바꾸면 다시 굽는다.
-        NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_CLASSROOM:-}
-        NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
-        NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
     restart: unless-stopped
     # **열 수 있는 파일 개수를 올린다**(2026-09-18, 이벤트 서비스와 같은 이유).
     # 강의실 실시간 신호는 이 앱이 중계하므로 스트림 하나가 브라우저 쪽 소켓 1 +
@@ -718,11 +688,12 @@ services:
       events:
         condition: service_started
     environment:
-      # 서버(Node)에서 난 오류도 같은 프로젝트로 보낸다 — 빌드 인자와 **같은 줄을
-      # 나눠 읽는다**(값이 갈리면 브라우저와 서버가 다른 곳에 보고한다).
-      NEXT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_CLASSROOM:-}
-      NEXT_PUBLIC_SENTRY_ENVIRONMENT: production
-      NEXT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # 공개 설정(#711, ADR-0062) — 서버가 읽고 루트 레이아웃이 브라우저로 넘긴다
+      # (`classroom/lib/public-config.ts`). 비밀을 `CODEMIT_PUBLIC_*` 이름으로 넣지 않는다.
+      # 오류 수집(GlitchTip) — 앱마다 다른 프로젝트(DSN). release 는 deploy.sh 가 export 하는 배포 커밋이다.
+      CODEMIT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_CLASSROOM:-}
+      CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: production
+      CODEMIT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
       CODEMIT_DEPLOYMENT_TARGET: production
       CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #380) — compose.staging.yaml의

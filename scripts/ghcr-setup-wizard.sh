@@ -188,6 +188,7 @@ finish() {
 # ghcr 이미지 배포로 옮기기 전에 사람이 해야 하는 일(2026-09-17 설계).
 # 이 개발 머신(sub2)에서 돌린다 — gh CLI 와 `ssh sub`, sub 를 거친 `ssh oracle` 을 쓴다.
 # 2026-10-15(#705) 이미지가 GitHub Actions 에서 Jenkins 로 옮겨 mac 러너·저장소 변수·Jenkins API 토큰 단계를 뺐다.
+# 2026-10-15(#711) 앱의 공개 값이 실행 env 로 옮겨 codemit-images-env 자격증명 단계를 뺐다 — 값은 서버의 .env.<target> 에만 있다.
 
 cd "$(dirname "$0")/.."   # set_secret 이 저장소를 현재 디렉터리에서 고른다
 REPO="sandcorporation/laurio"
@@ -203,7 +204,7 @@ _ssh_noise='post-quantum|store now|upgraded'
 on_sub()    { ssh sub 'bash -s' 2> >(grep -vE "$_ssh_noise" >&2); }
 on_oracle() { ssh sub 'timeout 120 ssh -o BatchMode=yes oracle "bash -s"' 2> >(grep -vE "$_ssh_noise" >&2); }
 
-TOTAL_STAGES=5
+TOTAL_STAGES=4
 
 banner "Codemit — ghcr 이미지 배포 준비 (사람 작업)"
 
@@ -266,43 +267,6 @@ step "Kind: Secret text · ID: ghcr-push-token · Secret: 방금 복사한 토�
 [[ -n "${JENKINS_UI_URL:-$(_existing JENKINS_UI_URL)}" ]] && open_url "$(_existing JENKINS_UI_URL)/manage/credentials/store/system/domain/_/newCredentials"
 note "토큰은 이 위저드가 저장하지 않습니다 — Jenkins 에만 둡니다."
 pause "만들었으면 Enter"
-
-# ── 5 ─────────────────────────────────────────────────────────────────────
-stage "앱 이미지에 굳는 공개 값 → Jenkins 자격증명 codemit-images-env"
-say "세 Next 앱은 빌드할 때 NEXT_PUBLIC_* 값을 이미지에 굽습니다. 이미지 잡이 구우려면 그 값이 Jenkins 에 있어야 합니다."
-say "두 서버 env 에서 해당 줄만 읽어 STAGING_* / PROD_* 를 KEY=value 줄로 한 파일에 모읍니다(값은 화면에 찍지 않습니다)."
-read_keys='for k in PORT_ONE_V2_STORE_ID KG_INICIS_CHANNEL_KEY TOSS_SANDBOX_CLIENT_KEY TOSS_LIVE_CLIENT_KEY SUPPORT_EMAIL SENTRY_DSN_BACKEND SENTRY_DSN_FRONTEND SENTRY_DSN_OPERATOR SENTRY_DSN_CLASSROOM CODEMIT_CONTEST_PRODUCT_ENABLED CODEMIT_PAID_CONTEST_PRODUCT_ENABLED; do sudo grep -E "^${k}=" "$F" | tail -n1; done'
-STAGING_LINES=$( { printf 'F=%q\n' "$STAGING_ENV"; echo "$read_keys"; } | on_sub)
-PROD_LINES=$( { printf 'F=%q\n' "$PROD_ENV"; echo "$read_keys"; } | on_oracle)
-IMAGES_ENV_FILE="${HOME}/.config/codemit-images-env"
-env_lines() {  # PREFIX LINES TOSS_SOURCE_KEY — images.sh 가 읽는 이름으로
-  local prefix="$1" lines="$2" toss_key="$3" key value
-  local -A seen=()
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    key="${line%%=*}"; value="${line#*=}"; value="${value%\"}"; value="${value#\"}"
-    case "$key" in
-      TOSS_SANDBOX_CLIENT_KEY|TOSS_LIVE_CLIENT_KEY) [[ "$key" == "$toss_key" ]] || continue; key=TOSS_CLIENT_KEY ;;
-    esac
-    seen[$key]=1
-    printf '%s_%s=%s\n' "$prefix" "$key" "$value"
-  done <<< "$lines"
-  # 파일에 없는 스위치는 compose 기본값과 같게 둔다(공모전 켜짐·유료 꺼짐). 빈 DSN 은 오류 수집을 끈다.
-  [[ -n "${seen[CODEMIT_CONTEST_PRODUCT_ENABLED]:-}" ]] || printf '%s_CODEMIT_CONTEST_PRODUCT_ENABLED=true\n' "$prefix"
-  [[ -n "${seen[CODEMIT_PAID_CONTEST_PRODUCT_ENABLED]:-}" ]] || printf '%s_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=false\n' "$prefix"
-  for k in SENTRY_DSN_BACKEND SENTRY_DSN_FRONTEND SENTRY_DSN_OPERATOR SENTRY_DSN_CLASSROOM SENTRY_DSN_SEARCH SENTRY_DSN_PGBOUNCER; do
-    [[ -n "${seen[$k]:-}" ]] || printf '%s_%s=\n' "$prefix" "$k"
-  done
-  for required in PORT_ONE_V2_STORE_ID KG_INICIS_CHANNEL_KEY TOSS_CLIENT_KEY SUPPORT_EMAIL; do
-    [[ -n "${seen[$required]:-}" ]] || { warn "${prefix}: ${required} 가 env 에 없습니다" >&2; SKIPPED+=("${prefix}_${required}"); }
-  done
-}
-( umask 077; { env_lines STAGING "$STAGING_LINES" TOSS_SANDBOX_CLIENT_KEY; env_lines PROD "$PROD_LINES" TOSS_LIVE_CLIENT_KEY; } > "$IMAGES_ENV_FILE" )
-printf '  %s✓%s %s (%s 줄, 권한 600)\n' "$GREEN" "$RESET" "$IMAGES_ENV_FILE" "$(wc -l < "$IMAGES_ENV_FILE" | tr -d ' ')"
-step "Jenkins → Credentials → (global) → Add Credentials"
-step "Kind: Secret file · ID: codemit-images-env · File: 위 파일 (이미 있으면 그 자격증명의 Update 에서 파일만 바꿉니다)"
-note "값을 바꾸면 그 앱의 이미지 문맥 해시가 바뀌어 다음 main 커밋에서 다시 굽습니다(바로 반영하려면 laurio 잡을 손으로 한 번)."
-pause "올렸으면 Enter — 그 뒤 로컬 파일은 지워도 됩니다"
 
 finish
 note "위저드 기본값 파일: $ENV_FILE (비밀값 포함, 권한 600) — 다 끝나면 지워도 됩니다."

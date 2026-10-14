@@ -2,18 +2,18 @@
 """배포 이미지 하나의 「빌드 문맥 해시」 — 같으면 같은 이미지라 다시 굽지 않는다(#705).
 
     image_context.py services                         서비스 이름(한 줄에 하나)
-    image_context.py field <서비스> <dockerfile|target|dsn|app>
+    image_context.py field <서비스> <dockerfile|target>
     image_context.py paths <서비스>                   해시에 드는 경로
-    image_context.py release <서비스>                 그 경로를 마지막으로 바꾼 커밋(Sentry release)
     image_context.py hash <서비스> <플랫폼> [빌드 인자 파일]
     image_context.py check                            Dockerfile 의 COPY 원본이 전부 문맥에 있는가
 
-`scripts/ci/images.sh` 가 서비스마다 이 해시를 내고, 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면
+`scripts/ci/images.sh` 가 서비스마다 이 해시를 내고, 태그 `ctx-<해시>-<arch>` 가 ghcr 에 있으면
 굽지 않고 커밋 태그만 그 매니페스트에 더한다. 해시에 드는 것: 아래 표의 경로마다 `git rev-parse
 HEAD:<경로>` 대신 그 경로 아래 파일 중 **`.dockerignore` 가 문맥에서 빼지 않는 것**의 blob 목록(#714 —
 e2e 스펙·단위 시험만 고친 커밋은 해시가 그대로다), Dockerfile, 루트 `.dockerignore`와 (있으면)
 `docker/<서비스>.Dockerfile.dockerignore`(무엇이 문맥에 드는지를 바꾼다 — BuildKit 처럼 그것이 있으면
-루트 것 대신 그 규칙을 적용한다), 빌드 대상·플랫폼, 빌드 인자 값(NEXT_PUBLIC 값이 바뀌면 다시 굽는다).
+루트 것 대신 그 규칙을 적용한다), 빌드 대상·플랫폼, (주면) 빌드 인자 값. 세 Next 앱도 지금은 빌드 인자가 없다 — 공개 값은 실행
+env 다(#711, ADR-0062).
 
 **가장 위험한 자리는 표가 Dockerfile 보다 좁은 것이다** — Dockerfile 이 읽는 파일이 표에 없으면 그
 파일을 고친 커밋이 옛 이미지로 배포된다. 그래서 `check` 와 `scripts/test_image_context.py` 가
@@ -46,8 +46,6 @@ class Service:
     name: str
     paths: tuple[str, ...]
     target: str = ""
-    app: bool = False  # Next 앱 — NEXT_PUBLIC_* 가 굳어 환경(staging/prod)마다 따로 굽는다
-    dsn: str = ""  # Sentry DSN 변수의 꼬리(STAGING_SENTRY_DSN_<dsn>)
 
     @property
     def dockerfile(self) -> str:
@@ -57,12 +55,12 @@ class Service:
 SERVICES: dict[str, Service] = {
     s.name: s
     for s in (
-        Service("backend", ("backend",), dsn="BACKEND"),
-        Service("frontend", ("frontend", *NODE_WORKSPACE), target="runner", app=True, dsn="FRONTEND"),
-        Service("operator", ("operator", *NODE_WORKSPACE), target="runner", app=True, dsn="OPERATOR"),
-        Service("classroom", ("classroom", *NODE_WORKSPACE), target="runner", app=True, dsn="CLASSROOM"),
-        Service("search", (), dsn="SEARCH"),
-        Service("pgbouncer", ("docker/pgbouncer",), dsn="PGBOUNCER"),
+        Service("backend", ("backend",)),
+        Service("frontend", ("frontend", *NODE_WORKSPACE), target="runner"),
+        Service("operator", ("operator", *NODE_WORKSPACE), target="runner"),
+        Service("classroom", ("classroom", *NODE_WORKSPACE), target="runner"),
+        Service("search", ()),
+        Service("pgbouncer", ("docker/pgbouncer",)),
     )
 }
 
@@ -308,25 +306,6 @@ def service_objects(service: Service, rev: str = "HEAD") -> dict[str, str]:
     return objects
 
 
-def release(service: Service) -> str:
-    """그 이미지의 문맥을 마지막으로 바꾼 커밋 — 얕은 클론이면 틀린 값이 나오므로 멈춘다.
-
-    경로를 건드린 커밋 가운데 `.dockerignore` 가 빼는 파일만 고친 것은 넘긴다 — 이 값이 빌드 인자
-    (`NEXT_PUBLIC_SENTRY_RELEASE`)로 해시에 들어가므로, 넘기지 않으면 시험만 고친 커밋이 다시 굽는다(#714).
-    """
-    if _git("rev-parse", "--is-shallow-repository") == "true":
-        raise SystemExit("얕은 클론이다 — release(경로별 마지막 커밋)를 셀 수 없다. 전체 이력으로 체크아웃한다")
-    commits = _git("log", "--format=%H", "--", *context_paths(service)).split()
-    for commit in commits:
-        try:
-            before = service_objects(service, f"{commit}^")
-        except (SystemExit, subprocess.CalledProcessError):
-            return commit  # 부모에 표의 경로가 없다 — 이 커밋이 문맥을 처음 만들었다
-        if service_objects(service, commit) != before:
-            return commit
-    return commits[-1] if commits else ""
-
-
 def _service(name: str) -> Service:
     if name not in SERVICES:
         raise SystemExit(f"모르는 서비스: {name} (있는 것: {' '.join(SERVICES)})")
@@ -346,8 +325,6 @@ def main(argv: list[str]) -> int:
         print(("true" if value else "false") if isinstance(value, bool) else value)
     elif cmd == "paths":
         print("\n".join(context_paths(_service(rest[0]))))
-    elif cmd == "release":
-        print(release(_service(rest[0])))
     elif cmd == "hash":
         svc = _service(rest[0])
         platform = rest[1]
