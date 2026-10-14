@@ -182,15 +182,13 @@ function ClassDetail() {
           ) : tab === "participants" ? (
             <ParticipantsTab classId={classId} onChanged={reloadClass} />
           ) : (
-            <div className="flex flex-col gap-4 border border-t-0 border-rule bg-surface p-4">
-              {/* 역할과 대기 요청이 바뀌면(넘겨받기·요청·취소) 강사 목록을 처음부터 다시 읽는다. */}
-              <InstructorsSection
-                key={`${classroom.role}-${classroom.pending_ownership_transfer?.id ?? "none"}`}
-                classId={classId}
-                pendingTransfer={classroom.pending_ownership_transfer}
-                onTransferChanged={reloadClass}
-              />
-            </div>
+            // 역할과 대기 요청이 바뀌면(넘겨받기·요청·취소) 강사 목록을 처음부터 다시 읽는다.
+            <InstructorsSection
+              key={`${classroom.role}-${classroom.pending_ownership_transfer?.id ?? "none"}`}
+              classId={classId}
+              pendingTransfer={classroom.pending_ownership_transfer}
+              onTransferChanged={reloadClass}
+            />
           )}
         </div>
       </div>
