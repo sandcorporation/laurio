@@ -26,7 +26,7 @@ push 하면 옛 빌드를 끊는다.
 | 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` |
 | | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨·이미지를 걷고 빌드 캐시를 30GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
 | 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
-| 붉으면 | sub | macos 가 「인프라 고장」으로 판정했고 sub 검사가 초록이면 **같은 묶음을 한 번 더**(아래 「Docker VM 정지는 인프라 고장이다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
+| 붉으면 | sub | macos 가 「인프라 고장」으로 판정했고 sub 검사가 초록이면 **같은 묶음을 한 번 더**(아래 「Docker VM 정지로 본 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
 - **왜 묶나**(2026-10-03). PR 마다 macos e2e 를 따로 돌리면 이미지 셋 굽기 포함 약 8분이 노드
   실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
@@ -76,10 +76,17 @@ push 하면 옛 빌드를 끊는다.
   빌 뿐 e2e 를 붉게 만들지 않는다. ⑤ `test-results/e2e-verdict.json` — 아래 인프라 판정. 로컬 `scripts/test.sh e2e` 는 같은 trace 를 `frontend/test-results/`(뒤 패스는
   `frontend/test-results/exclusive/`)에 두고, 스택 로그는 `CODEMIT_E2E_KEEP=1` 로 남긴 스택에서
   `docker compose -p <워크트리>-e2e … logs --timestamps <서비스>` 로 본다.
-- **Docker VM 정지는 인프라 고장이다 — 묶음을 한 번 더 돈다**(#716). 열차 #1840·#1890 에서 강의실 e2e
+- **Docker VM 정지로 본 틈은 묶음을 한 번 더 돈다**(#716). 열차 #1840·#1890 에서 강의실 e2e
   넷이 한꺼번에 3초를 넘었다. #1890 의 산출물로 가린 모양은 **backend 접근 로그에 3.9초 동안 요청 0건**
   (앞뒤는 초당 50~146건, 틈 앞뒤 요청은 8~25ms)이고, 시험 넷의 마지막 요청이 서로 다른 두 Next 컨테이너에서
-  같은 시각에 미완료였다 — 코드가 아니라 Docker VM(또는 포트 전달) 전체가 멈췄다. macos 단계가 e2e 뒤에
+  같은 시각에 미완료였다 — 그때는 코드가 아니라 Docker VM(또는 포트 전달) 전체가 멈췄다고 읽었다.
+  **그 읽기는 틀렸다(#723).** #1902·#1906·#1907 의 같은 모양(틈 3.98~4.01초)을 로컬에서 재현해 backend
+  망에서 패킷을 잡으니, 강의실 컨테이너가 맺은 연결 다섯이 **요청을 한 줄도 보내지 않고 정확히 4.00초
+  뒤 FIN** 했고, 그동안 gunicorn sync 워커 넷이 전부 그 연결에서 요청 머리를 기다리며 멈춰 있었다.
+  강의실 BFF 가 브라우저의 끊김을 backend fetch 에 바로 넘겨, Node fetch(undici)가 끊긴 요청 자리에
+  맺어 둔 빈 연결을 keep-alive 기본값 4초 동안 쥔 것이다(`packages/bff-shared/src/forward.ts`, 시험이
+  끝나 브라우저 맥락이 닫힐 때마다 생긴다). 그러니 #1906 을 인프라로 분류한 것은 **틀린 판정**이었고,
+  「backend 요청 0건」은 코드 밖의 증거가 아니다 — 워커가 모두 붙잡혀도 같은 모양이다. macos 단계가 e2e 뒤에
   `scripts/ci/e2e_stall.py` 로 판정한다: 실패가 하나 이상이고 전부 「Test timeout」이며, 시험마다 그 마감
   (trace 의 시작 + 한도)이 backend 접근 로그의 **3초 이상 요청 0건 틈** 안에 있다. celery-broker 와 sub
   검사까지 초록이면 `train.py fail --verdict` 가 PR 에 `failure` 를 주지 않고 같은 묶음을 다시 부르며
