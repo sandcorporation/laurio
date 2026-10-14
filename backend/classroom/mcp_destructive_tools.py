@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from collections import Counter
 
+from django.db.models import Count
+
 from .api import (
     _reject_if_banned_name,
     assert_member_expellable,
@@ -33,7 +35,7 @@ from .api import (
     remove_problem,
 )
 from .instructor_scope import class_scope, problem_scope
-from .instructors import instructor_user_ids, is_instructor
+from .instructors import active_participant_q, instructor_user_ids, is_instructor, is_instructor_q
 from .mcp_confirmation import CONFIRMATION_ARGUMENT, CONFIRMATION_SCHEMA, needs_confirmation, presented, redeem
 from .mcp_problem_tools import _check_arguments, _id, _object, _parse
 from .mcp_tool import Preview, Tool, WriteResult
@@ -161,23 +163,26 @@ def _delete_class(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult
     ensure_class_deletable(class_obj)
 
     problems = list(class_obj.problems.order_by("order", "id"))
-    members = list(class_obj.members.all())
-    instructor_ids = instructor_user_ids(class_obj)
-    participants = [m for m in members if m.user_id not in instructor_ids]
-    expelled = sum(1 for m in participants if m.expelled_at is not None)
+    # 참여자 수는 화면의 `member_count` 와 같은 규칙(`active_participant_q`, #671)으로 센다 — 강사의 가입은
+    # 빼고, 내보낸 사람은 가입이 함께 사라지므로 따로 센다.
+    counts = class_obj.members.exclude(is_instructor_q(user="user_id", classroom="classroom")).aggregate(
+        joined=Count("id"), active=Count("id", filter=active_participant_q(classroom="classroom"))
+    )
+    joined, active = counts["joined"], counts["active"]
+    expelled = joined - active
     template_kept = ClassTemplate.objects.filter(source_class=class_obj, taken_down_at__isnull=True).exists()
     preview = {
         "class": {"id": class_obj.id, "name": class_obj.name, "archived": class_obj.archived_at is not None},
         "problem_count": len(problems),
         "problem_counts": _status_counts(problems),
         "problems": [{"id": p.id, "title": p.title, "status": p.status} for p in problems],
-        "participant_count": len(participants) - expelled,
+        "participant_count": active,
         "expelled_participant_count": expelled,
         "submission_count": 0,
         "published_template_kept": template_kept,
         "summary": (
             f"클래스 「{class_obj.name}」와 그 안의 문제 {len(problems)}개(체크리스트 포함), "
-            f"참여자 {len(participants)}명의 가입"
+            f"참여자 {joined}명의 가입"
             + (f"(내보낸 {expelled}명 포함)" if expelled else "")
             + "이 사라지고 가입 링크도 끊긴다. 제출은 없다. "
             + ("이 클래스에서 공개한 템플릿은 사본이라 그대로 남는다. " if template_kept else "")
@@ -191,7 +196,7 @@ def _delete_class(grant: ConnectedApp, arguments: dict) -> Preview | WriteResult
         return WriteResult(
             structured={"status": "done", "deleted_class": {"id": class_id, "name": name}},
             class_id=class_id,
-            summary=f"「{name}」 삭제 — 문제 {len(problems)}개, 참여자 {len(participants)}명",
+            summary=f"「{name}」 삭제 — 문제 {len(problems)}개, 참여자 {joined}명",
         )
 
     return _two_steps(grant, "delete_class", arguments, preview, execute)

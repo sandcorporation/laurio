@@ -58,6 +58,7 @@ test("참여자 문제 목록이 진행 한 줄과 한 줄 행으로 보인다",
   await page.goto(`/classes/${classId}/problems/mine`);
 
   await expect(page.getByTestId("my-problems-progress-count")).toHaveText("0/2 통과");
+  await expect(page.getByText(/^목록 테스트 \d+ · 강사$/)).toBeVisible();
   await expect(page.getByTestId("my-problems-progress-rest")).toHaveText("채점 대기 1 · 미제출 1");
   await expect(page.getByTestId(`my-problem-row-${waiting}-status`)).toHaveText("채점 대기");
   await expect(page.getByTestId(`my-problem-row-${waiting}-attempts`)).toContainText("시도 1회 · 마지막");

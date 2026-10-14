@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 from django.conf import settings
 
 from core.adapters import is_fake_adapter_binding
+from core.clock import Clock
 from core.crypto import decrypt
 from core.llm_scoring import OPENAI_API_BASE_URL, AsyncTransport, Transport
 from core.safe_outbound import OutboundReason, OutboundRefused, SafeOutbound
@@ -112,6 +113,20 @@ def connection_for(class_obj: Class) -> ScoringConnection | None:
         base_url=OPENAI_KEY_BASE_URL,
         _encrypted_auth=class_obj.openai_api_key_encrypted.strip(),
     )
+
+
+def mark_verified(class_id: int, connection: ScoringConnection) -> None:
+    """이 연결이 방금 실제로 닿았다(#671) — 클래스의 확인 시각(`Class.scoring_connection_verified_at`)을
+    지금으로 민다. 채점 성공과 호환 서버 모델 시험 호출이 부른다. 벤더를 기다리는 사이 연결이 바뀌었으면
+    (다른 키·다른 서버로 다시 저장, 소유권 이전) 아무것도 하지 않는다 — 옛 연결의 성공은 새 연결의
+    확인이 아니다. 암호문은 저장할 때마다 새로 만들어지므로 같은 연결인지를 그것으로 가른다."""
+
+    same_connection = Class.objects.filter(
+        pk=class_id, scoring_connection_kind=connection.kind, openai_api_key_encrypted=connection._encrypted_auth
+    )
+    if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+        same_connection = same_connection.filter(scoring_server_url=connection.base_url)
+    same_connection.update(scoring_connection_verified_at=Clock.now())
 
 
 def openai_key_connection(api_key: str) -> ScoringConnection:

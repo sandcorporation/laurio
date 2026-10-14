@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 
-from .instructors import classes_taught_by, is_instructor_q
+from .instructors import active_participant_q, classes_taught_by
 
 from .models import (
     ChecklistItem,
@@ -390,9 +390,10 @@ def instructor_classes(instructor_id: int):
     센다(CONTEXT.md 「달성률」의 분모와 같은 사람들). 「본인이 강사인가」·「그 가입이
     강사의 것인가」는 `classroom.instructors` 가 답한다(#559)."""
 
-    active_members = Q(members__expelled_at__isnull=True) & ~is_instructor_q(user="members__user_id")
     return classes_taught_by(instructor_id).annotate(
-        participant_count=Count("members", filter=active_members, distinct=True),
+        participant_count=Count(
+            "members", filter=active_participant_q(member="members", classroom=""), distinct=True
+        ),
         open_problem_count=Count(
             "problems", filter=Q(problems__status=Problem.Status.OPEN), distinct=True
         ),

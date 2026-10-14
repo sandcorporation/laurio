@@ -135,6 +135,7 @@ export default function ProblemSubmitPage() {
     problem,
     submissions,
     submit_blocked_reason: submitBlockedReason,
+    max_source_asset_bytes: maxSourceAssetBytes,
     instructor_problem_status: instructorProblemStatus,
     viewing_as_instructor: viewingAsInstructor,
   } = state.data;
@@ -227,6 +228,7 @@ export default function ProblemSubmitPage() {
         viewingAsInstructor={viewingAsInstructor}
         instructorProblemStatus={instructorProblemStatus}
         submitBlockedReason={submitBlockedReason}
+        maxSourceAssetBytes={maxSourceAssetBytes}
         repositoryUrl={repositoryUrl}
         onRepositoryUrlChange={setRepositoryUrl}
         onRepositorySubmit={handleRepositorySubmit}

@@ -56,6 +56,8 @@ export type ProblemListItem = {
 export type MyProblems = {
   // 화면 눈썹이 말할 클래스 이름(#372 후속).
   class_name: string;
+  // 그 뒤에 붙는 강사 이름들(#671) — 가입 미리보기와 같은 규칙(소유자 먼저, 빈 이름은 빠진다).
+  instructor_display_names: string[];
   member_display_name: string;
   member_expelled: boolean;
   archived: boolean;
@@ -140,6 +142,8 @@ export type SubmitBlockedReason = "archived" | "expelled" | "hidden" | "viewing_
 export type ProblemSubmissions = {
   // 화면 눈썹이 말할 클래스 이름(#372 후속).
   class_name: string;
+  // 소스 zip 업로드 상한(바이트, #671) — 운영자 정책 값 그대로.
+  max_source_asset_bytes: number;
   problem: ProblemMine;
   submissions: ClassroomSubmissionRow[];
   submit_blocked_reason: SubmitBlockedReason;

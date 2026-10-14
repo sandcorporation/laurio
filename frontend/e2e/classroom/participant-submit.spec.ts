@@ -57,6 +57,7 @@ test("형식을 고르고 저장소를 내면 내 시도에 줄이 생긴다", a
   const side = page.getByTestId("my-problem-side");
   await side.getByTestId("submission-format-option-source").click();
   await expect(side.getByTestId("source-file-input")).toBeAttached();
+  await expect(side.getByTestId("source-file-max-size")).toHaveText("최대 50MB");
   await side.getByTestId("submission-format-change").click();
   await side.getByTestId("submission-format-option-repository").click();
   await side.getByTestId("repository-url-input").fill("https://github.com/octocat/e2e-submit");

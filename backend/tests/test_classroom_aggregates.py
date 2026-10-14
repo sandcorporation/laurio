@@ -103,6 +103,34 @@ def test_one_active_member_rule_for_a_single_class_and_for_many(client, db):
         assert (row["member_count"], denominators, preview["member_count"]) == (expected, {expected}, expected)
 
 
+
+def test_connected_app_counts_use_the_same_active_member_rule(client, db):
+    """연결된 앱의 참여자 수(`list_my_classes`·`delete_class` 미리보기)도 같은 규칙에서 나온다
+    (#671) — 강사 본인·공동 강사의 가입과 내보낸 사람을 빼고, 내보낸 사람은 미리보기가 따로 센다."""
+
+    from tests.test_classroom_connected_apps import _connect, _rpc
+
+    owner, class_id, _problem, _a, _b = _class_with_two_learners(client)
+    helper = login(client, "helper")
+    join_class(client, helper["access"], class_id, instructor_access=owner["access"], display_name="조교였던 학생")
+    add_co_instructor(client, owner["access"], class_id, helper["access"], display_name="조교")
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    gone = login(client, "gone")
+    join_class(client, gone["access"], class_id, instructor_access=owner["access"], display_name="떠난 학생")
+    _expel(client, owner, class_id, "떠난 학생")
+    token = _connect(client, owner["access"])["access_token"]
+
+    def tool(name: str, arguments: dict) -> dict:
+        result = _rpc(client, token, "tools/call", {"name": name, "arguments": arguments}).json()["result"]
+        assert result["isError"] is False, result
+        return result["structuredContent"]
+
+    listed = next(c for c in tool("list_my_classes", {})["classes"] if c["id"] == class_id)
+    preview = tool("delete_class", {"class_id": class_id})["preview"]
+
+    assert listed["participant_count"] == _row(client, owner["access"], class_id)["member_count"] == 2
+    assert (preview["participant_count"], preview["expelled_participant_count"]) == (2, 1)
+
 def test_class_row_problem_count_includes_drafts_and_the_average_is_over_open_problems(client, db, monkeypatch):
     owner, class_id, problem, a, _b = _class_with_two_learners(client)
     create_open_problem(client, owner["access"], class_id, title="초안", open=False)

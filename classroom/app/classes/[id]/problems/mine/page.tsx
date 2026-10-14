@@ -349,6 +349,7 @@ export default function MyProblemsPage() {
 
   const {
     className,
+    instructorNames,
     problems,
     hiddenProblems,
     memberDisplayName,
@@ -359,7 +360,11 @@ export default function MyProblemsPage() {
   return (
     <PageShell>
       <PageHeader
-        eyebrow={className}
+        eyebrow={
+          instructorNames.length > 0
+            ? `${className} · ${instructorNames.join(", ")}`
+            : className
+        }
         title="문제"
         actions={
           // 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다(#372 AC) —

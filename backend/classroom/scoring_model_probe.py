@@ -118,18 +118,21 @@ def _probe_input() -> ScoringInput:
 
 def ensure_model_keeps_scoring_format(
     connection: ScoringConnection | None, model_id: str, *, reasoning_effort: str | None
-) -> None:
+) -> bool:
     """이 연결로 이 모델이 채점 판정 하나를 형식대로 돌려주는지 확인한다 — 못 하면
     `ScoringModelProbeFailed`(이유별 화면 문장). 호환 서버가 아니면 아무것도 하지 않는다.
 
     `reasoning_effort` 는 채점 때 실릴 값 그대로다(추론 모델이면 강도, 아니면 `None`) — 추론 모델
-    요청은 `temperature` 대신 `reasoning_effort` 를 실어 서버가 받는 모양이 다르다."""
+    요청은 `temperature` 대신 `reasoning_effort` 를 실어 서버가 받는 모양이 다르다.
+
+    돌려주는 값은 「이번에 실제로 서버에 물어 통과했는가」다 — 연결 확인 시각(#671)을 그때만 민다.
+    호환 서버가 아니거나 캐시가 답했으면 거짓."""
 
     if connection is None or connection.kind != Class.ScoringConnectionKind.COMPATIBLE_SERVER:
-        return
+        return False
     key = _cache_key(connection, model_id, reasoning_effort)
     if cache.get(key):
-        return
+        return False
     if is_fake_adapter_binding(settings.CLASSROOM_SCORING_ADAPTER_MODE) and model_id in FAKE_FORMAT_FAILING_MODEL_IDS:
         raise ScoringModelProbeFailed(FORMAT_FAILED)
 
@@ -154,3 +157,4 @@ def ensure_model_keeps_scoring_format(
     if [v.requirement_id for v in output.verdicts] != [PROBE_REQUIREMENT_ID]:
         raise ScoringModelProbeFailed(FORMAT_FAILED)
     cache.set(key, True, timeout=_CACHE_TTL_SECONDS)
+    return True

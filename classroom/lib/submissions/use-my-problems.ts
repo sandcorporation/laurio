@@ -27,6 +27,8 @@ export type MyProblemsState =
       status: "ready";
       // 눈썹이 말할 클래스 이름(#372 후속).
       className: string;
+      // 그 뒤에 붙는 강사 이름들(#671) — 가입 미리보기와 같은 규칙. 다 비면 빈 배열.
+      instructorNames: string[];
       problems: ProblemListItem[];
       // 강사가 숨겼지만 이 참여자가 한 번이라도 낸 문제들(#406) — 목록
       // 아래 접힌 「숨겨진 문제」 섹션이 쓴다.
@@ -79,6 +81,7 @@ export function useMyProblems(classId: number) {
             : {
                 status: "ready",
                 className: queryState.data.class_name,
+                instructorNames: queryState.data.instructor_display_names,
                 problems: queryState.data.problems,
                 hiddenProblems: queryState.data.hidden_problems,
                 memberDisplayName: queryState.data.member_display_name,

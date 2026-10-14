@@ -243,7 +243,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
 | `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도·「추론 모델」 스위치(`default_model_is_reasoning`, 호환 서버만 뜻이 있다, #602)를 고친다(#402) — 소유자의 강사 이름 칸은 소유자만. 채점 상한 칸은 없다(#629, ADR-0060) — 응답의 `token_usage_total`·`token_usage_estimated` 가 누적 사용량이다. 호환 서버에서 모델이나 스위치가 바뀌면 시험 호출(`classroom.scoring_model_probe`)이 채점과 같은 `json_schema` 판정 하나를 받아 보고, 못 지키면 이유 문장의 422. 통과는 (연결, 모델, 추론 여부) 단위로 하루 캐시한다 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284). 채점 연결이 「OpenAI 키」가 되고 호환 서버 주소는 지워진다(#601) |
-| `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다 |
+| `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다. `ClassOut.scoring_connection_verified_at` 은 연결이 마지막으로 실제로 닿은 시각이다(#671) — 키 저장 때 벤더가 받았을 때·호환 서버 저장·호환 서버 모델 시험 호출 통과·채점 성공이 찍고, 벤더에 닿지 못한 키 저장과 소유권 이전이 지운다(벤더를 기다리는 사이 연결이 바뀌었으면 찍지 않는다). 강사 누구나 읽고, 연결된 앱의 `get_class` 에는 싣지 않는다 |
 | `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다). 호환 서버면 그 서버의 목록을 거르지 않고, 목록을 주지 않으면 `source="manual"` — 모델 이름을 직접 넣는다(#601) |
 | `GET /api/classroom/classes/{id}/scoring-cost[?problem_id=]` | 예상 채점 비용(#591) — 그 키로 쓸 수 있는 모델(추론 모델은 강도별)의 시도 1건·문제 하나·gpt-4.1-mini 대비 배율. 카탈로그 모델 전부를 카탈로그 순서로, 단가가 없는 것만 `priced=false`(#617). 기준은 그 문제의 지난 시도 평균 → 클래스 평균 → 소스 크기별(평균은 시도 `min_sample_count`=3건부터), 셈은 `classroom.scoring_cost`. 호환 서버 클래스는 `unit="tokens"` — 지금 설정 줄만, 원화·배율 없이 토큰(#604) |
 | `POST /api/classroom/classes/{id}/join-link/regenerate` | 가입 링크를 다시 뽑는다 — 이전 코드는 죽는다(#279) |
@@ -273,8 +273,8 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |
 | `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외) |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
-| `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·상태·시도 수·마지막 시도 시각(#288, #639) |
-| `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286) |
+| `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·상태·시도 수·마지막 시도 시각(#288, #639), 그리고 눈썹의 강사 이름들(`instructor_display_names`, 가입 미리보기와 같은 함수, #671) |
+| `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286), 소스 업로드 상한(`max_source_asset_bytes`, 운영자 정책 값 그대로, #671) |
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286) |
 | `POST .../problems/{id}/copy` | 문제를 자기 다른 클래스로 복사한다 — 체크리스트·채점 설정은 따라오고 제출물·시도·Score는 없다, 복사본은 언제나 초안이다(#292) |
 | `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·채점 연결(OpenAI 키·호환 서버 주소와 인증 값)은 따라오지 않는다(#293, #605) |
