@@ -10,10 +10,13 @@ backend 접근 로그의 **3.9초 동안 요청 0건**(앞뒤는 초당 50~146�
 
 그래서 판정은 셋이 모두 맞을 때만 「인프라 고장」이다.
   1. 실패한 시험이 하나 이상이고, `.last-run.json` 이 센 실패 수와 거둔 실패 폴더 수가 같다
-     (못 본 실패가 있으면 판정하지 않는다).
+     (못 본 실패가 있으면 판정하지 않는다). `status: failed` 인데 `failedTests` 가 빈 프로젝트
+     (「No tests found」, globalSetup 오류)가 하나라도 있으면 판정하지 않는다(#719).
   2. 실패가 전부 「Test timeout of …ms exceeded」다(단언 실패가 하나라도 있으면 코드 탓이다).
   3. 시험마다 그 마감 시각(trace 의 시작 wallTime + testTimeout)이 backend 접근 로그의
      **3초 이상 요청 0건 틈** 안에 있다. 틈은 앞뒤에 요청이 있는 것만 센다(로그 끝의 정적은 틈이 아니다).
+     testTimeout 은 설정의 한도라, 스펙이 `test.setTimeout`·`test.slow` 로 한도를 바꾸면 마감이 어긋난다
+     (지금 스펙은 쓰지 않는다 — #719).
 
 2 는 거르는 힘이 거의 없다 — 시험 한도(3초)가 `expect` 의 기본 기다림(5초)보다 짧아 흔한 화면 회귀도
 거의 다 timeout 으로 끝난다. 판정은 사실상 3 에 기댄다. 그런데 브라우저가 없는 요소를 기다리는 동안은
@@ -90,9 +93,14 @@ def classify(results: pathlib.Path) -> dict:
     expected = 0
     for last_run in playwright.glob("*/.last-run.json"):
         try:
-            expected += len(json.loads(last_run.read_text()).get("failedTests", []))
+            run = json.loads(last_run.read_text())
         except (OSError, ValueError):
             return {"infra": False, "reason": f"{last_run} 을 읽지 못했다"}
+        failed = run.get("failedTests", [])
+        if run.get("status") == "failed" and not failed:
+            # 「No tests found」·globalSetup 오류 — 시험 없이 깨진 프로젝트는 정지로 설명되지 않는다.
+            return {"infra": False, "reason": f"{last_run.parent.name} 은 실패한 시험 없이 실패했다"}
+        expected += len(failed)
     folders = sorted(p.parent for p in playwright.glob("*/*/error-context.md"))
     if not folders:
         return {"infra": False, "reason": "실패한 시험이 없다"}

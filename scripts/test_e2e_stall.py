@@ -119,6 +119,17 @@ class Classify(unittest.TestCase):
     def test_a_failure_without_its_folder_is_not_judged(self) -> None:
         self.assertFalse(e2e_stall.classify(results(self.root, last_run_failed=3))["infra"])
 
+    def test_a_project_that_failed_without_a_failed_test_is_not_judged(self) -> None:
+        # 「No tests found」·globalSetup 오류 — 프로젝트는 failed 인데 failedTests 가 빈다. 진짜 정지와
+        # 한 실행에서 겹쳐도 그 실패는 정지로 설명되지 않는다.
+        out = results(self.root)
+        broken = out / "playwright" / "operator"
+        broken.mkdir()
+        (broken / ".last-run.json").write_text(json.dumps({"status": "failed", "failedTests": []}))
+        verdict = e2e_stall.classify(out)
+        self.assertFalse(verdict["infra"], verdict)
+        self.assertIn("operator", verdict["reason"])
+
     def test_a_green_run_is_not_a_stall(self) -> None:
         self.assertFalse(e2e_stall.classify(results(self.root, tests=[]))["infra"])
 
