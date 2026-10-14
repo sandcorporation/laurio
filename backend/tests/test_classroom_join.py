@@ -67,7 +67,8 @@ def test_join_preview_shows_class_name_instructor_display_name_problem_count_and
     body = response.json()
     assert body["class_name"] == "웹 스터디"
     assert body["instructor_display_name"] == "김강사"
-    assert body["problem_count"] == 1
+    # 막 만든 문제는 초안이라 가입할 사람에게 보이지 않는다(#659).
+    assert body["open_problem_count"] == 0
     assert body["participant_count"] == 0
 
 

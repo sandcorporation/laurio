@@ -172,7 +172,7 @@ export default function JoinPage() {
             <span data-testid="join-preview-instructor">강사 {instructorNames.join(", ")}</span>
           ) : null}
           <span data-testid="join-preview-problem-count">
-            <Num className="font-semibold text-ink">{info.problem_count}</Num> 문제
+            <Num className="font-semibold text-ink">{info.open_problem_count}</Num> 문제
           </span>
           <span data-testid="join-preview-participant-count">
             <Num className="font-semibold text-ink">{info.participant_count}</Num> 참여자

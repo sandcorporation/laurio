@@ -19,6 +19,8 @@ from tests.classroom_scenarios import (
     force_real_scoring_adapter,
     get_class,
     join_class,
+    join_code,
+    join_preview,
     list_problems,
     list_taught_classes,
     login,
@@ -95,6 +97,38 @@ def test_class_row_problem_count_includes_drafts_and_the_average_is_over_open_pr
     assert row["problem_count"] == 3
     assert row["average_pass_rate"] == pytest.approx(0.25)
     assert second.id
+
+
+def test_join_preview_counts_match_the_class_rows(client, db):
+    """가입 미리보기의 두 수치는 내 클래스 행과 같은 기준이다(#659) — 참여자 수는 가르치는
+    행의 `member_count`(강사 전원·내보낸 사람 제외), 문제 수는 가입한 사람이 보게 될 열린
+    문제 수라 참여 중 행의 `open_problem_count` 다. 미리보기는 질의 수가 사람·문제 수에 따라
+    늘지 않는다."""
+
+    owner, class_id, _problem, a, _b = _class_with_two_learners(client)
+    create_open_problem(client, owner["access"], class_id, title="초안", open=False)
+    gone = login(client, "gone")
+    join_class(client, gone["access"], class_id, instructor_access=owner["access"], display_name="떠난 학생")
+    join_class(client, owner["access"], class_id, instructor_access=owner["access"], display_name="강사 본인")
+    _expel(client, owner, class_id, "떠난 학생")
+    code = join_code(client, owner["access"], class_id)
+
+    with CaptureQueriesContext(connection) as before:
+        preview = join_preview(client, code)
+    joined = _get(client, a["access"], "/joined").json()[0]
+    teaching = _row(client, owner["access"], class_id)
+
+    assert (preview["participant_count"], preview["open_problem_count"]) == (2, 1)
+    assert preview["participant_count"] == teaching["member_count"]
+    assert preview["open_problem_count"] == joined["open_problem_count"]
+
+    for name in ("다", "라"):
+        extra = login(client, f"extra-{name}")
+        join_class(client, extra["access"], class_id, instructor_access=owner["access"], display_name=name)
+    create_open_problem(client, owner["access"], class_id, title="2주차")
+    with CaptureQueriesContext(connection) as after:
+        assert join_preview(client, code)["participant_count"] == 4
+    assert len(after) == len(before)
 
 
 def test_class_row_average_pass_rate_is_null_without_open_problems_or_participants(client, db):
