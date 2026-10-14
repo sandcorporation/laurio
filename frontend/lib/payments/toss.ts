@@ -1,5 +1,7 @@
 "use client";
 
+import { publicConfig } from "@/lib/public-config";
+
 // 토스페이먼츠 결제창 브라우저 SDK 연동 (#112, spec #110, ADR-0007).
 //
 // lib/verification/portone.ts와 같은 모양이다 — 스크립트를 한 번만 불러오고,
@@ -154,13 +156,11 @@ export function clearRedirectPaymentParams(): void {
   window.history.replaceState(null, "", nextUrl);
 }
 
-/** 빌드타임에 인라인되는 클라이언트 키(NEXT_PUBLIC_TOSS_CLIENT_KEY, #112) —
- * docker/compose.staging.yaml·docker/compose.prod.yaml의 frontend build.args가
- * 채운다. 비어 있으면 null — 부팅 시점에 그 자체를 요구하는 것은 #115의
- * 범위다. */
+/** 토스 클라이언트 키(CODEMIT_PUBLIC_TOSS_CLIENT_KEY, #112·#711) — 실행 env 에서
+ * 레이아웃이 넘긴 공개 설정으로 온다(`lib/public-config.ts`). 비어 있으면 null —
+ * 배포 환경에서 그 자체를 요구하는 것은 `instrumentation.ts` 의 부팅 가드다. */
 export function getTossClientKey(): string | null {
-  const key = process.env.NEXT_PUBLIC_TOSS_CLIENT_KEY;
-  return key ? key : null;
+  return publicConfig().CODEMIT_PUBLIC_TOSS_CLIENT_KEY ?? null;
 }
 
 /** `requestPayment`가 reject하는 값은 `Error`가 아니다(#112 코드리뷰 지적 4) —

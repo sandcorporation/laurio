@@ -31,14 +31,7 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
 // 여기뿐이기 때문이다. `onRequestError` 는 서버 컴포넌트·라우트 핸들러에서 난
 // 오류를 Next 가 직접 넘겨주는 훅이다.
 function startSentry(): void {
-  const options = buildSentryOptions(
-    {
-      NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN,
-      NEXT_PUBLIC_SENTRY_ENVIRONMENT: process.env.NEXT_PUBLIC_SENTRY_ENVIRONMENT,
-      NEXT_PUBLIC_SENTRY_RELEASE: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
-    },
-    "server",
-  );
+  const options = buildSentryOptions(process.env, "server");
   if (options) Sentry.init(options);
 }
 

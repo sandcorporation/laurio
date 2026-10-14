@@ -157,12 +157,12 @@ export function buildSentryOptions(
   // null 을 돌려주면 그 이벤트는 보내지 않는다.
   beforeSend: (event: ErrorEvent) => ErrorEvent | null;
 } | null {
-  const dsn = (env.NEXT_PUBLIC_SENTRY_DSN ?? "").trim();
+  const dsn = (env.CODEMIT_PUBLIC_SENTRY_DSN ?? "").trim();
   if (dsn === "") return null;
-  const release = (env.NEXT_PUBLIC_SENTRY_RELEASE ?? "").trim();
+  const release = (env.CODEMIT_PUBLIC_SENTRY_RELEASE ?? "").trim();
   return {
     dsn,
-    environment: (env.NEXT_PUBLIC_SENTRY_ENVIRONMENT ?? "").trim() || "development",
+    environment: (env.CODEMIT_PUBLIC_SENTRY_ENVIRONMENT ?? "").trim() || "development",
     release: release === "" ? undefined : release,
     tracesSampleRate: 0,
     sendDefaultPii: false,
