@@ -25,20 +25,34 @@ export async function extractForwardBody(request: NextRequest): Promise<ArrayBuf
  * content-type을 채운 것을 그대로 쓴다 — 이 함수는 무엇을 헤더에 실을지 모른다
  * (그건 앱마다 다른 인증의 몫이다).
  *
- * `signal`을 주면 그대로 넘긴다 — 브라우저가 연결을 끊었을 때 **위쪽 요청도
- * 끊기게** 하는 신호다(2026-09-18). 끝나지 않는 응답(SSE)에서 이것이 없으면
- * 브라우저가 떠난 뒤에도 백엔드 요청이 영원히 살아 있고, 그 요청이 쥔 DB
- * 연결도 영원히 묶인다 — prod 에서 이벤트 서비스가 유휴 연결 100개를 쥐어
+ * `signal`을 주면 브라우저가 연결을 끊었을 때 **위쪽 요청도 끊는다**(2026-09-18). 끝나지
+ * 않는 응답(SSE)에서 이것이 없으면 브라우저가 떠난 뒤에도 백엔드 요청이 영원히 살아 있고,
+ * 그 요청이 쥔 DB 연결도 영원히 묶인다 — prod 에서 이벤트 서비스가 유휴 연결 100개를 쥐어
  * Postgres 가 `too many clients already`로 **모든** 요청을 거절했다.
+ *
+ * **단, 응답 머리가 온 뒤에만 끊는다**(#723). Node 의 fetch(undici)는 응답을 기다리는
+ * 요청을 끊으면 그 자리에 새 연결을 하나 더 맺어 두고, 요청을 한 줄도 쓰지 않은 그 연결을
+ * keep-alive 기본값 4초 동안 쥐고 있다. backend 의 gunicorn sync 워커는 연결을 받으면
+ * 요청 머리가 올 때까지 그 연결 하나에 묶이므로, 그런 연결이 워커 수(넷)만큼 모이면
+ * backend 전체가 4.0초 동안 **아무에게도** 답하지 않는다 — 열차 macos 강의실 e2e 에서
+ * 시험이 끝나 브라우저 맥락이 닫힐 때마다 그렇게 멈췄다(#1902·#1906·#1907, 로컬
+ * 패킷 캡처: 강의실 컨테이너가 맺은 연결 다섯이 요청 없이 정확히 4.00초 뒤 FIN).
+ * 머리가 오기 전에 떠났으면 응답을 마저 받은 뒤 끊는다 — 보통 수십 ms 이고, SSE 는
+ * 머리를 곧바로 보내므로 SSE 가 끊기는 시점은 그대로다.
  */
-export function forwardRequest(
+export async function forwardRequest(
   method: string,
   url: string,
   headers: Headers,
   body: ArrayBuffer | undefined,
   signal?: AbortSignal,
 ): Promise<Response> {
-  return fetch(url, { method, headers, body, cache: "no-store", ...(signal ? { signal } : {}) });
+  if (!signal) return fetch(url, { method, headers, body, cache: "no-store" });
+  const upstream = new AbortController();
+  const response = await fetch(url, { method, headers, body, cache: "no-store", signal: upstream.signal });
+  if (signal.aborted) upstream.abort(signal.reason);
+  else signal.addEventListener("abort", () => upstream.abort(signal.reason), { once: true });
+  return response;
 }
 
 /**
