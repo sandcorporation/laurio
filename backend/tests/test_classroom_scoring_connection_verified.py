@@ -13,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import requests
 
+from classroom import scoring_connection
+from classroom.models import Class
 from core.models import ClockOverride
 from tests.classroom_scenarios import (
     FakeCompatibleServer,
@@ -25,6 +27,7 @@ from tests.classroom_scenarios import (
     login,
     patch_class,
     raise_models_endpoint_network_error,
+    respond_with_key_rejection,
     respond_with_verdict,
     run_scan,
     set_compatible_server,
@@ -96,6 +99,7 @@ def test_a_scored_attempt_verifies_the_connection(client, db, monkeypatch):
         raise_models_endpoint_network_error(monkeypatch, requests.ConnectionError("network unreachable"))
         class_id = create_class(client, owner["access"])
         assert _verified_at(client, owner["access"], class_id) is None
+        assert get_class(client, owner["access"], class_id)["openai_key_status"] == "unverified"
         problem = create_open_problem(client, owner["access"], class_id)
         learner = login(client, "learner")
         join_class(client, learner["access"], class_id, instructor_access=owner["access"])
@@ -104,6 +108,30 @@ def test_a_scored_attempt_verifies_the_connection(client, db, monkeypatch):
         respond_with_verdict(monkeypatch, problem.item_id)
         assert run_scan(client)["count"] == 1
 
+    assert _verified_at(client, owner["access"], class_id) == T1
+    # 「미검증」은 「벤더에 닿아 본 적 없음」이다(#681) — 채점이 닿았으니 검증됨으로 오른다.
+    assert get_class(client, owner["access"], class_id)["openai_key_status"] == "verified"
+
+
+def test_a_success_reported_for_a_rejected_key_leaves_it_rejected(client, db, monkeypatch):
+    _set_clock(T0)
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"])
+    problem = create_open_problem(client, owner["access"], class_id)
+    learner = login(client, "learner")
+    join_class(client, learner["access"], class_id, instructor_access=owner["access"])
+    submit_repository(client, learner["access"], class_id, problem.id)
+    with force_real_scoring_adapter():
+        respond_with_key_rejection(monkeypatch)
+        run_scan(client)
+    assert get_class(client, owner["access"], class_id)["openai_key_status"] == "rejected"
+
+    # 거부된 키로 채점이 성공할 수는 없다 — 그래도 성공 보고가 그 행을 만나면 상태는 그대로 둔다.
+    _set_clock(T1)
+    scoring_connection.mark_verified(class_id, scoring_connection.connection_for(Class.objects.get(pk=class_id)))
+
+    body = get_class(client, owner["access"], class_id)
+    assert body["openai_key_status"] == "rejected"
     assert _verified_at(client, owner["access"], class_id) == T1
 
 

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.db.models import Case, F, Value, When
 
 from core.adapters import is_fake_adapter_binding
 from core.clock import Clock
@@ -126,7 +127,17 @@ def mark_verified(class_id: int, connection: ScoringConnection) -> None:
     )
     if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         same_connection = same_connection.filter(scoring_server_url=connection.base_url)
-    same_connection.update(scoring_connection_verified_at=Clock.now())
+        same_connection.update(scoring_connection_verified_at=Clock.now())
+        return
+    # 「미검증」은 「벤더에 닿아 본 적 없음」이다(#681) — 닿았으니 같은 UPDATE 에서 검증됨으로 올린다.
+    # 거부됨은 그대로 둔다. 호환 서버는 저장 전 확인이 늘 닿으므로 이 상태가 뜻이 없다.
+    same_connection.update(
+        scoring_connection_verified_at=Clock.now(),
+        openai_api_key_status=Case(
+            When(openai_api_key_status=Class.ScoringKeyStatus.UNVERIFIED, then=Value(Class.ScoringKeyStatus.VERIFIED)),
+            default=F("openai_api_key_status"),
+        ),
+    )
 
 
 def openai_key_connection(api_key: str) -> ScoringConnection:
