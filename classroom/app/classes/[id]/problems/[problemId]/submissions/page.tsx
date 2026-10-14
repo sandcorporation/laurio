@@ -9,6 +9,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { useState } from "react";
+
 import {
   Badge,
   Card,
@@ -21,12 +23,146 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
-import { judgedByLabel } from "@/app/components/ProblemParticipantView";
+import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
+import { detailTabHref } from "@/lib/classes/detail-tab";
+import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { useClass } from "@/lib/classes/use-class";
+import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
+import type { InstructorSubmissionRow } from "@/lib/submissions/api";
+import {
+  latestPerMember,
+  participantAttempts,
+  requiredSummary,
+  submissionStats,
+} from "@/lib/submissions/latest-attempts";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
 import { instructorEntryBadge } from "@/lib/submissions/contest-entry";
+
+const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
+
+function StatBar({ stats }: { stats: ReturnType<typeof submissionStats> }) {
+  const cells: { key: string; label: string; value: string; tone?: string }[] = [
+    {
+      key: "passed",
+      label: "통과",
+      value: `${stats.passed}/${stats.participants ?? "—"}`,
+      tone: "text-verified",
+    },
+    { key: "attempts", label: "시도", value: String(stats.attempts) },
+    { key: "scoring", label: "채점 중", value: String(stats.scoring) },
+    { key: "waiting", label: "채점 대기", value: String(stats.waiting) },
+  ];
+  return (
+    <div data-testid="submissions-stat-bar" className="grid grid-cols-4 border border-rule bg-surface sm:flex sm:w-fit">
+      {cells.map((cell) => (
+        <div
+          key={cell.key}
+          data-testid={`submissions-stat-${cell.key}`}
+          className="flex min-w-0 flex-col gap-0.5 border-r border-rule px-3 py-2.5 last:border-r-0 sm:min-w-[88px] sm:px-[18px]"
+        >
+          <span className="text-[11px] tracking-[0.06em] text-ink/45">{cell.label}</span>
+          <Num className={`text-[16px] font-semibold ${cell.tone ?? ""}`}>{cell.value}</Num>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
+  if (submission.status === "pending") {
+    return (
+      <Badge tone={submission.pending_reason ? "attention" : "neutral"}>
+        {submission.pending_reason ? "채점 대기" : "채점 중"}
+      </Badge>
+    );
+  }
+  return <Badge tone={submission.passed ? "verified" : "attention"}>{submission.passed ? "통과" : "미통과"}</Badge>;
+}
+
+function AttemptRow({
+  submission,
+  items,
+  checklistLabelById,
+  open,
+  onToggle,
+}: {
+  submission: InstructorSubmissionRow;
+  items: { id: number; label: string; required: boolean }[];
+  checklistLabelById: ReadonlyMap<number, string>;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const testId = `instructor-submission-row-${submission.id}`;
+  const summary = requiredSummary(submission, items);
+  const entry = instructorEntryBadge(submission);
+  const canOpen = submission.status === "scored" && submission.score !== null;
+  return (
+    <li data-testid={testId} className="px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
+        <span data-testid={`${testId}-member`} className="w-[90px] shrink-0 truncate text-[13.5px]">
+          {submission.member_display_name}
+        </span>
+        <span data-testid={`${testId}-attempt`} className="w-[44px] shrink-0 text-[12px] text-ink/45">
+          <Num>시도 {submission.attempt_number}</Num>
+        </span>
+        <span data-testid={`${testId}-status`}>
+          <StatusBadge submission={submission} />
+        </span>
+        {entry ? (
+          <span data-testid={`${testId}-contest-entry`}>
+            <Badge tone={entry.tone}>{entry.label}</Badge>
+          </span>
+        ) : null}
+        <span data-testid={`${testId}-required`} className="order-5 w-full basis-full text-[12.5px] text-ink/60 sm:order-none sm:w-auto sm:min-w-0 sm:flex-1 sm:basis-0">
+          필수 {summary.met ?? "—"}/{summary.total}
+          {summary.unmet.length > 0 ? ` — ${summary.unmet.join(", ")}` : ""}
+        </span>
+        <span className="order-4 ml-auto text-[11.5px] text-ink/45 sm:order-none sm:ml-0">{formatRelativeTime(submission.created_at)}</span>
+        {canOpen ? (
+          <button
+            type="button"
+            data-testid={`${testId}-verdict-toggle`}
+            aria-expanded={open}
+            onClick={onToggle}
+            className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
+          >
+            판정
+          </button>
+        ) : null}
+        {submission.submission_format === "repository" ? (
+          <a
+            href={submission.value}
+            target="_blank"
+            rel="noreferrer"
+            data-testid={`${testId}-repository`}
+            className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
+          >
+            저장소
+          </a>
+        ) : submission.download_url ? (
+          <a
+            href={submission.download_url}
+            data-testid={`${testId}-download`}
+            className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
+          >
+            다운로드
+          </a>
+        ) : null}
+      </div>
+      {open && canOpen && submission.score ? (
+        <div className="mt-3 border-t border-rule pt-3">
+          <SubmissionVerdictList
+            score={submission.score}
+            checklistLabelById={checklistLabelById}
+            testIdPrefix={testId}
+          />
+        </div>
+      ) : null}
+    </li>
+  );
+}
 
 export default function ProblemSubmissionsPage() {
   const params = useParams<{ id: string; problemId: string }>();
@@ -36,6 +172,9 @@ export default function ProblemSubmissionsPage() {
   const problemState = useProblem(classId, problemId);
   const { state } = useProblemSubmissions(classId, problemId);
   const { state: classState } = useClass(classId);
+  const { state: gridState } = useRosterGrid(classId);
+  const [showAll, setShowAll] = useState(false);
+  const [openIds, setOpenIds] = useState<ReadonlySet<number>>(new Set());
 
   useClassroomTabTitle({
     screenName: "제출 현황",
@@ -71,58 +210,69 @@ export default function ProblemSubmissionsPage() {
     );
   }
 
-  const checklistLabelById = new Map(
-    problemState.state.status === "ready"
-      ? problemState.state.problem.checklist_items.map((item) => [item.id, item.label])
-      : [],
-  );
-  const problemTitle = problemState.state.status === "ready" ? problemState.state.problem.title : "";
-  // 숨긴 문제도 제출 현황을 지금처럼 열어 볼 수 있다(#405) — 화면이
-  // 「숨김」 표시로 그 사실을 알린다(CONTEXT.md 「Problem」).
-  const problemHidden =
-    problemState.state.status === "ready" && problemState.state.problem.status === "hidden";
-  // 이 화면은 「학생이 아직 안 냈다」와 「냈는데 강사 본인의 키 문제로
-  // 멈췄다」를 헷갈리기 가장 쉬운 자리다(#346) — 시도가 하나라도 그 사유로
-  // 멈춰 있으면 목록 위에서 먼저 알리고 설정으로 가는 길을 준다. 키가
-  // 아예 없는지 벤더가 거절했는지(#355)는 여기서 갈라 말하지 않는다 —
-  // 이 화면은 문제별 제출 목록만 쥐고 있어 클래스의 키 상태를 따로 묻지
-  // 않는다, 어느 쪽이든 "설정에서 확인해야 한다"는 다음 행동은 같다.
-  const blockedByMissingKey = state.submissions.some(
-    (submission) => submission.pending_reason === "no_api_key",
-  );
-  // 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰는 경우(#403) — 키
-  // 문제와는 다른 사유이고 다음 행동도 다르다(채점 모델을 바꾼다), 그래서
-  // 따로 배너를 낸다.
-  const blockedByRejectedModel = state.submissions.some(
-    (submission) => submission.pending_reason === "model_rejected",
-  );
+  const problem = problemState.state.status === "ready" ? problemState.state.problem : null;
+  const items = problem?.checklist_items ?? [];
+  const checklistLabelById = new Map(items.map((item) => [item.id, item.label]));
+  const problemTitle = problem?.title ?? "";
+  const problemStatus = problem?.status ?? "";
+
+  // 사람 집합은 참여자 격자에서 온다 — 강사 본인과 내보낸 사람은 뺀다(클래스 상세의 달성률과 같은 집합).
+  // 격자를 아직 못 받았으면 목록은 그대로 두고 분모와 「안 낸 사람」만 비운다.
+  const participantIds =
+    gridState.status === "ready"
+      ? new Set(gridState.grid.members.filter((m) => !m.is_instructor && !m.expelled).map((m) => m.id))
+      : null;
+  const submissions = participantAttempts(state.submissions, participantIds);
+  const stats = submissionStats(submissions, participantIds ? participantIds.size : null);
+  const submittedMembers = new Set(submissions.map((s) => s.member_id));
+  const notSubmitted = participantIds
+    ? [...participantIds].filter((id) => !submittedMembers.has(id)).length
+    : null;
+
+  // 이 화면은 「학생이 아직 안 냈다」와 「냈는데 강사 본인의 키 문제로 멈췄다」를 헷갈리기
+  // 가장 쉬운 자리다(#346) — 시도가 하나라도 그 사유로 멈춰 있으면 통계 바 아래에서 먼저
+  // 알리고 설정으로 가는 길을 준다. 크레딧 소진·서버 연결 불가도 채점 키를 쓸 수 없는
+  // 상태로 같은 사유("no_api_key")에 실린다(#629).
+  const blockedByMissingKey = submissions.some((s) => s.pending_reason === "no_api_key");
+  // 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰는 경우(#403) — 다음 행동이 다르다.
+  const blockedByRejectedModel = submissions.some((s) => s.pending_reason === "model_rejected");
+
+  const rows = showAll ? submissions : latestPerMember(submissions);
+  const toggle = (id: number) =>
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   return (
     <PageShell>
       <PageHeader
-        eyebrow="클래스 · 문제"
+        eyebrow={classState.status === "ready" ? classState.classroom.name : undefined}
         title={`${problemTitle} · 제출 현황`}
         titleTestId="problem-submissions-heading"
-        description="시도마다 소스나 저장소를 열어 AI 판정과 함께 볼 수 있습니다."
         actions={
           <>
-            {problemHidden ? (
-              <span data-testid="problem-submissions-hidden-badge">
-                <Badge tone="attention">숨김</Badge>
-              </span>
-            ) : null}
+            <span data-testid="problem-submissions-status-badge">
+              <Badge tone={problemStatus === "open" ? "verified" : problemStatus === "hidden" ? "attention" : "neutral"}>
+                {STATUS_LABEL[problemStatus] ?? problemStatus}
+              </Badge>
+            </span>
             <Link
               href={`/classes/${classId}/problems/${problemId}`}
               data-testid="back-to-problem-link"
               className={buttonClass()}
             >
-              문제 편집으로
+              문제 편집
             </Link>
           </>
         }
       />
 
       <div className="flex flex-col gap-4">
+        <StatBar stats={stats} />
+
         {blockedByMissingKey ? (
           <MissingScoringKeyNote
             classId={classId}
@@ -143,167 +293,65 @@ export default function ProblemSubmissionsPage() {
           />
         ) : null}
 
-        {state.submissions.length === 0 ? (
-          <Card>
+        <div role="group" aria-label="보기" className="flex items-center gap-2 text-[12.5px]">
+          {(
+            [
+              { all: false, label: "참여자별 최신 시도", testId: "submissions-view-latest" },
+              { all: true, label: "모든 시도", testId: "submissions-view-all" },
+            ] as const
+          ).map((view) => (
+            <button
+              key={view.testId}
+              type="button"
+              data-testid={view.testId}
+              aria-pressed={showAll === view.all}
+              onClick={() => setShowAll(view.all)}
+              className={
+                showAll === view.all
+                  ? "bg-ink px-3 py-1.5 font-medium text-paper"
+                  : "border border-rule bg-surface px-3 py-1.5 text-ink"
+              }
+            >
+              {view.label}
+            </button>
+          ))}
+        </div>
+
+        <Card>
+          {rows.length === 0 ? (
             <EmptyState>
-              <span data-testid="problem-submissions-empty-state">
-                아직 낸 시도가 없습니다. 참여자가 제출하면 여기에 나타납니다.
-              </span>
+              <span data-testid="problem-submissions-empty-state">아직 낸 시도가 없습니다.</span>
             </EmptyState>
-          </Card>
-        ) : (
-          <Card>
+          ) : (
             <ol data-testid="problem-submissions-list" className="divide-y divide-rule">
-              {state.submissions.map((submission) => (
-                <li
+              {rows.map((submission) => (
+                <AttemptRow
                   key={submission.id}
-                  data-testid={`instructor-submission-row-${submission.id}`}
-                  className="px-4 py-4"
-                >
-                  {/* 두 칸으로 나눈다 — 왼쪽은 누가·몇 번째·배지, 오른쪽은 여는 버튼. 한 줄에
-                      흘려 두면 배지 수에 따라 버튼이 같은 줄에 붙기도 하고 다음 줄로 밀리기도
-                      해서 좁은 화면에서 버튼 자리가 줄마다 달랐다. */}
-                  <div className="flex items-start gap-3">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                      <div className="flex flex-wrap items-baseline gap-x-2">
-                        <span
-                          data-testid={`instructor-submission-row-${submission.id}-member`}
-                          className="text-[14px] font-medium"
-                        >
-                          {submission.member_display_name}
-                        </span>
-                        <span
-                          data-testid={`instructor-submission-row-${submission.id}-attempt`}
-                          className="text-[12px] text-ink/45"
-                        >
-                          <Num>{submission.attempt_number}</Num>번째 시도
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {submission.status === "pending" ? (
-                          <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                            <Badge
-                              tone={
-                                submission.pending_reason === "no_api_key" ||
-                                submission.pending_reason === "model_rejected"
-                                  ? "attention"
-                                  : "neutral"
-                              }
-                            >
-                              {submission.pending_reason ? "채점 대기" : "채점 중"}
-                            </Badge>
-                          </span>
-                        ) : (
-                          <span data-testid={`instructor-submission-row-${submission.id}-status`}>
-                            <Badge tone={submission.passed ? "verified" : "attention"}>
-                              채점 완료 · {submission.passed ? "통과" : "미통과"}
-                            </Badge>
-                          </span>
-                        )}
-                        {(() => {
-                          const entry = instructorEntryBadge(submission);
-                          return entry ? (
-                            <span data-testid={`instructor-submission-row-${submission.id}-contest-entry`}>
-                              <Badge tone={entry.tone}>{entry.label}</Badge>
-                            </span>
-                          ) : null;
-                        })()}
-                      </div>
-                    </div>
-
-                    <span className="shrink-0">
-                      {submission.submission_format === "repository" ? (
-                        <a
-                          href={submission.value}
-                          target="_blank"
-                          rel="noreferrer"
-                          data-testid={`instructor-submission-row-${submission.id}-repository`}
-                          className={buttonClass("secondary", "sm")}
-                        >
-                          저장소 열기
-                        </a>
-                      ) : submission.download_url ? (
-                        <a
-                          href={submission.download_url}
-                          data-testid={`instructor-submission-row-${submission.id}-download`}
-                          className={buttonClass("secondary", "sm")}
-                        >
-                          소스 다운로드
-                        </a>
-                      ) : null}
-                    </span>
-                  </div>
-
-                  {submission.status === "scored" && submission.score ? (
-                    <ul
-                      data-testid={`instructor-submission-row-${submission.id}-verdicts`}
-                      className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
-                    >
-                      {submission.score.syntax_check ? (
-                        <li
-                          data-testid={`instructor-submission-row-${submission.id}-syntax-check`}
-                          className="flex gap-2.5"
-                        >
-                          <span
-                            aria-hidden
-                            className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
-                              submission.score.syntax_check.is_met
-                                ? "border-verified bg-verified"
-                                : "border-attention"
-                            }`}
-                          />
-                          <span className="text-[13px] leading-relaxed">
-                            <Badge>기본</Badge>{" "}
-                            <Badge tone="neutral">{judgedByLabel(submission.score.syntax_check.judged_by)}</Badge>{" "}
-                            소스에 문법 오류가 없다
-                            <span className="text-ink/45">
-                              {" "}
-                              — {submission.score.syntax_check.is_met ? "충족" : "미충족"}
-                            </span>
-                            <span className="block text-ink/60">
-                              {submission.score.syntax_check.reasoning}
-                            </span>
-                            {submission.score.syntax_check.findings.map((finding, index) => (
-                              <span
-                                key={index}
-                                data-testid={`instructor-submission-row-${submission.id}-syntax-check-finding-${index}`}
-                                className="block font-mono text-[12px] text-ink/60"
-                              >
-                                {finding.path}
-                                {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
-                              </span>
-                            ))}
-                          </span>
-                        </li>
-                      ) : null}
-                      {submission.score.reasoning.map((verdict) => (
-                        <li key={verdict.checklist_item_id} className="flex gap-2.5">
-                          <span
-                            aria-hidden
-                            className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
-                              verdict.is_met ? "border-verified bg-verified" : "border-attention"
-                            }`}
-                          />
-                          <span className="text-[13px] leading-relaxed">
-                            <span className={verdict.is_met ? "" : "text-ink"}>
-                              {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
-                            </span>{" "}
-                            <span className="text-ink/45">— {verdict.is_met ? "충족" : "미충족"}</span>
-                            <span className="block text-ink/60">{verdict.reasoning}</span>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </li>
+                  submission={submission}
+                  items={items}
+                  checklistLabelById={checklistLabelById}
+                  open={openIds.has(submission.id)}
+                  onToggle={() => toggle(submission.id)}
+                />
               ))}
             </ol>
-          </Card>
-        )}
-
-        <Note>
-          이 화면을 열어 봐도 <b className="text-ink">그 사실은 어디에도 남지 않습니다.</b>
-        </Note>
+          )}
+          {notSubmitted !== null && notSubmitted > 0 ? (
+            <div
+              data-testid="submissions-not-submitted"
+              className="border-t border-rule px-4 py-2.5 text-[12.5px] text-ink/45"
+            >
+              아직 내지 않은 참여자 <Num>{notSubmitted}</Num>명 —{" "}
+              <Link
+                href={detailTabHref(classId, "participants")}
+                data-testid="submissions-not-submitted-link"
+                className="underline underline-offset-[3px] hover:text-ink"
+              >
+                참여자 탭에서 보기
+              </Link>
+            </div>
+          ) : null}
+        </Card>
       </div>
     </PageShell>
   );
