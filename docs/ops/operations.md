@@ -237,11 +237,10 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   치지 않고, 잊고 배포해도 부팅은 막히지 않는다(오류 수집이 없어도 서비스는 돌아야
   한다). `SENTRY_DSN_BACKEND`·`SENTRY_DSN_FRONTEND`·`SENTRY_DSN_OPERATOR`·
   `SENTRY_DSN_CLASSROOM` 을 `.env.staging`/`.env.prod` 가 채운다(두 env 예시 파일에
-  자리가 있다). 세 앱의 값은 `NEXT_PUBLIC_*` 로 **브라우저 번들에 굳으므로** 바꾸면
-  이미지를 다시 굽는다 — `NEXT_PUBLIC_TOSS_CLIENT_KEY` 와 같은 제약이다. **브라우저 쪽
-  값은 Jenkins 이미지 단계가 자격증명 `codemit-images-env` 의 `STAGING_`/`PROD_SENTRY_DSN_<앱>` 으로 굽고, 서버 쪽 초기화가
-  읽을 런타임 ENV 는 `.env` 줄에서 온다** — 둘을 같이 바꾼다(갈리면 브라우저와 서버가
-  다른 곳에 보고한다).
+  자리가 있다). 세 앱은 compose 가 그 줄을 실행 env `CODEMIT_PUBLIC_SENTRY_DSN` 으로 넣고,
+  서버 초기화는 그것을 읽고 브라우저는 루트 레이아웃이 넘긴 같은 값을 쓴다(#711,
+  `<앱>/lib/public-config.ts`) — 한 줄이라 브라우저와 서버가 갈리지 않고, 바꾸면 배포가
+  컨테이너를 다시 띄우는 것으로 끝난다(이미지를 다시 굽지 않는다).
 - **백엔드 이미지 하나로 도는 다섯 프로세스 전부가 켜진다** — `settings.py` 가 부르는
   `core.observability.configure_sentry()` 한 줄이라 gunicorn·events(ASGI)·celery
   worker·beat·관리 명령이 모두 같은 설정을 받는다.
@@ -288,14 +287,11 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   그래서 여섯 진입점이 `buildSentryOptions` 에 자기가 어느 쪽인지(`"browser"`·
   `"server"`)를 적는다.
 - **어느 커밋에서 났는지가 release 태그다** — `deploy.sh` 가 배포하는 커밋 SHA 를
-  `SENTRY_RELEASE` 로 내보내 compose 가 백엔드 환경변수로 넘기고, 세 앱은 이미지 단계가 **그 앱
-  이미지의 빌드 문맥을 마지막으로 바꾼 커밋**(`scripts/ci/image_context.py release` — 문맥 해시와 같은
-  경로 표, `.dockerignore` 가 빼는 시험 파일만 고친 커밋은 넘긴다, #714)을 빌드 인자로 굽는다. HEAD 로 구우면 커밋마다 Next 빌드 캐시가 깨졌고, 지금은 그보다
-  더 중요하다 — 바뀌지 않은 앱은 굽지 않고 옛 이미지에 커밋 태그만 더하므로(#705) release 가 HEAD 면
-  문맥 해시가 커밋마다 달라져 건너뛰기가 무의미해진다. 이 값은 문맥이 같으면 같고, 그래도 커밋이라
-  위 「최신 이벤트의 release 가 수정을 포함하는가」 판정이 그대로 선다(문맥 해시를 release 로 쓰면
-  그 판정이 서지 않고, 런타임에 읽는 길은 `NEXT_PUBLIC_` 이 브라우저 번들에 굳어 닿지 않는다). 이미지
-  태그는 여전히 HEAD sha 다.
+  `SENTRY_RELEASE` 로 내보내고, compose 가 백엔드 환경변수와 세 앱의 `CODEMIT_PUBLIC_SENTRY_RELEASE`
+  로 넘긴다(#711 — 앱의 release 도 이제 실행 env 다). 그래서 위 「최신 이벤트의 release 가 수정을
+  포함하는가」 판정이 배포 커밋으로 선다. #707 이 이미지에 「빌드 문맥을 마지막으로 바꾼 커밋」을
+  굽던 임시 결정은 거뒀다 — release 가 빌드 인자가 아니니 문맥 해시와 엮이지 않는다. 코드가 안 바뀐
+  앱은 `deploy.sh` 가 다시 띄우지 않으므로 그 앱의 release 는 그 앱을 마지막으로 띄운 배포 커밋이다.
   소스맵은 올리지 않는다(프론트 스택은 압축된 이름으로 보인다).
 - **닿는지 확인하는 법**: 설정이 틀려도 조용히 아무 일도 안 일어나는 것이 오류 수집의
   기본 실패 모양이라, 배포 뒤 한 번 쏴 보고 GlitchTip 에서 눈으로 본다.

@@ -127,6 +127,9 @@ cd <worktree>
 - **e2e 는 CI 와 같은 프로덕션 이미지 스택**(`compose.dev` + `compose.ci`)을 이 워크트리 전용
   이름(`<dev-env 프로젝트>-e2e`)으로 굽고 띄우고, 끝나면 지운다. 되풀이할 때는
   `CODEMIT_E2E_KEEP=1` 로 남기고, 다 쓰면 `scripts/test.sh e2e-down`. 일꾼은 코어 둘에 하나다.
+- **공개 값은 실행 env 다**(#711, ADR-0062) — e2e 이미지는 배포 이미지와 같은 것이라 빌드 인자가
+  없고, 문의 주소 등은 `compose.dev.yaml` 의 `CODEMIT_PUBLIC_*` 로 받는다(비어도 뜬다). 새 공개 값은
+  `<앱>/lib/public-config.ts` 의 목록에 더한다 — `NEXT_PUBLIC_` 을 쓰지 않는다(`next-build.md`).
 
 **e2e 시험 하나는 3초 안에 끝나고, 재시도하지 않는다**(2026-10-02, `playwright.config.ts`
 의 `timeout: 3_000`·`retries: 0`). 재시도가 흔들리는 시험을 초록으로 덮고 있었다 — 강의실
