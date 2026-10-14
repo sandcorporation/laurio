@@ -240,7 +240,11 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   자리가 있다). 세 앱은 compose 가 그 줄을 실행 env `CODEMIT_PUBLIC_SENTRY_DSN` 으로 넣고,
   서버 초기화는 그것을 읽고 브라우저는 루트 레이아웃이 넘긴 같은 값을 쓴다(#711,
   `<앱>/lib/public-config.ts`) — 한 줄이라 브라우저와 서버가 갈리지 않고, 바꾸면 배포가
-  컨테이너를 다시 띄우는 것으로 끝난다(이미지를 다시 굽지 않는다).
+  컨테이너를 다시 띄우는 것으로 끝난다(이미지를 다시 굽지 않는다). 다시 띄울지는 `deploy.sh plan` 이
+  떠 있는 컨테이너의 설정 해시와 견줘 정하고, 견주지 못하면 그 이유를 로그에 남기고 다시 띄운다(#727).
+- **첫 요청에서 루트 레이아웃이 죽으면 브라우저 쪽은 보내지 않는다**(#727). `app/global-error.tsx` 는
+  클라이언트 컴포넌트라 공개 설정을 실을 수 없어 브라우저 Sentry 가 DSN 없이 꺼져 있다 — 그 오류는
+  서버 `onRequestError` 가 올리므로 잃는 것은 브라우저 쪽 사본뿐이다.
 - **백엔드 이미지 하나로 도는 다섯 프로세스 전부가 켜진다** — `settings.py` 가 부르는
   `core.observability.configure_sentry()` 한 줄이라 gunicorn·events(ASGI)·celery
   worker·beat·관리 명령이 모두 같은 설정을 받는다.
