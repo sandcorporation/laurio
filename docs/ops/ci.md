@@ -23,7 +23,7 @@ push 하면 옛 빌드를 끊는다.
 | --- | --- | --- |
 | 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
 | 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` |
-| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨과 사흘 넘은 빌드 캐시를 걷는다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
+| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨·이미지를 걷고 빌드 캐시를 30GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
 | 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
 | 붉으면 | sub | 둘 이상이면 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
@@ -35,6 +35,15 @@ push 하면 옛 빌드를 끊는다.
   줄로 돌아온다 — 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
   초안을 풀거나 `hold` 를 떼면 다시 빌드하지 않아도 다음 묶음이 데려간다.
 
+- **macos 의 Docker VM 디스크는 96GiB 이고, 묶음마다 무엇이 남는지 정해 두어야 찬다.** 맥 호스트
+  디스크가 남아도 Docker Desktop 의 `Docker.raw` 가 차면 MinIO 가 `XMinioStorageFull` 로 업로드를
+  거절하고 db 컨테이너가 죽는다 — 코드와 무관하게 묶음이 붉다. 실행마다 compose 프로젝트 이름이
+  달라(`CODEMIT_CI_RUN_ID`) 쌓이는 것은 그 실행의 볼륨·이미지(`jenkins-codemit-…-e2e-<서비스>`, 다섯
+  개·수 GB)와 빌드 캐시다. `e2e.sh`·`celery-broker.sh` 는 내릴 때 `down -v --rmi local` 로 볼륨과
+  **자기가 구운 이미지**를 지우고(공용 base 이미지 postgres·redis·minio 는 남는다), 빌드 캐시는 남겨
+  다음 굽기가 캐시 히트다. trap 이 못 돈 중단 빌드의 찌꺼기는 다음 빌드 첫머리의 `macos-sweep.sh` 가
+  걷고, 빌드 캐시는 나이가 아니라 크기(30GB, 오래 안 쓴 것부터)로 자른다. 사고 둘: 2026-10-03 중단된
+  스택의 볼륨 400여 개(30GB), 2026-10-14 지워지지 않은 이미지 1,283개(51GB)와 캐시 48GB.
 - **노드는 실행기가 하나라 통째로 쓴다.** 예전에는 GitHub Actions 의 셀프호스티드 러너
   셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
   넘었다(#499 의 첫 CI — 공개 e2e 10건·단위 2건 타임아웃). 오래 걸리는 e2e 를 성능이 좋은

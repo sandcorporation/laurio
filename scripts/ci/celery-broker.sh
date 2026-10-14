@@ -6,7 +6,8 @@ cd "$(dirname "$0")/../.."
 
 project=$(printf '%s' "${CODEMIT_CI_RUN_ID:-codemit-celery-$$}-celery" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' | cut -c1-60)
 C=(docker compose -p "$project" -f docker/compose.dev.yaml -f docker/compose.ci.yaml -f docker/compose.ci-internal-only.yaml --profile celery)
-cleanup() { "${C[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; }
+# 구운 이미지까지 지운다(--rmi local) — 프로젝트 이름이 실행마다 달라 남기면 쌓인다(e2e.sh 머리 주석).
+cleanup() { "${C[@]}" down -v --remove-orphans --rmi local >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
