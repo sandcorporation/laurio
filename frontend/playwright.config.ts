@@ -50,7 +50,7 @@ export default defineConfig({
   // 같은 파일 안에서만 순서를 강제해 그것을 막지 못한다.
   //
   // 이제 그 보장은 워커 수가 아니라 **실행을 두 패스로 나누는 것**이 진다
-  // (package.json 의 test 스크립트) — `@exclusive` 태그가 없는 것을 먼저 병렬로,
+  // (scripts/e2e-two-pass.sh — package.json 의 test 스크립트·CI·scripts/test.sh 가 부른다) — `@exclusive` 태그가 없는 것을 먼저 병렬로,
   // 그 다음 태그가 붙은 것만 워커 하나로 돌린다. 스펙 파일이 늘어도 그 보장은
   // 유지된다: 전역 상태를 건드리는 스펙은 그 태그를 붙이면 된다.
   //

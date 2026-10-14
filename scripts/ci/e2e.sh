@@ -1,7 +1,9 @@
 #!/bin/bash
-# PR CI 의 macos 쪽 e2e — 세 앱의 프로덕션 이미지 스택을 굽고 띄워 세 프로젝트를 돌린다
-# (2026-10-02, Jenkinsfile.pr). macos 노드는 실행기가 하나라 다른 빌드와 겹치지 않으므로 노드를
-# 통째로 쓴다. 시험 하나 3초·재시도 0 은 playwright.config.ts 가 정한다.
+# 열차의 macos 쪽 e2e — 세 앱의 프로덕션 이미지 스택을 굽고 띄워 세 프로젝트를 돌린다
+# (2026-10-02 Jenkinsfile.pr 에서 시작, 지금은 Jenkinsfile.train 이 부른다). macos 노드는 실행기가
+# 하나라 다른 빌드와 겹치지 않으므로 노드를 통째로 쓴다. 시험 하나 3초·재시도 0 은
+# playwright.config.ts 가 정한다. 프로젝트마다 두 패스는 frontend/scripts/e2e-two-pass.sh 가 정의하고,
+# 첫 패스가 붉어도 둘째(`@exclusive`) 패스까지 돈다 — 실패를 더 많이 남기려는 것이다(#700).
 #
 # 끝나면(성공·실패·중단 모두) 스택을 지운다 — 그 실행이 구운 이미지까지(`--rmi local`). 프로젝트
 # 이름이 실행마다 달라(CODEMIT_CI_RUN_ID) 이미지가 새 이름으로 구워지므로, 남기면 Docker VM 디스크가
@@ -64,18 +66,15 @@ corepack enable >/dev/null 2>&1 || true
 pnpm install --frozen-lockfile >/dev/null || { echo "pnpm install 실패"; exit 1; }
 pnpm --dir frontend exec playwright install chromium >/dev/null || { echo "Playwright 브라우저를 받지 못했다"; exit 1; }
 
-# package.json 의 `test:*` 와 같은 두 패스(`@exclusive` 는 일꾼 하나로 따로)를 여기서 직접 부른다 —
-# Playwright 는 실행마다 출력 폴더를 비우므로, 한 폴더를 쓰면 뒤 패스가 앞 패스의 실패 trace 를
-# 지운다(#699). 패스마다 `test-results/playwright/<프로젝트>[-exclusive]/` 에 따로 둔다
-# (`--output` 은 frontend 기준이라 `../`). 성공한 시험의 것은 `retain-on-failure` 가 남기지 않는다.
-pw=(pnpm --dir frontend exec playwright test)
+# 두 패스(`@exclusive` 는 일꾼 하나로 따로)는 package.json 의 `test:*`·scripts/test.sh 와 같은
+# frontend/scripts/e2e-two-pass.sh 다(#702). Playwright 는 실행마다 출력 폴더를 비우므로 패스마다
+# `test-results/playwright/<프로젝트>[-exclusive]/` 에 따로 둔다(#699, 경로는 frontend 기준이라 `../`).
+# 성공한 시험의 것은 `retain-on-failure` 가 남기지 않는다.
 run_target() {
-  local target=$1 status=0
-  PLAYWRIGHT_WORKERS=$WORKERS "${pw[@]}" --project="$target" --grep-invert @exclusive \
-    --output="../test-results/playwright/$target" || status=1
-  "${pw[@]}" --project="$target" --grep @exclusive --workers=1 --pass-with-no-tests \
-    --output="../test-results/playwright/$target-exclusive" || status=1
-  return "$status"
+  PLAYWRIGHT_WORKERS=$WORKERS \
+    E2E_OUTPUT_DIR="../test-results/playwright/$1" \
+    E2E_EXCLUSIVE_OUTPUT_DIR="../test-results/playwright/$1-exclusive" \
+    frontend/scripts/e2e-two-pass.sh "$1"
 }
 
 failed=0
