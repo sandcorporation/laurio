@@ -8,13 +8,13 @@
 // 그 앞이 404인 것이 고른 실패 모양이다(`CLAUDE.md`, 이슈 #271 user story 13) —
 // `CODEMIT_OPERATOR_ORIGIN`이 이미 두 번 겪은 것과 같은 종류의 어긋남이다.
 //
-// `NEXT_PUBLIC_*`라 빌드타임에 브라우저 번들에 그대로 인라인된다
-// (`docker/frontend.Dockerfile`) — 서버·클라이언트 컴포넌트 양쪽에서 같은 값을
-// 한 번에 읽을 수 있어야 하기 때문이다(헤더는 서버 컴포넌트, `/console` 진입점은
-// 클라이언트 컴포넌트). 배포 후 값을 바꾸려면 이미지를 다시 굽는다 —
-// `NEXT_PUBLIC_TOSS_CLIENT_KEY`와 같은 제약이다.
+// 공개 설정(`lib/public-config.ts`, #711)에서 읽는다 — 서버·클라이언트 컴포넌트
+// 양쪽에서 같은 값을 읽어야 하기 때문이다(헤더는 서버 컴포넌트, `/console` 진입점은
+// 클라이언트 컴포넌트). 값은 실행 env 라 바꾸려면 컨테이너를 다시 띄우면 된다.
+import { publicConfig } from "@/lib/public-config";
+
 export function contestProductEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED !== "false";
+  return publicConfig().CODEMIT_PUBLIC_CONTEST_PRODUCT_ENABLED !== "false";
 }
 
 // 유료 공모전 스위치(#413) — 본인확인·견적·결제로 이어지는 **유료** 개최
@@ -25,5 +25,5 @@ export function contestProductEnabled(): boolean {
 // 수 있으므로, 유료 흐름을 감추는 화면은 항상 두 값을 함께 읽는다
 // (`contestProductEnabled() && paidContestProductEnabled()`).
 export function paidContestProductEnabled(): boolean {
-  return process.env.NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED !== "false";
+  return publicConfig().CODEMIT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED !== "false";
 }

@@ -16,7 +16,7 @@
 // CI 의 `classroom-deploy-guard` 는 **결과**를 본다 — 실제로 구운 이미지의 /login
 // HTML 에 로컬호스트가 없는지.
 //
-// `NEXT_PUBLIC_*` 는 대상이 아니다 — 그것은 빌드 시점에 번들에 박히는 것이 계약이다.
+// 공개 설정(`CODEMIT_PUBLIC_*`, #711)도 실행 env 라 대상이다 — 루트 레이아웃이 읽는다.
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -29,8 +29,8 @@ const SCAN_DIRS = ["app", "lib"];
 // 않으면 이 검사가 그 두 라우트를 조용히 지나친다.
 const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx", "robots.ts", "sitemap.ts"];
 
-/** `process.env.X` — 단, NEXT_PUBLIC_ 은 빌드 시점 주입이 계약이므로 뺀다. */
-const RUNTIME_ENV = /process\.env\.(?!NEXT_PUBLIC_)([A-Z0-9_]+)/g;
+/** `process.env.X` — 빌드 때 굳는 값(`NEXT_PUBLIC_*`)은 이 앱에 더는 없다(#711). */
+const RUNTIME_ENV = /process\.env\.([A-Z0-9_]+)/g;
 const FORCE_DYNAMIC = /export\s+const\s+dynamic\s*=\s*["']force-dynamic["']/;
 const IMPORT_FROM = /(?:^|\n)\s*import[^"']*["']([^"']+)["']/g;
 

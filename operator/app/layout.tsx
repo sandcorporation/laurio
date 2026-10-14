@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import "./globals.css";
 
+import { publicConfigFromEnv, publicConfigScript } from "@/lib/public-config";
 import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/preference";
 
 import { AppShell } from "./components/app-shell";
@@ -54,6 +55,14 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       data-theme={themeAttribute(themePreference)}
       className={`${pretendard.variable} ${ibmPlexMono.variable}`}
     >
+      <head>
+        {/* 공개 설정을 브라우저에 한 번 넘긴다(#711, lib/public-config.ts) — Sentry
+            초기화보다 먼저 읽히도록 <head> 에 둔다. */}
+        <script
+          id="codemit-public-config"
+          dangerouslySetInnerHTML={{ __html: publicConfigScript(publicConfigFromEnv(process.env)) }}
+        />
+      </head>
       <body>
         <AppShell themePreference={themePreference}>{children}</AppShell>
       </body>

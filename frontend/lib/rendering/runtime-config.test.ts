@@ -32,8 +32,8 @@ const SCAN_DIRS = ["app", "lib"];
 const ENTRY_BASENAMES = ["page.tsx", "route.ts", "layout.tsx", "robots.ts", "sitemap.ts"];
 
 /** 이 티켓이 헤더 경로에 새로 얹은 런타임 설정 — 대상 목록이 늘면 여기에
- * 추가한다. `NEXT_PUBLIC_*`는 대상이 아니다(빌드 시점 번들 주입이 계약,
- * `lib/contest-switch.ts`). */
+ * 추가한다. 공개 설정(`CODEMIT_PUBLIC_*`)은 루트 레이아웃이 읽고, 그 레이아웃이
+ * `force-dynamic` 인 것은 `lib/public-config.test.ts` 가 본다(#711). */
 const WATCHED_RUNTIME_ENV = ["CODEMIT_CLASSROOM_ORIGIN"];
 const RUNTIME_ENV = new RegExp(`process\\.env\\.(${WATCHED_RUNTIME_ENV.join("|")})`, "g");
 const FORCE_DYNAMIC = /export\s+const\s+dynamic\s*=\s*["']force-dynamic["']/;

@@ -9,8 +9,8 @@
 // (`classroom/app/components/account-menu-client.tsx`, #306) — 두 앱이 같은
 // 요소를 다르게 그리면 다시 갈라진다(#358가 이미 겪었다, #370의 브랜드 가드).
 //
-// `contestProductEnabled()`는 `NEXT_PUBLIC_`이라 클라이언트에서 직접 읽어도
-// 된다(`lib/contest-switch.ts`) — 서버를 거칠 이유가 없다. `classroomUrl`은
+// `contestProductEnabled()`는 공개 설정(`lib/public-config.ts`)이라 클라이언트에서
+// 직접 읽어도 된다(`lib/contest-switch.ts`) — 서버를 거칠 이유가 없다. `classroomUrl`은
 // 그렇지 않은 서버 전용 값(`CODEMIT_CLASSROOM_ORIGIN`)이라 부모(`SiteHeader`,
 // 서버 컴포넌트)가 계산해 내려준다(`lib/auth/classroom-link.ts`).
 import Link from "next/link";

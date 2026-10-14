@@ -15,12 +15,13 @@
 // 원래 발급받은 사람의 CI/DI로 VERIFIED가 될 수 있다 — 서버가 "요청자 본인이
 // 발급받은 값인가"를 확인해야만 막을 수 있는 문제라, 발급도 서버가 해야 한다.
 //
-// 이 모듈은 NEXT_PUBLIC_PORTONE_STORE_ID/NEXT_PUBLIC_PORTONE_CHANNEL_KEY가 설정된
+// 이 모듈은 CODEMIT_PUBLIC_PORTONE_STORE_ID/CODEMIT_PUBLIC_PORTONE_CHANNEL_KEY가 설정된
 // 환경에서만 쓰인다 — 기본 dev/e2e는 이 값들이 비어 있으므로 호출부(각 화면의
 // "실제 본인확인하기" 버튼)가 렌더링 자체를 건너뛴다. 기존 Fake 어댑터 기반
 // dev 버튼("지금 본인확인하기(dev)")은 이 모듈과 무관하게 그대로 남는다.
 
 import { bffClient } from "@/lib/bff/client";
+import { publicConfig } from "@/lib/public-config";
 
 const SDK_SRC = "https://cdn.portone.io/v2/browser-sdk.js";
 
@@ -205,8 +206,9 @@ export function clearRedirectVerificationParams(): void {
 
 /** 실물 본인확인 버튼을 렌더링할지 결정한다 — 둘 다 있어야 인증창을 열 수 있다. */
 export function getPortOneBrowserConfig(): { storeId: string; channelKey: string } | null {
-  const storeId = process.env.NEXT_PUBLIC_PORTONE_STORE_ID;
-  const channelKey = process.env.NEXT_PUBLIC_PORTONE_CHANNEL_KEY;
+  const config = publicConfig();
+  const storeId = config.CODEMIT_PUBLIC_PORTONE_STORE_ID;
+  const channelKey = config.CODEMIT_PUBLIC_PORTONE_CHANNEL_KEY;
   if (!storeId || !channelKey) return null;
   return { storeId, channelKey };
 }

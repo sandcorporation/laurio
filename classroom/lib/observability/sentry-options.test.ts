@@ -7,15 +7,15 @@ import { buildSentryOptions, scrubSensitiveRequestData } from "./sentry-options"
 describe("오류 수집 설정", () => {
   it("DSN 이 없으면 아무것도 켜지 않는다 — dev·CI 가 네트워크를 치지 않는다", () => {
     expect(buildSentryOptions({}, "browser")).toBeNull();
-    expect(buildSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: "   " }, "browser")).toBeNull();
+    expect(buildSentryOptions({ CODEMIT_PUBLIC_SENTRY_DSN: "   " }, "browser")).toBeNull();
   });
 
   it("DSN 이 있으면 환경·릴리스를 함께 싣는다", () => {
     const options = buildSentryOptions(
       {
-        NEXT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2",
-        NEXT_PUBLIC_SENTRY_ENVIRONMENT: "staging",
-        NEXT_PUBLIC_SENTRY_RELEASE: "abc1234",
+        CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2",
+        CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "staging",
+        CODEMIT_PUBLIC_SENTRY_RELEASE: "abc1234",
       },
       "browser",
     );
@@ -27,13 +27,13 @@ describe("오류 수집 설정", () => {
   });
 
   it("환경·릴리스가 비어 있어도 켜진다 — 환경은 development 로, 릴리스는 없음으로", () => {
-    const options = buildSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
+    const options = buildSentryOptions({ CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
     expect(options?.environment).toBe("development");
     expect(options?.release).toBeUndefined();
   });
 
   it("성능 추적과 기본 개인정보 전송은 꺼져 있다 — 오류만 보낸다", () => {
-    const options = buildSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
+    const options = buildSentryOptions({ CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
     expect(options?.tracesSampleRate).toBe(0);
     expect(options?.sendDefaultPii).toBe(false);
   });
@@ -98,7 +98,7 @@ describe("보내기 전에 걷어내는 것", () => {
   // 함수 동일성이 아니라 **동작**을 본다 — SDK 타입에 맞추려고 경계에 래퍼를 하나
   // 두었으므로, 「그 함수를 달았는가」는 구현 세부이고 「실제로 걷어내는가」가 계약이다.
   it("설정의 beforeSend 가 실제로 쿠키를 걷어낸다 — 달지 않으면 아무 의미가 없다", () => {
-    const options = buildSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
+    const options = buildSentryOptions({ CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
     const sent = options?.beforeSend({
       request: { cookies: { codemit_access: "eyJ..." }, headers: { cookie: "codemit_access=eyJ..." } },
     } as never) as unknown as { request: Record<string, unknown> };
@@ -113,7 +113,7 @@ describe("보내기 전에 걷어내는 것", () => {
 // 소음에 묻힌다. 아래가 「무엇을 버리고 무엇을 남기는가」의 경계를 고정한다.
 describe("남의 코드가 던진 브라우저 오류", () => {
   const options = () =>
-    buildSentryOptions({ NEXT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
+    buildSentryOptions({ CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" }, "browser");
 
   const errorEvent = (filenames: (string | undefined)[]) => ({
     exception: { values: [{ stacktrace: { frames: filenames.map((filename) => ({ filename })) } }] },
@@ -152,7 +152,7 @@ describe("남의 코드가 던진 브라우저 오류", () => {
 
   it("서버에서는 같은 이벤트를 버리지 않는다 — 서버 프레임은 /_next/ 아래가 아니다", () => {
     const server = buildSentryOptions(
-      { NEXT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" },
+      { CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2" },
       "server",
     );
     const sent = server?.beforeSend(
