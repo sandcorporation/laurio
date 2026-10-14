@@ -64,7 +64,8 @@ function StatusMark({ status }: { status: GridCellStatus }) {
 const CELL = "whitespace-nowrap border-b border-rule px-2.5 py-2 text-center";
 // 이름 열이 고정되어 가로로 훑어도 누구인지 잃지 않는다 — 헤더·본문·달성률 행의 첫 칸 모두 같은 배경이라야
 // 스크롤되는 셀 위에 제대로 얹힌다.
-const STICKY = "sticky left-0 z-[1] whitespace-nowrap border-b border-rule bg-surface px-4 py-2 text-left";
+const STICKY_BASE = "sticky left-0 z-[1] whitespace-nowrap border-b border-rule px-4 py-2 text-left";
+const STICKY = `${STICKY_BASE} bg-surface`;
 const HEAD = "text-[11px] font-normal text-ink/45";
 const TONE_CLASS = { verified: "text-verified", attention: "text-attention", ink: "text-ink" } as const;
 
@@ -150,7 +151,7 @@ function ExpelDialog({
         className="relative w-full max-w-[420px] border border-rule bg-surface p-5"
       >
         <h2 className="text-[16px] font-semibold">{member.display_name}님을 내보낼까요?</h2>
-        <p className="mt-2 text-[13px] leading-relaxed text-ink/70">
+        <p className="mt-2 break-keep text-[13px] leading-relaxed text-ink/70">
           내보내도 이름과 지난 제출·판정은 그대로 남습니다. 다만 다시 가입하거나 제출할 수는 없고, 달성률을
           셀 때도 빠집니다.
         </p>
@@ -295,7 +296,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                   {member.joined_at ? (
                     <span
                       data-testid={`participant-row-${member.id}-joined-at`}
-                      className="ml-2 text-[11px] text-ink/35"
+                      className="ml-2 text-[11px] text-ink/35 max-sm:ml-0 max-sm:block"
                     >
                       {new Date(member.joined_at).toLocaleDateString("ko-KR")} 가입
                     </span>
@@ -336,7 +337,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
             ))}
             <tr data-testid="participants-achievement-row" className="bg-paper">
               <td
-                className={`${STICKY} bg-paper text-[11px] tracking-[0.06em] text-ink/45`}
+                className={`${STICKY_BASE} bg-paper text-[11px] tracking-[0.06em] text-ink/45`}
                 data-testid="participants-achievement-row-name"
               >
                 달성률
