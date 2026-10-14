@@ -27,6 +27,7 @@ from datetime import timedelta
 from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.db import connections, transaction
+from django.db.models import Count, Max
 from django.http import HttpRequest, StreamingHttpResponse
 from django.utils import timezone
 from ninja import Router
@@ -91,6 +92,7 @@ from .schemas import (
     ClassroomProblemMineOut,
     ClassroomProblemStatsOut,
     ClassroomProblemSubmissionsOut,
+    ClassroomRecentAttemptOut,
     ClassroomRosterGridOut,
     ClassroomScoreOut,
     ClassroomSubmissionIn,
@@ -136,7 +138,7 @@ from .schemas import (
 from . import pending_scoring
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
-from .instructors import classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
+from .instructors import classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_instructor_q, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
@@ -199,12 +201,14 @@ def _live_problem_template(problem: Problem) -> ProblemTemplate | None:
     return problem.templates.filter(taken_down_at__isnull=True).first()
 
 
-def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
+def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None = None) -> ClassOut:
     """`viewer_id`는 부른 사람 — 그 사람이 소유자인지 공동 강사인지(`role`)를 싣는다(#561)."""
 
     has_key = class_obj.has_scoring_key()
     compatible = has_key and class_obj.scoring_connection_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER
     viewer_is_owner = is_owner(class_obj, viewer_id)
+    if row_stats is None:
+        row_stats = _class_row_stats([class_obj])[class_obj.id]
     token_budget_remaining = (
         max(class_obj.token_budget - class_obj.token_usage_total, 0)
         if class_obj.token_budget is not None
@@ -251,6 +255,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int) -> ClassOut:
         published_template=_published_template_summary(_live_class_template(class_obj)),
         role="owner" if viewer_is_owner else "co_instructor",
         pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
+        **row_stats,
     )
 
 
@@ -284,7 +289,9 @@ def _active_member_ids(class_obj: Class) -> set[int]:
     )
 
 
-def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[int, int]:
+def _problem_pass_stats(
+    problem: Problem, active_member_ids: set[int], *, submissions=None
+) -> tuple[int, int]:
     """(passed_count, member_count) — 분모는 `active_member_ids`의 크기,
     분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). 매번 지금의
     체크리스트 기준으로 다시 셈한다 — `Problem.is_score_passed`(#436)가
@@ -299,9 +306,10 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
     if not any(item.required for item in checklist_items):
         return 0, member_count
 
-    submissions = ClassroomSubmission.objects.filter(
-        problem=problem, member_id__in=active_member_ids
-    ).select_related("classroom_score")
+    if submissions is None:
+        submissions = ClassroomSubmission.objects.filter(
+            problem=problem, member_id__in=active_member_ids
+        ).select_related("classroom_score")
 
     passed_member_ids: set[int] = set()
     for submission in submissions:
@@ -312,6 +320,114 @@ def _problem_pass_stats(problem: Problem, active_member_ids: set[int]) -> tuple[
             passed_member_ids.add(submission.member_id)
 
     return len(passed_member_ids), member_count
+
+
+# --- 집계 필드 (#632, 시안 v2) ------------------------------------------------
+#
+# 클래스 목록·문제 목록·격자가 한 번에 낸다 — 질의 수가 클래스·문제·멤버 수에
+# 비례하지 않는다. 「누구를 세는가」는 달성률과 같다(강사 전원·내보낸 사람 제외,
+# `_active_member_ids`). 배치로 셈하느라 그 규칙을 `is_instructor_q`로 한 번 더
+# 쓰므로, 두 숫자가 어긋나지 않는지는 시험(`test_classroom_aggregates`)이 지킨다.
+
+
+def _participant_submissions():
+    """강사 본인·내보낸 참여자의 것이 아닌 시도 — `_active_member_ids`와 같은 사람들."""
+
+    return ClassroomSubmission.objects.filter(member__expelled_at__isnull=True).exclude(
+        is_instructor_q(user="member__user_id", classroom="problem__classroom")
+    )
+
+
+def _last_submitted_by(key: str, **filters) -> dict[int, object]:
+    rows = (
+        _participant_submissions()
+        .filter(**filters)
+        .order_by()
+        .values(key)
+        .annotate(last=Max("created_at"))
+        .values_list(key, "last")
+    )
+    return dict(rows)
+
+
+def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
+    """클래스 행 수치 — 클래스 수와 무관하게 질의 여섯 개."""
+
+    class_ids = [c.id for c in classes]
+    active_ids: dict[int, set[int]] = {cid: set() for cid in class_ids}
+    for member_id, classroom_id in (
+        ClassMember.objects.filter(classroom_id__in=class_ids, expelled_at__isnull=True)
+        .exclude(is_instructor_q(user="user_id", classroom="classroom"))
+        .order_by()
+        .values_list("id", "classroom_id")
+    ):
+        active_ids[classroom_id].add(member_id)
+
+    problems_by_class: dict[int, list[Problem]] = {cid: [] for cid in class_ids}
+    for problem in Problem.objects.filter(classroom_id__in=class_ids).prefetch_related("checklist_items"):
+        problems_by_class[problem.classroom_id].append(problem)
+
+    submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
+    for submission in (
+        _participant_submissions()
+        .filter(problem__classroom_id__in=class_ids, problem__status=Problem.Status.OPEN)
+        .select_related("classroom_score")
+    ):
+        submissions_by_problem.setdefault(submission.problem_id, []).append(submission)
+
+    last_by_class = _last_submitted_by("problem__classroom_id", problem__classroom_id__in=class_ids)
+    scored_by_class = dict(
+        ClassroomScore.objects.filter(submission__problem__classroom_id__in=class_ids)
+        .order_by()
+        .values("submission__problem__classroom_id")
+        .annotate(n=Count("id"))
+        .values_list("submission__problem__classroom_id", "n")
+    )
+
+    stats: dict[int, dict] = {}
+    for cid in class_ids:
+        rates = []
+        for problem in problems_by_class[cid]:
+            if problem.status != Problem.Status.OPEN:
+                continue
+            passed_count, member_count = _problem_pass_stats(
+                problem, active_ids[cid], submissions=submissions_by_problem.get(problem.id, [])
+            )
+            if member_count:
+                rates.append(passed_count / member_count)
+        stats[cid] = {
+            "member_count": len(active_ids[cid]),
+            "problem_count": len(problems_by_class[cid]),
+            "average_pass_rate": (sum(rates) / len(rates)) if rates else None,
+            "last_submitted_at": last_by_class.get(cid),
+            "scored_attempt_count": scored_by_class.get(cid, 0),
+        }
+    return stats
+
+
+def _joined_progress(memberships: list[ClassMember]) -> dict[int, tuple[int, int]]:
+    """멤버십 id → (내가 통과한 열린 문제 수, 열린 문제 수) — 질의 셋."""
+
+    class_ids = {m.classroom_id for m in memberships}
+    open_problems: dict[int, list[Problem]] = {cid: [] for cid in class_ids}
+    for problem in Problem.objects.filter(
+        classroom_id__in=class_ids, status=Problem.Status.OPEN
+    ).prefetch_related("checklist_items"):
+        open_problems[problem.classroom_id].append(problem)
+    problems_by_id = {p.id: p for plist in open_problems.values() for p in plist}
+
+    passed_by_member: dict[int, set[int]] = {}
+    for submission in ClassroomSubmission.objects.filter(
+        member_id__in=[m.id for m in memberships], problem_id__in=problems_by_id
+    ).select_related("classroom_score"):
+        problem = problems_by_id[submission.problem_id]
+        if problem.is_score_passed(getattr(submission, "classroom_score", None)):
+            passed_by_member.setdefault(submission.member_id, set()).add(submission.problem_id)
+
+    return {
+        m.id: (len(passed_by_member.get(m.id, set())), len(open_problems[m.classroom_id]))
+        for m in memberships
+    }
 
 
 def _problem_ids_blocking_deletion(class_obj: Class) -> set[int]:
@@ -361,7 +477,10 @@ def _serialize_problem(
     *,
     active_member_ids: set[int] | None = None,
     blocking_problem_ids: set[int] | None = None,
+    last_submitted_by_problem: dict[int, object] | None = None,
 ) -> ProblemOut:
+    if last_submitted_by_problem is None:
+        last_submitted_by_problem = _last_submitted_by("problem_id", problem_id=problem.id)
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
     passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
@@ -399,6 +518,7 @@ def _serialize_problem(
         ],
         contest=_contest_out(problem),
         instructor_note=problem.instructor_note,
+        last_submitted_at=last_submitted_by_problem.get(problem.id),
     )
 
 
@@ -587,8 +707,11 @@ def create_class(request: HttpRequest, payload: ClassIn):
 def list_my_classes(request: HttpRequest):
     """「내 클래스」— 본인이 강사인 것만. 남의 클래스는 여기 나오지 않는다."""
 
-    classes = instructor_classes(request.auth_user.id)
-    return 200, [_serialize_class(c, viewer_id=request.auth_user.id) for c in classes]
+    classes = list(instructor_classes(request.auth_user.id))
+    row_stats = _class_row_stats(classes)
+    return 200, [
+        _serialize_class(c, viewer_id=request.auth_user.id, row_stats=row_stats[c.id]) for c in classes
+    ]
 
 
 @router.get("/classes/joined", response={200: list[JoinedClassOut]}, auth=jwt_auth)
@@ -605,6 +728,8 @@ def list_joined_classes(request: HttpRequest):
         .select_related("classroom")
         .order_by("-joined_at")
     )
+    memberships = list(memberships)
+    progress = _joined_progress(memberships)
     return 200, [
         JoinedClassOut(
             id=m.classroom.id,
@@ -613,6 +738,8 @@ def list_joined_classes(request: HttpRequest):
             joined_at=m.joined_at,
             archived=m.classroom.archived_at is not None,
             expelled=m.expelled_at is not None,
+            passed_count=progress[m.id][0],
+            open_problem_count=progress[m.id][1],
         )
         for m in memberships
     ]
@@ -1526,10 +1653,60 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 is_instructor=is_instructor(class_obj, member.user_id),
                 expelled=member.expelled_at is not None,
                 cells=cells,
+                joined_at=member.joined_at,
+                last_submitted_at=max(
+                    (s.created_at for problem in problems for s in submissions_by_key.get((problem.id, member.id), [])),
+                    default=None,
+                ),
             )
         )
 
     return ClassroomRosterGridOut(problems=problem_stats, members=member_rows)
+
+
+#: 「최근 제출」 목록의 길이(#632) — 고정이다.
+RECENT_ATTEMPTS_LIMIT = 10
+
+
+@router.get(
+    "/classes/{class_id}/recent-attempts",
+    response={200: list[ClassroomRecentAttemptOut], 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_recent_attempts(request: HttpRequest, class_id: int):
+    """클래스의 최근 시도 열 건(#632) — 강사 전용. 강사 본인·내보낸 참여자의 시도는
+    달성률과 같은 이유로 뺀다. 상태는 격자 칸의 낱말이다: 통과 이력이 아니라 **그 시도
+    하나**의 결과(통과·미통과)이고, 아직 채점 전이면 「설정 필요」(`needs_setup`) 또는
+    「채점 중」(`scoring`)이다."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    attempts = list(
+        _participant_submissions()
+        .filter(problem__classroom_id=class_obj.id)
+        .select_related("member", "problem", "classroom_score")
+        .prefetch_related("problem__checklist_items")
+        .order_by("-created_at", "-id")[:RECENT_ATTEMPTS_LIMIT]
+    )
+    out = []
+    for attempt in attempts:
+        score = getattr(attempt, "classroom_score", None)
+        if score is None:
+            status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
+        else:
+            status = "passed" if attempt.problem.is_score_passed(score) else "attempted_not_passed"
+        out.append(
+            ClassroomRecentAttemptOut(
+                id=attempt.id,
+                member_id=attempt.member_id,
+                member_display_name=attempt.member.display_name,
+                problem_id=attempt.problem_id,
+                problem_title=attempt.problem.title,
+                attempt_number=attempt.attempt_number,
+                status=status,
+                submitted_at=attempt.created_at,
+            )
+        )
+    return 200, out
 
 
 # --- Problem -------------------------------------------------------------------
@@ -1568,9 +1745,14 @@ def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
     problems = class_obj.problems.prefetch_related("checklist_items").all()
     active_member_ids = _active_member_ids(class_obj)
     blocking_problem_ids = _problem_ids_blocking_deletion(class_obj)
+    last_submitted = _last_submitted_by("problem_id", problem__classroom_id=class_obj.id)
     return [
         _serialize_problem(
-            p, class_obj, active_member_ids=active_member_ids, blocking_problem_ids=blocking_problem_ids
+            p,
+            class_obj,
+            active_member_ids=active_member_ids,
+            blocking_problem_ids=blocking_problem_ids,
+            last_submitted_by_problem=last_submitted,
         )
         for p in problems
     ]

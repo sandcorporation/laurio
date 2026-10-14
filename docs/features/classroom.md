@@ -443,6 +443,13 @@ CONTEXT.md 「Class」)이므로 읽는 쪽을 먼저 두고 도드라진 자리
 `GET /api/classroom/classes`(강사인 것 — 소유한 것과 공동 강사인 것, `role`)와 `GET /api/classroom/classes/joined`
 (참여자로 들어간 것)를 각각 불러와 그린다.
 
+두 목록 행에는 화면이 셈하지 않아도 되는 수치가 실려 온다(#632, 질의 수는 클래스 수와 무관하다).
+강사 행(`ClassOut`): `member_count`(참여 중인 참여자 — 강사 전원·내보낸 사람 제외, 달성률과 같은 기준)
+· `problem_count`(초안·숨김 포함) · `average_pass_rate`(**열린** 문제들의 달성률 평균 — 열린 문제가 없거나
+참여자가 0명이면 `null`) · `last_submitted_at`(참여자의 가장 최근 제출, 없으면 `null`) ·
+`scored_attempt_count`(누적 채점 횟수 — `GET .../classes/{id}` 에서도 읽는다). 참여자 행(`JoinedClassOut`):
+`open_problem_count`(지금 열린 문제 수)와 `passed_count`(그중 내가 한 번이라도 통과한 수).
+
 ## `/classes/new` 새 클래스
 
 클래스 이름과, 강사가 **이 클래스에서** 불릴 이름을 받아 클래스를 만들고 그
@@ -586,7 +593,14 @@ OR이고, 매번 지금의 체크리스트 기준으로 다시 셈된다. 분모
 행에는 나오지만(각각 배지로 표시) 달성률 계산에서는 빠진다 — 맨 아래 달성률
 행의 값은 위 「문제 중심」탭의 값과 **같은 계산 함수에서 나와** 정확히 같다.
 
-`GET /api/classroom/classes/{id}/roster-grid`로 그린다.
+`GET /api/classroom/classes/{id}/roster-grid`로 그린다. 참여자 행에는 `joined_at`(가입 시각)과
+`last_submitted_at`(그 사람의 가장 최근 제출, 없으면 `null`)이 실린다(#632). 문제 행(`GET .../problems`)에도
+`last_submitted_at`이 있다 — 강사 본인·내보낸 참여자의 제출은 센 대상이 아니다.
+
+`GET /api/classroom/classes/{id}/recent-attempts`(강사 전용, #632)는 참여자(강사 본인·내보낸 사람 제외)의
+**최근 시도 열 건**(고정)을 새것부터 준다 — 참여자 이름·문제 제목·시도 번호·시각과 `status`. `status` 는 격자 칸과
+같은 낱말이되 통과 이력이 아니라 **그 시도 하나**의 결과다: `passed` · `attempted_not_passed` · `scoring`(채점 대기·중)
+· `needs_setup`(키·모델 문제로 강사가 손대야 풀리는 채점 대기).
 
 ## `/classes/{id}/members` 참여자 명단(#281)
 

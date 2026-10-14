@@ -145,6 +145,18 @@ class ClassOut(Schema):
     #: 대기 중인 소유권 이전 요청(#564) — 없으면 `None`. 강사 누구나 본다: 소유자는 취소하고,
     #: 받는 공동 강사(`recipient_is_me`)는 클래스 화면에서 수락하거나 거절한다.
     pending_ownership_transfer: PendingOwnershipTransferOut | None = None
+    #: 클래스 행 수치(#632) — 모두 「강사 본인·내보낸 참여자 제외」의 달성률과 같은 기준이다.
+    #: 참여 중인 참여자 수.
+    member_count: int = 0
+    #: 문제 수(초안·숨김 포함 — 강사가 만든 것 전부).
+    problem_count: int = 0
+    #: 열린 문제들의 달성률(`pass_rate`) 평균. 열린 문제가 없거나 달성률이 있는 문제가
+    #: 하나도 없으면(참여자 0명) `None`.
+    average_pass_rate: float | None = None
+    #: 참여자(강사 본인·내보낸 사람 제외)의 가장 최근 제출 시각. 제출이 없으면 `None`.
+    last_submitted_at: datetime | None = None
+    #: 이 클래스에서 누적 채점된 횟수(채점 결과가 붙은 시도 수) — 강사 본인의 시도도 센다.
+    scored_attempt_count: int = 0
 
 
 class OpenAIKeyIn(Schema):
@@ -177,6 +189,9 @@ class JoinedClassOut(Schema):
     #: 강사가 내보냈는가(#281) — 참이어도 행은 지워지지 않고 지난 시도·판정은
     #: 그대로 읽힌다(`member_expelled`와 같은 신호, #300). 새 제출만 막힌다.
     expelled: bool = False
+    #: 내 진행(#632) — 지금 열린 문제 수와 그중 내가 한 번이라도 통과한 수.
+    open_problem_count: int = 0
+    passed_count: int = 0
 
 
 class ScoringModelOut(Schema):
@@ -461,6 +476,8 @@ class ProblemOut(Schema):
     contest: ProblemContestOut | None = None
     #: 공모전 문제의 수업용 안내(#548).
     instructor_note: str = ""
+    #: 참여자(강사 본인·내보낸 사람 제외)의 가장 최근 제출 시각(#632). 없으면 `None`.
+    last_submitted_at: datetime | None = None
 
 
 class ProblemReorderIn(Schema):
@@ -880,11 +897,29 @@ class ClassroomGridMemberOut(Schema):
     is_instructor: bool
     expelled: bool
     cells: list[ClassroomGridCellOut]
+    #: 가입 시각과 이 사람의 가장 최근 제출 시각(#632). 제출이 없으면 `None`.
+    joined_at: datetime | None = None
+    last_submitted_at: datetime | None = None
 
 
 class ClassroomRosterGridOut(Schema):
     problems: list[ClassroomProblemStatsOut]
     members: list[ClassroomGridMemberOut]
+
+
+class ClassroomRecentAttemptOut(Schema):
+    """클래스의 최근 시도 한 줄(#632) — 강사 전용. `status`는 격자 칸과 같은 낱말이다:
+    "passed" | "attempted_not_passed" | "scoring" | "needs_setup"."""
+
+    id: int
+    member_id: int
+    member_display_name: str
+    problem_id: int
+    problem_title: str
+    attempt_number: int
+    status: str
+    submitted_at: datetime
+
 class ClassroomInstructorSubmissionOut(Schema):
     """강사가 보는 시도 하나(#291) — 참여자용 `ClassroomSubmissionOut`과 같은
     모양에 `member_id`·`member_display_name`을 더한다. 강사는 자기 시도가
