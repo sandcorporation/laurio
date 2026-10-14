@@ -35,7 +35,7 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 것은 보통이다. 화면은 이 함수를 부를 뿐 `text-attention` 을 직접 적지 않는다.
 
 **공모전 제품 스위치는 「공모전 / 유료 공모전」 둘이다**
-(`NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED`·`NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED`,
+(실행 env `CODEMIT_PUBLIC_CONTEST_PRODUCT_ENABLED`·`CODEMIT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED`,
 `frontend/lib/contest-switch.ts`, ADR-0048). 공모전 스위치가 꺼지면 헤더의
 「공모전」·「공모전 개최」·「무료 공모전 개최」(#415) 진입점과 헤더 계정 메뉴의
 「내 공모전」 진입점(#375)이 빠지고, `/contests/**`·`/console/contests/**`

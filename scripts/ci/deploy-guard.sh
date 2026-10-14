@@ -264,10 +264,10 @@ case "$app" in
     esac
 
     step "공개 설정이 브라우저로 가고 비밀은 가지 않는다"
-    html="$(c -sS --max-time 10 http://127.0.0.1:3000/)"
+    # /privacy 는 백엔드 없이 그려진다(이 가드의 API 주소는 닿지 않는 곳이다) — 첫 화면은 500 이라 못 쓴다.
     case "$html" in
-      *__CODEMIT_PUBLIC__*ci-guard-only-toss-client-key*) echo "토스 클라이언트 키가 window.__CODEMIT_PUBLIC__ 로 간다" ;;
-      *) printf '%s' "$html" | head -c 2000; fail "첫 화면 HTML 에 공개 설정(토스 클라이언트 키)이 없다 — 결제창이 키 없이 열린다" ;;
+      *'<script id="codemit-public-config">'*ci-guard-only-toss-client-key*) echo "토스 클라이언트 키가 window.__CODEMIT_PUBLIC__ 로 간다" ;;
+      *) printf '%s' "$html" | head -c 2000; fail "HTML 의 공개 설정 스크립트에 토스 클라이언트 키가 없다 — 결제창이 키 없이 열린다" ;;
     esac
     case "$html" in
       *ci-guard-only-toss-secret-key*) fail "토스 시크릿 키가 HTML 에 실렸다 — lib/public-config.ts 의 목록을 확인한다" ;;

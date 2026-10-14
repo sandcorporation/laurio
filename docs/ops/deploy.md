@@ -76,11 +76,10 @@ ADR-0048이 amend). 스위치가 둘이다:
 
 **한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
 다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`/`.env.prod`에
-`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고, Jenkins 자격증명
-`codemit-images-env` 의 `STAGING_`/`PROD_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED` 도 `true` 로 바꾼 뒤
-`laurio` 잡을 다시 돌려 배포한다 — frontend 는 그 값을 빌드 인자로 굽고, 굽는 곳이 Jenkins 라
-원본이 그 자격증명이다(아래 「이미지는 Jenkins `laurio` 잡이 굽는다」, `docker/frontend.Dockerfile`). ADR을 새로 쓰지 않는다 — 되돌리기가 환경변수 한
-줄이다(ADR-0037·ADR-0048).
+`CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 배포한다 — backend 와 frontend 가
+같은 줄을 나눠 읽고(frontend 는 실행 env `CODEMIT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED`, #711),
+`deploy.sh` 가 설정이 바뀐 앱을 다시 띄운다(이미지를 다시 굽지 않는다). ADR을 새로 쓰지 않는다 —
+되돌리기가 환경변수 한 줄이다(ADR-0037·ADR-0048).
 
 **그래도 가드는 그대로다.** `core.adapters.check_adapter_mode`(`django.core.checks` 로
 등록되어 `django.setup()` 이후 `manage.py migrate`/`check`/`runserver` 부팅 파이프라인에서
@@ -184,8 +183,8 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 
 | 노드 | 명령 | 태그 |
 | --- | --- | --- |
-| sub(`laurio-staging`) | `images.sh amd64` | `codemit-backend:<sha>-amd64`, 세 앱 `:<sha>-staging`, `codemit-search:<sha>-amd64`(#450/#451), `codemit-pgbouncer:<sha>-amd64`(#453/#458) |
-| macos | `images.sh arm64` | `codemit-backend:<sha>-arm64`, 세 앱 `:<sha>-prod`, `codemit-search:<sha>-arm64`, `codemit-pgbouncer:<sha>-arm64` |
+| sub(`laurio-staging`) | `images.sh amd64` | 여섯 전부 `codemit-<서비스>:<sha>-amd64` — backend·세 앱·search(#450/#451)·pgbouncer(#453/#458) |
+| macos | `images.sh arm64` | 여섯 전부 `codemit-<서비스>:<sha>-arm64` |
 
 각 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
 를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
@@ -196,7 +195,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   문맥 해시를 낸다 — Dockerfile 이 읽는 경로 아래 파일 중 `.dockerignore` 가 문맥에서 빼지 않는 것의
   blob 목록(BuildKit 과 같은 규칙을 해시에도 적용한다 — e2e 스펙·단위 시험·시험 설정만 고친 커밋은
   해시가 그대로라 굽지 않는다, #714)·그 Dockerfile·루트
-  `.dockerignore`(와, 있으면 BuildKit 이 그 대신 쓰는 `docker/<서비스>.Dockerfile.dockerignore`)·빌드 대상·플랫폼·빌드 인자 값. 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면 굽지 않고
+  `.dockerignore`(와, 있으면 BuildKit 이 그 대신 쓰는 `docker/<서비스>.Dockerfile.dockerignore`)·빌드 대상·플랫폼. 태그 `ctx-<해시>-<arch>` 가 ghcr 에 있으면 굽지 않고
   커밋 태그를 그 매니페스트에 더하기만 한다(`imagetools create --prefer-index=false` — 같은 digest,
   수 초). **구운 이미지는 커밋 태그로만 올리고, `ctx-` 태그는 이미지 두 가지와 부팅 가드가 모두 초록인 뒤에**
   「문맥 태그」 단계(`scripts/ci/images-ctx.sh`)가 붙인다(#709) — 가드에서 떨어졌거나 다른 가지가 실패한
@@ -204,11 +203,14 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   서비스만 바꿔 끼우므로 나머지 이미지는 굽자마자 버려지던 것이다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
   새 경로를 `COPY` 하는데 표에 없으면 빨갛다. 빠뜨리면 그 경로를 고친 커밋이 옛 이미지로 배포된다.
-- **backend·search·pgbouncer 는 환경을 가리지 않아 아키텍처로만 가른다**(#450/#451 — Next 앱이 아니라
-  `NEXT_PUBLIC_*` 처럼 굳는 값이 없다). 세 앱은 `NEXT_PUBLIC_*` 가 굳으므로 환경마다 따로 굽는다 — 그
-  값의 원본은 서버 env 가 아니라 **Jenkins 자격증명 `codemit-images-env`**(Secret file, `STAGING_*`·`PROD_*`
-  를 `KEY=value` 줄로 — 옛 저장소 변수 스무 개를 옮겼다)다. 값이 해시에 들어가므로 **바꾸면 다음 빌드가
-  그 앱을 저절로 다시 굽는다** — 바로 반영하려면 `laurio` 잡을 손으로 한 번 돌린다.
+- **이미지는 환경을 모른다 — 아키텍처로만 가른다**(#711, ADR-0062). 세 Next 앱도 빌드 인자가 없다:
+  공개 값(Sentry DSN·환경·release, 토스 클라이언트 키, 포트원 store·channel, 문의 주소, 공모전·유료
+  공모전 스위치)은 compose 의 `environment:` 가 서버의 `docker/.env.<target>` 에서 `CODEMIT_PUBLIC_*` 로
+  넣고, 앱은 서버에서 그것을 읽어 루트 레이아웃이 브라우저로 넘긴다(`<앱>/lib/public-config.ts`).
+  그래서 amd64 이미지 = staging, arm64 이미지 = prod 이고 커밋당 굽는 수가 최대 여섯이다(예전 열둘).
+  값을 바꾸면 `.env.<target>` 을 고치고 배포한다 — `deploy.sh plan` 이 떠 있는 앱의 compose 설정 해시를
+  지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 어느 키가 어느 이름으로 가는지는
+  `docker/staging.env.example`·`prod.env.example` 과 compose 두 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
 - **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, sub)는 이번에 구운 앱만 본다 — 건너뛴 앱의 이미지는
