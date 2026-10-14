@@ -38,6 +38,10 @@ export type ProblemListItem = {
   title: string;
   submission_formats: SubmissionFormat[];
   passed: boolean;
+  // 통과 이력 상태(#639) — 격자·최근 시도와 같은 낱말. 미제출은 시도 0.
+  status: "passed" | "attempted_not_passed" | "scoring" | "not_submitted";
+  attempt_count: number;
+  last_attempted_at: string | null;
 };
 
 // 참여자의 문제 목록 응답(#372) — 그 화면 위쪽 인라인 이름 편집 칸이 쓸 지금
