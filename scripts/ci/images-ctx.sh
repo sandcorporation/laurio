@@ -21,7 +21,9 @@ trap 'exit 130' INT TERM
 
 ghcr_login
 
-n=0
+# 태그마다 `imagetools create` 한 번(수 초) — 열둘을 차례로 붙이면 45초였다(laurio #481). 함께 붙이고
+# 전부 기다린다. 하나라도 실패하면 붉다(나머지는 붙은 채 남는다 — 붙은 것은 그 문맥이 초록이라는 사실 그대로다).
+pids=""
 for file in "$@"; do
   [ -f "$file" ] || { echo "$file 이 없다 — 붙일 것이 없다"; continue; }
   while read -r svc ctx_ref sha_ref; do
@@ -31,8 +33,14 @@ for file in "$@"; do
       exit 1
     fi
     echo "문맥 태그 $svc — ${ctx_ref##*:} ← ${sha_ref##*:}"
-    docker buildx imagetools create --prefer-index=false --tag "$ctx_ref" "$sha_ref"
-    n=$((n + 1))
+    docker buildx imagetools create --prefer-index=false --tag "$ctx_ref" "$sha_ref" &
+    pids="$pids $!"
   done < "$file"
 done
+n=0
+failed=0
+for pid in $pids; do
+  if wait "$pid"; then n=$((n + 1)); else failed=1; fi
+done
 echo "문맥 태그 ${n}개"
+exit "$failed"

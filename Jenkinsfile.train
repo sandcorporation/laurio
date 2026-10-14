@@ -7,6 +7,11 @@
 //
 // 노드: 쌓기·병합은 sub, 시험은 sub(검사 전체)와 macos(e2e·celery)가 함께. 묶음이 PR 마다의 시험을
 // 대신하는 것은 macos 쪽이다 — sub 검사는 PR 마다 한 번(줄 서기 전 거르개)과 묶음에서 한 번 돈다.
+//
+// **배포 이미지도 여기서 굽는다**(#712). sub 가 검사 뒤 amd64 여섯(+ 구운 앱의 부팅 가드), macos 가
+// arm64 여섯을 `scripts/ci/images.sh` 로 굽고, macos 의 e2e·celery 는 그 arm64 이미지를 받아 돈다.
+// 「병합」 뒤 `images-ctx.sh` 가 ctx 태그를 붙이면, 병합 뒤 laurio(`Jenkinsfile`)의 이미지 단계는 같은
+// 문맥을 전부 「건너뛴다」로 두고 main 커밋 태그만 더한다 — 같은 코드를 두 번 굽지 않는다.
 // 같은 잡을 둘 겹쳐 돌리지 않는다 — 줄에 쌓인 호출은 Jenkins 가 하나로 합친다.
 pipeline {
   agent none
@@ -95,7 +100,21 @@ pipeline {
             }
             sh 'bash scripts/ci/sub-checks.sh'
             // 묶음이 붉었을 때 macos 의 인프라 판정을 믿어도 되는지 — sub 가 초록이어야 e2e 만 붉은 것이다.
+            // 뒤의 이미지·가드는 이 판정에 넣지 않는다 — 인프라 재실행은 사슬에 한 번이라 잘못 읽혀도 대가는 빌드 한 번이다.
             script { env.TRAIN_SUB_OK = '1' }
+            // 검사가 초록이면 staging(amd64) 여섯을 묶음의 트리로 굽는다(#712) — 바뀌지 않은 것은 ctx 로
+            // 건너뛴다. 커밋 태그(<묶음 머리 sha>-amd64)는 지금 올리고, ctx 태그는 「병합」 뒤에만 붙인다(#709).
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+              sh 'bash scripts/ci/images.sh amd64'
+              // 이번에 구운 앱만 부팅 가드 — 건너뛴 앱의 이미지는 ctx 가 붙을 때 이미 한 번 지났다.
+              // laurio 는 열차가 ctx 를 붙인 문맥을 굽지도 가드하지도 않으므로 가드는 여기가 유일하다.
+              sh '''
+                for app in frontend operator classroom; do
+                  if grep -qx "$app=built" .images-amd64.result; then bash scripts/ci/deploy-guard.sh "$app"; fi
+                done
+              '''
+            }
+            stash name: 'ctx-amd64', includes: '.images-amd64.ctx', allowEmpty: true
           }
           post {
             always {
@@ -117,15 +136,23 @@ pipeline {
             }
             // 중단된 앞 빌드가 남긴 스택·디스크부터 걷는다(trap 은 중단 때 돌지 못한다).
             sh 'bash scripts/ci/macos-sweep.sh'
-            // e2e 가 붉어도 celery-broker 는 돈다 — 어디가 깨졌는지 한 번에 본다.
-            catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-              sh 'bash scripts/ci/e2e.sh'
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+              // prod(arm64) 여섯을 묶음의 트리로 굽고 커밋 태그로 올린다(#712) — 바뀌지 않은 것은 ctx 로
+              // 건너뛴다. e2e·celery 는 스택이 따로 굽지 않고 **바로 이 이미지**를 받아 돈다
+              // (compose.ci-images.yaml) — 그래서 e2e 가 본 digest 가 prod 에 가는 digest 다.
+              sh 'bash scripts/ci/images.sh arm64'
+              // 커밋 태그는 images.sh 가 쓴 그것 — 이 작업 공간의 HEAD(쌓은 묶음의 머리) + `-arm64`.
+              // e2e 가 붉어도 celery-broker 는 돈다 — 어디가 깨졌는지 한 번에 본다.
+              catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                sh 'CODEMIT_IMAGE_TAG="$(git -c safe.directory="$PWD" rev-parse HEAD)-arm64" bash scripts/ci/e2e.sh'
+              }
+              // 붉은 e2e 가 Docker VM 정지(3초 초과 + 그 시각 backend 요청 0건) 모양인지 판정한다(#716).
+              // celery-broker 까지 초록일 때만 넘긴다 — 다른 단계가 붉으면 인프라 재실행 대상이 아니다.
+              sh 'python3 scripts/ci/e2e_stall.py test-results > test-results/e2e-verdict.json || rm -f test-results/e2e-verdict.json'
+              sh 'CODEMIT_IMAGE_TAG="$(git -c safe.directory="$PWD" rev-parse HEAD)-arm64" bash scripts/ci/celery-broker.sh'
             }
-            // 붉은 e2e 가 Docker VM 정지(3초 초과 + 그 시각 backend 요청 0건) 모양인지 판정한다(#716).
-            // celery-broker 까지 초록일 때만 넘긴다 — 다른 단계가 붉으면 인프라 재실행 대상이 아니다.
-            sh 'python3 scripts/ci/e2e_stall.py test-results > test-results/e2e-verdict.json || rm -f test-results/e2e-verdict.json'
-            sh 'bash scripts/ci/celery-broker.sh'
             stash name: 'e2e-verdict', includes: 'test-results/e2e-verdict.json', allowEmpty: true
+            stash name: 'ctx-arm64', includes: '.images-arm64.ctx', allowEmpty: true
           }
           post {
             always {
@@ -162,6 +189,23 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/train.py assemble'
           sh 'python3 scripts/ci/train.py merge'
+        }
+        // 합쳤으면 이 묶음이 구운 이미지에 ctx 태그를 붙인다(#712, #709 의 「초록 뒤에만」) — 열차에서 초록은
+        // 시험 두 가지(검사·이미지·가드 / 이미지·e2e·celery) + 병합이다. 병합 뒤 laurio 가 같은 트리의 문맥
+        // 해시를 내면 전부 「건너뛴다」가 되어 커밋 태그만 더한다. 붉은 묶음은 여기 닿지 않아 ctx 가 없고,
+        // 반으로 갈라 다시 도는 묶음은 트리가 달라 해시도 다르니 스스로 다시 굽는다. 다 합치지 못하고 멈췄어도
+        // (그 사이 새 push) 시험한 문맥은 초록이므로 붙인다 — main 의 트리가 다르면 laurio 가 다른 해시를
+        // 내고, 그 문맥만 굽는다. 실패해도 병합은 이미 끝났으므로 빌드를 붉히지 않는다 — laurio 가 구울 뿐이다.
+        script {
+          if (fileExists('.train-merged') && env.TRAIN_RUN_TESTS == '1') {
+            catchError(buildResult: null, stageResult: null, message: 'ctx 태그 실패 — laurio 가 다시 굽는다') {
+              unstash 'ctx-amd64'
+              unstash 'ctx-arm64'
+              withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+                sh 'bash scripts/ci/images-ctx.sh .images-amd64.ctx .images-arm64.ctx'
+              }
+            }
+          }
         }
         // 합쳤으면 합친 범위의 `GlitchTip: <id>` 줄을 해결 표시한다 — 「고쳤다」의 판정이 곧 이
         // 병합이다(시험이 초록이고 main 에 들어갔다). 토큰이 없으면 스크립트가 넘어간다.
