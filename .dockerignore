@@ -45,3 +45,13 @@ docs/
 **/*.sqlite3
 **/staticfiles/
 **/media/
+
+# 시험 — runner 이미지에 들지 않고 `pnpm build`(next build 의 typecheck 포함)도 읽지 않는다.
+# 문맥에서 빼면 시험만 고친 커밋이 앱 이미지를 다시 굽지 않는다(#714) — `scripts/ci/image_context.py`
+# 가 이 규칙을 해시에도 적용한다. e2e·vitest 는 호스트에서 돈다. 시험을 들여야 하는 ci 이미지는
+# 자기 `docker/ci.Dockerfile.dockerignore` 를 쓰므로 이 줄들이 닿지 않는다.
+**/e2e/
+**/*.test.ts
+**/__snapshots__/
+**/vitest.config.*
+**/playwright.config.*

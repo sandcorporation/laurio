@@ -193,7 +193,9 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 전 sub)가 커밋마다 열둘을 다 구웠다.
 
 - **바뀌지 않은 서비스는 굽지 않는다**(#705). `scripts/ci/image_context.py` 가 서비스마다 빌드
-  문맥 해시를 낸다 — Dockerfile 이 읽는 경로(`git rev-parse HEAD:<경로>`)·그 Dockerfile·루트
+  문맥 해시를 낸다 — Dockerfile 이 읽는 경로 아래 파일 중 `.dockerignore` 가 문맥에서 빼지 않는 것의
+  blob 목록(BuildKit 과 같은 규칙을 해시에도 적용한다 — e2e 스펙·단위 시험·시험 설정만 고친 커밋은
+  해시가 그대로라 굽지 않는다, #714)·그 Dockerfile·루트
   `.dockerignore`(와, 있으면 BuildKit 이 그 대신 쓰는 `docker/<서비스>.Dockerfile.dockerignore`)·빌드 대상·플랫폼·빌드 인자 값. 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면 굽지 않고
   커밋 태그를 그 매니페스트에 더하기만 한다(`imagetools create --prefer-index=false` — 같은 digest,
   수 초). **구운 이미지는 커밋 태그로만 올리고, `ctx-` 태그는 이미지 두 가지와 부팅 가드가 모두 초록인 뒤에**

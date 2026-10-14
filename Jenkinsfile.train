@@ -173,7 +173,7 @@ pipeline {
 
   post {
     // 묶음이 비지 않았으면 다음 묶음을 부른다 — 붉었으면 반으로 갈라서, 초록이면 남은 줄을.
-    // 빈 묶음은 부르지 않는다(10분 cron 과 PR CI 가 부른다).
+    // 빈 묶음은 부르지 않는다(30분 cron·PR CI·pull_request 웹훅이 부른다).
     failure {
       script {
         if (env.TRAIN_COUNT && env.TRAIN_COUNT != '0') {

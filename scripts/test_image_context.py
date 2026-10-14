@@ -210,5 +210,140 @@ class GitObjects(unittest.TestCase):
             self.assertNotEqual(digest(), second)
 
 
+class DockerIgnore(unittest.TestCase):
+    """BuildKit 의 `.dockerignore` 규칙(moby patternmatcher)을 그대로 따른다 — 해시가 문맥과 같은 것을 보게."""
+
+    def ignored(self, text: str, path: str) -> bool:
+        return ic.is_ignored(path, ic.parse_dockerignore(text))
+
+    def test_double_star_reaches_any_depth_and_whole_directories(self) -> None:
+        self.assertTrue(self.ignored("**/e2e/", "frontend/e2e/auth.spec.ts"))
+        self.assertTrue(self.ignored("**/e2e/", "frontend/e2e/lib/seed.ts"))
+        self.assertTrue(self.ignored("**/e2e/", "e2e/x.ts"))
+        self.assertFalse(self.ignored("**/e2e/", "frontend/lib/e2e-helper.ts"))
+        self.assertTrue(self.ignored("**/*.test.ts", "classroom/lib/auth/session.test.ts"))
+        self.assertFalse(self.ignored("**/*.test.ts", "classroom/lib/auth/session.ts"))
+        self.assertTrue(self.ignored("**/vitest.config.*", "packages/markdown/vitest.config.mts"))
+
+    def test_root_anchored_patterns_stay_at_the_root(self) -> None:
+        self.assertTrue(self.ignored("docs/", "docs/ops/ci.md"))
+        self.assertFalse(self.ignored("docs/", "frontend/docs/page.tsx"))
+        self.assertFalse(self.ignored(".git/", "frontend/.gitignore"))
+        self.assertFalse(self.ignored("*.md", "frontend/README.md"))
+        self.assertTrue(self.ignored("/*.md", "README.md"))
+
+    def test_last_matching_rule_wins_and_comments_are_skipped(self) -> None:
+        text = "# c\n**/.env\n**/.env.*\n!**/.env.example\n"
+        self.assertTrue(self.ignored(text, "frontend/.env.local"))
+        self.assertFalse(self.ignored(text, "frontend/.env.example"))
+        self.assertFalse(self.ignored(text, "frontend/app/page.tsx"))
+
+    def test_question_mark_and_literal_dots(self) -> None:
+        self.assertTrue(self.ignored("**/*.py[cod]", "backend/a.pyc"))
+        self.assertFalse(self.ignored("**/*.py[cod]", "backend/a.py"))
+        self.assertFalse(self.ignored("a.b", "axb"))
+        self.assertTrue(self.ignored("a?b", "axb"))
+
+    def test_the_repo_dockerignore_drops_tests_but_keeps_app_sources(self) -> None:
+        rules = ic.parse_dockerignore((ROOT / ".dockerignore").read_text(encoding="utf-8"))
+        for path in (
+            "frontend/e2e/auth.spec.ts",
+            "frontend/playwright.config.ts",
+            "classroom/vitest.config.mts",
+            "operator/lib/home/home.test.ts",
+            "frontend/lib/ui/__snapshots__/classnames.test.ts.snap",
+            "frontend/.env.local",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(ic.is_ignored(path, rules))
+        for path in (
+            "frontend/app/page.tsx",
+            "frontend/package.json",
+            "frontend/tsconfig.json",
+            "frontend/next.config.ts",
+            "classroom/lib/auth/session.ts",
+            "packages/route-audit/src/route-scan.ts",
+            "pnpm-lock.yaml",
+            "frontend/.env.example",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(ic.is_ignored(path, rules))
+
+
+class IgnoredFilesDoNotMoveTheHash(unittest.TestCase):
+    """`.dockerignore` 가 문맥에서 뺀 파일은 해시에도 들지 않는다(#714) — 시험만 고친 커밋은 굽지 않는다."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.repo = pathlib.Path(self._tmp.name)
+        _git(self.repo, "init", "-q")
+        files = {
+            ".dockerignore": "**/e2e/\n**/*.test.ts\n",
+            "docker/frontend.Dockerfile": "FROM x\nCOPY frontend/ ./frontend/\n",
+            "frontend/app/page.tsx": "page",
+            "frontend/e2e/auth.spec.ts": "spec",
+            "frontend/lib/a.test.ts": "unit",
+        }
+        for name in ic.NODE_WORKSPACE:
+            files[f"{name}/x" if name == "packages" else name] = name
+        for rel, text in files.items():
+            (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.repo / rel).write_text(text)
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", "one")
+        self.svc = ic.SERVICES["frontend"]
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def in_repo(self, fn):  # type: ignore[no-untyped-def]
+        cwd = pathlib.Path.cwd()
+        try:
+            os.chdir(self.repo)
+            return fn()
+        finally:
+            os.chdir(cwd)
+
+    def digest(self) -> str:
+        return self.in_repo(
+            lambda: ic.context_digest(ic.service_objects(self.svc), self.svc.target, "linux/amd64", {})
+        )
+
+    def commit(self, rel: str, text: str) -> str:
+        (self.repo / rel).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / rel).write_text(text)
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-qm", rel)
+        return _git(self.repo, "rev-parse", "HEAD")
+
+    def test_e2e_and_unit_test_changes_keep_the_hash_and_the_release(self) -> None:
+        first = self.digest()
+        app_commit = _git(self.repo, "rev-parse", "HEAD")
+        self.commit("frontend/e2e/auth.spec.ts", "spec changed")
+        self.commit("frontend/e2e/new.spec.ts", "new spec")
+        self.commit("frontend/lib/a.test.ts", "unit changed")
+        self.assertEqual(self.digest(), first)
+        self.assertEqual(self.in_repo(lambda: ic.release(self.svc)), app_commit)
+
+    def test_app_source_changes_move_the_hash_and_the_release(self) -> None:
+        first = self.digest()
+        changed = self.commit("frontend/app/page.tsx", "page changed")
+        self.commit("frontend/e2e/auth.spec.ts", "spec changed")
+        self.assertNotEqual(self.digest(), first)
+        self.assertEqual(self.in_repo(lambda: ic.release(self.svc)), changed)
+
+    def test_a_new_ignore_rule_moves_the_hash(self) -> None:
+        first = self.digest()
+        self.commit(".dockerignore", "**/e2e/\n")
+        self.assertNotEqual(self.digest(), first)
+
+    def test_the_per_service_ignore_replaces_the_root_one(self) -> None:
+        # BuildKit 은 `docker/<서비스>.Dockerfile.dockerignore` 가 있으면 루트 것을 읽지 않는다.
+        self.commit("docker/frontend.Dockerfile.dockerignore", "**/node_modules/\n")
+        before = self.digest()
+        self.commit("frontend/e2e/auth.spec.ts", "spec changed")
+        self.assertNotEqual(self.digest(), before)
+
+
 if __name__ == "__main__":
     unittest.main()
