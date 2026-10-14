@@ -39,7 +39,13 @@ export type ProblemListItem = {
   submission_formats: SubmissionFormat[];
   passed: boolean;
   // 통과 이력 상태(#639) — 격자·최근 시도와 같은 낱말. 미제출은 시도 0.
-  status: "passed" | "attempted_not_passed" | "scoring" | "not_submitted";
+  // `needs_setup` 은 키·모델 사정으로 멈춘 시도 — 화면은 「채점 대기」(#670).
+  status:
+    | "passed"
+    | "attempted_not_passed"
+    | "scoring"
+    | "needs_setup"
+    | "not_submitted";
   attempt_count: number;
   last_attempted_at: string | null;
 };

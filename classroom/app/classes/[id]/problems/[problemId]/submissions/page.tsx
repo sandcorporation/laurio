@@ -32,6 +32,7 @@ import type { InstructorSubmissionRow } from "@/lib/submissions/api";
 import {
   latestPerMember,
   participantAttempts,
+  participantIdsOf,
   requiredSummary,
   submissionStats,
 } from "@/lib/submissions/latest-attempts";
@@ -84,18 +85,20 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
 function AttemptRow({
   submission,
   items,
+  syntaxCheckEnabled,
   checklistLabelById,
   open,
   onToggle,
 }: {
   submission: InstructorSubmissionRow;
   items: { id: number; label: string; required: boolean }[];
+  syntaxCheckEnabled: boolean;
   checklistLabelById: ReadonlyMap<number, string>;
   open: boolean;
   onToggle: () => void;
 }) {
   const testId = `instructor-submission-row-${submission.id}`;
-  const summary = requiredSummary(submission, items);
+  const summary = requiredSummary(submission, items, syntaxCheckEnabled);
   const entry = instructorEntryBadge(submission);
   const canOpen = submission.status === "scored" && submission.score !== null;
   return (
@@ -212,6 +215,7 @@ export default function ProblemSubmissionsPage() {
 
   const problem = problemState.state.status === "ready" ? problemState.state.problem : null;
   const items = problem?.checklist_items ?? [];
+  const syntaxCheckEnabled = problem?.syntax_check_enabled ?? false;
   const checklistLabelById = new Map(items.map((item) => [item.id, item.label]));
   const problemTitle = problem?.title ?? "";
   const problemStatus = problem?.status ?? "";
@@ -219,9 +223,7 @@ export default function ProblemSubmissionsPage() {
   // 사람 집합은 참여자 격자에서 온다 — 강사 본인과 내보낸 사람은 뺀다(클래스 상세의 달성률과 같은 집합).
   // 격자를 아직 못 받았으면 목록은 그대로 두고 분모와 「안 낸 사람」만 비운다.
   const participantIds =
-    gridState.status === "ready"
-      ? new Set(gridState.grid.members.filter((m) => !m.is_instructor && !m.expelled).map((m) => m.id))
-      : null;
+    gridState.status === "ready" ? participantIdsOf(gridState.grid) : null;
   const submissions = participantAttempts(state.submissions, participantIds);
   const stats = submissionStats(submissions, participantIds ? participantIds.size : null);
   const submittedMembers = new Set(submissions.map((s) => s.member_id));
@@ -235,7 +237,9 @@ export default function ProblemSubmissionsPage() {
   // 상태로 같은 사유("no_api_key")에 실린다(#629).
   const blockedByMissingKey = submissions.some((s) => s.pending_reason === "no_api_key");
   // 키는 멀쩡한데 이 문제의 채점 모델을 그 키로 못 쓰는 경우(#403) — 다음 행동이 다르다.
-  const blockedByRejectedModel = submissions.some((s) => s.pending_reason === "model_rejected");
+  // 경고는 한 곳에서 한 줄(#670) — 둘이 겹치면 CONTEXT.md 「채점 대기」의 순서대로 키만 말한다.
+  const blockedByRejectedModel =
+    !blockedByMissingKey && submissions.some((s) => s.pending_reason === "model_rejected");
 
   const rows = showAll ? submissions : latestPerMember(submissions);
   const toggle = (id: number) =>
@@ -315,6 +319,11 @@ export default function ProblemSubmissionsPage() {
               {view.label}
             </button>
           ))}
+          {showAll ? null : (
+            <span data-testid="submissions-sort" className="ml-auto text-ink/60">
+              정렬: 최근 제출순
+            </span>
+          )}
         </div>
 
         <Card>
@@ -329,6 +338,7 @@ export default function ProblemSubmissionsPage() {
                   key={submission.id}
                   submission={submission}
                   items={items}
+                  syntaxCheckEnabled={syntaxCheckEnabled}
                   checklistLabelById={checklistLabelById}
                   open={openIds.has(submission.id)}
                   onToggle={() => toggle(submission.id)}

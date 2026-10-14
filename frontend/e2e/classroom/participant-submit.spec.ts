@@ -31,6 +31,10 @@ test("형식을 고르고 저장소를 내면 내 시도에 줄이 생긴다", a
   expect(
     (await api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "목록을 그린다", required: true } })).ok(),
   ).toBeTruthy();
+  // 강사가 아직 초안인 문제를 학생 화면으로 열면 띠가 배지 둘이다(#660·#670).
+  await instructorPage.goto(`/classes/${classId}/problems/${problemId}/submit`);
+  await expect(instructorPage.getByTestId("instructor-viewing-banner")).toContainText("강사로 보는 중");
+  await expect(instructorPage.getByTestId("instructor-viewing-banner-draft")).toHaveText("초안");
   expect((await api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
 
   const joinCode = (await (await api.get(base)).json()).join_code as string;

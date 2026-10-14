@@ -175,7 +175,7 @@ describe("문제 편집의 비용 한 줄 (#637)", () => {
   it("시도 1건과 문제 하나를 한 줄로, 참여자가 없으면 시도 1건만", () => {
     const priced = row({ per_attempt: { krw: 30, tokens: 19_000 }, per_problem_krw: 1_150 });
     expect(problemCostLine(estimate({ participant_count: 24, attempts_per_participant: 1.6 }), priced)).toBe(
-      "시도 1건 약 30원 · 참여자 24명 × 평균 1.6번 ≈ 약 1,200원",
+      "시도 1건 약 30원 · 참여자 24명 × 평균 1.6회 ≈ 약 1,200원",
     );
     expect(problemCostLine(estimate({ participant_count: 0 }), priced)).toBe("시도 1건 약 30원");
   });
@@ -188,6 +188,6 @@ describe("문제 편집의 비용 한 줄 (#637)", () => {
         estimate({ unit: "tokens", participant_count: 2, attempts_per_participant: 2 }),
         row({ priced: false, per_attempt: { krw: null, tokens: 17_650 }, per_problem_tokens: 70_000 }),
       ),
-    ).toBe("시도 1건 약 1.8만 토큰 · 참여자 2명 × 평균 2번 ≈ 약 7만 토큰");
+    ).toBe("시도 1건 약 1.8만 토큰 · 참여자 2명 × 평균 2회 ≈ 약 7만 토큰");
   });
 });

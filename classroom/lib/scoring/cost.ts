@@ -123,7 +123,7 @@ export function costBasisText(estimate: ScoringCostEstimate, scope: "class" | "p
 }
 
 export function formatAttemptsPerParticipant(n: number): string {
-  return `${(Math.round(n * 10) / 10).toLocaleString("ko-KR")}번`;
+  return `${(Math.round(n * 10) / 10).toLocaleString("ko-KR")}회`;
 }
 
 /** 시도 1건 — 기준이 소스 크기별이면 「보통」(가운데) 크기로 본다. */
@@ -159,7 +159,7 @@ export function classCostSummary(estimate: ScoringCostEstimate, current: Scoring
 }
 
 /**
- * 문제 편집의 채점 모델 카드에 놓는 비용 한 줄(#637) — 「시도 1건 약 30원 · 참여자 24명 × 평균 1.6번 ≈ 약 1,150원」.
+ * 문제 편집의 채점 모델 카드에 놓는 비용 한 줄(#637) — 「시도 1건 약 30원 · 참여자 24명 × 평균 1.6회 ≈ 약 1,150원」.
  * 기준이 소스 크기별이면 가운데(「보통」) 크기의 시도 1건만, 참여자가 없으면 시도 1건만 적는다.
  * 호환 서버(토큰 단위)는 같은 모양으로 토큰을 적는다. 단가를 모르면 null — 카드는 줄을 그리지 않는다.
  */

@@ -294,11 +294,19 @@ export default function EditProblemPage() {
     });
   }
 
-  function handleReorder(orderedKeys: (string | number)[]) {
-    void checklistMutation.run(() => reorderChecklistItems(classId, problemId, orderedKeys as number[]), {
+  // 성공 여부를 돌려준다 — 실패하면 줄이 서버 순서로 돌아오고(#670), 다른 탭에서 바뀐 항목도
+  // 받도록 다시 불러온다(`useMutationRequest` 는 실패에 다시 불러오지 않는다).
+  async function handleReorder(orderedKeys: (string | number)[]): Promise<boolean> {
+    let saved = false;
+    await checklistMutation.run(() => reorderChecklistItems(classId, problemId, orderedKeys as number[]), {
       fallbackMessage: "순서를 바꾸지 못했습니다. 다시 시도해주세요.",
       reload,
+      onSuccess: () => {
+        saved = true;
+      },
     });
+    if (!saved) reload();
+    return saved;
   }
 
   function handleOpen() {

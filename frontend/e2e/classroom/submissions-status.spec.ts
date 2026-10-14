@@ -70,8 +70,11 @@ test("제출 현황: 통계 바·참여자별 최신 시도·판정 펼치기·�
   await list.getByRole("button", { name: "판정" }).click();
   await expect(list.locator('[data-testid$="-verdicts"]')).toBeVisible();
 
+  await expect(page.getByTestId("submissions-sort")).toHaveText("정렬: 최근 제출순");
+
   await page.getByTestId("submissions-view-all").click();
   await expect(list.locator(":scope > li")).toHaveCount(2);
+  await expect(page.getByTestId("submissions-sort")).toHaveCount(0);
 
   await expect(page.getByTestId("submissions-not-submitted")).toContainText("아직 내지 않은 참여자 1명");
   await expect(page.getByTestId("submissions-not-submitted-link")).toHaveAttribute(
