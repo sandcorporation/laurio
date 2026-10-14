@@ -462,7 +462,11 @@ services:
         condition: service_started
       search:
         condition: service_started
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      # grader 의 LLM 지표(`codemit_llm_*`) 엔드포인트(#585) — 단일 프로세스라 합산이 필요 없다. 호스트에 열지
+      # 않는다: oracle 의 prometheus 가 prod 네트워크 안에서 `grader:9102` 로 긁는다(docs/ops/operations.md).
+      CLASSROOM_GRADER_METRICS_PORT: "9102"
     stop_grace_period: 4m
     # 상한이 없으면 메모리를 다 쓰는 일이 같은 호스트의 DB 까지 OOM 에 끌어들일 수 있다(#584 점검).
     # 64건의 요청·응답 본문(응답은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES` 까지)·소스 읽기에 넉넉한 값이다.

@@ -860,6 +860,8 @@ CLASSROOM_GRADER_PER_CONNECTION_LIMIT = int(_env("CLASSROOM_GRADER_PER_CONNECTIO
 # 큐를 읽는 간격(초) — 제출 뒤 채점이 시작되기까지의 최대 지연이다. dev·CI(e2e 시험 하나 3초)도
 # 같은 값이라 운영과 같은 길을 탄다.
 CLASSROOM_GRADER_POLL_SECONDS = float(_env("CLASSROOM_GRADER_POLL_SECONDS", "0.5"))
+# grader 의 LLM 지표 엔드포인트 포트(#585) — 0 이면 열지 않는다(dev·시험). 배포 compose 가 9102 를 준다.
+CLASSROOM_GRADER_METRICS_PORT = int(_env("CLASSROOM_GRADER_METRICS_PORT", "0"))
 # pytest 만 켠다 — 큐에 넣는 자리에서 한 시도를 동기로 채점해 상주 프로세스 없이 시험이 결과를
 # 본다. 배포·dev·e2e 는 항상 꺼져 있고 `grader` 서비스가 채점한다.
 CLASSROOM_GRADER_INLINE = _RUNNING_TESTS

@@ -406,7 +406,7 @@ grader 가 0.5초마다 큐에 있는 후보를 읽어 **임대**(`scoring_lease
 서버 모두, 호환 서버는 `core.safe_outbound` 의 보장 그대로), 임대가 아직 내 것인지 확인하는 짧은
 트랜잭션 하나로 결과를 쓴다. 같은 시도를 둘이 집어도 임대를 이긴 하나만 벤더를 부르고(ADR-0006),
 임대가 만료돼 다른 grader 가 집은 뒤에 늦게 온 결과는 버려진다. 동시성은 전역 64건·클래스(채점
-연결)당 8건(`CLASSROOM_GRADER_*`)이고 grader 는 하나만 띄운다. 임대는 다른 연결이 잠근 행을 기다리지 않고 건너뛰며(잠금 대기는 `CLASSROOM_GRADER_LOCK_TIMEOUT_MS` 2초에서 포기하고 결과 쓰기는 다시 한다), 벤더를 부르기 직전에 늘리고(내 임대일 때만 — 실패하면 벤더를 안 부른다) 처리 중인 시도는 다시 집지 않는다. DB 일은 스레드 하나가 연결 하나를 쥐고 하며(grader 의 DB 연결은 정확히 1개, 실시간 신호 발행은 그 스레드 밖), 소스 읽기(`CLASSROOM_GRADER_SOURCE_THREADS` 8)는 DB 를 쓰지 않는 따로 둔 풀이다. 벤더 응답 본문은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES`(2MB)까지만 읽고 연결은 `SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS`(10초)에 포기한다. 벤더 타임아웃은 3분이다. 처리를
+연결)당 8건(`CLASSROOM_GRADER_*`)이고 grader 는 하나만 띄운다. 임대는 다른 연결이 잠근 행을 기다리지 않고 건너뛰며(잠금 대기는 `CLASSROOM_GRADER_LOCK_TIMEOUT_MS` 2초에서 포기하고 결과 쓰기는 다시 한다), 벤더를 부르기 직전에 늘리고(내 임대일 때만 — 실패하면 벤더를 안 부른다) 처리 중인 시도는 다시 집지 않는다. DB 일은 스레드 하나가 연결 하나를 쥐고 하며(grader 의 DB 연결은 정확히 1개, 실시간 신호 발행은 그 스레드 밖), 소스 읽기(`CLASSROOM_GRADER_SOURCE_THREADS` 8)는 DB 를 쓰지 않는 따로 둔 풀이다. 벤더 응답 본문은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES`(2MB)까지만 읽고 연결은 `SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS`(10초)에 포기한다. 벤더 타임아웃은 3분이다. 벤더 호출은 지표(`codemit_llm_*`, grader 는 `CLASSROOM_GRADER_METRICS_PORT` 의 자체 `/metrics`)와 호출별 로그 한 줄(`codemit.llm`)로 남는다 — 라벨에 클래스·제출 id 가 없고 로그에 프롬프트·본문·키가 없다(`docs/ops/operations.md`). 처리를
 마치면 큐 시각·임대를 비워 실패한 시도는 다음 스캔 tick 에, grader 가 죽어 잃은 시도는 임대 만료
 뒤에 다시 줍힌다. SIGTERM 이면 새 후보를 잡지 않고 하던 채점을 끝낸다. dev compose·CI e2e 스택에도
 `grader` 가 뜬다(운영과 같은 길, 제출 뒤 0.5초 안에 줍는다) — pytest 만 상주 프로세스 없이

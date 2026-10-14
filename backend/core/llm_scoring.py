@@ -46,6 +46,7 @@ import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
+from core.llm_metrics import observe_call, observe_call_async
 from core.safe_outbound import AsyncResponse, OutboundRefused, read_limited_async
 
 
@@ -105,6 +106,9 @@ class ScoringOutput:
     #: 포함해 이 값을 채우지 않는 호출자는 기본값 0이 그대로 남는다(공모전은
     #: 예산 기능이 없어 이 필드를 쓰지 않는다).
     total_tokens: int = 0
+    #: 입력·출력 토큰(`usage.prompt_tokens`·`completion_tokens`, #585) — 지표가 센다. 없으면 0.
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class LLMAdapterError(Exception):
@@ -170,6 +174,11 @@ class LLMAdapterRateLimitedError(LLMAdapterError):
     """벤더가 요청 빈도 제한에 걸렸다고 답했다(크레딧 소진이 아닌 429, #586) — 잠시 뒤
     저절로 풀린다. 공모전은 이 하위 클래스를 모른 채 `LLMAdapterError` 로 재시도한다.
     `classroom.scoring` 은 이 실패를 일정 시간 동안 실패 한도에 세지 않는다."""
+
+
+class LLMAdapterTimeoutError(LLMAdapterError):
+    """벤더가 정해진 시간 안에 답하지 않았다(#585) — 일시 실패의 하위 예외라 이 클래스를 모르는
+    호출자는 지금처럼 다룬다. 지표의 결과 라벨 `timeout` 이 이것이다."""
 
 
 class LLMAdapterUnreachableError(LLMAdapterError):
@@ -426,20 +435,26 @@ def _classify_openai_error(response: Any, *, context: str) -> Exception:
     message = _describe_openai_http_error(
         response, context=context, error_type=error_type, error_code=error_code
     )
-    if response.status_code in _OPENAI_AUTH_HTTP_STATUSES:
-        return LLMAdapterAuthError(message)
-    if (
-        response.status_code in _OPENAI_MODEL_REJECTION_HTTP_STATUSES
-        and error_code in _OPENAI_MODEL_REJECTION_ERROR_CODES
-    ):
-        return LLMAdapterModelRejectedError(message)
-    if response.status_code == _OPENAI_RATE_LIMIT_HTTP_STATUS:
+    error = _pick_openai_error(response.status_code, error_type, error_code)(message)
+    # 지표·로그(#585)가 읽는다 — 벤더가 고정된 값만 쓰는 `type`/`code` 와 상태코드뿐이다(본문 아님).
+    error.status_code = response.status_code
+    error.vendor_error_type = error_type
+    error.vendor_error_code = error_code
+    return error
+
+
+def _pick_openai_error(status_code: int, error_type: str, error_code: str) -> type[LLMAdapterError]:
+    if status_code in _OPENAI_AUTH_HTTP_STATUSES:
+        return LLMAdapterAuthError
+    if status_code in _OPENAI_MODEL_REJECTION_HTTP_STATUSES and error_code in _OPENAI_MODEL_REJECTION_ERROR_CODES:
+        return LLMAdapterModelRejectedError
+    if status_code == _OPENAI_RATE_LIMIT_HTTP_STATUS:
         if {error_type, error_code} & _OPENAI_QUOTA_EXHAUSTED_LABELS:
-            return LLMAdapterQuotaExhaustedError(message)
-        return LLMAdapterRateLimitedError(message)
-    if response.status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
-        return LLMAdapterPermanentError(message)
-    return LLMAdapterError(message)
+            return LLMAdapterQuotaExhaustedError
+        return LLMAdapterRateLimitedError
+    if status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
+        return LLMAdapterPermanentError
+    return LLMAdapterError
 
 
 def _round_trip_request(
@@ -499,7 +514,8 @@ def _openai_round_trip(
         response = send(url, **kwargs)
     except requests.RequestException as exc:
         detail = f", {context}" if context else ""
-        raise LLMAdapterError(
+        error = LLMAdapterTimeoutError if isinstance(exc, requests.Timeout) else LLMAdapterError
+        raise error(
             f"OpenAI 호출이 네트워크 오류로 실패했다({type(exc).__name__}{detail})."
         ) from None
 
@@ -547,7 +563,8 @@ async def _openai_round_trip_async(
         raise _refused_error(exc, context) from None
     except (aiohttp.ClientError, TimeoutError, OSError) as exc:
         detail = f", {context}" if context else ""
-        raise LLMAdapterError(
+        error = LLMAdapterTimeoutError if isinstance(exc, TimeoutError) else LLMAdapterError
+        raise error(
             f"OpenAI 호출이 네트워크 오류로 실패했다({type(exc).__name__}{detail})."
         ) from None
     if response.status_code == 200:
@@ -673,7 +690,18 @@ def _parse_openai_scoring_response(
         # 벤더가 이상한 모양을 보내도(문자열·실수·bool) 채점 자체를 실패로 만들지
         # 않는다 — 판정은 이미 유효하게 파싱됐다. 예산 집계만 0으로 조용히 빠진다.
         total_tokens = 0
-    return ScoringOutput(verdicts=verdicts, model_version=str(model_used), total_tokens=total_tokens)
+    return ScoringOutput(
+        verdicts=verdicts,
+        model_version=str(model_used),
+        total_tokens=total_tokens,
+        input_tokens=_usage_count(usage, "prompt_tokens"),
+        output_tokens=_usage_count(usage, "completion_tokens"),
+    )
+
+
+def _usage_count(usage: Any, key: str) -> int:
+    value = usage.get(key, 0) if isinstance(usage, dict) else 0
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
 class OpenAIScoringAdapter:
@@ -725,6 +753,10 @@ class OpenAIScoringAdapter:
         transport: Transport | None = None,
         #: `transport` 의 비동기 판(#584) — grader 가 `score_async` 에서 쓴다.
         async_transport: AsyncTransport | None = None,
+        #: 지표·호출별 로그의 제품 라벨(#585) — 공모전은 주지 않아 `contest`, 강의실이 `classroom` 을 준다.
+        product: str = "contest",
+        #: 호출별 로그에 실리는 식별 번호(클래스·문제 등) — 지표 라벨이 아니다. 본문·키를 담지 않는다.
+        log_context: dict | None = None,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
         if not api_key and transport is None:
@@ -744,6 +776,8 @@ class OpenAIScoringAdapter:
         self._base_url = base_url
         self._transport = transport
         self._async_transport = async_transport
+        self._product = product
+        self._log_context = dict(log_context or {})
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
         # OpenAI 응답의 "model" 필드에서 새로 읽어 ScoringOutput.model_version으로
@@ -794,32 +828,50 @@ class OpenAIScoringAdapter:
                 f"submission={scoring_input.submission_id})."
             ) from None
 
+    def _observe_args(self, scoring_input: ScoringInput) -> dict:
+        context = {"submission_id": scoring_input.submission_id, **self._log_context}
+        if self._product == "contest":
+            context["contest_id"] = scoring_input.contest_id
+        return {
+            "product": self._product,
+            "model": self._model,
+            "custom": self._base_url is not None,
+            "reasoning_effort": self._reasoning_effort,
+            "context": context,
+        }
+
     def score(self, scoring_input: ScoringInput) -> ScoringOutput:
-        response = _openai_round_trip(
-            "POST",
-            _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
-            api_key=self._api_key,
-            timeout=self._timeout,
-            json_body=self._scoring_payload(scoring_input),
-            context=f"submission={scoring_input.submission_id}",
-            transport=self._transport,
-        )
-        return self._scoring_output(response, scoring_input)
+        with observe_call(**self._observe_args(scoring_input)) as call:
+            response = _openai_round_trip(
+                "POST",
+                _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
+                api_key=self._api_key,
+                timeout=self._timeout,
+                json_body=self._scoring_payload(scoring_input),
+                context=f"submission={scoring_input.submission_id}",
+                transport=self._transport,
+            )
+            output = self._scoring_output(response, scoring_input)
+            call.succeed(output)
+            return output
 
     async def score_async(self, scoring_input: ScoringInput) -> ScoringOutput:
         """`score` 의 비동기 판(#584) — 같은 요청·같은 분류, 기다리는 동안 스레드를 쥐지 않는다.
         강의실 grader 가 쓴다(공모전은 `score` 그대로)."""
 
-        response = await _openai_round_trip_async(
-            "POST",
-            _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
-            api_key=self._api_key,
-            timeout=self._timeout,
-            json_body=self._scoring_payload(scoring_input),
-            context=f"submission={scoring_input.submission_id}",
-            transport=self._async_transport,
-        )
-        return self._scoring_output(response, scoring_input)
+        async with observe_call_async(**self._observe_args(scoring_input)) as call:
+            response = await _openai_round_trip_async(
+                "POST",
+                _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
+                api_key=self._api_key,
+                timeout=self._timeout,
+                json_body=self._scoring_payload(scoring_input),
+                context=f"submission={scoring_input.submission_id}",
+                transport=self._async_transport,
+            )
+            output = self._scoring_output(response, scoring_input)
+            call.succeed(output)
+            return output
 
     def check_key(self) -> LLMKeyCheckStatus:
         """저장 시점에 이 키가 실제로 쓸 수 있는지 벤더에게 한 번 묻는다(#354).

@@ -29,6 +29,11 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "request_id": getattr(record, "request_id", "-"),
         }
+        # 호출별 구조화 필드(`extra={"fields": {...}}`, 예: `codemit.llm` 의 LLM 호출 줄 #585) —
+        # 예약된 키는 덮지 못한다.
+        fields = getattr(record, "fields", None)
+        if isinstance(fields, dict):
+            payload = {**fields, **payload}
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
         elif record.stack_info:

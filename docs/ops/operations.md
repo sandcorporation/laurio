@@ -118,6 +118,105 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
   <int:contest_id>` 꼴)로 세고 맞지 않은 요청은 `unmatched` 하나로 모은다. 실제 경로를 쓰면
   공모전 수만큼 시계열이 생긴다.
 
+**LLM 채점 호출은 지표·호출별 로그·경보로 본다**(2026-10-14, #585, `core/llm_metrics.py`). 벤더로 나가는
+왕복은 `OpenAIScoringAdapter.score`(동기)·`score_async`(grader) 두 곳뿐이고 공모전·강의실이 둘 다
+거기를 지나므로 계측도 거기 하나다.
+
+- **지표**(prod 에서 긁는다). 라벨은 닫힌 집합이다 — 제품 `classroom`·`contest`, 모델(호환 서버의 자유
+  문자열 모델은 `custom` 하나로 접는다), 결과. **클래스·제출·강사 id 는 라벨에 없다**(시험이 못 박는다):
+  - `codemit_llm_calls_total{product,model,result}` — 결과는 `ok`·`timeout`·`rate_limited`·
+    `quota_exhausted`·`auth`·`server_error`·`other`. 새로 판정하지 않고 기존 예외 계층을 옮긴다(401·403→
+    `auth`, 429 `insufficient_quota`→`quota_exhausted`, 그 밖의 429→`rate_limited`, 5xx→`server_error`,
+    타임아웃→`timeout`). **호환 서버의 읽기 타임아웃은 `other` 로 센다**(안전한 바깥 호출이 `response_failed` 로
+    접어 던진다) — OpenAI 직접 호출의 타임아웃은 `timeout`.
+  - `codemit_llm_call_duration_seconds{product,model}` — 히스토그램, 버킷 0.5~240초(강의실 벤더 한도 180초).
+  - `codemit_llm_tokens_total{product,model,direction}` — `input`·`output`(벤더 `usage`).
+  - `codemit_llm_in_flight{product}` — 지금 벤더 응답을 기다리는 호출 수(게이지). grader 에서는 비동기
+    동시성 그대로다(전역 상한 64).
+  - `codemit_llm_queue_wait_seconds{product="classroom"}` — 「큐에 넣은 시각」(`scoring_queued_at`, 즉시 채점·
+    스캔이 찍는다) → grader 가 임대를 집은 시각. 공모전에는 큐 시각이 없어 이 지표가 없다.
+- **여러 프로세스는 어디서 합산하나 — 호출이 도는 곳이 둘이고 각자 한 번에 긁힌다.**
+  ① 강의실 채점은 **grader 한 프로세스(asyncio)** 안이다 → `manage.py grader` 가 `CLASSROOM_GRADER_METRICS_PORT`
+  (prod compose 9102, 호스트에 열지 않음)로 작은 `/metrics` 를 열고 프로세스 하나의 값을 그대로 낸다 — 합산할
+  것이 없다. ② 공모전 채점은 Celery 가 아니라 **내부 API 를 부른 gunicorn 워커**(`scoring/api.py` 의 스캔
+  엔드포인트)에서 돈다 → 위 `/metrics` 의 `PROMETHEUS_MULTIPROC_DIR` 합산이 그대로 태운다. 게이지는 `livesum`
+  이라 죽은 워커의 값은 더하지 않는다. Celery 워커는 벤더를 부르지 않아 노출이 없다.
+- **호출별 로그**(Loki): 호출마다 `codemit.llm` 로거가 한 줄 JSON 을 남긴다 — `product`·`class_id`·`problem_id`·
+  `submission_id`(공모전은 `contest_id`)·`model`·`reasoning_effort`·`duration_seconds`·`input_tokens`·
+  `output_tokens`·`total_tokens`·`result`·`error_class`·`error_status`·`error_type`·`error_code`.
+  grader 의 줄은 `{service="grader"} | json | logger="codemit.llm"`, 공모전은 `{service="backend"}` 로 찾는다.
+  `result != "ok"` 는 WARNING. 오류 `type`/`code` 는 벤더가 고정된 값만 쓰는 열거형이고 **프롬프트·소스·응답
+  본문·키·벤더의 `error.message` 는 어떤 필드에도 없다**(시험이 비밀 문자열이 줄에 없음을 못 박는다).
+  예) 크레딧 소진 429 를 가려내려면 `| json | result="quota_exhausted"`.
+
+**사람이 할 일 — 대시보드·경보·긁기 대상은 저장소 밖(oracle `/server/prometheus`)이라 에이전트가 적용하지 않았다.**
+
+1. **긁기 대상 추가**(`prometheus.yml`) — grader 는 prod 네트워크의 `grader:9102` 다(prometheus 컨테이너가 이미
+   `codemit-prod_default` 에 붙어 있다). 백엔드 대상은 이미 있어 공모전 지표는 따로 할 일이 없다. grader 는
+   배포 때마다 새 컨테이너가 되므로 서비스 이름(`grader`)으로 긁는다.
+
+   ```yaml
+     - job_name: codemit-grader
+       metrics_path: /metrics
+       static_configs:
+         - targets: ["grader:9102"]
+           labels: { env: prod, service: grader }
+   ```
+
+   배포한 뒤 한 번 `curl -s http://grader:9102/metrics | grep codemit_llm_` (prometheus 컨테이너 안에서)로 줄이
+   나오는지 본다. staging 은 긁지 않는다.
+2. **「Codemit prod」 대시보드 패널**(LLM 줄 하나, 패널 PromQL):
+   - 결과별 호출률(누적 막대): `sum by (product, result) (rate(codemit_llm_calls_total[5m]))`
+   - 응답 시간 p50 / p95: `histogram_quantile(0.5|0.95, sum by (le, product) (rate(codemit_llm_call_duration_seconds_bucket[5m])))`
+   - 토큰률: `sum by (product, direction) (rate(codemit_llm_tokens_total[5m]))`
+   - 동시 채점: `sum by (product) (codemit_llm_in_flight)`
+   - 큐 대기 p95: `histogram_quantile(0.95, sum by (le) (rate(codemit_llm_queue_wait_seconds_bucket[5m])))`
+3. **경보 규칙**(`prometheus/alerts.yml` 에 그룹으로 더한다, 기존 Discord 채널로). 임계값 근거:
+
+   ```yaml
+   - name: codemit-llm
+     rules:
+       - alert: LLMTimeoutRatioHigh
+         expr: |
+           sum(increase(codemit_llm_calls_total{result="timeout"}[15m]))
+             / sum(increase(codemit_llm_calls_total[15m])) > 0.2
+           and sum(increase(codemit_llm_calls_total[15m])) >= 10
+         for: 5m
+         labels: { severity: warning }
+         annotations: { summary: "LLM 채점 호출의 20% 이상이 타임아웃 (15분)" }
+       - alert: LLMQuotaExhausted
+         expr: sum(increase(codemit_llm_calls_total{result="quota_exhausted"}[10m])) > 0
+         labels: { severity: warning }
+         annotations: { summary: "채점 키의 크레딧이 소진된 호출이 있다 — 강사가 충전해야 풀린다" }
+       - alert: LLMRateLimited
+         expr: sum(increase(codemit_llm_calls_total{result="rate_limited"}[10m])) >= 5
+         labels: { severity: warning }
+         annotations: { summary: "벤더 빈도 제한 429 가 10분에 5건 이상" }
+       - alert: LLMAuthRejected
+         expr: sum(increase(codemit_llm_calls_total{result="auth"}[30m])) > 0
+         labels: { severity: info }
+         annotations: { summary: "채점 키 거부(401·403) — 해당 강사의 키 상태가 거부됨으로 옮겨졌다" }
+       - alert: ClassroomScoringQueueSlow
+         expr: |
+           histogram_quantile(0.95, sum by (le) (rate(codemit_llm_queue_wait_seconds_bucket[10m]))) > 300
+           and sum(rate(codemit_llm_queue_wait_seconds_count[10m])) > 0
+         for: 10m
+         labels: { severity: warning }
+         annotations: { summary: "강의실 채점 큐 대기 p95 가 5분을 넘는다 (10분 지속)" }
+       - alert: GraderMetricsDown
+         expr: up{job="codemit-grader"} == 0
+         for: 3m
+         labels: { severity: warning }
+         annotations: { summary: "grader 지표를 못 긁는다 — grader 가 죽었으면 강의실 채점이 멈춘다" }
+   ```
+
+   **임계값 근거.** 타임아웃은 한 건이 180초라 몇 건만 겹쳐도 비율이 튀므로 표본 10건 이상일 때만, 15분
+   창에서 20% 와 5분 지속을 둔다(#581 의 타임아웃 몰림이 이 모양이었다). 크레딧 소진은 **한 건도 정상이
+   아니다** — 그 클래스는 확인 간격(`QUOTA_RECHECK_INTERVAL`)마다 한 건씩만 다시 쳐서 경보가 반복돼도 시끄럽지
+   않다. 빈도 제한은 `RATE_LIMIT_UNCOUNTED_ATTEMPTS`(60)번까지 실패에 세지 않아 조용히 쌓이므로 10분 5건에서
+   먼저 본다. 큐 대기는 정상일 때 grader 폴링 간격(0.5초)과 동시성(64) 안쪽이라 초 단위이고, 벤더 한도가
+   180초이므로 p95 300초는 「한 바퀴 이상 밀렸다」는 뜻이다. 모두 시작값이다 — 첫 일주일 값을 보고 조인다.
+
 **로그 소음 둘을 걷었다**(2026-09-21, Loki 로 처음 보였다). pgbouncer 가 트랜잭션 모드에서
 연결·끊김마다 한 줄씩 **시간당 492줄**(prod 전체의 절반 가까이)을 찍어 `log_connections`·
 `log_disconnections` 를 껐다(분당 stats 줄은 남긴다). 그리고 모을 정적 파일이 없어 `STATIC_ROOT`

@@ -48,6 +48,7 @@ from django.conf import settings
 from django.db import InterfaceError, OperationalError, close_old_connections, connection, connections
 
 from core.clock import Clock
+from core import llm_metrics
 from core.events import publish_all
 from core.llm_scoring import LLMAdapterError
 
@@ -183,6 +184,7 @@ class Grader:
                 scoring.prepare_claimed_head, submission_id, owner=owner, as_of=as_of
             )
             if not isinstance(prepared, Concluded):
+                self._observe_queue_wait(prepared.submission, as_of)
                 prepared = await self._source(scoring.prepare_tail, prepared)
             if isinstance(prepared, Concluded):
                 result = await self._write(
@@ -217,6 +219,14 @@ class Grader:
             result.get("status"),
             self.active - 1,
         )
+
+    @staticmethod
+    def _observe_queue_wait(submission, as_of) -> None:
+        """「큐에 넣은 시각」(즉시 채점·스캔이 찍는다) → 임대를 집은 시각(#585). 지표가 이 간격의 분포를 센다."""
+
+        queued_at = submission.scoring_queued_at
+        if queued_at is not None:
+            llm_metrics.QUEUE_WAIT.labels("classroom").observe(max((as_of - queued_at).total_seconds(), 0.0))
 
     def _extend(self, submission_id: int) -> bool:
         return scoring.extend_lease(submission_id, owner=self.owner, as_of=Clock.now())
