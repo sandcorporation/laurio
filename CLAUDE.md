@@ -39,7 +39,7 @@ scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400�
 - [테스트](docs/ops/testing.md) — 호스트에서 돈다, `scripts/test.sh`, 앱 경계·금칙어 구조 테스트, 시드.
 - [프론트엔드](docs/ops/frontend.md) — 워크스페이스·e2e 시임·워크트리 dev 서버·남길 e2e·토큰·Docker 함정.
 - [Next 프로덕션 빌드](docs/ops/next-build.md) — Turbopack, 지우면 안 되는 의존성 둘.
-- [CI](docs/ops/ci.md) — Jenkins PR CI(sub·macos), Actions 는 이미지·부팅 가드만.
+- [CI](docs/ops/ci.md) — 전부 Jenkins(PR·열차·`main` push 의 이미지→가드→배포), GitHub Actions 는 쓰지 않는다.
 - [배포](docs/ops/deploy.md) — PR → main → staging → production 체인, deploy.sh, 겹쳐 바꾸기, 풀러, 제품 스위치.
 - [운영](docs/ops/operations.md) — admin 없음, 백업, Prometheus·Loki·GlitchTip, GlitchTip 자동 진단.
 - [커밋 훅](docs/ops/commit-hooks.md) — `.githooks/pre-commit` 이 하는 셋.

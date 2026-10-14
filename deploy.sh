@@ -24,11 +24,12 @@
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
-# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 CI 가
-# 커밋마다 여섯 이미지를 ghcr 에 올린다(둘 다 mac 러너가 굽는다, 비상시 sub) — backend·
+# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `laurio` 잡의
+# 앞 단계가 커밋마다 여섯 이미지를 ghcr 에 올린다(scripts/ci/images.sh — amd64 는 sub, arm64 는
+# macos 가 굽고, 바뀌지 않은 서비스는 옛 이미지에 커밋 태그만 더한다, #705) — backend·
 # search·pgbouncer 는 `<sha>-amd64`·`<sha>-arm64`, 세 앱은 NEXT_PUBLIC_* 가 굳으므로
 # `<sha>-staging`·`<sha>-prod` 다. compose 파일의 `image:` 가 그 이름을 가리키고, 태그의
-# <sha> 는 여기서 체크아웃한 커밋이다(`CODEMIT_IMAGE_TAG`). 그래서 staging 은 sub 가, prod 는
+# <sha> 는 여기서 체크아웃한 커밋이다(`CODEMIT_IMAGE_TAG`). 그래서 배포 단계는 굽지 않고, prod 는
 # oracle 이 더 이상 굽지 않는다 — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
 #
 # 이미지 출처는 `DEPLOY_IMAGE_SOURCE` 가 고른다: `registry`(기본값, 파이프라인) 또는
@@ -436,10 +437,10 @@ cmd_plan() {
         log "NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 과 어긋난다(떠 있는 컨테이너가 구운 값과 다르다) — frontend 를 다시 굽는다."
         BUILD_FRONTEND=true
       else
-        # registry 이미지의 값은 CI 가 저장소 변수(STAGING_/PROD_TOSS_CLIENT_KEY)로
+        # registry 이미지의 값은 이미지 단계가 Jenkins 자격증명 codemit-images-env(STAGING_/PROD_TOSS_CLIENT_KEY)로
         # 굽는다 — 여기서 다시 받아도 고쳐지지 않는다. 어긋남만 크게 알린다.
         log "경고: 떠 있는 frontend 가 구운 NEXT_PUBLIC_TOSS_CLIENT_KEY 가 .env.${TARGET} 의 ${TOSS_KEY_VAR} 와 다르다."
-        log "      저장소 변수 $(echo "$TARGET" | tr a-z A-Z)_TOSS_CLIENT_KEY 를 고치고 CI 를 다시 돌려야 한다."
+        log "      Jenkins 자격증명 codemit-images-env 의 $(echo "$TARGET" | tr a-z A-Z)_TOSS_CLIENT_KEY 를 고치고 laurio 잡을 다시 돌려야 한다."
       fi
     fi
   fi
@@ -563,7 +564,7 @@ load_plan() {
 # 로컬로 구울 때도 backend 하나만 구우면 된다.
 #
 # NEXT_PUBLIC_* 는 빌드타임에 인라인된다 — 로컬로 구울 때의 build args 는 compose 가
-# .env.<target> 에서 읽어 넘긴다(#85). CI 는 같은 값을 저장소 변수에서 읽는다.
+# .env.<target> 에서 읽어 넘긴다(#85). 이미지 단계는 같은 값을 Jenkins 자격증명 codemit-images-env 에서 읽는다.
 cmd_build() {
   compose_services "$1" >/dev/null
   log "$1 빌드 (이 호스트에서)"
@@ -577,7 +578,7 @@ cmd_pull() {
   # shellcheck disable=SC2086
   if ! $COMPOSE pull $services; then
     echo "ghcr 에 이 커밋($CODEMIT_IMAGE_TAG)의 $1 이미지가 없거나 받을 수 없다."
-    echo "CI 의 이미지 잡이 끝났는지(prod 는 mac 러너), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
+    echo "laurio 잡의 이미지 단계가 끝났는지(prod 는 macos 노드), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
     echo "급하면 DEPLOY_IMAGE_SOURCE=build."
     exit 1
   fi

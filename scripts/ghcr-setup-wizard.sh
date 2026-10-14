@@ -187,7 +187,7 @@ finish() {
 
 # ghcr 이미지 배포로 옮기기 전에 사람이 해야 하는 일(2026-09-17 설계).
 # 이 개발 머신(sub2)에서 돌린다 — gh CLI 와 `ssh sub`, sub 를 거친 `ssh oracle` 을 쓴다.
-# mac 에서 할 일은 명령을 보여주고, 끝나면 GitHub API 로 러너가 붙었는지 확인한다.
+# 2026-10-15(#705) 이미지가 GitHub Actions 에서 Jenkins 로 옮겨 mac 러너·저장소 변수·Jenkins API 토큰 단계를 뺐다.
 
 cd "$(dirname "$0")/.."   # set_secret 이 저장소를 현재 디렉터리에서 고른다
 REPO="sandcorporation/laurio"
@@ -203,17 +203,7 @@ _ssh_noise='post-quantum|store now|upgraded'
 on_sub()    { ssh sub 'bash -s' 2> >(grep -vE "$_ssh_noise" >&2); }
 on_oracle() { ssh sub 'timeout 120 ssh -o BatchMode=yes oracle "bash -s"' 2> >(grep -vE "$_ssh_noise" >&2); }
 
-# set_repo_var NAME VALUE — 저장소 변수(비밀 아님). environment 기능은 free 조직의
-# 비공개 저장소에서 쓸 수 없어 접두어(STAGING_/PROD_)로 환경을 가른다.
-set_repo_var() {
-  if gh variable set "$1" --repo "$REPO" --body "$2" >/dev/null 2>&1; then
-    printf '  %s✓ set%s GitHub variable %s\n' "$GREEN" "$RESET" "$1"
-  else
-    SKIPPED+=("GitHub variable $1"); warn "GitHub variable $1 을 설정하지 못했다"
-  fi
-}
-
-TOTAL_STAGES=7
+TOTAL_STAGES=5
 
 banner "Codemit — ghcr 이미지 배포 준비 (사람 작업)"
 
@@ -233,31 +223,6 @@ fi
 pause "계속하려면 Enter"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
-stage "mac: Docker Desktop 상시 가동"
-say "staging(amd64)·prod(arm64) 이미지를 모두 mac 의 러너 컨테이너가 굽습니다."
-say "mac 이 잠들면 staging 배포와 prod 승격이 기다립니다(비상구: 저장소 변수 IMAGE_BUILDER=sub)."
-step "Docker Desktop → Settings → General → 'Start Docker Desktop when you sign in to your computer' 켜기 → Apply"
-step "같은 화면의 'Use Rosetta for x86_64/amd64 emulation on Apple Silicon' 켜기 — staging(amd64) 빌드가 빨라집니다"
-step "Docker Desktop → Settings → Resources 에서 메모리를 넉넉히(권장 8GB 이상 — Next 빌드가 무겁습니다)"
-step "mac 터미널에서 전원 연결 중 잠자기 끄기:"
-note "    sudo pmset -c sleep 0 disksleep 0 && pmset -g | grep -E ' sleep|disksleep'"
-step "시스템 설정 → 사용자 및 그룹 → 자동 로그인을 이 계정으로 (Docker Desktop 은 로그인해야 뜹니다)"
-pause "mac 에서 끝냈으면 Enter"
-
-# ── 3 ─────────────────────────────────────────────────────────────────────
-stage "mac: 러너 컨테이너 확인"
-say "러너는 sub 와 같은 myoung34/github-runner 컨테이너(조직 범위)로 띄웁니다. mac 의 compose 에서 확인하세요:"
-step "LABELS 에 mac-arm 이 있다 — CI 의 images-prod 가 runs-on: [self-hosted, ARM64, mac-arm] 으로 고릅니다"
-step "volumes 에 /var/run/docker.sock:/var/run/docker.sock 이 있다 — 없으면 buildx 로 굽지 못합니다"
-step "restart: unless-stopped — Docker Desktop 이 다시 뜰 때 러너도 함께 뜹니다"
-step "RUNNER_NAME_PREFIX 를 mac-arm 처럼 sub 와 다른 이름으로 (지금은 sub-arm-builder 라 목록에서 헷갈립니다)"
-open_url "https://github.com/organizations/sandcorporation/settings/actions/runners"
-step "조직 러너 목록에서 mac 러너가 'Linux ARM64 mac-arm' 라벨로 Idle 인지 봅니다"
-if ! confirm "mac 러너가 mac-arm 라벨로 Idle 인가요?"; then
-  SKIPPED+=("mac 러너(mac-arm) 확인")
-fi
-
-# ── 4 ─────────────────────────────────────────────────────────────────────
 stage "ghcr pull 토큰 발급"
 say "staging·prod 서버가 비공개 이미지를 받을 때 쓸 읽기 전용 토큰입니다."
 say "ghcr 는 SSH 키로 로그인할 수 없고, classic PAT 가 필요합니다."
@@ -272,7 +237,7 @@ ask_secret GHCR_READ_TOKEN "토큰을 붙여 넣으세요 (ghp_...):"
 write_env GHCR_USER "$GHCR_USER"
 write_env GHCR_READ_TOKEN "$GHCR_READ_TOKEN"   # 다시 돌릴 때의 기본값(저장소 밖, 600)
 
-# ── 5 ─────────────────────────────────────────────────────────────────────
+# ── 3 ─────────────────────────────────────────────────────────────────────
 stage "두 배포 에이전트에 ghcr 로그인 저장"
 say "sub 의 jenkins, oracle 의 jenkins-desktop-agent 컨테이너 안에서 한 번 로그인해 둡니다."
 note "두 컨테이너 모두 /root/.docker 가 named volume 이라 컨테이너를 다시 만들어도 로그인이 남습니다."
@@ -291,41 +256,26 @@ else
 fi
 pause "계속하려면 Enter"
 
-# ── 6 ─────────────────────────────────────────────────────────────────────
-stage "Jenkins API 토큰 (CI 가 staging 배포를 부른다)"
-say "이미지가 올라간 뒤 CI(sub 의 러너)가 Jenkins 의 staging 잡(laurio)을 부릅니다."
-say "러너와 Jenkins 가 같은 호스트라 CI 는 http://127.0.0.1:8080 으로 칩니다."
-ask JENKINS_UI_URL "브라우저로 여는 Jenkins 주소 (예: http://sub:8080):"
-write_env JENKINS_UI_URL "$JENKINS_UI_URL"
-ask JENKINS_USER "Jenkins 사용자 아이디 (빌드 권한이 있는 계정):"
-write_env JENKINS_USER "$JENKINS_USER"
-open_url "${JENKINS_UI_URL%/}/user/${JENKINS_USER}/security/"
-note "(이 주소가 없으면 오른쪽 위 사용자 이름 → Security, 옛 버전은 → Configure 에 있습니다)"
-step "API Token → Add new Token → 이름 github-actions-staging → Generate → 복사 (다시 볼 수 없습니다)"
-ask_secret JENKINS_API_TOKEN "API 토큰을 붙여 넣으세요:"
-write_env JENKINS_API_TOKEN "$JENKINS_API_TOKEN"
-code=$(printf 'curl -s -o /dev/null -w "%%{http_code}" -u %q http://127.0.0.1:8080/job/laurio/api/json\n' \
-  "${JENKINS_USER}:${JENKINS_API_TOKEN}" | on_sub || true)
-if [[ "$code" == "200" ]]; then
-  printf '  %s✓ sub 에서 laurio 잡 조회 200%s (빌드는 부르지 않았습니다)\n' "$GREEN" "$RESET"
-  set_secret JENKINS_API_TOKEN "$JENKINS_API_TOKEN"
-  set_repo_var JENKINS_USER "$JENKINS_USER"
-  set_repo_var JENKINS_URL "http://127.0.0.1:8080"
-else
-  warn "sub 에서 조회가 ${code} 로 실패했습니다 — 아이디·토큰을 확인하고 이 위저드를 다시 돌리세요"
-  SKIPPED+=("JENKINS_API_TOKEN 확인 실패(${code})")
-fi
-note "staging 잡의 GitHub 웹훅 트리거는 지금 끄지 않습니다 — 코드가 main 에 들어가는 그 시점에 끕니다."
-pause "계속하려면 Enter"
+# ── 4 ─────────────────────────────────────────────────────────────────────
+stage "ghcr push 토큰 → Jenkins 자격증명 ghcr-push-token"
+say "이미지는 Jenkins 잡 laurio 가 굽고 올립니다(#705 — macos 가 arm64, sub 가 amd64). 쓰기 토큰이 필요합니다."
+open_url "https://github.com/settings/tokens/new?scopes=write:packages&description=codemit-ghcr-push"
+step "Select scopes: write:packages(read:packages 가 따라 붙습니다) → Generate token → 복사"
+step "Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials"
+step "Kind: Secret text · ID: ghcr-push-token · Secret: 방금 복사한 토큰"
+[[ -n "${JENKINS_UI_URL:-$(_existing JENKINS_UI_URL)}" ]] && open_url "$(_existing JENKINS_UI_URL)/manage/credentials/store/system/domain/_/newCredentials"
+note "토큰은 이 위저드가 저장하지 않습니다 — Jenkins 에만 둡니다."
+pause "만들었으면 Enter"
 
-# ── 7 ─────────────────────────────────────────────────────────────────────
-stage "앱 이미지에 굳는 공개 값 → 저장소 변수"
-say "세 Next 앱은 빌드할 때 NEXT_PUBLIC_* 값을 이미지에 굽습니다. CI 가 구우려면 그 값이 CI 에 있어야 합니다."
-say "두 서버 env 에서 해당 줄만 읽어 STAGING_* / PROD_* 저장소 변수로 올립니다(값은 화면에 찍지 않습니다)."
-read_keys='for k in PORT_ONE_V2_STORE_ID KG_INICIS_CHANNEL_KEY TOSS_SANDBOX_CLIENT_KEY TOSS_LIVE_CLIENT_KEY SENTRY_DSN_FRONTEND SENTRY_DSN_OPERATOR SENTRY_DSN_CLASSROOM CODEMIT_CONTEST_PRODUCT_ENABLED CODEMIT_PAID_CONTEST_PRODUCT_ENABLED; do sudo grep -E "^${k}=" "$F" | tail -n1; done'
+# ── 5 ─────────────────────────────────────────────────────────────────────
+stage "앱 이미지에 굳는 공개 값 → Jenkins 자격증명 codemit-images-env"
+say "세 Next 앱은 빌드할 때 NEXT_PUBLIC_* 값을 이미지에 굽습니다. 이미지 잡이 구우려면 그 값이 Jenkins 에 있어야 합니다."
+say "두 서버 env 에서 해당 줄만 읽어 STAGING_* / PROD_* 를 KEY=value 줄로 한 파일에 모읍니다(값은 화면에 찍지 않습니다)."
+read_keys='for k in PORT_ONE_V2_STORE_ID KG_INICIS_CHANNEL_KEY TOSS_SANDBOX_CLIENT_KEY TOSS_LIVE_CLIENT_KEY SUPPORT_EMAIL SENTRY_DSN_BACKEND SENTRY_DSN_FRONTEND SENTRY_DSN_OPERATOR SENTRY_DSN_CLASSROOM CODEMIT_CONTEST_PRODUCT_ENABLED CODEMIT_PAID_CONTEST_PRODUCT_ENABLED; do sudo grep -E "^${k}=" "$F" | tail -n1; done'
 STAGING_LINES=$( { printf 'F=%q\n' "$STAGING_ENV"; echo "$read_keys"; } | on_sub)
 PROD_LINES=$( { printf 'F=%q\n' "$PROD_ENV"; echo "$read_keys"; } | on_oracle)
-publish_env_vars() {  # PREFIX LINES TOSS_SOURCE_KEY
+IMAGES_ENV_FILE="${HOME}/.config/codemit-images-env"
+env_lines() {  # PREFIX LINES TOSS_SOURCE_KEY — images.sh 가 읽는 이름으로
   local prefix="$1" lines="$2" toss_key="$3" key value
   local -A seen=()
   while IFS= read -r line; do
@@ -335,23 +285,24 @@ publish_env_vars() {  # PREFIX LINES TOSS_SOURCE_KEY
       TOSS_SANDBOX_CLIENT_KEY|TOSS_LIVE_CLIENT_KEY) [[ "$key" == "$toss_key" ]] || continue; key=TOSS_CLIENT_KEY ;;
     esac
     seen[$key]=1
-    set_repo_var "${prefix}_${key}" "$value"
+    printf '%s_%s=%s\n' "$prefix" "$key" "$value"
   done <<< "$lines"
-  # 파일에 없는 스위치는 compose 기본값과 같게 둔다(공모전 켜짐·유료 꺼짐).
-  [[ -n "${seen[CODEMIT_CONTEST_PRODUCT_ENABLED]:-}" ]] || set_repo_var "${prefix}_CODEMIT_CONTEST_PRODUCT_ENABLED" true
-  [[ -n "${seen[CODEMIT_PAID_CONTEST_PRODUCT_ENABLED]:-}" ]] || set_repo_var "${prefix}_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED" false
-  for required in PORT_ONE_V2_STORE_ID KG_INICIS_CHANNEL_KEY TOSS_CLIENT_KEY; do
-    [[ -n "${seen[$required]:-}" ]] || { warn "${prefix}: ${required} 가 env 에 없습니다"; SKIPPED+=("${prefix}_${required}"); }
+  # 파일에 없는 스위치는 compose 기본값과 같게 둔다(공모전 켜짐·유료 꺼짐). 빈 DSN 은 오류 수집을 끈다.
+  [[ -n "${seen[CODEMIT_CONTEST_PRODUCT_ENABLED]:-}" ]] || printf '%s_CODEMIT_CONTEST_PRODUCT_ENABLED=true\n' "$prefix"
+  [[ -n "${seen[CODEMIT_PAID_CONTEST_PRODUCT_ENABLED]:-}" ]] || printf '%s_CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=false\n' "$prefix"
+  for k in SENTRY_DSN_BACKEND SENTRY_DSN_FRONTEND SENTRY_DSN_OPERATOR SENTRY_DSN_CLASSROOM SENTRY_DSN_SEARCH SENTRY_DSN_PGBOUNCER; do
+    [[ -n "${seen[$k]:-}" ]] || printf '%s_%s=\n' "$prefix" "$k"
+  done
+  for required in PORT_ONE_V2_STORE_ID KG_INICIS_CHANNEL_KEY TOSS_CLIENT_KEY SUPPORT_EMAIL; do
+    [[ -n "${seen[$required]:-}" ]] || { warn "${prefix}: ${required} 가 env 에 없습니다" >&2; SKIPPED+=("${prefix}_${required}"); }
   done
 }
-if confirm "STAGING_* 와 PROD_* 저장소 변수를 올릴까요? (NEXT_PUBLIC 값이라 브라우저에 어차피 노출되는 값입니다)"; then
-  publish_env_vars STAGING "$STAGING_LINES" TOSS_SANDBOX_CLIENT_KEY
-  publish_env_vars PROD "$PROD_LINES" TOSS_LIVE_CLIENT_KEY
-else
-  SKIPPED+=("STAGING_*/PROD_* 저장소 변수")
-fi
-pause "마무리하려면 Enter"
+( umask 077; { env_lines STAGING "$STAGING_LINES" TOSS_SANDBOX_CLIENT_KEY; env_lines PROD "$PROD_LINES" TOSS_LIVE_CLIENT_KEY; } > "$IMAGES_ENV_FILE" )
+printf '  %s✓%s %s (%s 줄, 권한 600)\n' "$GREEN" "$RESET" "$IMAGES_ENV_FILE" "$(wc -l < "$IMAGES_ENV_FILE" | tr -d ' ')"
+step "Jenkins → Credentials → (global) → Add Credentials"
+step "Kind: Secret file · ID: codemit-images-env · File: 위 파일 (이미 있으면 그 자격증명의 Update 에서 파일만 바꿉니다)"
+note "값을 바꾸면 그 앱의 이미지 문맥 해시가 바뀌어 다음 main 커밋에서 다시 굽습니다(바로 반영하려면 laurio 잡을 손으로 한 번)."
+pause "올렸으면 Enter — 그 뒤 로컬 파일은 지워도 됩니다"
 
 finish
-note "다음: 코드 작업(CI 이미지 잡·compose image 태그·deploy.sh pull·docker login)과 머지 시점의 웹훅 끄기."
 note "위저드 기본값 파일: $ENV_FILE (비밀값 포함, 권한 600) — 다 끝나면 지워도 됩니다."

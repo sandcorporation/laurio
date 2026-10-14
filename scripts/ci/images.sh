@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# 배포 이미지 여섯을 한 아키텍처로 굽거나, 바뀌지 않았으면 건너뛴다(#705, Jenkinsfile 「이미지」).
+#
+#   scripts/ci/images.sh amd64     staging 호스트(sub)의 것 — 백엔드·search·pgbouncer `-amd64`, 세 앱 `-staging`
+#   scripts/ci/images.sh arm64     prod 호스트(oracle)의 것 — 백엔드·search·pgbouncer `-arm64`, 세 앱 `-prod`
+#
+# 태그는 `ghcr.io/sandcorporation/codemit-<서비스>:<커밋 sha>-<arch|env>` — deploy.sh 가 그 이름으로
+# 받는다. 예전에는 GitHub Actions(`.github/workflows/images.yaml`)가 커밋마다 열둘을 다 구웠다.
+#
+# **건너뛰기.** 서비스마다 빌드 문맥 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로의
+# git 해시 + 빌드 인자)를 내고, `…:ctx-<해시>-<arch|env>` 가 레지스트리에 있으면 굽지 않고 커밋 태그를
+# 그 매니페스트에 더하기만 한다(`imagetools create`, 수 초). 없으면 굽고 두 태그로 올린다. 콘솔에
+# 서비스마다 「굽는다/건너뛴다」 한 줄이 남고, 결과는 `.images-<arch>.result` 에 `서비스=built|skipped`
+# 로 적힌다 — 파이프라인이 그것으로 부팅 가드를 고른다(건너뛴 앱의 이미지는 이미 한 번 가드를 지났다).
+#
+# 환경변수:
+#   GHCR_TOKEN / GHCR_USER     ghcr 쓰기 토큰(Jenkins `ghcr-push-token`). 없으면 노드의 로그인을 쓴다
+#   CODEMIT_IMAGES_ENV         `STAGING_*`·`PROD_*` 를 `KEY=value` 로 담은 파일(Jenkins `codemit-images-env`).
+#                              앱을 다룰 때 없으면 멈춘다 — 빈 값으로 구운 앱은 prod 에서 결제·문의 주소 없이 뜬다
+#   CODEMIT_IMAGES_MODE        push(기본) | plan — plan 은 해시와 판단만 적고 굽지도 태그를 더하지도 않는다
+#   CODEMIT_IMAGES_SERVICES    다룰 서비스(공백으로 가름, 기본 여섯 전부)
+#   CODEMIT_IMAGE_REGISTRY     기본 ghcr.io/sandcorporation (로컬 시험은 localhost:<포트>)
+#   CODEMIT_IMAGES_BUILDER     buildx 빌더 이름(기본 codemit-images — 없으면 docker-container 로 만든다.
+#                              레지스트리 캐시를 내보내려면 docker 드라이버로는 안 된다)
+#   CODEMIT_IMAGES_PARALLEL    1(기본)이면 굽는 것끼리 함께 돈다, 0 이면 하나씩
+#   CODEMIT_IMAGES_KEEP_STORAGE  끝나고 빌더 캐시를 이만큼만 남긴다(기본 20gb)
+#
+# bash 3.2(macos 노드)에서도 돈다 — 연관 배열·`wait -n`·`mapfile` 을 쓰지 않는다.
+set -euo pipefail
+
+arch="${1:-}"
+case "$arch" in
+  amd64) env_name=staging; prefix=STAGING; sentry_env=staging ;;
+  arm64) env_name=prod; prefix=PROD; sentry_env=production ;;
+  *) echo "쓰는 법: $0 <amd64|arm64>" >&2; exit 2 ;;
+esac
+
+cd "$(dirname "$0")/../.."
+# shellcheck source=scripts/ci/ghcr-login.sh
+. scripts/ci/ghcr-login.sh
+
+platform="linux/$arch"
+registry="${CODEMIT_IMAGE_REGISTRY:-ghcr.io/sandcorporation}"
+mode="${CODEMIT_IMAGES_MODE:-push}"
+builder="${CODEMIT_IMAGES_BUILDER:-codemit-images}"
+parallel="${CODEMIT_IMAGES_PARALLEL:-1}"
+keep_storage="${CODEMIT_IMAGES_KEEP_STORAGE:-20gb}"
+services="${CODEMIT_IMAGES_SERVICES:-$(python3 scripts/ci/image_context.py services | tr '\n' ' ')}"
+sha="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+result_file=".images-$arch.result"
+work="$(mktemp -d "${TMPDIR:-/tmp}/codemit-images.XXXXXX")"
+
+case "$mode" in push|plan) ;; *) echo "CODEMIT_IMAGES_MODE 는 push 나 plan 이다: $mode" >&2; exit 2 ;; esac
+
+cleanup() {
+  rm -rf "$work"
+  ghcr_logout
+}
+trap cleanup EXIT
+
+# ── preflight ───────────────────────────────────────────────────────────────
+# sub 의 Jenkins 는 컨테이너다 — 그 안의 docker CLI 에 buildx 가 없으면 Dockerfile 의
+# `RUN --mount`(BuildKit 전용)에서 전부 죽는다(2026-09-14 deploy.sh 빌드 #4~#6). 여기서 먼저 멈춘다.
+if ! docker buildx version >/dev/null 2>&1; then
+  echo "이 노드의 docker CLI 에 buildx 플러그인이 없다 — 에이전트에 docker-buildx 를 넣어라." >&2
+  exit 1
+fi
+
+# 건너뛸 때 매니페스트를 그대로 베끼는 `imagetools create --prefer-index=false` 는 buildx 0.13+ 에 있다.
+if ! docker buildx imagetools create --help 2>/dev/null | grep -q prefer-index; then
+  echo "이 노드의 buildx 가 낡았다(imagetools create --prefer-index 없음) — buildx 0.13 이상을 넣어라." >&2
+  exit 1
+fi
+
+needs_env=0
+for svc in $services; do
+  if [ "$(python3 scripts/ci/image_context.py field "$svc" app)" = true ]; then needs_env=1; fi
+done
+if [ "$needs_env" = 1 ]; then
+  if [ -z "${CODEMIT_IMAGES_ENV:-}" ] || [ ! -f "${CODEMIT_IMAGES_ENV}" ]; then
+    echo "CODEMIT_IMAGES_ENV 가 없다 — 앱에 굳힐 ${prefix}_* 값 파일(Jenkins 자격증명 codemit-images-env)." >&2
+    exit 1
+  fi
+fi
+
+ghcr_login
+
+if [ "$mode" = push ]; then
+  if ! docker buildx inspect "$builder" >/dev/null 2>&1; then
+    echo "빌더 $builder 를 만든다(docker-container)"
+    docker buildx create --name "$builder" --driver docker-container >/dev/null
+  fi
+  docker buildx inspect --bootstrap "$builder" >/dev/null
+fi
+
+# ── 서비스마다 ──────────────────────────────────────────────────────────────
+
+# 앱의 빌드 인자를 파일로 — 이 파일이 해시에도, 빌드에도 그대로 들어간다.
+write_build_args() {
+  local svc="$1" out="$2" dsn release key var value
+  : > "$out"
+  [ "$(python3 scripts/ci/image_context.py field "$svc" app)" = true ] || return 0
+  dsn="$(python3 scripts/ci/image_context.py field "$svc" dsn)"
+  # release 는 HEAD 가 아니라 「그 문맥을 마지막으로 바꾼 커밋」이다 — 문맥이 같으면 값도 같아
+  # 해시가 그대로이고, GlitchTip 의 release 도 그 코드의 실제 버전을 가리킨다(operations.md GlitchTip 절).
+  release="$(python3 scripts/ci/image_context.py release "$svc")"
+  for pair in \
+    NEXT_PUBLIC_PORTONE_STORE_ID:PORT_ONE_V2_STORE_ID \
+    NEXT_PUBLIC_PORTONE_CHANNEL_KEY:KG_INICIS_CHANNEL_KEY \
+    NEXT_PUBLIC_TOSS_CLIENT_KEY:TOSS_CLIENT_KEY \
+    NEXT_PUBLIC_SUPPORT_EMAIL:SUPPORT_EMAIL \
+    NEXT_PUBLIC_CONTEST_PRODUCT_ENABLED:CODEMIT_CONTEST_PRODUCT_ENABLED \
+    NEXT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED:CODEMIT_PAID_CONTEST_PRODUCT_ENABLED \
+    "NEXT_PUBLIC_SENTRY_DSN:SENTRY_DSN_$dsn"; do
+    key="${pair%%:*}"
+    var="${prefix}_${pair#*:}"
+    if ! value="$(env_value "$CODEMIT_IMAGES_ENV" "$var")"; then
+      echo "$CODEMIT_IMAGES_ENV 에 $var 가 없다" >&2
+      return 1
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$out"
+  done
+  printf 'NEXT_PUBLIC_SENTRY_ENVIRONMENT=%s\n' "$sentry_env" >> "$out"
+  printf 'NEXT_PUBLIC_SENTRY_RELEASE=%s\n' "$release" >> "$out"
+}
+
+build() {
+  local svc="$1" suffix="$2" ctx_ref="$3" sha_ref="$4" args_file="$5" target line
+  local cache="$registry/codemit-buildcache:$svc-$suffix"
+  local cmd
+  target="$(python3 scripts/ci/image_context.py field "$svc" target)"
+  cmd=(docker buildx build --builder "$builder" --file "docker/$svc.Dockerfile" --platform "$platform"
+       --provenance=false --push
+       --tag "$sha_ref" --tag "$ctx_ref"
+       --label "org.opencontainers.image.source=https://github.com/sandcorporation/laurio"
+       --cache-from "type=registry,ref=$cache"
+       --cache-to "type=registry,ref=$cache,mode=max")
+  if [ -n "$target" ]; then cmd+=(--target "$target"); fi
+  while IFS= read -r line; do
+    [ -n "$line" ] && cmd+=(--build-arg "$line")
+  done < "$args_file"
+  "${cmd[@]}" .
+}
+
+# 서비스 하나 — 판단을 한 줄로 적고 결과를 `$work/<svc>.result` 에 남긴다.
+one() {
+  local svc="$1" suffix args_file hash ctx_ref sha_ref
+  if [ "$(python3 scripts/ci/image_context.py field "$svc" app)" = true ]; then
+    suffix="$env_name"
+  else
+    suffix="$arch"
+  fi
+  args_file="$work/$svc.args"
+  write_build_args "$svc" "$args_file"
+  hash="$(python3 scripts/ci/image_context.py hash "$svc" "$platform" "$args_file")"
+  ctx_ref="$registry/codemit-$svc:ctx-$hash-$suffix"
+  sha_ref="$registry/codemit-$svc:$sha-$suffix"
+
+  if docker buildx imagetools inspect "$ctx_ref" >/dev/null 2>&1; then
+    echo "건너뛴다 $svc ($suffix) — ctx-$hash 가 이미 있다"
+    if [ "$mode" = push ]; then
+      # --prefer-index=false: 매니페스트를 그대로 베낀다(같은 digest — ghcr 에서는 같은 버전에 태그만
+      # 는다). 빼면 buildx 가 매니페스트 하나짜리 index 를 새로 만들어, ghcr 에 그 index 와 원본이
+      # 따로 버전으로 남고 정리 잡이 원본만 지우면 커밋 태그가 깨진다.
+      docker buildx imagetools create --prefer-index=false --tag "$sha_ref" "$ctx_ref"
+    fi
+    echo "$svc=skipped" > "$work/$svc.result"
+    return 0
+  fi
+  echo "굽는다 $svc ($suffix) — ctx-$hash"
+  if [ "$mode" = push ]; then
+    build "$svc" "$suffix" "$ctx_ref" "$sha_ref" "$args_file"
+  fi
+  echo "$svc=built" > "$work/$svc.result"
+}
+
+echo "커밋 $sha · $platform · 레지스트리 $registry · $mode"
+
+# 서비스마다 배경 subshell 하나 — 로그는 파일로 받아 끝난 뒤 차례로 보인다(서로 섞이지 않는다).
+# 하나씩(CODEMIT_IMAGES_PARALLEL=0)이면 띄우자마자 기다린다. `||` 안에서 부르면 set -e 가 꺼지므로
+# 배경으로만 부른다.
+show() {
+  local pid="$1" svc="$2"
+  if ! wait "$pid"; then
+    echo "$svc=failed" > "$work/$svc.result"
+  fi
+  echo "──── $svc"
+  cat "$work/$svc.log"
+}
+pids=""
+for svc in $services; do
+  ( one "$svc" ) > "$work/$svc.log" 2>&1 &
+  if [ "$parallel" = 1 ]; then
+    pids="$pids $!:$svc"
+  else
+    show "$!" "$svc"
+  fi
+done
+for entry in $pids; do
+  show "${entry%%:*}" "${entry#*:}"
+done
+
+failed=0
+: > "$result_file"
+for svc in $services; do
+  if [ -f "$work/$svc.result" ]; then
+    cat "$work/$svc.result" >> "$result_file"
+  else
+    echo "$svc=failed" >> "$result_file"
+  fi
+done
+grep -q '=failed$' "$result_file" && failed=1
+
+echo
+echo "── 결과($arch)"
+cat "$result_file"
+
+if [ "$mode" = push ] && grep -q '=built$' "$result_file"; then
+  # 빌더 컨테이너의 캐시는 노드 디스크에 쌓인다 — 여기서 자른다(레지스트리 캐시는 그대로).
+  docker buildx prune --builder "$builder" -f --keep-storage "$keep_storage" >/dev/null 2>&1 \
+    || echo "빌더 캐시 정리를 건너뛴다 — 결과와 무관하다"
+fi
+
+exit "$failed"

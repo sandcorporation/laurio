@@ -1,44 +1,66 @@
-// staging 배포 (#52) — 단계는 보이게, 논리는 `deploy.sh` 에.
+// main 의 커밋 하나의 여정 전부 (#52 → #705) — 이미지 → 부팅 가드 → `staging` 앞당기기 → staging 배포 →
+// `production` 앞당기기. 단계는 보이게, 논리는 스크립트에.
 //
-// 각 단계의 본문은 `deploy.sh staging <명령>` 한 줄이다. 무엇을 다시 굽고 무엇을 바꿔
-// 끼우는지, 왜 backend 만 갈면 안 되는지는 전부 `deploy.sh` 의 주석에 있다 — 여기에
-// 논리를 두면 아무도 읽지 않는 두 번째 사본이 된다(예전 freestyle 잡 시절 빌드 #4:
-// `cannot open ./deploy.sh`).
+// **잡 `laurio` 는 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`, GitHub 웹훅
+// `GitHubPushTrigger`). 2026-10-15 까지는 GitHub Actions(`.github/workflows/images.yaml`)가 이미지
+// 열둘과 부팅 가드 셋을 돌리고 `staging` 을 앞당겼고, 이 잡은 `staging` push 에서 배포만 했다 —
+// 조직의 Actions 분량(Free, 월 2,000분)이 바닥나 `staging` 이 멈춘 뒤 Actions 를 떠났다(ADR-0058).
+// 이제 커밋 하나가 이 잡의 빌드 하나에 다 보인다.
 //
-// 단계를 나눈 이유: 예전에는 `sh ./deploy.sh staging` 한 단계뿐이라 Jenkins 화면에서
-// 어느 서비스의 빌드가, 교체가, 헬스 체크가 실패했는지 로그를 뒤져야 알았다.
-// `Jenkinsfile.production` 도 같은 단계를 갖는다 — 한쪽 단계를 바꾸면 다른 쪽도 같이
-// 고친다(다른 것은 agent 라벨·대상·prod 의 브랜치 검사뿐이다).
+//   대상 확인(built-in)     main 인지, 문서만 바뀌었는지(`scripts/ci/changed.sh` — 그러면 여기서 초록)
+//   이미지                  macos 가 arm64 여섯(prod), sub 가 amd64 여섯(staging) — `scripts/ci/images.sh`.
+//                           바뀌지 않은 서비스는 굽지 않고 커밋 태그만 더한다(빌드 문맥 해시)
+//   부팅 가드(sub)          이번에 구운 앱만 — `scripts/ci/deploy-guard.sh`
+//   staging 앞당기기         `scripts/ci/fast_forward.py staging <sha>` — 배포 기록이자 브랜치의 뜻은 그대로
+//   staging 배포(built-in)  Preflight → 변경 계획 → 이미지 받기 → 교체 → 확인 → 배포 표식 → 정리 — 각 단계는
+//                           `deploy.sh staging <명령>` 한 줄이다. 무엇을 바꿔 끼우는지는 전부 deploy.sh 주석에
+//                           있다(여기에 논리를 두면 아무도 읽지 않는 두 번째 사본이 된다 — 예전 freestyle 잡
+//                           시절 빌드 #4: `cannot open ./deploy.sh`)
+//   (post success)          PROMOTE_PRODUCTION 이면 `production` 을 같은 커밋으로 → prod 잡(Jenkinsfile.production)
 //
-// **잡은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/staging`).
+// `Jenkinsfile.production` 도 배포 단계를 같은 모양으로 갖는다 — 한쪽을 바꾸면 다른 쪽도 같이 고친다.
 //
-// **무엇이 이 잡을 부르는가**(2026-10-02). `staging` 브랜치의 push 다(GitHub 웹훅,
-// GitHubPushTrigger). 그 브랜치는 사람이 커밋하지 않는다 — main 에 들어온 커밋의 이미지 열둘과
-// 부팅 가드 셋이 GitHub Actions(images.yaml)에서 초록이면 그 워크플로가 `staging` 을 그 커밋으로
-// fast-forward 한다. 그래서 웹훅이 이 잡을 부르는 순간 이미지는 이미 ghcr 에 있다. 예전에는
-// main 의 CI 가 `buildWithParameters` 로 DEPLOY_SHA 를 채워 불렀다(그때 잡 브랜치는 `*/main`).
+// **IMAGES_ONLY** 를 켜면 이미지·부팅 가드까지만 돌고 앞당기기·배포는 건너뛴다 — 브랜치를 가리지 않는다.
+// 이 파일을 바꾼 PR 을 병합 전에 돌려 보는 길이다(PR 브랜치를 가리키는 임시 잡). PR CI 는 이 파일을 보지 못한다.
 //
-// **초록이면 `production` 을 같은 커밋으로 앞당긴다**(아래 post success, scripts/ci/fast_forward.py)
-// — 그것이 prod 잡(Jenkinsfile.production)을 부른다. staging 에서 실제로 떠서 헬스 체크를 통과한
-// 커밋만 prod 로 간다.
+// **노드마다 같은 커밋을 쓴다.** 단계마다 제 노드에서 다시 체크아웃하므로, 그 사이 main 이 움직였으면
+// 다른 커밋을 받을 수 있다 — 첫 단계가 적은 DEPLOY_SHA 로 되돌려 놓는다(pin()).
 
 def deployTarget = 'staging'
 
 // 디스코드 알림에 쓸 대상 이름(아래 post 참고).
 def TARGET_LABEL = 'staging'
 
-pipeline {
-  // 스택이 실제로 떠 있는 호스트 = Jenkins 컨트롤러다. `built-in` 은 컨트롤러가
-  // **항상** 갖는 내장 라벨이라(Jenkins 2.307+) 사람이 노드 설정을 유지할 필요가
-  // 없다 — 커스텀 라벨(`codemit-staging`)로 뒀더니 노드에 그 라벨을 붙였는데도
-  // "There are no nodes with the label" 로 스케줄되지 않아 빌드가 통째로 멈췄다.
-  //
-  // `agent any` 로 두지 않는 이유: 이 컨트롤러에는 다른 에이전트(prod 의 `oracle` 등)도
-  // 붙어 있는데 거기엔 staging 스택도 `docker/.env.staging` 도 없다.
-  agent { label 'built-in' }
+// 이 노드의 체크아웃을 첫 단계가 고른 커밋으로 맞춘다. main 은 앞으로만 가므로 그 커밋은 언제나 있다.
+def pin() {
+  sh '''
+    git -c safe.directory="$PWD" cat-file -e "${DEPLOY_SHA}^{commit}" \
+      || { echo "이 노드의 체크아웃에 ${DEPLOY_SHA} 가 없다 — main 이 강제로 바뀌었는가?"; exit 1; }
+    git -c safe.directory="$PWD" checkout -q --detach "${DEPLOY_SHA}"
+    git -c safe.directory="$PWD" log -1 --oneline
+  '''
+}
 
-  // 이미지는 CI 가 굽고 ghcr 에서 받는다(2026-09-17, deploy.sh 머리 주석). ghcr·CI 가
-  // 막혔을 때는 사람이 호스트에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` 으로 굽는다.
+// images.sh 가 남긴 `서비스=built|skipped|failed` 를 env 로 — 부팅 가드가 이번에 구운 앱만 고른다.
+def readImageResult(String arch) {
+  readFile(".images-${arch}.result").split('\n').each { line ->
+    def parts = line.split('=', 2)
+    if (parts.length == 2) { env."IMAGE_${arch.toUpperCase()}_${parts[0].trim().toUpperCase()}" = parts[1].trim() }
+  }
+}
+
+pipeline {
+  // 단계마다 노드가 다르다 — 배포는 스택이 떠 있는 컨트롤러(`built-in`), 이미지는 macos·sub, 가드는 sub.
+  //
+  // `built-in` 은 컨트롤러가 **항상** 갖는 내장 라벨이라(Jenkins 2.307+) 사람이 노드 설정을 유지할
+  // 필요가 없다 — 커스텀 라벨(`codemit-staging`)로 뒀더니 노드에 그 라벨을 붙였는데도 "There are no
+  // nodes with the label" 로 스케줄되지 않아 빌드가 통째로 멈췄다. 배포를 `agent any` 로 두지 않는
+  // 이유: 이 컨트롤러에는 다른 에이전트(prod 의 `oracle` 등)도 붙어 있는데 거기엔 staging 스택도
+  // `docker/.env.staging` 도 없다.
+  agent none
+
+  // 이미지는 이 잡이 앞 단계에서 굽고 배포는 ghcr 에서 받는다(deploy.sh 머리 주석). ghcr 가 막혔을
+  // 때는 사람이 호스트에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` 으로 굽는다.
   environment {
     DEPLOY_IMAGE_SOURCE = 'registry'
   }
@@ -52,6 +74,8 @@ pipeline {
     // 이 값을 따라간다.
     booleanParam(name: 'PROMOTE_PRODUCTION', defaultValue: false,
                  description: '초록이면 production 을 이 커밋으로 앞당긴다(→ prod 배포)')
+    booleanParam(name: 'IMAGES_ONLY', defaultValue: false,
+                 description: '이미지·부팅 가드까지만 — staging·production 은 건드리지 않는다(어느 브랜치든)')
   }
 
   options {
@@ -62,110 +86,232 @@ pipeline {
 
   stages {
     stage('대상 확인') {
+      agent { label 'built-in' }
       steps {
         script {
-          // 이 파일이 staging 이 아닌 브랜치로 잘못 돌면(잡 브랜치 지정 실수) 이미지가 없거나
-          // 승격되지 않은 커밋을 배포하고, 끝에서 그 커밋을 production 으로 앞당긴다. 멈춘다.
+          // 이 파일이 main 이 아닌 브랜치로 돌면(잡 브랜치 지정 실수) 시험을 거치지 않은 커밋을 staging 에
+          // 올리고 끝에서 production 까지 앞당긴다. 멈춘다 — IMAGES_ONLY 는 이미지만 올리므로 예외다.
           def branch = env.GIT_BRANCH ?: ''
-          if (!(branch == 'staging' || branch.endsWith('/staging'))) {
-            error("staging 브랜치만 staging 으로 배포한다 — 지금 브랜치: '${branch}'")
+          if (!params.IMAGES_ONLY && !(branch == 'main' || branch.endsWith('/main'))) {
+            error("main 브랜치만 staging 으로 배포한다 — 지금 브랜치: '${branch}'")
           }
-          currentBuild.description = (env.GIT_COMMIT ?: '').take(12)
+          env.DEPLOY_SHA = sh(returnStdout: true, script: 'git -c safe.directory="$PWD" rev-parse HEAD').trim()
+          currentBuild.description = env.DEPLOY_SHA.take(12) + (params.IMAGES_ONLY ? ' 이미지만' : '')
+          // 문서(.md·docs/)만 바뀌었으면 이미지에 드는 것이 없다 — 굽지도 앞당기지도 않고 초록으로 끝난다.
+          // 기준은 지금의 staging: 그 사이 커밋이 여럿이면 그 전부를 본다. 그런 커밋은 다음 코드 커밋과 함께 간다.
+          def changed = sh(returnStdout: true, script: '''
+            if git -c safe.directory="$PWD" rev-parse --verify -q origin/staging >/dev/null; then
+              bash scripts/ci/changed.sh origin/staging
+            else
+              echo TESTS=1
+            fi
+          ''').trim()
+          env.DOCS_ONLY = (changed == 'TESTS=0') ? 'true' : 'false'
+          if (env.DOCS_ONLY == 'true') {
+            echo '문서만 바뀌었다 — 이미지·가드·배포를 건너뛴다.'
+            currentBuild.description += ' 문서만'
+          }
         }
         sh 'git -c safe.directory="$PWD" log -1 --oneline'
       }
     }
 
-    stage('Preflight') {
-      steps {
-        sh "sh ./deploy.sh ${deployTarget} preflight"
+    stage('이미지') {
+      when {
+        beforeAgent true
+        expression { env.DOCS_ONLY != 'true' }
       }
-    }
-
-    stage('변경 계획') {
-      steps {
-        sh "sh ./deploy.sh ${deployTarget} plan"
-        script {
-          // deploy.sh 가 남긴 `KEY=value` 줄을 읽어 뒤 단계의 when 에 쓴다.
-          readFile(".jenkins-${deployTarget}-plan").split('\n').each { line ->
-            def parts = line.split('=', 2)
-            if (parts.length == 2) { env."${parts[0].trim()}" = parts[1].trim() }
+      // 하나가 실패해도 다른 아키텍처는 끝까지 굽는다 — 실패 원인을 한 번에 본다. 둘 다 초록이어야
+      // 넘어간다: staging 이 초록이면 곧 production 을 앞당기므로 그때 prod(arm64) 이미지가 있어야 한다.
+      failFast false
+      parallel {
+        stage('arm64 — prod (macos)') {
+          agent { label 'macos' }
+          options { timeout(time: 60, unit: 'MINUTES') }
+          steps {
+            pin()
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN'),
+                             file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
+              sh 'bash scripts/ci/images.sh arm64'
+            }
+          }
+        }
+        stage('amd64 — staging (sub)') {
+          // 배포 워크스페이스(`workspace/laurio`, `docker/.env.staging` 이 있다)와 겹치지 않게 따로 둔다.
+          agent { node { label 'laurio-staging'; customWorkspace 'laurio-images' } }
+          options { timeout(time: 60, unit: 'MINUTES') }
+          steps {
+            pin()
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN'),
+                             file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
+              sh 'bash scripts/ci/images.sh amd64'
+            }
+            script { readImageResult('amd64') }
           }
         }
       }
     }
 
-    stage('이미지') {
-      when { expression { env.DEPLOY_ANY == 'true' } }
-      // 하나가 실패해도 나머지는 끝까지 굽는다 — 한 번에 실패 원인을 전부 본다.
-      // 어느 하나라도 실패하면 이 단계가 빨갛고 뒤의 교체·표식에는 닿지 않는다.
-      parallel {
-        stage('backend') {
-          when { expression { env.BUILD_BACKEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} image backend" }
-        }
-        stage('frontend') {
-          when { expression { env.BUILD_FRONTEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} image frontend" }
-        }
-        stage('operator') {
-          when { expression { env.BUILD_OPERATOR == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} image operator" }
-        }
-        stage('classroom') {
-          when { expression { env.BUILD_CLASSROOM == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} image classroom" }
-        }
-        stage('search') {
-          when { expression { env.BUILD_SEARCH == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} image search" }
+    // 방금 올린 staging 이미지를 ghcr 에서 받아, 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다.
+    // 이번에 굽지 않은(건너뛴) 앱은 보지 않는다 — 같은 이미지가 이미 한 번 지났다.
+    stage('부팅 가드') {
+      when {
+        beforeAgent true
+        expression {
+          env.DOCS_ONLY != 'true' && (env.IMAGE_AMD64_FRONTEND == 'built' ||
+            env.IMAGE_AMD64_OPERATOR == 'built' || env.IMAGE_AMD64_CLASSROOM == 'built')
         }
       }
-    }
-
-    stage('교체') {
-      when { expression { env.DEPLOY_ANY == 'true' } }
-      steps {
-        sh "sh ./deploy.sh ${deployTarget} up"
-      }
-    }
-
-    stage('확인') {
-      when { expression { env.DEPLOY_ANY == 'true' } }
+      agent { node { label 'laurio-staging'; customWorkspace 'laurio-images' } }
+      options { timeout(time: 20, unit: 'MINUTES') }
       stages {
-        stage('컨테이너') {
-          steps { sh "sh ./deploy.sh ${deployTarget} verify" }
+        stage('가드 준비') {
+          steps { pin() }
         }
-        stage('backend 응답') {
-          steps { sh "sh ./deploy.sh ${deployTarget} health backend" }
+        stage('frontend 가드') {
+          when { expression { env.IMAGE_AMD64_FRONTEND == 'built' } }
+          steps {
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN'),
+                             file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
+              sh 'bash scripts/ci/deploy-guard.sh frontend'
+            }
+          }
         }
-        stage('events 응답') {
-          steps { sh "sh ./deploy.sh ${deployTarget} health events" }
+        stage('operator 가드') {
+          when { expression { env.IMAGE_AMD64_OPERATOR == 'built' } }
+          steps {
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+              sh 'bash scripts/ci/deploy-guard.sh operator'
+            }
+          }
         }
-        stage('search 응답') {
-          steps { sh "sh ./deploy.sh ${deployTarget} health search" }
-        }
-        stage('검색 재색인') {
-          // 검색이나 backend 를 바꿨을 때만 — 스캔의 하루 제한을 보지 않고
-          // 즉시 맞춘다(deploy.sh reindex, 부모 #444 스펙).
-          when { expression { env.BUILD_SEARCH == 'true' || env.BUILD_BACKEND == 'true' } }
-          steps { sh "sh ./deploy.sh ${deployTarget} reindex" }
+        stage('classroom 가드') {
+          when { expression { env.IMAGE_AMD64_CLASSROOM == 'built' } }
+          steps {
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+              sh 'bash scripts/ci/deploy-guard.sh classroom'
+            }
+          }
         }
       }
     }
 
-    stage('배포 표식') {
+    // `staging` 브랜치는 배포 기록이다 — 이미지와 가드가 초록인 main 의 커밋만 그리로 간다. 늦게 끝난
+    // 옛 커밋이면 아무것도 하지 않고, 브랜치가 main 에서 갈라져 있으면 밀어붙이지 않고 빨갛게 멈춘다.
+    // 토큰은 production 을 앞당기는 것과 같다(Contents 쓰기).
+    stage('staging 앞당기기') {
+      when {
+        beforeAgent true
+        expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY }
+      }
+      agent { label 'built-in' }
       steps {
-        sh "sh ./deploy.sh ${deployTarget} mark"
+        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+          sh 'python3 scripts/ci/fast_forward.py staging "$DEPLOY_SHA"'
+        }
       }
     }
 
-    // 옛 커밋의 ghcr 이미지·오래된 빌드 캐시를 지운다(deploy.sh prune). 실패해도
-    // 배포를 실패로 만들지 않는다 — 명령 자신도 언제나 0 으로 끝나지만, 여기서도
-    // 실패를 삼킨다.
-    stage('정리') {
-      steps {
-        sh "sh ./deploy.sh ${deployTarget} prune || echo '정리를 건너뛴다 — 배포 결과와 무관하다'"
+    stage('staging 배포') {
+      when {
+        beforeAgent true
+        expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY }
+      }
+      agent { label 'built-in' }
+      stages {
+        stage('Preflight') {
+          steps {
+            pin()
+            sh "sh ./deploy.sh ${deployTarget} preflight"
+          }
+        }
+
+        stage('변경 계획') {
+          steps {
+            sh "sh ./deploy.sh ${deployTarget} plan"
+            script {
+              // deploy.sh 가 남긴 `KEY=value` 줄을 읽어 뒤 단계의 when 에 쓴다.
+              readFile(".jenkins-${deployTarget}-plan").split('\n').each { line ->
+                def parts = line.split('=', 2)
+                if (parts.length == 2) { env."${parts[0].trim()}" = parts[1].trim() }
+              }
+            }
+          }
+        }
+
+        stage('이미지 받기') {
+          when { expression { env.DEPLOY_ANY == 'true' } }
+          // 하나가 실패해도 나머지는 끝까지 받는다 — 한 번에 실패 원인을 전부 본다.
+          // 어느 하나라도 실패하면 이 단계가 빨갛고 뒤의 교체·표식에는 닿지 않는다.
+          parallel {
+            stage('backend') {
+              when { expression { env.BUILD_BACKEND == 'true' } }
+              steps { sh "sh ./deploy.sh ${deployTarget} image backend" }
+            }
+            stage('frontend') {
+              when { expression { env.BUILD_FRONTEND == 'true' } }
+              steps { sh "sh ./deploy.sh ${deployTarget} image frontend" }
+            }
+            stage('operator') {
+              when { expression { env.BUILD_OPERATOR == 'true' } }
+              steps { sh "sh ./deploy.sh ${deployTarget} image operator" }
+            }
+            stage('classroom') {
+              when { expression { env.BUILD_CLASSROOM == 'true' } }
+              steps { sh "sh ./deploy.sh ${deployTarget} image classroom" }
+            }
+            stage('search') {
+              when { expression { env.BUILD_SEARCH == 'true' } }
+              steps { sh "sh ./deploy.sh ${deployTarget} image search" }
+            }
+          }
+        }
+
+        stage('교체') {
+          when { expression { env.DEPLOY_ANY == 'true' } }
+          steps {
+            sh "sh ./deploy.sh ${deployTarget} up"
+          }
+        }
+
+        stage('확인') {
+          when { expression { env.DEPLOY_ANY == 'true' } }
+          stages {
+            stage('컨테이너') {
+              steps { sh "sh ./deploy.sh ${deployTarget} verify" }
+            }
+            stage('backend 응답') {
+              steps { sh "sh ./deploy.sh ${deployTarget} health backend" }
+            }
+            stage('events 응답') {
+              steps { sh "sh ./deploy.sh ${deployTarget} health events" }
+            }
+            stage('search 응답') {
+              steps { sh "sh ./deploy.sh ${deployTarget} health search" }
+            }
+            stage('검색 재색인') {
+              // 검색이나 backend 를 바꿨을 때만 — 스캔의 하루 제한을 보지 않고
+              // 즉시 맞춘다(deploy.sh reindex, 부모 #444 스펙).
+              when { expression { env.BUILD_SEARCH == 'true' || env.BUILD_BACKEND == 'true' } }
+              steps { sh "sh ./deploy.sh ${deployTarget} reindex" }
+            }
+          }
+        }
+
+        stage('배포 표식') {
+          steps {
+            sh "sh ./deploy.sh ${deployTarget} mark"
+          }
+        }
+
+        // 옛 커밋의 ghcr 이미지·오래된 빌드 캐시를 지운다(deploy.sh prune). 실패해도
+        // 배포를 실패로 만들지 않는다 — 명령 자신도 언제나 0 으로 끝나지만, 여기서도
+        // 실패를 삼킨다.
+        stage('정리') {
+          steps {
+            sh "sh ./deploy.sh ${deployTarget} prune || echo '정리를 건너뛴다 — 배포 결과와 무관하다'"
+          }
+        }
       }
     }
   }
@@ -174,7 +320,7 @@ pipeline {
     // **빌드가 끝나면 디스코드로 결과를 보낸다**(2026-09-18). 배포는 사람이 화면을
     // 보고 있지 않을 때 도는 일이라, 끝났다는 사실이 사람에게 닿는 자리가 없었다 —
     // 실패는 더더욱 그렇다(2026-09-17 staging 배포가 정리 단계에서 빨갛게 끝난 것을
-    // 한참 뒤에 알았다).
+    // 한참 뒤에 알았다). 문서만 바뀐 빌드는 보내지 않는다 — 한 일이 없다.
     //
     // **웹훅 주소는 저장소에 두지 않는다** — Jenkins 자격증명(Secret text)
     // `discord-deploy-webhook` 에 있고, 여기서는 이름으로만 부른다. 그 값을 아는
@@ -184,19 +330,23 @@ pipeline {
     // `catchError` 가 그 역할이다. 자격증명이 없는 Jenkins(새로 세운 것 등)에서도
     // 배포 자체는 그대로 돌아야 한다.
     always {
-      catchError(buildResult: null, stageResult: null, message: '디스코드 알림 실패 — 배포 결과와 무관하다') {
-        withCredentials([string(credentialsId: 'discord-deploy-webhook', variable: 'DISCORD_WEBHOOK')]) {
-          script {
-            def result = currentBuild.currentResult
-            def mark = result == 'SUCCESS' ? '\u2705' : (result == 'ABORTED' ? '\u26aa' : '\u274c')
-            def sha = (env.GIT_COMMIT ?: '').take(12)
-            def took = currentBuild.durationString.replace(' and counting', '')
-            def text = "${mark} ${TARGET_LABEL} 배포 ${result} — #${env.BUILD_NUMBER}" +
-              (sha ? " (${sha})" : '') + " · ${took} · ${env.BUILD_URL}"
-            // 본문은 JSON 이라 따옴표·역슬래시를 그대로 실으면 깨진다 — Groovy 가
-            // 만들어 준 문자열을 셸이 다시 해석하지 않도록 파일로 넘긴다.
-            writeFile file: 'discord-payload.json', text: groovy.json.JsonOutput.toJson([content: text])
-            sh 'curl -sS -X POST -H "Content-Type: application/json" --data @discord-payload.json "$DISCORD_WEBHOOK" > /dev/null || true'
+      script {
+        if (env.DOCS_ONLY == 'true' && currentBuild.currentResult == 'SUCCESS') { return }
+        node('built-in') {
+          catchError(buildResult: null, stageResult: null, message: '디스코드 알림 실패 — 배포 결과와 무관하다') {
+            withCredentials([string(credentialsId: 'discord-deploy-webhook', variable: 'DISCORD_WEBHOOK')]) {
+              def result = currentBuild.currentResult
+              def mark = result == 'SUCCESS' ? '✅' : (result == 'ABORTED' ? '⚪' : '❌')
+              def sha = (env.DEPLOY_SHA ?: '').take(12)
+              def took = currentBuild.durationString.replace(' and counting', '')
+              def what = params.IMAGES_ONLY ? '이미지' : '배포'
+              def text = "${mark} ${TARGET_LABEL} ${what} ${result} — #${env.BUILD_NUMBER}" +
+                (sha ? " (${sha})" : '') + " · ${took} · ${env.BUILD_URL}"
+              // 본문은 JSON 이라 따옴표·역슬래시를 그대로 실으면 깨진다 — Groovy 가
+              // 만들어 준 문자열을 셸이 다시 해석하지 않도록 파일로 넘긴다.
+              writeFile file: 'discord-payload.json', text: groovy.json.JsonOutput.toJson([content: text])
+              sh 'curl -sS -X POST -H "Content-Type: application/json" --data @discord-payload.json "$DISCORD_WEBHOOK" > /dev/null || true'
+            }
           }
         }
       }
@@ -204,20 +354,24 @@ pipeline {
     // staging 에서 초록이었던 커밋을 prod 로 보낸다. `production` 이 움직이면 웹훅이 prod 잡을
     // 부른다. 토큰은 PR CI 의 자동 병합과 같은 것이다(Contents 쓰기 — 워크플로 파일을 바꾼 커밋은
     // Workflows 쓰기도 있어야 한다). 실패하면 빌드가 빨갛다 — staging 은 바뀌었는데 prod 가 따라가지
-    // 않은 상태라 사람이 봐야 한다.
+    // 않은 상태라 사람이 봐야 한다. 문서만·이미지만 빌드는 staging 에 아무것도 올리지 않았으므로 앞당기지 않는다.
     success {
       script {
-        if (params.PROMOTE_PRODUCTION == false) {
+        if (env.DOCS_ONLY == 'true' || params.IMAGES_ONLY) {
+          echo 'staging 에 배포하지 않은 빌드다 — production 은 그대로 둔다.'
+        } else if (params.PROMOTE_PRODUCTION == false) {
           echo 'PROMOTE_PRODUCTION 이 꺼져 있다 — production 은 그대로 둔다.'
         } else {
-          withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-            sh 'python3 scripts/ci/fast_forward.py production "$(git -c safe.directory="$PWD" rev-parse HEAD)"'
+          node('built-in') {
+            withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+              sh 'python3 scripts/ci/fast_forward.py production "$DEPLOY_SHA"'
+            }
           }
         }
       }
     }
     failure {
-      echo '배포 실패 — 배포 표식은 옮기지 않았고 production 도 앞당기지 않았다. 다음 빌드가 같은 범위를 다시 시도한다.'
+      echo '실패 — staging·production 은 이 커밋으로 옮기지 않았거나(앞 단계) 배포 표식을 옮기지 않았다(배포 단계). 다음 빌드가 같은 범위를 다시 시도한다.'
     }
   }
 }

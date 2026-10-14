@@ -1,6 +1,6 @@
 # 공모전 검색 실물 어댑터가 붙는 OpenSearch — nori(한국어 형태소 분석기) 플러그인만
 # 더한다 (#450, 부모 #444 스펙). dev `search` 프로필과 staging·prod(#451)가 같은
-# 이미지를 쓴다 — CI 이미지 잡(mac 러너, 비상구 IMAGE_BUILDER=sub, #451)이 이 파일로
+# 이미지를 쓴다 — Jenkins `laurio` 잡의 이미지 단계(scripts/ci/images.sh, #705)가 이 파일로
 # amd64·arm64 를 굽는다.
 #
 # 보안 플러그인은 켜진 채로 두지 않는다(부모 스펙 "보안 플러그인은 끈다") — 이미지

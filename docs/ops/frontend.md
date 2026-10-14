@@ -221,7 +221,7 @@ ADR-0017 의 세 위험(공개 페이지 SSR·인증 구역 가드·프록시 �
 프로덕션 이미지에 배포 설정을 물려야만 드러난다. 그래서 두 곳에서 잡는다 —
 `classroom/lib/rendering/runtime-config.test.ts` 가 **구조**(런타임 환경변수에 닿는
 page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)를,
-`classroom-deploy-guard` 잡이 **결과**(구운 이미지의 `/login` HTML 에 로컬호스트가
+`scripts/ci/deploy-guard.sh classroom` 이 **결과**(구운 이미지의 `/login` HTML 에 로컬호스트가
 없는가)를 본다.
 
 **강의실은 공개 앱과 같은 토큰·서체를 쓴다**(#298). `classroom/app/tokens.css` 는
@@ -384,7 +384,7 @@ docker build -f docker/operator.Dockerfile --target runner -t y .
 줄로 옮기고, 그 줄이 없으면 `/kakao/...` 같은 정적 자산이 **배포에서만** 404 가
 된다(2026-09-16, 카카오 로그인 버튼 이미지가 prod 에서 그렇게 깨졌다). dev 는 소스를
 그대로 서빙하고 부팅 가드는 `/healthz` 만 보므로 세 게이트가 전부 못 본다 — 그래서
-`frontend-deploy-guard` 잡이 구운 이미지에서 그 파일과 `/_next/image` 최적화 주소가
+`scripts/ci/deploy-guard.sh frontend` 가 구운 이미지에서 그 파일과 `/_next/image` 최적화 주소가
 둘 다 200 인지 직접 확인한다(#297 의 「구운 이미지에만 드러나는 실패」와 같은 종류).
 `operator/`·`classroom/` 에는 아직 `public/` 이 없다 — 생기면 같은 줄을 그 Dockerfile
 에도 더한다.
