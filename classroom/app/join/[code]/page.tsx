@@ -13,7 +13,6 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import {
-  Badge,
   Card,
   ErrorNote,
   FieldLabel,
@@ -163,113 +162,91 @@ export default function JoinPage() {
 
   return (
     <Shell>
-      <div className="text-[11px] tracking-[0.08em] text-ink/45">초대받은 클래스</div>
-      <h1 data-testid="join-preview-heading" className="mt-1.5 text-[21px] font-semibold leading-snug">
-        {info.class_name}
-      </h1>
-      <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] text-ink/60">
-        {instructorNames.length > 0 ? (
-          <>
+      <div className="flex flex-col gap-2">
+        <div className="text-[11px] tracking-[0.08em] text-ink/45">초대받은 클래스</div>
+        <h1 data-testid="join-preview-heading" className="text-[24px] font-semibold leading-[1.3] tracking-[-0.01em]">
+          {info.class_name}
+        </h1>
+        <p className="flex flex-wrap items-center gap-x-[18px] gap-y-1 text-[13px] text-ink/60">
+          {instructorNames.length > 0 ? (
             <span data-testid="join-preview-instructor">강사 {instructorNames.join(", ")}</span>
-            <span aria-hidden>·</span>
-          </>
-        ) : null}
-        <span data-testid="join-preview-problem-count">
-          문제 <Num>{info.problem_count}</Num>개
-        </span>
-        <span aria-hidden>·</span>
-        <span data-testid="join-preview-participant-count">
-          참여자 <Num>{info.participant_count}</Num>명
-        </span>
-      </p>
-      <p className="mt-3 text-[13px] leading-relaxed text-ink/60">
-        문제를 풀어 코드나 저장소를 내면 곧바로 채점되는 클래스입니다.
-      </p>
-
-      <div className="mt-6">
-        {info.archived ? (
-          // 보관된 클래스의 가입 링크는 "고장"이 아니라 "끝났다"로 읽혀야
-          // 한다(#294 AC) — 죽은 링크(preview.status === "dead")와 달리
-          // 미리보기는 그대로 보여주고, 가입 폼만 접는다.
-          <Note>
-            <span data-testid="join-preview-archived">
-              이 클래스는 보관되어 더 이상 가입할 수 없습니다. 지난 기록은 참여자에게 그대로 남습니다.
-            </span>
-          </Note>
-        ) : me.status === "error" ? (
-          // 로그인하지 않은 사람은 이름 칸을 아예 보지 않는다(#387 AC) — 적은
-          // 이름이 로그인 왕복 사이에 사라지는 일 자체가 없다. 로그인된 채로
-          // 폼을 보다가 세션이 만료되면 제출 시 `bffClient`가 곧장 공개 앱
-          // 로그인으로 보낸다(#462, #385 Further Notes).
-          <div className="flex flex-col gap-3">
-            <Note>
-              <span data-testid="join-needs-login">
-                가입하려면 먼저 로그인해야 합니다. 로그인하면 이 초대 링크로 자동으로 돌아옵니다.
-              </span>
-            </Note>
-            <Link
-              href={`/login?next=${encodeURIComponent(`/join/${code}`)}`}
-              data-testid="join-login-link"
-              className={`${buttonClass("primary")} w-full`}
-            >
-              로그인하러 가기
-            </Link>
-          </div>
-        ) : me.status === "loading" ? (
-          // `me`가 아직 로딩 중이면 이름 칸도 로그인 버튼도 보이지 않는다 —
-          // 둘 중 무엇을 보여줄지 아직 모른다.
-          <p data-testid="join-login-status-loading" className="text-[13.5px] text-ink/45">
-            확인하는 중...
-          </p>
-        ) : (
-          <Card className="p-4">
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="join-display-name">
-                  <FieldLabel>이 클래스에서 불릴 이름</FieldLabel>
-                </label>
-                <input
-                  id="join-display-name"
-                  data-testid="join-display-name-input"
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  required
-                  className={INPUT_CLASS}
-                />
-                <span className="text-[11.5px] leading-relaxed text-ink/45">
-                  강사에게 이 이름으로 보입니다. 계정 이름과 달라도 됩니다 —
-                  회사 수업이나 스터디에서 다른 이름을 쓸 수 있습니다.
-                </span>
-              </div>
-              <button
-                type="submit"
-                data-testid="join-submit"
-                disabled={submit.status === "submitting" || displayName.trim() === ""}
-                className={`${buttonClass("primary")} w-full`}
-              >
-                {submit.status === "submitting" ? "가입하는 중..." : "가입하기"}
-              </button>
-            </form>
-          </Card>
-        )}
+          ) : null}
+          <span data-testid="join-preview-problem-count">
+            <Num className="font-semibold text-ink">{info.problem_count}</Num> 문제
+          </span>
+          <span data-testid="join-preview-participant-count">
+            <Num className="font-semibold text-ink">{info.participant_count}</Num> 참여자
+          </span>
+        </p>
       </div>
 
-      {submit.status === "error" ? (
-        <div className="mt-4">
-          <ErrorNote>
-            <span data-testid="join-error">{submit.message}</span>
-          </ErrorNote>
-        </div>
-      ) : null}
+      {info.archived ? (
+        // 보관된 클래스의 가입 링크는 "고장"이 아니라 "끝났다"로 읽혀야
+        // 한다(#294 AC) — 죽은 링크(preview.status === "dead")와 달리
+        // 미리보기는 그대로 보여주고, 가입 폼만 접는다.
+        <Note>
+          <span data-testid="join-preview-archived">
+            이 클래스는 보관되어 더 이상 가입할 수 없습니다. 지난 기록은 참여자에게 그대로 남습니다.
+          </span>
+        </Note>
+      ) : me.status === "error" ? (
+        // 로그인하지 않은 사람은 이름 칸을 아예 보지 않는다(#387 AC) — 적은
+        // 이름이 로그인 왕복 사이에 사라지는 일 자체가 없다. 로그인된 채로
+        // 폼을 보다가 세션이 만료되면 제출 시 `bffClient`가 곧장 공개 앱
+        // 로그인으로 보낸다(#462, #385 Further Notes).
+        <Card className="p-5">
+          <Link
+            href={`/login?next=${encodeURIComponent(`/join/${code}`)}`}
+            data-testid="join-login-link"
+            className={`${buttonClass("primary")} w-full`}
+          >
+            로그인하고 가입하기
+          </Link>
+        </Card>
+      ) : me.status === "loading" ? (
+        // `me`가 아직 로딩 중이면 이름 칸도 로그인 버튼도 보이지 않는다 —
+        // 둘 중 무엇을 보여줄지 아직 모른다.
+        <p data-testid="join-login-status-loading" className="text-[13.5px] text-ink/45">
+          확인하는 중...
+        </p>
+      ) : (
+        <Card className="p-5">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-3.5">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="join-display-name">
+                <FieldLabel>이 클래스에서 불릴 이름</FieldLabel>
+              </label>
+              <input
+                id="join-display-name"
+                data-testid="join-display-name-input"
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                required
+                className={INPUT_CLASS}
+              />
+            </div>
+            <button
+              type="submit"
+              data-testid="join-submit"
+              disabled={submit.status === "submitting" || displayName.trim() === ""}
+              className={`${buttonClass("primary")} w-full sm:w-auto sm:self-start`}
+            >
+              {submit.status === "submitting" ? "가입하는 중..." : "가입하고 문제 보기"}
+            </button>
+          </form>
+        </Card>
+      )}
 
-      <p className="mt-8 border-t border-rule pt-4 text-[11.5px] leading-relaxed text-ink/45">
-        가입하면 바로 문제 목록이 열립니다 — 본인확인도 결제도 없습니다.
-      </p>
+      {submit.status === "error" ? (
+        <ErrorNote>
+          <span data-testid="join-error">{submit.message}</span>
+        </ErrorNote>
+      ) : null}
     </Shell>
   );
 }
 
 /** 폰 우선 — 좁은 화면에서 한 칸으로 흐르고, 넓어져도 읽기 폭을 넘기지 않는다. */
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto w-full max-w-[440px] px-5 py-8">{children}</main>;
+  return <main className="mx-auto flex w-full max-w-[440px] flex-col gap-7 px-5 py-12">{children}</main>;
 }
