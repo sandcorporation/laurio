@@ -26,14 +26,14 @@ push 하면 옛 빌드를 끊는다.
 | 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` |
 | | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨·이미지를 걷고 빌드 캐시를 30GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/e2e.sh`(세 앱 프로덕션 이미지 스택 + 세 프로젝트) → `scripts/ci/celery-broker.sh` |
 | 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
-| 붉으면 | sub | 둘 이상이면 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
+| 붉으면 | sub | macos 가 「인프라 고장」으로 판정했고 sub 검사가 초록이면 **같은 묶음을 한 번 더**(아래 「Docker VM 정지는 인프라 고장이다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
 - **왜 묶나**(2026-10-03). PR 마다 macos e2e 를 따로 돌리면 이미지 셋 굽기 포함 약 8분이 노드
   실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
   먼저 합쳐진 PR 과 충돌하는 PR 이 초록인 채 남았다(#530 이 #531·#532 와 그렇게 충돌했다).
 - **줄에서 빠지는 법·돌아오는 법.** 새로 push 하면 새 커밋에는 상태가 없어 저절로 빠지고, PR CI
   가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit-pr/job/<브랜치>/build`)
-  줄로 돌아온다 — 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
+  줄로 돌아온다 — 위 판정에 들지 않는 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
   초안을 풀거나 `hold` 를 떼거나 PR 을 다시 열면 다시 빌드하지 않아도 열차가 곧 데려간다(#709) — 셋은
   push 가 아니라 PR CI 가 부르지 않으므로, `Jenkinsfile.train` 의 `GenericTrigger`(플러그인
   generic-webhook-trigger)가 GitHub 웹훅(`pull_request` 이벤트만, `/generic-webhook-trigger/invoke?token=…`,
@@ -69,9 +69,40 @@ push 하면 옛 빌드를 끊는다.
   `acquired … after`)이 찍힌다 — `compose.ci.yaml` 의 db·backend 오버라이드가 켠다(dev·배포는 그대로).
   ③ `test-results/summary.txt` — 프로젝트별 통과·실패와 걸린 초. 여러 시험이 한꺼번에 3초를 넘었으면
   trace 의 정지 시각을 `backend.log`·`db.log` 의 같은 시각과 맞춰 본다(열차 #1840 은 이것이 없어 원인을
-  못 남겼다). 로컬 `scripts/test.sh e2e` 는 같은 trace 를 `frontend/test-results/`(뒤 패스는
+  못 남겼다). ④ `test-results/host/*.log` — macos 호스트의 1초 샘플(#716, `scripts/ci/host-sample.sh`):
+  `memory.log`(memory_pressure 의 남은 %·vm_stat 의 free/compressed/swapins/swapouts·스왑·load),
+  `vm-top.log`(Docker VM 프로세스의 CPU·메모리), `docker-stats.log`(컨테이너마다, 따로 돌아 VM 이 멈추면
+  줄 사이가 빈다). 줄마다 UTC 초 시각이라 스택 로그·trace 와 맞춰 본다. 명령이 없거나 권한이 없으면 그 칸이
+  빌 뿐 e2e 를 붉게 만들지 않는다. ⑤ `test-results/e2e-verdict.json` — 아래 인프라 판정. 로컬 `scripts/test.sh e2e` 는 같은 trace 를 `frontend/test-results/`(뒤 패스는
   `frontend/test-results/exclusive/`)에 두고, 스택 로그는 `CODEMIT_E2E_KEEP=1` 로 남긴 스택에서
   `docker compose -p <워크트리>-e2e … logs --timestamps <서비스>` 로 본다.
+- **Docker VM 정지는 인프라 고장이다 — 묶음을 한 번 더 돈다**(#716). 열차 #1840·#1890 에서 강의실 e2e
+  넷이 한꺼번에 3초를 넘었다. #1890 의 산출물로 가린 모양은 **backend 접근 로그에 3.9초 동안 요청 0건**
+  (앞뒤는 초당 50~146건, 틈 앞뒤 요청은 8~25ms)이고, 시험 넷의 마지막 요청이 서로 다른 두 Next 컨테이너에서
+  같은 시각에 미완료였다 — 코드가 아니라 Docker VM(또는 포트 전달) 전체가 멈췄다. macos 단계가 e2e 뒤에
+  `scripts/ci/e2e_stall.py` 로 판정한다: 실패가 하나 이상이고 전부 「Test timeout」이며, 시험마다 그 마감
+  (trace 의 시작 + 한도)이 backend 접근 로그의 **3초 이상 요청 0건 틈** 안에 있다. celery-broker 와 sub
+  검사까지 초록이면 `train.py fail --verdict` 가 PR 에 `failure` 를 주지 않고 같은 묶음을 다시 부르며
+  콘솔에 `인프라 고장으로 분류: backend 요청 0건 3.9초 틈 @…` 한 줄을 남긴다. **재실행은 한 번뿐이다** —
+  다시 붉으면(`INFRA_RETRY=1` 빌드) 지금 규칙대로 가르거나 `failure`. 「시험 하나 3초·재시도 없음」은
+  **시험 단위의 규칙이라 그대로다**: 시험을 다시 돌려 초록을 사는 것이 아니라 묶음 전체를 처음부터 다시
+  돌고, 다시 도는 조건이 「그 순간 서버가 요청을 하나도 받지 않았다」는 코드 밖의 증거다. 코드 탓의 느림은
+  backend 가 요청을 받는 동안 생기므로 이 모양에 들지 않는다. 판정이 틀릴 수 있는 자리(일꾼 하나인
+  `@exclusive` 패스에서 시험이 코드 탓으로 멈춘 경우)의 대가는 묶음 한 번이다.
+- **macos 의 Docker Desktop 설정**(#716 — 사람이 mac 에서 한 번 읽어 적는다. 정지의 원인 후보가
+  호스트 메모리 압력·VM 일시 정지·포트 전달 계층이라 다음 정지를 읽을 때 같이 본다):
+
+  | 항목 | 값 | 읽은 날 |
+  | --- | --- | --- |
+  | VM 메모리 | (적을 자리 — `playwright.config.ts` 주석은 24GB) | |
+  | VM CPU 수 | (적을 자리) | |
+  | 스왑 | (적을 자리) | |
+  | 가상화 프레임워크(Apple Virtualization·Docker VMM·QEMU) | (적을 자리) | |
+  | 파일 공유(VirtioFS·gRPC FUSE·osxfs) | (적을 자리) | |
+  | 네트워크 모드·포트 전달 | (적을 자리) | |
+  | Resource Saver | (적을 자리) | |
+  | Docker Desktop 버전 · macOS 버전 · 호스트 RAM | (적을 자리) | |
+
 - **sub 의 Jenkins 는 컨테이너라 node·pnpm·uv 가 없다** — 그래서 sub 쪽은 저장소를 담은
   시험 이미지(`docker/ci.Dockerfile`)를 굽고 사이드카 postgres(tmpfs·fsync 끔)와 같은 망에서
   `scripts/ci/sub-checks-inside.sh` 를 돈다. 바인드 마운트는 쓰지 않는다(컨테이너와 호스트의
