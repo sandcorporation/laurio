@@ -10,8 +10,9 @@
 
 **되돌릴 수 없다.** 지운 버전은 복구되지 않는다. 돌고 있는 컨테이너는 영향이 없다 — 배포된
 이미지는 이미 그 호스트에 있고, 잃는 것은 그 커밋으로 pull 해 되돌리는 길뿐이다(최근 N 개는
-남는다). 커밋 하나가 패키지마다 두 버전(staging·prod)을 만든다. 빌드 캐시는 더 적게 남긴다 —
-없으면 빌드가 느려질 뿐 깨지지 않는다.
+남는다). 커밋 하나가 패키지마다 두 버전(amd64·arm64)을 만든다. 빌드 캐시는 지금 이름의 태그
+(`<서비스>-<아키텍처>`)만 늘 남기고 옛 이름은 지운다(`doomed_cache_versions`, #727) — 없으면 빌드가
+느려질 뿐 깨지지 않는다.
 
 **살아 있는 커밋의 버전은 순서와 무관하게 남긴다**(#705). 이미지 잡이 바뀌지 않은 서비스를 굽지 않고
 옛 매니페스트에 커밋 태그만 더하므로(`scripts/ci/images.sh` — 같은 digest 라 같은 버전에 태그가 붙는다),
@@ -30,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -78,9 +80,33 @@ def doomed_versions(listed: list[dict], keep: int, shas: list[str]) -> list[dict
     return [v for v in ordered[keep:] if not protected(v, shas)]
 
 
+# 빌드 캐시의 **지금 이름**(#712 — `scripts/ci/images.sh` 의 `codemit-buildcache:<서비스>-<아키텍처>`).
+LIVE_CACHE_TAG = re.compile(r"^(" + "|".join(i.removeprefix("codemit-") for i in IMAGES) + r")-(amd64|arm64)$")
+
+
+def doomed_cache_versions(listed: list[dict], keep: int) -> list[dict]:
+    """빌드 캐시에서 지울 버전(#727).
+
+    - 지금 이름의 태그(`<서비스>-<아키텍처>`, 여섯 × 둘 = 열둘)를 가진 버전은 순서와 무관하게 남긴다 —
+      태그 하나가 버전 하나라 많아야 열둘이고, 순서로 자르면 드물게 굽는 search·pgbouncer 의 살아 있는
+      캐시가 `keep`(10) 밖으로 밀려 매번 지워졌다(2026-10-15 실측: 살아 있는 태그 12 > 10).
+    - 그 밖의 태그만 가진 버전은 순서와 무관하게 지운다 — 옛 이름 `<앱>-staging`·`<앱>-prod`(#711 전,
+      환경마다 따로 굽던 때)는 다시 쓰이지 않는데, 순서로만 자르면 새 이름 캐시보다 최근에 갱신된 동안은
+      남았다.
+    - 태그 없는 버전(덮어쓴 캐시의 옛 매니페스트)은 예전처럼 최근 `keep` 개만 남긴다.
+    """
+    def tags(v: dict) -> list[str]:
+        return v.get("metadata", {}).get("container", {}).get("tags", [])
+
+    live = [v for v in listed if any(LIVE_CACHE_TAG.match(t) for t in tags(v))]
+    stale = [v for v in listed if tags(v) and v not in live]
+    untagged = [v for v in listed if not tags(v)]
+    return stale + doomed_versions(untagged, keep, [])
+
+
 def prune(package: str, keep: int, dry_run: bool, shas: list[str]) -> int:
     listed = versions(package)
-    doomed = doomed_versions(listed, keep, shas)
+    doomed = doomed_cache_versions(listed, keep) if package == CACHE else doomed_versions(listed, keep, shas)
     print(f"{package}: 전체 {len(listed)} · 남김 {len(listed) - len(doomed)} · 지움 {len(doomed)}")
     failures = 0
     for version in doomed:

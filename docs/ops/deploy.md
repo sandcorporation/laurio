@@ -219,7 +219,8 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   넣고, 앱은 서버에서 그것을 읽어 루트 레이아웃이 브라우저로 넘긴다(`<앱>/lib/public-config.ts`).
   그래서 amd64 이미지 = staging, arm64 이미지 = prod 이고 커밋당 굽는 수가 최대 여섯이다(예전 열둘).
   값을 바꾸면 `.env.<target>` 을 고치고 배포한다 — `deploy.sh plan` 이 떠 있는 앱의 compose 설정 해시를
-  지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 어느 키가 어느 이름으로 가는지는
+  지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 견주지 못하면(`config --hash` 실패 등)
+  그 메시지를 로그에 남기고 다시 띄운다(#727, `backend/tests/test_deploy_plan_app_env.py`). 어느 키가 어느 이름으로 가는지는
   `docker/staging.env.example`·`prod.env.example` 과 compose 두 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
@@ -296,7 +297,10 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 `production` 끝 커밋의 태그를 가진 버전은 몇 번째든 남긴다**(#705 — 셋은 지울 때마다 GitHub 에서 다시 읽고,
 하나라도 못 읽으면 지우지 않고 멈춘다, #709) — 바뀌지 않은 서비스는 옛 버전에 커밋
 태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
-센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **레지스트리
+센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **빌드 캐시는
+이름으로 가른다**(#727): 지금 이름(`<서비스>-<아키텍처>`, 열둘)은 늘 남기고, 옛 이름(`<앱>-staging`·`-prod`)은 늘 지우고,
+캐시 10 은 태그 없는 버전에만 센다 — 순서로만 자르면 살아 있는 태그 열둘이 10 을 넘어 드물게 굽는 search·pgbouncer 의
+캐시가 지워졌다. **레지스트리
 쓰기가 막혀도 이 삭제는 된다.** 토큰은 Jenkins 자격증명 `ghcr-prune-token`(Secret text·Secret file·아이디/비밀번호 어느 종류든) — **classic PAT**
 (`read:packages`·`delete:packages`)여야 한다(fine-grained 토큰은 패키지 API 에 닿지 못한다).
 **되돌릴 수 없지만 돌고 있는 서비스는 영향이 없다**: 배포된 이미지는 이미 그 호스트에 있고,

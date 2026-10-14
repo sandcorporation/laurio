@@ -3,11 +3,22 @@ import * as path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { publicConfig, publicConfigFromEnv, publicConfigScript } from "./public-config";
+import { PUBLIC_CONFIG_NAMES, publicConfig, publicConfigFromEnv, publicConfigScript } from "./public-config";
 
 describe("공개 설정은 실행 때 env 에서 온다 (#711)", () => {
   afterEach(() => {
     delete (globalThis as { window?: unknown }).window;
+  });
+
+  // 이 목록이 곧 「브라우저로 가는 env」다(#727). 비밀은 원래 목록 밖이라 deploy-guard 의 「시크릿 미노출」
+  // 검사는 늘 통과한다 — 비밀을 `CODEMIT_PUBLIC_*` 이름으로 넣는 실수는 여기서만 걸린다. 이름을 더하려면
+  // 그 값이 누구에게 보여도 되는지 확인하고 이 시험을 같이 고친다.
+  it("브라우저로 가는 이름은 이 목록뿐이다", () => {
+    expect([...PUBLIC_CONFIG_NAMES]).toEqual([
+      "CODEMIT_PUBLIC_SENTRY_DSN",
+      "CODEMIT_PUBLIC_SENTRY_ENVIRONMENT",
+      "CODEMIT_PUBLIC_SENTRY_RELEASE",
+    ]);
   });
 
   it("목록에 있는 공개 값만 고르고 비밀·빈 값은 버린다", () => {

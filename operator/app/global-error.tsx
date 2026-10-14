@@ -12,6 +12,13 @@
 // 아니라 소스의 문자열 리터럴 전부를 훑는다(주석 참고). 다만 유틸리티 모양의
 // 낱말만 걸리므로 `#17160f`처럼 hex 로 적은 색은 안 걸린다 — hex 값을 그대로
 // 쓴다.
+//
+// **공개 설정 스크립트(`window.__CODEMIT_PUBLIC__`, #711)는 여기 싣지 못한다**(#727). 이 파일은 Next 가
+// 클라이언트 컴포넌트로만 받아 서버 env 를 읽을 자리가 없고, 루트 레이아웃이 죽었으니 레이아웃의
+// `<head>` 스크립트도 없다. 그래서 **첫 요청에서** 레이아웃이 죽으면 브라우저 Sentry 는 DSN 이 없어
+// 켜지지 않고 아래 `captureException` 은 아무 데도 가지 않는다. 그 오류는 서버에서 났으므로 서버
+// `onRequestError`(`instrumentation.ts`)가 GlitchTip 에 올린다 — 잃는 것은 같은 오류의 브라우저 쪽
+// 사본뿐이다. 이미 떠 있던 화면에서 레이아웃이 터진 경우에는 설정이 남아 있어 그대로 올라간다.
 import { useEffect } from "react";
 import * as Sentry from "@sentry/nextjs";
 

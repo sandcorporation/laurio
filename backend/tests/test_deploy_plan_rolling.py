@@ -29,8 +29,14 @@ COMPOSE = "docker/compose.prod.yaml"
 # 가짜 `docker` 는 `sh` 다 — `plan` 은 서비스마다 `compose ps -q` 를 부르는데(열두 번 남짓),
 # 그때마다 파이썬을 띄우면 그것만으로 CPU 0.4초가 든다(#701). 정의를 렌더해야 하는
 # `config` 만 파이썬(`docker-config`)에 넘긴다.
+# 세 앱의 실행 env 어긋남(#711·#727)은 이 파일의 관심이 아니다 — 떠 있는 컨테이너의 설정 해시와
+# 지금 해시를 같은 값(`same`)으로 답해 「어긋나지 않음」으로 둔다(`test_deploy_plan_app_env.py` 가 본다).
 FAKE_DOCKER = """#!/bin/sh
-[ "$1" = compose ] || exit 0  # docker inspect 등 — 이 시험에서는 볼 것이 없다
+if [ "$1" = inspect ]; then
+  case "$3" in *config-hash*) echo same ;; esac
+  exit 0
+fi
+[ "$1" = compose ] || exit 0
 shift
 compose_file=
 while [ $# -gt 0 ]; do
@@ -43,7 +49,7 @@ while [ $# -gt 0 ]; do
 done
 case "$1" in
   ps) [ "$2" = -q ] && echo "cid-$3" ;;
-  config) shift; exec "$(dirname "$0")/docker-config" "$compose_file" "$@" ;;
+  config) shift; [ "$1" = --hash ] && { echo "$2 same"; exit 0; }; exec "$(dirname "$0")/docker-config" "$compose_file" "$@" ;;
 esac
 exit 0
 """
