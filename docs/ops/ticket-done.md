@@ -52,11 +52,6 @@ scripts/test.sh e2e --project=public e2e/payout.spec.ts -g "상금 그대로가"
 안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 4초가 아니라 7분**이 된다. 슬라이스
 하나에 그 왕복이 여러 번 있으니 티켓 하나가 통째로 테스트 대기에 잠긴다.
 
-**CI 가 돌리는 것 (참고용 수치).**
-
-```bash
-pnpm --dir frontend test            # 전체 (102건이던 시절 약 1.8분 — 지금 132건)
-pnpm --dir frontend test:public     # 공개 앱만 (74건이던 시절 약 1.4분 — 지금 89건)
-pnpm --dir frontend test:operator   # 운영자 앱만 (28건이던 시절 약 25초 — 지금 31건)
-pnpm --dir frontend test:classroom  # 강의실만 (6건이던 시절 CI 첫 실행 1.7초 — 지금 20건)
-```
+**CI 가 돌리는 것.** 열차(`codemit-train`)의 macos 가지가 `scripts/ci/e2e.sh` 로 세 프로젝트를
+`frontend/scripts/e2e-two-pass.sh` 의 두 패스씩 돈다(#702). 로컬에서 같은 것을 한 프로젝트만 돌리면
+`scripts/test.sh e2e --project=<public|operator|classroom>` 이고, 한 번에 400개까지다.
