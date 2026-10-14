@@ -65,13 +65,13 @@ def _set_now(moment) -> None:
     ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": moment})
 
 
-def _setup(client, *, submissions: int = 1):
+def _setup(client, *, submissions: int = 1, syntax_check_enabled: bool = True):
     owner = login(client, uid="owner")
     co = login(client, uid="co")
     participant = login(client, uid="participant")
     class_id = create_class(client, owner["access"])
     add_co_instructor(client, owner["access"], class_id, co["access"], display_name="보조 강사")
-    problem = create_open_problem(client, owner["access"], class_id)
+    problem = create_open_problem(client, owner["access"], class_id, syntax_check_enabled=syntax_check_enabled)
     join_class(client, participant["access"], class_id, instructor_access=owner["access"])
     for n in range(submissions):
         submit_repository(
@@ -104,7 +104,9 @@ def _respond_with_success(monkeypatch, ctx) -> list:
 def test_exhausted_credit_never_turns_into_an_automatic_fail_and_waits_on_the_key(
     client, monkeypatch, start
 ):
-    ctx = _setup(client)
+    # 문법 검사는 끈다 — 스캔마다 시도를 다시 준비하며 파서 프로세스를 띄워, 열 번이면
+    # 그것만으로 CPU 0.2초가 든다(#701). 이 시험이 보는 것은 크레딧이 바닥났을 때다.
+    ctx = _setup(client, syntax_check_enabled=False)
     respond_with_quota_exhausted(monkeypatch)
 
     # 실패 한도(5회)의 두 배를, 다시 확인 간격을 넘겨 가며 돌린다.

@@ -169,9 +169,15 @@ def test_a_server_without_a_model_list_takes_a_typed_model_name(client, db, monk
     assert "Authorization" not in scoring[0]["headers"]
 
 
-def test_the_auth_value_never_appears_raw_in_responses_logs_or_error_events(
-    client, db, monkeypatch, real_adapter, caplog
-):
+@pytest.fixture
+def class_saved_with_a_token(client, db, monkeypatch, real_adapter, caplog):
+    """오류 이벤트·로그를 잡기 시작한 뒤 인증 값을 저장한 클래스.
+
+    잡기(Sentry 초기화)와 저장·문제 만들기는 준비라 픽스처에 둔다 — 시험 본문의 CPU
+    한도 밖이다(#701). 잡기는 저장 전에 켜지고 본문이 끝날 때까지 이어진다 — 이벤트는
+    같은 목록에 쌓이고, 로그는 pytest 가 단계마다 따로 모으므로 준비 단계의 것을
+    `setup_logs` 로 넘겨 본문이 함께 본다."""
+
     token = f"tok-{secrets.token_hex(16)}"
     events: list[dict] = []
 
@@ -188,23 +194,28 @@ def test_the_auth_value_never_appears_raw_in_responses_logs_or_error_events(
             client, monkeypatch, auth_value=token, model_ids=SERVER_MODELS, accepted_auth=token
         )
         problem = create_open_problem(client, instructor["access"], class_id)
-        fake.error = RuntimeError("서버가 이상한 응답을 했다")
-        _submit(client, instructor, class_id, problem)
-        client.post(SCAN_URL, content_type="application/json", **internal_headers())
-        bodies = [
-            json.dumps(saved),
-            get_class(client, instructor["access"], class_id).__repr__(),
-            json.dumps(_models(client, instructor["access"], class_id)),
-        ]
+        yield token, events, fake, instructor, class_id, saved, problem, caplog.text
     finally:
         sentry_sdk.get_global_scope().set_client(None)
+
+
+def test_the_auth_value_never_appears_raw_in_responses_logs_or_error_events(client, caplog, class_saved_with_a_token):
+    token, events, fake, instructor, class_id, saved, problem, setup_logs = class_saved_with_a_token
+    fake.error = RuntimeError("서버가 이상한 응답을 했다")
+    _submit(client, instructor, class_id, problem)
+    client.post(SCAN_URL, content_type="application/json", **internal_headers())
+    bodies = [
+        json.dumps(saved),
+        get_class(client, instructor["access"], class_id).__repr__(),
+        json.dumps(_models(client, instructor["access"], class_id)),
+    ]
 
     assert fake.scoring_requests  # 채점 요청은 실제로 나갔다
     assert events  # 채점 실패가 오류 이벤트로 잡혔다 — 그 이벤트에도 값이 없어야 한다
     stored = Class.objects.get(id=class_id).openai_api_key_encrypted
     assert token not in stored and decrypt(stored) == token
     leaked_in_responses = any(token in body for body in bodies)
-    leaked_in_logs = token in caplog.text
+    leaked_in_logs = token in setup_logs or token in caplog.text
     leaked_in_events = any(token in json.dumps(e, ensure_ascii=False, default=str) for e in events)
     assert not leaked_in_responses
     assert not leaked_in_logs
