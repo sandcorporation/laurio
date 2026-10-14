@@ -177,6 +177,38 @@ class GitObjects(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_a_per_service_dockerignore_moves_the_hash(self) -> None:
+        # BuildKit 은 `docker/<서비스>.Dockerfile.dockerignore` 가 있으면 루트 `.dockerignore` 대신 그것을 쓴다 —
+        # 문맥을 바꾸는 파일이므로 해시에 들어야 한다(#709). 없으면 표에 넣지 않는다(git_objects 가 멈춘다).
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            _git(repo, "init", "-q")
+            for rel in ("backend/app.py", "docker/backend.Dockerfile", ".dockerignore"):
+                (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+                (repo / rel).write_text(rel)
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "one")
+            svc = ic.SERVICES["backend"]
+            own = "docker/backend.Dockerfile.dockerignore"
+
+            def digest() -> str:
+                cwd = pathlib.Path.cwd()
+                try:
+                    os.chdir(repo)
+                    return ic.context_digest(ic.git_objects(ic.context_paths(svc)), svc.target, "linux/amd64", {})
+                finally:
+                    os.chdir(cwd)
+
+            first = digest()
+            (repo / own).write_text("node_modules")
+            _git(repo, "add", "-A")
+            _git(repo, "commit", "-qm", "own ignore")
+            second = digest()
+            self.assertNotEqual(second, first)
+            (repo / own).write_text("node_modules\n.env")
+            _git(repo, "commit", "-qam", "own ignore changed")
+            self.assertNotEqual(digest(), second)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -232,7 +232,7 @@ cmd_preflight() {
     docker_config="${DOCKER_CONFIG:-$HOME/.docker}/config.json"
     if ! grep -q '"ghcr.io"' "$docker_config" 2>/dev/null; then
       echo "이 에이전트에 ghcr.io 로그인이 없다($docker_config) — ghcr 에서 이미지를 받을 수 없다."
-      echo "read:packages 권한의 classic PAT 로 한 번 로그인해 둔다(scripts/ghcr-setup-wizard.sh 5단계):"
+      echo "read:packages 권한의 classic PAT 로 한 번 로그인해 둔다(scripts/ghcr-setup-wizard.sh 3단계):"
       echo "  docker login ghcr.io -u <GitHub 아이디> --password-stdin"
       echo "급하면 DEPLOY_IMAGE_SOURCE=build 로 이 호스트에서 굽는다."
       exit 1

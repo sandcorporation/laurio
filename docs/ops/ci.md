@@ -16,8 +16,9 @@ push 하면 옛 빌드를 끊는다.
 | 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit-train` 을 부른다 |
 
 **묶음마다** — Jenkins `codemit-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
-최신 `main` 위에 차례로 쌓아 **한 번** 시험하고 초록이면 차례로 합친다. PR CI 가 부르고, 10분마다
-스스로도 돈다. 규칙은 `scripts/ci/train.py` 머리말에 있다.
+최신 `main` 위에 차례로 쌓아 **한 번** 시험하고 초록이면 차례로 합친다. PR CI 가 부르고, GitHub 의
+`pull_request` 웹훅이 hold 를 떼거나·초안을 풀거나·다시 연 PR 에서 부르며(아래 「줄에서 빠지는 법·돌아오는
+법」), 30분마다 스스로도 돈다(뒷받침). 규칙은 `scripts/ci/train.py` 머리말에 있다.
 
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
@@ -33,7 +34,14 @@ push 하면 옛 빌드를 끊는다.
 - **줄에서 빠지는 법·돌아오는 법.** 새로 push 하면 새 커밋에는 상태가 없어 저절로 빠지고, PR CI
   가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit-pr/job/<브랜치>/build`)
   줄로 돌아온다 — 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
-  초안을 풀거나 `hold` 를 떼면 다시 빌드하지 않아도 다음 묶음이 데려간다.
+  초안을 풀거나 `hold` 를 떼거나 PR 을 다시 열면 다시 빌드하지 않아도 열차가 곧 데려간다(#709) — 셋은
+  push 가 아니라 PR CI 가 부르지 않으므로, `Jenkinsfile.train` 의 `GenericTrigger`(플러그인
+  generic-webhook-trigger)가 GitHub 웹훅(`pull_request` 이벤트만, `/generic-webhook-trigger/invoke?token=…`,
+  토큰은 자격증명 `codemit-train-webhook-token`)을 받아 `unlabeled`(라벨 `hold`)·`ready_for_review`·`reopened`
+  이고 초안이 아니며 base 가 `main` 인 것에서만 열차를 깨운다. 그 밖의 이벤트(opened·synchronize·labeled·
+  closed)는 PR CI 가 push 로 다룬다. 웹훅이 빠지면 30분 cron 이 데려간다. Jenkins 는 `triggers` 를 **잡이 한
+  번 돈 뒤에** 반영하므로, 이 블록을 바꾸면 그 뒤 첫 빌드부터 듣는다. 기다리기 싫으면 손으로 깨운다:
+  `POST /job/codemit-train/buildWithParameters`.
 
 - **macos 의 Docker VM 디스크는 96GiB 이고, 묶음마다 무엇이 남는지 정해 두어야 찬다.** 맥 호스트
   디스크가 남아도 Docker Desktop 의 `Docker.raw` 가 차면 MinIO 가 `XMinioStorageFull` 로 업로드를
@@ -76,12 +84,15 @@ push 하면 옛 빌드를 끊는다.
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`·`codemit-images-env`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
-- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 와 `laurio` 잡 모두 `scripts/ci/changed.sh`(`laurio` 는 지금의 `staging` 과 견준다). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 와 `laurio` 잡 모두 `scripts/ci/changed.sh`(`laurio` 는 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `laurio` 잡(`Jenkinsfile`)의 앞 단계가 됐다
   (「배포」 절). 이미지는 macos 가 arm64 여섯, sub 가 amd64 여섯을 함께 굽고(`scripts/ci/images.sh`),
-  **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, sub)은
+  **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
+  (`ctx-<해시>`)는 이미지 두 가지와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,
+  sub)가 붙인다(#709) — 그래서 「건너뛴다」는 언제나 앞 빌드가 끝까지 초록으로 본 이미지이고, 가드가 빨갛거나
+  한 가지가 실패한 빌드의 이미지는 다음 빌드가 다시 굽고 가드도 다시 돈다. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, sub)은
   **방금 올린 그 이미지를 ghcr 에서 받아** 배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다 — 이번에
   구운 앱만(건너뛴 앱의 이미지는 이미 한 번 지났다). 방침의 문의 주소는 `codemit-images-env` 의
   `STAGING_SUPPORT_EMAIL` 이 실렸는지로, `.dockerignore` 는 가짜 시크릿을 심은 **빌드 컨텍스트**(`COPY . /ctx`

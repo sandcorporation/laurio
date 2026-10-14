@@ -9,9 +9,15 @@
 #
 # **건너뛰기.** 서비스마다 빌드 문맥 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로의
 # git 해시 + 빌드 인자)를 내고, `…:ctx-<해시>-<arch|env>` 가 레지스트리에 있으면 굽지 않고 커밋 태그를
-# 그 매니페스트에 더하기만 한다(`imagetools create`, 수 초). 없으면 굽고 두 태그로 올린다. 콘솔에
+# 그 매니페스트에 더하기만 한다(`imagetools create`, 수 초). 없으면 굽고 **커밋 태그로만** 올린다. 콘솔에
 # 서비스마다 「굽는다/건너뛴다」 한 줄이 남고, 결과는 `.images-<arch>.result` 에 `서비스=built|skipped`
-# 로 적힌다 — 파이프라인이 그것으로 부팅 가드를 고른다(건너뛴 앱의 이미지는 이미 한 번 가드를 지났다).
+# 로 적힌다 — 파이프라인이 그것으로 부팅 가드를 고른다.
+#
+# **ctx 태그는 여기서 붙이지 않는다**(#709). 구운 서비스는 `.images-<arch>.ctx` 에 `서비스 ctx태그 커밋태그`
+# 한 줄씩 남기고, 파이프라인이 이미지 단계 전체와 부팅 가드가 초록인 뒤에 `scripts/ci/images-ctx.sh` 로
+# 붙인다. 그래서 「ctx 태그가 있다」 = 「그 문맥을 어느 빌드가 끝까지 초록으로 봤다」이고, 건너뛴 앱의
+# 이미지는 이미 한 번 가드를 지났다. 가드에서 떨어졌거나 다른 가지가 실패한 빌드의 이미지는 ctx 가 없어
+# 다음 빌드가 다시 굽고 가드도 다시 돈다(레지스트리 캐시 덕에 대개 몇 분).
 #
 # 환경변수:
 #   GHCR_TOKEN / GHCR_USER     ghcr 쓰기 토큰(Jenkins `ghcr-push-token`). 없으면 노드의 로그인을 쓴다
@@ -48,6 +54,7 @@ keep_storage="${CODEMIT_IMAGES_KEEP_STORAGE:-20gb}"
 services="${CODEMIT_IMAGES_SERVICES:-$(python3 scripts/ci/image_context.py services | tr '\n' ' ')}"
 sha="$(git -c safe.directory="$PWD" rev-parse HEAD)"
 result_file=".images-$arch.result"
+ctx_file=".images-$arch.ctx"
 work="$(mktemp -d "${TMPDIR:-/tmp}/codemit-images.XXXXXX")"
 
 case "$mode" in push|plan) ;; *) echo "CODEMIT_IMAGES_MODE 는 push 나 plan 이다: $mode" >&2; exit 2 ;; esac
@@ -57,6 +64,8 @@ cleanup() {
   ghcr_logout
 }
 trap cleanup EXIT
+# Jenkins 가 중단하면(SIGTERM) EXIT trap 이 돌도록 — 안 그러면 쓰기 토큰이 담긴 임시 DOCKER_CONFIG 가 남는다.
+trap 'exit 130' INT TERM
 
 # ── preflight ───────────────────────────────────────────────────────────────
 # sub 의 Jenkins 는 컨테이너다 — 그 안의 docker CLI 에 buildx 가 없으면 Dockerfile 의
@@ -125,13 +134,13 @@ write_build_args() {
 }
 
 build() {
-  local svc="$1" suffix="$2" ctx_ref="$3" sha_ref="$4" args_file="$5" target line
+  local svc="$1" suffix="$2" sha_ref="$3" args_file="$4" target line
   local cache="$registry/codemit-buildcache:$svc-$suffix"
   local cmd
   target="$(python3 scripts/ci/image_context.py field "$svc" target)"
   cmd=(docker buildx build --builder "$builder" --file "docker/$svc.Dockerfile" --platform "$platform"
        --provenance=false --push
-       --tag "$sha_ref" --tag "$ctx_ref"
+       --tag "$sha_ref"
        --label "org.opencontainers.image.source=https://github.com/sandcorporation/laurio"
        --cache-from "type=registry,ref=$cache"
        --cache-to "type=registry,ref=$cache,mode=max")
@@ -169,7 +178,9 @@ one() {
   fi
   echo "굽는다 $svc ($suffix) — ctx-$hash"
   if [ "$mode" = push ]; then
-    build "$svc" "$suffix" "$ctx_ref" "$sha_ref" "$args_file"
+    build "$svc" "$suffix" "$sha_ref" "$args_file"
+    # ctx 태그는 가드·다른 가지가 초록인 뒤에 — 머리 주석 「ctx 태그는 여기서 붙이지 않는다」.
+    echo "$svc $ctx_ref $sha_ref" > "$work/$svc.ctx"
   fi
   echo "$svc=built" > "$work/$svc.result"
 }
@@ -202,7 +213,9 @@ done
 
 failed=0
 : > "$result_file"
+: > "$ctx_file"
 for svc in $services; do
+  if [ -f "$work/$svc.ctx" ]; then cat "$work/$svc.ctx" >> "$ctx_file"; fi
   if [ -f "$work/$svc.result" ]; then
     cat "$work/$svc.result" >> "$result_file"
   else

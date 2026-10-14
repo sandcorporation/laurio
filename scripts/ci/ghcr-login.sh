@@ -1,7 +1,10 @@
 # shellcheck shell=bash
-# ghcr 로그인 — `images.sh`·`deploy-guard.sh` 가 source 한다(#705). bash 3.2(macos 노드)에서도 돈다.
+# ghcr 로그인 — `images.sh`·`images-ctx.sh`·`deploy-guard.sh` 가 source 한다(#705). bash 3.2(macos 노드)에서도 돈다.
 #
 #   GHCR_TOKEN=… [GHCR_USER=…] ; . scripts/ci/ghcr-login.sh ; ghcr_login ; … ; ghcr_logout
+#
+# 부르는 쪽은 `ghcr_logout` 을 EXIT trap 에 걸고 `trap 'exit 130' INT TERM` 도 건다 — Jenkins 가 중단하면
+# SIGTERM 이 오는데, 그때 EXIT trap 이 돌지 않으면 쓰기 토큰이 담긴 임시 DOCKER_CONFIG 가 노드에 남는다(#709).
 #
 # **노드의 docker 설정을 건드리지 않는다.** 빌드마다 임시 DOCKER_CONFIG 를 만들어 거기에만 토큰을
 # 적는다 — sub 의 컨테이너에는 deploy.sh 가 쓰는 읽기 전용 ghcr 로그인이 이미 있고, macos 는 Docker

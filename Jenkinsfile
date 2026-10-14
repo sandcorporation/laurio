@@ -4,13 +4,16 @@
 // **잡 `laurio` 는 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`, GitHub 웹훅
 // `GitHubPushTrigger`). 2026-10-15 까지는 GitHub Actions(`.github/workflows/images.yaml`)가 이미지
 // 열둘과 부팅 가드 셋을 돌리고 `staging` 을 앞당겼고, 이 잡은 `staging` push 에서 배포만 했다 —
-// 조직의 Actions 분량(Free, 월 2,000분)이 바닥나 `staging` 이 멈춘 뒤 Actions 를 떠났다(ADR-0058).
+// 조직의 Actions 분량(Free, 월 2,000분)이 바닥나 `staging` 이 멈춘 뒤 Actions 를 떠났다(ADR-0061).
 // 이제 커밋 하나가 이 잡의 빌드 하나에 다 보인다.
 //
-//   대상 확인(built-in)     main 인지, 문서만 바뀌었는지(`scripts/ci/changed.sh` — 그러면 여기서 초록)
+//   대상 확인(built-in)     main 인지, 마지막 staging 배포 뒤로 문서만 바뀌었는지(`scripts/ci/changed.sh` —
+//                           그러면 여기서 초록)
 //   이미지                  macos 가 arm64 여섯(prod), sub 가 amd64 여섯(staging) — `scripts/ci/images.sh`.
-//                           바뀌지 않은 서비스는 굽지 않고 커밋 태그만 더한다(빌드 문맥 해시)
+//                           바뀌지 않은 서비스는 굽지 않고 커밋 태그만 더한다(빌드 문맥 해시 = `ctx-` 태그)
 //   부팅 가드(sub)          이번에 구운 앱만 — `scripts/ci/deploy-guard.sh`
+//   문맥 태그(sub)          여기까지 초록이면 이번에 구운 것에 `ctx-` 태그 — `scripts/ci/images-ctx.sh`. 그래서
+//                           「건너뛴다」는 언제나 앞 빌드가 가드까지 초록으로 본 이미지다(#709)
 //   staging 앞당기기         `scripts/ci/fast_forward.py staging <sha>` — 배포 기록이자 브랜치의 뜻은 그대로
 //   staging 배포(built-in)  Preflight → 변경 계획 → 이미지 받기 → 교체 → 확인 → 배포 표식 → 정리 — 각 단계는
 //                           `deploy.sh staging <명령>` 한 줄이다. 무엇을 바꿔 끼우는지는 전부 deploy.sh 주석에
@@ -98,10 +101,15 @@ pipeline {
           env.DEPLOY_SHA = sh(returnStdout: true, script: 'git -c safe.directory="$PWD" rev-parse HEAD').trim()
           currentBuild.description = env.DEPLOY_SHA.take(12) + (params.IMAGES_ONLY ? ' 이미지만' : '')
           // 문서(.md·docs/)만 바뀌었으면 이미지에 드는 것이 없다 — 굽지도 앞당기지도 않고 초록으로 끝난다.
-          // 기준은 지금의 staging: 그 사이 커밋이 여럿이면 그 전부를 본다. 그런 커밋은 다음 코드 커밋과 함께 간다.
+          // 기준은 **마지막으로 staging 배포를 끝낸 커밋**(deploy.sh 의 배포 표식 — 이 노드의 이 워크스페이스에
+          // 「배포 표식」 단계가 남긴다): 그 사이 커밋이 여럿이면 그 전부를 본다. `origin/staging` 으로 두지 않는
+          // 이유: staging 앞당기기는 배포보다 먼저라, 커밋 X 의 배포가 실패한 뒤 문서만 바꾼 커밋이 오면 X 를
+          // 다시 배포하지 않고 초록이 됐다(#709). 표식이 없으면(새 워크스페이스) 전부 돈다.
           def changed = sh(returnStdout: true, script: '''
-            if git -c safe.directory="$PWD" rev-parse --verify -q origin/staging >/dev/null; then
-              bash scripts/ci/changed.sh origin/staging
+            base=""
+            if [ -f .jenkins-staging-deployed ]; then base=$(cat .jenkins-staging-deployed); fi
+            if [ -n "$base" ] && git -c safe.directory="$PWD" cat-file -e "${base}^{commit}" 2>/dev/null; then
+              bash scripts/ci/changed.sh "$base"
             else
               echo TESTS=1
             fi
@@ -134,6 +142,8 @@ pipeline {
                              file(credentialsId: 'codemit-images-env', variable: 'CODEMIT_IMAGES_ENV')]) {
               sh 'bash scripts/ci/images.sh arm64'
             }
+            // 구운 것의 ctx 태그 목록 — 「문맥 태그」 단계가 sub 에서 붙인다.
+            stash name: 'ctx-arm64', includes: '.images-arm64.ctx', allowEmpty: true
           }
         }
         stage('amd64 — staging (sub)') {
@@ -147,13 +157,15 @@ pipeline {
               sh 'bash scripts/ci/images.sh amd64'
             }
             script { readImageResult('amd64') }
+            stash name: 'ctx-amd64', includes: '.images-amd64.ctx', allowEmpty: true
           }
         }
       }
     }
 
     // 방금 올린 staging 이미지를 ghcr 에서 받아, 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다.
-    // 이번에 굽지 않은(건너뛴) 앱은 보지 않는다 — 같은 이미지가 이미 한 번 지났다.
+    // 이번에 굽지 않은(건너뛴) 앱은 보지 않는다 — ctx 태그는 가드까지 초록인 빌드만 붙이므로(「문맥 태그」)
+    // 건너뛴 앱의 이미지는 이미 한 번 지났다.
     stage('부팅 가드') {
       when {
         beforeAgent true
@@ -192,6 +204,28 @@ pipeline {
               sh 'bash scripts/ci/deploy-guard.sh classroom'
             }
           }
+        }
+      }
+    }
+
+    // 이미지 두 가지와 부팅 가드가 초록이면 이번에 구운 이미지에 ctx 태그를 붙인다 — 다음 빌드가 그 문맥을
+    // 「건너뛴다」로 두는 근거다. 앞 단계가 하나라도 빨가면 여기 닿지 않고, ctx 가 없는 그 이미지들은 다음
+    // 빌드가 다시 굽고 가드도 다시 돈다(가드가 빨간 커밋을 그대로 다시 돌려도 같다). 가드가 없는 서비스
+    // (backend·search·pgbouncer, 세 앱의 prod 이미지)도 여기서 함께 — 한 가지가 빨간 채 다른 가지가 ctx 를
+    // 남기면 그 서비스를 다음에 건너뛰어 버린다. 배포 실패는 이미지 탓이 아니므로 앞당기기·배포보다 먼저 붙인다.
+    stage('문맥 태그') {
+      when {
+        beforeAgent true
+        expression { env.DOCS_ONLY != 'true' }
+      }
+      agent { node { label 'laurio-staging'; customWorkspace 'laurio-images' } }
+      options { timeout(time: 10, unit: 'MINUTES') }
+      steps {
+        pin()
+        unstash 'ctx-amd64'
+        unstash 'ctx-arm64'
+        withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+          sh 'bash scripts/ci/images-ctx.sh .images-amd64.ctx .images-arm64.ctx'
         }
       }
     }

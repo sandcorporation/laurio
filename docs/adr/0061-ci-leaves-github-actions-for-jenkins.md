@@ -10,7 +10,9 @@ Status: Accepted (2026-10-15 결정)
 16개가 각각 1분 단위로 올림돼 커밋당 약 20분이었고, 10-14 하루에 50개 넘게 병합돼 바닥났다.
 `staging` 이 e95f314 에 멈췄다.
 
-결정: 결제하지 않고 Actions 를 떠난다. 셀프호스티드 러너도 쓰지 않는다. 그 셋은 `main` push 에서
+결정: 결제하지 않고 Actions 를 떠난다. 셀프호스티드 러너도 쓰지 않는다 — 분량을 쓰지 않는데도 떠나는
+이유는, Jenkins 와 Actions 두 체계(자격증명·러너·로그)를 함께 유지하는 비용과, sub 의 러너 셋이 sub
+코어를 제한 없이 나눠 써 Jenkins 검사와 다퉜던 일(#499)이다. 그 셋은 `main` push 에서
 도는 Jenkins `laurio` 잡(`Jenkinsfile`)의 앞 단계가 된다 — 대상 확인(문서만이면 끝) → 이미지(macos 가
 arm64, sub 가 amd64, `scripts/ci/images.sh`) → 부팅 가드(sub, `scripts/ci/deploy-guard.sh`) → `staging`
 앞당기기(`scripts/ci/fast_forward.py`) → 지금까지의 staging 배포 → (켜져 있으면) `production` 앞당기기.

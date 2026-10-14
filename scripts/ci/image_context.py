@@ -11,7 +11,7 @@
 `scripts/ci/images.sh` 가 서비스마다 이 해시를 내고, 태그 `ctx-<해시>-<arch|env>` 가 ghcr 에 있으면
 굽지 않고 커밋 태그만 그 매니페스트에 더한다. 해시에 드는 것: 아래 표의 경로마다 `git rev-parse
 HEAD:<경로>`(트리·blob 해시 — 그 경로 아래 무엇이 바뀌어도 달라진다), Dockerfile, 루트
-`.dockerignore`(무엇이 문맥에 드는지를 바꾼다), 빌드 대상·플랫폼, 빌드 인자 값(NEXT_PUBLIC 값이
+`.dockerignore`와 (있으면) `docker/<서비스>.Dockerfile.dockerignore`(무엇이 문맥에 드는지를 바꾼다), 빌드 대상·플랫폼, 빌드 인자 값(NEXT_PUBLIC 값이
 바뀌면 다시 굽는다).
 
 **가장 위험한 자리는 표가 Dockerfile 보다 좁은 것이다** — Dockerfile 이 읽는 파일이 표에 없으면 그
@@ -66,7 +66,13 @@ SERVICES: dict[str, Service] = {
 
 
 def context_paths(service: Service) -> list[str]:
-    return sorted({*COMMON_PATHS, service.dockerfile, *service.paths})
+    paths = {*COMMON_PATHS, service.dockerfile, *service.paths}
+    # BuildKit 은 `<Dockerfile>.dockerignore` 가 있으면 루트 `.dockerignore` 대신 그것을 쓴다 — 있을 때만
+    # 표에 넣는다(지금 있는 것은 ci 이미지의 것뿐이다, #709). 지금 디렉터리(저장소 루트)를 기준으로 본다.
+    own_ignore = f"{service.dockerfile}.dockerignore"
+    if os.path.exists(own_ignore):
+        paths.add(own_ignore)
+    return sorted(paths)
 
 
 # ── Dockerfile 읽기 ─────────────────────────────────────────────────────────

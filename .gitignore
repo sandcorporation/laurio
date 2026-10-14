@@ -56,6 +56,8 @@ node_modules/
 .jenkins-prod-plan
 .images-amd64.result
 .images-arm64.result
+.images-amd64.ctx
+.images-arm64.ctx
 
 # Playwright MCP 가 남기는 스냅샷·스크린샷·임시 스크립트. 토큰 같은 것이
 # 섞일 수 있는 자리라 절대 커밋하지 않는다.
