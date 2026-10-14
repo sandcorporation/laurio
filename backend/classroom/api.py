@@ -271,13 +271,9 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
 
 def _active_member_ids(class_obj: Class) -> set[int]:
     """달성률의 분모를 이루는 참여자 id — 강사(지금 강사인 사람 전원)와 내보내진 사람은
-    뺀다(#289, CONTEXT.md 「달성률」·「공동 강사」)."""
+    뺀다(#289, CONTEXT.md 「달성률」·「공동 강사」). 규칙은 `_active_member_ids_by_class` 하나다(#664)."""
 
-    return set(
-        class_obj.members.filter(expelled_at__isnull=True)
-        .exclude(user_id__in=instructor_user_ids(class_obj))
-        .values_list("id", flat=True)
-    )
+    return _active_member_ids_by_class([class_obj.id])[class_obj.id]
 
 
 def _problem_pass_stats(
@@ -316,9 +312,10 @@ def _problem_pass_stats(
 # --- 집계 필드 (#632, 시안 v2) ------------------------------------------------
 #
 # 클래스 목록·문제 목록·격자가 한 번에 낸다 — 질의 수가 클래스·문제·멤버 수에
-# 비례하지 않는다. 「누구를 세는가」는 달성률과 같다(강사 전원·내보낸 사람 제외,
-# `_active_member_ids`). 배치로 셈하느라 그 규칙을 `is_instructor_q`로 한 번 더
-# 쓰므로, 두 숫자가 어긋나지 않는지는 시험(`test_classroom_aggregates`)이 지킨다.
+# 비례하지 않는다. 「누구를 세는가」는 달성률과 같다(강사 전원·내보낸 사람 제외) —
+# 참여자 규칙은 `_active_member_ids_by_class` 하나이고 클래스 하나짜리 `_active_member_ids`
+# 는 그것을 부른다(#664). 시도에 거는 같은 규칙(`_participant_submissions`)이 어긋나지
+# 않는지는 시험(`test_classroom_aggregates`)이 지킨다.
 
 
 def _participant_submissions():
@@ -343,7 +340,7 @@ def _last_submitted_by(key: str, **filters) -> dict[int, object]:
 
 def _active_member_ids_by_class(class_ids: list[int]) -> dict[int, set[int]]:
     """클래스 id → 참여 중인 참여자 id(강사 전원·내보낸 사람 제외) — 질의 하나. 클래스 행의
-    `member_count` 와 가입 미리보기의 `participant_count`(#659)가 이것을 센다."""
+    `member_count` 와 가입 미리보기의 `member_count`(#659·#664)가 이것을 센다."""
 
     active_ids: dict[int, set[int]] = {cid: set() for cid in class_ids}
     for member_id, classroom_id in (
@@ -1179,7 +1176,7 @@ def preview_join(request: HttpRequest, join_code: str):
         instructor_display_name=class_obj.instructor_display_name or None,
         instructor_display_names=co_instructors.instructor_names(class_obj),
         open_problem_count=class_obj.problems.filter(status=Problem.Status.OPEN).count(),
-        participant_count=len(_active_member_ids_by_class([class_obj.id])[class_obj.id]),
+        member_count=len(_active_member_ids(class_obj)),
         archived=class_obj.archived_at is not None,
         already_joined=already_joined,
         suggested_name=suggested_name,
