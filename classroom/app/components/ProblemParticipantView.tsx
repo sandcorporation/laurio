@@ -32,7 +32,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
-import { requiredSummary, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
+import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
@@ -448,7 +448,7 @@ function ChecklistWithVerdict({
           data-testid="my-problem-checklist-footer"
           className="border-t border-rule px-4 py-2.5 text-[11.5px] text-ink/45"
         >
-          {score.model_version} · {formatRelativeTime(score.created_at)}
+          {scoreJudgeLabel(score)} · {formatRelativeTime(score.created_at)}
         </div>
       ) : null}
     </Card>

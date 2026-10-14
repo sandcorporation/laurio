@@ -340,8 +340,8 @@ def test_listing_query_count_does_not_grow_with_classes_problems_or_members(clie
     # 집계 필드는 클래스를 몇 개 더해도 질의를 늘리지 않는다.
     assert count("", owner["access"]) <= before_classes + 4 * 3
     assert count("/joined", learner["access"]) <= before_joined
-    # 문제 행의 기존 직렬화(달성률의 제출 질의·템플릿)는 문제마다 질의 둘이 따로 든다 — 마지막 제출은 더하지 않는다.
-    assert count(f"/{first}/problems", owner["access"]) <= before_problems + 2
+    # 문제 행(달성률·템플릿·제출 표식)은 클래스 단위로 한 번에 센다(#684) — 문제를 더해도 질의가 늘지 않는다.
+    assert count(f"/{first}/problems", owner["access"]) <= before_problems
 
 
 def test_reorder_query_count_does_not_grow_with_problems(client, db):
@@ -370,8 +370,8 @@ def test_reorder_query_count_does_not_grow_with_problems(client, db):
     create_open_problem(client, owner["access"], class_id, title="2주차")
     create_open_problem(client, owner["access"], class_id, title="3주차")
 
-    # 문제 행의 기존 직렬화(달성률의 제출 질의·템플릿)는 문제마다 질의 둘이 따로 든다 — 목록과 같다.
-    assert count() <= before + 2 * 2
+    # 문제 행은 목록과 같이 클래스 단위로 한 번에 센다(#684) — 문제를 더해도 질의가 늘지 않는다.
+    assert count() <= before
 
 
 def test_problem_participant_attempt_count_is_the_submissions_screens_attempts(client, db):
