@@ -171,7 +171,31 @@ class TrainFail(unittest.TestCase):
         self.assertIn("failure", printed)
         self.assertEqual(nxt, "NEXT_MAX=0\nINFRA_RETRY=0\n")
         _, nxt = self.run_fail(4, self.STALL, retried=True)
-        self.assertEqual(nxt, "NEXT_MAX=2\nINFRA_RETRY=0\n")
+        self.assertEqual(nxt, "NEXT_MAX=2\nINFRA_RETRY=1\n")
+
+    def test_a_split_after_the_rerun_is_not_judged_infra_again(self) -> None:
+        # 재실행 몫은 가르기 사슬 전체에 한 번이다(#718) — 가른 묶음은 몫을 물려받아 판정을 읽지 않는다.
+        printed, nxt = self.run_fail(2, self.STALL, retried=True)
+        self.assertNotIn("인프라 고장으로 분류", printed)
+        self.assertEqual(nxt, "NEXT_MAX=1\nINFRA_RETRY=1\n")
+
+    def test_a_chain_that_always_looks_infra_reruns_only_once(self) -> None:
+        # 코드 탓 실패가 매번 인프라로 잘못 분류돼도 8 → 재8 → 4 → 2 → 1, 다섯 번에 끝난다.
+        builds, size, retried = [], 8, False
+        while size:
+            builds.append(size)
+            _, nxt = self.run_fail(size, self.STALL, retried)
+            values = dict(line.split("=") for line in nxt.split())
+            size, retried = int(values["NEXT_MAX"]), values["INFRA_RETRY"] == "1"
+        self.assertEqual(builds, [8, 8, 4, 2, 1])
+        self.assertFalse(retried)
+
+    def test_a_green_bundle_hands_the_budget_back(self) -> None:
+        # 초록 뒤의 다음 묶음은 INFRA_RETRY 를 넘기지 않는다 — 기본값 0 으로 새 사슬이 몫을 다시 받는다.
+        jenkinsfile = (ROOT / "Jenkinsfile.train").read_text()
+        success = jenkinsfile[jenkinsfile.index("    success {"):]
+        self.assertIn("string(name: 'MAX_PRS', value: '0')", success)
+        self.assertNotIn("INFRA_RETRY", success)
 
     def test_a_code_failure_splits_as_before(self) -> None:
         _, nxt = self.run_fail(4, {"infra": False, "reason": "단언 실패"})

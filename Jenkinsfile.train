@@ -13,7 +13,7 @@ pipeline {
 
   parameters {
     string(name: 'MAX_PRS', defaultValue: '0', description: '이번 묶음의 PR 상한 — 0 이면 기본(8). 붉은 묶음을 반으로 가를 때 잡이 스스로 채운다')
-    string(name: 'INFRA_RETRY', defaultValue: '0', description: '1 이면 앞 묶음이 인프라 고장(Docker VM 정지)으로 붉어 같은 묶음을 다시 도는 빌드다 — 잡이 스스로 채운다, 또 붉으면 가른다(#716)')
+    string(name: 'INFRA_RETRY', defaultValue: '0', description: '1 이면 이 가르기 사슬이 인프라 재실행(Docker VM 정지, #716)을 이미 썼다 — 같은 묶음을 다시 도는 빌드와 그 뒤 가른 묶음이 받는다. 잡이 스스로 채우고, 판정을 다시 읽지 않는다(#718)')
   }
 
   triggers {

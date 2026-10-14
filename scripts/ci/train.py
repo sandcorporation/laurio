@@ -30,8 +30,9 @@
 **인프라 고장이면 가르지 않고 같은 묶음을 한 번 더 돈다**(#716). macos 단계가 e2e 뒤에
 `scripts/ci/e2e_stall.py` 로 판정을 남기고(실패가 전부 3초 한도 초과이고, 시험마다 그 마감이
 backend 접근 로그의 3초 이상 요청 0건 틈 안에 있다 — Docker VM 전체의 정지), sub 검사도 초록이면
-`fail --verdict` 가 그것을 읽는다. 재실행은 한 번뿐이다 — 다시 붉으면(`--infra-retried`) 위의 가르기대로
-간다. 그 밖의 인프라 고장은 이 가르기가 PR 하나를 억울하게 잡을 수 있다 — PR CI 를 다시 돌리면 줄로 돌아온다.
+`fail --verdict` 가 그것을 읽는다. 재실행은 **가르기 사슬 전체에 한 번**이다 — 다시 붉으면(`--infra-retried`)
+위의 가르기대로 가고, 가른 묶음도 그 몫을 물려받아 판정을 다시 읽지 않는다(#718). 몫은 초록 뒤나 PR 하나가
+붉어 사슬이 끝난 뒤에야 돌아온다. 그래서 코드 탓 실패가 매번 인프라로 잘못 분류돼도 대가는 빌드 한 번이다. 그 밖의 인프라 고장은 이 가르기가 PR 하나를 억울하게 잡을 수 있다 — PR CI 를 다시 돌리면 줄로 돌아온다.
 
 표준 라이브러리만 쓴다 — Jenkins 컨테이너(sub)에는 gh 가 없다. 토큰은 URL 이 아니라 헤더로
 넘겨 git 의 오류 출력에 실리지 않게 한다.
@@ -304,7 +305,9 @@ def fail(verdict_path: str | None = None, infra_retried: bool = False) -> int:
     data = load_plan()
     entries = data["entries"]
     stall = None if infra_retried else infra_stall(verdict_path)
-    infra_retry = 0
+    # 재실행 몫은 가르기 사슬 전체에 한 번이다(#718) — 가른 묶음은 받은 몫을 그대로 물려받는다.
+    # 몫이 돌아오는 것은 사슬이 끝날 때(PR 하나가 붉음)와 초록 뒤(다음 묶음이 INFRA_RETRY 없이 뜬다)뿐이다.
+    infra_retry = 1 if infra_retried else 0
     if stall and entries:
         print(f"인프라 고장으로 분류: {stall.get('reason', '')}")
         print(f"{build_label()}({len(entries)}개)을 가르지 않고 같은 묶음으로 한 번 더 돈다.")
@@ -322,6 +325,7 @@ def fail(verdict_path: str | None = None, infra_retried: bool = False) -> int:
         for entry in entries:
             status(entry["head"], "failure", f"이 PR 하나만 묶은 {build_label()}이 붉었다 — 빌드 기록을 보세요")
         next_max = 0
+        infra_retry = 0
     with open("train.next", "w") as out:
         out.write(f"NEXT_MAX={next_max}\nINFRA_RETRY={infra_retry}\n")
     return 0
