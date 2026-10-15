@@ -38,8 +38,11 @@ psycopg3 기본 커서(`ClientCursor`)가 인자를 클라이언트에서 합쳐
 **요청 안에서 한도를 따로 걸면 다음 문에서 덮인다.** `SET LOCAL lock_timeout = …` 이나
 `set_config('lock_timeout', …, true)` 를 요청 안에서 내면, 이 래퍼가 그다음 문 앞에 붙이는
 `SET LOCAL` 이 같은 트랜잭션의 값을 이 모듈의 값으로 되돌린다. 지금 그렇게 거는 유일한 자리인
-`classroom/scoring.py` 의 `_short_lock_timeout` 은 상주 grader(`manage.py grader`)에서만 돌아
-요청을 지나지 않는다. 요청 안에서 다른 한도가 필요해지면 문 하나의 SQL 에 직접 싣지 말고
+`classroom/scoring.py` 의 `_short_lock_timeout` 은 배포에서는 상주 grader(`manage.py grader`)
+에서만 돌아 요청을 지나지 않는다. 다만 pytest 에서는 `CLASSROOM_GRADER_INLINE`(시험 동안 켜짐)
+때문에 즉시 채점 요청 안에서 `grade_inline` 으로 돌아, 그 300ms 가 다음 문의 접두(5000ms)에
+덮인다(값을 0 으로 해도 접두가 `lock_timeout = 0` 으로 덮는다) — HTTP 로 그 짧은 한도를
+재는 시험은 지금 쓸 수 없다. 요청 안에서 다른 한도가 필요해지면 문 하나의 SQL 에 직접 싣지 말고
 이 미들웨어에 그 뷰의 예외를 먼저 만든다. 비동기 요청(이벤트 서비스의 실시간 스트림)도 그대로
 통과시킨다 — DB 를 다른 스레드에서 쓰고, 스트림은 원래 길게 열린다. `executemany`, 스트리밍
 응답 본문을 만드는 동안의 문, 서버측 커서(배포는 풀러 때문에 꺼 둔다)에도 걸리지 않는다.
