@@ -293,6 +293,42 @@ class ImagesScript(unittest.TestCase):
         self.assertEqual((self.repo / ".images-arm64.result").read_text(), "backend=skipped\nfrontend=skipped\n")
 
 
+class ImagesE2eTag(unittest.TestCase):
+    """images-e2e.sh — e2e 가 받은 우리 이미지 digest 마다 한 번 `e2e-<트리>-arm64` 를 붙인다(#729)."""
+
+    def test_tags_each_of_our_digests_once_with_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = pathlib.Path(tmp)
+            repo = base / "repo"
+            (repo / "scripts" / "ci").mkdir(parents=True)
+            for name in ("images-e2e.sh", "ghcr-login.sh"):
+                shutil.copy(ROOT / "scripts" / "ci" / name, repo / "scripts" / "ci" / name)
+            (base / "bin").mkdir()
+            (base / "bin" / "docker").write_text(FAKE_DOCKER)
+            (base / "bin" / "docker").chmod(0o755)
+            a, b = "a" * 64, "b" * 64
+            listing = base / "images.txt"
+            listing.write_text(
+                f"backend ghcr.io/sandcorporation/codemit-backend@sha256:{a}\n"
+                f"celery-worker ghcr.io/sandcorporation/codemit-backend@sha256:{a}\n"
+                f"frontend ghcr.io/sandcorporation/codemit-frontend@sha256:{b}\n"
+                f"db postgres@sha256:{a}\n"
+            )
+            calls = base / "calls"
+            env = {**os.environ, "PATH": f"{base / 'bin'}:{os.environ['PATH']}", "FAKE_CALLS": str(calls), "TMPDIR": tmp}
+            env.pop("GHCR_TOKEN", None)
+            done = subprocess.run(["bash", "scripts/ci/images-e2e.sh", str(listing), "t" * 40], cwd=repo, env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.assertEqual(done.returncode, 0, done.stdout)
+            created = sorted(line for line in calls.read_text().splitlines() if "imagetools create --prefer" in line)
+            self.assertEqual(created, [
+                f"buildx imagetools create --prefer-index=false --tag ghcr.io/sandcorporation/codemit-backend:e2e-{'t' * 40}-arm64 "
+                f"ghcr.io/sandcorporation/codemit-backend@sha256:{a}",
+                f"buildx imagetools create --prefer-index=false --tag ghcr.io/sandcorporation/codemit-frontend:e2e-{'t' * 40}-arm64 "
+                f"ghcr.io/sandcorporation/codemit-frontend@sha256:{b}",
+            ])
+
+
 class TrainFail(unittest.TestCase):
     """`train.py fail` — 인프라 판정이면 같은 묶음을 한 번 더, 두 번째는 지금 규칙대로."""
 

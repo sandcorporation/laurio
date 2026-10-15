@@ -207,7 +207,8 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   수 초). **구운 이미지는 커밋 태그로만 올리고, `ctx-` 태그는 이미지 두 가지와 부팅 가드가 모두 초록인 뒤에**
   「문맥 태그」 단계(`scripts/ci/images-ctx.sh`)가 붙인다(#709) — 가드에서 떨어졌거나 다른 가지가 실패한
   빌드의 이미지는 ctx 가 없어 다음 빌드가 다시 굽고 가드도 다시 돈다(같은 커밋을 다시 돌려도). 콘솔에 서비스마다 「굽는다/건너뛴다」 한 줄이 남는다. `deploy.sh plan` 도
-  **같은 해시로** 바꿔 끼울 서비스를 고른다(#712, `image_context.py changed <직전 배포> HEAD`) — 직전 배포와
+  **같은 해시로** 바꿔 끼울 서비스를 고른다(#712, `image_context.py changed <직전 배포> HEAD` — 양쪽 커밋의 표에서 빌드 대상·`HASH_VERSION` 까지 읽어 해시 전체를
+  견준다, #729) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
   아무것도 다시 띄우지 않는다(예전의 경로 패턴은 codemit-deploy-staging #474 에서 `frontend/playwright.config.ts` 주석 하나에
   frontend 를 다시 띄웠다). 해시를 내지 못하면(호스트에 python3 가 없다 등) 경로 패턴으로 떨어진다. compose
@@ -254,7 +255,8 @@ CI 가 `buildWithParameters` 로 `DEPLOY_SHA` 를 채워 불렀다(그때 브랜
 
 **배포는 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
 Jenkinsfile 이 「(staging 은 대상 확인 → 이미지 → 부팅 가드 → staging 앞당기기 →) Preflight → 변경 계획 → 이미지 받기(서비스별 병렬 pull) →
-교체 → 확인 → 배포 표식 → 정리」를
+교체 → 확인(prod 는 끝에 「e2e 대조」 — `deploy.sh prod e2e-digest`, 떠 있는 이미지가 열차의 e2e 가 본
+그것인지 콘솔에 적기만 한다, #729) → 배포 표식 → 정리」를
 각각 한 단계로 보여주고, 단계 본문은 `sh ./deploy.sh <대상> <명령>` 한 줄이다 — `plan` 이
 `.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 파이프라인이 읽어 이미지 단계의 `when` 을
 정한다. 논리는 여전히 `deploy.sh` 에만 있고, 사람이 손으로 돌릴 때는 `deploy.sh <대상>`

@@ -130,6 +130,14 @@ pipeline {
           when { expression { env.BUILD_SEARCH == 'true' || env.BUILD_BACKEND == 'true' } }
           steps { sh "sh ./deploy.sh ${deployTarget} reindex" }
         }
+        // 떠 있는 앱·backend 가 열차의 e2e 가 본 그 이미지인지(#729) — 관측만, 다르다고 붉히지 않는다.
+        stage('e2e 대조') {
+          steps {
+            catchError(buildResult: null, stageResult: null, message: 'e2e 대조를 하지 못했다 — 배포와 무관하다') {
+              sh "sh ./deploy.sh ${deployTarget} e2e-digest"
+            }
+          }
+        }
       }
     }
 

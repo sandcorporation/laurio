@@ -24,7 +24,11 @@ push 하면 옛 빌드를 끊는다.
 `images.sh` 로 굽고(바뀌지 않은 문맥은 ctx 로 건너뛴다) 커밋 태그 `<묶음 머리 sha>-<arch>` 로 올린다. macos 의
 e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈다(`docker/compose.ci-images.yaml`,
 `CODEMIT_IMAGE_TAG`) — 그래서 **e2e 가 본 digest 가 prod 에 가는 digest 다**(`test-results/images.txt` 에
-남는다). ctx 태그는 시험 두 가지가 초록인 묶음에만, 「병합」 단계가 **병합 전에** 붙인다(#709 의 「초록 뒤에만」,
+남는다). 「병합」은 병합 전에 그 digest 마다 `e2e-<묶음 트리>-arm64` 태그를 붙이고(`scripts/ci/images-e2e.sh`,
+#729), prod 배포의 「e2e 대조」 단계(`deploy.sh prod e2e-digest`)가 그 커밋의 트리로 태그를 받아 떠 있는
+backend·세 앱의 이미지 ID 와 견줘 콘솔에 `e2e 대조: <서비스> — 같다|다르다!|…` 를 적는다(관측만 — 붉히지 않는다).
+열차 산출물을 Jenkins API 로 읽지 않고 레지스트리를 쓰는 이유: oracle 에이전트에는 Jenkins 자격증명이 없고
+(copyartifact 플러그인도 없다) ghcr 로그인은 이미 있으며, 쌓은 sha·main sha 는 달라도 **트리**는 같다. ctx 태그는 시험 두 가지가 초록인 묶음에만, 「병합」 단계가 **병합 전에** 붙인다(#709 의 「초록 뒤에만」,
 #729) — 붉은 묶음의 이미지는 커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시
 굽는다. 병합 뒤에 붙이던 때(#712)는 병합 push 가 깨운 `codemit-deploy-staging` 이 ctx 보다 먼저 떠 같은 트리를
 다시 굽기도 했다. ctx 는 내용 기준의 사실이라 병합이 거절돼도 무해하다(main 의 트리가 다르면 해시가 다르다).
