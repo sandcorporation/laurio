@@ -59,7 +59,8 @@ describe("buildForwardHeaders — 방문자 주소", () => {
 // 영원히 살아 있다 — prod 에서 이벤트 서비스가 그렇게 DB 연결 100개를 유휴로
 // 쥐어 Postgres 가 `too many clients already`로 모든 요청을 거절했다.
 //
-// **그러나 응답이 시작되기 전에는 끊지 않는다**(#723). Node 의 fetch(undici)는
+// **그러나 끊김은 SSE(`text/event-stream`) 응답에만 넘긴다**(#723) — 응답이 시작되기 전에도, SSE 가
+// 아닌 응답 도중에도 끊지 않는다. Node 의 fetch(undici)는
 // 연결을 맺는 도중에 끊기면 요청을 한 줄도 쓰지 않은 소켓을 4초(keep-alive
 // 기본값) 동안 쥐고 있다. backend 의 gunicorn sync 워커 넷은 그런 연결을 받으면
 // 요청 머리를 기다리며 그대로 멈춘다 — 넷이 모이면 backend 전체가 4.0초 동안

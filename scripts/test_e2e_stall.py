@@ -391,6 +391,26 @@ class TrainFail(unittest.TestCase):
         self.assertEqual(builds, [8, 8, 4, 2, 1])
         self.assertFalse(retried)
 
+    def test_a_green_half_opens_a_new_chain(self) -> None:
+        # 범인이 맨 뒤이고 매번 인프라로 잘못 분류되면, 초록 앞 절반이 합쳐질 때마다 남은 뒤 절반이 기본값
+        # 빌드(MAX_PRS=0, INFRA_RETRY 없음 — 아래 시험)로 새 사슬을 열어 몫을 다시 받는다(#721).
+        queue, culprit = list(range(8)), 7
+        builds, size, retried, rerun = [], 0, False, False
+        while True:
+            bundle = queue[: size or train.DEFAULT_MAX]
+            builds.append(("재" if rerun else "") + str(len(bundle)))
+            if culprit not in bundle:  # 초록 — 합쳐지고 다음은 기본값 빌드다
+                queue, size, retried, rerun = queue[len(bundle):], 0, False, False
+                continue
+            printed, nxt = self.run_fail(len(bundle), self.STALL, retried)
+            values = dict(line.split("=") for line in nxt.split())
+            size, retried = int(values["NEXT_MAX"]), values["INFRA_RETRY"] == "1"
+            rerun = "인프라 고장으로 분류" in printed
+            if size == 0:
+                break
+        self.assertEqual(builds, ["8", "재8", "4", "4", "재4", "2", "2", "재2", "1", "1", "재1"])
+        self.assertEqual(sum(b.startswith("재") for b in builds), 4)  # log2(8) + 1
+
     def test_a_green_bundle_hands_the_budget_back(self) -> None:
         # 초록 뒤의 다음 묶음은 INFRA_RETRY 를 넘기지 않는다 — 기본값 0 으로 새 사슬이 몫을 다시 받는다.
         jenkinsfile = (ROOT / "Jenkinsfile.train").read_text()
