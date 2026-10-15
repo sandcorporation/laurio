@@ -25,12 +25,20 @@ export function probeBackendHealth(url: string, timeoutMs: number): Promise<Back
       resolve(result);
     };
     const send = url.startsWith("https:") ? httpsRequest : httpRequest;
-    const req = send(url, { method: "GET", agent: false, headers: { connection: "close" } }, (res) => {
-      const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300;
-      res.resume();
-      res.on("end", () => finish(ok ? "ok" : "unreachable"));
-      res.on("error", () => finish("unreachable"));
-    });
+    let req: ReturnType<typeof send>;
+    try {
+      req = send(url, { method: "GET", agent: false, headers: { connection: "close" } }, (res) => {
+        const ok = res.statusCode !== undefined && res.statusCode >= 200 && res.statusCode < 300;
+        res.resume();
+        res.on("end", () => finish(ok ? "ok" : "unreachable"));
+        res.on("error", () => finish("unreachable"));
+      });
+    } catch {
+      // 잘못된 주소(CODEMIT_API_BASE_URL 오타 등)면 http.request 가 동기로 던진다 — 500 이 아니라
+      // 닿지 않은 것으로 답한다(#745).
+      resolve("unreachable");
+      return;
+    }
     const timer = setTimeout(() => finish("unreachable"), timeoutMs);
     req.on("error", () => finish("unreachable"));
     req.end();
