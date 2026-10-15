@@ -3,10 +3,12 @@
 #
 #   scripts/ci/host-sample.sh test-results/host &   # 죽일 때까지 돈다
 #
-# 왜: 열차 #1890 의 강의실 e2e 넷이 3초 한도에 걸린 4초 동안 backend 는 요청을 하나도 받지 않았고
-# 서로 다른 두 Next 컨테이너도 응답하지 않았다 — Docker VM 전체가 멈췄다. 컨테이너 로그로는 더
-# 가릴 수 없어, 그 몇 초에 호스트(mac)가 무엇을 했는지를 남긴다. 줄마다 UTC 초 시각을 붙여
-# `test-results/stack/*.log` 의 Docker 타임스탬프·trace 의 wallTime 과 맞춰 본다.
+# 왜: 열차가 「backend 요청 0건 3초 틈」을 인프라 고장으로 분류해 같은 묶음을 다시 돈다(#716,
+# `e2e_stall.py`). 처음에는 그 틈을 Docker VM 전체의 정지로 읽었지만, trace 로 본 틈(#1902·#1906·#1907)은
+# backend 워커가 모두 붙잡힌 코드 탓이었다(#723) — 판정은 둘을 가르지 못한다. 이 샘플은 다음에 틈이
+# 생기면 그 몇 초에 호스트(mac)·VM 이 무엇을 했는지로 VM·호스트 쪽을 배제하거나 짚는 증거다(#721).
+# 줄마다 UTC 초 시각을 붙여 `test-results/stack/*.log` 의 Docker 타임스탬프·trace 의 wallTime 과 맞춰 본다.
+# 간격은 memory·docker-stats 가 1초(docker-stats 는 한 번에 1~2초), vm-top 은 1.5~2초다(아래).
 #
 #   memory.log        memory_pressure -Q(남은 메모리 %) · vm_stat 의 free/compressed/swapins/swapouts ·
 #                     vm.swapusage · vm.loadavg

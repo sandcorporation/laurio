@@ -30,16 +30,16 @@ export async function extractForwardBody(request: NextRequest): Promise<ArrayBuf
  * 그 요청이 쥔 DB 연결도 영원히 묶인다 — prod 에서 이벤트 서비스가 유휴 연결 100개를 쥐어
  * Postgres 가 `too many clients already`로 **모든** 요청을 거절했다.
  *
- * **단, 응답 머리가 온 뒤에만 끊는다**(#723). Node 의 fetch(undici)는 응답을 기다리는
+ * **단, 끝나지 않는 응답(`text/event-stream`)에만 끊김을 넘긴다**(#723). Node 의 fetch(undici)는 응답을 기다리는
  * 요청을 끊으면 그 자리에 새 연결을 하나 더 맺어 두고, 요청을 한 줄도 쓰지 않은 그 연결을
  * keep-alive 기본값 4초 동안 쥐고 있다. backend 의 gunicorn sync 워커는 연결을 받으면
  * 요청 머리가 올 때까지 그 연결 하나에 묶이므로, 그런 연결이 워커 수(넷)만큼 모이면
  * backend 전체가 4.0초 동안 **아무에게도** 답하지 않는다 — 열차 macos 강의실 e2e 에서
  * 시험이 끝나 브라우저 맥락이 닫힐 때마다 그렇게 멈췄다(#1902·#1906·#1907, 로컬
  * 패킷 캡처: 강의실 컨테이너가 맺은 연결 다섯이 요청 없이 정확히 4.00초 뒤 FIN).
- * 그래서 끊김은 응답 머리를 받은 뒤, 그것도 끝나지 않는 응답(`text/event-stream`)에만
- * 넘긴다 — SSE 는 머리를 곧바로 보내므로 끊기는 시점이 그대로이고, 보통 응답은 수십 ms 안에
- * 끝까지 받는다.
+ * 응답 도중에 끊어도 Node 22 의 undici 는 같은 빈 연결을 하나 더 맺는다. 그래서 응답 머리가 오기
+ * 전에는 끊지 않고, 머리가 온 뒤에도 SSE 가 아니면 끝까지 받는다 — SSE 는 머리를 곧바로 보내므로
+ * 끊기는 시점이 그대로이고, 보통 응답은 수십 ms 안에 끝까지 받는다.
  */
 export async function forwardRequest(
   method: string,

@@ -58,10 +58,13 @@ rm -rf test-results && mkdir -p test-results
 summary=test-results/summary.txt
 : >"$summary"
 # 호스트(mac)의 1초 샘플 — 메모리 압력·스왑·load·Docker VM 프로세스·docker stats 를
-# `test-results/host/*.log` 에(#716). 열차 #1890 의 4초 정지는 Docker VM 전체였고 컨테이너 로그로는 더
-# 가릴 수 없었다. macOS 가 아니면 곧바로 끝나고, 명령이 없어도 e2e 를 붉게 만들지 않는다.
-bash scripts/ci/host-sample.sh test-results/host </dev/null >/dev/null 2>&1 &
-sampler=$!
+# `test-results/host/*.log` 에(#716). 다음에 backend 요청 0건 틈이 생기면 VM·호스트 쪽을 배제하거나 짚는
+# 증거다(#721). macOS 에서만 띄운다 — 다른 곳에서는 샘플러가 곧바로 끝나, 몇 분 뒤 cleanup 이 다른
+# 프로세스가 물려받았을지 모르는 옛 pid 로 신호를 보내게 된다. 명령이 없어도 e2e 를 붉게 만들지 않는다.
+if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+  bash scripts/ci/host-sample.sh test-results/host </dev/null >/dev/null 2>&1 &
+  sampler=$!
+fi
 
 read_port() { "${C[@]}" port "$1" "$2" | head -n 1 | sed 's/.*://'; }
 
