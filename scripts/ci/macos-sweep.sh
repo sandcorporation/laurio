@@ -12,7 +12,7 @@
 # #708(2026-10-15)이 잡 이름을 codemit-pr → codemit-ci-pr, codemit-train → codemit-ci-train 으로 바꿨다.
 # **옛 이름 jenkins-codemit-(pr|train)- 도 같이 걷는다** — rename 직전에 중단된 빌드가 남긴 것이다.
 # 지울 때: rename 뒤 macos 에서 `docker ps -a`·`docker volume ls`·`docker image ls` 에 옛 이름이 하나도
-# 없음을 본 뒤(늦어도 2026-11-15) 아래 PAT 에서 `|pr|train` 을 빼고 `ci-(pr|train)` 만 남긴다.
+# 없음을 본 뒤 아래 PAT 에서 `|pr|train` 을 빼고 `ci-(pr|train)` 만 남긴다 — 2026-11-15 이후 #735 로 지운다.
 set -u
 export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin"
 PAT='^jenkins-codemit-(ci-pr|ci-train|pr|train)-'

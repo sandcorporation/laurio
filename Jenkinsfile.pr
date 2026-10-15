@@ -87,8 +87,8 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/train.py enqueue "$(git rev-parse HEAD)"'
         }
-        // 묶음 잡을 깨운다. 이미 돌고 있으면 줄에 하나로 합쳐지고, 없더라도 10분 cron 이 데려간다.
-        catchError(buildResult: null, stageResult: null, message: '묶음 잡을 부르지 못했다 — 10분 안에 스스로 돈다') {
+        // 묶음 잡을 깨운다. 이미 돌고 있으면 줄에 하나로 합쳐지고, 없더라도 30분 cron(`H/30`)이 데려간다.
+        catchError(buildResult: null, stageResult: null, message: '묶음 잡을 부르지 못했다 — 30분 안에 스스로 돈다') {
           build job: '/codemit-ci-train', wait: false
         }
       }
