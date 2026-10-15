@@ -252,7 +252,8 @@ _CHECKOUT_TOKEN = hashlib.sha256(str(BASE_DIR.resolve()).encode("utf-8")).hexdig
 
 
 def _default_test_db_name() -> str:
-    """이 체크아웃 전용 테스트 DB 이름. pytest-django 가 워커별로 `_gwN` 을 덧붙인다."""
+    """이 체크아웃 전용 테스트 DB 이름. pytest-django 가 워커별로 `_gwN` 을 덧붙이고, 워커들이
+    복제해 쓰는 템플릿은 `_tpl` 이다(`tests/db_template.py`, #755)."""
 
     return f"test_codemit_{_CHECKOUT_TOKEN}"
 

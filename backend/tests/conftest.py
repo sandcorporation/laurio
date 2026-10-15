@@ -19,6 +19,7 @@ import time
 
 import pytest
 from django.core.cache import caches
+from django.db import connections
 
 from contests.search import FakeContestSearchAdapter
 from contests.view_flush_store import InMemoryChangedContestsStore
@@ -125,6 +126,90 @@ def pytest_runtest_makereport(item, call):
                 " (CODEMIT_TEST_CPU_LIMIT). 원인을 찾아 줄인다; 한도를 늘리지 않는다."
             )
     return report
+
+
+# --- 시험 DB 는 템플릿에서 복제한다 (#755) ------------------------------------------
+#
+# pytest-django 의 `django_db_setup` 을 덮는다. xdist 컨트롤러가 워커를 띄우는 동안 템플릿 DB 를
+# 만들어 마이그레이션하고, 워커는 복제한다 — 왜·어떻게는 `tests/db_template.py` 의 docstring.
+# 워커당 첫 시험의 setup 에 복제 비용(1초 미만)만 남고 마이그레이션(약 7.5초)은 어느 시험에도
+# 붙지 않는다(`-n 0` 은 픽스처가 처음 쓰일 때 만들어 그 시험 하나에 붙는다).
+# `--reuse-db`·`--no-migrations` 는 이 길에 없다 — CI 는 매번 새 DB 컨테이너이고, 마이그레이션
+# 자체를 시험하는 것(#453, 배포 가드)과 syncdb 는 어긋난다.
+
+
+def pytest_configure_node(node):
+    # xdist 컨트롤러가 워커를 띄울 때 — 세션 표를 넘겨 모두가 같은 템플릿을 알아본다.
+    from tests.db_template import WORKERINPUT_KEY, session_token
+
+    node.workerinput[WORKERINPUT_KEY] = session_token(node.config)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionstart(session):
+    # xdist 컨트롤러에서, 워커를 띄운 뒤(trylast — dsession 다음)·시험을 나눠 주기 전에 템플릿을
+    # 만든다. 워커는 그동안 수집한다. 워커와 -n 0 은 픽스처가 처음 쓰일 때 만든다.
+    config = session.config
+    if (
+        hasattr(config, "workerinput")
+        or not config.pluginmanager.hasplugin("dsession")
+        or config.option.collectonly
+    ):
+        return
+    from pytest_django.plugin import blocking_manager_key
+
+    from tests.db_template import prebuild_template, session_token
+
+    with config.stash[blocking_manager_key].unblock():
+        prebuild_template(connections, token=session_token(config), verbosity=config.option.verbose)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session):
+    # 컨트롤러(또는 -n 0 의 단일 프로세스)에서 워커가 전부 내려간 뒤(trylast — xdist 의 노드
+    # 정리 다음) 템플릿을 지운다. 워커 DB 는 pytest-django 의 보통 teardown 이 지운다.
+    if hasattr(session.config, "workerinput"):
+        return
+    from django.conf import settings
+
+    from tests.db_template import drop_template, template_db_name
+
+    default = settings.DATABASES["default"]
+    drop_template(default, template_db_name(default["TEST"]["NAME"], None))
+
+
+@pytest.fixture(scope="session")
+def django_db_setup(  # noqa: PLR0917 - pytest-django 의 서명 그대로(의존 순서가 설정 접미사를 먼저 붙인다)
+    request,
+    django_test_environment,
+    django_db_blocker,
+    django_db_use_migrations,
+    django_db_keepdb,
+    django_db_createdb,
+    django_db_modify_db_settings,
+):
+    from django.test.utils import teardown_databases
+
+    from tests.db_template import session_token, setup_test_databases
+
+    if django_db_keepdb or not django_db_use_migrations:
+        raise pytest.UsageError(
+            "--reuse-db·--no-migrations 는 쓰지 않는다 — 시험 DB 는 템플릿 복제로 선다(tests/db_template.py)."
+        )
+    verbosity = request.config.option.verbose
+    with django_db_blocker.unblock():
+        old_config = setup_test_databases(
+            connections,
+            token=session_token(request.config),
+            worker_id=getattr(request.config, "workerinput", {}).get("workerid"),
+            verbosity=verbosity,
+        )
+    yield
+    with django_db_blocker.unblock():
+        try:
+            teardown_databases(old_config, verbosity=verbosity)
+        except Exception as exc:  # noqa: BLE001 - pytest-django 와 같다: 정리 실패는 경고다
+            request.node.warn(pytest.PytestWarning(f"시험 DB 를 지우지 못했다: {exc!r}"))
 
 
 @pytest.fixture(scope="session", autouse=True)
