@@ -2,6 +2,7 @@
 """ghcr 에 쌓인 옛 이미지 버전을 지운다 — 패키지마다 최근 N 개만 남긴다(2026-10-02, Jenkinsfile.ghcr-prune).
 
     GH_TOKEN=… scripts/ci/ghcr_prune.py [--keep-images 12] [--keep-cache 10] [--dry-run]
+                                        [--main-shas FILE] [--unmerged-grace-hours 6]
 
 **왜 있는가**(2026-09-20). 이미지 잡이 커밋마다 여섯 이미지를 올리는데 옛 버전을 지우는 것이
 아무 데도 없어, 비공개 패키지 용량이 차서 **ghcr 쓰기가 403** 으로 막혔고 배포가 이틀 멈췄다(실측:
@@ -22,6 +23,15 @@
 센다. `ctx-<해시>-…` 태그만 남은 버전은 다른 버전과 똑같이 순서대로 지운다 — 지워지면 그 문맥을 다음에
 한 번 다시 구울 뿐이다.
 
+**병합되지 않은 묶음의 이미지는 순서보다 먼저 지운다**(#729). 열차가 묶음마다 쌓은 커밋 sha 로 이미지를
+올리는데(`<쌓은 sha>-<arch>` — 붉은 묶음·반으로 가른 재실행 포함), 그 sha 는 main 에 오지 않는다(쌓기는
+cherry-pick, 병합은 rebase 라 main 의 sha 가 다르다). 순서로만 자르면 이것들이 `--keep-images` 를 채워
+되돌리기 창(main 커밋의 이미지)이 줄었다. 그래서 `--main-shas`(main 의 커밋 목록 파일)를 주면, **커밋 태그가
+전부 main 에 없고 `ctx-` 태그도 없는** 버전을 먼저 지우고 나머지로 `keep` 을 센다. 초록 묶음의 이미지는 병합
+전에 ctx 가 붙고 `codemit-deploy-staging` 이 main 커밋 태그를 같은 버전에 더하므로 여기 들지 않는다. 지금 도는
+열차의 이미지를 지우지 않도록 `--unmerged-grace-hours`(기본 6시간 — 열차 한도 45분의 여러 배) 안에 갱신된
+버전은 남긴다. 목록이 비었거나 `MIN_MAIN_SHAS` 보다 짧으면(얕은 체크아웃) 이 규칙을 쓰지 않는다.
+
 토큰은 classic PAT(`read:packages`·`delete:packages`)여야 한다 — fine-grained 토큰은 패키지 API 에
 닿지 못한다. 예전에는 Actions 의 GITHUB_TOKEN 으로 했다(.github/workflows/ghcr-prune.yaml).
 """
@@ -29,6 +39,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -74,10 +85,41 @@ def protected(version: dict, shas: list[str]) -> bool:
     return any(tag.startswith(sha) for tag in tags for sha in shas)
 
 
-def doomed_versions(listed: list[dict], keep: int, shas: list[str]) -> list[dict]:
-    """지울 버전 — 최근(태그가 붙은 때 기준) `keep` 개와 살아 있는 커밋의 태그를 가진 것을 뺀 나머지."""
-    ordered = sorted(listed, key=lambda v: max(v["created_at"], v.get("updated_at") or ""), reverse=True)
-    return [v for v in ordered[keep:] if not protected(v, shas)]
+COMMIT_TAG = re.compile(r"^([0-9a-f]{40})-")
+# main 목록이 이보다 짧으면 얕은 체크아웃으로 보고 쓰지 않는다 — main 은 이미 수천 커밋이다.
+MIN_MAIN_SHAS = 500
+
+
+def touched(version: dict) -> str:
+    return max(version["created_at"], version.get("updated_at") or "")
+
+
+def unmerged(version: dict, main_shas: set[str]) -> bool:
+    """커밋 태그가 하나 이상이고 전부 main 에 없으며 `ctx-` 태그도 없다 — 병합되지 않은 묶음의 이미지(#729)."""
+    tags = version.get("metadata", {}).get("container", {}).get("tags", [])
+    if not tags:
+        return False
+    for tag in tags:
+        match = COMMIT_TAG.match(tag)
+        if not match or match.group(1) in main_shas:
+            return False
+    return True
+
+
+def doomed_versions(
+    listed: list[dict], keep: int, shas: list[str], main_shas: set[str] | None = None,
+    now: datetime.datetime | None = None, grace_hours: float = 6,
+) -> list[dict]:
+    """지울 버전 — 병합되지 않은 묶음의 이미지(`main_shas` 를 줄 때, 유예 시간 밖) 먼저, 그다음 나머지에서
+    최근(태그가 붙은 때 기준) `keep` 개와 살아 있는 커밋의 태그를 가진 것을 뺀 것."""
+    early: list[dict] = []
+    if main_shas:
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        cutoff = (now - datetime.timedelta(hours=grace_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        early = [v for v in listed if unmerged(v, main_shas) and not protected(v, shas) and touched(v) < cutoff]
+    rest = [v for v in listed if v not in early]
+    ordered = sorted(rest, key=touched, reverse=True)
+    return early + [v for v in ordered[keep:] if not protected(v, shas)]
 
 
 # 빌드 캐시의 **지금 이름**(#712 — `scripts/ci/images.sh` 의 `codemit-buildcache:<서비스>-<아키텍처>`).
@@ -104,9 +146,13 @@ def doomed_cache_versions(listed: list[dict], keep: int) -> list[dict]:
     return stale + doomed_versions(untagged, keep, [])
 
 
-def prune(package: str, keep: int, dry_run: bool, shas: list[str]) -> int:
+def prune(package: str, keep: int, dry_run: bool, shas: list[str], main_shas: set[str] | None = None,
+          grace_hours: float = 6) -> int:
     listed = versions(package)
-    doomed = doomed_cache_versions(listed, keep) if package == CACHE else doomed_versions(listed, keep, shas)
+    if package == CACHE:
+        doomed = doomed_cache_versions(listed, keep)
+    else:
+        doomed = doomed_versions(listed, keep, shas, main_shas, grace_hours=grace_hours)
     print(f"{package}: 전체 {len(listed)} · 남김 {len(listed) - len(doomed)} · 지움 {len(doomed)}")
     failures = 0
     for version in doomed:
@@ -127,13 +173,24 @@ def main() -> int:
     parser.add_argument("--keep-cache", type=int, default=10)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--protect-sha", action="append", default=[], help="이 커밋의 태그를 가진 버전은 남긴다(여러 번)")
+    parser.add_argument("--main-shas", default=None, help="main 의 커밋 목록(한 줄에 하나) — 병합되지 않은 묶음의 이미지를 먼저 지운다")
+    parser.add_argument("--unmerged-grace-hours", type=float, default=6)
     args = parser.parse_args()
+    main_shas: set[str] = set()
+    if args.main_shas:
+        with open(args.main_shas) as listing:
+            main_shas = {line.strip() for line in listing if len(line.strip()) == 40}
+    if 0 < len(main_shas) < MIN_MAIN_SHAS:
+        # 얕은 체크아웃이면 main 의 옛 커밋이 전부 「병합되지 않았다」로 보여 되돌리기 창을 통째로 지운다.
+        print(f"main 커밋이 {len(main_shas)}개뿐이다(얕은 체크아웃?) — 이 목록을 믿지 않는다")
+        main_shas = set()
+    print(f"main 커밋 {len(main_shas)}개 — " + ("병합되지 않은 묶음의 이미지를 먼저 지운다" if main_shas else "순서로만 자른다"))
     # 짧은 sha 로 지키면 엉뚱한 태그까지 지킨다 — 40자만 받는다.
     shas = [s for s in (x.strip() for x in args.protect_sha) if len(s) == 40]
     print("지키는 커밋: " + (" ".join(s[:12] for s in shas) or "없음"))
     failures = 0
     for package in IMAGES:
-        failures += prune(package, args.keep_images, args.dry_run, shas)
+        failures += prune(package, args.keep_images, args.dry_run, shas, main_shas, args.unmerged_grace_hours)
     failures += prune(CACHE, args.keep_cache, args.dry_run, [])
     return 1 if failures else 0
 

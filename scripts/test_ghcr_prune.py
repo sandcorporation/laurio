@@ -13,7 +13,8 @@ import pathlib
 import sys
 import unittest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "ci"))
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 import ghcr_prune as gp  # noqa: E402
 
@@ -39,6 +40,48 @@ class Doomed(unittest.TestCase):
             version(n, [f"{n}-amd64"]) for n in range(2, 6)
         ]
         self.assertNotIn(1, [v["id"] for v in gp.doomed_versions(listed, 2, [])])
+
+
+
+class Unmerged(unittest.TestCase):
+    """병합되지 않은 묶음의 이미지(main 에 없는 쌓은 sha, ctx 없음)를 순서보다 먼저 지운다(#729)."""
+
+    MAIN = {"1" * 40, "2" * 40}
+    NOW = gp.datetime.datetime(2026, 10, 31, tzinfo=gp.datetime.timezone.utc)
+
+    def doomed(self, listed: list[dict], keep: int = 2, main=None) -> list[int]:
+        return [v["id"] for v in gp.doomed_versions(listed, keep, [], self.MAIN if main is None else main, now=self.NOW)]
+
+    def test_red_bundles_go_first_and_do_not_take_the_window(self) -> None:
+        # 최근 셋이 붉은 묶음(쌓은 sha) — 예전 규칙은 main 커밋 1·2 를 밀어냈다.
+        listed = [version(1, ["1" * 40 + "-arm64"]), version(2, ["2" * 40 + "-arm64"])] + [
+            version(n, [f"{n}" * 40 + "-arm64"]) for n in (3, 4, 5)
+        ]
+        self.assertEqual(sorted(self.doomed(listed)), [3, 4, 5])
+
+    def test_a_ctx_tag_keeps_it_in_the_order(self) -> None:
+        # 초록 묶음 — 병합 전에 ctx 가 붙었다. 재사용될 이미지라 순서로만 센다.
+        listed = [version(1, ["1" * 40 + "-arm64"]), version(5, ["5" * 40 + "-arm64", "ctx-h-arm64"])]
+        self.assertEqual(self.doomed(listed), [])
+
+    def test_a_version_also_holding_a_main_tag_is_not_unmerged(self) -> None:
+        listed = [version(5, ["5" * 40 + "-arm64", "2" * 40 + "-arm64"])]
+        self.assertEqual(self.doomed(listed, keep=0), [5])  # 순서로는 지워진다(keep 0) — 먼저 지울 것은 아니다
+        self.assertFalse(gp.unmerged(listed[0], self.MAIN))
+
+    def test_a_train_still_running_is_left_alone(self) -> None:
+        listed = [version(30, ["3" * 40 + "-arm64"], updated="2026-10-30T22:00:00Z")]
+        self.assertEqual(self.doomed(listed), [])
+        listed = [version(30, ["3" * 40 + "-arm64"], updated="2026-10-30T23:59:00Z"), version(1, ["1" * 40 + "-arm64"])]
+        self.assertEqual(self.doomed(listed, keep=5), [])  # 30-23:59 는 유예 6시간 안이다
+
+    def test_without_a_main_list_it_only_orders(self) -> None:
+        listed = [version(n, [f"{n}" * 40 + "-arm64"]) for n in (3, 4, 5)]
+        self.assertEqual(self.doomed(listed, keep=3, main=set()), [])
+
+    def test_the_prune_job_passes_the_main_list(self) -> None:
+        jenkinsfile = (ROOT / "Jenkinsfile.ghcr-prune").read_text()
+        self.assertIn("--main-shas .prune-main", jenkinsfile)
 
 
 if __name__ == "__main__":

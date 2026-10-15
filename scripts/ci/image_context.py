@@ -6,7 +6,7 @@
     image_context.py paths <서비스>                   해시에 드는 경로
     image_context.py hash <서비스> <플랫폼> [빌드 인자 파일]
     image_context.py check                            Dockerfile 의 COPY 원본이 전부 문맥에 있는가
-    image_context.py changed <옛 커밋> <새 커밋>       문맥이 바뀐 서비스(한 줄에 하나) — deploy.sh plan
+    image_context.py changed <옛 커밋> <새 커밋> [플랫폼]  문맥이 바뀐 서비스(한 줄에 하나) — deploy.sh plan
 
 `scripts/ci/images.sh` 가 서비스마다 이 해시를 내고, 태그 `ctx-<해시>-<arch>` 가 ghcr 에 있으면
 굽지 않고 커밋 태그만 그 매니페스트에 더한다. 해시에 드는 것: 아래 표의 경로마다 `git rev-parse
@@ -236,11 +236,11 @@ def uncovered(service: Service, dockerfile_text: str) -> list[str]:
 
 
 def context_digest(
-    objects: dict[str, str], target: str, platform: str, build_args: dict[str, str]
+    objects: dict[str, str], target: str, platform: str, build_args: dict[str, str], version: str = HASH_VERSION
 ) -> str:
     """순수 함수 — 경로별 git 객체 해시 + 대상 + 플랫폼 + 빌드 인자 → 24자 16진."""
     h = hashlib.sha256()
-    h.update(f"v{HASH_VERSION}\n".encode())
+    h.update(f"v{version}\n".encode())
     for path in sorted(objects):
         h.update(f"path {path} {objects[path]}\n".encode())
     h.update(f"target {target}\nplatform {platform}\n".encode())
@@ -307,18 +307,56 @@ def service_objects(service: Service, rev: str = "HEAD") -> dict[str, str]:
     return objects
 
 
-def changed_services(old: str, new: str) -> list[str]:
+TABLE_FILE = "scripts/ci/image_context.py"
+_TABLE_VERSION = re.compile(r'^HASH_VERSION = "([^"]*)"', re.MULTILINE)
+_TABLE_SERVICE = re.compile(r'^\s*Service\("([\w-]+)"(.*)$', re.MULTILINE)
+_TABLE_TARGET = re.compile(r'target="([^"]*)"')
+
+
+def table_at(rev: str) -> tuple[str, dict[str, str]] | None:
+    """`rev` 의 이 파일에서 (HASH_VERSION, 서비스 → 빌드 대상)을 읽는다 — 실행하지 않고 줄로 읽는다.
+
+    파일이 그 커밋에 없으면 None(이 표를 그대로 쓴다). 있는데 읽지 못하면 SystemExit — 모르는 것이다.
+    """
+    try:
+        text = _git("show", f"{rev}:{TABLE_FILE}")
+    except subprocess.CalledProcessError:
+        return None
+    version = _TABLE_VERSION.search(text)
+    targets = {}
+    for match in _TABLE_SERVICE.finditer(text):
+        target = _TABLE_TARGET.search(match.group(2))
+        targets[match.group(1)] = target.group(1) if target else ""
+    if not version or not targets:
+        raise SystemExit(f"{rev} 의 {TABLE_FILE} 에서 표를 읽지 못했다")
+    return version.group(1), targets
+
+
+def changed_services(old: str, new: str, platform: str = "") -> list[str]:
     """두 커밋 사이에 빌드 문맥이 바뀐 서비스(표의 순서) — `deploy.sh plan` 이 바꿔 끼울 것을 고른다(#712).
 
     `images.sh` 가 굽기·건너뛰기를 정하는 바로 그 해시라, 「이미지가 같다」와 「다시 띄우지 않는다」가 한
-    기준이다(예전의 경로 패턴은 `.dockerignore` 가 빼는 파일도 「바뀜」으로 봤다). 대상·플랫폼은 양쪽이
-    같으니 경로별 객체만 견준다. 어느 쪽에서든 표의 경로가 없으면(옛 커밋이 그 디렉터리를 몰랐다) 모르는
-    것이고, 모르면 바꿔 끼운다.
+    기준이다(예전의 경로 패턴은 `.dockerignore` 가 빼는 파일도 「바뀜」으로 봤다). 경로별 객체만이 아니라
+    **양쪽 커밋의 표**에서 빌드 대상과 `HASH_VERSION` 을 읽어 해시 전체를 견준다(#729) — 표의 target 만 바꾼
+    커밋은 `codemit-deploy-staging` 이 다시 굽는데, 예전의 `changed` 는 이 파일(새 커밋의 표)의 target 을 양쪽에
+    써서 그 서비스를 바꿔 끼우지 않았다. 플랫폼은 배포 호스트 하나의 것이라 양쪽이 같다(해시에는 넣는다).
+    어느 쪽에서든 표의 경로가 없거나(옛 커밋이 그 디렉터리를 몰랐다) 표를 읽지 못하면 모르는 것이고, 모르면
+    바꿔 끼운다. 옛 커밋에 표가 아예 없으면 이 표를 쓴다.
     """
+    here = (HASH_VERSION, {svc.name: svc.target for svc in SERVICES.values()})
+    try:
+        tables = {rev: table_at(rev) or here for rev in (old, new)}
+    except (SystemExit, subprocess.CalledProcessError):
+        return list(SERVICES)
     changed = []
     for svc in SERVICES.values():
         try:
-            same = service_objects(svc, old) == service_objects(svc, new)
+            digests = set()
+            for rev, (version, targets) in tables.items():
+                if svc.name not in targets:
+                    raise SystemExit(f"{rev} 의 표에 {svc.name} 이 없다")
+                digests.add(context_digest(service_objects(svc, rev), targets[svc.name], platform, {}, version))
+            same = len(digests) == 1
         except (SystemExit, subprocess.CalledProcessError):
             same = False
         if not same:
@@ -351,10 +389,10 @@ def main(argv: list[str]) -> int:
         args = parse_build_args(open(rest[2], encoding="utf-8").read()) if len(rest) > 2 else {}
         print(context_digest(service_objects(svc), svc.target, platform, args))
     elif cmd == "changed":
-        if len(rest) != 2:
+        if len(rest) not in (2, 3):
             print(__doc__, file=sys.stderr)
             return 2
-        for name in changed_services(rest[0], rest[1]):
+        for name in changed_services(rest[0], rest[1], rest[2] if len(rest) > 2 else ""):
             print(name)
     elif cmd == "check":
         bad = 0
