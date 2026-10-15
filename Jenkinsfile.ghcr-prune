@@ -14,7 +14,7 @@ pipeline {
   }
 
   parameters {
-    string(name: 'KEEP_IMAGES', defaultValue: '12', trim: true, description: '이미지 패키지마다 남길 버전 수 (커밋 하나가 2개 — amd64·arm64). 병합되지 않은 묶음의 이미지는 이 수에 들지 않고 먼저 지운다(#729)')
+    string(name: 'KEEP_IMAGES', defaultValue: '24', trim: true, description: '이미지 패키지마다 남길 버전 수 (커밋 하나가 2개 — amd64·arm64). 병합되지 않은 묶음의 이미지는 이 수에 들지 않고 먼저 지운다(#729)')
     string(name: 'KEEP_CACHE', defaultValue: '10', trim: true, description: '빌드 캐시에 남길 태그 없는 버전 수 (지금 이름의 캐시 태그 열둘은 늘 남고 옛 이름은 늘 지운다)')
     booleanParam(name: 'DRY_RUN', defaultValue: false, description: '지우지 않고 무엇을 지울지만 적는다')
   }
