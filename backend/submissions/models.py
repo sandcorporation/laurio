@@ -175,6 +175,12 @@ class SubmissionAsset(models.Model):
     # 안 봤다"와 "봤는데 오래됐다"를 `is_public`(null 하나)만으로 구별할 수
     # 없어서 따로 둔다.
     is_public_checked_at = models.DateTimeField(null=True, blank=True)
+    # 마지막 저장소 조회 응답의 ETag(#490) — 다음 확인이 `If-None-Match` 로 보내고,
+    # 304 를 받으면 GitHub 이 그 호출을 시간당 한도에 세지 않는다. 자산에 두는 이유는
+    # 이 값이 `is_public`·`is_public_checked_at` 과 한 묶음의 「마지막 확인」이기
+    # 때문이다 — 캐시에 두면 비워질 때마다 전부 다시 세고, 어댑터가 지난 답을 기억하는
+    # 상태를 갖게 된다. 비공개(404)·확인 전에는 null이다.
+    is_public_etag = models.CharField(max_length=255, null=True, blank=True)
 
     # 이 자료를 누가 넣었는가 (#220, ADR-0030). 거의 모두 Developer가 넣지만
     # 전부는 아니다 — 소스 없이 저장소만 낸 제출이 채점 시점에 그 저장소를

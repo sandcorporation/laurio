@@ -34,11 +34,19 @@ from .adapters import get_github_adapter
 # 마감 전 화면 배지가 참고할 값이라 아주 자주 다시 볼 필요는 없다 — 참가자가
 # 저장소를 공개로 바꾼 뒤 배지가 반영되기까지 이 값만큼 늦을 수 있다는 뜻이고,
 # ADR-0003이 이미 "스캔 주기만큼 늦어지는 건 무해하다"고 정한 것과 같은 허용
-# 범위다.
+# 범위다. 아직 모르는 것(null)·비공개로 확인된 것·마감이 임박한 것에 쓴다.
 _STALE_AFTER = timedelta(hours=1)
+# 한 번 공개로 확인된 저장소는 이만큼 지나야 다시 본다(#490). 공개 여부는 거의 안
+# 바뀌고, 채점은 어차피 채점 시점에 직접 재확인한다(#219) — 늦게 반영되는 것은
+# 화면 배지뿐이다. 다만 마감까지 이 값보다 적게 남았으면 그 사이 비공개로 바뀐 것을
+# 마감 전에 한 번도 못 보므로, 그때부터는 `_STALE_AFTER` 로 돌아간다.
+_STALE_AFTER_PUBLIC = timedelta(hours=12)
 
 
 def _pending_repository_assets(as_of, ctx):
+    deadline_near = Q(
+        submission__contestsubmission__contest__deadline_at__lte=as_of + _STALE_AFTER_PUBLIC
+    )
     return (
         SubmissionAsset.objects.filter(
             kind=SubmissionAsset.Kind.REPOSITORY,
@@ -50,7 +58,14 @@ def _pending_repository_assets(as_of, ctx):
             submission__score__isnull=True,
         )
         .exclude(submission__scoring_attempts__permanent=True)
-        .filter(Q(is_public__isnull=True) | Q(is_public_checked_at__lt=as_of - _STALE_AFTER))
+        .filter(
+            Q(is_public__isnull=True)
+            | Q(is_public_checked_at__lt=as_of - _STALE_AFTER_PUBLIC)
+            | (
+                Q(is_public_checked_at__lt=as_of - _STALE_AFTER)
+                & (Q(is_public=False) | deadline_near)
+            )
+        )
     )
 
 
@@ -59,16 +74,20 @@ def _check_repository_visibility(asset, as_of, ctx):
 
     조건부 UPDATE(ADR-0003)가 필요 없다 — 이 값은 참가자 사이의 경합이 없는
     "지금 이 순간의 사실"을 다시 쓰는 것뿐이라, 두 스캔이 겹쳐 돌아도 같은 결과로
-    수렴한다(멱등). `check_public`이 예외를 던지면 이 함수도 그대로 던진다 —
+    수렴한다(멱등). `check_visibility`가 예외를 던지면 이 함수도 그대로 던진다 —
     `core.scans.run_scan`이 그 행만 `failed`에 남기고 다음 스캔이 다시 본다.
+
+    지난 확인의 ETag 를 보내고(#490) 304 면 `is_public` 은 그대로, 확인 시각만 올린다
+    — GitHub 은 그 호출을 시간당 한도에 세지 않는다.
     """
 
     adapter = get_github_adapter()
-    is_public = adapter.check_public(asset.value)
+    result = adapter.check_visibility(asset.value, etag=asset.is_public_etag or None)
+    is_public = asset.is_public if result.unchanged else result.is_public
     SubmissionAsset.objects.filter(pk=asset.pk).update(
-        is_public=is_public, is_public_checked_at=as_of
+        is_public=is_public, is_public_checked_at=as_of, is_public_etag=result.etag
     )
-    return {"asset_id": asset.id, "is_public": is_public}
+    return {"asset_id": asset.id, "is_public": is_public, "unchanged": result.unchanged}
 
 
 REPOSITORY_VISIBILITY_SCAN = ScanSpec(

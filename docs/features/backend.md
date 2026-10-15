@@ -708,6 +708,14 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 관측 | `db-connection-usage`(#455 — DB 연결 사용률이 임계(기본 80%)를 넘으면 오류 수집기로 보낸다. 넘은 상태가 이어지는 동안은 간격(기본 15분)에 한 번만 보낸다 — 둘 다 환경변수로 조절한다, `core.db_connection_scan`) |
 | 데모 | `scheduled-state-demo` |
 
+**`repository-visibility` 는 GitHub 시간당 한도(인증 토큰 5,000회)를 아낀다(#490).** 채점 안 된
+공모전 저장소 자산의 공개 여부를 다시 보는 주기는 값에 따라 다르다 — 아직 모르는 것(null)·
+비공개로 확인된 것·마감까지 12시간이 안 남은 것은 **1시간**(`_STALE_AFTER`), 공개로 확인된
+것은 **12시간**(`_STALE_AFTER_PUBLIC`, `repositories/services.py`)이다. 다시 볼 때는 지난
+응답의 ETag(`SubmissionAsset.is_public_etag`)를 `If-None-Match` 로 보내고, 304 면 `is_public`
+은 그대로 두고 확인 시각만 올린다 — GitHub 은 인증한 조건부 요청의 304 를 한도에 세지 않는다.
+채점 시점의 재확인(#219)과 강의실 채점의 `check_public` 은 조건 없이 간다.
+
 **스캔이 아닌 정해진 시각의 작업이 하나 있다 — 매일 새벽 2시(서울) DB 백업.** beat 가
 `core.backup_database` 를 부르고, 워커가 `pg_dump --format=custom` 결과를 기존 비공개 버킷의
 `db-backups/YYYY/MM/DD/codemit-YYYYMMDD-HHMMSS.dump` 에 올린다. 스캔과 달리 내부 HTTP 를 거치지
