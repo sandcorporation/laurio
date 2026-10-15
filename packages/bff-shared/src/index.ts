@@ -4,4 +4,5 @@ export { sanitizeBackendPath, assembleAndVerifyBackendPath } from "./path-safety
 export { isAllowedPath } from "./allowlist";
 export { assertSameOrigin } from "./origin";
 export { forwardRequest, extractForwardBody, buildForwardHeaders } from "./forward";
+export { probeBackendHealth, type BackendProbe } from "./health-probe";
 export { retryWhileConnectionRefused, DEFAULT_DELAYS_MS } from "./connect-retry";

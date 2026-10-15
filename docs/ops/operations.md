@@ -117,19 +117,24 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 - **`keepalive = 5`**: sync 는 응답마다 연결을 닫았지만 gthread 는 살려 둔다. 서버가 BFF 의
   undici(쉬는 연결을 4초 뒤 버린다, Node 22 기본값)보다 먼저 닫으면 막 닫힌 연결에 요청이 실려
   `other side closed` 로 떨어지므로 서버가 더 길게 둔다. 쉬는 연결은 스레드를 쥐지 않는다.
+- **세 앱의 `/healthz` 는 전역 fetch 로 backend 를 치지 않는다**: 프로브가 3초에 끊기면 undici 가
+  끊긴 연결 자리에 다음 요청용 연결을 곧바로 새로 맺어 두고 그 연결은 요청 없이 4초 열려 있다
+  (Node 22·26 모두 실제 소켓으로 쟀다, `connection: close` 머리는 fetch 가 무시한다). backend 가
+  느릴수록 빈 연결이 늘어 더 느려지는 되먹임이라, 프로브는 `@codemit/bff-shared` 의
+  `probeBackendHealth`(`node:http`, 연결 풀 없음)로 친다 — 끝나거나 끊기면 그 연결을 닫는다.
 - **DB 연결 셈**: 스레드마다 Django 연결이 하나고 `CONN_MAX_AGE` 가 0 이라 요청이 끝나면 닫는다.
   모두 트랜잭션 모드 pgbouncer 를 거친다.
 
   | 쓰는 쪽 | prod | staging | 근거 |
   | --- | --- | --- | --- |
   | backend(워커 × 스레드) | 4 × 4 = 16 | 3 × 4 = 12 | 예전 sync 는 4·3 |
-  | celery-worker(prefork) | 4 | 호스트 코어 수 | `--concurrency` 미지정 → `os.cpu_count()` |
+  | celery-worker(prefork) | 4 | 12 | `--concurrency` 미지정 → 호스트 코어 수 |
   | celery-beat · grader DB 스레드 | 1 · 1 | 1 · 1 | |
   | events(ASGI) | 따로 세지 않았다 | 같음 | 스트림을 여는 요청만 DB 를 쓴다 |
   | **풀러 클라이언트 상한** | `max_client_conn` 200 | 200 | `docker/pgbouncer/docker-entrypoint.sh` |
   | **풀러 → DB 서버 연결** | `default_pool_size` 20 | 20 | PostgreSQL `max_connections` 기본 100 안 |
 
-  클라이언트 쪽 최악(모두 동시에)은 prod 약 22 로 200 에 한참 못 미친다. 서버 연결 20 은
+  클라이언트 쪽 최악(모두 동시에)은 prod 약 22·staging 약 26 으로 200 에 한참 못 미친다. 서버 연결 20 은
   트랜잭션 동안만 쓰이므로(`ATOMIC_REQUESTS` 없음, 쿼리마다 자동 커밋) 동시에 DB 안에 있는
   스레드가 20을 넘을 때만 풀러가 줄 세운다 — 오류가 아니라 대기다.
 - **스레드 안전성**(2026-10-15 판정): 요청 경로의 가변 상태는 모두 Redis(호출 상한
