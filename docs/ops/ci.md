@@ -140,8 +140,9 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   `status: failed` 인데 `failedTests` 가 빈 프로젝트(「No tests found」·globalSetup 오류)가 있으면 판정하지
   않는다(#719). 한도는 trace 첫 줄의 `testTimeout`(설정의 한도)이라 **스펙에서 `test.setTimeout`·`test.slow`·
   `test.describe.configure({ timeout })` 로 시험 한도를 바꾸면 마감이 어긋난다** — 지금 스펙은 아무도 쓰지
-  않는다(2026-10-15 `git grep`). celery-broker 와 sub
-  검사까지 초록이면 `train.py fail --verdict` 가 PR 에 `failure` 를 주지 않고 같은 묶음을 다시 부르며
+  않는다(2026-10-15 `git grep`). celery-broker 가 초록이고, sub 단계가 초록이거나 sub 의 이미지 굽기도
+  인프라 판정이면(위 「이미지가 붉은 것도 묶음이 붉은 것이다」, #729) `train.py fail --verdict` 가 PR 에
+  `failure` 를 주지 않고 같은 묶음을 다시 부르며
   콘솔에 `인프라 고장으로 분류: backend 요청 0건 3.9초 틈 @…` 한 줄을 남긴다. **재실행은 가르기 사슬
   전체에 한 번이다**(#718) — 다시 붉으면(`INFRA_RETRY=1` 빌드) 지금 규칙대로 가르거나 `failure` 이고,
   가른 묶음도 `INFRA_RETRY=1` 을 물려받아 판정을 다시 읽지 않는다. 몫은 초록 뒤(다음 묶음이
