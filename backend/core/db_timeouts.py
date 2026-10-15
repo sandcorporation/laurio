@@ -26,8 +26,21 @@ psycopg3 기본 커서(`ClientCursor`)가 인자를 클라이언트에서 합쳐
 여러 문을 한 메시지에 실을 수 있다. 실행 뒤에는 앞의 두 `SET` 결과를 넘겨 마지막 문의
 결과에 커서를 둔다.
 
-**요청 경로에만.** 미들웨어라 celery 태스크·관리 명령·마이그레이션은 지나지 않는다 — 채점
-(몇 분)·백업 같은 긴 일이 거기 있다. 비동기 요청(이벤트 서비스의 실시간 스트림)도 그대로
+**요청 경로에만.** 미들웨어라 celery 태스크 본체·관리 명령·마이그레이션은 지나지 않는다 —
+채점(몇 분)·백업 같은 긴 일이 거기 있다. 다만 **요청으로 도는 일은 걸린다**: celery beat 의
+스캔은 태스크가 `/api/internal/scans/{name}` 을 HTTP 로 부르는 것이라(ADR-0003, `core/tasks.py`)
+스캔 본체가 요청 안에서 돌고, e2e 시드도 시드 엔드포인트 안의 `call_command` 다. 스캔이 잠금을
+5초 넘게 기다리면 500 이 되고, 태스크는 `HTTPError` 를 재시도하지 않아 다음 beat 로 밀린다.
+그래도 지금 그런 스캔은 없다(#747 점검) — 스캔은 한 번에 후보 몇십 개를 문 여러 개로 나눠
+돌고, 스캔이 기다릴 수 있는 행 잠금(공모전·분배 몫·인계·판매자)은 벤더 호출을 잠금 밖에 두는
+규율(#127) 덕에 짧은 DB 쓰기 동안만 잡힌다. 그래서 뷰별로 한도를 늘리는 장치는 두지 않았다.
+
+**요청 안에서 한도를 따로 걸면 다음 문에서 덮인다.** `SET LOCAL lock_timeout = …` 이나
+`set_config('lock_timeout', …, true)` 를 요청 안에서 내면, 이 래퍼가 그다음 문 앞에 붙이는
+`SET LOCAL` 이 같은 트랜잭션의 값을 이 모듈의 값으로 되돌린다. 지금 그렇게 거는 유일한 자리인
+`classroom/scoring.py` 의 `_short_lock_timeout` 은 상주 grader(`manage.py grader`)에서만 돌아
+요청을 지나지 않는다. 요청 안에서 다른 한도가 필요해지면 문 하나의 SQL 에 직접 싣지 말고
+이 미들웨어에 그 뷰의 예외를 먼저 만든다. 비동기 요청(이벤트 서비스의 실시간 스트림)도 그대로
 통과시킨다 — DB 를 다른 스레드에서 쓰고, 스트림은 원래 길게 열린다. `executemany`, 스트리밍
 응답 본문을 만드는 동안의 문, 서버측 커서(배포는 풀러 때문에 꺼 둔다)에도 걸리지 않는다.
 
@@ -72,11 +85,11 @@ def _limit_statement(execute, sql, params, many, context):
     prefix = _prefix()
     try:
         result = execute(prefix + sql, params, many, context)
-        # 뒤 문의 오류(IntegrityError 등)는 그 결과로 넘어갈 때 올라온다 — Django 의
-        # 오류 변환 안에서 넘겨야 `except IntegrityError` 와 atomic 의 롤백 표시가 전처럼 돈다.
-        with context["connection"].wrap_database_errors:
-            raw.nextset()
-            raw.nextset()
+        # 앞의 두 SET 결과를 넘겨 커서를 마지막 문의 결과에 둔다. 뒤 문의 오류(IntegrityError
+        # 등)는 여기까지 오지 않는다 — psycopg 가 `execute` 안에서 한 메시지의 결과 전부를 보고
+        # 바로 던지고, Django 의 `_execute` 가 그것을 이미 Django 오류로 바꿔 올린다.
+        raw.nextset()
+        raw.nextset()
         return result
     finally:
         _hide_prefix(raw, prefix)
