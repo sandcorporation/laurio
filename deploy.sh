@@ -448,45 +448,59 @@ cmd_plan() {
   # 됐다 — 키를 돌린 배포가 옛 키를 문 앱을 조용히 남긴다. 실패는 그 메시지를 로그에 남긴다.
   # codemit-deploy-staging #482(#711 뒤 앱 코드가 안 바뀐 첫 staging 배포)에서 세 앱 모두 「어긋난다」가 나오지 않아
   # 늘 다르게 나오지는 않는다 — 다만 그때는 실패를 삼켰는지 로그로 가를 수 없었다.
-  # `backend/tests/test_deploy_plan_app_env.py` 가 이 셋을 고정한다.
+  # 반환값이 셋을 가른다(#733): 0 같음 · 1 어긋남 · 2 견줄 수 없음(컨테이너를 못 읽음·`config --hash`
+  # 실패·떠 있는 컨테이너에 해시 라벨이 없음). 호출부는 1·2 둘 다 다시 띄우되 로그로 둘을 가른다 —
+  # 예전에는 견주지 못한 것도 「실행 설정이 .env 과 어긋난다」로 찍혀 실제 어긋남과 구별되지 않았다.
+  # `backend/tests/test_deploy_plan_app_env.py` 가 이것들을 고정한다.
   app_env_drifted() {
     local cid image tag release was now err
     cid=$($COMPOSE ps -q "$1" 2>/dev/null | head -1)
-    [ -n "$cid" ] || return 1  # 없는 컨테이너는 위 missing 이 이미 굽게 했다
+    [ -n "$cid" ] || return 0  # 없는 컨테이너는 위 missing 이 이미 굽게 했다
     err=".jenkins-${TARGET}-config-hash.err"
     if ! image=$(docker inspect --format '{{.Config.Image}}' "$cid" 2>"$err"); then
-      log "$1 컨테이너를 읽지 못했다($(tr '\n' ' ' < "$err")) — 실행 설정을 견줄 수 없어 다시 띄운다."
+      log "$1 컨테이너를 읽지 못했다($(tr '\n' ' ' < "$err"))."
       rm -f "$err"
-      return 0
+      return 2
     fi
     tag=${image##*:}
     tag=${tag%-*}
     release=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null \
       | sed -n 's/^CODEMIT_PUBLIC_SENTRY_RELEASE=//p' | head -1)
     was=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.config-hash"}}' "$cid" 2>/dev/null || true)
+    if [ -z "$was" ]; then
+      log "$1 컨테이너에 설정 해시 라벨이 없다."
+      return 2
+    fi
     if ! now=$(CODEMIT_IMAGE_TAG="$tag" SENTRY_RELEASE="$release" $COMPOSE config --hash "$1" 2>"$err"); then
-      log "$1 의 지금 설정 해시를 내지 못했다($(tr '\n' ' ' < "$err")) — 실행 설정을 견줄 수 없어 다시 띄운다."
+      log "$1 의 지금 설정 해시를 내지 못했다($(tr '\n' ' ' < "$err"))."
       rm -f "$err"
-      return 0
+      return 2
     fi
     rm -f "$err"
     now=$(echo "$now" | awk -v svc="$1" '$1 == svc {print $2}')
     if [ -z "$now" ]; then
-      log "$1 의 지금 설정 해시가 비었다 — 실행 설정을 견줄 수 없어 다시 띄운다."
-      return 0
+      log "$1 의 지금 설정 해시가 비었다."
+      return 2
     fi
-    [ "$now" != "$was" ]
+    [ "$now" = "$was" ] || return 1
   }
-  if [ "$BUILD_FRONTEND" = false ] && app_env_drifted frontend; then
-    log "frontend 의 실행 설정이 .env.${TARGET} 과 어긋난다(공개 값 등) — 다시 띄운다."
+  # 0 이면 그 앱을 다시 띄운다.
+  app_env_needs_restart() {
+    local rc=0
+    app_env_drifted "$1" || rc=$?
+    case $rc in
+      1) log "$1 의 실행 설정이 .env.${TARGET} 과 어긋난다 — 다시 띄운다." ;;
+      2) log "$1 의 실행 설정을 .env.${TARGET} 과 견줄 수 없어 다시 띄운다." ;;
+      *) return 1 ;;
+    esac
+  }
+  if [ "$BUILD_FRONTEND" = false ] && app_env_needs_restart frontend; then
     BUILD_FRONTEND=true
   fi
-  if [ "$BUILD_OPERATOR" = false ] && app_env_drifted operator; then
-    log "operator 의 실행 설정이 .env.${TARGET} 과 어긋난다 — 다시 띄운다."
+  if [ "$BUILD_OPERATOR" = false ] && app_env_needs_restart operator; then
     BUILD_OPERATOR=true
   fi
-  if [ "$BUILD_CLASSROOM" = false ] && app_env_drifted classroom; then
-    log "classroom 의 실행 설정이 .env.${TARGET} 과 어긋난다 — 다시 띄운다."
+  if [ "$BUILD_CLASSROOM" = false ] && app_env_needs_restart classroom; then
     BUILD_CLASSROOM=true
   fi
 

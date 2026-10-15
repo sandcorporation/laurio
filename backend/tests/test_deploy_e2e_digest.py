@@ -70,7 +70,7 @@ print(open(path).read().strip())
 
 @pytest.fixture
 def prod(tmp_path):
-    """커밋 하나짜리 저장소 + 가짜 docker. 준비는 픽스처에서 — 시험 본문의 CPU 한도 밖이다(#701)."""
+    """옛 커밋·지금 커밋 둘짜리 저장소 + 가짜 docker. 준비는 픽스처에서 — 시험 본문의 CPU 한도 밖이다(#701)."""
     repo = tmp_path / "repo"
     (repo / "docker").mkdir(parents=True)
     shutil.copy(REPO_ROOT / "deploy.sh", repo / "deploy.sh")
