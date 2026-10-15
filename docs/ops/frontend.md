@@ -231,7 +231,7 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 없는가)를 본다.
 
 **강의실은 공개 앱과 같은 토큰·서체를 쓴다**(#298). `classroom/app/tokens.css` 는
-`frontend/app/tokens.css` 의 **복사본**이고 Pretendard 파일도 그렇다. 공유 패키지로
+`frontend/app/tokens.css` 의 **복사본**이고 서체 파일(Pretendard, IBM Plex Mono 굵기 셋 — #743)도 그렇다. 공유 패키지로
 빼지 않은 이유는 손으로 관리되는 목록 셋이 또 늘고 로컬 게이트가 그것을 못 보기
 때문이다(#166). 대신 `classroom/lib/design/tokens.test.ts` 가 두 파일이 한 글자라도
 갈리면 빨개진다 — 「복사했으니 언젠가 갈라진다」를 규율이 아니라 검사로 바꿨다.

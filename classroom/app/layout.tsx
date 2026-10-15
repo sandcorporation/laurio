@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import localFont from "next/font/local";
@@ -31,7 +30,8 @@ export const dynamic = "force-dynamic";
 // 사람이 먼저 알아챈다. 파일도 `app/fonts/` 에 같은 것을 담는다(공유 패키지로
 // 빼지 않은 이유와, 갈라지지 않게 지키는 방법은 `lib/design/tokens.test.ts`).
 //
-// Pretendard 는 Google Fonts 에 없어 `next/font/local` 로 셀프호스팅한다. 폴백
+// 두 서체 다 `next/font/local` 로 셀프호스팅한다 — 빌드가 외부 네트워크를 쓰지
+// 않게(#743, 공개 앱 app/layout.tsx 의 주석). 폴백
 // 스택의 최종 결정은 `app/tokens.css` 의 `--font-sans`/`--font-mono` 이고, 여기서는
 // 변수만 채운다.
 const pretendard = localFont({
@@ -41,9 +41,12 @@ const pretendard = localFont({
   display: "swap",
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const ibmPlexMono = localFont({
+  src: [
+    { path: "./fonts/IBMPlexMono-Regular.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/IBMPlexMono-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/IBMPlexMono-SemiBold.woff2", weight: "600", style: "normal" },
+  ],
   variable: "--font-ibm-plex-mono",
   display: "swap",
 });
