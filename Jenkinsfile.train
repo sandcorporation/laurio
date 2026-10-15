@@ -169,6 +169,8 @@ pipeline {
             }
             stash name: 'e2e-verdict', includes: 'test-results/e2e-verdict.json', allowEmpty: true
             stash name: 'ctx-arm64', includes: '.images-arm64.ctx', allowEmpty: true
+            // e2e 가 받은 arm64 digest — 「병합」이 `e2e-<트리>-arm64` 태그로 남긴다(#729, prod 의 e2e 대조).
+            stash name: 'e2e-images', includes: 'test-results/images.txt', allowEmpty: true
             script { if (env.TRAIN_E2E_OK == '1') { env.TRAIN_MACOS_GREEN = '1' } }
           }
           post {
@@ -218,6 +220,14 @@ pipeline {
               unstash 'ctx-arm64'
               withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
                 sh 'bash scripts/ci/images-ctx.sh .images-amd64.ctx .images-arm64.ctx'
+              }
+            }
+            // e2e 가 본 arm64 이미지에 이 묶음의 트리를 태그로 — prod 가 `deploy.sh prod e2e-digest` 로 견준다(#729).
+            catchError(buildResult: null, stageResult: null, message: 'e2e 태그 실패 — prod 의 e2e 대조가 「대조 못 함」이 될 뿐이다') {
+              sh 'rm -f test-results/images.txt'
+              unstash 'e2e-images'
+              withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+                sh 'bash scripts/ci/images-e2e.sh test-results/images.txt "$(python3 -c \'import json;print(json.load(open("train.plan"))["tree"])\')"'
               }
             }
           }

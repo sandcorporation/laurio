@@ -19,6 +19,7 @@
 #   build <서비스>       이 호스트에서 직접 굽는다(비상용)
 #   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다
 #   verify              컨테이너가 running 인지 본다
+#   e2e-digest          떠 있는 앱·backend 가 열차의 e2e 가 본 이미지인지 견준다(prod, 관측만 — #729)
 #   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   mark                배포 표식을 지금 커밋으로 옮긴다
@@ -955,6 +956,50 @@ cmd_verify() {
   log "컨테이너 전부 running"
 }
 
+# ------------------------------------------------------- e2e 가 본 이미지인가
+
+# 끝 조건 「e2e 가 돈 이미지 = prod 이미지」를 사람이 아니라 잡이 본다(#729). 열차는 시험 둘이 초록인
+# 묶음에서 e2e 가 받은 arm64 이미지(`test-results/images.txt` 의 RepoDigests)에 **병합 전에**
+# `e2e-<묶음 트리>-arm64` 태그를 붙인다(`scripts/ci/images-e2e.sh`). 병합이 다 끝나면 main 의 트리가 그
+# 트리와 같으므로, 여기서 이 커밋의 트리로 그 태그를 받아 떠 있는 컨테이너의 이미지 ID 와 견준다 — 같은
+# ID 면 같은 이미지다(이미 있는 층이라 받기는 매니페스트 한 번이다). 열차 산출물을 Jenkins API 로 읽지 않는
+# 이유: oracle 에이전트에는 Jenkins 자격증명이 없고(copyartifact 플러그인도 없다), 레지스트리 로그인은 이미
+# 있다. 태그가 없으면 열차를 거치지 않은 트리(직접 push·병합 사이에 main 이 움직였다)라고 적는다.
+# **관측만 한다 — 다르거나 대조하지 못해도 0 으로 끝난다.** 콘솔의 「e2e 대조:」 줄이 결과다.
+cmd_e2e_digest() {
+  arch=arm64
+  [ "$TARGET" = prod ] || arch=amd64
+  if [ "$arch" != arm64 ]; then
+    log "e2e 대조: e2e 는 arm64 이미지로 돈다 — $TARGET($arch)는 대조하지 않는다"
+    return 0
+  fi
+  repo="${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}"
+  tree=$($GIT rev-parse "HEAD^{tree}" 2>/dev/null) || { log "e2e 대조: 이 커밋의 트리를 모른다"; return 0; }
+  same=0; differ=0; missing=0
+  for svc in backend frontend operator classroom; do
+    cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
+    if [ -z "$cid" ]; then
+      echo "e2e 대조: $svc — 떠 있는 컨테이너가 없다"; missing=$((missing + 1)); continue
+    fi
+    running=$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null)
+    ref="$repo/codemit-$svc:e2e-$tree-$arch"
+    if ! docker pull -q "$ref" >/dev/null 2>&1; then
+      echo "e2e 대조: $svc — $ref 가 없다(열차가 이 트리를 e2e 로 보지 않았다)"; missing=$((missing + 1)); continue
+    fi
+    tested=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)
+    # 대조용 태그는 남기지 않는다 — 떠 있는 이미지에 붙은 태그 하나를 떼는 것뿐이다.
+    docker image rm "$ref" >/dev/null 2>&1 || true
+    if [ -n "$running" ] && [ "$running" = "$tested" ]; then
+      echo "e2e 대조: $svc — 같다 ($(echo "$running" | cut -c1-19))"; same=$((same + 1))
+    else
+      echo "e2e 대조: $svc — 다르다! 떠 있는 것 $(echo "$running" | cut -c1-19), e2e 가 본 것 $(echo "$tested" | cut -c1-19)"
+      differ=$((differ + 1))
+    fi
+  done
+  log "e2e 대조: 같다 $same · 다르다 $differ · 대조 못 함 $missing (트리 $(echo "$tree" | cut -c1-12))"
+  return 0
+}
+
 # 서비스가 요청을 실제로 받는지 본다. 컨테이너가 running 인 것과 서버가
 # 응답하는 것은 다르다.
 #
@@ -1108,6 +1153,7 @@ case "$COMMAND" in
     ;;
   up) cmd_up ;;
   verify) cmd_verify ;;
+  e2e-digest) cmd_e2e_digest ;;
   health)
     [ -n "$ARG" ] || { echo "health 에는 서비스가 필요하다 (backend|events|search|pgbouncer)"; exit 2; }
     cmd_health "$ARG"
@@ -1137,7 +1183,7 @@ case "$COMMAND" in
     cmd_prune
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|mark|prune|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|e2e-digest|health|reindex|mark|prune|all)"
     exit 2
     ;;
 esac
