@@ -123,3 +123,45 @@ def test_migrate_read_write_through_pgbouncer():
         assert "COUNT=1" in write_then_read.stdout, write_then_read.stdout
     finally:
         _drop_scratch_database(db_name)
+
+
+@live_vendor
+def test_request_db_timeouts_hold_through_pgbouncer():
+    # 요청 한도(#745)는 문마다 `SET LOCAL` 을 같은 메시지에 실어 보낸다 — 트랜잭션 모드
+    # 풀러가 둘을 다른 서버 연결로 가르지 않고, 한도가 다음 클라이언트에게 남지 않는지를
+    # 실제 풀러 뒤에서 본다. 시험용 뷰(`tests/test_request_db_timeouts.py`)는 테이블을 읽지
+    # 않으므로 일회용 DB 를 마이그레이션하지 않는다.
+    pgbouncer_port = require_live_credential("CODEMIT_PGBOUNCER_PORT")
+
+    db_name = _make_scratch_database()
+    try:
+        run = subprocess.run(
+            [
+                sys.executable,
+                "manage.py",
+                "shell",
+                "-c",
+                (
+                    "from django.db import connection\n"
+                    "from django.test import Client, override_settings\n"
+                    "with override_settings(ROOT_URLCONF='tests.test_request_db_timeouts'):\n"
+                    "    print('BODY=' + Client().get('/settings/').content.decode())\n"
+                    "with connection.cursor() as cursor:\n"
+                    "    cursor.execute('SHOW statement_timeout')\n"
+                    "    print('AFTER=' + cursor.fetchone()[0])\n"
+                ),
+            ],
+            cwd=BACKEND_DIR,
+            env=_env_through_pooler(db_name, pgbouncer_port),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (
+            'BODY={"statement": "25s", "lock": "5s", "autocommit": "25s", "is_autocommit": true}'
+            in run.stdout
+        ), run.stdout
+        assert "AFTER=0" in run.stdout, run.stdout
+    finally:
+        _drop_scratch_database(db_name)
