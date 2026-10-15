@@ -14,7 +14,7 @@ import { SiteHeader } from "./components/site-header";
 // 본문 서체는 Pretendard, 등폭은 IBM Plex Mono 다.
 //
 // 두 서체 다 `next/font/local` 로 저장소에 담은 파일에서 로드한다(`app/fonts/`).
-// Pretendard 는 Google Fonts 에 없고, IBM Plex Mono 는 `next/font/google` 이
+// Pretendard 는 Google Fonts 에 없고, IBM Plex Mono 는 Google 서체 로더가
 // 빌드 때마다 fonts.gstatic.com 을 불러 이미지 굽기가 외부 네트워크에 매달렸다
 // (#743) — 그래서 latin 서브셋의 굵기 셋(400·500·600)을 받아 담았다. 그래도 `next/font` 를 쓰는
 // 이유는 이 앱이 원래 갖고 있던 성질을 잃지 않기 위해서다: 셀프호스팅(외부
