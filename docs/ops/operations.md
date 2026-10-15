@@ -104,7 +104,6 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 아무도 응답을 못 받았다(prod 포함). 지금은 `config/gunicorn.conf.py` 가 `worker_class =
 "gthread"`·`threads = 4` 를 두고 prod·staging·PR CI 셋이 모두 그 파일을 `-c` 로 읽는다(워커
 수만 compose 에 — prod·CI 4, staging 3). 빈 연결은 스레드 하나만 쥐고 주 루프는 계속 받는다.
-**prod 는 다음 승격부터다** — 지금 prod 이미지는 아직 sync 다(`docs/ops/deploy.md` 의 승격 절차).
 `tests/test_gunicorn_idle_connections.py` 가 실제 gunicorn 으로 빈 연결을 워커 수만큼 쥔 채 다음
 요청이 1초 안에 오는 것을, `--worker-class sync` 로 덮으면 묶이는 것을 함께 본다.
 

@@ -164,12 +164,8 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
    웹훅이 `codemit-deploy-prod` 잡(`Jenkinsfile.production`)을 부른다. **이 넷째 길은 지금 꺼져 있다**
    (2026-10-14, `Jenkinsfile` 의 `PROMOTE_PRODUCTION` 기본값 `false`) — 강의실 화면을 시안 v2 로
    고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `codemit-deploy-staging` 잡을 「Build with
-   Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다.
-   **그동안 staging 과 prod 의 backend 는 워커 종류가 다르다**(#725): staging 은 gthread(`config/
-   gunicorn.conf.py`, `docs/ops/operations.md` 「요청 없는 연결이 워커를 묶는다」)로 먼저 돌고, prod 는
-   다음 승격 때 같은 이미지·compose 와 함께 sync 에서 gthread 로 바뀐다. 승격이 끝나면
-   `docs/ops/operations.md` 「요청 없는 연결이 워커를 묶는다」의 「prod 는 다음 승격부터다」 줄과
-   이 문단을 지운다.
+   Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다(2026-10-16 02:30 KST 에 그렇게 한 번
+   승격했다 — `buildWithParameters?delay=…sec` 의 조용 기간으로 예약, DB 백업 02:00 과 겹치지 않게).
 
 `staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
