@@ -14,10 +14,11 @@ from repositories.adapters import GitHubAPIAdapter, GitHubAdapterError
 
 
 class _FakeResponse:
-    def __init__(self, *, status_code=200, json_body=None, chunks=None):
+    def __init__(self, *, status_code=200, json_body=None, chunks=None, headers=None):
         self.status_code = status_code
         self._json_body = json_body
         self._chunks = chunks or []
+        self.headers = headers or {}
 
     def json(self):
         return self._json_body
@@ -118,3 +119,75 @@ def test_a_repository_name_that_is_only_dot_git_is_rejected_rather_than_emptied(
 
     with pytest.raises(GitHubAdapterError):
         GitHubAPIAdapter(token="").check_public("https://github.com/acme/.git")
+
+
+def _etag_aware_repo_get(requested_headers: list[dict], *, etag: str, private: bool):
+    """`acme/widgets` 하나 — 보낸 `If-None-Match` 가 지금 ETag 와 같으면 실물처럼
+    본문 없는 304 를 준다."""
+
+    def fake_get(url, *args, headers=None, **kwargs):
+        assert url == "https://api.github.com/repos/acme/widgets", url
+        requested_headers.append(dict(headers or {}))
+        if (headers or {}).get("If-None-Match") == etag:
+            return _FakeResponse(status_code=304, headers={"ETag": etag})
+        return _FakeResponse(
+            status_code=200,
+            json_body={"default_branch": "main", "private": private},
+            headers={"ETag": etag},
+        )
+
+    return fake_get
+
+
+def test_visibility_check_returns_the_etag_and_sends_it_back_as_if_none_match(monkeypatch):
+    """GitHub 은 `Authorization` 을 붙인 조건부 요청이 304 를 받으면 그 호출을 시간당
+    한도에 세지 않는다(#490). 첫 조회는 조건 없이 가고 응답의 ETag 를 돌려주며, 그
+    ETag 를 넘긴 다음 조회는 `If-None-Match` 로 간다 — 304 면 「지난 확인 그대로」다
+    (`is_public` 이 None, ETag 는 그대로)."""
+
+    requested_headers: list[dict] = []
+    monkeypatch.setattr(
+        "requests.get", _etag_aware_repo_get(requested_headers, etag='"abc123"', private=False)
+    )
+    adapter = GitHubAPIAdapter(token="")
+
+    first = adapter.check_visibility("https://github.com/acme/widgets")
+    assert (first.is_public, first.etag, first.unchanged) == (True, '"abc123"', False)
+    assert "If-None-Match" not in requested_headers[0]
+
+    second = adapter.check_visibility("https://github.com/acme/widgets", etag=first.etag)
+    assert requested_headers[1]["If-None-Match"] == '"abc123"'
+    assert (second.is_public, second.etag, second.unchanged) == (None, '"abc123"', True)
+
+
+def test_visibility_check_with_a_stale_etag_gets_the_new_value_and_the_new_etag(monkeypatch):
+    """저장소가 비공개로 바뀌면 표현이 바뀌어 ETag 도 바뀐다 — 옛 ETag 를 보낸 조회는
+    200 과 새 값·새 ETag 를 받고, 그 값을 그대로 쓴다. 비공개는 404 라 ETag 가 없다."""
+
+    requested_headers: list[dict] = []
+    monkeypatch.setattr(
+        "requests.get", _etag_aware_repo_get(requested_headers, etag='"new"', private=True)
+    )
+    adapter = GitHubAPIAdapter(token="")
+
+    result = adapter.check_visibility("https://github.com/acme/widgets", etag='"old"')
+
+    assert requested_headers[0]["If-None-Match"] == '"old"'
+    assert (result.is_public, result.etag, result.unchanged) == (False, '"new"', False)
+
+    monkeypatch.setattr("requests.get", _public_repo_get([]))
+    missing = adapter.check_visibility("https://github.com/acme/gone", etag='"old"')
+    assert (missing.is_public, missing.etag, missing.unchanged) == (False, None, False)
+
+
+def test_check_public_never_sends_a_conditional_request(monkeypatch):
+    """강의실 채점이 채점 시점에 부르는 `check_public` 은 저장할 ETag 가 없다 — 조건
+    없이 가고 bool 만 돌려준다(304 가 생길 수 없다)."""
+
+    requested_headers: list[dict] = []
+    monkeypatch.setattr(
+        "requests.get", _etag_aware_repo_get(requested_headers, etag='"abc123"', private=False)
+    )
+
+    assert GitHubAPIAdapter(token="").check_public("https://github.com/acme/widgets") is True
+    assert "If-None-Match" not in requested_headers[0]

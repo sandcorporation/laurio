@@ -29,6 +29,7 @@ from core.repository_adapters import (
     GitHubAdapterError,
     GitHubAPIAdapter,
     GitHubRepositoryNotFoundError,
+    RepositoryVisibility,
     get_github_adapter,
 )
 
@@ -40,5 +41,6 @@ __all__ = [
     "GitHubAdapterError",
     "GitHubAPIAdapter",
     "GitHubRepositoryNotFoundError",
+    "RepositoryVisibility",
     "get_github_adapter",
 ]

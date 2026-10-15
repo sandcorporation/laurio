@@ -95,9 +95,28 @@ class ClonedRepository:
     zip_bytes: bytes
 
 
+@dataclass(frozen=True)
+class RepositoryVisibility:
+    """`check_visibility()` 의 결과 (#490).
+
+    `unchanged` 가 참이면 GitHub 이 304 를 줬다 — 저장소의 표현이 지난 확인 때와 같으니
+    호출자는 지난 `is_public` 을 그대로 쓴다(`is_public` 은 None). `etag` 는 다음 확인에
+    `If-None-Match` 로 보낼 값이고, 404(없거나 비공개)에는 없다.
+    """
+
+    is_public: bool | None
+    etag: str | None
+
+    @property
+    def unchanged(self) -> bool:
+        return self.is_public is None
+
+
 @runtime_checkable
 class GitHubAdapter(Protocol):
     def check_public(self, url: str) -> bool: ...
+
+    def check_visibility(self, url: str, *, etag: str | None = None) -> RepositoryVisibility: ...
 
     def clone(self, url: str) -> ClonedRepository: ...
 
@@ -156,6 +175,10 @@ class FakeGitHubAdapter:
             )
         return "private" not in owner.lower() and "private" not in repo.lower()
 
+    def check_visibility(self, url: str, *, etag: str | None = None) -> RepositoryVisibility:
+        # 흉내 GitHub 에는 ETag 가 없다 — 언제나 조건 없는 조회처럼 답한다.
+        return RepositoryVisibility(is_public=self.check_public(url), etag=None)
+
     def clone(self, url: str) -> ClonedRepository:
         owner, repo = _parse_github_url(url)
         if "cloneerror" in owner.lower() or "cloneerror" in repo.lower():
@@ -205,17 +228,27 @@ class GitHubAPIAdapter:
         return headers
 
     def _request(
-        self, url: str, *, what: str, owner: str, repo: str, stream: bool = False
+        self,
+        url: str,
+        *,
+        what: str,
+        owner: str,
+        repo: str,
+        stream: bool = False,
+        etag: str | None = None,
     ) -> requests.Response:
         """GitHub 호출 셋(저장소 조회·브랜치 조회·zip 다운로드)이 공유하는 네트워크
         오류 처리 — 상태 코드별 처리는 호출부마다 다르므로 응답 그대로 돌려준다
         (#193 코드리뷰 지적: 세 호출이 같은 `try/except requests.RequestException`을
         메시지 문자열만 바꿔 반복하고 있었다)."""
 
+        headers = self._headers()
+        if etag:
+            # 조건부 요청(#490) — 표현이 그대로면 GitHub 이 본문 없는 304 를 주고, 인증한
+            # 조건부 요청의 304 는 시간당 한도에 세지 않는다.
+            headers["If-None-Match"] = etag
         try:
-            return requests.get(
-                url, headers=self._headers(), timeout=self._timeout, stream=stream
-            )
+            return requests.get(url, headers=headers, timeout=self._timeout, stream=stream)
         except requests.RequestException as exc:
             raise GitHubAdapterError(
                 f"{what}이(가) 네트워크 오류로 실패했다({type(exc).__name__}, "
@@ -223,13 +256,26 @@ class GitHubAPIAdapter:
             ) from None
 
     def _repo_info(self, owner: str, repo: str) -> dict:
+        info, _etag = self._repo_info_conditional(owner, repo, etag=None)
+        if info is None:  # etag 를 안 보냈으니 304 는 올 수 없다
+            raise GitHubAdapterError(f"GitHub 저장소 조회가 본문 없이 끝났다(owner={owner}, repo={repo}).")
+        return info
+
+    def _repo_info_conditional(
+        self, owner: str, repo: str, *, etag: str | None
+    ) -> tuple[dict | None, str | None]:
+        """저장소 조회 — `(본문, ETag)`. `etag` 를 보냈고 304 를 받으면 본문이 None 이다."""
+
         response = self._request(
             f"{_GITHUB_API_BASE}/repos/{owner}/{repo}",
             what="GitHub 저장소 조회",
             owner=owner,
             repo=repo,
+            etag=etag,
         )
 
+        if etag and response.status_code == 304:
+            return None, etag
         if response.status_code == 404:
             # 존재하지 않거나 비공개(GitHub은 권한 없는 조회에 404를 준다) — 이건
             # 실패가 아니라 확정적 사실이다. `GitHubRepositoryNotFoundError`로
@@ -244,20 +290,28 @@ class GitHubAPIAdapter:
                 f"owner={owner}, repo={repo})."
             )
         try:
-            return response.json()
+            return response.json(), response.headers.get("ETag") or None
         except ValueError:
             raise GitHubAdapterError(
                 f"GitHub 저장소 조회 응답이 JSON이 아니다(owner={owner}, repo={repo})."
             ) from None
 
     def check_public(self, url: str) -> bool:
+        result = self.check_visibility(url)
+        if result.is_public is None:  # etag 없이는 304 가 없다
+            raise GitHubAdapterError(f"GitHub 저장소 조회가 본문 없이 끝났다(url={url}).")
+        return result.is_public
+
+    def check_visibility(self, url: str, *, etag: str | None = None) -> RepositoryVisibility:
         owner, repo = _parse_github_url(url)
         try:
-            info = self._repo_info(owner, repo)
+            info, new_etag = self._repo_info_conditional(owner, repo, etag=etag)
         except GitHubRepositoryNotFoundError:
             # 없거나 비공개 — 확정적으로 "공개가 아니다"다. 스캔이 이 값을
-            # 그대로 SubmissionAsset.is_public에 쓴다.
-            return False
+            # 그대로 SubmissionAsset.is_public에 쓴다. 404 에는 ETag 가 없다.
+            return RepositoryVisibility(is_public=False, etag=None)
+        if info is None:
+            return RepositoryVisibility(is_public=None, etag=new_etag)
         # 그 밖의 GitHubAdapterError(네트워크 순단·5xx·rate limit·JSON 파싱
         # 실패)는 여기서 삼키지 않고 그대로 올려 보낸다(#193 코드리뷰 지적) —
         # `repositories.services._check_repository_visibility`를 부르는
@@ -265,7 +319,7 @@ class GitHubAPIAdapter:
         # 건드리지 않는다. 다음 스캔이 다시 본다(ADR-0003) — 이 실패를 False로
         # 오분류하면 공개 저장소가 순단 한 번에 영구 비공개로 잘못 확정될 수
         # 있다.
-        return not bool(info.get("private", True))
+        return RepositoryVisibility(is_public=not bool(info.get("private", True)), etag=new_etag)
 
     def clone(self, url: str) -> ClonedRepository:
         owner, repo = _parse_github_url(url)
