@@ -21,7 +21,7 @@ trap 'exit 130' INT TERM
 
 ghcr_login
 
-# 태그마다 `imagetools create` 한 번(수 초) — 열둘을 차례로 붙이면 45초였다(laurio #481). 함께 붙이고
+# 태그마다 `imagetools create` 한 번(수 초) — 열둘을 차례로 붙이면 45초였다(codemit-deploy-staging #481). 함께 붙이고
 # 전부 기다린다. 하나라도 실패하면 붉다(나머지는 붙은 채 남는다 — 붙은 것은 그 문맥이 초록이라는 사실 그대로다).
 pids=""
 for file in "$@"; do

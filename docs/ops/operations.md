@@ -368,8 +368,8 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
   `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Jenkins
-  `codemit-pr` 가 시험을 돌려 초록이면 PR 을 `main` 에 병합하고, **곧바로 그 PR 범위**
-  (`merge-base..HEAD`)의 줄을 읽어 이슈를 resolved 로 돌린다(`Jenkinsfile.pr` 의 병합 단계,
+  `codemit-ci-pr` 가 sub 검사로 줄 세우고 열차 `codemit-ci-train` 이 초록 묶음을 `main` 에 병합하고, **곧바로 그 PR 범위**
+  (`merge-base..HEAD`)의 줄을 읽어 이슈를 resolved 로 돌린다(`Jenkinsfile.train` 의 병합 단계,
   자격증명 `glitchtip-automation-token`) — 「고친 것 같다」와 「고쳤다」를 가르는 자리다.
   범위가 PR 하나로 정확히 닫히므로 옛 방식의 두 문제가 없다: push 와 표시 사이의 5~10분
   공백(그래서 두던 `glitchtip-ack` 예고 코멘트)과, 연달아 push 할 때 취소된 실행이 범위를

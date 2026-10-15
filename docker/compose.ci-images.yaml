@@ -7,7 +7,7 @@
 # 열차(`Jenkinsfile.train`)의 macos 가지가 `images.sh arm64` 로 여섯을 굽고(바뀌지 않은 것은 ctx 로
 # 건너뛰어 커밋 태그만 더한다) 그 커밋 태그로 e2e·celery 를 돈다. 그래서 e2e 가 본 이미지의 digest 가
 # 곧 prod 에 가는 이미지의 digest 다 — 예전처럼 스택이 `up --build` 로 따로 구운 이미지가 아니다.
-# 초록이면 열차가 ctx 태그를 붙이고, 병합 뒤 laurio 는 같은 문맥을 「건너뛴다」로 두어 태그만 더한다.
+# 초록이면 열차가 ctx 태그를 붙이고, 병합 뒤 codemit-deploy-staging 은 같은 문맥을 「건너뛴다」로 두어 태그만 더한다.
 #
 # `compose.ci.yaml` 이 정한 것(`runner` 타깃, 마운트·포트 걷기, gunicorn 명령)은 그대로 받는다 — 여기서는
 # `build` 를 걷고 `image` 만 준다. backend 계열 다섯(backend·events·grader·celery-worker·celery-beat)은

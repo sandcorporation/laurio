@@ -5,7 +5,7 @@
 로컬 게이트는 셋이다 — **바꾼 자리의 백엔드 시험**(`scripts/test.sh backend <파일…>`,
 400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. Jenkins
-`codemit-pr` 가 sub 검사를 통과한 커밋을 줄 세우고, 묶음 병합 큐 `codemit-train` 이 줄 선 PR 을
+`codemit-ci-pr` 가 sub 검사를 통과한 커밋을 줄 세우고, 묶음 병합 큐 `codemit-ci-train` 이 줄 선 PR 을
 최신 `main` 위에 묶어 e2e 까지 시험한 뒤 **스스로 `main` 에 rebase 병합한다**(2026-10-03) — 사람이 머지 버튼을
 누르지 않고, `main` 에 직접 push 하지 않는다(시험 없이 이미지가 구워져 staging 까지 간다).
 병합을 막으려면 초안으로 열거나 `hold` 라벨을 붙인다. 다음 티켓을 시작하기 전에 PR 의 결과
@@ -52,6 +52,6 @@ scripts/test.sh e2e --project=public e2e/payout.spec.ts -g "상금 그대로가"
 안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 4초가 아니라 7분**이 된다. 슬라이스
 하나에 그 왕복이 여러 번 있으니 티켓 하나가 통째로 테스트 대기에 잠긴다.
 
-**CI 가 돌리는 것.** 열차(`codemit-train`)의 macos 가지가 `scripts/ci/e2e.sh` 로 세 프로젝트를
+**CI 가 돌리는 것.** 열차(`codemit-ci-train`)의 macos 가지가 `scripts/ci/e2e.sh` 로 세 프로젝트를
 `frontend/scripts/e2e-two-pass.sh` 의 두 패스씩 돈다(#702). 로컬에서 같은 것을 한 프로젝트만 돌리면
 `scripts/test.sh e2e --project=<public|operator|classroom>` 이고, 한 번에 400개까지다.

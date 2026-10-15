@@ -343,7 +343,7 @@ class IgnoredFilesDoNotMoveTheHash(unittest.TestCase):
 
 
 class ChangedServices(unittest.TestCase):
-    """deploy.sh plan 이 두 커밋 사이에 바꿔 끼울 서비스를 문맥 해시로 고른다(#712, laurio #474 —
+    """deploy.sh plan 이 두 커밋 사이에 바꿔 끼울 서비스를 문맥 해시로 고른다(#712, codemit-deploy-staging #474 —
     `frontend/playwright.config.ts` 주석만 바뀐 커밋에 frontend 를 다시 띄웠다)."""
 
     FILES = (

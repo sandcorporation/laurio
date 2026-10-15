@@ -139,12 +139,12 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 
 **커밋이 prod 까지 가는 길은 넷이다**(2026-10-02, 둘째·셋째는 2026-10-15 에 한 잡으로 — #705):
 
-1. **브랜치 → PR → `main`.** Jenkins `codemit-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
-   sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit-train`(`Jenkinsfile.train`)이 줄 선
+1. **브랜치 → PR → `main`.** Jenkins `codemit-ci-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
+   sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit-ci-train`(`Jenkinsfile.train`)이 줄 선
    PR 을 최신 `main` 위에 묶어 e2e 까지 한 번 시험한 뒤 차례로 **rebase 병합**한다(초안·`hold`
    라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 staging 까지 간다.
-2. **`main` → `staging`.** `main` 의 push 가 웹훅으로 Jenkins `laurio` 잡(`Jenkinsfile`)을 부른다.
+2. **`main` → `staging`.** `main` 의 push 가 웹훅으로 Jenkins `codemit-deploy-staging` 잡(`Jenkinsfile`)을 부른다.
    그 잡이 이미지(바뀐 서비스만, 아래)와 부팅 가드를 돌리고, 다 초록이면 구운 이미지에 문맥 태그를 붙인 뒤 `staging` 을 그 커밋으로
    **fast-forward** 한다(`scripts/ci/fast_forward.py staging <sha>`, 자격증명
    `github-sandcorporation-token`). 마지막 staging 배포(배포 표식) 뒤로 문서(`.md`·`docs/`)만 바뀌었으면
@@ -160,9 +160,9 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
    을 앞당겼고, 그 push 가 이 잡을 불렀다 — 조직의 Actions 분량이 바닥나 떠났다(ADR-0061).
 4. **staging 초록 → `production` → prod 배포.** 그 잡이 끝에서 `production` 을 같은 커밋으로
    fast-forward 하고(`scripts/ci/fast_forward.py`, Jenkins 자격증명 `github-sandcorporation-token`),
-   웹훅이 `codemit` 잡(`Jenkinsfile.production`)을 부른다. **이 넷째 길은 지금 꺼져 있다**
+   웹훅이 `codemit-deploy-prod` 잡(`Jenkinsfile.production`)을 부른다. **이 넷째 길은 지금 꺼져 있다**
    (2026-10-14, `Jenkinsfile` 의 `PROMOTE_PRODUCTION` 기본값 `false`) — 강의실 화면을 시안 v2 로
-   고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `laurio` 잡을 「Build with
+   고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `codemit-deploy-staging` 잡을 「Build with
    Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다.
 
 `staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
@@ -178,10 +178,10 @@ prod 배포의 `Jenkinsfile.production` 은 `production` 브랜치
 buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 네 빌드가 전부 죽었다(2026-09-14 빌드
 #4~#6, 지금은 `deploy.sh` preflight 가 먼저 멈춘다). 호스트 `/var/jenkins_home/workspace` 가 컨테이너
 `/home/jenkins/agent/workspace` 로 붙어 있어, 노드의 Remote root directory 는 컨테이너 경로
-`/home/jenkins/agent`, 잡 이름은 `codemit` 이어야 호스트의 `/var/jenkins_home/workspace/codemit` 에 둔
+`/home/jenkins/agent`, 잡 이름은 `codemit-deploy-prod` 여야 호스트의 `/var/jenkins_home/workspace/codemit-deploy-prod` 에 둔
 `docker/.env.prod`(chmod 600)·배포 표식을 쓴다. 잡·노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
-**이미지는 Jenkins `laurio` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
+**이미지는 Jenkins `codemit-deploy-staging` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
 2026-10-15 Jenkins — #705, ADR-0061). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
 배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 `Jenkinsfile` 의 「이미지」
 단계가 두 노드에서 함께 `scripts/ci/images.sh` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
@@ -208,7 +208,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   빌드의 이미지는 ctx 가 없어 다음 빌드가 다시 굽고 가드도 다시 돈다(같은 커밋을 다시 돌려도). 콘솔에 서비스마다 「굽는다/건너뛴다」 한 줄이 남는다. `deploy.sh plan` 도
   **같은 해시로** 바꿔 끼울 서비스를 고른다(#712, `image_context.py changed <직전 배포> HEAD`) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
-  아무것도 다시 띄우지 않는다(예전의 경로 패턴은 laurio #474 에서 `frontend/playwright.config.ts` 주석 하나에
+  아무것도 다시 띄우지 않는다(예전의 경로 패턴은 codemit-deploy-staging #474 에서 `frontend/playwright.config.ts` 주석 하나에
   frontend 를 다시 띄웠다). 해시를 내지 못하면(호스트에 python3 가 없다 등) 경로 패턴으로 떨어진다. compose
   파일·없는 컨테이너·앱 실행 env 의 규칙은 그대로다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
@@ -240,7 +240,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   와 시크릿 `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN` 삭제(그 배포 키도 저장소 Deploy keys 에서),
   조직의 GitHub 셀프호스티드 러너(sub 3대, mac-arm 3대) 해제와 그 컨테이너 내리기.
 
-**staging 배포는 `main` 의 push 가 부른다**(2026-10-15, #705). Jenkins 잡(`/var/jenkins_home/jobs/laurio`)은
+**staging 배포는 `main` 의 push 가 부른다**(2026-10-15, #705). Jenkins 잡(`/var/jenkins_home/jobs/codemit-deploy-staging`)은
 **Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main`,
 트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. 같은 빌드가 이미지 → 부팅 가드 → `staging` 앞당기기
 → 배포를 차례로 돌므로 배포 단계에 닿는 순간 이미지는 ghcr 에 있다. 단계마다 노드가 달라 다시
@@ -483,9 +483,9 @@ jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개�
 컨테이너도 경로도 없다).
 
 Jenkins 컨테이너는 호스트 docker 소켓을 물고 root 로 돈다. 빌드 로그는
-`docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/laurio/builds/<N>/log'`.
-워크스페이스는 컨테이너의 `/var/jenkins_home/workspace/laurio` 이자 호스트의
-`/server/jenkins/workspace/laurio` 다 — **경로가 다르므로** compose 에 상대경로
+`docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/codemit-deploy-staging/builds/<N>/log'`.
+워크스페이스는 컨테이너의 `/var/jenkins_home/workspace/codemit-deploy-staging` 이자 호스트의
+`/server/jenkins/workspace/codemit-deploy-staging` 다 — **경로가 다르므로** compose 에 상대경로
 바인드 마운트를 넣으면 호스트 데몬이 엉뚱한 곳을 본다. 지금은 named volume 뿐이다.
 
 **마이그레이션이 앱마다 단일 initial 로 다시 만들어졌다**(#364, 부모 #358).
