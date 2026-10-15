@@ -311,10 +311,33 @@ TABLE_FILE = "scripts/ci/image_context.py"
 _TABLE_VERSION = re.compile(r'^HASH_VERSION = "([^"]*)"', re.MULTILINE)
 _TABLE_SERVICE = re.compile(r'^\s*Service\("([\w-]+)"(.*)$', re.MULTILINE)
 _TABLE_TARGET = re.compile(r'target="([^"]*)"')
+_TABLE_PATHS = re.compile(r'^\s*,\s*\(([^()]*)\)')
+_TABLE_TUPLE = r'^{name} = \(([^()]*)\)'
 
 
-def table_at(rev: str) -> tuple[str, dict[str, str]] | None:
-    """`rev` 의 이 파일에서 (HASH_VERSION, 서비스 → 빌드 대상)을 읽는다 — 실행하지 않고 줄로 읽는다.
+def _table_paths(items: str, text: str) -> tuple[str, ...]:
+    """표 한 칸의 경로 튜플 안쪽(`"a", *NODE_WORKSPACE`)을 경로 목록으로 — 실행하지 않고 읽는다.
+
+    `*이름` 은 같은 파일의 `이름 = (…)` 한 줄에서 읽는다. 모르는 모양이면 SystemExit — 모르는 것이다.
+    """
+    paths: list[str] = []
+    for item in (part.strip() for part in items.split(",")):
+        if not item:
+            continue
+        literal = re.fullmatch(r'"([^"]*)"', item)
+        if literal:
+            paths.append(literal.group(1))
+            continue
+        star = re.fullmatch(r"\*([A-Z_]+)", item)
+        shared = re.search(_TABLE_TUPLE.format(name=star.group(1)), text, re.MULTILINE) if star else None
+        if not shared:
+            raise SystemExit(f"{TABLE_FILE} 의 표에서 경로 {item} 를 읽지 못했다")
+        paths.extend(_table_paths(shared.group(1), ""))
+    return tuple(paths)
+
+
+def table_at(rev: str) -> tuple[str, dict[str, Service]] | None:
+    """`rev` 의 이 파일에서 (HASH_VERSION, 서비스 → 경로·빌드 대상)을 읽는다 — 실행하지 않고 줄로 읽는다.
 
     파일이 그 커밋에 없으면 None(이 표를 그대로 쓴다). 있는데 읽지 못하면 SystemExit — 모르는 것이다.
     """
@@ -323,13 +346,19 @@ def table_at(rev: str) -> tuple[str, dict[str, str]] | None:
     except subprocess.CalledProcessError:
         return None
     version = _TABLE_VERSION.search(text)
-    targets = {}
+    services = {}
     for match in _TABLE_SERVICE.finditer(text):
-        target = _TABLE_TARGET.search(match.group(2))
-        targets[match.group(1)] = target.group(1) if target else ""
-    if not version or not targets:
+        rest = match.group(2)
+        paths = _TABLE_PATHS.search(rest)
+        if not paths:
+            raise SystemExit(f"{rev} 의 {TABLE_FILE} 에서 {match.group(1)} 의 경로를 읽지 못했다")
+        target = _TABLE_TARGET.search(rest[paths.end():])
+        services[match.group(1)] = Service(
+            match.group(1), _table_paths(paths.group(1), text), target.group(1) if target else ""
+        )
+    if not version or not services:
         raise SystemExit(f"{rev} 의 {TABLE_FILE} 에서 표를 읽지 못했다")
-    return version.group(1), targets
+    return version.group(1), services
 
 
 def changed_services(old: str, new: str, platform: str = "") -> list[str]:
@@ -339,11 +368,12 @@ def changed_services(old: str, new: str, platform: str = "") -> list[str]:
     기준이다(예전의 경로 패턴은 `.dockerignore` 가 빼는 파일도 「바뀜」으로 봤다). 경로별 객체만이 아니라
     **양쪽 커밋의 표**에서 빌드 대상과 `HASH_VERSION` 을 읽어 해시 전체를 견준다(#729) — 표의 target 만 바꾼
     커밋은 `codemit-deploy-staging` 이 다시 굽는데, 예전의 `changed` 는 이 파일(새 커밋의 표)의 target 을 양쪽에
-    써서 그 서비스를 바꿔 끼우지 않았다. 플랫폼은 배포 호스트 하나의 것이라 양쪽이 같다(해시에는 넣는다).
+    써서 그 서비스를 바꿔 끼우지 않았다. 경로 목록도 그 커밋의 표의 것을 쓴다(#738) — 표에서 경로를 빼기만 한
+    커밋을 지금 표로 양쪽에 재면 「같다」가 됐다. 플랫폼은 배포 호스트 하나의 것이라 양쪽이 같다(해시에는 넣는다).
     어느 쪽에서든 표의 경로가 없거나(옛 커밋이 그 디렉터리를 몰랐다) 표를 읽지 못하면 모르는 것이고, 모르면
     바꿔 끼운다. 옛 커밋에 표가 아예 없으면 이 표를 쓴다.
     """
-    here = (HASH_VERSION, {svc.name: svc.target for svc in SERVICES.values()})
+    here = (HASH_VERSION, SERVICES)
     try:
         tables = {rev: table_at(rev) or here for rev in (old, new)}
     except (SystemExit, subprocess.CalledProcessError):
@@ -352,10 +382,11 @@ def changed_services(old: str, new: str, platform: str = "") -> list[str]:
     for svc in SERVICES.values():
         try:
             digests = set()
-            for rev, (version, targets) in tables.items():
-                if svc.name not in targets:
+            for rev, (version, table) in tables.items():
+                if svc.name not in table:
                     raise SystemExit(f"{rev} 의 표에 {svc.name} 이 없다")
-                digests.add(context_digest(service_objects(svc, rev), targets[svc.name], platform, {}, version))
+                then = table[svc.name]
+                digests.add(context_digest(service_objects(then, rev), then.target, platform, {}, version))
             same = len(digests) == 1
         except (SystemExit, subprocess.CalledProcessError):
             same = False

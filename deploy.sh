@@ -966,6 +966,13 @@ cmd_verify() {
 # 이유: oracle 에이전트에는 Jenkins 자격증명이 없고(copyartifact 플러그인도 없다), 레지스트리 로그인은 이미
 # 있다. 태그가 없으면 열차를 거치지 않은 트리(직접 push·병합 사이에 main 이 움직였다)라고 적는다.
 # **관측만 한다 — 다르거나 대조하지 못해도 0 으로 끝난다.** 콘솔의 「e2e 대조:」 줄이 결과다.
+#
+# **다르다고 다 다른 코드는 아니다**(#738). ctx 태그가 prune 으로 지워진 서비스는 열차가 같은 문맥을 다시
+# 굽는데 buildx 는 digest 가 같다는 보장이 없고, `plan` 은 문맥이 같으니 그 서비스를 바꿔 끼우지 않는다. 그래서
+# 다르면 떠 있는 컨테이너를 만든 커밋(이미지 이름의 `<sha>-<arch>` 태그 — 배포가 `CODEMIT_IMAGE_TAG` 로 쓴
+# 것)과 이 커밋의 문맥을 `plan` 과 같은 `image_context.py changed` 로 견준다: 같으면 「다르다(문맥 같음 — 다시
+# 구운 것)」, 다르면 「다르다!(문맥 다름)」, 견주지 못하면(커밋 태그가 아니다·그 커밋을 모른다) 「다르다!(문맥
+# 모름)」. 어느 쪽이든 두 이미지 ID 와 떠 있는 커밋을 줄에 싣는다.
 cmd_e2e_digest() {
   arch=arm64
   [ "$TARGET" = prod ] || arch=amd64
@@ -975,7 +982,9 @@ cmd_e2e_digest() {
   fi
   repo="${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}"
   tree=$($GIT rev-parse "HEAD^{tree}" 2>/dev/null) || { log "e2e 대조: 이 커밋의 트리를 모른다"; return 0; }
-  same=0; differ=0; missing=0
+  head=$($GIT rev-parse HEAD 2>/dev/null)
+  same=0; rebuilt=0; differ=0; missing=0
+  ctx_rev=""; ctx_changed=""; ctx_ok=false
   for svc in backend frontend operator classroom; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
@@ -992,11 +1001,44 @@ cmd_e2e_digest() {
     if [ -n "$running" ] && [ "$running" = "$tested" ]; then
       echo "e2e 대조: $svc — 같다 ($(echo "$running" | cut -c1-19))"; same=$((same + 1))
     else
-      echo "e2e 대조: $svc — 다르다! 떠 있는 것 $(echo "$running" | cut -c1-19), e2e 가 본 것 $(echo "$tested" | cut -c1-19)"
-      differ=$((differ + 1))
+      # 떠 있는 컨테이너를 만든 커밋 — 이미지 이름이 `…:<40자 sha>-<arch>` 일 때만 안다.
+      started=$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null)
+      started=${started##*:}
+      started=${started%-"$arch"}
+      case "$started" in
+        *[!0-9a-f]*|'') started="" ;;
+        *) [ ${#started} -eq 40 ] || started="" ;;
+      esac
+      if [ -z "$started" ]; then
+        verdict='다르다!(문맥 모름)'
+      elif [ "$started" = "$head" ]; then
+        verdict='다르다(문맥 같음 — 다시 구운 것)'
+      else
+        # 같은 커밋은 한 번만 견준다 — `changed` 는 여섯 서비스를 다 잰다.
+        if [ "$started" != "$ctx_rev" ]; then
+          ctx_rev=$started
+          if ctx_changed=$(python3 scripts/ci/image_context.py changed "$started" HEAD 2>/dev/null); then
+            ctx_ok=true
+          else
+            ctx_ok=false
+          fi
+        fi
+        if [ "$ctx_ok" != true ]; then
+          verdict='다르다!(문맥 모름)'
+        elif echo " $(echo $ctx_changed) " | grep -q " $svc "; then
+          verdict='다르다!(문맥 다름)'
+        else
+          verdict='다르다(문맥 같음 — 다시 구운 것)'
+        fi
+      fi
+      case "$verdict" in
+        다르다\(*) rebuilt=$((rebuilt + 1)) ;;
+        *) differ=$((differ + 1)) ;;
+      esac
+      echo "e2e 대조: $svc — $verdict 떠 있는 것 $(echo "$running" | cut -c1-19) ($(echo "${started:-커밋 모름}" | cut -c1-12)), e2e 가 본 것 $(echo "$tested" | cut -c1-19)"
     fi
   done
-  log "e2e 대조: 같다 $same · 다르다 $differ · 대조 못 함 $missing (트리 $(echo "$tree" | cut -c1-12))"
+  log "e2e 대조: 같다 $same · 다시 구움 $rebuilt · 다르다 $differ · 대조 못 함 $missing (트리 $(echo "$tree" | cut -c1-12))"
   return 0
 }
 

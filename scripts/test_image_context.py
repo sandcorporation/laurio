@@ -412,11 +412,11 @@ class ChangedServices(unittest.TestCase):
         cwd = pathlib.Path.cwd()
         os.chdir(self.repo)
         try:
-            version, targets = ic.table_at(head)
+            version, services = ic.table_at(head)
         finally:
             os.chdir(cwd)
         self.assertEqual(version, ic.HASH_VERSION)
-        self.assertEqual(targets, {svc.name: svc.target for svc in ic.SERVICES.values()})
+        self.assertEqual(services, ic.SERVICES)
 
     def test_a_target_change_in_the_table_changes_that_service(self) -> None:
         # #729 — 표의 target 만 바꾼 커밋은 다시 구워지므로 바꿔 끼워야 한다.
@@ -425,6 +425,26 @@ class ChangedServices(unittest.TestCase):
             'Service("operator", ("operator", *NODE_WORKSPACE), target="runner")',
             'Service("operator", ("operator", *NODE_WORKSPACE), target="slim")'))
         self.assertEqual(self.changed(old, head), ["operator"])
+
+    def test_a_path_removed_from_the_table_changes_that_service(self) -> None:
+        # #738 — 표에서 경로를 빼기만 한 커밋은 images.sh 의 해시가 바뀌어 다시 구워진다. 옛 커밋의 해시는
+        # 옛 표의 경로로 내야 한다(지금 표를 양쪽에 쓰면 「같다」가 된다).
+        old = self.commit(ic.TABLE_FILE, self.TABLE)
+        head = self.commit(ic.TABLE_FILE, self.TABLE.replace(
+            'Service("pgbouncer", ("docker/pgbouncer",))', 'Service("pgbouncer", ())'))
+        self.assertEqual(self.changed(old, head), ["pgbouncer"])
+
+    def test_a_path_added_to_the_table_changes_that_service(self) -> None:
+        old = self.commit(ic.TABLE_FILE, self.TABLE)
+        head = self.commit(ic.TABLE_FILE, self.TABLE.replace(
+            'Service("search", ())', 'Service("search", ("docker/pgbouncer",))'))
+        self.assertEqual(self.changed(old, head), ["search"])
+
+    def test_a_path_removed_from_a_shared_tuple_changes_its_users(self) -> None:
+        old = self.commit(ic.TABLE_FILE, self.TABLE)
+        head = self.commit(ic.TABLE_FILE, self.TABLE.replace(', "pnpm-lock.yaml")', ")", 1))
+        self.assertNotEqual(old, head)
+        self.assertEqual(self.changed(old, head), ["frontend", "operator", "classroom"])
 
     def test_a_hash_version_bump_changes_everything(self) -> None:
         old = self.commit(ic.TABLE_FILE, self.TABLE)
