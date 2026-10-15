@@ -1035,7 +1035,10 @@ cmd_e2e_digest() {
         다르다\(*) rebuilt=$((rebuilt + 1)) ;;
         *) differ=$((differ + 1)) ;;
       esac
-      echo "e2e 대조: $svc — $verdict 떠 있는 것 $(echo "$running" | cut -c1-19) ($(echo "${started:-커밋 모름}" | cut -c1-12)), e2e 가 본 것 $(echo "$tested" | cut -c1-19)"
+      # `cut -c` 는 C 로캘에서 바이트로 자른다 — 한글이 든 값은 자르지 않는다.
+      shown="커밋 모름"
+      [ -z "$started" ] || shown=$(echo "$started" | cut -c1-12)
+      echo "e2e 대조: $svc — $verdict 떠 있는 것 $(echo "$running" | cut -c1-19) ($shown), e2e 가 본 것 $(echo "$tested" | cut -c1-19)"
     fi
   done
   log "e2e 대조: 같다 $same · 다시 구움 $rebuilt · 다르다 $differ · 대조 못 함 $missing (트리 $(echo "$tree" | cut -c1-12))"
