@@ -72,4 +72,8 @@ describe("probeBackendHealth", () => {
     await server.close();
     expect(await probeBackendHealth(url, 1000)).toBe("unreachable");
   });
+
+  test("주소가 잘못돼도 던지지 않고 unreachable", async () => {
+    expect(await probeBackendHealth("not a url/healthz", 1000)).toBe("unreachable");
+  });
 });
