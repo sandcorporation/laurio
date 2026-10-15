@@ -24,7 +24,8 @@ DSN·환경·release, 토스 클라이언트 키, 포트원 둘, 문의 주소, 
 그리므로 빌드 머신의 빈 값이 HTML 에 박히지 않는다. `instrumentation-client.ts` 는 async 라 그
 `<script>` 보다 먼저 돌 수 있어, 값이 아직 없으면 `DOMContentLoaded` 까지 Sentry 초기화를 미룬다.
 새 공개 값을 더하면 `NEXT_PUBLIC_` 이 아니라 그 목록과 compose 두 파일의 `environment:` 에 더한다.
-둘 다 시험이 지킨다(#727): `process.env.NEXT_PUBLIC_` 이 세 앱·`packages/` 에 다시 들어오면
+둘 다 시험이 지킨다(#727): `process.env.NEXT_PUBLIC_` 이 세 앱·`packages/` 에 다시 들어오거나
+`next.config.*` 에 `env:` 키가 생기면(#733)
 `backend/tests/test_next_public_env_stays_out.py` 가, 목록 이름이 바뀌면 `<앱>/lib/public-config.test.ts` 가
 막는다 — 비밀을 `CODEMIT_PUBLIC_*` 이름으로 넣는 실수는 목록 시험에서만 걸린다.
 

@@ -57,3 +57,38 @@ def test_the_scan_sees_the_apps_and_catches_the_pattern():
     assert BUILD_TIME_ENV.search('const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;')
     assert BUILD_TIME_ENV.search('process.env["NEXT_PUBLIC_X"]')
     assert not BUILD_TIME_ENV.search("process.env.CODEMIT_PUBLIC_SENTRY_DSN")
+
+
+# `next.config.*` 의 `env: { … }` 는 이름과 상관없이 값을 빌드 때 번들에 굳히는 남은 길이다 — 세 앱 모두
+# 이 키를 쓰지 않는다. 줄 머리의 `env:` 키(따옴표 포함)만 본다: 줄 단위 정규식이라
+# `process.env?.NEXT_PUBLIC_X`·`const { NEXT_PUBLIC_X } = process.env` 같은 구조 분해 꼴, 그리고
+# `env,` 단축 속성은 이 시험이 잡지 못한다.
+NEXT_CONFIG = re.compile(r"^next\.config\.(ts|js|mjs|cjs)$")
+CONFIG_ENV_KEY = re.compile(r"""^\s*["']?env["']?\s*:""")
+
+
+def _next_configs() -> list[Path]:
+    return [
+        REPO_ROOT / app / f
+        for app in ("frontend", "operator", "classroom")
+        for f in os.listdir(REPO_ROOT / app)
+        if NEXT_CONFIG.match(f)
+    ]
+
+
+def test_no_next_config_bakes_env_into_the_bundle():
+    configs = _next_configs()
+    assert len(configs) == 3, configs
+    hits = [
+        f"{path.relative_to(REPO_ROOT)}:{n}: {line.strip()}"
+        for path in configs
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if CONFIG_ENV_KEY.search(line) and not COMMENT_LINE.match(line)
+    ]
+    assert not hits, (
+        "`next.config` 의 `env` 는 값을 빌드 때 번들에 굳힌다 — 공개 값은 `CODEMIT_PUBLIC_*` 로 실행 때 "
+        "읽는다(docs/ops/frontend.md):\n" + "\n".join(hits)
+    )
+    assert CONFIG_ENV_KEY.search("  env: { FOO: 'x' },")
+    assert CONFIG_ENV_KEY.search('  "env": {},')
+    assert not CONFIG_ENV_KEY.search("  environment: 'x',")

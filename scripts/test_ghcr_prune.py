@@ -17,6 +17,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 import ghcr_prune as gp  # noqa: E402
+import image_context  # noqa: E402
 
 LIVE = "a" * 40
 
@@ -82,6 +83,12 @@ class Unmerged(unittest.TestCase):
     def test_the_prune_job_passes_the_main_list(self) -> None:
         jenkinsfile = (ROOT / "Jenkinsfile.ghcr-prune").read_text()
         self.assertIn("--main-shas .prune-main", jenkinsfile)
+
+
+class Packages(unittest.TestCase):
+    def test_prune_walks_every_image_the_build_pushes(self) -> None:
+        # 어긋나면 새 서비스의 빌드 캐시 태그가 LIVE_CACHE_TAG 에 안 걸려 매일 「옛 이름」으로 지워진다.
+        self.assertEqual({i.removeprefix("codemit-") for i in gp.IMAGES}, set(image_context.SERVICES))
 
 
 if __name__ == "__main__":
