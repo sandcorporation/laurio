@@ -113,7 +113,14 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 - **`timeout = 30` 의 뜻이 바뀌었다**: sync 에서는 요청 하나가 30초를 넘기면 워커를 죽였지만,
   gthread 의 주 루프는 요청과 상관없이 1초마다 살아 있다고 알리므로 이제는 주 루프가 멈춘
   워커만 거둔다. 요청 안의 벤더 호출(공모전 채점·요구사항 대화·채점 모델 시험 호출)은 제
-  타임아웃 20초를 따로 들고, `call_internal` 은 30초에 부른 쪽이 끊는다.
+  타임아웃 20초를 따로 들고, `call_internal` 은 30초에 부른 쪽이 끊는다. 요청 안의 SQL 문은
+  `core/db_timeouts.py` 가 `statement_timeout` 25초·`lock_timeout` 5초로 끊는다(#745 — 문마다
+  `SET LOCAL` 을 함께 실어 트랜잭션 모드 풀러에서도 그 문에만 걸리고, celery·관리 명령에는
+  걸리지 않는다. 값은 `CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS`·`CODEMIT_REQUEST_LOCK_TIMEOUT_MS`).
+  끊긴 요청은 500 이고 GlitchTip 에 `OperationalError: canceling statement due to statement
+  timeout`(잠금이면 `… due to lock timeout`)으로 잡힌다. 10초를 넘긴 요청 수는
+  `sum(rate(codemit_http_request_duration_seconds_count[5m])) - sum(rate(codemit_http_request_duration_seconds_bucket{le="10.0"}[5m]))`
+  — 히스토그램은 끝난 요청만 세므로, 끝나지 않고 걸린 요청은 여기에 안 보인다.
 - **`keepalive = 5`**: sync 는 응답마다 연결을 닫았지만 gthread 는 살려 둔다. 서버가 BFF 의
   undici(쉬는 연결을 4초 뒤 버린다, Node 22 기본값)보다 먼저 닫으면 막 닫힌 연결에 요청이 실려
   `other side closed` 로 떨어지므로 서버가 더 길게 둔다. 쉬는 연결은 스레드를 쥐지 않는다.

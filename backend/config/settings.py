@@ -179,6 +179,9 @@ MIDDLEWARE = [
     # 요청량·지연·상태코드(core/metrics.py) — 바깥쪽에 두어야 체인 전체가 걸린 시간과
     # 체인 중간에서 결정된 최종 상태코드를 잰다.
     "core.metrics.MetricsMiddleware",
+    # 요청 안의 SQL 문에 statement_timeout·lock_timeout 을 건다(#745, core/db_timeouts.py) —
+    # gthread 는 걸린 요청을 죽이지 않는다. 세션 미들웨어의 쿼리도 덮도록 앞쪽에 둔다.
+    "core.db_timeouts.RequestDbTimeoutMiddleware",
     # 가장 바깥쪽에 둔다 — CommonMiddleware의 APPEND_SLASH 301, CsrfViewMiddleware의
     # 403 등 체인 중간에서 반환되는 응답도 이 미들웨어를 반드시 한 번 더 거쳐 나가므로
     # CSP 헤더가 모든 응답에 실제로 붙는다(ADR-0012 — 세 보완책 중 하나라도 빠지면
@@ -314,6 +317,11 @@ DATABASES = {
         ),
     }
 }
+
+# 요청 경로의 DB 한도(#745, core/db_timeouts.py) — 밀리초, 0 이면 끔. statement 는 gunicorn 요청
+# 예산(30초) 안, lock 은 그보다 짧게. celery·관리 명령에는 걸리지 않는다.
+CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS = int(_env("CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS", "25000"))
+CODEMIT_REQUEST_LOCK_TIMEOUT_MS = int(_env("CODEMIT_REQUEST_LOCK_TIMEOUT_MS", "5000"))
 
 # **연결 사용률을 재는 전용 별칭**(#455/#458) — 「상한에 얼마나 가까운가」는 DB
 # 자신에게 물어야 한다. 배포에서는 앱의 "default" 연결이 연결 풀러를 거치므로
