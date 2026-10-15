@@ -224,6 +224,7 @@ export default function ProblemSubmitPage() {
         gradingStrictness={problem.grading_strictness}
         gradingGuidelineCustomText={problem.grading_guideline_text}
         submissionFormats={problem.submission_formats}
+        zipGitHistoryWarning={problem.zip_git_history_warning !== null}
         submissions={submissions}
         viewingAsInstructor={viewingAsInstructor}
         instructorProblemStatus={instructorProblemStatus}

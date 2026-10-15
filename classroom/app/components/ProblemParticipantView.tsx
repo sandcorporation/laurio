@@ -29,6 +29,7 @@ import {
   ErrorNote,
   FieldLabel,
   INPUT_CLASS,
+  Note,
   buttonClass,
 } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
@@ -72,6 +73,9 @@ type InteractiveProps = {
   /** 공모전 문제의 「공모전에도 내기」 칸(#549) — 제출 입력 위에 선다. 공모전 문제가 아니거나
    *  공모전이 지금 받지 않으면 비운다. */
   contestEntry?: ReactNode;
+  /** 필수 항목이 Git 기록을 물어 zip 으로는 언제나 놓치는 문제인가(#587, 백엔드 판정) —
+   *  zip 을 고르면 보이는 안내가 경고 띠로 바뀐다. */
+  zipGitHistoryWarning?: boolean;
 };
 
 type PreviewProps = {
@@ -651,6 +655,7 @@ function InteractiveSubmissionForm(
     uploadError,
     submissionFormats,
     contestEntry,
+    zipGitHistoryWarning = false,
   } = props;
 
   // 둘 다 열린 문제는 형식 선택을 먼저 보인다(#373 AC) — 하나만 열린
@@ -783,6 +788,31 @@ function InteractiveSubmissionForm(
         </form>
       ) : (
         <div className="flex flex-col gap-2">
+          {zipGitHistoryWarning ? (
+            <Note tone="attention">
+              <div data-testid="zip-git-history-warning" className="flex flex-col gap-2">
+                <p className="text-attention">
+                  {submissionFormats.includes("repository")
+                    ? "이 문제는 커밋 기록을 봅니다. zip 에는 Git 기록(.git)이 들어가지 않으니 저장소로 내세요."
+                    : "이 문제는 커밋 기록을 봅니다. zip 에는 Git 기록(.git)이 들어가지 않아 그 항목은 충족되지 않습니다."}
+                </p>
+                {submissionFormats.includes("repository") ? (
+                  <button
+                    type="button"
+                    data-testid="zip-git-history-use-repository"
+                    onClick={() => setChosenFormat("repository")}
+                    className={`${buttonClass("secondary", "sm")} self-start`}
+                  >
+                    저장소로 내기
+                  </button>
+                ) : null}
+              </div>
+            </Note>
+          ) : (
+            <p data-testid="zip-git-history-note" className="text-[12px] leading-relaxed text-ink/55">
+              zip 에는 Git 기록(.git)이 들어가지 않습니다. 커밋 기록을 보여야 하는 문제는 저장소로 내세요.
+            </p>
+          )}
           {/* 드롭 칸 — 투명한 파일 입력이 칸 전체를 덮어 끌어다 놓기와 고르기를 함께 받는다. */}
           <div className="relative border border-dashed border-rule bg-paper px-5 py-6 text-center text-[13.5px] text-ink/60">
             소스 zip 을 끌어다 놓거나 <span className="text-attention">고르기</span>
