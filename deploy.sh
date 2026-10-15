@@ -1017,7 +1017,11 @@ cmd_e2e_digest() {
         # 같은 커밋은 한 번만 견준다 — `changed` 는 여섯 서비스를 다 잰다.
         if [ "$started" != "$ctx_rev" ]; then
           ctx_rev=$started
-          if ctx_changed=$(python3 scripts/ci/image_context.py changed "$started" HEAD 2>/dev/null); then
+          # 그 커밋이 이 체크아웃에 없는지는 여기서 가른다 — `changed` 는 모르는 커밋을 「전부 바뀜」으로
+          # 답하고 0 으로 끝난다. `plan` 에는 그것이 맞는 답(모르면 바꿔 끼운다)이라 `changed` 는 그대로 둔다.
+          if ! $GIT cat-file -e "${started}^{commit}" 2>/dev/null; then
+            ctx_ok=false
+          elif ctx_changed=$(python3 scripts/ci/image_context.py changed "$started" HEAD 2>/dev/null); then
             ctx_ok=true
           else
             ctx_ok=false

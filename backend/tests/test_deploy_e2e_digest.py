@@ -13,6 +13,8 @@
 만든 이미지 이름(없으면 이 커밋의 태그), `e2e-<서비스>` 는 그 서비스의 e2e 태그가 가리키는 이미지 ID(없으면
 태그가 없다). 받은 ref 는 `pulled` 에 적는다. 문맥 비교(`scripts/ci/image_context.py changed`)는 가짜 스크립트가
 `changed` 의 내용을 내고 받은 인자를 `changed-args` 에 적는다 — 해시 자체는 `scripts/test_image_context.py` 의 몫이다.
+저장소에는 커밋이 둘 있다 — 옛 커밋(`env["FAKE_OLD"]`, 떠 있는 컨테이너를 만든 커밋 역)과 지금 커밋. 이 체크아웃에
+없는 커밋은 `UNKNOWN` 이다(#741 — 진짜 `changed` 는 모르는 커밋에도 0 으로 끝나니 호출 쪽이 `cat-file -e` 로 가른다).
 """
 
 from __future__ import annotations
@@ -53,7 +55,7 @@ esac
 exit 0
 """
 
-OLD = "1" * 40
+UNKNOWN = "1" * 40
 
 FAKE_IMAGE_CONTEXT = """import os, sys
 state = os.environ["FAKE_DOCKER_STATE"]
@@ -77,6 +79,10 @@ def prod(tmp_path):
     (repo / "scripts/ci").mkdir(parents=True)
     (repo / "scripts/ci/image_context.py").write_text(FAKE_IMAGE_CONTEXT, encoding="utf-8")
     _git(repo, "init", "-q")
+    (repo / "old").write_text("", encoding="utf-8")
+    _git(repo, "add", "old")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "옛 배포")
+    old = _git(repo, "rev-parse", "HEAD")
     _git(repo, "add", "-A")
     _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "배포")
     tree = _git(repo, "rev-parse", "HEAD^{tree}")
@@ -87,7 +93,7 @@ def prod(tmp_path):
     (bin_dir / "docker").chmod(0o755)
     state = tmp_path / "state"
     state.mkdir()
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_DOCKER_STATE": str(state), "FAKE_HEAD": head}
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "FAKE_DOCKER_STATE": str(state), "FAKE_HEAD": head, "FAKE_OLD": old}
     return repo, env, state, tree
 
 
@@ -101,7 +107,7 @@ def test_each_service_is_reported_and_the_run_stays_green(prod) -> None:
     (state / "e2e-backend").write_text("sha256:aaa\n")
     (state / "running-frontend").write_text("sha256:bbb\n")
     (state / "e2e-frontend").write_text("sha256:ccc\n")
-    (state / "ref-frontend").write_text(f"ghcr.io/sandcorporation/codemit-frontend:{OLD}-arm64\n")
+    (state / "ref-frontend").write_text(f"ghcr.io/sandcorporation/codemit-frontend:{env['FAKE_OLD']}-arm64\n")
     (state / "changed").write_text("frontend\n")
     (state / "running-operator").write_text("sha256:ddd\n")  # e2e 태그가 없다
     # classroom 은 떠 있지 않다
@@ -136,7 +142,7 @@ def test_a_rebuilt_image_of_the_same_context_is_told_apart(prod) -> None:
     repo, env, state, _ = prod
     for svc in ("backend", "frontend", "operator", "classroom"):
         (state / f"running-{svc}").write_text("sha256:old000000000000000000\n")
-        (state / f"ref-{svc}").write_text(f"ghcr.io/sandcorporation/codemit-{svc}:{OLD}-arm64\n")
+        (state / f"ref-{svc}").write_text(f"ghcr.io/sandcorporation/codemit-{svc}:{env['FAKE_OLD']}-arm64\n")
         (state / f"e2e-{svc}").write_text("sha256:new000000000000000000\n")
     (state / "changed").write_text("frontend\n")
     (state / "ref-classroom").write_text("codemit-classroom:local\n")  # 커밋 태그가 아니다
@@ -148,24 +154,33 @@ def test_a_rebuilt_image_of_the_same_context_is_told_apart(prod) -> None:
     assert "e2e 대조: backend — 다르다(문맥 같음 — 다시 구운 것)" in out
     assert "e2e 대조: frontend — 다르다!(문맥 다름)" in out
     assert "e2e 대조: classroom — 다르다!(문맥 모름)" in out
-    assert "떠 있는 것 sha256:old000000000 (" + OLD[:12] + ")" in out
+    assert "떠 있는 것 sha256:old000000000 (" + env["FAKE_OLD"][:12] + ")" in out
     assert "e2e 가 본 것 sha256:new000000000" in out
     assert "같다 0 · 다시 구움 2 · 다르다 2 · 대조 못 함 0" in out
     # 같은 커밋은 한 번만 견준다.
-    assert (state / "changed-args").read_text().splitlines() == [f"changed {OLD} HEAD"]
+    assert (state / "changed-args").read_text().splitlines() == [f"changed {env['FAKE_OLD']} HEAD"]
 
 
 def test_an_unknown_context_comparison_says_so(prod) -> None:
+    # 떠 있는 컨테이너를 만든 커밋이 이 체크아웃에 없거나(force-push·얕은 체크아웃) 이미지 이름이 커밋 태그가
+    # 아니면 문맥을 견주지 못한다 — 「문맥 다름」이 아니라 「문맥 모름」이다(#741).
+    # C 로캘로 돈다(PR CI 와 같다) — 「커밋 모름」을 `cut -c` 로 자르면 바이트로 잘려 UTF-8 이 깨진다(32708a5).
     repo, env, state, _ = prod
-    (state / "running-backend").write_text("sha256:old\n")
-    (state / "ref-backend").write_text(f"ghcr.io/sandcorporation/codemit-backend:{OLD}-arm64\n")
-    (state / "e2e-backend").write_text("sha256:new\n")
-    # `changed` 가 없으면 가짜 스크립트가 1 로 끝난다 — 옛 커밋을 모르는 호스트와 같다.
+    for svc in ("backend", "frontend"):
+        (state / f"running-{svc}").write_text("sha256:old\n")
+        (state / f"e2e-{svc}").write_text("sha256:new\n")
+    (state / "ref-backend").write_text(f"ghcr.io/sandcorporation/codemit-backend:{UNKNOWN}-arm64\n")
+    (state / "ref-frontend").write_text("codemit-frontend:local\n")
+    (state / "changed").write_text("\n")  # 진짜 `changed` 처럼 모르는 커밋에도 0 으로 끝난다
 
-    done = _run(repo, env)
+    done = _run(repo, {**env, "LC_ALL": "C", "LANG": "C"})
 
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "e2e 대조: backend — 다르다!(문맥 모름)" in done.stdout
+    out = done.stdout
+    assert f"e2e 대조: backend — 다르다!(문맥 모름) 떠 있는 것 sha256:old ({UNKNOWN[:12]})" in out
+    assert "e2e 대조: frontend — 다르다!(문맥 모름) 떠 있는 것 sha256:old (커밋 모름)" in out
+    assert "같다 0 · 다시 구움 0 · 다르다 2 · 대조 못 함 2" in out
+    assert not (state / "changed-args").exists()  # 모르는 커밋으로는 견주지 않는다
 
 
 def test_an_image_started_at_this_commit_is_the_same_context(prod) -> None:
