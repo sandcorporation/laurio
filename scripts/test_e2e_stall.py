@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`scripts/ci/e2e_stall.py` 와 `train.py fail` 의 인프라 분기 — Docker VM 정지를 인프라 고장으로 가른다(#716).
+"""`scripts/ci/e2e_stall.py` 와 `train.py fail` 의 인프라 분기 — e2e 의 backend 요청 0건 틈(VM 정지와 워커 고갈을 가르지 못한다)을 인프라 고장으로 가른다(#716, #723).
 
 `python3 scripts/test_e2e_stall.py` 하나로 돈다 — 표준 라이브러리 `unittest` 와 임시 폴더만 쓴다
 (네트워크·도커 없음). PR CI 의 sub 검사가 돌린다(`scripts/ci/sub-checks-inside.sh`).

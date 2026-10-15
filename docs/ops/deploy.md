@@ -207,8 +207,8 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   수 초). **구운 이미지는 커밋 태그로만 올리고, `ctx-` 태그는 이미지 두 가지와 부팅 가드가 모두 초록인 뒤에**
   「문맥 태그」 단계(`scripts/ci/images-ctx.sh`)가 붙인다(#709) — 가드에서 떨어졌거나 다른 가지가 실패한
   빌드의 이미지는 ctx 가 없어 다음 빌드가 다시 굽고 가드도 다시 돈다(같은 커밋을 다시 돌려도). 콘솔에 서비스마다 「굽는다/건너뛴다」 한 줄이 남는다. `deploy.sh plan` 도
-  **같은 해시로** 바꿔 끼울 서비스를 고른다(#712, `image_context.py changed <직전 배포> HEAD` — 양쪽 커밋의 표에서 빌드 대상·`HASH_VERSION` 까지 읽어 해시 전체를
-  견준다, #729) — 직전 배포와
+  **같은 해시로** 바꿔 끼울 서비스를 고른다(#712, `image_context.py changed <직전 배포> HEAD` — 양쪽 커밋의 표에서 경로 목록·빌드 대상·`HASH_VERSION` 까지 읽어 해시 전체를
+  견준다, #729·#738) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
   아무것도 다시 띄우지 않는다(예전의 경로 패턴은 codemit-deploy-staging #474 에서 `frontend/playwright.config.ts` 주석 하나에
   frontend 를 다시 띄웠다). 해시를 내지 못하면(호스트에 python3 가 없다 등) 경로 패턴으로 떨어진다. compose
