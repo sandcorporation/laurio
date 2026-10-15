@@ -144,3 +144,8 @@ test("@exclusive 첫 방문자가 / 에서 시작해 클릭만으로 실제 공�
   await expect(page).toHaveURL(/\/login/);
   await expect(page.getByTestId("login-kakao")).toBeVisible();
 });
+
+// #712 확인용 — 병합 금지. 일부러 붉게 해 열차가 ctx 태그를 남기지 않는지 본다.
+test("#712 일부러 실패한다", async () => {
+  expect(1).toBe(2);
+});
