@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ghcr 에 쌓인 옛 이미지 버전을 지운다 — 패키지마다 최근 N 개만 남긴다(2026-10-02, Jenkinsfile.ghcr-prune).
 
-    GH_TOKEN=… scripts/ci/ghcr_prune.py [--keep-images 12] [--keep-cache 10] [--dry-run]
+    GH_TOKEN=… scripts/ci/ghcr_prune.py [--keep-images 24] [--keep-cache 10] [--dry-run]
                                         [--main-shas FILE] [--unmerged-grace-hours 6]
 
 **왜 있는가**(2026-09-20). 이미지 잡이 커밋마다 여섯 이미지를 올리는데 옛 버전을 지우는 것이
@@ -169,7 +169,7 @@ def prune(package: str, keep: int, dry_run: bool, shas: list[str], main_shas: se
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--keep-images", type=int, default=12)
+    parser.add_argument("--keep-images", type=int, default=24)
     parser.add_argument("--keep-cache", type=int, default=10)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--protect-sha", action="append", default=[], help="이 커밋의 태그를 가진 버전은 남긴다(여러 번)")
