@@ -40,8 +40,8 @@ def test_internal_http_tasks_retry_connection_failures():
     refused` 로 죽었다. 스캔은 두 번 쏴도 한 번만 통과하므로(ADR-0003) 다시 쏘는
     것이 안전하다 — 연결·타임아웃만 재시도하고, 끝까지 실패하면 예외를 낸다."""
 
-    # 강의실 채점 태스크(`classroom.score_attempt`)는 #582 부터 내부 HTTP 를 부르지 않고
-    # 워커 안에서 채점한다(ADR-0056) — 이 재시도의 대상이 아니다.
+    # 강의실 채점은 celery 태스크가 아니라 상주 grader 다(#584, ADR-0059) — 이 재시도의
+    # 대상이 아니다.
     task = run_scan
     assert task.max_retries and task.max_retries > 0, task.name
     assert requests.ConnectionError in task.autoretry_for, task.name

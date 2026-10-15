@@ -150,6 +150,13 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 여기까지 늘었다. 그리고 처음으로 **줄었다** — 과제를 접으며(#358) 그 전용 테스트와, 마이그레이션을 앱마다 단일 initial 로 접으며(#364) 옛 마이그레이션을 직접 세우던 되감기 테스트 일곱 파일이 함께 빠졌다) `-n 4` 84초 → `-n auto` 57초.
 직렬로 보려면 `-n 0`.
 
+**실물을 치는 시험은 표식 둘로 나뉘고 기본 실행에서 빠진다**(`addopts` 의 `-m`, `tests/live.py`).
+`live_vendor` 는 돈이 드는 실제 벤더(OpenAI·PortOne·Toss 등), `live_infra` 는 dev 프로필로 띄운
+실물 인프라(pgbouncer·Redis·OpenSearch, #751)다. 둘 다 접속값 환경변수(`OPEN_AI_API_KEY`,
+`CODEMIT_PGBOUNCER_PORT`, `EVENT_BUS_REDIS_URL`, `OPENSEARCH_URL` …)가 없으면 실패가 아니라 skip
+이고, CI 는 둘 다 건너뛴다. 돌릴 때는 `scripts/test.sh backend tests/test_pgbouncer_live.py -m live_infra`
+처럼 표식을 직접 준다.
+
 **시험 하나는 CPU 1초를 넘지 못한다**(2026-10-02). `tests/conftest.py` 가 시험 본문(call
 단계)의 CPU 시간 — 자식 프로세스 몫 포함 — 을 재서 넘으면 실패로 바꾼다. 한도는
 `CODEMIT_TEST_CPU_LIMIT`(로컬 기본 1.0, CI 의 `test` 잡은 1.5, 0 이면 끈다). 벽시계가

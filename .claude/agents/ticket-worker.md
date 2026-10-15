@@ -34,7 +34,7 @@ description: Codemit 저장소에서 GitHub 이슈(티켓) 하나를 워크트�
 3. **모든 docker compose 명령에 `-p codemit-dev-<오프셋>`.** 공유 스택 `codemit-dev`(오프셋 0)와 남의 오프셋을 절대 내리지 않는다. 필요한 컨테이너만. 이 머신은 메모리 한도가 빡빡하다(사용자 슬라이스 14G). dev 서버는 `scripts/dev-server.sh`(출력은 파일로, `| tail` 하면 안 돌아온다).
 4. `mattpocock-skills:tdd` 로 구현한다. 시임은 **마운트된 HTTP API**(`backend/tests/classroom_scenarios.py` 빌더, ORM 으로 상태를 만들지 않는다)와 앱별 e2e. 시험 한도: **백엔드 시험 하나 CPU 1초, e2e 하나 3초·재시도 없음** — 넘으면 한도를 늘리지 말고 원인을 줄인다.
 5. 마이그레이션은 ADR-0053(먼저 돌고 뒤로 호환). 새 API 는 커밋 훅이 bff 스키마를 다시 만든다.
-6. **`.env` 의 OpenAI 키는 잔고가 0원이다** — 실제 OpenAI 를 부르는 확인(`-m live_vendor`, 실물 어댑터로 OpenAI 직접)은 하지 않는다. 흉내 어댑터나 로컬 흉내 서버로.
+6. **`.env` 의 OpenAI 키는 잔고가 0원이다** — 실제 OpenAI 를 부르는 확인(`-m live_vendor`, 실물 어댑터로 OpenAI 직접)은 하지 않는다 — 풀러·Redis·OpenSearch 실물 시험은 따로 `-m live_infra` 다(dev 프로필을 띄워 돌린다). 흉내 어댑터나 로컬 흉내 서버로.
 7. 화면을 바꾸면: 역할마다 「그 화면이 누구에게 무엇을 말하는가」(문구·주 버튼·순서)까지 걷는다. 구현 사정을 말하는 메타 문장 금지. 1440px·390px 스크린샷을 data: URI 로 담아 검토 Artifact 「Codemit 화면 검토」 https://claude.ai/artifact/8Xc8xeV9duZJdZhzpxFEcH 맨 위에 이 PR 절로 더한다(read 후 publish, 새 아티팩트 금지, 충돌로 거절되면 돌려받은 최신본에 더해 다시).
 8. 게이트: 바꾼 자리의 백엔드 시험(`scripts/test.sh backend <파일…>`, 400개까지) + 세 앱 typecheck(먼저 `pnpm install --frozen-lockfile`; 컨테이너를 올린 뒤라면 한 번 더). e2e 를 바꿨으면 그 파일만 `scripts/test.sh e2e`.
 9. 문서: 이 변경이 거짓으로 만든 `CONTEXT.md`·`docs/features/`·`docs/ops/` 문장을 같은 커밋에서 고친다. `CLAUDE.md` 의 테스트 건수와 `docs/features/README.md` 실측 블록은 건드리지 않는다.
