@@ -167,7 +167,9 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
    Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다.
    **그동안 staging 과 prod 의 backend 는 워커 종류가 다르다**(#725): staging 은 gthread(`config/
    gunicorn.conf.py`, `docs/ops/operations.md` 「요청 없는 연결이 워커를 묶는다」)로 먼저 돌고, prod 는
-   다음 승격 때 같은 이미지·compose 와 함께 sync 에서 gthread 로 바뀐다 — 따로 할 일은 없다.
+   다음 승격 때 같은 이미지·compose 와 함께 sync 에서 gthread 로 바뀐다. 승격이 끝나면
+   `docs/ops/operations.md` 「요청 없는 연결이 워커를 묶는다」의 「prod 는 다음 승격부터다」 줄과
+   이 문단을 지운다.
 
 `staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
