@@ -47,6 +47,10 @@ export type PublishedProblemTemplateSummary = {
   created_at: string;
 };
 
+// zip 으로 낸 사람이 언제나 놓칠 필수 항목들(#587) — zip 에는 Git 기록(.git)이 없다. 판정은
+// 백엔드(`classroom.git_history_hint`) 한 자리이고 화면은 이 값만 읽는다.
+export type ZipGitHistoryWarning = { checklist_item_ids: number[] };
+
 export type ProblemRow = {
   id: number;
   classroom_id: number;
@@ -105,6 +109,8 @@ export type ProblemRow = {
   contest: ProblemContest | null;
   // 공모전 문제의 수업용 안내(#548).
   instructor_note: string;
+  // 받는 형식에 소스가 있고 필수 항목이 Git 기록을 물으면 그 항목들(#587), 아니면 null.
+  zip_git_history_warning: ZipGitHistoryWarning | null;
 };
 
 export type ProblemContest = {

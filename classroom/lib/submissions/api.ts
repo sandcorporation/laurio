@@ -4,7 +4,13 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
-import type { ChecklistItemRow, GradingStrictness, ProblemContest, SubmissionFormat } from "@/lib/problems/api";
+import type {
+  ChecklistItemRow,
+  GradingStrictness,
+  ProblemContest,
+  SubmissionFormat,
+  ZipGitHistoryWarning,
+} from "@/lib/problems/api";
 import type { ContestEntryForm, ContestEntryInput } from "./contest-entry";
 
 export type ProblemMine = {
@@ -29,6 +35,8 @@ export type ProblemMine = {
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
   passed: boolean;
+  // 강사 쪽과 같은 판정(#587) — 걸리면 zip 을 고를 때의 안내가 더 눈에 띈다.
+  zip_git_history_warning: ZipGitHistoryWarning | null;
 };
 
 // 참여자의 문제 목록 한 줄(#288) — 통과/미통과가 한눈에 보이도록 상세보다

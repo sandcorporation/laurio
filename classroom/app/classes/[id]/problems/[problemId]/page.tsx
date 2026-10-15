@@ -289,6 +289,14 @@ export default function EditProblemPage() {
     });
   }
 
+  // 「받는 형식을 저장소만으로」(#587) — zip 경고의 고칠 길. 형식 칸만 바로 저장한다.
+  function handleRepositoryOnly() {
+    void checklistMutation.run(() => updateProblem(classId, problemId, { submission_formats: ["repository"] }), {
+      fallbackMessage: "설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
+  }
+
   function handleSyntaxCheckToggle(enabled: boolean) {
     void checklistMutation.run(() => updateProblem(classId, problemId, { syntax_check_enabled: enabled }), {
       fallbackMessage: "설정을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
@@ -513,6 +521,49 @@ export default function EditProblemPage() {
                     </div>
                   </form>
                 </Card>
+
+                {problem.zip_git_history_warning ? (
+                  <Note tone="attention">
+                    <div data-testid="zip-git-history-warning" className="flex flex-col gap-2.5">
+                      <p className="text-attention">
+                        zip 제출에는 Git 기록이 들어가지 않습니다. 저장소로 낸 사람만 이 항목을 충족할 수 있습니다.
+                      </p>
+                      <ul className="flex flex-col gap-1.5">
+                        {problem.checklist_items
+                          .filter((item) => problem.zip_git_history_warning?.checklist_item_ids.includes(item.id))
+                          .map((item) => (
+                            <li
+                              key={item.id}
+                              data-testid={`zip-git-history-item-${item.id}`}
+                              className="flex flex-wrap items-center justify-between gap-2"
+                            >
+                              <span className="text-ink">{item.label}</span>
+                              {followsContest ? null : (
+                                <button
+                                  type="button"
+                                  data-testid={`zip-git-history-make-optional-${item.id}`}
+                                  disabled={isArchived || checklistMutation.pending}
+                                  onClick={() => handleItemRequiredToggle(item.id, false)}
+                                  className={buttonClass("secondary", "sm")}
+                                >
+                                  이 항목을 선택으로
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                      </ul>
+                      <button
+                        type="button"
+                        data-testid="zip-git-history-repository-only"
+                        disabled={isArchived || checklistMutation.pending}
+                        onClick={handleRepositoryOnly}
+                        className={`${buttonClass("secondary", "sm")} self-start`}
+                      >
+                        받는 형식을 저장소만으로
+                      </button>
+                    </div>
+                  </Note>
+                ) : null}
 
                 <Card>
                   <CardHeader title="체크리스트" />
