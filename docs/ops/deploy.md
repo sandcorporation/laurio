@@ -243,9 +243,11 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   자리에서 굽는다. 병합 전에 `Jenkinsfile` 을 바꾼 PR 을 돌려 보려면 그 브랜치를 가리키는 임시 잡으로
   파라미터 `IMAGES_ONLY=true`(이미지·가드까지만, `staging`·배포는 건드리지 않는다) — PR CI 는 이 파일을
   보지 못한다.
-- **전환 뒤 사람이 할 일**(2026-10-15): 저장소 변수 `STAGING_*`·`PROD_*`·`ARM_RUNNER_LABELS`·`JENKINS_*`
-  와 시크릿 `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN` 삭제(그 배포 키도 저장소 Deploy keys 에서),
-  조직의 GitHub 셀프호스티드 러너(sub 3대, mac-arm 3대) 해제와 그 컨테이너 내리기.
+- **GitHub 쪽에는 CI·배포를 위한 것을 두지 않는다**(#752). `.github/workflows/` 가 없고, 저장소
+  변수·시크릿(옛 `STAGING_*`·`PROD_*`·`JENKINS_*`, `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN`·
+  `GLITCHTIP_TOKEN_FOR_AUTOMATION`)과 Deploy key `promote-production` 은 지웠다 — 공개 값은 서버의
+  `.env.<target>`(#711), Jenkins 의 GitHub 쓰기는 자격증명 `github-sandcorporation-token`, GlitchTip 쓰기
+  토큰은 Jenkins 자격증명 `glitchtip-automation-token` 이다. 조직 셀프호스티드 러너는 0대다(2026-10-15).
 
 **staging 배포는 `main` 의 push 가 부른다**(2026-10-15, #705). Jenkins 잡(`/var/jenkins_home/jobs/codemit-deploy-staging`)은
 **Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main`,
