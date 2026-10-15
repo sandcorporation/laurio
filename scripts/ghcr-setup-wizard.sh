@@ -192,8 +192,8 @@ finish() {
 
 cd "$(dirname "$0")/.."   # set_secret 이 저장소를 현재 디렉터리에서 고른다
 REPO="sandcorporation/laurio"
-STAGING_ENV="/server/jenkins/workspace/laurio/docker/.env.staging"   # sub 호스트
-PROD_ENV="/var/jenkins_home/workspace/codemit/docker/.env.prod"       # oracle 호스트
+STAGING_ENV="/server/jenkins/workspace/codemit-deploy-staging/docker/.env.staging"   # sub 호스트
+PROD_ENV="/var/jenkins_home/workspace/codemit-deploy-prod/docker/.env.prod"       # oracle 호스트
 # 다시 돌릴 때의 기본값 — 저장소 밖에 둔다(비밀값이 섞인다).
 ENV_FILE="${HOME}/.config/codemit-ghcr-wizard.env"
 mkdir -p "$(dirname "$ENV_FILE")"; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
@@ -259,7 +259,7 @@ pause "계속하려면 Enter"
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
 stage "ghcr push 토큰 → Jenkins 자격증명 ghcr-push-token"
-say "이미지는 Jenkins 잡 laurio 가 굽고 올립니다(#705 — macos 가 arm64, sub 가 amd64). 쓰기 토큰이 필요합니다."
+say "이미지는 Jenkins 잡 codemit-deploy-staging 이 굽고 올립니다(#705 — macos 가 arm64, sub 가 amd64). 쓰기 토큰이 필요합니다."
 open_url "https://github.com/settings/tokens/new?scopes=write:packages&description=codemit-ghcr-push"
 step "Select scopes: write:packages(read:packages 가 따라 붙습니다) → Generate token → 복사"
 step "Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials"

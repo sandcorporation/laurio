@@ -172,7 +172,7 @@ def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(pooler_ch
     assert plan["ROLLING_BACKEND"] == "false"
 
 
-# 이미지 문맥 해시로 고른다(#712, laurio #474) — 문맥 밖 파일만 바뀐 커밋은 그 앱을 다시 띄우지 않는다.
+# 이미지 문맥 해시로 고른다(#712, codemit-deploy-staging #474) — 문맥 밖 파일만 바뀐 커밋은 그 앱을 다시 띄우지 않는다.
 @pytest.fixture
 def playwright_config_only(tmp_path):
     return _prepare(tmp_path, lambda compose: compose, touch=("frontend/playwright.config.ts",))

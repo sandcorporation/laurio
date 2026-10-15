@@ -17,8 +17,8 @@
 // `jenkins-desktop-agent` 컨테이너(root, 호스트 docker 소켓, docker CLI·compose·buildx·git 포함 —
 // 이미지 정의는 호스트의 `/server/jenkins`)이고, 호스트의 `/var/jenkins_home/workspace` 가
 // 컨테이너의 `/home/jenkins/agent/workspace` 로 붙어 있다. 그래서 노드의 Remote root directory 는
-// **컨테이너 안 경로** `/home/jenkins/agent` 여야 하고, 잡 이름은 `codemit` 이어야 워크스페이스가
-// 호스트의 `/var/jenkins_home/workspace/codemit` 이 된다 — 거기에 사람이 둔 `docker/.env.prod`
+// **컨테이너 안 경로** `/home/jenkins/agent` 여야 하고, 잡 이름은 `codemit-deploy-prod` 여야 워크스페이스가
+// 호스트의 `/var/jenkins_home/workspace/codemit-deploy-prod` 가 된다(#708 전에는 `codemit`) — 거기에 사람이 둔 `docker/.env.prod`
 // (chmod 600)와 배포 표식이 있다. 컨트롤러에서 돌면 prod 가 아니라 sub 호스트에 스택을 띄우므로
 // `built-in` 을 쓰지 않는다.
 

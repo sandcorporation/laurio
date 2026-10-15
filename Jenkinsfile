@@ -1,7 +1,7 @@
 // main 의 커밋 하나의 여정 전부 (#52 → #705) — 이미지 → 부팅 가드 → `staging` 앞당기기 → staging 배포 →
 // `production` 앞당기기. 단계는 보이게, 논리는 스크립트에.
 //
-// **잡 `laurio` 는 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`, GitHub 웹훅
+// **잡 `codemit-deploy-staging`(#708 전에는 `laurio`)은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`, GitHub 웹훅
 // `GitHubPushTrigger`). 2026-10-15 까지는 GitHub Actions(`.github/workflows/images.yaml`)가 이미지
 // 열둘과 부팅 가드 셋을 돌리고 `staging` 을 앞당겼고, 이 잡은 `staging` push 에서 배포만 했다 —
 // 조직의 Actions 분량(Free, 월 2,000분)이 바닥나 `staging` 이 멈춘 뒤 Actions 를 떠났다(ADR-0061).
@@ -148,8 +148,8 @@ pipeline {
           }
         }
         stage('amd64 — staging (sub)') {
-          // 배포 워크스페이스(`workspace/laurio`, `docker/.env.staging` 이 있다)와 겹치지 않게 따로 둔다.
-          agent { node { label 'laurio-staging'; customWorkspace 'laurio-images' } }
+          // 배포 워크스페이스(`workspace/codemit-deploy-staging`, `docker/.env.staging` 이 있다)와 겹치지 않게 따로 둔다.
+          agent { node { label 'laurio-staging'; customWorkspace 'codemit-deploy-staging-images' } }
           options { timeout(time: 60, unit: 'MINUTES') }
           steps {
             pin()
@@ -174,7 +174,7 @@ pipeline {
             env.IMAGE_AMD64_OPERATOR == 'built' || env.IMAGE_AMD64_CLASSROOM == 'built')
         }
       }
-      agent { node { label 'laurio-staging'; customWorkspace 'laurio-images' } }
+      agent { node { label 'laurio-staging'; customWorkspace 'codemit-deploy-staging-images' } }
       options { timeout(time: 20, unit: 'MINUTES') }
       stages {
         stage('가드 준비') {
@@ -217,7 +217,7 @@ pipeline {
         beforeAgent true
         expression { env.DOCS_ONLY != 'true' }
       }
-      agent { node { label 'laurio-staging'; customWorkspace 'laurio-images' } }
+      agent { node { label 'laurio-staging'; customWorkspace 'codemit-deploy-staging-images' } }
       options { timeout(time: 10, unit: 'MINUTES') }
       steps {
         pin()

@@ -59,7 +59,7 @@ PLAN = "train.plan"
 TIPS = "train.tips"
 DEFAULT_MAX = 8
 WAITING = "다음 묶음을 기다린다"
-GIT_IDENTITY = ["-c", "user.name=codemit-train", "-c", "user.email=ci@codemit.invalid"]
+GIT_IDENTITY = ["-c", "user.name=codemit-ci-train", "-c", "user.email=ci@codemit.invalid"]
 
 
 # --- GitHub ------------------------------------------------------------------

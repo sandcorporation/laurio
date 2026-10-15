@@ -24,7 +24,7 @@
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
-# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `laurio` 잡의
+# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `codemit-deploy-staging` 잡의
 # 앞 단계가 커밋마다 여섯 이미지를 ghcr 에 올린다(scripts/ci/images.sh — amd64 는 sub, arm64 는
 # macos 가 굽고, 바뀌지 않은 서비스는 옛 이미지에 커밋 태그만 더한다, #705) — backend·
 # search·pgbouncer 와 세 앱 모두 `<sha>-amd64`(staging)·`<sha>-arm64`(prod) 다 — 앱도 환경을
@@ -328,7 +328,7 @@ cmd_plan() {
     # 그 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로 중 `.dockerignore` 가 빼지 않는 것)를
     # 직전 배포와 지금 커밋에서 내어 다른 서비스만 바꿔 끼운다. 그래서 「이미지가 같다」와 「다시 띄우지
     # 않는다」가 한 기준이다 — 경로 패턴은 문맥 밖의 파일(e2e 스펙·playwright 설정)만 바뀐 커밋에도 그 앱을
-    # 다시 띄웠다(laurio #474). python3 가 없거나 해시를 내지 못하면 아래 경로 패턴으로 떨어진다.
+    # 다시 띄웠다(codemit-deploy-staging #474). python3 가 없거나 해시를 내지 못하면 아래 경로 패턴으로 떨어진다.
     if CTX_CHANGED=$(python3 scripts/ci/image_context.py changed "$PREVIOUS" HEAD 2>/dev/null); then
       log "문맥 해시로 고른다 — 바뀐 서비스: $(echo $CTX_CHANGED)"
       for svc in $CTX_CHANGED; do
@@ -445,7 +445,7 @@ cmd_plan() {
   # **견주지 못하면 다시 띄운다**(#727 — 풀러 비교와 같은 원칙, 「모르면 바꾼다」). 예전에는
   # 컨테이너를 읽지 못하거나 `config --hash` 가 실패하면 `2>/dev/null` 이 삼켜 「어긋나지 않음」이
   # 됐다 — 키를 돌린 배포가 옛 키를 문 앱을 조용히 남긴다. 실패는 그 메시지를 로그에 남긴다.
-  # laurio #482(#711 뒤 앱 코드가 안 바뀐 첫 staging 배포)에서 세 앱 모두 「어긋난다」가 나오지 않아
+  # codemit-deploy-staging #482(#711 뒤 앱 코드가 안 바뀐 첫 staging 배포)에서 세 앱 모두 「어긋난다」가 나오지 않아
   # 늘 다르게 나오지는 않는다 — 다만 그때는 실패를 삼켰는지 로그로 가를 수 없었다.
   # `backend/tests/test_deploy_plan_app_env.py` 가 이 셋을 고정한다.
   app_env_drifted() {
@@ -621,7 +621,7 @@ cmd_pull() {
   # shellcheck disable=SC2086
   if ! $COMPOSE pull $services; then
     echo "ghcr 에 이 커밋($CODEMIT_IMAGE_TAG)의 $1 이미지가 없거나 받을 수 없다."
-    echo "laurio 잡의 이미지 단계가 끝났는지(prod 는 macos 노드), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
+    echo "codemit-deploy-staging 잡의 이미지 단계가 끝났는지(prod 는 macos 노드), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
     echo "급하면 DEPLOY_IMAGE_SOURCE=build."
     exit 1
   fi

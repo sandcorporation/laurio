@@ -2,7 +2,7 @@
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
-**시험은 Jenkins `codemit-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다**(2026-10-02). GitHub
+**시험은 Jenkins `codemit-ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다**(2026-10-02). GitHub
 소스 `sandcorporation/laurio` 의 브랜치(`main`·`staging`·`production` 은 뺀다)마다 하위 잡이
 생기고, 5분마다 훑어 새 push 를 찾는다. 결과는 GitHub 커밋 상태로 남는다. 같은 브랜치에 새로
 push 하면 옛 빌드를 끊는다.
@@ -13,9 +13,9 @@ push 하면 옛 빌드를 끊는다.
 | --- | --- | --- |
 | 변경 | sub(`laurio-staging`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
 | 시험(병렬) | sub | `scripts/ci/sub-checks.sh` — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어 검사, 단위 시험 여섯, 세 앱 typecheck |
-| 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit-train` 을 부른다 |
+| 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit-ci-train` 을 부른다 |
 
-**묶음마다** — Jenkins `codemit-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
+**묶음마다** — Jenkins `codemit-ci-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
 최신 `main` 위에 차례로 쌓아 **한 번** 시험하고 초록이면 차례로 합친다. PR CI 가 부르고, GitHub 의
 `pull_request` 웹훅이 hold 를 떼거나·초안을 풀거나·다시 연 PR 에서 부르며(아래 「줄에서 빠지는 법·돌아오는
 법」), 30분마다 스스로도 돈다(뒷받침). 규칙은 `scripts/ci/train.py` 머리말에 있다.
@@ -25,22 +25,22 @@ push 하면 옛 빌드를 끊는다.
 e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈다(`docker/compose.ci-images.yaml`,
 `CODEMIT_IMAGE_TAG`) — 그래서 **e2e 가 본 digest 가 prod 에 가는 digest 다**(`test-results/images.txt` 에
 남는다). ctx 태그는 「병합」이 하나라도 합친 뒤에만 붙는다(#709 의 「초록 뒤에만」) — 붉은 묶음의 이미지는
-커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시 굽는다. 병합 뒤 `laurio` 의
+커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시 굽는다. 병합 뒤 `codemit-deploy-staging` 의
 이미지 단계는 같은 트리의 해시를 내므로 전부 「건너뛴다」가 되어 main 커밋 태그만 더하고, 가드·문맥 태그
 단계도 할 일이 없다.
 
-- **왜 laurio 가 건너뛰나 — sha 가 아니라 트리다.** 쌓기는 cherry-pick 이라 노드마다 머리 커밋 sha 가 다르고
+- **왜 배포 잡이 건너뛰나 — sha 가 아니라 트리다.** 쌓기는 cherry-pick 이라 노드마다 머리 커밋 sha 가 다르고
   GitHub 의 rebase 병합도 새 커밋을 만든다. 같은 것은 트리다: `train.py merge` 는 마지막 PR 까지 합친 뒤 main 의
   트리가 계획의 트리(`train.plan` 의 `tree`, 시험 두 가지가 `assemble` 에서 같은지 확인한다)와 같은지 콘솔에
   적는다. 같으면 서비스마다 문맥 해시도 같다. 다르면(그 사이 main 에 다른 커밋이 들어왔다·중간에 멈췄다)
-  다른 문맥만 laurio 가 굽고 가드한다 — 해시가 판단하므로 틀린 이미지가 건너뛰어지지는 않는다.
+  다른 문맥만 배포 잡이 굽고 가드한다 — 해시가 판단하므로 틀린 이미지가 건너뛰어지지는 않는다.
 - **이미지가 붉은 것도 묶음이 붉은 것이다** — 레지스트리 고장으로 굽기가 실패해도 지금은 반으로 가른다
   (인프라 재실행 판정은 e2e 정지 모양만 본다, #716).
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
 | 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
 | 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` → 초록이면 `scripts/ci/images.sh amd64`(staging 여섯, #712) → 이번에 구운 앱만 부팅 가드(`scripts/ci/deploy-guard.sh`) |
-| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 스택·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
+| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-ci-pr-*`·`jenkins-codemit-ci-train-*` 스택(#708 전 이름 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 도 한동안 — 「잡 이름」)·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
 | 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 하나라도 합쳤으면 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
 | 붉으면 | sub | macos 가 「인프라 고장」으로 판정했고 sub 검사가 초록이면 **같은 묶음을 한 번 더**(아래 「Docker VM 정지로 본 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
@@ -48,7 +48,7 @@ e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈
   실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
   먼저 합쳐진 PR 과 충돌하는 PR 이 초록인 채 남았다(#530 이 #531·#532 와 그렇게 충돌했다).
 - **줄에서 빠지는 법·돌아오는 법.** 새로 push 하면 새 커밋에는 상태가 없어 저절로 빠지고, PR CI
-  가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit-pr/job/<브랜치>/build`)
+  가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit-ci-pr/job/<브랜치>/build`)
   줄로 돌아온다 — 위 판정에 들지 않는 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
   초안을 풀거나 `hold` 를 떼거나 PR 을 다시 열면 다시 빌드하지 않아도 열차가 곧 데려간다(#709) — 셋은
   push 가 아니라 PR CI 가 부르지 않으므로, `Jenkinsfile.train` 의 `GenericTrigger`(플러그인
@@ -57,7 +57,7 @@ e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈
   이고 초안이 아니며 base 가 `main` 인 것에서만 열차를 깨운다. 그 밖의 이벤트(opened·synchronize·labeled·
   closed)는 PR CI 가 push 로 다룬다. 웹훅이 빠지면 30분 cron 이 데려간다. Jenkins 는 `triggers` 를 **잡이 한
   번 돈 뒤에** 반영하므로, 이 블록을 바꾸면 그 뒤 첫 빌드부터 듣는다. 기다리기 싫으면 손으로 깨운다:
-  `POST /job/codemit-train/buildWithParameters`.
+  `POST /job/codemit-ci-train/buildWithParameters`.
 
 - **macos 의 Docker VM 디스크는 96GiB 이고, 묶음마다 무엇이 남는지 정해 두어야 찬다.** 맥 호스트
   디스크가 남아도 Docker Desktop 의 `Docker.raw` 가 차면 MinIO 가 `XMinioStorageFull` 로 업로드를
@@ -151,14 +151,30 @@ e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈
   다이어그램 최신성 시험이 그것을 읽는다(빼먹었을 때 넷이 「파일이 없다」로 빨갰다).
 - **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
   운영자 4초 · 강의실 4초(이미지 굽기 제외).
-- **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
+- **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit-ci-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
-- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 와 `laurio` 잡 모두 `scripts/ci/changed.sh`(`laurio` 는 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
+- **잡 이름은 `codemit-<역할>-<대상>` 이다**(2026-10-15, #708). 잡이 다섯이다.
+
+  | 잡 | 파일 | 워크스페이스·이름에 묶인 것 |
+  | --- | --- | --- |
+  | `codemit-ci-pr`(Multibranch) | `Jenkinsfile.pr` | e2e·celery 스택 `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) |
+  | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
+  | `codemit-deploy-staging` | `Jenkinsfile` | sub `workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`, 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'` |
+  | `codemit-deploy-prod` | `Jenkinsfile.production` | oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
+  | `codemit-ghcr-prune` | 저장소 밖 | |
+
+  이전 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 잡을 이름으로 부르는 자리는
+  `Jenkinsfile.pr` 의 `build job: '/codemit-ci-train'` 하나다(실패해도 열차는 30분 cron 으로 돈다).
+  자격증명 `codemit-train-webhook-token` 은 잡 이름이 아니라 ID 라 그대로 뒀다. `macos-sweep.sh` 는
+  rename 직전에 남은 `jenkins-codemit-(pr|train)-*` 도 한동안 같이 걷는다(지울 조건은 그 파일 머리말).
+  끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이다 — `codemit-deploy-prod` 는 사용자가 prod
+  승격을 말할 때 처음 돈다.
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 와 `codemit-deploy-staging` 잡 모두 `scripts/ci/changed.sh`(`codemit-deploy-staging` 은 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
-  가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `laurio` 잡(`Jenkinsfile`)의 앞 단계가 됐다
+  가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit-deploy-staging` 잡(`Jenkinsfile`)의 앞 단계가 됐다
   (「배포」 절). 이미지는 macos 가 arm64 여섯, sub 가 amd64 여섯을 함께 굽고(`scripts/ci/images.sh`),
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
   (`ctx-<해시>`)는 이미지 두 가지와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,
