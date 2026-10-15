@@ -88,7 +88,8 @@ services:
     # 프로세스 하나라 Playwright 워커 여럿의 시드와 화면 요청이 GIL 하나를 두고
     # 줄을 섰다 — 혼자 돌면 1.2초인 이의 시험이 병렬에서는 시드 대기만으로
     # 3초(시험 하나 한도)를 넘었다. 코드가 이미지에 구워진 CI 에서는 자동
-    # 재시작도 필요 없다. 워커 수는 prod compose 와 같다.
+    # 재시작도 필요 없다. 워커 수는 prod compose 와 같고, 워커가 어떻게 도는지(gthread·스레드 넷,
+    # #725)는 배포와 같은 `config/gunicorn.conf.py` 가 정한다.
     #
     # **요청마다 한 줄을 stdout 에 적는다**(#699) — 메서드·경로·상태·응답 바이트·걸린 ms·
     # 워커 pid. 시각은 `e2e.sh` 가 로그를 거둘 때 붙이는 Docker 타임스탬프(나노초)가 맡는다
@@ -98,7 +99,7 @@ services:
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py seed_dev_data &&
-             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --access-logfile - --access-logformat '%(r)s %(s)s %(B)s %(M)sms pid=%(p)s'"
+             gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --access-logfile - --access-logformat '%(r)s %(s)s %(B)s %(M)sms pid=%(p)s'"
 
   # 이벤트 서비스(ADR-0046, #379) — `backend`와 같은 이유로 마운트를 걷는다.
   # dev 의 `--reload`(uvicorn watchfiles)는 코드가 이미지에 구워진 CI 에서는

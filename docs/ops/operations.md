@@ -98,6 +98,48 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
   Django 가 4xx·5xx 경고(`django.request` 의 「Not Found」 등)를 **체인이 끝난 뒤에** 찍기
   때문에 사후 진단에서 제일 먼저 찾는 그 줄이 id 없이 나간다(실제로 테스트가 그렇게 잡았다).
 
+**요청 없는 연결이 워커를 묶는다 — backend 는 gthread 워커로 돈다**(2026-10-15, #725).
+예전 sync 워커는 연결 하나를 받으면 요청 머리가 올 때까지 그 연결에 묶여 다른 연결을 받지
+못했다. BFF 의 undici 가 남긴 빈 연결(#723, `docs/ops/ci.md`)이 워커 수만큼 쌓이면 그동안
+아무도 응답을 못 받았다(prod 포함). 지금은 `config/gunicorn.conf.py` 가 `worker_class =
+"gthread"`·`threads = 4` 를 두고 prod·staging·PR CI 셋이 모두 그 파일을 `-c` 로 읽는다(워커
+수만 compose 에 — prod·CI 4, staging 3). 빈 연결은 스레드 하나만 쥐고 주 루프는 계속 받는다.
+`tests/test_gunicorn_idle_connections.py` 가 실제 gunicorn 으로 빈 연결을 워커 수만큼 쥔 채 다음
+요청이 1초 안에 오는 것을, `--worker-class sync` 로 덮으면 묶이는 것을 함께 본다.
+
+- **남는 틈**: gunicorn 26 은 새 연결이 데이터를 보내지 않으면 스레드를 **5초**(코드 고정값)
+  쥐다가 폴러로 넘긴다. 워커는 스레드가 다 차도 연결을 계속 받아 줄 세우므로, 한 워커에 빈
+  연결이 4개 몰리면 그 워커가 받은 요청은 그만큼 기다린다.
+- **`timeout = 30` 의 뜻이 바뀌었다**: sync 에서는 요청 하나가 30초를 넘기면 워커를 죽였지만,
+  gthread 의 주 루프는 요청과 상관없이 1초마다 살아 있다고 알리므로 이제는 주 루프가 멈춘
+  워커만 거둔다. 요청 안의 벤더 호출(공모전 채점·요구사항 대화·채점 모델 시험 호출)은 제
+  타임아웃 20초를 따로 들고, `call_internal` 은 30초에 부른 쪽이 끊는다.
+- **`keepalive = 5`**: sync 는 응답마다 연결을 닫았지만 gthread 는 살려 둔다. 서버가 BFF 의
+  undici(쉬는 연결을 4초 뒤 버린다, Node 22 기본값)보다 먼저 닫으면 막 닫힌 연결에 요청이 실려
+  `other side closed` 로 떨어지므로 서버가 더 길게 둔다. 쉬는 연결은 스레드를 쥐지 않는다.
+- **DB 연결 셈**: 스레드마다 Django 연결이 하나고 `CONN_MAX_AGE` 가 0 이라 요청이 끝나면 닫는다.
+  모두 트랜잭션 모드 pgbouncer 를 거친다.
+
+  | 쓰는 쪽 | prod | staging | 근거 |
+  | --- | --- | --- | --- |
+  | backend(워커 × 스레드) | 4 × 4 = 16 | 3 × 4 = 12 | 예전 sync 는 4·3 |
+  | celery-worker(prefork) | 4 | 호스트 코어 수 | `--concurrency` 미지정 → `os.cpu_count()` |
+  | celery-beat · grader DB 스레드 | 1 · 1 | 1 · 1 | |
+  | events(ASGI) | 따로 세지 않았다 | 같음 | 스트림을 여는 요청만 DB 를 쓴다 |
+  | **풀러 클라이언트 상한** | `max_client_conn` 200 | 200 | `docker/pgbouncer/docker-entrypoint.sh` |
+  | **풀러 → DB 서버 연결** | `default_pool_size` 20 | 20 | PostgreSQL `max_connections` 기본 100 안 |
+
+  클라이언트 쪽 최악(모두 동시에)은 prod 약 22 로 200 에 한참 못 미친다. 서버 연결 20 은
+  트랜잭션 동안만 쓰이므로(`ATOMIC_REQUESTS` 없음, 쿼리마다 자동 커밋) 동시에 DB 안에 있는
+  스레드가 20을 넘을 때만 풀러가 줄 세운다 — 오류가 아니라 대기다.
+- **스레드 안전성**(2026-10-15 판정): 요청 경로의 가변 상태는 모두 Redis(호출 상한
+  `classroom/mcp.py` 의 `cache.add`+`incr`, 조회수 `contests/view_tracking.py`)·잠금이 있는
+  LocMem(채점 모델 시험 호출의 통과 기록)·스레드 로컬(`core/events.py` 의 커밋 뒤 발행)·요청마다
+  만드는 객체(요구사항 대화 어댑터, `safe_outbound` 의 `requests.Session`)에 있다. 지표는
+  prometheus_client 가 값마다 잠그고 multiprocess 파일은 pid 단위라 같은 워커의 스레드가 함께
+  쓴다. Sentry 사용자 표시는 SDK 의 요청별 격리 범위(contextvars)에 들어간다. 모듈 수준 가변
+  전역은 테스트 전용 `FakeEventBus._queues`(배포는 Redis 버스) 하나다.
+
 **prod 백엔드의 요청량·지연·상태코드는 `/metrics` 로 나간다**(2026-09-21, `core/metrics.py`).
 **대시보드용**이다 — 경보는 걸지 않는다(5xx 는 GlitchTip 이 이미 울린다).
 
@@ -109,7 +151,7 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
   그 동안에는 prod 에서 `docker compose down` 을 하면 그 네트워크를 지우지 못한다는 경고가 난다
   (배포는 `up -d` 만 써서 영향이 없다). 배포 직후 요청이 가장 많은 경로는 헤더 알림 벨의
   `api/notifications/unread-count` 폴링이었다(2026-09-21 실측) — 백엔드 부하를 볼 때 첫 자리다.
-- **gunicorn 워커 넷을 합산한다** — prod compose 가 backend 에만 `PROMETHEUS_MULTIPROC_DIR`
+- **gunicorn 워커 넷을 합산한다**(워커 안의 스레드는 pid 가 같아 한 파일을 함께 쓴다) — prod compose 가 backend 에만 `PROMETHEUS_MULTIPROC_DIR`
   를 주고 뜰 때마다 비우며, 죽은 워커 정리는 `config/gunicorn.conf.py` 의 `child_exit` 가
   한다(워커가 각자 카운터를 들면 긁을 때마다 무작위 워커 하나의 값이 와서 튄다). 워커 넷에
   40번 보낸 뒤 긁으면 세 번 모두 같은 합계가 나오는 것을 실측으로 확인했다. staging 은 긁지

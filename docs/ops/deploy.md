@@ -165,6 +165,9 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
    (2026-10-14, `Jenkinsfile` 의 `PROMOTE_PRODUCTION` 기본값 `false`) — 강의실 화면을 시안 v2 로
    고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `codemit-deploy-staging` 잡을 「Build with
    Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다.
+   **그동안 staging 과 prod 의 backend 는 워커 종류가 다르다**(#725): staging 은 gthread(`config/
+   gunicorn.conf.py`, `docs/ops/operations.md` 「요청 없는 연결이 워커를 묶는다」)로 먼저 돌고, prod 는
+   다음 승격 때 같은 이미지·compose 와 함께 sync 에서 gthread 로 바뀐다 — 따로 할 일은 없다.
 
 `staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
@@ -336,7 +339,7 @@ SIGKILL 로 끊긴 채점은 임대(240초)가 만료된 뒤 다른(새) grader 
 짧은 DB 일(임대 집기·읽기·결과 쓰기)에만 쓰고, **grader 의 몫은 정확히 1개**다 — DB 일은 스레드
 하나(`grader-db`)에서만 하고 그 스레드가 Django 연결 하나를 계속 쥔다(작업 전에 죽은 연결을 걷고, 연결
 오류면 닫고 한 번 다시 한다). 그 스레드에는 짧은 DB 일만 있다 — 알림이 내는 실시간 신호(Redis)는 모아
-두었다 다른 작은 풀에서 보낸다. 나머지 19 는 backend(gunicorn 워커 넷)·celery-worker·beat·events 의
+두었다 다른 작은 풀에서 보낸다. 나머지 19 는 backend(gunicorn 워커 넷 × 스레드 넷)·celery-worker·beat·events 의
 몫이다. 소스 읽기(저장소 clone 최대 20MB·
 스토리지·문법 검사)는 **DB 를 쓰지 않는 따로 둔 스레드 풀**(`CLASSROOM_GRADER_SOURCE_THREADS` 기본
 8)에서 돌아 DB 일을 막지 않고 DB 연결도 쥐지 않는다(시험이 DB 스레드 밖 쿼리 0번을 못 박는다). grader 컨테이너에는 **`mem_limit: 1g`** 가 있다 —
@@ -423,8 +426,8 @@ CPU 0.2%·메모리 180MB 로 거의 놀고 있었다). 두 서비스의 `nofile
 65536 으로 올려 두었다(검색 서비스가 이미 쓰던 값, hard 는 원래 524288).
 
 **같은 날 잰 처리량**(staging, 컨테이너 직접, CI 유휴): 백엔드 API 는 동시 4에서
-**602 rps**(동기 gunicorn 워커가 넷이라 그 지점이 정점이고, 그 뒤로는 처리량이
-유지된 채 지연만 는다), 공개 앱의 서버 렌더링은 **약 135 rps**(Next 프로세스가
+**602 rps**(그때는 sync gunicorn 워커가 넷이라 그 지점이 정점이고, 그 뒤로는 처리량이
+유지된 채 지연만 늘었다 — 지금은 워커마다 스레드 넷인 gthread 다, #725), 공개 앱의 서버 렌더링은 **약 135 rps**(Next 프로세스가
 하나다 — 사람이 쓰는 경로에서는 여기가 백엔드보다 먼저 막힌다). prod 는 코어 4의
 arm64 라 같은 페이지 한 건이 staging 11ms 대 prod 41ms 였다.
 

@@ -8,7 +8,7 @@ ADR-0003: 스캔 진입점은 내부 인증 HTTP 엔드포인트다 — 워커·
 자체가 불가능하다.
 
 **예외가 둘 있다 — 워커 안에서 직접 도는 태스크.** 내부 HTTP 를 거치면 그 일이 gunicorn
-요청 하나(`call_internal` 30초, gunicorn `--timeout` 30초) 안에 들어야 한다. 그보다 길 수
+요청 하나(`call_internal` 30초 — 넘으면 부른 쪽이 끊는다) 안에 들어야 한다. 그보다 길 수
 있는 일은 워커 안에서 직접 돈다:
 
 - `core.backup_database`(아래) — `pg_dump` 가 30초를 넘길 수 있다.

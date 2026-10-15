@@ -12,7 +12,8 @@ oracle 의 감시 스택(저장소 밖, CLAUDE.md 「운영」)이 prod 백엔�
 **gunicorn 워커가 넷이다.** 워커마다 제 카운터를 들고 있으면 한 번 긁을 때 무작위 워커
 하나의 숫자만 와서 값이 튄다. `PROMETHEUS_MULTIPROC_DIR` 가 있으면(prod compose 가 준다)
 prometheus_client 가 워커별 값을 그 디렉터리에 파일로 쓰고, 여기서 합산해 낸다. 죽은
-워커의 값 정리는 `config/gunicorn.conf.py` 의 `child_exit` 가 한다. 그 값이 없으면(dev·
+워커의 값 정리는 `config/gunicorn.conf.py` 의 `child_exit` 가 한다. 워커 안의 스레드들
+(gthread, #725)은 pid 가 같아 한 파일을 함께 쓴다 — prometheus_client 가 값마다 잠근다. 그 값이 없으면(dev·
 테스트·events·celery) 프로세스 하나의 값을 그대로 낸다.
 
 **라벨은 URL 패턴이다, 실제 경로가 아니다.** `/api/contests/17` 을 그대로 라벨로 쓰면
