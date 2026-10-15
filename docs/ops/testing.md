@@ -234,6 +234,14 @@ scripts/test.sh backend tests/test_x.py   # db 하나만 띄우고(스크립트�
 기준」) — `scripts/` 검사는 그 셋 중 어디에도 안 걸려 push 해야만 결과를 안다. import
 경계는 쓰는 순간 막혀야 뜻이 있다. 새 CI 잡도 늘지 않는다: 기존 `test` 잡이 돌린다.
 
+**Next 앱이 빌드 때 바깥에 매달리는 길도 같은 모양의 시험이 막는다** — 세 앱과 `packages/` 의
+소스를 줄 단위로 훑고, 시험 파일과 주석 줄은 보지 않는다(금지를 설명하는 문장은 남아야 한다).
+`tests/test_next_public_env_stays_out.py`(#727·#733)는 `process.env.NEXT_PUBLIC_*` 가 다시
+들어오는 것과 세 앱 `next.config.*` 의 `env:` 키를 막는다 — 둘 다 값을 빌드 때 번들에 굳혀 이미지가
+환경을 알게 한다. 줄 단위 정규식이라 `process.env?.NEXT_PUBLIC_X`·구조 분해·`env,` 단축 속성은
+못 잡는다. `tests/test_next_font_stays_local.py`(#743)는 `next/font/google` 을 막는다 — 빌드가
+fonts.gstatic.com 에 매달린다. 왜 그런지는 [Next 프로덕션 빌드](next-build.md).
+
 **그리고 이것이 실제 사고를 하나 막는다.** 호스트 pytest 의 기본 세션 URL 은 dev compose
 가 노출한 **바로 그 Redis 의 같은 인덱스**였다. 즉 `uv run pytest` 한 번이 떠 있는 dev
 환경의 운영자 세션과 조회 카운터를 통째로 지웠다(`RedisCache.clear()` 는 FLUSHDB 다).
