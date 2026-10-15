@@ -22,13 +22,19 @@
 #
 # 환경변수:
 #   GHCR_TOKEN / GHCR_USER     ghcr 쓰기 토큰(Jenkins `ghcr-push-token`). 없으면 노드의 로그인을 쓴다
-#   CODEMIT_IMAGES_MODE        push(기본) | plan — plan 은 해시와 판단만 적고 굽지도 태그를 더하지도 않는다
+#   CODEMIT_IMAGES_MODE        push(기본) | plan | retag — plan 은 해시와 판단만 적고 굽지도 태그를 더하지도
+#                              않는다. retag 는 건너뛸 것에만 커밋 태그를 더하고 구울 것은 `서비스=pending` 으로
+#                              남긴다 — 빌더를 띄우지 않아 어느 노드에서나 돈다. `codemit-deploy-staging` 이 열차가
+#                              이미 구운 커밋을 macos 없이 끝내는 길이다(#729, Jenkinsfile 「대상 확인」)
 #   CODEMIT_IMAGES_SERVICES    다룰 서비스(공백으로 가름, 기본 여섯 전부)
 #   CODEMIT_IMAGE_REGISTRY     기본 ghcr.io/sandcorporation (로컬 시험은 localhost:<포트>)
 #   CODEMIT_IMAGES_BUILDER     buildx 빌더 이름(기본 codemit-images — 없으면 docker-container 로 만든다.
 #                              레지스트리 캐시를 내보내려면 docker 드라이버로는 안 된다)
 #   CODEMIT_IMAGES_PARALLEL    1(기본)이면 굽는 것끼리 함께 돈다, 0 이면 하나씩
 #   CODEMIT_IMAGES_KEEP_STORAGE  끝나고 빌더 캐시를 이만큼만 남긴다(기본 20gb)
+#
+# **실패 로그.** 실패한 서비스의 로그는 `test-results/images-<arch>/<서비스>.log` 에 남는다 — 열차가
+# `scripts/ci/e2e_stall.py images <arch>` 로 레지스트리·buildx 탓인지 가른다(#729).
 #
 # bash 3.2(macos 노드)에서도 돈다 — 연관 배열·`wait -n`·`mapfile` 을 쓰지 않는다.
 set -euo pipefail
@@ -53,9 +59,12 @@ services="${CODEMIT_IMAGES_SERVICES:-$(python3 scripts/ci/image_context.py servi
 sha="$(git -c safe.directory="$PWD" rev-parse HEAD)"
 result_file=".images-$arch.result"
 ctx_file=".images-$arch.ctx"
+log_dir="test-results/images-$arch"
 work="$(mktemp -d "${TMPDIR:-/tmp}/codemit-images.XXXXXX")"
 
-case "$mode" in push|plan) ;; *) echo "CODEMIT_IMAGES_MODE 는 push 나 plan 이다: $mode" >&2; exit 2 ;; esac
+case "$mode" in push|plan|retag) ;; *) echo "CODEMIT_IMAGES_MODE 는 push·plan·retag 중 하나다: $mode" >&2; exit 2 ;; esac
+# 앞 빌드가 이 작업 공간에 남긴 결과를 먼저 지운다 — preflight 에서 멈춘 빌드가 옛 결과로 읽히지 않게.
+rm -rf "$result_file" "$ctx_file" "$log_dir"
 
 cleanup() {
   rm -rf "$work"
@@ -115,13 +124,18 @@ one() {
 
   if docker buildx imagetools inspect "$ctx_ref" >/dev/null 2>&1; then
     echo "건너뛴다 $svc ($suffix) — ctx-$hash 가 이미 있다"
-    if [ "$mode" = push ]; then
+    if [ "$mode" != plan ]; then
       # --prefer-index=false: 매니페스트를 그대로 베낀다(같은 digest — ghcr 에서는 같은 버전에 태그만
       # 는다). 빼면 buildx 가 매니페스트 하나짜리 index 를 새로 만들어, ghcr 에 그 index 와 원본이
       # 따로 버전으로 남고 정리 잡이 원본만 지우면 커밋 태그가 깨진다.
       docker buildx imagetools create --prefer-index=false --tag "$sha_ref" "$ctx_ref"
     fi
     echo "$svc=skipped" > "$work/$svc.result"
+    return 0
+  fi
+  if [ "$mode" = retag ]; then
+    echo "구울 것이 있다 $svc ($suffix) — ctx-$hash 가 없다, retag 는 굽지 않는다"
+    echo "$svc=pending" > "$work/$svc.result"
     return 0
   fi
   echo "굽는다 $svc ($suffix) — ctx-$hash"
@@ -168,6 +182,10 @@ for svc in $services; do
     cat "$work/$svc.result" >> "$result_file"
   else
     echo "$svc=failed" >> "$result_file"
+  fi
+  if grep -qx "$svc=failed" "$result_file"; then
+    mkdir -p "$log_dir"
+    cp "$work/$svc.log" "$log_dir/$svc.log" 2>/dev/null || true
   fi
 done
 grep -q '=failed$' "$result_file" && failed=1

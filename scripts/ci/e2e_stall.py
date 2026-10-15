@@ -2,6 +2,7 @@
 """붉은 e2e 가 Docker VM 의 정지 탓인지 가린다(#716). 열차의 macos 단계가 e2e 뒤에 부른다.
 
     python3 scripts/ci/e2e_stall.py test-results > test-results/e2e-verdict.json
+    python3 scripts/ci/e2e_stall.py images arm64 > test-results/e2e-verdict.json   # 아래 「이미지 굽기의 실패」
 
 **모양.** 열차 #1840·#1890 에서 강의실 e2e 넷이 한꺼번에 3초 한도에 걸렸다. #1890 의 증거는
 backend 접근 로그의 **3.9초 동안 요청 0건**(앞뒤는 초당 50~146건, 틈 앞뒤 요청은 전부 8~25ms)과,
@@ -24,6 +25,28 @@ backend 를 부르지 않을 수 있어, 일꾼 하나인 `@exclusive` 패스나
 코드 탓의 멈춤도 3 을 만족할 수 있다. 그 대가는 빌드 한 번이다 — `train.py fail` 의 인프라 재실행은
 가르기 사슬 전체에 한 번이고, 가른 묶음은 그 몫을 물려받는다(#718).
 
+**이미지 굽기의 실패**(#729). 열차의 sub·macos 가 `scripts/ci/images.sh` 로 이미지를 굽다 붉으면
+`images <arch>` 가 같은 모양의 판정을 낸다.
+
+    python3 scripts/ci/e2e_stall.py images arm64 > test-results/e2e-verdict.json
+
+images.sh 는 서비스마다 `.images-<arch>.result` 에 `서비스=built|skipped|failed` 를 적고, 실패한 서비스의
+로그를 `test-results/images-<arch>/<서비스>.log` 에 남긴다. 판정은 셋이 모두 맞을 때만 「인프라 고장」이다.
+  1. 결과 파일이 있고 `failed` 가 하나 이상이다(없으면 preflight·사용법 오류 — buildx 가 없다 같은 노드
+     설정은 다시 돌아도 낫지 않으므로 판정하지 않는다).
+  2. 실패한 서비스마다 로그가 있고, 그 로그에 **코드 탓 문구**(`CODE_FAILURE`)가 없다 — Dockerfile 의 RUN
+     단계가 0 아닌 코드로 끝났다(`did not complete successfully: exit code`), COPY 할 경로가 없다
+     (`failed to compute cache key`), Dockerfile 을 못 읽었다, 대상 단계가 없다. RUN 안의 `pnpm install`
+     이 네트워크로 죽어도 이 문구가 나오므로 코드 탓으로 센다(좁게 잡는다 — 잘못 넣은 대가가 더 크다).
+  3. 그 로그마다 **인프라 문구**(`INFRA_FAILURE`)가 하나 이상 있다 — 레지스트리의 5xx·429, 연결 끊김·시간
+     초과·이름 풀이 실패, BuildKit 데몬과의 연결(rpc Unavailable), 디스크가 찼다. 어느 쪽도 아니면 판정하지
+     않는다(모르는 실패를 인프라라 부르지 않는다).
+종료코드는 images.sh 의 것(1 = 서비스 실패, 2 = 사용법)이 아니라 이 결과 파일과 로그로 가른다 — buildx 는
+어느 실패든 1 로 끝나 둘을 가르지 못한다.
+
+`train.py fail` 은 붉은 쪽(sub·macos)마다 판정이 있고 **전부** 인프라일 때만 같은 묶음을 다시 돈다 —
+붉은 쪽 하나라도 판정이 없으면(검사·가드·celery 가 붉다) 가른다.
+
 표준 라이브러리만 쓴다 — macos 노드의 시스템 python3 로 돈다.
 """
 
@@ -43,6 +66,24 @@ ACCESS = re.compile(
     r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?Z (?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) \S+ HTTP/"
 )
 TIMEOUT = re.compile(r"Test timeout of \d+ms exceeded")
+# 이미지 굽기(#729) — 머리말 「이미지 굽기의 실패」. 코드 탓이 하나라도 있으면 인프라가 아니다.
+CODE_FAILURE = re.compile(
+    r"did not complete successfully: exit code"
+    r"|failed to compute cache key"
+    r"|dockerfile parse error|failed to parse dockerfile|unknown instruction"
+    r"|target stage \S+ could not be found",
+    re.IGNORECASE,
+)
+INFRA_FAILURE = re.compile(
+    r"unexpected status(?: from \w+ request to \S+)?: (?:5\d\d|429)"
+    r"|\b(?:500 Internal Server Error|502 Bad Gateway|503 Service Unavailable|504 Gateway Time-?out)\b"
+    r"|toomanyrequests|429 Too Many Requests"
+    r"|connection reset by peer|connection refused|broken pipe|i/o timeout|TLS handshake timeout"
+    r"|no such host|context deadline exceeded|unexpected EOF|failed to do request"
+    r"|rpc error: code = (?:Unavailable|Canceled|DeadlineExceeded)"
+    r"|Cannot connect to the Docker daemon|no space left on device",
+    re.IGNORECASE,
+)
 
 
 def epoch(stamp: str, fraction: str | None) -> float:
@@ -131,7 +172,35 @@ def classify(results: pathlib.Path) -> dict:
     }
 
 
+def classify_images(arch: str, root: pathlib.Path = pathlib.Path(".")) -> dict:
+    """images.sh 의 결과와 실패 로그 → 판정(머리말 「이미지 굽기의 실패」)."""
+    try:
+        lines = (root / f".images-{arch}.result").read_text().split()
+    except OSError:
+        return {"infra": False, "reason": f"images.sh({arch}) 가 결과를 남기지 않았다 — preflight 에서 멈췄다"}
+    failed = [line.split("=", 1)[0] for line in lines if line.endswith("=failed")]
+    if not failed:
+        return {"infra": False, "reason": f"images.sh({arch}) 에 실패한 서비스가 없다"}
+    hits = []
+    for svc in failed:
+        try:
+            text = (root / "test-results" / f"images-{arch}" / f"{svc}.log").read_text(errors="replace")
+        except OSError:
+            return {"infra": False, "reason": f"{svc}({arch}) 의 굽기 로그가 없다"}
+        code = CODE_FAILURE.search(text)
+        if code:
+            return {"infra": False, "reason": f"{svc}({arch}) 은 빌드가 실패했다: {code.group(0)}"}
+        infra = INFRA_FAILURE.search(text)
+        if not infra:
+            return {"infra": False, "reason": f"{svc}({arch}) 의 실패를 가르지 못했다"}
+        hits.append(f"{svc} {infra.group(0)}")
+    return {"infra": True, "failed": len(failed), "reason": f"이미지 굽기({arch})의 인프라 실패: " + ", ".join(hits)}
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) > 2 and argv[1] == "images":
+        print(json.dumps(classify_images(argv[2]), ensure_ascii=False))
+        return 0
     results = pathlib.Path(argv[1] if len(argv) > 1 else "test-results")
     print(json.dumps(classify(results), ensure_ascii=False))
     return 0

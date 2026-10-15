@@ -15,6 +15,8 @@ import io
 import json
 import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -139,6 +141,158 @@ class Classify(unittest.TestCase):
         self.assertFalse(e2e_stall.classify(out)["infra"])
 
 
+# 이미지 굽기(#729) — buildx 가 실제로 남기는 줄 모양.
+REGISTRY_502 = """#12 exporting to image
+#12 pushing layers 2.1s done
+ERROR: failed to solve: failed to push ghcr.io/sandcorporation/codemit-backend:abc-arm64: unexpected status from PUT request to https://ghcr.io/v2/sandcorporation/codemit-backend/blobs/uploads/x: 502 Bad Gateway
+"""
+RUN_FAILED = """#18 [build 6/9] RUN pnpm --filter frontend build
+#18 ERROR: process "/bin/sh -c pnpm --filter frontend build" did not complete successfully: exit code: 1
+ERROR: failed to solve: process "/bin/sh -c pnpm --filter frontend build" did not complete successfully: exit code: 1
+"""
+COPY_MISSING = 'ERROR: failed to solve: failed to compute cache key: failed to calculate checksum of ref x: "/backend/nope": not found\n'
+BUILDKIT_GONE = "ERROR: failed to receive status: rpc error: code = Unavailable desc = error reading from server: EOF\n"
+
+
+def images_run(root: pathlib.Path, arch: str, results: dict, logs: dict) -> None:
+    """images.sh 가 남기는 모양 — `.images-<arch>.result` 와 실패 로그."""
+    (root / f".images-{arch}.result").write_text("".join(f"{k}={v}\n" for k, v in results.items()))
+    folder = root / "test-results" / f"images-{arch}"
+    folder.mkdir(parents=True, exist_ok=True)
+    for svc, text in logs.items():
+        (folder / f"{svc}.log").write_text(text)
+
+
+class ImagesClassify(unittest.TestCase):
+    """`e2e_stall.py images <arch>` — 레지스트리·buildx 탓만 인프라, Dockerfile·소스 탓은 코드."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_a_registry_5xx_is_infra(self) -> None:
+        images_run(self.root, "arm64", {"backend": "failed", "frontend": "skipped"}, {"backend": REGISTRY_502})
+        verdict = e2e_stall.classify_images("arm64", self.root)
+        self.assertTrue(verdict["infra"])
+        self.assertIn("backend", verdict["reason"])
+
+    def test_buildkit_losing_its_daemon_is_infra(self) -> None:
+        images_run(self.root, "amd64", {"backend": "failed", "search": "failed"},
+                   {"backend": BUILDKIT_GONE, "search": REGISTRY_502})
+        self.assertTrue(e2e_stall.classify_images("amd64", self.root)["infra"])
+
+    def test_a_failed_run_step_is_the_code(self) -> None:
+        images_run(self.root, "arm64", {"frontend": "failed"}, {"frontend": RUN_FAILED})
+        self.assertFalse(e2e_stall.classify_images("arm64", self.root)["infra"])
+
+    def test_a_missing_copy_path_is_the_code(self) -> None:
+        images_run(self.root, "arm64", {"backend": "failed"}, {"backend": COPY_MISSING})
+        self.assertFalse(e2e_stall.classify_images("arm64", self.root)["infra"])
+
+    def test_one_code_failure_among_infra_failures_is_the_code(self) -> None:
+        images_run(self.root, "arm64", {"backend": "failed", "frontend": "failed"},
+                   {"backend": REGISTRY_502, "frontend": RUN_FAILED + REGISTRY_502})
+        self.assertFalse(e2e_stall.classify_images("arm64", self.root)["infra"])
+
+    def test_an_unknown_failure_is_not_judged(self) -> None:
+        images_run(self.root, "arm64", {"backend": "failed"}, {"backend": "ERROR: something odd\n"})
+        self.assertFalse(e2e_stall.classify_images("arm64", self.root)["infra"])
+
+    def test_preflight_without_a_result_is_not_judged(self) -> None:
+        self.assertFalse(e2e_stall.classify_images("arm64", self.root)["infra"])
+
+    def test_a_failure_without_its_log_is_not_judged(self) -> None:
+        images_run(self.root, "arm64", {"backend": "failed"}, {})
+        self.assertFalse(e2e_stall.classify_images("arm64", self.root)["infra"])
+
+
+FAKE_DOCKER = """#!/bin/sh
+# 가짜 docker — FAKE_HAVE 에 든 ref 만 레지스트리에 있다, build 는 FAKE_BUILD_LOG 를 내고 실패한다.
+echo "$*" >> "$FAKE_CALLS"
+case "$*" in
+  "buildx version") [ -z "$FAKE_NO_BUILDX" ]; exit $? ;;
+  "buildx imagetools create --help") echo "--prefer-index" ; exit 0 ;;
+  "buildx imagetools inspect "*) case " $FAKE_HAVE " in *" $4 "*) exit 0 ;; esac; exit 1 ;;
+  "buildx imagetools create "*) exit 0 ;;
+  "buildx inspect"*|"buildx create"*|"buildx prune"*) exit 0 ;;
+  "buildx build "*) cat "$FAKE_BUILD_LOG"; exit 1 ;;
+esac
+exit 0
+"""
+
+
+class ImagesScript(unittest.TestCase):
+    """images.sh 를 가짜 docker 로 — 실패 로그를 남기는가, retag 는 굽지도 빌더를 띄우지도 않는가(#729)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self.tmp.name)
+        self.repo = base / "repo"
+        (self.repo / "scripts" / "ci").mkdir(parents=True)
+        for name in ("images.sh", "ghcr-login.sh"):
+            shutil.copy(ROOT / "scripts" / "ci" / name, self.repo / "scripts" / "ci" / name)
+        # 문맥 해시는 서비스 이름 그대로 — 해시 계산은 test_image_context.py 가 본다.
+        (self.repo / "scripts" / "ci" / "image_context.py").write_text(
+            "import sys\nif sys.argv[1] == 'hash': print('h' + sys.argv[2])\n")
+        git = ["git", "-C", str(self.repo), "-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run(git[:3] + ["init", "-q"], check=True)
+        subprocess.run(git + ["add", "."], check=True)
+        subprocess.run(git + ["commit", "-qm", "x"], check=True)
+        bin_dir = base / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "docker").write_text(FAKE_DOCKER)
+        (bin_dir / "docker").chmod(0o755)
+        self.calls = base / "calls"
+        self.build_log = base / "build.log"
+        self.env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "FAKE_CALLS": str(self.calls),
+                    "FAKE_BUILD_LOG": str(self.build_log), "CODEMIT_IMAGES_SERVICES": "backend frontend",
+                    "CODEMIT_IMAGE_REGISTRY": "r", "TMPDIR": str(base)}
+        self.env.pop("GHCR_TOKEN", None)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def run_images(self, mode: str, have: str) -> int:
+        env = {**self.env, "CODEMIT_IMAGES_MODE": mode, "FAKE_HAVE": have}
+        done = subprocess.run(["bash", "scripts/ci/images.sh", "arm64"], cwd=self.repo, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return done.returncode
+
+    def test_a_failed_build_leaves_its_log_for_the_verdict(self) -> None:
+        self.build_log.write_text(REGISTRY_502)
+        self.assertEqual(self.run_images("push", "r/codemit-frontend:ctx-hfrontend-arm64"), 1)
+        self.assertEqual((self.repo / ".images-arm64.result").read_text(), "backend=failed\nfrontend=skipped\n")
+        self.assertIn("502 Bad Gateway", (self.repo / "test-results/images-arm64/backend.log").read_text())
+        self.assertFalse((self.repo / "test-results/images-arm64/frontend.log").exists())
+        self.assertTrue(e2e_stall.classify_images("arm64", self.repo)["infra"])
+
+    def test_a_stale_result_does_not_survive_a_preflight_stop(self) -> None:
+        (self.repo / ".images-arm64.result").write_text("backend=failed\n")
+        env = {**self.env, "CODEMIT_IMAGES_MODE": "nope"}
+        subprocess.run(["bash", "scripts/ci/images.sh", "arm64"], cwd=self.repo, env=env, capture_output=True)
+        # 사용법 오류는 지우기 전에 멈춘다 — preflight(buildx 없음)는 지운 뒤라 옛 결과가 남지 않는다.
+        env = {**self.env, "FAKE_NO_BUILDX": "1"}
+        subprocess.run(["bash", "scripts/ci/images.sh", "arm64"], cwd=self.repo, env=env, capture_output=True)
+        self.assertFalse((self.repo / ".images-arm64.result").exists())
+
+    def test_retag_tags_what_it_can_and_leaves_the_rest_pending(self) -> None:
+        self.assertEqual(self.run_images("retag", "r/codemit-frontend:ctx-hfrontend-arm64"), 0)
+        self.assertEqual((self.repo / ".images-arm64.result").read_text(), "backend=pending\nfrontend=skipped\n")
+        self.assertEqual((self.repo / ".images-arm64.ctx").read_text(), "")
+        calls = self.calls.read_text()
+        self.assertIn("imagetools create --prefer-index=false --tag r/codemit-frontend:", calls)
+        self.assertNotIn("buildx build", calls)
+        self.assertNotIn("buildx inspect", calls)  # 빌더를 띄우지 않는다 — 어느 노드에서나 돈다
+
+    def test_retag_with_everything_skipped_is_all_skipped(self) -> None:
+        have = "r/codemit-backend:ctx-hbackend-arm64 r/codemit-frontend:ctx-hfrontend-arm64"
+        self.assertEqual(self.run_images("retag", have), 0)
+        self.assertEqual((self.repo / ".images-arm64.result").read_text(), "backend=skipped\nfrontend=skipped\n")
+
+
 class TrainFail(unittest.TestCase):
     """`train.py fail` — 인프라 판정이면 같은 묶음을 한 번 더, 두 번째는 지금 규칙대로."""
 
@@ -207,6 +361,33 @@ class TrainFail(unittest.TestCase):
         success = jenkinsfile[jenkinsfile.index("    success {"):]
         self.assertIn("string(name: 'MAX_PRS', value: '0')", success)
         self.assertNotIn("INFRA_RETRY", success)
+
+    def run_fail_many(self, count: int, verdicts: list) -> str:
+        entries = [{"number": 700 + i, "branch": f"b{i}", "head": f"{i:040d}", "fork": "f"} for i in range(count)]
+        pathlib.Path(train.PLAN).write_text(json.dumps({"base": "b", "tree": "t", "entries": entries}))
+        paths = []
+        for i, verdict in enumerate(verdicts):
+            paths.append(f"verdict-{i}.json")
+            pathlib.Path(paths[-1]).write_text(json.dumps(verdict, ensure_ascii=False))
+        with contextlib.redirect_stdout(io.StringIO()):
+            train.fail(paths, False)
+        return pathlib.Path("train.next").read_text()
+
+    def test_every_red_side_infra_reruns(self) -> None:
+        # sub 의 이미지 굽기와 macos 의 e2e 가 둘 다 인프라로 붉었다(#729).
+        images = {"infra": True, "reason": "이미지 굽기(amd64)의 인프라 실패: backend 502 Bad Gateway"}
+        self.assertEqual(self.run_fail_many(4, [images, self.STALL]), "NEXT_MAX=4\nINFRA_RETRY=1\n")
+
+    def test_one_red_side_that_is_the_code_splits(self) -> None:
+        images = {"infra": True, "reason": "502"}
+        code = {"infra": False, "reason": "frontend(arm64) 은 빌드가 실패했다"}
+        self.assertEqual(self.run_fail_many(4, [images, code]), "NEXT_MAX=2\nINFRA_RETRY=0\n")
+
+    def test_the_pipeline_passes_a_verdict_only_when_every_red_side_has_one(self) -> None:
+        # 붉은 쪽 하나라도 판정이 없으면(검사·가드·celery) 판정을 넘기지 않는다 — Jenkinsfile.train 의 post.
+        failure = (ROOT / "Jenkinsfile.train").read_text().split("    failure {", 1)[1]
+        self.assertIn("judgeable = false", failure)
+        self.assertIn("if (judgeable && verdicts) {", failure)
 
     def test_a_code_failure_splits_as_before(self) -> None:
         _, nxt = self.run_fail(4, {"infra": False, "reason": "단언 실패"})

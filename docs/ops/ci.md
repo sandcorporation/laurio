@@ -24,25 +24,36 @@ push 하면 옛 빌드를 끊는다.
 `images.sh` 로 굽고(바뀌지 않은 문맥은 ctx 로 건너뛴다) 커밋 태그 `<묶음 머리 sha>-<arch>` 로 올린다. macos 의
 e2e·celery 는 스택이 따로 굽지 않고 그 arm64 이미지를 받아 돈다(`docker/compose.ci-images.yaml`,
 `CODEMIT_IMAGE_TAG`) — 그래서 **e2e 가 본 digest 가 prod 에 가는 digest 다**(`test-results/images.txt` 에
-남는다). ctx 태그는 「병합」이 하나라도 합친 뒤에만 붙는다(#709 의 「초록 뒤에만」) — 붉은 묶음의 이미지는
-커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시 굽는다. 병합 뒤 `codemit-deploy-staging` 의
-이미지 단계는 같은 트리의 해시를 내므로 전부 「건너뛴다」가 되어 main 커밋 태그만 더하고, 가드·문맥 태그
-단계도 할 일이 없다.
+남는다). ctx 태그는 시험 두 가지가 초록인 묶음에만, 「병합」 단계가 **병합 전에** 붙인다(#709 의 「초록 뒤에만」,
+#729) — 붉은 묶음의 이미지는 커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시
+굽는다. 병합 뒤에 붙이던 때(#712)는 병합 push 가 깨운 `codemit-deploy-staging` 이 ctx 보다 먼저 떠 같은 트리를
+다시 굽기도 했다. ctx 는 내용 기준의 사실이라 병합이 거절돼도 무해하다(main 의 트리가 다르면 해시가 다르다).
+병합 뒤 `codemit-deploy-staging` 은 「대상 확인」(built-in)에서 `images.sh` 의 **retag**(굽지 않고 커밋 태그만 더한다,
+빌더도 띄우지 않는다)를 먼저 해 보고, 한 아키텍처가 전부 「건너뛴다」면 그 이미지 가지를 돌지 않는다 —
+macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문맥 태그 단계도 할 일이 없어 건너뛴다.
 
 - **왜 배포 잡이 건너뛰나 — sha 가 아니라 트리다.** 쌓기는 cherry-pick 이라 노드마다 머리 커밋 sha 가 다르고
   GitHub 의 rebase 병합도 새 커밋을 만든다. 같은 것은 트리다: `train.py merge` 는 마지막 PR 까지 합친 뒤 main 의
   트리가 계획의 트리(`train.plan` 의 `tree`, 시험 두 가지가 `assemble` 에서 같은지 확인한다)와 같은지 콘솔에
   적는다. 같으면 서비스마다 문맥 해시도 같다. 다르면(그 사이 main 에 다른 커밋이 들어왔다·중간에 멈췄다)
   다른 문맥만 배포 잡이 굽고 가드한다 — 해시가 판단하므로 틀린 이미지가 건너뛰어지지는 않는다.
-- **이미지가 붉은 것도 묶음이 붉은 것이다** — 레지스트리 고장으로 굽기가 실패해도 지금은 반으로 가른다
-  (인프라 재실행 판정은 e2e 정지 모양만 본다, #716).
+- **이미지가 붉은 것도 묶음이 붉은 것이다** — 다만 레지스트리·buildx 탓으로 붉었으면 e2e 정지와 같은 인프라
+  재실행을 받는다(#729). `images.sh` 가 실패한 서비스의 로그를 `test-results/images-<arch>/` 에 남기고,
+  `scripts/ci/e2e_stall.py images <arch>` 가 가른다: 실패한 서비스마다 로그에 **코드 탓 문구**(RUN 단계가 0 아닌
+  코드로 끝났다 `did not complete successfully: exit code`, COPY 할 경로가 없다 `failed to compute cache key`,
+  Dockerfile 을 못 읽었다)가 없고 **인프라 문구**(레지스트리 5xx·429, 연결 끊김·시간 초과·이름 풀이, BuildKit
+  `rpc error: code = Unavailable`, 디스크가 찼다)가 있어야 인프라다. 결과 파일이 없으면(preflight — buildx 가 없다)
+  판정하지 않는다. 종료코드로는 가르지 못한다 — buildx 는 어느 실패든 1 이다. RUN 안의 `pnpm install` 이 네트워크로
+  죽어도 코드 탓으로 센다(좁게). 판정은 `post failure` 가 **붉은 쪽(sub·macos)마다** 모은다 — 붉은 쪽 하나라도
+  판정이 없으면(검사·가드·celery 가 붉다) 넘기지 않고, `train.py fail` 은 넘어온 판정이 **전부** 인프라일 때만
+  같은 묶음을 다시 돈다.
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
 | 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
 | 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` → 초록이면 `scripts/ci/images.sh amd64`(staging 여섯, #712) → 이번에 구운 앱만 부팅 가드(`scripts/ci/deploy-guard.sh`) |
 | | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-ci-pr-*`·`jenkins-codemit-ci-train-*` 스택(#708 전 이름 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 도 한동안 — 「잡 이름」)·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
-| 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) → 하나라도 합쳤으면 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
-| 붉으면 | sub | macos 가 「인프라 고장」으로 판정했고 sub 검사가 초록이면 **같은 묶음을 한 번 더**(아래 「Docker VM 정지로 본 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
+| 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) — 그 **앞에** 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712·#729) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
+| 붉으면 | sub | 붉은 쪽마다 「인프라 고장」 판정이 있으면(macos 의 e2e 정지·이미지 굽기, sub 의 이미지 굽기 — sub 는 검사가 초록일 때만) **같은 묶음을 한 번 더**(아래 「Docker VM 정지로 본 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
 - **왜 묶나**(2026-10-03). PR 마다 macos e2e 를 따로 돌리면 이미지 셋 굽기 포함 약 8분이 노드
   실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
