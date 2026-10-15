@@ -12,7 +12,8 @@
 //   이미지                  macos 가 arm64 여섯(prod), sub 가 amd64 여섯(staging) — `scripts/ci/images.sh`.
 //                           앱도 환경을 모른다 — 공개 값은 서버의 `.env.<target>` 에서 실행 때(#711, ADR-0062).
 //                           바뀌지 않은 서비스는 굽지 않고 커밋 태그만 더한다(빌드 문맥 해시 = `ctx-` 태그).
-//                           열차를 거쳐 온 커밋은 열차가 같은 트리로 굽고 ctx 를 붙여 두어 전부 건너뛴다(#712)
+//                           열차를 거쳐 온 커밋은 열차가 같은 트리로 굽고 병합 전에 ctx 를 붙여 두어 전부 건너뛴다
+//                           (#712) — 그러면 「대상 확인」이 커밋 태그만 더하고 가지는 노드를 잡지 않는다(#729)
 //   부팅 가드(sub)          이번에 구운 앱만 — `scripts/ci/deploy-guard.sh`
 //   문맥 태그(sub)          여기까지 초록이면 이번에 구운 것에 `ctx-` 태그 — `scripts/ci/images-ctx.sh`. 그래서
 //                           「건너뛴다」는 언제나 앞 빌드가 가드까지 초록으로 본 이미지다(#709)
@@ -52,6 +53,17 @@ def readImageResult(String arch) {
     def parts = line.split('=', 2)
     if (parts.length == 2) { env."IMAGE_${arch.toUpperCase()}_${parts[0].trim().toUpperCase()}" = parts[1].trim() }
   }
+}
+
+// 「대상 확인」의 retag 결과가 그 아키텍처의 여섯 전부 `skipped` 인가.
+def allSkipped(String arch) {
+  if (!fileExists(".images-${arch}.result")) { return false }
+  def lines = readFile(".images-${arch}.result").trim().split('\n')
+  if (lines.length == 0) { return false }
+  for (line in lines) {
+    if (!line.trim().endsWith('=skipped')) { return false }
+  }
+  return true
 }
 
 pipeline {
@@ -120,6 +132,23 @@ pipeline {
           if (env.DOCS_ONLY == 'true') {
             echo '문서만 바뀌었다 — 이미지·가드·배포를 건너뛴다.'
             currentBuild.description += ' 문서만'
+          } else {
+            // 열차를 거쳐 온 커밋은 열차가 같은 트리로 굽고 병합 전에 ctx 를 붙였다(#712, #729) — 그러면 굽지
+            // 않고 커밋 태그만 더하면 된다. 그 일(`images.sh` 의 retag — 빌더를 띄우지 않는다)을 이 노드에서 먼저
+            // 해 보고, 한 아키텍처가 전부 「건너뛴다」면 그 「이미지」 가지는 노드를 잡지 않는다. 줄이 길 때
+            // macos 실행기를 다음 열차와, sub 실행기를 열차의 sub 단계와 다투지 않으려는 것이다. 구울 것이
+            // 하나라도 있거나 retag 가 붉으면 그 가지가 평소대로 돈다(이미 더한 커밋 태그는 같은 값으로 다시 더한다).
+            withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
+              for (arch in ['arm64', 'amd64']) {
+                def ok = sh(returnStatus: true, script: "CODEMIT_IMAGES_MODE=retag bash scripts/ci/images.sh ${arch}") == 0
+                if (ok && allSkipped(arch)) {
+                  env."IMAGES_${arch.toUpperCase()}_RETAGGED" = 'true'
+                  stash name: "ctx-${arch}", includes: ".images-${arch}.ctx", allowEmpty: true
+                  if (arch == 'amd64') { readImageResult('amd64') }
+                  echo "${arch}: 전부 건너뛴다 — 커밋 태그만 더했다, 「이미지」 가지를 돌지 않는다."
+                }
+              }
+            }
           }
         }
         sh 'git -c safe.directory="$PWD" log -1 --oneline'
@@ -136,6 +165,10 @@ pipeline {
       failFast false
       parallel {
         stage('arm64 — prod (macos)') {
+          when {
+            beforeAgent true
+            expression { env.IMAGES_ARM64_RETAGGED != 'true' }
+          }
           agent { label 'macos' }
           options { timeout(time: 60, unit: 'MINUTES') }
           steps {
@@ -148,6 +181,10 @@ pipeline {
           }
         }
         stage('amd64 — staging (sub)') {
+          when {
+            beforeAgent true
+            expression { env.IMAGES_AMD64_RETAGGED != 'true' }
+          }
           // 배포 워크스페이스(`workspace/codemit-deploy-staging`, `docker/.env.staging` 이 있다)와 겹치지 않게 따로 둔다.
           agent { node { label 'laurio-staging'; customWorkspace 'codemit-deploy-staging-images' } }
           options { timeout(time: 60, unit: 'MINUTES') }
@@ -213,9 +250,12 @@ pipeline {
     // (backend·search·pgbouncer, 세 앱의 prod 이미지)도 여기서 함께 — 한 가지가 빨간 채 다른 가지가 ctx 를
     // 남기면 그 서비스를 다음에 건너뛰어 버린다. 배포 실패는 이미지 탓이 아니므로 앞당기기·배포보다 먼저 붙인다.
     stage('문맥 태그') {
+      // 두 가지 모두 「대상 확인」의 retag 로 끝났으면 구운 것이 없어 붙일 ctx 도 없다 — 노드를 잡지 않는다.
       when {
         beforeAgent true
-        expression { env.DOCS_ONLY != 'true' }
+        expression {
+          env.DOCS_ONLY != 'true' && !(env.IMAGES_ARM64_RETAGGED == 'true' && env.IMAGES_AMD64_RETAGGED == 'true')
+        }
       }
       agent { node { label 'laurio-staging'; customWorkspace 'codemit-deploy-staging-images' } }
       options { timeout(time: 10, unit: 'MINUTES') }

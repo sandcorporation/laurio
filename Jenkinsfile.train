@@ -10,8 +10,9 @@
 //
 // **배포 이미지도 여기서 굽는다**(#712). sub 가 검사 뒤 amd64 여섯(+ 구운 앱의 부팅 가드), macos 가
 // arm64 여섯을 `scripts/ci/images.sh` 로 굽고, macos 의 e2e·celery 는 그 arm64 이미지를 받아 돈다.
-// 「병합」 뒤 `images-ctx.sh` 가 ctx 태그를 붙이면, 병합 뒤 `codemit-deploy-staging`(`Jenkinsfile`)의 이미지 단계는 같은
-// 문맥을 전부 「건너뛴다」로 두고 main 커밋 태그만 더한다 — 같은 코드를 두 번 굽지 않는다.
+// 시험 둘이 초록이면 「병합」 단계가 **병합 전에** `images-ctx.sh` 로 ctx 태그를 붙이고(#729), 병합 뒤
+// `codemit-deploy-staging`(`Jenkinsfile`)은 같은 문맥을 전부 「건너뛴다」로 두고 main 커밋 태그만 더한다 — 같은
+// 코드를 두 번 굽지 않고, 건너뛰기만 할 때는 macos 도 잡지 않는다.
 // 같은 잡을 둘 겹쳐 돌리지 않는다 — 줄에 쌓인 호출은 Jenkins 가 하나로 합친다.
 pipeline {
   agent none
@@ -99,13 +100,19 @@ pipeline {
               sh 'python3 scripts/ci/train.py assemble'
             }
             sh 'bash scripts/ci/sub-checks.sh'
-            // 묶음이 붉었을 때 macos 의 인프라 판정을 믿어도 되는지 — sub 가 초록이어야 e2e 만 붉은 것이다.
-            // 뒤의 이미지·가드는 이 판정에 넣지 않는다 — 인프라 재실행은 사슬에 한 번이라 잘못 읽혀도 대가는 빌드 한 번이다.
+            // 검사까지 초록 — 이 뒤에 붉으면 이미지 굽기의 판정만이 인프라 재실행의 근거가 된다(post 「failure」).
             script { env.TRAIN_SUB_OK = '1' }
             // 검사가 초록이면 staging(amd64) 여섯을 묶음의 트리로 굽는다(#712) — 바뀌지 않은 것은 ctx 로
-            // 건너뛴다. 커밋 태그(<묶음 머리 sha>-amd64)는 지금 올리고, ctx 태그는 「병합」 뒤에만 붙인다(#709).
+            // 건너뛴다. 커밋 태그(<묶음 머리 sha>-amd64)는 지금 올리고, ctx 태그는 「병합」 단계가 붙인다(#709).
             withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
-              sh 'bash scripts/ci/images.sh amd64'
+              // 붉으면 레지스트리·buildx 탓인지 가린다(#729, `e2e_stall.py images`) — post 가 그 판정을 읽는다.
+              script {
+                if (sh(returnStatus: true, script: 'bash scripts/ci/images.sh amd64') != 0) {
+                  sh 'mkdir -p test-results && python3 scripts/ci/e2e_stall.py images amd64 > test-results/images-verdict-amd64.json || rm -f test-results/images-verdict-amd64.json'
+                  stash name: 'images-verdict-amd64', includes: 'test-results/images-verdict-amd64.json', allowEmpty: true
+                  error('amd64 이미지 굽기가 붉다 — 위의 서비스별 로그')
+                }
+              }
               // 이번에 구운 앱만 부팅 가드 — 건너뛴 앱의 이미지는 ctx 가 붙을 때 이미 한 번 지났다.
               // `codemit-deploy-staging` 은 열차가 ctx 를 붙인 문맥을 굽지도 가드하지도 않으므로 가드는 여기가 유일하다.
               sh '''
@@ -115,6 +122,7 @@ pipeline {
               '''
             }
             stash name: 'ctx-amd64', includes: '.images-amd64.ctx', allowEmpty: true
+            script { env.TRAIN_SUB_GREEN = '1' }
           }
           post {
             always {
@@ -140,11 +148,19 @@ pipeline {
               // prod(arm64) 여섯을 묶음의 트리로 굽고 커밋 태그로 올린다(#712) — 바뀌지 않은 것은 ctx 로
               // 건너뛴다. e2e·celery 는 스택이 따로 굽지 않고 **바로 이 이미지**를 받아 돈다
               // (compose.ci-images.yaml) — 그래서 e2e 가 본 digest 가 prod 에 가는 digest 다.
-              sh 'bash scripts/ci/images.sh arm64'
+              // 붉으면 레지스트리·buildx 탓인지 가려(#729) e2e 판정과 같은 자리에 남긴다 — e2e 는 돌지 않는다.
+              script {
+                if (sh(returnStatus: true, script: 'bash scripts/ci/images.sh arm64') != 0) {
+                  sh 'mkdir -p test-results && python3 scripts/ci/e2e_stall.py images arm64 > test-results/e2e-verdict.json || rm -f test-results/e2e-verdict.json'
+                  stash name: 'e2e-verdict', includes: 'test-results/e2e-verdict.json', allowEmpty: true
+                  error('arm64 이미지 굽기가 붉다 — 위의 서비스별 로그')
+                }
+              }
               // 커밋 태그는 images.sh 가 쓴 그것 — 이 작업 공간의 HEAD(쌓은 묶음의 머리) + `-arm64`.
               // e2e 가 붉어도 celery-broker 는 돈다 — 어디가 깨졌는지 한 번에 본다.
               catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                 sh 'CODEMIT_IMAGE_TAG="$(git -c safe.directory="$PWD" rev-parse HEAD)-arm64" bash scripts/ci/e2e.sh'
+                script { env.TRAIN_E2E_OK = '1' }
               }
               // 붉은 e2e 가 Docker VM 정지(3초 초과 + 그 시각 backend 요청 0건) 모양인지 판정한다(#716).
               // celery-broker 까지 초록일 때만 넘긴다 — 다른 단계가 붉으면 인프라 재실행 대상이 아니다.
@@ -153,6 +169,7 @@ pipeline {
             }
             stash name: 'e2e-verdict', includes: 'test-results/e2e-verdict.json', allowEmpty: true
             stash name: 'ctx-arm64', includes: '.images-arm64.ctx', allowEmpty: true
+            script { if (env.TRAIN_E2E_OK == '1') { env.TRAIN_MACOS_GREEN = '1' } }
           }
           post {
             always {
@@ -186,18 +203,16 @@ pipeline {
       steps {
         unstash 'plan'
         sh 'rm -f .train-merged'
-        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-          sh 'python3 scripts/ci/train.py assemble'
-          sh 'python3 scripts/ci/train.py merge'
-        }
-        // 합쳤으면 이 묶음이 구운 이미지에 ctx 태그를 붙인다(#712, #709 의 「초록 뒤에만」) — 열차에서 초록은
-        // 시험 두 가지(검사·이미지·가드 / 이미지·e2e·celery) + 병합이다. 병합 뒤 `codemit-deploy-staging` 이 같은 트리의 문맥
-        // 해시를 내면 전부 「건너뛴다」가 되어 커밋 태그만 더한다. 붉은 묶음은 여기 닿지 않아 ctx 가 없고,
-        // 반으로 갈라 다시 도는 묶음은 트리가 달라 해시도 다르니 스스로 다시 굽는다. 다 합치지 못하고 멈췄어도
-        // (그 사이 새 push) 시험한 문맥은 초록이므로 붙인다 — main 의 트리가 다르면 `codemit-deploy-staging` 이 다른 해시를
-        // 내고, 그 문맥만 굽는다. 실패해도 병합은 이미 끝났으므로 빌드를 붉히지 않는다 — 배포 잡이 구울 뿐이다.
+        // 시험 둘이 초록이면 **병합 전에** 이 묶음이 구운 이미지에 ctx 태그를 붙인다(#712, #729). 열차에서
+        // 초록은 시험 두 가지(검사·이미지·가드 / 이미지·e2e·celery)다. 병합 push 가 깨운 `codemit-deploy-staging`
+        // 이 같은 트리의 문맥 해시를 내면 전부 「건너뛴다」가 되어 macos 를 잡지 않고 커밋 태그만 더한다
+        // (Jenkinsfile 「대상 확인」의 retag) — 병합 뒤에 붙이면 그 잡이 ctx 보다 먼저 떠 같은 트리를 다시 구웠다.
+        // ctx 는 「이 문맥을 어느 빌드가 끝까지 초록으로 봤다」는 내용 기준의 사실이라, 병합이 거절되거나
+        // (그 사이 새 push) 다 합치지 못해도 무해하다 — main 의 트리가 다르면 배포 잡이 다른 해시를 내고 그
+        // 문맥만 굽는다. 붉은 묶음은 여기 닿지 않아 ctx 가 없고, 반으로 갈라 다시 도는 묶음은 트리가 달라
+        // 해시도 다르니 스스로 다시 굽는다. 실패해도 빌드를 붉히지 않는다 — 배포 잡이 구울 뿐이다.
         script {
-          if (fileExists('.train-merged') && env.TRAIN_RUN_TESTS == '1') {
+          if (env.TRAIN_RUN_TESTS == '1') {
             catchError(buildResult: null, stageResult: null, message: 'ctx 태그 실패 — 배포 잡이 다시 굽는다') {
               unstash 'ctx-amd64'
               unstash 'ctx-arm64'
@@ -206,6 +221,10 @@ pipeline {
               }
             }
           }
+        }
+        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+          sh 'python3 scripts/ci/train.py assemble'
+          sh 'python3 scripts/ci/train.py merge'
         }
         // 합쳤으면 합친 범위의 `GlitchTip: <id>` 줄을 해결 표시한다 — 「고쳤다」의 판정이 곧 이
         // 병합이다(시험이 초록이고 main 에 들어갔다). 토큰이 없으면 스크립트가 넘어간다.
@@ -230,12 +249,26 @@ pipeline {
         if (env.TRAIN_COUNT && env.TRAIN_COUNT != '0') {
           node('laurio-staging') {
             unstash 'plan'
-            // 인프라 판정(#716) — 앞 빌드가 이 작업 공간에 남긴 것을 지우고, 이번 macos 가 남긴 것만 읽는다.
-            sh 'rm -f test-results/e2e-verdict.json'
+            // 인프라 판정(#716, #729) — 앞 빌드가 이 작업 공간에 남긴 것을 지우고, 이번 빌드가 남긴 것만 읽는다.
+            // 붉은 쪽마다 판정이 있어야 넘긴다: sub 는 검사가 초록이고 이미지 굽기가 붉었을 때만(가드·검사가
+            // 붉으면 판정이 없다), macos 는 이미지 굽기가 붉었거나 e2e 가 붉고 celery 까지 돌았을 때만.
+            // 판정이 없는 붉은 쪽이 하나라도 있으면 아무것도 넘기지 않는다 — 가른다. 전부 인프라인지는 train.py 가 본다.
+            sh 'rm -f test-results/e2e-verdict.json test-results/images-verdict-amd64.json'
             def failArgs = ''
-            if (env.TRAIN_SUB_OK == '1') {
+            def verdicts = []
+            def judgeable = true
+            if (env.TRAIN_SUB_GREEN != '1') {
+              if (env.TRAIN_SUB_OK == '1') { try { unstash 'images-verdict-amd64' } catch (ignored) { } }
+              if (fileExists('test-results/images-verdict-amd64.json')) { verdicts << 'test-results/images-verdict-amd64.json' }
+              else { judgeable = false }
+            }
+            if (env.TRAIN_MACOS_GREEN != '1') {
               try { unstash 'e2e-verdict' } catch (ignored) { }
-              if (fileExists('test-results/e2e-verdict.json')) { failArgs += ' --verdict test-results/e2e-verdict.json' }
+              if (fileExists('test-results/e2e-verdict.json')) { verdicts << 'test-results/e2e-verdict.json' }
+              else { judgeable = false }
+            }
+            if (judgeable && verdicts) {
+              for (v in verdicts) { failArgs += " --verdict ${v}" }
             }
             if ((params.INFRA_RETRY ?: '0') == '1') { failArgs += ' --infra-retried' }
             withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {

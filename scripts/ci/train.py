@@ -5,7 +5,7 @@
     GH_TOKEN=… scripts/ci/train.py plan [--max N]    # 줄 선 PR 을 main 위에 쌓고 train.plan 을 쓴다
     GH_TOKEN=… scripts/ci/train.py assemble          # train.plan 그대로 다시 쌓는다(다른 노드·단계)
     GH_TOKEN=… scripts/ci/train.py merge             # 묶음이 초록이면 차례로 rebase 병합한다
-    GH_TOKEN=… scripts/ci/train.py fail [--verdict F] [--infra-retried]  # 묶음이 붉으면 다음 묶음 크기를 정한다
+    GH_TOKEN=… scripts/ci/train.py fail [--verdict F]… [--infra-retried]  # 묶음이 붉으면 다음 묶음 크기를 정한다
 
 `TRAIN_DRY_RUN=1` 이면 GitHub 에 상태도 병합도 쓰지 않는다(손으로 시험할 때).
 
@@ -30,7 +30,8 @@
 **인프라 고장이면 가르지 않고 같은 묶음을 한 번 더 돈다**(#716). macos 단계가 e2e 뒤에
 `scripts/ci/e2e_stall.py` 로 판정을 남기고(실패가 전부 3초 한도 초과이고, 시험마다 그 마감이
 backend 접근 로그의 3초 이상 요청 0건 틈 안에 있다 — Docker VM 전체의 정지), sub 검사도 초록이면
-`fail --verdict` 가 그것을 읽는다. 재실행은 **가르기 사슬 전체에 한 번**이다 — 다시 붉으면(`--infra-retried`)
+`fail --verdict` 가 그것을 읽는다. 이미지 굽기(`images.sh`)가 레지스트리·buildx 탓으로 붉은 것도 같은
+판정을 낸다(#729, `e2e_stall.py` 머리말) — 붉은 쪽(sub·macos)마다 판정이 있고 전부 인프라여야 다시 돈다. 재실행은 **가르기 사슬 전체에 한 번**이다 — 다시 붉으면(`--infra-retried`)
 위의 가르기대로 가고, 가른 묶음도 그 몫을 물려받아 판정을 다시 읽지 않는다(#718). 몫은 초록 뒤나 PR 하나가
 붉어 사슬이 끝난 뒤에야 돌아온다. 그래서 코드 탓 실패가 매번 인프라로 잘못 분류돼도 대가는 빌드 한 번이다. 그 밖의 인프라 고장은 이 가르기가 PR 하나를 억울하게 잡을 수 있다 — PR CI 를 다시 돌리면 줄로 돌아온다.
 
@@ -289,19 +290,27 @@ def merge() -> int:
     return 0
 
 
-def infra_stall(verdict_path: str | None) -> dict | None:
-    """macos 단계가 남긴 e2e 판정(`scripts/ci/e2e_stall.py`)이 「인프라 고장」이면 그 판정을 돌려준다."""
-    if not verdict_path:
+def infra_stall(verdict_paths) -> dict | None:
+    """붉은 쪽마다 남긴 판정(`scripts/ci/e2e_stall.py` — e2e 정지 또는 이미지 굽기)이 **전부** 「인프라 고장」이면
+    그 판정들을 하나로 묶어 돌려준다. 하나라도 읽지 못했거나 인프라가 아니면 None — 가른다(#729)."""
+    if isinstance(verdict_paths, str):
+        verdict_paths = [verdict_paths]
+    verdicts = []
+    for path in verdict_paths or []:
+        try:
+            with open(path) as source:
+                verdict = json.load(source)
+        except (OSError, ValueError):
+            return None
+        if not (isinstance(verdict, dict) and verdict.get("infra") is True):
+            return None
+        verdicts.append(verdict)
+    if not verdicts:
         return None
-    try:
-        with open(verdict_path) as source:
-            verdict = json.load(source)
-    except (OSError, ValueError):
-        return None
-    return verdict if isinstance(verdict, dict) and verdict.get("infra") is True else None
+    return {"infra": True, "reason": " · ".join(str(v.get("reason", "")) for v in verdicts)}
 
 
-def fail(verdict_path: str | None = None, infra_retried: bool = False) -> int:
+def fail(verdict_path=None, infra_retried: bool = False) -> int:
     data = load_plan()
     entries = data["entries"]
     stall = None if infra_retried else infra_stall(verdict_path)
@@ -339,7 +348,8 @@ def main() -> int:
     sub.add_parser("assemble")
     sub.add_parser("merge")
     failing = sub.add_parser("fail")
-    failing.add_argument("--verdict", default=None)  # macos 의 e2e 판정 — sub 검사가 초록일 때만 넘긴다
+    # 붉은 쪽(sub·macos)마다의 판정 — 붉은 쪽 전부에 판정이 있을 때만 파이프라인이 넘긴다(#729)
+    failing.add_argument("--verdict", action="append", default=None)
     failing.add_argument("--infra-retried", action="store_true")  # 이 빌드가 이미 인프라 재실행이었다
     args = parser.parse_args()
     if args.command == "enqueue":
