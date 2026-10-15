@@ -116,8 +116,11 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
   워커만 거둔다. 요청 안의 벤더 호출(공모전 채점·요구사항 대화·채점 모델 시험 호출)은 제
   타임아웃 20초를 따로 들고, `call_internal` 은 30초에 부른 쪽이 끊는다. 요청 안의 SQL 문은
   `core/db_timeouts.py` 가 `statement_timeout` 25초·`lock_timeout` 5초로 끊는다(#745 — 문마다
-  `SET LOCAL` 을 함께 실어 트랜잭션 모드 풀러에서도 그 문에만 걸리고, celery·관리 명령에는
-  걸리지 않는다. 값은 `CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS`·`CODEMIT_REQUEST_LOCK_TIMEOUT_MS`).
+  `SET LOCAL` 을 함께 실어 트랜잭션 모드 풀러에서도 그 문에만 걸린다. celery 태스크 본체·관리
+  명령·마이그레이션에는 걸리지 않지만, **요청으로 도는 내부 HTTP 스캔(`/api/internal/scans/*`)과
+  e2e 시드에는 걸린다** — 스캔이 잠금을 5초 넘게 기다리면 500 이고 태스크는 재시도하지 않아 다음
+  beat 로 밀린다. 그게 정상인 스캔은 지금 없다(#747). 값은
+  `CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS`·`CODEMIT_REQUEST_LOCK_TIMEOUT_MS`).
   끊긴 요청은 500 이고 GlitchTip 에 `OperationalError: canceling statement due to statement
   timeout`(잠금이면 `… due to lock timeout`)으로 잡힌다. 10초를 넘긴 요청 수는
   `sum(rate(codemit_http_request_duration_seconds_count[5m])) - sum(rate(codemit_http_request_duration_seconds_bucket{le="10.0"}[5m]))`
