@@ -9,6 +9,8 @@ gitignore 라 git diff 로는 값이 바뀐 것을 못 보므로, `plan` 은 떠
   견주기 때문이다(고정하지 않으면 「늘 다르다」가 되어 매 배포 세 앱이 다 뜬다).
 - 한 앱의 env 만 바뀌면 그 앱만 다시 뜬다.
 - `config --hash` 가 실패하면 삼키지 않는다 — 메시지를 로그에 남기고 다시 띄운다(예전에는 「어긋나지 않음」).
+- 견줄 수 없을 때(컨테이너를 못 읽음·`config --hash` 실패·라벨이 빔)는 「어긋난다」가 아니라 「견줄 수 없어
+  다시 띄운다」로 찍는다(#733) — 동작은 같고 로그만 실제 어긋남과 가른다.
 
 가짜 `docker` 의 해시는 `<이미지 태그>/<release>/<그 앱의 env>` 다 — compose 가 렌더한 정의에서 env 와
 이미지가 해시에 드는 모양을 흉내 낸다. 떠 있는 컨테이너는 옛 커밋(`oldsha`)으로 떠 있다.
@@ -28,6 +30,7 @@ FAKE_DOCKER = """#!/bin/sh
 state="$FAKE_DOCKER_STATE"
 if [ "$1" = inspect ]; then
   svc=${4#cid-}
+  if [ -e "$state/inspect-fails" ]; then echo "Error response from daemon: No such object: $4" >&2; exit 1; fi
   case "$3" in
     *Config.Image*) echo "ghcr.io/sandcorporation/codemit-$svc:oldsha-amd64" ;;
     *Config.Env*) printf 'PORT=3000\\nCODEMIT_PUBLIC_SENTRY_RELEASE=oldsha\\n' ;;
@@ -56,7 +59,14 @@ exit 0
 """
 
 
-def _prepare_app_env(tmp_path, *, env_now: dict[str, str] | None = None, hash_fails: bool = False):
+def _prepare_app_env(
+    tmp_path,
+    *,
+    env_now: dict[str, str] | None = None,
+    hash_fails: bool = False,
+    inspect_fails: bool = False,
+    no_label: bool = False,
+):
     """세 앱이 옛 커밋으로, env `v1` 로 떠 있다. `env_now` 는 지금 `.env.<target>` 이 주는 값."""
     # 앱 코드는 안 바뀐 커밋 — 이미지 문맥 밖(e2e 설정) 파일만 바꾼다.
     repo, env = _prepare(tmp_path, lambda compose: compose, touch=("frontend/playwright.config.ts",))
@@ -64,10 +74,13 @@ def _prepare_app_env(tmp_path, *, env_now: dict[str, str] | None = None, hash_fa
     state = tmp_path / "state"
     state.mkdir()
     for app in APPS:
-        (state / f"label-{app}").write_text("oldsha/oldsha/v1\n", encoding="utf-8")
+        if not no_label:
+            (state / f"label-{app}").write_text("oldsha/oldsha/v1\n", encoding="utf-8")
         (state / f"env-{app}").write_text((env_now or {}).get(app, "v1"), encoding="utf-8")
     if hash_fails:
         (state / "hash-fails").touch()
+    if inspect_fails:
+        (state / "inspect-fails").touch()
     return repo, {**env, "FAKE_DOCKER_STATE": str(state)}
 
 
@@ -104,7 +117,8 @@ def test_an_app_whose_env_changed_is_the_only_one_restarted(operator_env_changed
     assert plan["BUILD_OPERATOR"] == "true"
     assert plan["BUILD_FRONTEND"] == "false"
     assert plan["BUILD_CLASSROOM"] == "false"
-    assert "operator 의 실행 설정이" in out
+    assert "operator 의 실행 설정이 .env.prod 과 어긋난다" in out
+    assert "견줄 수 없" not in out
 
 
 @pytest.fixture
@@ -117,3 +131,32 @@ def test_a_failing_config_hash_is_logged_and_restarts_instead_of_passing_silentl
 
     assert [plan[f"BUILD_{app.upper()}"] for app in APPS] == ["true", "true", "true"]
     assert "undefined network edge" in out
+    assert "classroom 의 실행 설정을 .env.prod 과 견줄 수 없어 다시 띄운다" in out
+    assert "어긋난다" not in out
+
+
+@pytest.fixture
+def inspect_fails(tmp_path):
+    return _prepare_app_env(tmp_path, inspect_fails=True)
+
+
+def test_an_unreadable_container_restarts_as_incomparable_not_as_drifted(inspect_fails):
+    plan, out = _plan(inspect_fails)
+
+    assert [plan[f"BUILD_{app.upper()}"] for app in APPS] == ["true", "true", "true"]
+    assert "No such object: cid-frontend" in out
+    assert "frontend 의 실행 설정을 .env.prod 과 견줄 수 없어 다시 띄운다" in out
+    assert "어긋난다" not in out
+
+
+@pytest.fixture
+def no_label(tmp_path):
+    return _prepare_app_env(tmp_path, no_label=True)
+
+
+def test_a_container_without_a_config_hash_label_is_incomparable(no_label):
+    plan, out = _plan(no_label)
+
+    assert [plan[f"BUILD_{app.upper()}"] for app in APPS] == ["true", "true", "true"]
+    assert "operator 의 실행 설정을 .env.prod 과 견줄 수 없어 다시 띄운다" in out
+    assert "어긋난다" not in out

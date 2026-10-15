@@ -227,7 +227,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   그래서 amd64 이미지 = staging, arm64 이미지 = prod 이고 커밋당 굽는 수가 최대 여섯이다(예전 열둘).
   값을 바꾸면 `.env.<target>` 을 고치고 배포한다 — `deploy.sh plan` 이 떠 있는 앱의 compose 설정 해시를
   지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 견주지 못하면(`config --hash` 실패 등)
-  그 메시지를 로그에 남기고 다시 띄운다(#727, `backend/tests/test_deploy_plan_app_env.py`). 어느 키가 어느 이름으로 가는지는
+  그 메시지와 「견줄 수 없어 다시 띄운다」를 찍고(실제 어긋남의 로그와 갈린다) 다시 띄운다(#727·#733, `backend/tests/test_deploy_plan_app_env.py`). 어느 키가 어느 이름으로 가는지는
   `docker/staging.env.example`·`prod.env.example` 과 compose 두 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
