@@ -214,7 +214,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   rename 직전에 남은 `jenkins-codemit-(pr|train)-*` 도 한동안 같이 걷는다 — 2026-11-15 이후 #735 로 지운다(지울 조건은 그 파일 머리말).
   끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이다 — `codemit-deploy-prod` 는 사용자가 prod
   승격을 말할 때 처음 돈다.
-- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — PR CI 와 `codemit-deploy-staging` 잡 모두 `scripts/ci/changed.sh`(`codemit-deploy-staging` 은 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — 같은 규칙을 세 곳이 쓴다. PR CI 는 `scripts/ci/changed.sh`(merge-base 와 견준다), 열차는 `scripts/ci/train.py` 의 `touches_code`(묶음 전체가 문서뿐이면 시험·이미지 대신 `문서만` 단계), `codemit-deploy-staging` 잡은 다시 `changed.sh`(`codemit-deploy-staging` 은 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit-deploy-staging` 잡(`Jenkinsfile`)의 앞 단계가 됐다
