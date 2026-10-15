@@ -22,6 +22,7 @@ from __future__ import annotations
 import pydantic
 
 from . import problem_authoring
+from .git_history_hint import zip_git_history_item_ids, zip_git_history_warning_text
 from .instructor_scope import class_scope, problem_scope
 from .mcp_tool import Tool, ToolInputError, WriteResult
 from .models import ChecklistItem, Class, ConnectedApp, Problem
@@ -107,7 +108,15 @@ def _problem_out(problem: Problem, class_obj: Class) -> dict:
         "syntax_check_enabled": problem.syntax_check_enabled,
         "checklist_items": _items_out(problem),
         "available_transitions": _transitions_out(problem, class_obj),
+        **_warning_out(problem),
     }
+
+
+def _warning_out(problem: Problem) -> dict:
+    """zip 제출에 Git 기록이 없어 언제나 놓칠 필수 항목이 있으면 경고 한 줄(#587) — 없으면 키가 없다."""
+
+    item_ids = zip_git_history_item_ids(problem.submission_formats, problem.checklist_items.all())
+    return {"warning": zip_git_history_warning_text(item_ids)} if item_ids else {}
 
 
 def _transition_out(problem: Problem, class_obj: Class) -> dict:
@@ -124,7 +133,7 @@ def _transition_out(problem: Problem, class_obj: Class) -> dict:
 def _checklist_out(problem: Problem) -> dict:
     """체크리스트 도구의 결과에 붙는 그 문제의 항목 목록(#579) — 설명·채점 설정은 빠진다."""
 
-    return {"problem_id": problem.id, "checklist_items": _items_out(problem)}
+    return {"problem_id": problem.id, "checklist_items": _items_out(problem), **_warning_out(problem)}
 
 
 # --- 스키마 조각 ------------------------------------------------------------------
@@ -257,12 +266,20 @@ def _object(properties: dict, required: list[str]) -> dict:
     return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
 
 
+#: 걸릴 때만 실리는 키(#587) — 그래서 어느 결과의 required 에도 넣지 않는다.
+_WARNING_OUT = {
+    "type": "string",
+    "description": "zip 제출에는 Git 기록이 없어 zip 으로 낸 사람이 언제나 놓칠 필수 항목이 있으면 그 경고. 없으면 키가 없다.",
+}
+_PROBLEM_OUT["properties"]["warning"] = _WARNING_OUT
+
+
 _PROBLEM_RESULT = _object({"problem": _PROBLEM_OUT}, ["problem"])
 _TRANSITION_RESULT = _object({"problem": _TRANSITION_OUT}, ["problem"])
-_ITEM_RESULT = _object({"item": _ITEM_OUT, **_CHECKLIST_OUT}, ["item", *_CHECKLIST_OUT])
-_CHECKLIST_RESULT = _object(_CHECKLIST_OUT, list(_CHECKLIST_OUT))
+_ITEM_RESULT = _object({"item": _ITEM_OUT, **_CHECKLIST_OUT, "warning": _WARNING_OUT}, ["item", *_CHECKLIST_OUT])
+_CHECKLIST_RESULT = _object({**_CHECKLIST_OUT, "warning": _WARNING_OUT}, list(_CHECKLIST_OUT))
 _DELETED_ITEM_RESULT = _object(
-    {"deleted_item_id": {"type": "integer", "description": "지운 항목 번호"}, **_CHECKLIST_OUT},
+    {"deleted_item_id": {"type": "integer", "description": "지운 항목 번호"}, **_CHECKLIST_OUT, "warning": _WARNING_OUT},
     ["deleted_item_id", *_CHECKLIST_OUT],
 )
 

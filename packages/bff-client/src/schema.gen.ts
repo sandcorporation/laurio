@@ -5312,6 +5312,7 @@ export interface components {
             syntax_check_enabled: boolean;
             /** Title */
             title: string;
+            zip_git_history_warning?: components["schemas"]["ZipGitHistoryWarningOut"] | null;
         };
         /**
          * ClassroomProblemStatsOut
@@ -7661,6 +7662,7 @@ export interface components {
             syntax_check_enabled: boolean;
             /** Title */
             title: string;
+            zip_git_history_warning?: components["schemas"]["ZipGitHistoryWarningOut"] | null;
         };
         /** ProblemPatchIn */
         ProblemPatchIn: {
@@ -8808,6 +8810,15 @@ export interface components {
             blocking_reasons: components["schemas"]["WithdrawalBlockReason"][];
             /** Detail */
             detail: string;
+        };
+        /**
+         * ZipGitHistoryWarningOut
+         * @description zip 으로 낸 사람이 언제나 놓칠 필수 항목들(#587, `classroom.git_history_hint`) —
+         *     zip 에는 Git 기록(.git)이 들어가지 않는다. 경고일 뿐 저장·제출을 막지 않는다.
+         */
+        ZipGitHistoryWarningOut: {
+            /** Checklist Item Ids */
+            checklist_item_ids: number[];
         };
     };
     responses: never;

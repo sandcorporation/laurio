@@ -136,7 +136,9 @@ from .schemas import (
     ScoringModelOut,
     OwnershipTransferIn,
     PendingOwnershipTransferOut,
+    ZipGitHistoryWarningOut,
 )
+from .git_history_hint import zip_git_history_item_ids
 from . import pending_scoring
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
@@ -500,6 +502,7 @@ def _serialize_problem(
     )
     effective_model = problem.effective_model()
     effective_reasoning_effort = problem.effective_reasoning_effort()
+    checklist_items = list(problem.checklist_items.all())
     return ProblemOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -520,7 +523,7 @@ def _serialize_problem(
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
-        checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+        checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
         passed_count=passed_count,
         member_count=member_count,
         pass_rate=(passed_count / member_count) if member_count else None,
@@ -534,7 +537,13 @@ def _serialize_problem(
         instructor_note=problem.instructor_note,
         last_submitted_at=last_submitted_at,
         participant_attempt_count=participant_attempt_count,
+        zip_git_history_warning=_zip_git_history_warning(problem, checklist_items),
     )
+
+
+def _zip_git_history_warning(problem: Problem, checklist_items: list) -> ZipGitHistoryWarningOut | None:
+    item_ids = zip_git_history_item_ids(problem.submission_formats, checklist_items)
+    return ZipGitHistoryWarningOut(checklist_item_ids=item_ids) if item_ids else None
 
 
 def _contest_out(problem: Problem) -> ProblemContestOut | None:
@@ -543,6 +552,7 @@ def _contest_out(problem: Problem) -> ProblemContestOut | None:
 
 
 def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> ClassroomProblemMineOut:
+    checklist_items = list(problem.checklist_items.all())
     return ClassroomProblemMineOut(
         id=problem.id,
         classroom_id=problem.classroom_id,
@@ -554,8 +564,9 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
-        checklist_items=[_serialize_checklist_item(i) for i in problem.checklist_items.all()],
+        checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
         passed=passed,
+        zip_git_history_warning=_zip_git_history_warning(problem, checklist_items),
     )
 
 

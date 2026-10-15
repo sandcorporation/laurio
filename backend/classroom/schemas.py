@@ -398,6 +398,13 @@ class ImportContestIn(Schema):
     contest_id: int
 
 
+class ZipGitHistoryWarningOut(Schema):
+    """zip 으로 낸 사람이 언제나 놓칠 필수 항목들(#587, `classroom.git_history_hint`) —
+    zip 에는 Git 기록(.git)이 들어가지 않는다. 경고일 뿐 저장·제출을 막지 않는다."""
+
+    checklist_item_ids: list[int]
+
+
 class ProblemOut(Schema):
     id: int
     classroom_id: int
@@ -470,6 +477,8 @@ class ProblemOut(Schema):
     #: 참여자(강사 본인·내보낸 사람 제외)의 시도 수(#674) — 제출 현황의 「시도」와 같은 집합.
     #: 문제 편집 머리의 「제출 현황 N」 이 이 값을 보인다.
     participant_attempt_count: int = 0
+    #: 받는 형식에 소스가 있고 필수 항목이 Git 기록을 묻으면 그 항목들(#587), 아니면 None.
+    zip_git_history_warning: ZipGitHistoryWarningOut | None = None
 
 
 class ProblemReorderIn(Schema):
@@ -645,6 +654,9 @@ class ClassroomProblemMineOut(Schema):
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
     #: 내서 미통과가 나와도 계속 참이다.
     passed: bool = False
+    #: 강사 쪽 `ProblemOut.zip_git_history_warning` 과 같은 판정(#587) — 제출 화면이 zip 을
+    #: 고를 때의 안내를 더 눈에 띄게 그린다.
+    zip_git_history_warning: ZipGitHistoryWarningOut | None = None
 
 
 class ContestEntryEvidenceIn(Schema):
