@@ -494,6 +494,17 @@ PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 (데이터 CSV 등)가 경로 순서상 앞에 있으면 코드의 몫을 먹는다; 그런 파일이 실제로
 문제가 되면 `EXCLUDED_FILE_NAMES`·`EXCLUDED_SUFFIXES` 에 한 줄 더한다.
 
+**zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
+`classroom.git_history_hint`). 위 제외 목록이 `.git/` 를 빼므로, 받는 형식에 소스(zip)가
+있는 문제의 필수 항목이 커밋·브랜치를 물으면 zip 으로 낸 사람은 그 항목을 언제나 놓친다.
+판정은 그 모듈 한 자리다: 받는 형식에 소스가 있고, **필수** 항목의 문구에 `git`·`commit…`·
+`branch…`(영어는 단어 경계 — `GitHub`·`digit` 은 안 걸린다) 또는 `커밋`·`브랜치`(조사가 붙어
+경계를 보지 않는다)가 있다(대소문자 무시). 선택 항목과 문제 설명은 보지 않는다 — 놓쳐도 통과에
+관여하지 않거나 채점 항목이 아니다. 결과는 강사의 문제 조회(`ProblemOut`)와 참여자의 문제
+화면(`ClassroomProblemMineOut`)에 `zip_git_history_warning`(`{checklist_item_ids}` 또는
+`null`)으로, 연결된 앱의 문제·체크리스트 쓰기 응답에 `warning` 한 줄로 실린다. 오탐은
+괜찮다 — 경고일 뿐 저장도 제출도 막지 않는다.
+
 **UTF-8 로 읽히지 않는 파일은 버리기 전에 변환 플러그인에게 묻는다**(#496,
 `core.source_converters`). 설정 `SOURCE_CONVERTERS`(dotted path 목록, 쉼표 구분)에
 적힌 순서대로 「내 형식인가」를 묻고 — 판정은 이름이 아니라 내용으로 한다(단일 파일
@@ -603,7 +614,8 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 **응답은 할 일에 맞는 크기다**(#579). 원문(설명·채점 지침)은 `get_problem` 하나만 싣는다 — 상태
 하나를 바꾸거나 체크리스트 한 줄을 고칠 때마다 설명 마크다운이 대화에 다시 실리지 않도록. 모든
 도구의 실제 응답이 자기 `outputSchema` 를 만족하는지는 MCP 시험이 부르는 도구 호출마다 저절로
-검사된다(`tests/mcp_output_schema.py`).
+검사된다(`tests/mcp_output_schema.py`). 문제·체크리스트 쓰기의 결과에는 zip 으로 낸 사람이
+언제나 놓칠 필수 항목이 있을 때만 `warning` 한 줄이 붙는다(#587, 위 「zip 에는 Git 기록이 없다」).
 
 읽기 도구 다섯(#513)은 화면 라우트와 **같은 함수**를 부른다 — 범위는 `instructor_scope`
 (`write=False`)가, 값은 `classroom.api` 의 직렬화 함수가 정하고, 화면과 같은 인코더로 내보내
