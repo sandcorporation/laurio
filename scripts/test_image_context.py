@@ -404,5 +404,43 @@ class ChangedServices(unittest.TestCase):
         self.assertEqual(self.changed(old, head), ["pgbouncer"])
 
 
+    TABLE = (pathlib.Path(__file__).resolve().parent / "ci" / "image_context.py").read_text()
+
+    def test_the_table_reads_back_as_this_file(self) -> None:
+        # 표를 줄로 읽는 파서가 지금 표와 같은 값을 낸다 — 표 모양을 바꾸면 여기서 붉다.
+        head = self.commit(ic.TABLE_FILE, self.TABLE)
+        cwd = pathlib.Path.cwd()
+        os.chdir(self.repo)
+        try:
+            version, targets = ic.table_at(head)
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(version, ic.HASH_VERSION)
+        self.assertEqual(targets, {svc.name: svc.target for svc in ic.SERVICES.values()})
+
+    def test_a_target_change_in_the_table_changes_that_service(self) -> None:
+        # #729 — 표의 target 만 바꾼 커밋은 다시 구워지므로 바꿔 끼워야 한다.
+        old = self.commit(ic.TABLE_FILE, self.TABLE)
+        head = self.commit(ic.TABLE_FILE, self.TABLE.replace(
+            'Service("operator", ("operator", *NODE_WORKSPACE), target="runner")',
+            'Service("operator", ("operator", *NODE_WORKSPACE), target="slim")'))
+        self.assertEqual(self.changed(old, head), ["operator"])
+
+    def test_a_hash_version_bump_changes_everything(self) -> None:
+        old = self.commit(ic.TABLE_FILE, self.TABLE)
+        head = self.commit(ic.TABLE_FILE, self.TABLE.replace(
+            f'HASH_VERSION = "{ic.HASH_VERSION}"', 'HASH_VERSION = "99"'))
+        self.assertEqual(self.changed(old, head), list(ic.SERVICES))
+
+    def test_an_unreadable_table_changes_everything(self) -> None:
+        old = self.commit(ic.TABLE_FILE, "# 표가 없다\n")
+        head = self.commit(ic.TABLE_FILE, self.TABLE)
+        self.assertEqual(self.changed(old, head), list(ic.SERVICES))
+
+    def test_the_same_table_on_both_sides_changes_nothing(self) -> None:
+        old = self.commit(ic.TABLE_FILE, self.TABLE)
+        head = self.commit("frontend/playwright.config.ts", "// 주석만")
+        self.assertEqual(self.changed(old, head), [])
+
 if __name__ == "__main__":
     unittest.main()
