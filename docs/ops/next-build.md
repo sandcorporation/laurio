@@ -27,3 +27,10 @@ DSN·환경·release, 토스 클라이언트 키, 포트원 둘, 문의 주소, 
 둘 다 시험이 지킨다(#727): `process.env.NEXT_PUBLIC_` 이 세 앱·`packages/` 에 다시 들어오면
 `backend/tests/test_next_public_env_stays_out.py` 가, 목록 이름이 바뀌면 `<앱>/lib/public-config.test.ts` 가
 막는다 — 비밀을 `CODEMIT_PUBLIC_*` 이름으로 넣는 실수는 목록 시험에서만 걸린다.
+
+**빌드는 외부 네트워크를 쓰지 않는다 — 글꼴은 저장소 안이다**(#743). 세 앱의 서체(Pretendard,
+IBM Plex Mono latin 400·500·600)는 `<앱>/app/fonts/` 의 woff2 를 `next/font/local` 로 읽는다.
+`next/font/google` 은 빌드 때마다 fonts.gstatic.com 을 불러, 그 연결이 한 번 끊기자 이미지 굽기가
+죽고 열차가 붉었다(#1945). 다시 들어오면 `backend/tests/test_next_font_stays_local.py` 가 막고, 세
+사본이 갈리면 `<앱>/lib/design/tokens.test.ts` 가 막는다. 새 굵기·서체가 필요하면 파일을 받아 세
+앱에 같이 넣는다.

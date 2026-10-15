@@ -33,9 +33,16 @@ describe("디자인 토큰은 공개 앱과 한 벌이다 (#298)", () => {
     ).toBe(fs.readFileSync(PUBLIC_APP, "utf8"));
   });
 
-  it("본문 서체 파일도 같다 — 한쪽만 갈아끼우면 두 서브도메인의 글꼴이 달라진다", () => {
-    const a = path.resolve(__dirname, "..", "..", "app", "fonts", "PretendardVariable.woff2");
-    const b = path.resolve(__dirname, "..", "..", "..", "frontend", "app", "fonts", "PretendardVariable.woff2");
+  // 본문(Pretendard)과 등폭(IBM Plex Mono, #743)을 다 센다 — 등폭도 저장소 안의
+  // 파일이라 한쪽만 갈아끼우면 코드 블록의 글꼴이 갈린다.
+  it.each([
+    "PretendardVariable.woff2",
+    "IBMPlexMono-Regular.woff2",
+    "IBMPlexMono-Medium.woff2",
+    "IBMPlexMono-SemiBold.woff2",
+  ])("서체 파일 %s 도 같다 — 한쪽만 갈아끼우면 두 서브도메인의 글꼴이 갈린다", (name) => {
+    const a = path.resolve(__dirname, "..", "..", "app", "fonts", name);
+    const b = path.resolve(__dirname, "..", "..", "..", "frontend", "app", "fonts", name);
     expect(fs.readFileSync(a).equals(fs.readFileSync(b))).toBe(true);
   });
 });

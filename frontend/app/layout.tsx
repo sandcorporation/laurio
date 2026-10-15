@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Mono } from "next/font/google";
 import { cookies } from "next/headers";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
@@ -14,8 +13,10 @@ import { SiteHeader } from "./components/site-header";
 
 // 본문 서체는 Pretendard, 등폭은 IBM Plex Mono 다.
 //
-// **Pretendard 는 Google Fonts 에 없다** — 그래서 본문만 `next/font/local` 로
-// 저장소에 담은 파일에서 로드한다(`app/fonts/`). 그래도 `next/font` 를 쓰는
+// 두 서체 다 `next/font/local` 로 저장소에 담은 파일에서 로드한다(`app/fonts/`).
+// Pretendard 는 Google Fonts 에 없고, IBM Plex Mono 는 `next/font/google` 이
+// 빌드 때마다 fonts.gstatic.com 을 불러 이미지 굽기가 외부 네트워크에 매달렸다
+// (#743) — 그래서 latin 서브셋의 굵기 셋(400·500·600)을 받아 담았다. 그래도 `next/font` 를 쓰는
 // 이유는 이 앱이 원래 갖고 있던 성질을 잃지 않기 위해서다: 셀프호스팅(외부
 // 호스트의 가동에 기대지 않는다)과 폴백 메트릭 보정(스왑 순간의 레이아웃
 // 시프트를 줄인다).
@@ -40,9 +41,12 @@ const pretendard = localFont({
   display: "swap",
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const ibmPlexMono = localFont({
+  src: [
+    { path: "./fonts/IBMPlexMono-Regular.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/IBMPlexMono-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/IBMPlexMono-SemiBold.woff2", weight: "600", style: "normal" },
+  ],
   variable: "--font-ibm-plex-mono",
   display: "swap",
 });
