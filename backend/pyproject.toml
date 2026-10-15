@@ -77,9 +77,12 @@ python_files = ["test_*.py"]
 testpaths = ["tests"]
 # live_vendor(#83, ADR-0007): 벤더를 실제로 치는 선택적 테스트. 기본 실행에서
 # 제외한다 — 자격증명 없는 신선한 체크아웃이 이 때문에 빨개지면 안 된다.
-# `uv run pytest -m live_vendor`로만 선택 실행한다(tests/live.py 참고).
+# `-m live_vendor`로만 선택 실행한다(tests/live.py 참고).
+# live_infra(#751): 실물 인프라(pgbouncer·Redis·OpenSearch)를 치는 선택적 테스트. 벤더가 아니라
+# 로컬에 띄운 dev 프로필이 상대라 따로 둔다 — `-m live_vendor`(돈이 드는 실제 벤더)와 섞이지 않게.
 markers = [
-    "live_vendor: 실제 벤더를 치는 선택적 테스트. 기본 실행에서 제외된다.",
+    "live_vendor: 실제 벤더(OpenAI·PortOne·Toss 등)를 치는 선택적 테스트. 기본 실행에서 제외된다.",
+    "live_infra: 실물 인프라(pgbouncer·Redis·OpenSearch)를 치는 선택적 테스트. 기본 실행에서 제외된다.",
 ]
 # 기본 병렬 실행. 이 스위트를 도는 주체가 많아서(에이전트마다, 머지 후, CI) 그 차이가
 # 계속 곱해진다. 직렬로 보고 싶으면 `-n 0` 을 준다.
@@ -88,4 +91,4 @@ markers = [
 # 인덱스를 하나씩 올려 줘야 했고(FLUSHDB 라 접두어로는 못 막는다) Redis 기본 범위
 # 0~15 를 금방 넘겼다. 테스트 세션 캐시가 LocMem 이 되면서 그 제약이 통째로 사라졌다 —
 # 프로세스가 갈리면 캐시도 갈린다. 실측(이 머신, 1192건): `-n 4` 84초 → `-n auto` 57초.
-addopts = "-q -n auto -m \"not live_vendor\""
+addopts = "-q -n auto -m \"not live_vendor and not live_infra\""

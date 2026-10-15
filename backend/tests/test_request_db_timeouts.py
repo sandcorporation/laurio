@@ -6,6 +6,8 @@ SQL 문 하나하나에 `SET LOCAL statement_timeout`·`lock_timeout` 을 함께
 
 - 요청 안의 느린 문은 끊긴다(실제 PostgreSQL 의 `pg_sleep`).
 - 요청 밖(celery 태스크 본체·관리 명령)의 같은 문은 끊기지 않는다.
+- 한도는 태스크가 아니라 요청·연결의 범위다 — 같은 태스크도 요청 뷰 안에서 `.apply()` 로
+  부르면 걸린다. 워커가 안전한 것은 미들웨어가 없는 별도 프로세스이기 때문이다.
 - autocommit 요청에서도 `SET LOCAL` 이 그 문의 암묵 트랜잭션에 먹는다 — `transaction=True`
   시험이라 시험 바깥 트랜잭션 없이 실제 autocommit 으로 돈다.
 - 접두 뒤 문의 오류는 `execute` 에서 바로 올라온다(psycopg 가 결과 전부를 본다).
@@ -67,7 +69,13 @@ def _iterator_view(request):
     return JsonResponse({"count": count})
 
 
+def _task_in_request_view(request):
+    # eager `.apply()` 는 같은 스레드·같은 연결에서 돈다 — 요청 동안 연결에 걸린 래퍼 안이다.
+    return JsonResponse({"statement": _show_statement_timeout.apply().get()})
+
+
 urlpatterns = [
+    path("task-in-request/", _task_in_request_view),
     path("sleep/", _sleep_view),
     path("iterator/", _iterator_view),
     path("settings/", _settings_view),
@@ -79,6 +87,13 @@ urlpatterns = [
 def _sleep_then_show_statement_timeout():
     with connection.cursor() as cursor:
         cursor.execute("SELECT pg_sleep(0.3)")
+        cursor.execute("SHOW statement_timeout")
+        return cursor.fetchone()[0]
+
+
+@shared_task
+def _show_statement_timeout():
+    with connection.cursor() as cursor:
         cursor.execute("SHOW statement_timeout")
         return cursor.fetchone()[0]
 
@@ -119,6 +134,15 @@ def test_celery_task_bodies_are_not_limited(settings):
     settings.CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS = 100
 
     assert _sleep_then_show_statement_timeout.apply().get() == "0"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_limit_belongs_to_the_request_not_the_task(client_here):
+    # 같은 태스크라도 요청 뷰 안에서 `.apply()` 로 부르면 그 안의 문에 접두가 붙는다 — 한도는
+    # 요청 동안 연결에 걸리는 `execute_wrapper` 다. 배포의 celery 워커가 걸리지 않는 것은
+    # 태스크라서가 아니라 미들웨어가 없는 별도 프로세스라서다(#751).
+    assert client_here.get("/task-in-request/").json() == {"statement": "25s"}
+    assert _show_statement_timeout.apply().get() == "0"
 
 
 @pytest.mark.django_db

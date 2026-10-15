@@ -12,6 +12,9 @@
 
 다음 실물 어댑터 티켓들(#85 PortOne 본인확인, #87 Toss 결제, #88 OpenAI 채점)이
 이 모양을 그대로 베낀다 — `tests/test_live_adapters.py`가 그 예시다.
+
+실물 인프라(pgbouncer·Redis·OpenSearch)를 치는 시험은 같은 규칙에 `@live_infra`를 쓴다(#751) —
+`-m live_vendor`가 「돈이 드는 실제 벤더」만 고르도록.
 """
 
 from __future__ import annotations
@@ -21,6 +24,9 @@ import os
 import pytest
 
 live_vendor = pytest.mark.live_vendor
+# 실물 인프라(dev 의 pgbouncer·Redis·OpenSearch 프로필)를 치는 시험(#751). 벤더 시험과 같은
+# 규칙(기본 실행에서 제외, 접속값이 없으면 skip)이고 `-m live_infra` 로만 돈다.
+live_infra = pytest.mark.live_infra
 
 
 def require_live_credential(env_var_name: str) -> str:

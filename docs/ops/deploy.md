@@ -544,7 +544,7 @@ SEARCH_ADAPTER_MODE=contests.search_opensearch.OpenSearchContestSearch \
 끈다. **호스트의 `vm.max_map_count`가 262144 이상이어야 뜬다**(OpenSearch
 공식 권장값, 커널 전역이라 컨테이너 안에서 올릴 수 없다) — `sysctl
 vm.max_map_count`로 먼저 확인한다. `tests/test_contest_search_opensearch_live.py`
-(`@live_vendor`, `OPENSEARCH_URL`이 있을 때만 돈다, CI는 건너뛴다)가 이 실물
+(`@live_infra`, `OPENSEARCH_URL`이 있을 때만 돈다, CI는 건너뛴다)가 이 실물
 어댑터를 실제로 친다 — 한국어 조사가 달라도 찾아지는지, 제목 가중이 설명보다
 높은지, 재색인(`rebuild`) 중에도 검색이 끊기지 않는지(별칭 원자적 교체) 확인한다.
 
@@ -574,6 +574,6 @@ docker compose -f docker/compose.dev.yaml --profile pgbouncer up -d
 pgbouncer 문서가 트랜잭션 모드의 표준값으로 권하는 것을 그대로 따른 것이고
 (임시 테이블·세션 SET 이 다음 클라이언트에 새는 것을 막는다), 직접 재현해
 확인한 것은 위 커서 하나뿐이다. `tests/test_pgbouncer_live.py`
-(`@live_vendor`, `CODEMIT_PGBOUNCER_PORT` 가 있을 때만 돈다, CI 는 건너뛴다)가
+(`@live_infra`, `CODEMIT_PGBOUNCER_PORT` 가 있을 때만 돈다, CI 는 건너뛴다)가
 이 풀러를 거쳐 실제로 마이그레이션(일회용 DB 를 새로 만들어 처음부터
 DDL 을 낸다)·쓰기·읽기가 되는 것을 확인한다.

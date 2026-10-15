@@ -4,7 +4,7 @@ ADR-0046).
 `EVENT_BUS_REDIS_URL`이 있을 때만 돈다(dev 스택의 redis 컨테이너를 가리키는
 값, 예: `redis://127.0.0.1:16679/2` — `docker compose -f
 docker/compose.dev.yaml up -d redis`) — 없으면 `tests/live.py`의 원칙대로
-skip이지 실패가 아니다. `@live_vendor`라 기본 스위트·CI에서 제외된다(#453
+skip이지 실패가 아니다. `@live_infra`라 기본 스위트·CI에서 제외된다(#453
 Testing Decisions).
 
 스펙 #453이 요구하는 세 가지만 본다:
@@ -29,7 +29,7 @@ import asyncio
 
 import pytest
 
-from tests.live import live_vendor, require_live_credential
+from tests.live import live_infra, require_live_credential
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ async def _poll_past_subscribe_ack(subscription, *, timeout: float, attempts: in
     return []
 
 
-@live_vendor
+@live_infra
 def test_published_event_reaches_the_subscriber(bus):
     from core.events import Event
 
@@ -69,7 +69,7 @@ def test_published_event_reaches_the_subscriber(bus):
     assert events[0].payload == {"submission_id": 1}
 
 
-@live_vendor
+@live_infra
 def test_closing_the_subscription_cleans_it_up(bus):
     async def scenario():
         subscription = bus.subscribe(90002)
@@ -85,7 +85,7 @@ def test_closing_the_subscription_cleans_it_up(bus):
     asyncio.run(scenario())
 
 
-@live_vendor
+@live_infra
 def test_concurrent_subscribers_do_not_cross_contaminate(bus):
     from core.events import Event
 

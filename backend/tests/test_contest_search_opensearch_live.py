@@ -3,7 +3,7 @@ live 테스트 (#450, 부모 #444 스펙).
 
 `OPENSEARCH_URL`이 있을 때만 돈다(dev `search` 프로필,
 `docker compose -f docker/compose.dev.yaml --profile search up -d`) — 없으면
-`tests/live.py`의 원칙대로 skip이지 실패가 아니다. `@live_vendor`라 기본
+`tests/live.py`의 원칙대로 skip이지 실패가 아니다. `@live_infra`라 기본
 스위트·CI에서 제외된다(#450 AC "CI는 이 테스트를 건너뛴다").
 
 부모 스펙이 요구하는 세 가지만 본다(#450 AC):
@@ -21,7 +21,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 from django.utils import timezone
 
-from tests.live import live_vendor, require_live_credential
+from tests.live import live_infra, require_live_credential
 
 
 def _contest(sponsor, category, deliverable_types, *, title, description="", days=5):
@@ -79,7 +79,7 @@ def sponsor_and_category(db):
     return sponsor, category, [deliverable_type]
 
 
-@live_vendor
+@live_infra
 @pytest.mark.django_db
 def test_korean_particles_still_find_the_same_contest(adapter, sponsor_and_category):
     sponsor, category, deliverable_types = sponsor_and_category
@@ -94,7 +94,7 @@ def test_korean_particles_still_find_the_same_contest(adapter, sponsor_and_categ
     assert contest.id in bare_noun
 
 
-@live_vendor
+@live_infra
 @pytest.mark.django_db
 def test_title_match_outranks_a_description_only_match(adapter, sponsor_and_category):
     sponsor, category, deliverable_types = sponsor_and_category
@@ -114,7 +114,7 @@ def test_title_match_outranks_a_description_only_match(adapter, sponsor_and_cate
     assert results.index(title_hit.id) < results.index(description_hit.id)
 
 
-@live_vendor
+@live_infra
 @pytest.mark.django_db
 def test_search_never_breaks_while_reindexing(adapter, sponsor_and_category):
     sponsor, category, deliverable_types = sponsor_and_category

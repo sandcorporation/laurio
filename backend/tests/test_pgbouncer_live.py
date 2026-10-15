@@ -4,7 +4,7 @@
 `CODEMIT_PGBOUNCER_PORT`(dev `pgbouncer` 프로필의 호스트 포트,
 `docker compose -f docker/compose.dev.yaml --profile pgbouncer up -d`)가 있을
 때만 돈다 — 없으면 `tests/live.py`의 원칙대로 skip이지 실패가 아니다.
-`@live_vendor`라 기본 스위트·CI에서 제외된다.
+`@live_infra`라 기본 스위트·CI에서 제외된다.
 
 풀러는 트랜잭션 모드다(#453 Implementation Decisions) — 매 트랜잭션이 끝날
 때마다 실제 DB 연결이 다른 클라이언트에게 넘어갈 수 있다. 이미 마이그레이션이
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import psycopg
 
-from tests.live import live_vendor, require_live_credential
+from tests.live import live_infra, require_live_credential
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -80,7 +80,7 @@ def _env_through_pooler(db_name: str, pgbouncer_port: str) -> dict[str, str]:
     return env
 
 
-@live_vendor
+@live_infra
 def test_migrate_read_write_through_pgbouncer():
     pgbouncer_port = require_live_credential("CODEMIT_PGBOUNCER_PORT")
 
@@ -125,7 +125,7 @@ def test_migrate_read_write_through_pgbouncer():
         _drop_scratch_database(db_name)
 
 
-@live_vendor
+@live_infra
 def test_request_db_timeouts_hold_through_pgbouncer():
     # 요청 한도(#745)는 문마다 `SET LOCAL` 을 같은 메시지에 실어 보낸다 — 트랜잭션 모드
     # 풀러가 둘을 다른 서버 연결로 가르지 않고, 한도가 다음 클라이언트에게 남지 않는지를
