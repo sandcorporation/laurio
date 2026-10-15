@@ -362,8 +362,8 @@ _OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _OPENAI_DEFAULT_TEMPERATURE = 0.7
 # `scoring.adapters.OpenAIScoringAdapter`가 20초로 줄인 것과 같은 이유(#88 코드리뷰
-# 지적 1) — 이 엔드포인트도 동기 WSGI 요청이라 gunicorn 기본 워커 타임아웃(30초)
-# 안에서 프롬프트 구성·DB 조회 오버헤드까지 끝나야 한다.
+# 지적 1) — 이 엔드포인트도 동기 WSGI 요청이라 BFF 가 기다리는 동안 프롬프트 구성·
+# DB 조회 오버헤드까지 끝나야 한다(gunicorn 은 gthread 라 요청을 30초에 죽이지 않는다, #725).
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
 _OPENAI_SYSTEM_PROMPT = (
     "당신은 Codemit 공모전 Sponsor의 AI grill 대화를 돕는 보조자입니다. 응답은 반드시 "

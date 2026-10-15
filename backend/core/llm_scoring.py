@@ -286,12 +286,12 @@ def _endpoint(base_url: str | None, path: str) -> str:
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _OPENAI_DEFAULT_TEMPERATURE = 0
 
-# celery-beat가 30초 타임아웃으로 이 앱의 internal 엔드포인트를 호출하고
-# (core.tasks.call_internal), gunicorn도 --timeout을 따로 안 줬으니 기본값인
-# 30초 만에 워커를 SIGKILL한다(#88 코드리뷰 지적 1). 이전 값(60초)은 단 하나의
-# 느린 호출로도 그 예산을 넘겼고, 워커가 SIGKILL되면 진행 중이던 요청은
-# ScoringAttempt를 남길 기회조차 없이 사라진다 — 다음 beat(60초 뒤)가 같은
-# 앞머리 Submission들을 다시 집어 똑같이 죽는 사고가 반복된다. 20초로 줄여
+# celery-beat가 30초 타임아웃으로 이 앱의 internal 엔드포인트를 호출한다
+# (core.tasks.call_internal). 그때는 gunicorn sync 워커도 30초 만에 워커를
+# SIGKILL했다(#88 코드리뷰 지적 1 — gthread 로 바꾼 #725 뒤로는 요청이 길다고
+# 죽이지 않는다, config/gunicorn.conf.py). 이전 값(60초)은 단 하나의
+# 느린 호출로도 그 예산을 넘겼고, 부른 쪽이 끊으면 다음 beat(60초 뒤)가 같은
+# 앞머리 Submission들을 다시 집어 똑같이 넘는 일이 반복된다. 20초로 줄여
 # 프롬프트 구성·DB 조회 등 나머지 오버헤드에 10초 여유를 남긴다. 강의실 채점은
 # 이 예산 밖(Celery 워커 안)에서 돌아 자기 값(180초)을 넘긴다(#582, ADR-0056 —
 # `classroom.scoring.CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS`). 키 확인·모델 목록
