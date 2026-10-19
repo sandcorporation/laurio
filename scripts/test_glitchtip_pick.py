@@ -92,5 +92,33 @@ class BranchStateTest(unittest.TestCase):
         self.assertEqual(gp._branch_state(self.repo, "auto-missing"), "unmerged")
 
 
+class ProjectFilterTest(unittest.TestCase):
+    """조직 단위 이슈 목록에는 다른 제품의 프로젝트도 섞인다 — slug 접두어로 가른다."""
+
+    def test_codemit_projects_are_ours(self) -> None:
+        for slug in ("codemit-backend", "codemit-classroom", "codemit-frontend", "codemit-operator"):
+            self.assertTrue(gp._is_ours({"project": {"slug": slug}}), slug)
+
+    def test_other_products_are_not_ours(self) -> None:
+        self.assertFalse(gp._is_ours({"project": {"slug": "daypage"}}))
+        self.assertFalse(gp._is_ours({"project": {"slug": "daypage-frontend"}}))
+
+    def test_missing_project_is_not_ours(self) -> None:
+        self.assertFalse(gp._is_ours({}))
+        self.assertFalse(gp._is_ours({"project": None}))
+
+
+class AutomationBranchTest(unittest.TestCase):
+    """Orca 가 분기 이름 앞에 사용자 접두어를 붙여도 자동 진단 분기를 알아본다."""
+
+    def test_bare_and_prefixed_names(self) -> None:
+        self.assertTrue(gp._is_automation_branch("auto-glitchtip-prod-run-1-20261019T0513"))
+        self.assertTrue(gp._is_automation_branch("farrar142/auto-glitchtip-prod-run-1-20261019T0513"))
+
+    def test_human_worktrees_are_left_alone(self) -> None:
+        for name in ("main", "chain-3", "int-2", "farrar142/guitarfish", "t755-test-db-template-clone"):
+            self.assertFalse(gp._is_automation_branch(name), name)
+
+
 if __name__ == "__main__":
     unittest.main()
