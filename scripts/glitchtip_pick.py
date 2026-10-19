@@ -77,6 +77,12 @@ import urllib.request
 GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "https://glitchtip.honeycombpizza.link")
 ORG_SLUG = os.environ.get("GLITCHTIP_ORG", "codemit")
 
+#: 이 접두어의 프로젝트만 집는다. GlitchTip 조직 `codemit` 에는 2026-10-16 부터 다른
+#: 제품의 프로젝트(`daypage`·`daypage-frontend`)도 들어 있는데, 조직 단위 이슈 목록은
+#: 그것까지 돌려준다 — 그대로 집으면 이 저장소의 진단 세션이 남의 오류를 들고 뜬다
+#: (2026-10-17~19 에 다섯 번 그랬다, `DAYPAGE-6` 등). 프로젝트 slug 로 가른다.
+PROJECT_PREFIX = os.environ.get("GLITCHTIP_PROJECT_PREFIX", "codemit-")
+
 #: 이 환경의 오류만 집는다. staging·dev 는 대개 사람이 그 자리에서 보고 있다.
 TARGET_ENVIRONMENT = "production"
 
@@ -171,6 +177,25 @@ def _a_session_holds_the_lock(lock_path: pathlib.Path, ttl_minutes: float) -> bo
     # 수명이 지난 잠금은 남이 죽어 두고 간 것이다 — 걷어내고 우리가 집는다.
     lock_path.unlink(missing_ok=True)
     return False
+
+
+def _is_ours(issue: dict) -> bool:
+    """이 저장소의 프로젝트에서 난 오류인가 — `project.slug` 가 `PROJECT_PREFIX` 로 시작하면."""
+
+    project = issue.get("project")
+    slug = project.get("slug") if isinstance(project, dict) else project
+    return isinstance(slug, str) and slug.startswith(PROJECT_PREFIX)
+
+
+def _is_automation_branch(branch: str) -> bool:
+    """automation 이 만든 분기인가 — 마지막 경로 조각이 `auto-` 로 시작하면.
+
+    Orca 는 분기 이름 앞에 사용자 접두어(`farrar142/`)를 붙인다(2026-10 부터). 전체
+    이름이 `auto-` 로 시작하는지만 보던 옛 판정은 그 뒤로 하나도 맞지 않아 자동 진단
+    워크트리가 영영 걷히지 않았다(2026-10-19 에 다섯 개가 쌓여 있었다).
+    """
+
+    return branch.rsplit("/", 1)[-1].startswith("auto-")
 
 
 def _branch_state(repo: pathlib.Path, branch: str, base: str = "origin/main") -> str:
@@ -272,7 +297,7 @@ def _sweep_merged_automation_worktrees(min_idle_minutes: float) -> list[str]:
 
             branch = line[len("branch refs/heads/") :]
             here, path = path, None
-            if not branch.startswith("auto-"):
+            if not _is_automation_branch(branch):
                 continue
 
             state = _branch_state(_repo_root(), branch)
@@ -454,6 +479,9 @@ def _pick(args: argparse.Namespace) -> dict | None:
     ledger = _load_ledger()
 
     for issue in issues:
+        # 같은 조직의 다른 제품 프로젝트는 이 저장소의 일이 아니다.
+        if not _is_ours(issue):
+            continue
         # 우리가 일부러 던지는 예외는 진단 대상이 아니다.
         if (issue.get("metadata") or {}).get("type") in DELIBERATE_EXCEPTION_TYPES:
             continue

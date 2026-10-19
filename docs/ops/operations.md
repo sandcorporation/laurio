@@ -363,7 +363,8 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 
 **그 오류를 에이전트가 집어 진단한다**(2026-09-18). Orca automation 「GlitchTip prod 오류
 진단」이 매분 `scripts/glitchtip_pick.py` 를 precheck 로 돌려 **prod 의 미해결·미클레임
-오류 하나**를 고르고, 집힌 것이 있을 때만 이 머신에 세션을 띄운다(워크트리는 실행마다
+오류 하나**를 고르고(프로젝트 slug 가 `codemit-` 인 것만 — 같은 GlitchTip 조직에 2026-10-16 부터
+`daypage`·`daypage-frontend` 도 있어 한때 남의 오류로 세션이 떴다, `GLITCHTIP_PROJECT_PREFIX`), 집힌 것이 있을 때만 이 머신에 세션을 띄운다(워크트리는 실행마다
 새로, `origin/main` 기준). 세션이 따르는 절차는 `.claude/skills/glitchtip-triage/` 다 —
 재현 루프를 먼저 만들고, **재현되지 않으면 고치지 않고 멈춘다**.
 
@@ -459,6 +460,9 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   워크트리가 영원히 남지 않게), **(3)** 머지 안 된 것은 그대로 남긴다 — 게이트에 걸려
   사람에게 넘긴 분기가 정확히 그 모양이다.
   사람 워크트리(`chain-*`·`int-*`)는 접두어가 달라 대상이 아니다. `--no-tidy` 로 끈다.
+  **분기 이름은 마지막 경로 조각으로 본다**(2026-10-19) — Orca 가 `farrar142/auto-…` 처럼 사용자
+  접두어를 붙인 뒤로 전체 이름이 `auto-` 로 시작하는지만 보던 판정이 하나도 맞지 않아 다섯 개가
+  쌓여 있었다.
   **「머지됨」은 sha 가 아니라 변경으로 본다**(2026-10-03, `_branch_state`) — Jenkins 가 PR 을
   rebase 병합해 `main` 의 커밋 sha 가 분기와 달라서, 옛 `merge-base --is-ancestor` 판정으로는
   병합된 자동 진단 분기가 하나도 걷히지 않았다. 지금은 `git cherry` 로 분기 커밋이 전부 같은
