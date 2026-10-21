@@ -11,7 +11,6 @@ import json
 
 import pytest
 
-from django.apps import apps
 from django.core.cache import caches
 
 from classroom import scoring_cost
@@ -28,6 +27,7 @@ from tests.classroom_scenarios import (
     patch_class,
     roster_grid,
     submit_repository,
+    table_row_counts,
 )
 from tests.test_classroom_connected_apps import _connect, _rpc
 
@@ -252,10 +252,6 @@ def test_an_archived_class_is_still_readable(client, db):
     assert len(_structured(client, token, "list_problems", class_id=class_id)["problems"]) == 1
 
 
-def _row_counts() -> dict[str, int]:
-    return {model._meta.label: model.objects.count() for model in apps.get_models()}
-
-
 def test_reading_leaves_no_record(client, db):
     """ADR-0040 — 연결된 앱이 무엇을 몇 번 읽었는지는 어디에도 남지 않는다."""
 
@@ -263,7 +259,7 @@ def test_reading_leaves_no_record(client, db):
     token = _connect(client, instructor["access"])["access_token"]
     _call(client, token, "get_class", class_id=class_id)  # 「마지막으로 쓴 날」은 첫 호출에 이미 적혔다
 
-    before = _row_counts()
+    before = table_row_counts()
     for _ in range(2):
         _structured(client, token, "get_class", class_id=class_id)
         _structured(client, token, "list_problems", class_id=class_id)
@@ -272,7 +268,7 @@ def test_reading_leaves_no_record(client, db):
         _structured(client, token, "get_roster_grid", class_id=class_id)
     _call(client, token, "get_class", class_id=class_id + 999)  # 거절된 읽기도 마찬가지
 
-    assert _row_counts() == before
+    assert table_row_counts() == before
 
 
 def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_setting(client, db, monkeypatch):

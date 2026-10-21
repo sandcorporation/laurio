@@ -14,7 +14,6 @@ import zipfile
 from datetime import timedelta
 
 import pytest
-from django.apps import apps
 from django.core.cache import caches
 from django.test import override_settings
 from django.utils import timezone
@@ -32,6 +31,7 @@ from tests.classroom_scenarios import (
     run_scan,
     submit_repository,
     submit_source,
+    table_row_counts,
     user_id,
 )
 from tests.test_classroom_connected_apps import _connect, _rpc, _set_clock
@@ -382,28 +382,45 @@ def test_opening_sources_has_its_own_lower_per_minute_limit(client, db):
     assert _open().status_code == 200
 
 
-def _row_counts() -> dict[str, int]:
-    return {model._meta.label: model.objects.count() for model in apps.get_models()}
+def test_reading_reports_and_sources_leaves_no_record(client, db):
+    """ADR-0040 — 연결된 앱이 누구의 리포트를 받고 어느 소스를 몇 번 열었는지는 어디에도 남지 않는다.
 
+    채점은 필요 없다 — 저장소 제출 하나와 소스 제출 하나가 「열기」의 두 길(주소 · 파일 목록)을 다 밟는다.
+    채점까지 도는 `_a_scored_class` 위에서는 이 시험 하나가 CPU 예산(1초)에 닿았다(부하 높은 머신에서 실제로 걸렸다).
+    """
 
-def test_reading_reports_and_sources_leaves_no_record(client, db, monkeypatch):
-    """ADR-0040 — 연결된 앱이 누구의 리포트를 받고 어느 소스를 몇 번 열었는지는 어디에도 남지 않는다."""
-
-    instructor, class_id, repo_problem, source_problem = _a_scored_class(client, monkeypatch)
+    instructor = login(client, uid="mcp-report-norecord-teacher", email="norecord-teacher@school.example")
     access = instructor["access"]
+    class_id = create_class(client, access, name="알고리즘")
+    repo_problem = create_open_problem(client, access, class_id, title="정렬", syntax_check_enabled=False)
+    source_problem = create_open_problem(
+        client, access, class_id, title="탐색", submission_formats=["source"], syntax_check_enabled=False
+    )
+    person = login(client, uid="mcp-report-norecord-p1", email="norecord-p1@student.example")
+    join_class(client, person["access"], class_id, instructor_access=access, display_name="김하나")
+    submit_repository(client, person["access"], class_id, repo_problem.id)
+    submit_source(
+        client,
+        person["access"],
+        class_id,
+        source_problem.id,
+        participant_user_id=user_id("mcp-report-norecord-p1"),
+        files={"main.py": "print('hi')\n"},
+    )
     token = _connect(client, access)["access_token"]
     submission_ids = [
         s["id"]
         for problem in (repo_problem, source_problem)
         for s in instructor_submissions(client, access, class_id, problem.id)
     ]
+    assert len(submission_ids) == 2
     _call(client, token, "get_participant_report", class_id=class_id)  # 「마지막으로 쓴 날」은 첫 호출에 이미 적혔다
 
-    before = _row_counts()
+    before = table_row_counts()
     for _ in range(2):
         _structured(client, token, "get_participant_report", class_id=class_id)
         for submission_id in submission_ids:
             _structured(client, token, "open_submission_source", submission_id=submission_id)
     _call(client, token, "open_submission_source", submission_id=max(submission_ids) + 999)  # 거절된 열기도
 
-    assert _row_counts() == before
+    assert table_row_counts() == before
