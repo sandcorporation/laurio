@@ -145,6 +145,7 @@ from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
+    SUBMIT_BLOCKED_DEADLINE_PASSED,
     SUBMIT_BLOCKED_EXPELLED,
     SUBMIT_BLOCKED_HIDDEN,
     SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
@@ -538,6 +539,8 @@ def _serialize_problem(
         last_submitted_at=last_submitted_at,
         participant_attempt_count=participant_attempt_count,
         zip_git_history_warning=_zip_git_history_warning(problem, checklist_items),
+        recommended_due_at=problem.recommended_due_at,
+        due_at=problem.due_at,
     )
 
 
@@ -567,6 +570,8 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
         passed=passed,
         zip_git_history_warning=_zip_git_history_warning(problem, checklist_items),
+        recommended_due_at=problem.recommended_due_at,
+        due_at=problem.due_at,
     )
 
 
@@ -660,6 +665,7 @@ def _serialize_classroom_submission(
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=pending_reason,
         contest_entry=contest_entry_out(submission),
+        late=problem.is_late(submission.created_at),
     )
 
 
@@ -715,6 +721,7 @@ def _serialize_instructor_submission(
         pending_reason=_pending_reason(score, class_obj, problem),
         contest_entry=contest_entry_out(submission),
         is_current_contest_entry=marks is not None and submission.id in marks.current,
+        late=problem.is_late(submission.created_at),
     )
 
 
@@ -1595,6 +1602,15 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
 # --- Roster grid (#290) -----------------------------------------------------------
 
 
+def _last_attempt_late(problem: Problem, submissions: list[ClassroomSubmission]) -> bool:
+    """격자 칸·참여자 목록 줄의 「늦음」(#769) — **마지막 시도**가 권장 기한 뒤였는가.
+    통과 이력(`_cell_status`)과 달리 OR 가 아니다: 늦게 낸 뒤 제때 다시 낸 사람은
+    늦지 않은 것이고, 반대로 제때 냈다가 늦게 다시 낸 사람은 늦은 것이다."""
+
+    last = max((s.created_at for s in submissions), default=None)
+    return last is not None and problem.is_late(last)
+
+
 def _cell_status(
     submissions: list[ClassroomSubmission],
     class_obj: Class,
@@ -1685,6 +1701,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 contest_entry=marks.cell(
                     s.id for s in submissions_by_key.get((problem.id, member.id), [])
                 ),
+                late=_last_attempt_late(problem, submissions_by_key.get((problem.id, member.id), [])),
             )
             for problem in problems
         ]
@@ -1746,6 +1763,7 @@ def list_recent_attempts(request: HttpRequest, class_id: int):
                 attempt_number=attempt.attempt_number,
                 status=status,
                 submitted_at=attempt.created_at,
+                late=attempt.problem.is_late(attempt.created_at),
             )
         )
     return 200, out
@@ -1992,6 +2010,9 @@ def list_my_problems(request: HttpRequest, class_id: int):
                     status=status,
                     attempt_count=len(own),
                     last_attempted_at=max((s.created_at for s in own), default=None),
+                    recommended_due_at=problem.recommended_due_at,
+                    due_at=problem.due_at,
+                    late=_last_attempt_late(problem, own),
                 )
             )
         return items
@@ -2367,8 +2388,9 @@ def _enqueue_immediate_scoring(submission_id: int) -> None:
 def create_classroom_submission(
     request: HttpRequest, class_id: int, problem_id: int, payload: ClassroomSubmissionIn
 ):
-    """제출할 때마다 새 시도가 쌓인다 — 마감도 시도 횟수 상한도 없다
-    (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
+    """제출할 때마다 새 시도가 쌓인다 — 시도 횟수 상한은 없다(ADR-0039, CONTEXT.md
+    「Problem」). 마감(`Problem.due_at`, #769)이 지나면 참여자만 막힌다 — 아래
+    `SUBMIT_BLOCKED_DEADLINE_PASSED`. 근거 연결도 자가 체크도 없다: 소스
     또는 저장소 값 하나만 받는다."""
 
     # 오류에는 식별자만 싣는다(#590) — 제출 값은 요청 본문이라 원래 보내지 않는다.
@@ -2389,7 +2411,7 @@ def create_classroom_submission(
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
 
     # 낼 수 있는가는 참여 정책 모듈이 한 곳에서 답한다(#439) — 우선순위는
-    # 보관 → 내보냄 → 숨김이고, 화면의 `submit_blocked_reason`과 여기 문이
+    # 보관 → 내보냄 → 숨김 → 마감이고, 화면의 `submit_blocked_reason`과 여기 문이
     # 같은 기준이어야 어긋나지 않는다.
     blocked_reason = participant_submit_blocked_reason(member.classroom, member, problem)
     if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
@@ -2407,6 +2429,10 @@ def create_classroom_submission(
         # (`_get_visible_problem_for_participant_or_404`), 그래도 새로
         # 낼 수는 없다. 다시 열면(`reopen_problem`) 이 분기를 벗어난다.
         raise HttpError(403, "강사가 숨긴 문제라 새로 낼 수 없습니다.")
+    if blocked_reason == SUBMIT_BLOCKED_DEADLINE_PASSED:
+        # 마감이 지났다(#769) — 시도 자체가 만들어지지 않으므로 「공모전에도 내기」도
+        # 함께 막힌다. 강사가 마감을 뒤로 옮기면 이 분기를 벗어난다.
+        raise HttpError(403, "마감이 지나 새로 낼 수 없습니다.")
 
     return _create_submission_row(request, problem, member, payload, as_instructor=False)
 

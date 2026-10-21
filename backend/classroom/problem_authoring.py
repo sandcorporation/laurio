@@ -143,6 +143,16 @@ def reject_banned_public_text(value: str, field_label: str) -> None:
 # --- 문제 ----------------------------------------------------------------------
 
 
+DUE_ORDER_MESSAGE = "권장 기한은 마감보다 늦을 수 없습니다."
+
+
+def validate_due_order(recommended_due_at, due_at) -> None:
+    """둘 다 있으면 권장 기한 ≤ 마감이어야 한다(#769) — 같은 시각은 된다."""
+
+    if recommended_due_at is not None and due_at is not None and recommended_due_at > due_at:
+        raise HttpError(422, DUE_ORDER_MESSAGE)
+
+
 def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
     """만들기 한 번이 문제와 체크리스트 항목을 함께 만든다(#315). `open`이
     참이면 만든 직후 바로 연다 — 필수 항목이 하나도 없으면(`open_problem`과
@@ -169,6 +179,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
     grading_strictness, grading_guideline_text = validate_grading_guideline(
         payload.grading_strictness, payload.grading_guideline_text
     )
+    validate_due_order(payload.recommended_due_at, payload.due_at)
 
     reject_banned_public_text(payload.title, "제목")
     reject_banned_public_text(payload.description, "설명")
@@ -195,6 +206,8 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
             grading_strictness=grading_strictness,
             grading_guideline_text=grading_guideline_text,
             syntax_check_enabled=payload.syntax_check_enabled,
+            recommended_due_at=payload.recommended_due_at,
+            due_at=payload.due_at,
             order=next_order,
             status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
         )
@@ -259,7 +272,22 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
     if payload.instructor_note is not None and not is_contest_problem(problem):
         raise HttpError(422, "수업용 안내는 공모전 문제에만 둡니다 — 설명에 적어 주세요.")
 
+    # 두 날짜는 생략과 null 이 다르다(#769) — 생략하면 그대로, null 이면 비운다. 순서는
+    # 보낸 값과 저장된 값을 합쳐 본다: 마감(2020)이 있는 문제에 권장 기한(2099) 하나만
+    # 보내도 거절돼야 한다.
+    sent_dates = {"recommended_due_at", "due_at"} & payload.model_fields_set
+    next_recommended = (
+        payload.recommended_due_at if "recommended_due_at" in sent_dates else problem.recommended_due_at
+    )
+    next_due = payload.due_at if "due_at" in sent_dates else problem.due_at
+    if sent_dates:
+        validate_due_order(next_recommended, next_due)
+
     update_fields = []
+    if sent_dates:
+        problem.recommended_due_at = next_recommended
+        problem.due_at = next_due
+        update_fields.extend(["recommended_due_at", "due_at"])
     if payload.instructor_note is not None:
         reject_banned_public_text(payload.instructor_note, "수업용 안내")
         problem.instructor_note = payload.instructor_note
