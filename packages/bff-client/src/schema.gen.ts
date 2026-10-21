@@ -5346,6 +5346,8 @@ export interface components {
          *     행의 값이 문제 중심 탭의 값과 정확히 같다").
          */
         ClassroomProblemStatsOut: {
+            /** Due At */
+            due_at?: string | null;
             /** Id */
             id: number;
             /** Member Count */
@@ -5354,6 +5356,8 @@ export interface components {
             pass_rate?: number | null;
             /** Passed Count */
             passed_count: number;
+            /** Recommended Due At */
+            recommended_due_at?: string | null;
             /** Status */
             status: string;
             /** Title */
