@@ -28,8 +28,9 @@ from django.db.models import Q
 
 from core.scans import ScanSpec
 from submissions.models import Submission, SubmissionAsset
+from submissions.repository_pins import is_pinned, requested_ref, resolve_pinned_commit
 
-from .adapters import get_github_adapter
+from .adapters import GitHubRefNotFoundError, get_github_adapter
 
 # 마감 전 화면 배지가 참고할 값이라 아주 자주 다시 볼 필요는 없다 — 참가자가
 # 저장소를 공개로 바꾼 뒤 배지가 반영되기까지 이 값만큼 늦을 수 있다는 뜻이고,
@@ -87,7 +88,33 @@ def _check_repository_visibility(asset, as_of, ctx):
     SubmissionAsset.objects.filter(pk=asset.pk).update(
         is_public=is_public, is_public_checked_at=as_of, is_public_etag=result.etag
     )
-    return {"asset_id": asset.id, "is_public": is_public, "unchanged": result.unchanged}
+    row = {"asset_id": asset.id, "is_public": is_public, "unchanged": result.unchanged}
+    if is_public and requested_ref(asset):
+        row["ref_found"] = _check_repository_ref(asset, adapter, unchanged=result.unchanged)
+    return row
+
+
+def _check_repository_ref(asset, adapter, *, unchanged: bool) -> bool:
+    """브랜치·커밋으로 낸 자산의 ref 도 같이 확인한다(#777) — 공개 여부를 먼저 쓴 뒤에 한다.
+    이 확인이 순단으로 죽어도 방금 쓴 공개 여부는 남고, 이 행만 `failed` 로 다음 스캔이 본다.
+
+    아직 안 박혔으면 **처음 성공한 이 확인이 박는다**(`resolve_pinned_commit`). 박힌 뒤에는 그
+    SHA 가 아직 있는지 본다(force push 로 사라질 수 있다) — 다만 저장소 표현이 지난 확인과
+    같다고(304) GitHub 이 말했고 지난번에 찾았었다면 push 가 없었으니 다시 묻지 않는다.
+    """
+
+    if unchanged and is_pinned(asset) and asset.repository_ref_found is True:
+        return True
+    try:
+        if is_pinned(asset):
+            adapter.resolve_ref(asset.value, asset.repository_commit_sha)
+        else:
+            resolve_pinned_commit(asset, adapter)
+    except GitHubRefNotFoundError:
+        SubmissionAsset.objects.filter(pk=asset.pk).update(repository_ref_found=False)
+        return False
+    SubmissionAsset.objects.filter(pk=asset.pk).update(repository_ref_found=True)
+    return True
 
 
 REPOSITORY_VISIBILITY_SCAN = ScanSpec(

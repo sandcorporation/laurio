@@ -37,6 +37,7 @@ Award·DistributionShare·Handover·Appeal)가 전부 이 테이블을 그대로
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from django.conf import settings
 from django.db import models
@@ -78,6 +79,18 @@ GITHUB_REPO_URL_PATTERN = re.compile(
     r"^https://github\.com/[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}/?$"
 )
 
+# 제출이 받는 세 모양(#777, ADR-0065) — 저장소 · `/tree/<ref>` · `/commit/<sha>`. `/tree/` 뒤는
+# **나머지 전체**가 브랜치 이름이다(`release/2024` 처럼 슬래시 포함) — 디렉터리 경로와 구분하지
+# 않고 GitHub 에 묻는다. 커밋은 7~40자 16진수. 그 밖(`/blob/`·`/pull/`·ref 없는 `/tree/`)은 422.
+GITHUB_SUBMISSION_URL_PATTERN = re.compile(
+    r"^https://github\.com/(?P<owner>[A-Za-z0-9._-]{1,100})/(?P<repo>[A-Za-z0-9._-]{1,100})"
+    r"(?:/tree/(?P<ref>[^\s?#]+?)|/commit/(?P<sha>[0-9A-Fa-f]{7,40}))?/?$"
+)
+REPOSITORY_REF_MAX_LENGTH = 255
+REPOSITORY_URL_SHAPES_MESSAGE = (
+    "저장소는 https://github.com/<owner>/<repo> · …/tree/<브랜치> · …/commit/<sha> 형식만 받습니다."
+)
+
 
 def normalize_github_repo_url(url: str) -> str:
     """끝의 `/`·`.git` 을 뗀다 — 같은 저장소를 가리키는 모양을 한 가지로 저장한다. 제출 화면이
@@ -89,6 +102,51 @@ def normalize_github_repo_url(url: str) -> str:
     if value.lower().endswith(".git") and not value.endswith("/.git"):
         value = value[: -len(".git")]
     return value.rstrip("/")
+
+
+@dataclass(frozen=True)
+class RepositoryTarget:
+    """제출이 가리키는 곳 — 저장소 URL 과, 있으면 브랜치 이름(`ref`) 또는 커밋(`commit_sha`) (#777).
+
+    저장 모양 그대로다: `repo_url` 이 `SubmissionAsset.value` 에, 나머지 둘이 별도 컬럼에 간다.
+    낸 URL 은 `url` 이 그 둘로 되살린다 — 브랜치면 `/tree/<ref>`, 커밋이면 `/commit/<sha>`.
+    """
+
+    repo_url: str
+    ref: str = ""
+    commit_sha: str = ""
+
+    @property
+    def url(self) -> str:
+        if self.ref:
+            return f"{self.repo_url}/tree/{self.ref}"
+        if self.commit_sha:
+            return f"{self.repo_url}/commit/{self.commit_sha}"
+        return self.repo_url
+
+
+def parse_github_submission_url(raw: str) -> RepositoryTarget | None:
+    """세 모양 중 하나면 `RepositoryTarget`, 아니면 None(호출부가 422 로 바꾼다). 끝의 `/`·
+    저장소 이름 뒤 `.git` 은 `normalize_github_repo_url` 과 같은 이유로 뗀다. 커밋 SHA 는
+    소문자로 — GitHub 이 대소문자를 가리지 않지만 같은 커밋이 두 값으로 남지 않게 한다."""
+
+    value = raw.strip().rstrip("/")
+    match = GITHUB_SUBMISSION_URL_PATTERN.match(value)
+    if match is None:
+        return None
+    repo = match["repo"]
+    if repo.lower().endswith(".git"):
+        repo = repo[: -len(".git")]
+    if not repo:
+        return None
+    ref = (match["ref"] or "").rstrip("/")
+    if match["ref"] is not None and (not ref or len(ref) > REPOSITORY_REF_MAX_LENGTH):
+        return None
+    return RepositoryTarget(
+        repo_url=f"https://github.com/{match['owner']}/{repo}",
+        ref=ref,
+        commit_sha=(match["sha"] or "").lower(),
+    )
 
 
 #: `test_account`를 붙일 수 있는 종류. `SubmissionAsset.Meta.constraints`가 읽어야
@@ -182,6 +240,22 @@ class SubmissionAsset(models.Model):
     # 상태를 갖게 된다. 비공개(404)·확인 전에는 null이다.
     is_public_etag = models.CharField(max_length=255, null=True, blank=True)
 
+    # 브랜치 URL(`/tree/<ref>`)로 낸 저장소의 브랜치 이름(#777, ADR-0065). 저장소 URL·커밋 URL
+    # 제출에는 빈 문자열이다. `value` 는 저장소 URL 그대로 둔다 — 공개 여부 확인·중복 제약·기존
+    # 행이 그 키를 쓴다. 낸 URL 은 `submitted_url` 이 이 둘로 되살린다.
+    repository_ref = models.CharField(
+        max_length=REPOSITORY_REF_MAX_LENGTH, blank=True, default="", db_default=""
+    )
+    # 채점이 볼 **고정 커밋**. 커밋 URL 이면 낸 SHA(짧으면 첫 스캔이 40자로 확정한다), 브랜치
+    # URL 이면 **처음 성공한 스캔(강의실은 첫 채점)** 이 그 HEAD 의 SHA 를 박는다 — 그 뒤
+    # 채점·재채점은 push 가 있어도 이 값만 본다. 저장소 URL 제출은 빈 문자열이고 고정하지 않는다
+    # (스캔 시점 기본 브랜치 최신, 지금과 같다). 쓰는 곳은 `submissions.repository_pins` 뿐이다.
+    repository_commit_sha = models.CharField(max_length=40, blank=True, default="", db_default="")
+    # ref·커밋을 GitHub 에서 찾았는가 — `is_public` 과 같은 세 값이다: null 은 「아직 확인하지
+    # 않음」. False 면 비공개와 같은 줄의 새 상태(화면 배지 「브랜치를 찾을 수 없음」)이고 마감
+    # 전에 고치면 다시 확인된다. 저장소 URL 제출에는 항상 null 이다.
+    repository_ref_found = models.BooleanField(null=True, blank=True)
+
     # 이 자료를 누가 넣었는가 (#220, ADR-0030). 거의 모두 Developer가 넣지만
     # 전부는 아니다 — 소스 없이 저장소만 낸 제출이 채점 시점에 그 저장소를
     # clone한 zip을 그대로 kind=SOURCE 자료로 남긴다("박제"). Award 후 그
@@ -225,7 +299,33 @@ class SubmissionAsset(models.Model):
                 ),
                 name="test_account_only_on_demo_url_asset",
             ),
+            # ref·고정 커밋·ref 확인 결과는 저장소 자산에만 있다 — 다른 종류에 값이 남으면
+            # 「낸 URL 되살리기」가 object_key 뒤에 `/tree/…` 를 붙이는 거짓을 만든다(#777).
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="repository")
+                    | models.Q(
+                        repository_ref="", repository_commit_sha="", repository_ref_found__isnull=True
+                    )
+                ),
+                name="repository_ref_only_on_repository_asset",
+            ),
         ]
+
+    @property
+    def repository_target(self) -> RepositoryTarget:
+        return RepositoryTarget(
+            repo_url=self.value, ref=self.repository_ref, commit_sha=self.repository_commit_sha
+        )
+
+    @property
+    def submitted_url(self) -> str:
+        """참가자가 낸 URL 그대로 — API 응답의 `value` 가 이것이다(#777). 저장소가 아닌 종류는
+        `value` 그대로."""
+
+        if self.kind != self.Kind.REPOSITORY:
+            return self.value
+        return self.repository_target.url
 
     @property
     def is_object_key(self) -> bool:

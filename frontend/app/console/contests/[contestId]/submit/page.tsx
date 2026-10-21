@@ -60,6 +60,8 @@ function assetsOfKind(assets: SubmissionOut["assets"], kind: string): EditableAs
       label: asset.label,
       testAccount: asset.test_account,
       isPublic: asset.is_public,
+      refFound: asset.repository_ref_found,
+      commitSha: asset.commit_sha,
       retentionDeadline: asset.demo_video_retention_deadline,
       retentionExpired: asset.demo_video_destroyed,
     }));

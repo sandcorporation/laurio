@@ -354,6 +354,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
         "files_listed_truncated": False,
         "truncated": False,
         "repository_url": None,
+        "commit_sha": None,
         "scored_content": None,
         "scored_content_truncated": False,
         "limits": {
@@ -373,7 +374,8 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
             result["truncated"] = result["files_listed_truncated"] or any(f["truncated"] for f in files)
     else:
         content, cut = _scored_content(submission)
-        result["repository_url"] = asset.value
+        result["repository_url"] = asset.submitted_url
+        result["commit_sha"] = asset.repository_commit_sha or None
         result["scored_content"] = content
         result["scored_content_truncated"] = cut
         result["truncated"] = cut
@@ -553,7 +555,8 @@ _SOURCE_OUTPUT = {
         },
         "files_listed_truncated": {"type": "boolean", "description": "파일이 많아 목록 자체가 잘렸는가"},
         "truncated": {"type": "boolean", "description": "어느 것이든 상한 때문에 잘렸는가"},
-        "repository_url": {"type": ["string", "null"], "description": "저장소 제출일 때만 — 낸 GitHub 주소"},
+        "repository_url": {"type": ["string", "null"], "description": "저장소 제출일 때만 — 낸 GitHub 주소 그대로(저장소·/tree/<브랜치>·/commit/<sha>)"},
+        "commit_sha": {"type": ["string", "null"], "description": "저장소 제출의 고정 커밋 — 커밋 URL 이면 낸 SHA, 브랜치 URL 이면 첫 채점이 박은 SHA. 저장소 URL 제출은 null"},
         "scored_content": {
             "type": ["string", "null"],
             "description": "저장소 제출일 때만 — 채점 때 채점기가 본 소스(파일마다 「# 경로」 줄로 시작한다). 아직 채점되지 않았으면 null",

@@ -66,12 +66,12 @@ from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from storage.policy import get_download_ttl_resolver
 from submissions.models import (
-    GITHUB_REPO_URL_PATTERN,
     Evidence,
     RequirementResponse,
     Submission,
     SubmissionAsset,
-    normalize_github_repo_url,
+    REPOSITORY_URL_SHAPES_MESSAGE,
+    parse_github_submission_url,
 )
 from submissions.schemas import (
     AssetSummaryOut,
@@ -330,6 +330,10 @@ class _CleanedAsset:
     #: 업로드 발급 시 받은 content-type(#241) — SOURCE·DEMO_VIDEO가 아니면 항상
     #: 빈 문자열이다(`_clean_assets_in`이 그 외 종류에서는 무시한다).
     content_type: str = ""
+    #: 저장소 자료의 브랜치 이름·커밋 SHA(#777) — `value` 는 저장소 URL 이고 이 둘이 낸 URL 의
+    #: 나머지다. 다른 종류는 항상 빈 문자열이다.
+    repository_ref: str = ""
+    repository_commit_sha: str = ""
 
     def as_model_fields(self) -> dict:
         return {
@@ -339,13 +343,24 @@ class _CleanedAsset:
             "test_account": self.test_account,
             "order": self.order,
             "content_type": self.content_type,
+            "repository_ref": self.repository_ref,
+            "repository_commit_sha": self.repository_commit_sha,
         }
 
     @property
-    def identity(self) -> tuple[str, str]:
-        """자료의 정체성 — `SubmissionAsset`의 UniqueConstraint와 같은 키다."""
+    def identity(self) -> tuple[str, str, str, str]:
+        """자료의 정체성 — `SubmissionAsset`의 UniqueConstraint 키에 ref·커밋을 더한 것(#777).
+        같은 저장소를 다른 브랜치로 다시 내면 **다른 자료**다 — 공개 여부·고정 커밋이 옛
+        브랜치의 것이면 안 되므로 옛 행을 지우고 새 행을 만든다. 브랜치 자료의 고정 커밋은
+        스캔이 뒤에 박는 값이라 정체성에 들지 않는다."""
 
-        return (self.kind, self.value)
+        return _asset_identity(
+            self.kind, self.value, self.repository_ref, self.repository_commit_sha
+        )
+
+
+def _asset_identity(kind: str, value: str, ref: str, commit_sha: str) -> tuple[str, str, str, str]:
+    return (kind, value, ref, "" if ref else commit_sha)
 
 
 def _clean_assets_in(
@@ -383,6 +398,7 @@ def _clean_assets_in(
         value = (item.value or "").strip()
         if not value:
             raise HttpError(422, f"{_KIND_LABELS[item.kind]} 자료의 값이 비어 있습니다.")
+        repository_ref = repository_commit_sha = ""
 
         expected_ref = target_ref_for_asset_kind(
             item.kind, contest_id=contest.id, developer_user_id=developer_user_id
@@ -395,12 +411,13 @@ def _clean_assets_in(
                     "속하지 않습니다.",
                 )
         elif item.kind == SubmissionAsset.Kind.REPOSITORY:
-            value = normalize_github_repo_url(value)
-            if not GITHUB_REPO_URL_PATTERN.match(value):
-                raise HttpError(
-                    422,
-                    "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.",
-                )
+            # 저장소 · `/tree/<브랜치>` · `/commit/<sha>` 셋을 받는다(#777) — `value` 는
+            # 저장소 URL 로 남기고(중복 검사·유니크 제약이 그 키다) ref·SHA 는 따로 담는다.
+            target = parse_github_submission_url(value)
+            if target is None:
+                raise HttpError(422, REPOSITORY_URL_SHAPES_MESSAGE)
+            value = target.repo_url
+            repository_ref, repository_commit_sha = target.ref, target.commit_sha
         else:
             # 데모 URL은 자유 텍스트다 — 다중화 이전과 같은 취급이다.
             value = sanitize_free_text(value)
@@ -454,6 +471,8 @@ def _clean_assets_in(
                 test_account=test_account,
                 order=item.order,
                 content_type=content_type,
+                repository_ref=repository_ref,
+                repository_commit_sha=repository_commit_sha,
             )
         )
 
@@ -492,6 +511,12 @@ def _clean_assets_in(
     return cleaned
 
 
+def _existing_identity(asset: SubmissionAsset) -> tuple[str, str, str, str]:
+    return _asset_identity(
+        asset.kind, asset.value, asset.repository_ref, asset.repository_commit_sha
+    )
+
+
 def _merge_assets(submission: ContestSubmission, cleaned: list[_CleanedAsset]) -> set[int]:
     """자료를 병합한다 — 이 API에서 부분 갱신 의미론을 갖는 유일한 곳이다 (#190).
 
@@ -521,7 +546,7 @@ def _merge_assets(submission: ContestSubmission, cleaned: list[_CleanedAsset]) -
     """
 
     existing = {a.id: a for a in submission.assets.all()}
-    by_identity = {(a.kind, a.value): a for a in existing.values()}
+    by_identity = {_existing_identity(a): a for a in existing.values()}
 
     kept: dict[int, _CleanedAsset] = {}
     creates: list[_CleanedAsset] = []
@@ -539,7 +564,7 @@ def _merge_assets(submission: ContestSubmission, cleaned: list[_CleanedAsset]) -
                 # (예: 마감 후 부분 수정을 여는 기능이 생기면) 느슨해져도
                 # 조용히 깨지지 않게 한 번 더 막는다.
                 raise HttpError(422, "플랫폼이 만든 자료는 수정할 수 없습니다.")
-            if (asset.kind, asset.value) == row.identity and asset.id not in kept:
+            if _existing_identity(asset) == row.identity and asset.id not in kept:
                 kept[asset.id] = row
                 continue
             creates.append(row)
@@ -896,11 +921,13 @@ def _serialize(
             SubmissionAssetOut(
                 id=a.id,
                 kind=a.kind,
-                value=a.value,
+                value=a.submitted_url,
                 label=a.label,
                 test_account=a.test_account if show_test_account else "",
                 order=a.order,
                 is_public=a.is_public,
+                commit_sha=a.repository_commit_sha or None,
+                repository_ref_found=a.repository_ref_found,
                 created_by_platform=a.created_by_platform,
                 demo_video_retention_deadline=(
                     None

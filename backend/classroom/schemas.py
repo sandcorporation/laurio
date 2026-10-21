@@ -825,7 +825,11 @@ class ClassroomSubmissionOut(Schema):
     problem_id: int
     attempt_number: int
     submission_format: str
+    #: 저장소 제출이면 **낸 URL 그대로**(저장소·`/tree/<브랜치>`·`/commit/<sha>`, #777).
     value: str
+    #: 저장소 제출의 고정 커밋(#777) — 커밋 URL 이면 낸 SHA, 브랜치 URL 이면 첫 채점이 박은
+    #: 40자 SHA. 저장소 URL 제출·소스 제출은 None.
+    commit_sha: str | None = None
     #: 소스 제출에만 채워진다 — 저장소는 `value` 자체가 이미 열어 볼 수 있는
     #: URL이라 별도 다운로드가 필요 없다. 파일명은 제출자 본인의 User 정보를
     #: 따른다(강의실 참여자는 DeveloperProfile이 없다, #286 AC).
@@ -972,6 +976,7 @@ class ClassroomInstructorSubmissionOut(Schema):
     attempt_number: int
     submission_format: str
     value: str
+    commit_sha: str | None = None
     #: 소스 제출에만 채워진다(참여자용과 같은 이유) — 파일명은 참여자 이름과
     #: 시도 번호로 구별된다(#291 AC), 참여자 본인 이메일이 아니다.
     download_url: str | None = None

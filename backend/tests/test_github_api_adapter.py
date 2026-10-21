@@ -191,3 +191,73 @@ def test_check_public_never_sends_a_conditional_request(monkeypatch):
 
     assert GitHubAPIAdapter(token="").check_public("https://github.com/acme/widgets") is True
     assert "If-None-Match" not in requested_headers[0]
+
+
+# --- ref 확정과 고정 커밋 clone (#777) ---------------------------------------------------
+
+
+def _ref_aware_repo_get(requested_urls: list[str], *, ref_status: int, sha: str = "c" * 40):
+    """`acme/widgets` 의 `/commits/{ref}` 가 `ref_status` 로 답하는 GitHub."""
+
+    def fake_get(url, *args, **kwargs):
+        requested_urls.append(url)
+        if url == "https://api.github.com/repos/acme/widgets":
+            return _FakeResponse(status_code=200, json_body={"default_branch": "main", "private": False})
+        if url.startswith("https://api.github.com/repos/acme/widgets/commits/"):
+            if ref_status == 200:
+                return _FakeResponse(status_code=200, json_body={"sha": sha})
+            return _FakeResponse(status_code=ref_status, json_body={"message": "No commit found"})
+        if url.startswith("https://codeload.github.com/acme/widgets/"):
+            return _FakeResponse(status_code=200, chunks=[b"PK\x03\x04fake-zip"])
+        return _FakeResponse(status_code=404)
+
+    return fake_get
+
+
+def test_resolve_ref_asks_the_commits_endpoint_and_returns_the_full_sha(monkeypatch):
+    """브랜치·태그·짧은 SHA 모두 `/commits/{ref}` 하나가 푼다 — 슬래시가 든 브랜치
+    이름(`release/2024`)은 GitHub 이 그대로 받으므로 슬래시는 인코딩하지 않는다."""
+
+    requested: list[str] = []
+    monkeypatch.setattr("requests.get", _ref_aware_repo_get(requested, ref_status=200))
+
+    sha = GitHubAPIAdapter(token="").resolve_ref("https://github.com/acme/widgets", "release/2024")
+
+    assert sha == "c" * 40
+    assert requested == ["https://api.github.com/repos/acme/widgets/commits/release/2024"]
+
+
+@pytest.mark.parametrize("status", [404, 422])
+def test_resolve_ref_reports_a_missing_ref_distinctly(monkeypatch, status):
+    """GitHub 은 없는 브랜치에 404 를, 모양이 틀리거나 모호한 SHA 에 422 를 준다 — 둘 다
+    「못 찾았다」는 확정 사실이라 네트워크 순단·5xx 와 구별되는 예외로 올린다."""
+
+    from repositories.adapters import GitHubRefNotFoundError
+
+    monkeypatch.setattr("requests.get", _ref_aware_repo_get([], ref_status=status))
+
+    with pytest.raises(GitHubRefNotFoundError):
+        GitHubAPIAdapter(token="").resolve_ref("https://github.com/acme/widgets", "gone")
+
+
+def test_resolve_ref_raises_a_plain_adapter_error_on_other_failures(monkeypatch):
+    from repositories.adapters import GitHubRefNotFoundError
+
+    monkeypatch.setattr("requests.get", _ref_aware_repo_get([], ref_status=503))
+
+    with pytest.raises(GitHubAdapterError) as excinfo:
+        GitHubAPIAdapter(token="").resolve_ref("https://github.com/acme/widgets", "main")
+    assert not isinstance(excinfo.value, GitHubRefNotFoundError)
+
+
+def test_clone_at_a_pinned_commit_skips_the_default_branch_lookup(monkeypatch):
+    """고정 SHA 가 있으면 저장소·브랜치 조회 없이 그 커밋의 zip 만 받는다 — 박힌 뒤의
+    채점은 GitHub 호출 하나로 끝난다."""
+
+    requested: list[str] = []
+    monkeypatch.setattr("requests.get", _ref_aware_repo_get(requested, ref_status=200))
+
+    cloned = GitHubAPIAdapter(token="").clone("https://github.com/acme/widgets", commit_sha="d" * 40)
+
+    assert cloned.commit_sha == "d" * 40
+    assert requested == [f"https://codeload.github.com/acme/widgets/zip/{'d' * 40}"]

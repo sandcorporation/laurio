@@ -130,7 +130,10 @@ export type ClassroomSubmissionRow = {
   problem_id: number;
   attempt_number: number;
   submission_format: SubmissionFormat;
+  // 저장소 제출이면 낸 URL 그대로(저장소·/tree/<브랜치>·/commit/<sha>, #777).
   value: string;
+  // 저장소 제출의 고정 커밋(#777) — 커밋 URL 의 SHA 또는 첫 채점이 박은 브랜치 HEAD. 없으면 null.
+  commit_sha: string | null;
   // 소스 제출에만 채워진다 — 저장소는 value 자체가 이미 열어 볼 수 있는 URL이다.
   download_url: string | null;
   created_at: string;
@@ -226,6 +229,7 @@ export type InstructorSubmissionRow = {
   attempt_number: number;
   submission_format: SubmissionFormat;
   value: string;
+  commit_sha: string | null;
   download_url: string | null;
   created_at: string;
   status: SubmissionStatus;

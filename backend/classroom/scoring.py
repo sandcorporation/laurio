@@ -100,6 +100,7 @@ from notifications.models import NotificationType
 from notifications.services import create_notification, notify_safely
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
+from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
 from . import pending_scoring, scoring_cost
@@ -379,7 +380,10 @@ def _read_raw_source(submission: ClassroomSubmission, asset: SubmissionAsset) ->
     github = get_github_adapter()
     if not github.check_public(asset.value):
         raise _SourceNotReady("저장소가 공개가 아니거나 아직 확인되지 않았다.")
-    return github.clone(asset.value).zip_bytes
+    # 브랜치·커밋 제출은 고정 커밋을 받는다(#777) — 강의실에는 스캔이 없어 **첫 채점**이
+    # 박는다. 없는 브랜치·커밋은 `GitHubRefNotFoundError`(GitHubAdapterError 의 하나)라
+    # 호출부가 `repository_unreachable` 로 다룬다 — 기본 브랜치로 대신 채점하지 않는다.
+    return clone_repository_asset(asset, github).zip_bytes
 
 
 def _source_text_for(raw: bytes, asset: SubmissionAsset) -> str:

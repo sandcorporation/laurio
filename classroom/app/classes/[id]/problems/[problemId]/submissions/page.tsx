@@ -7,6 +7,7 @@
 // 정상적인 운영이라 "몇 번 봤다"가 신호가 아니라 잡음이 되기 때문이다
 // (docs/adr/0040-classroom-does-not-record-reads.md).
 import Link from "next/link";
+import { commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 import { useParams } from "next/navigation";
 
 import { useState } from "react";
@@ -140,15 +141,29 @@ function AttemptRow({
           </button>
         ) : null}
         {submission.submission_format === "repository" ? (
-          <a
-            href={submission.value}
-            target="_blank"
-            rel="noreferrer"
-            data-testid={`${testId}-repository`}
-            className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
-          >
-            저장소
-          </a>
+          <>
+            <a
+              href={submission.value}
+              target="_blank"
+              rel="noreferrer"
+              data-testid={`${testId}-repository`}
+              className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
+            >
+              저장소
+            </a>
+            {/* 고정 커밋(#777) — 브랜치·커밋으로 낸 시도만, 낸 주소 옆에 짧은 SHA 를 커밋 링크로. */}
+            {submission.commit_sha ? (
+              <a
+                href={commitUrl(submission.value, submission.commit_sha)}
+                target="_blank"
+                rel="noreferrer"
+                data-testid={`${testId}-commit`}
+                className="order-6 py-1.5 font-mono text-[12px] text-ink/60 hover:text-ink sm:order-none"
+              >
+                {shortSha(submission.commit_sha)}
+              </a>
+            ) : null}
+          </>
         ) : submission.download_url ? (
           <a
             href={submission.download_url}
