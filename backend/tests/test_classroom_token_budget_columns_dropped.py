@@ -40,6 +40,16 @@ def _migrate(target: tuple[str, str]) -> None:
     executor.migrate([target])
 
 
+def _migrate_to_latest() -> None:
+    """classroom 앱의 leaf 까지 올린다 — 0032 로 못 박으면 그 뒤에 온 마이그레이션(0033, #769)이
+    이 워커의 DB 에 안 돌아간 채로 남아, 같은 워커가 이어서 집는 시험이 「column … does not
+    exist」로 떨어진다(xdist 워커의 DB 는 세션 동안 하나다)."""
+
+    executor = MigrationExecutor(connection)
+    executor.loader.build_graph()
+    executor.migrate(executor.loader.graph.leaf_nodes("classroom"))
+
+
 @pytest.mark.django_db(transaction=True)
 def test_contract_migration_drops_the_budget_columns_and_reverse_restores_them():
     assert _budget_columns() == set()
@@ -49,6 +59,6 @@ def test_contract_migration_drops_the_budget_columns_and_reverse_restores_them()
         assert _budget_columns() == COLUMNS
         assert _threshold_default() == "80"
     finally:
-        _migrate(("classroom", "0032_drop_class_token_budget_columns"))
+        _migrate_to_latest()
 
     assert _budget_columns() == set()
