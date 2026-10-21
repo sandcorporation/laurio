@@ -33,6 +33,9 @@ export type GridProblemStats = {
   passed_count: number;
   member_count: number;
   pass_rate: number | null;
+  // 권장 기한·마감(#769) — 격자 머리는 이 응답만 읽는다(#774, 문제 목록에서 꿰매지 않는다).
+  recommended_due_at: string | null;
+  due_at: string | null;
 };
 
 export type GridMemberRow = {

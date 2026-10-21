@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
-import { describeDue } from "@/lib/problems/due-dates";
+import { describeDue, type DueFields } from "@/lib/problems/due-dates";
 import { achievementTone, describeAchievementRate } from "@/lib/problems/achievement";
 import type { GridCell, GridCellStatus, GridMemberRow } from "@/lib/roster-grid/api";
 import { gridEntryLabel } from "@/lib/submissions/contest-entry";
@@ -79,8 +79,8 @@ function StatusMark({ status }: { status: GridCellStatus }) {
 }
 
 /** 문제 머리 아래 마감 한 줄(#770) — 「~M/D」, 지난 것은 흐리게, 없으면 빈 줄로 높이만 맞춘다. */
-function DueSubline({ dueAt, testId }: { dueAt: string | null; testId: string }) {
-  const { due } = describeDue({ recommended_due_at: null, due_at: dueAt }, { passed: null });
+function DueSubline({ problem, testId }: { problem: DueFields; testId: string }) {
+  const { due } = describeDue(problem, { passed: null });
   return (
     <div
       data-testid={due ? testId : undefined}
@@ -200,16 +200,7 @@ function ExpelDialog({
   );
 }
 
-export function ParticipantsTab({
-  classId,
-  dueAtByProblem,
-  onChanged,
-}: {
-  classId: number;
-  /** 문제별 마감(#770) — 격자 응답에는 없어 문제 탭이 받은 목록에서 넘긴다. 머리 아래 「~M/D」 한 줄. */
-  dueAtByProblem: Record<number, string | null>;
-  onChanged?: () => void;
-}) {
+export function ParticipantsTab({ classId, onChanged }: { classId: number; onChanged?: () => void }) {
   const { state, expel, expelError } = useRosterGrid(classId);
   const [expelling, setExpelling] = useState<GridMemberRow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -303,7 +294,7 @@ export function ParticipantsTab({
                       </Badge>
                     </span>
                   ) : null}
-                  <DueSubline dueAt={dueAtByProblem[problem.id] ?? null} testId={`participants-header-problem-${problem.id}-due`} />
+                  <DueSubline problem={problem} testId={`participants-header-problem-${problem.id}-due`} />
                 </th>
               ))}
               <th className={`${CELL} ${HEAD} text-right`}>통과</th>

@@ -1,9 +1,11 @@
 "use client";
 
 // 「최근 제출」 카드(#633, 백엔드 #632) — 강사가 이 화면을 여는 이유의 대부분은 「누가 방금 냈나」다.
-// 최근 10건, 새것부터. 칸 모양은 참여자별 현황 격자와 같은 낱말·같은 표식이다.
+// 최근 10건, 새것부터. 칸 모양은 참여자별 현황 격자와 같은 낱말·같은 표식이고, 권장 기한 뒤의 시도는
+// 목록·내 시도와 같은 꼴로 결과 낱말에 「· 늦음」이 붙는다(#774).
 import { Card, CardHeader } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { withLate } from "@/lib/problems/due-dates";
 import { useRecentAttempts, type RecentAttemptStatus } from "@/lib/classes/use-recent-attempts";
 
 const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: string }> = {
@@ -55,7 +57,7 @@ export function RecentAttemptsCard({ classId }: { classId: number }) {
                   <span className="text-ink/60">{attempt.problem_title}</span>
                 </span>
                 <span className="shrink-0 whitespace-nowrap text-right">
-                  <span className={`text-[12px] ${status.className}`}>{status.label}</span>
+                  <span className={`text-[12px] ${status.className}`}>{withLate(status.label, attempt.late)}</span>
                   <span className="block text-[11px] text-ink/30">{formatRelativeTime(attempt.submitted_at)}</span>
                 </span>
               </li>

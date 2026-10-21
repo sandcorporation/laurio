@@ -903,6 +903,9 @@ class ClassroomProblemStatsOut(Schema):
     passed_count: int
     member_count: int
     pass_rate: float | None = None
+    #: 권장 기한·마감(#769) — 격자 화면이 문제 목록에서 꿰매 넣지 않고 이 응답만 읽는다(#774).
+    recommended_due_at: datetime | None = None
+    due_at: datetime | None = None
 
 
 class ClassroomGridCellOut(Schema):

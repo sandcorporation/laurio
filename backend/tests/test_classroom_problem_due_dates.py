@@ -262,6 +262,16 @@ def test_the_list_row_and_grid_cell_follow_the_last_attempt(client, db):
     assert next(m for m in rows if m["display_name"] == "참여자")["cells"][0]["late"] is False
 
 
+def test_the_grid_problem_header_carries_both_dates(client, db):
+    # 격자 화면이 문제 목록에서 기한을 꿰매 넣지 않도록(#774) 문제 머리가 두 날짜를 싣는다.
+    instructor, participant, class_id, problem_id = _setup_with_participant(client, recommended=PAST, due=FUTURE)
+    second = _create(client, instructor["access"], class_id, {}).json()["id"]
+
+    headers = {p["id"]: p for p in roster_grid(client, instructor["access"], class_id)["problems"]}
+    assert (headers[problem_id]["recommended_due_at"], headers[problem_id]["due_at"]) == (_iso(PAST), _iso(FUTURE))
+    assert (headers[second]["recommended_due_at"], headers[second]["due_at"]) == (None, None)
+
+
 # --- 복사·템플릿은 두 날짜를 비운다 ------------------------------------------------
 
 

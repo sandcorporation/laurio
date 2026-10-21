@@ -22,6 +22,8 @@ export type RecentAttemptRow = {
   attempt_number: number;
   status: RecentAttemptStatus;
   submitted_at: string;
+  // 권장 기한 뒤에 낸 시도인가(#769) — 결과 낱말에 「· 늦음」으로 붙는다(#774).
+  late: boolean;
 };
 
 const FALLBACK_POLL_MS = 30_000;

@@ -1684,6 +1684,8 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 passed_count=passed_count,
                 member_count=member_count,
                 pass_rate=(passed_count / member_count) if member_count else None,
+                recommended_due_at=problem.recommended_due_at,
+                due_at=problem.due_at,
             )
         )
 
