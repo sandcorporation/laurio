@@ -89,7 +89,10 @@ class StubGitHubAdapter:
     def check_visibility(self, url: str, *, etag=None):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
-    def clone(self, url: str):
+    def resolve_ref(self, url: str, ref: str):
+        raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
+
+    def clone(self, url: str, *, commit_sha=None):
         raise NotImplementedError("배포 가드 검증 전용 stub — 실제로 호출되면 안 된다.")
 
 
