@@ -33,6 +33,8 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { DueRows } from "@/app/components/DueLabel";
+import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
@@ -97,6 +99,9 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   /** `undefined`면 통과 배지를 아예 내지 않는다 — 미리보기는 아직 아무도
    *  푼 적이 없으므로 「통과」/「미통과」 어느 쪽도 사실이 아니다. */
   passed?: boolean;
+  /** 권장 기한·마감(#770) — 「제출」 카드 머리 아래 두 줄. 미리보기도 같은 자리에 그린다. */
+  recommendedDueAt?: string | null;
+  dueAt?: string | null;
   description: string;
   // 공모전 문제의 수업용 안내(#548) — 설명 위에 보인다. 공모전 문제가 아니면 빈 문자열.
   instructorNote?: string;
@@ -159,6 +164,8 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     title,
     titleTestId,
     passed,
+    recommendedDueAt = null,
+    dueAt = null,
     description,
     instructorNote = "",
     checklistItems,
@@ -262,11 +269,46 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     </>
   );
 
+  // 마감이 지나 참여자가 새로 낼 수 없다(#769 `submit_blocked_reason`, 강사가 학생 화면으로 보면 막히지 않는다).
+  const deadlinePassed = props.interactive && props.submitBlockedReason === "deadline_passed";
+
   const side = (
     <>
       <Card>
-        <CardHeader title="제출" />
-        <div className="flex flex-col gap-3.5 p-4">
+        {deadlinePassed ? (
+          <>
+            <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
+              <h2 className="text-[15px] font-semibold tracking-[-0.005em]">제출</h2>
+              <span data-testid="submit-deadline-passed">
+                <Badge tone={passed === true ? "neutral" : "attention"}>마감 지남</Badge>
+              </span>
+            </div>
+            {dueAt ? (
+              <div
+                data-testid="submit-due-rows-due"
+                className="flex justify-between gap-3 border-b border-rule px-4 py-2.5 text-[12.5px] text-ink/60"
+              >
+                <span>마감</span>
+                <span className="font-mono">{formatDueDateTime(dueAt)}</span>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <CardHeader title="제출" />
+            <DueRows
+              problem={{ recommended_due_at: recommendedDueAt, due_at: dueAt }}
+              passed={passed === true}
+              testId="submit-due-rows"
+            />
+          </>
+        )}
+        <div
+          data-testid="submit-form-area"
+          aria-disabled={deadlinePassed || undefined}
+          // 마감 뒤에는 끌어다 놓기·저장소 칸·「제출하기」가 흐려진 채 남고 누를 수 없다(#770).
+          className={`flex flex-col gap-3.5 p-4 ${deadlinePassed ? "pointer-events-none opacity-45" : ""}`}
+        >
           {props.interactive ? (
             <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
           ) : (
@@ -556,7 +598,7 @@ function AttemptRow({
             <Badge>{submission.pending_reason ? "채점 대기" : "채점 중"}</Badge>
           ) : (
             <Badge tone={submission.passed ? "verified" : "attention"}>
-              {submission.passed ? "통과" : "미통과"}
+              {withLate(submission.passed ? "통과" : "미통과", submission.late)}
             </Badge>
           )}
         </span>
@@ -665,10 +707,12 @@ function InteractiveSubmissionForm(
   );
   const resolvedFormat = chosenFormat ?? submissionFormats[0];
   const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
-  const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
+  const locked = submitBlockedReason === "deadline_passed";
+  const needsFormatChoice = !locked && submissionFormats.length > 1 && chosenFormat === null;
 
   // 낼 수 없는 이유는 제출 카드 자리에 한 줄이다 — 지난 시도와 판정은 옆 열에 그대로 남는다.
-  // 백엔드가 보관 → 내보냄 → 숨김 순서로 이유를 하나만 정해 주므로(#439) 그 값을 그대로 분기한다.
+  // 백엔드가 보관 → 내보냄 → 숨김 → 마감 순서로 이유를 하나만 정해 주므로(#439, #769) 그 값을 그대로
+  // 분기한다. 마감(`deadline_passed`)만은 문장이 아니다 — 카드 머리의 「마감 지남」 배지와 흐려진 칸이 말한다.
   if (submitBlockedReason === "archived") {
     return (
       <p data-testid="class-archived-note" className="text-[13px] text-attention">
@@ -753,6 +797,7 @@ function InteractiveSubmissionForm(
               placeholder="https://github.com/owner/repo"
               value={repositoryUrl}
               onChange={(event) => onRepositoryUrlChange(event.target.value)}
+              disabled={locked}
               required
               aria-invalid={repositoryCheck !== null && !repositoryCheck.ok}
               className={`${INPUT_CLASS} font-mono`}
@@ -780,7 +825,7 @@ function InteractiveSubmissionForm(
           <button
             type="submit"
             data-testid="submit-repository"
-            disabled={submitting || repositoryCheck === null || !repositoryCheck.ok}
+            disabled={locked || submitting || repositoryCheck === null || !repositoryCheck.ok}
             className={`${buttonClass("primary")} w-full`}
           >
             {submitting ? "제출하는 중..." : "제출하기"}
@@ -825,7 +870,7 @@ function InteractiveSubmissionForm(
               type="file"
               aria-label="소스 파일"
               onChange={onSourceFile}
-              disabled={submitting || uploadStatus === "uploading"}
+              disabled={locked || submitting || uploadStatus === "uploading"}
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
             />
           </div>

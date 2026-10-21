@@ -27,7 +27,9 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { DueCells } from "@/app/components/DueLabel";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { withLate } from "@/lib/problems/due-dates";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
@@ -44,7 +46,8 @@ const STATUS_BADGE: Record<
   not_submitted: { label: "미제출", tone: "neutral" },
 };
 
-// 한 줄 — 행 전체가 링크다(#639). 제목 · 「시도 k회 · 마지막 …」(시도가 없으면 비운다) · 배지 하나.
+// 한 줄 — 행 전체가 링크다(#639). 제목 · 기한(권장·마감, #770) · 「시도 k회 · 마지막 …」(시도가 없으면 비운다) ·
+// 배지 하나(「통과 · 늦음」 — 마지막 시도가 권장 기한 뒤였으면 글자로 붙는다).
 function ProblemListRow({
   classId,
   problem,
@@ -63,20 +66,20 @@ function ProblemListRow({
         <span className="min-w-0 flex-1 truncate text-[14px]">
           {problem.title}
         </span>
-        {problem.attempt_count > 0 ? (
-          <span
-            data-testid={`my-problem-row-${problem.id}-attempts`}
-            className="shrink-0 text-[12px] whitespace-nowrap text-ink/45"
-          >
-            시도 {problem.attempt_count}회 · 마지막{" "}
-            {formatRelativeTime(problem.last_attempted_at)}
-          </span>
-        ) : null}
+        {/* 고정 폭 세 칸(#770) — 기한(권장 100px · 마감 150px), 시도·마지막, 상태 배지. 한 줄 높이. */}
+        <DueCells problem={problem} passed={problem.status === "passed"} testId={`my-problem-row-${problem.id}`} />
+        <span className="w-[170px] shrink-0 text-right text-[12px] whitespace-nowrap text-ink/45 max-sm:hidden">
+          {problem.attempt_count > 0 ? (
+            <span data-testid={`my-problem-row-${problem.id}-attempts`}>
+              시도 {problem.attempt_count}회 · 마지막 {formatRelativeTime(problem.last_attempted_at)}
+            </span>
+          ) : null}
+        </span>
         <span
           data-testid={`my-problem-row-${problem.id}-status`}
-          className="shrink-0"
+          className="w-[96px] shrink-0 text-right"
         >
-          <Badge tone={badge.tone}>{badge.label}</Badge>
+          <Badge tone={badge.tone}>{withLate(badge.label, problem.late)}</Badge>
         </span>
       </Link>
     </li>

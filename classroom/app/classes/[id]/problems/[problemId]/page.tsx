@@ -22,6 +22,7 @@ import { ChecklistRows } from "@/app/components/ChecklistRows";
 import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
+import { ProblemDueCard } from "@/app/components/ProblemDueCard";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemSideActions } from "@/app/components/ProblemSideActions";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
@@ -45,6 +46,14 @@ import {
   type ProblemTransitionBlockedReason,
   type SubmissionFormat,
 } from "@/lib/problems/api";
+import {
+  DUE_ORDER_MESSAGE,
+  EMPTY_DUE_DRAFT,
+  dueDraftFromIso,
+  dueDraftToIso,
+  dueOrderViolated,
+  type DueDraft,
+} from "@/lib/problems/due-dates";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
@@ -92,7 +101,12 @@ export default function EditProblemPage() {
     grading_strictness: "normal",
     grading_guideline_text: "",
   });
-  // 본문 저장(제목·설명·제출 형식·채점 모델·추론 강도·채점 지침) — 공용
+  // 권장 기한·마감(#770) — 날짜 칸·시각 칸의 초안. 머리의 「저장」이 함께 보낸다(생략 없이 늘 둘 다,
+  // 빈 칸은 null = 비움). 권장이 마감 뒤면 보내지 않고 두 칸을 붉게 둔다 — 서버의 422 도 같은 표시.
+  const [recommendedDue, setRecommendedDue] = useState<DueDraft>(EMPTY_DUE_DRAFT);
+  const [dueDraft, setDueDraft] = useState<DueDraft>(EMPTY_DUE_DRAFT);
+  const [dueOrderRefused, setDueOrderRefused] = useState(false);
+  // 본문 저장(제목·설명·제출 형식·채점 모델·추론 강도·채점 지침·기한) — 공용
   // 변경 도우미(#442)를 거친다. 오류·불러오는 중 표시가 자리마다 갈려
   // 아래 나머지 변경도 각자 자기 훅 인스턴스를 든다.
   const mainSave = useMutationRequest();
@@ -135,6 +149,8 @@ export default function EditProblemPage() {
     setModel(state.problem.model);
     setReasoningEffort(state.problem.reasoning_effort);
     setModelIsReasoning(state.problem.model_is_reasoning);
+    setRecommendedDue(dueDraftFromIso(state.problem.recommended_due_at));
+    setDueDraft(dueDraftFromIso(state.problem.due_at));
     setGradingGuideline({
       grading_strictness: state.problem.grading_strictness,
       grading_guideline_text: state.problem.grading_guideline_text,
@@ -199,9 +215,15 @@ export default function EditProblemPage() {
       mainSave.setError(descriptionBannedWordMessage);
       return;
     }
+    if (dueOrderViolated(recommendedDue, dueDraft)) {
+      setDueOrderRefused(true);
+      return;
+    }
     void mainSave.run(
       () =>
         updateProblem(classId, problemId, {
+          recommended_due_at: dueDraftToIso(recommendedDue),
+          due_at: dueDraftToIso(dueDraft),
           // 공모전 문제는 제목·설명을 보내지 않는다 — 서버가 거절한다(#548). 대신 수업용 안내를 보낸다.
           ...(followsContest ? { instructor_note: instructorNote } : { title: title.trim(), description }),
           submission_formats: submissionFormats,
@@ -739,6 +761,22 @@ export default function EditProblemPage() {
                   </div>
                 </Card>
 
+                <ProblemDueCard
+                  testIdPrefix="edit-problem"
+                  recommended={recommendedDue}
+                  due={dueDraft}
+                  onRecommendedChange={(next) => {
+                    setRecommendedDue(next);
+                    setDueOrderRefused(false);
+                  }}
+                  onDueChange={(next) => {
+                    setDueDraft(next);
+                    setDueOrderRefused(false);
+                  }}
+                  invalid={dueOrderRefused || mainSave.error === DUE_ORDER_MESSAGE}
+                  disabled={isArchived}
+                />
+
                 <ProblemSettingsForm
                   testIdPrefix="edit-problem"
                   submissionFormats={submissionFormats}
@@ -807,6 +845,8 @@ export default function EditProblemPage() {
               headingLevel="h2"
               eyebrow={previewEyebrow}
               title={title.trim() === "" ? "(제목 없음)" : title}
+              recommendedDueAt={problem.recommended_due_at}
+              dueAt={problem.due_at}
               description={description}
               instructorNote={followsContest ? instructorNote : ""}
               checklistItems={problem.checklist_items}

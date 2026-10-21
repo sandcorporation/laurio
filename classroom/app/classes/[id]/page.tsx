@@ -147,7 +147,13 @@ function ClassDetail() {
               </div>
             </div>
           ) : tab === "participants" ? (
-            <ParticipantsTab classId={classId} onChanged={reloadClass} />
+            <ParticipantsTab
+              classId={classId}
+              dueAtByProblem={Object.fromEntries(
+                (problemsState.status === "ready" ? problemsState.problems : []).map((problem) => [problem.id, problem.due_at]),
+              )}
+              onChanged={reloadClass}
+            />
           ) : (
             // 역할과 대기 요청이 바뀌면(넘겨받기·요청·취소) 강사 목록을 처음부터 다시 읽는다.
             <InstructorsSection

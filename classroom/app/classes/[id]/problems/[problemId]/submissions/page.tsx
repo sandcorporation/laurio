@@ -39,6 +39,7 @@ import {
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
+import { withLate } from "@/lib/problems/due-dates";
 import { instructorEntryBadge } from "@/lib/submissions/contest-entry";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
@@ -79,7 +80,11 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
       </Badge>
     );
   }
-  return <Badge tone={submission.passed ? "verified" : "attention"}>{submission.passed ? "통과" : "미통과"}</Badge>;
+  return (
+    <Badge tone={submission.passed ? "verified" : "attention"}>
+      {withLate(submission.passed ? "통과" : "미통과", submission.late)}
+    </Badge>
+  );
 }
 
 function AttemptRow({

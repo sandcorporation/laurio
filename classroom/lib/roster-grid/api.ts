@@ -19,6 +19,8 @@ export type GridCell = {
   // 공모전 문제에서만(#550) — "current": 지금 공모전 제출이 이 칸의 시도다, "entered": 냈었지만
   // 지금 제출은 다른 시도·직접 고친 것이다.
   contest_entry?: "current" | "entered" | null;
+  // 마지막 시도가 권장 기한 뒤였는가(#769) — 화면은 칸 오른쪽 아래의 점(#770).
+  late: boolean;
 };
 
 export type GridProblemStats = {

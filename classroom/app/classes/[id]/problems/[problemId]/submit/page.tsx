@@ -217,6 +217,8 @@ export default function ProblemSubmitPage() {
         // 강사가 아직 한 번도 안 냈으면 「통과」/「미통과」 어느 쪽도 사실이
         // 아니다 — 미리보기와 같은 이유로 배지 자체를 내지 않는다.
         passed={viewingAsInstructor && submissions.length === 0 ? undefined : problem.passed}
+        recommendedDueAt={problem.recommended_due_at}
+        dueAt={problem.due_at}
         description={problem.description}
         instructorNote={problem.instructor_note}
         checklistItems={problem.checklist_items}

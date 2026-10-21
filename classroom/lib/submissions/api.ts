@@ -35,6 +35,9 @@ export type ProblemMine = {
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
   passed: boolean;
+  // 권장 기한·마감(#769) — ISO 8601 또는 null. 제출 카드가 두 줄로 그린다(#770).
+  recommended_due_at: string | null;
+  due_at: string | null;
   // 강사 쪽과 같은 판정(#587) — 걸리면 zip 을 고를 때의 안내가 더 눈에 띈다.
   zip_git_history_warning: ZipGitHistoryWarning | null;
 };
@@ -56,6 +59,10 @@ export type ProblemListItem = {
     | "not_submitted";
   attempt_count: number;
   last_attempted_at: string | null;
+  // 권장 기한·마감(#769)과 마지막 시도가 권장 기한 뒤였는가(`late`, 마지막 시도 기준).
+  recommended_due_at: string | null;
+  due_at: string | null;
+  late: boolean;
 };
 
 // 참여자의 문제 목록 응답(#372) — 그 화면 위쪽 인라인 이름 편집 칸이 쓸 지금
@@ -131,6 +138,8 @@ export type ClassroomSubmissionRow = {
   score: ClassroomScore | null;
   // 이 시도 하나가 통과인가(#288) — 미채점("pending")이면 항상 거짓이다.
   passed: boolean;
+  // 제출 시각이 권장 기한 뒤였는가(#769) — 저장된 값이 아니라 응답마다 다시 셈한 것.
+  late: boolean;
   pending_reason: PendingReason;
   // 「공모전에도 내기」로 낸 시도면 그 결과(#549), 끄고 낸 시도면 null.
   contest_entry: AttemptContestEntry | null;
@@ -147,7 +156,13 @@ export type AttemptContestEntry = {
 // 중)는 그 셋과 겹치지 않는 별도 판정이다. 백엔드가 이미 우선순위를 정해
 // 하나만 내려주므로 화면은 이 값을 다시 계산하지 않는다
 // (`classroom.participation.participant_submit_blocked_reason`).
-export type SubmitBlockedReason = "archived" | "expelled" | "hidden" | "viewing_as_instructor" | null;
+export type SubmitBlockedReason =
+  | "archived"
+  | "expelled"
+  | "hidden"
+  | "deadline_passed"
+  | "viewing_as_instructor"
+  | null;
 
 export type ProblemSubmissions = {
   // 화면 눈썹이 말할 클래스 이름(#372 후속).
@@ -216,6 +231,8 @@ export type InstructorSubmissionRow = {
   status: SubmissionStatus;
   score: ClassroomScore | null;
   passed: boolean;
+  // 제출 시각이 권장 기한 뒤였는가(#769).
+  late: boolean;
   // 참여자용 `ClassroomSubmissionRow.pending_reason`과 같은 값·같은 이유
   // (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
   // 멈춘 것"을 구별해야 한다.
