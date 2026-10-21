@@ -25,8 +25,10 @@ import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+from django.apps import apps
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import override_settings
 
 from storage.adapters.fake import FakeStorageAdapter
@@ -926,3 +928,17 @@ class FakeCompatibleServer:
         if self.error is not None:
             raise self.error
         return FakeVendorResponse(200, self.verdicts)
+
+
+def table_row_counts() -> dict[str, int]:
+    """모든 모델 표의 행 수 — 「읽기는 아무것도 남기지 않는다」(ADR-0040) 를 재는 시험이 전후를 비교한다.
+
+    문 하나로 센다. 표마다 `Model.objects.count()` 를 보내면 모델 수(백 개 남짓)만큼 왕복하고, 전후 두 번이면
+    그것만으로 시험 CPU 예산(1초)의 10분의 1 이 나간다.
+    """
+
+    tables = {model._meta.label: model._meta.db_table for model in apps.get_models()}
+    sql = " UNION ALL ".join(f"SELECT '{label}', count(*) FROM \"{table}\"" for label, table in tables.items())
+    with connection.cursor() as cursor:
+        cursor.execute(sql)
+        return {label: int(n) for label, n in cursor.fetchall()}
