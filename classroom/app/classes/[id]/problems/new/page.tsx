@@ -26,12 +26,20 @@ import { ChecklistRows } from "@/app/components/ChecklistRows";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
+import { ProblemDueCard } from "@/app/components/ProblemDueCard";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ContestPickerSheet } from "@/app/components/ContestPickerSheet";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
+import {
+  DUE_ORDER_MESSAGE,
+  EMPTY_DUE_DRAFT,
+  dueDraftToIso,
+  dueOrderViolated,
+  type DueDraft,
+} from "@/lib/problems/due-dates";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 
@@ -69,6 +77,10 @@ export default function NewProblemPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 권장 기한·마감(#770) — 빈 상태가 기본 모습. 권장이 마감 뒤면 만들지 않고 두 칸을 붉게 둔다.
+  const [recommendedDue, setRecommendedDue] = useState<DueDraft>(EMPTY_DUE_DRAFT);
+  const [dueDraft, setDueDraft] = useState<DueDraft>(EMPTY_DUE_DRAFT);
+  const [dueOrderRefused, setDueOrderRefused] = useState(false);
   // 「작성」/「미리보기」 탭(#325) — 참여자 화면 전체를 보여주는 쪽은 그
   // 자리에서 저장하지 않고 지금 상태를 그대로 비춘다(아래 렌더에서
   // `ProblemParticipantView`에 이 컴포넌트의 상태를 직접 넘긴다).
@@ -155,9 +167,15 @@ export default function NewProblemPage() {
         return;
       }
     }
+    if (dueOrderViolated(recommendedDue, dueDraft)) {
+      setDueOrderRefused(true);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     const result = await createProblem(classId, {
+      recommended_due_at: dueDraftToIso(recommendedDue),
+      due_at: dueDraftToIso(dueDraft),
       title: title.trim(),
       description,
       submission_formats: submissionFormats,
@@ -395,7 +413,22 @@ export default function NewProblemPage() {
               </>
             }
             side={
-              <ProblemSettingsForm
+              <>
+                <ProblemDueCard
+                  testIdPrefix="new-problem"
+                  recommended={recommendedDue}
+                  due={dueDraft}
+                  onRecommendedChange={(next) => {
+                    setRecommendedDue(next);
+                    setDueOrderRefused(false);
+                  }}
+                  onDueChange={(next) => {
+                    setDueDraft(next);
+                    setDueOrderRefused(false);
+                  }}
+                  invalid={dueOrderRefused || error === DUE_ORDER_MESSAGE}
+                />
+                <ProblemSettingsForm
                 testIdPrefix="new-problem"
                 submissionFormats={submissionFormats}
                 onToggleSubmissionFormat={toggleSubmissionFormat}
@@ -424,6 +457,7 @@ export default function NewProblemPage() {
                 gradingGuideline={gradingGuideline}
                 onGradingGuidelineChange={setGradingGuideline}
               />
+              </>
             }
           />
         </div>

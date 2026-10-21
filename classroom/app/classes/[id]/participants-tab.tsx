@@ -2,7 +2,8 @@
 
 // 클래스 상세의 「참여자」 탭 (#634, 시안 v2 Roster). 예전의 참여자 명단(/members)과 참여자 × 문제
 // 격자(#290)를 하나로 합친 표다 — 한 줄이 한 사람이고, 가입일·문제별 칸·통과 n/N·최근 제출·⋮(내보내기)가
-// 붙는다. 셀은 최신 시도가 아니라 **통과 이력**을 그린다(#289 「달성률」과 같은 규칙이어야 두 탭이
+// 붙는다. 문제 머리 아래에 마감 「~M/D」, 칸 오른쪽 아래 점은 마지막 시도가 권장 기한 뒤였다는 표시다(#770).
+// 셀은 최신 시도가 아니라 **통과 이력**을 그린다(#289 「달성률」과 같은 규칙이어야 두 탭이
 // 서로 다른 말을 하지 않는다). 이름 열은 고정이고 가로 스크롤은 문제 열만 한다 — 페이지 전체가 넘치면
 // 이름 열을 고정한 뜻을 잃는다.
 //
@@ -14,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { describeDue } from "@/lib/problems/due-dates";
 import { achievementTone, describeAchievementRate } from "@/lib/problems/achievement";
 import type { GridCell, GridCellStatus, GridMemberRow } from "@/lib/roster-grid/api";
 import { gridEntryLabel } from "@/lib/submissions/contest-entry";
@@ -33,7 +35,8 @@ const STATUS_LABEL: Record<GridCellStatus, string> = {
 /** 셀 하나의 모양. 리터럴 hex 없이 토큰 유틸리티로만 그린다. */
 function cellLabel(cell: GridCell): string {
   const entry = gridEntryLabel(cell.contest_entry ?? null);
-  return entry ? `${STATUS_LABEL[cell.status]} · ${entry}` : STATUS_LABEL[cell.status];
+  const parts = [STATUS_LABEL[cell.status], entry, cell.late ? "권장 기한 뒤 제출" : null].filter(Boolean);
+  return parts.join(" · ");
 }
 
 /** 공모전에도 냈다는 표시(#550) — 칸 오른쪽 위의 작은 점. 지금 공모전 제출이면 채운다. */
@@ -44,6 +47,16 @@ function ContestEntryMark({ entry, inline = false }: { entry: "current" | "enter
       className={`${inline ? "block" : "absolute -right-1.5 -top-1.5"} h-[7px] w-[7px] border border-attention ${
         entry === "current" ? "bg-attention" : "bg-surface"
       }`}
+    />
+  );
+}
+
+/** 권장 기한 뒤 제출(#770) — 마지막 시도의 `late`. 칸 표식 오른쪽 아래의 작은 점. */
+function LateMark({ inline = false }: { inline?: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`${inline ? "block" : "absolute -bottom-1 -right-1"} h-[6px] w-[6px] border border-surface bg-ink`}
     />
   );
 }
@@ -63,6 +76,20 @@ function StatusMark({ status }: { status: GridCellStatus }) {
       <span className="mx-auto block h-[15px] w-[15px] border border-rule bg-[repeating-linear-gradient(45deg,var(--color-rule)_0_2px,transparent_2px_4px)]" />
     );
   return <span className="mx-auto block h-[5px] w-[5px] bg-ink/25" />;
+}
+
+/** 문제 머리 아래 마감 한 줄(#770) — 「~M/D」, 지난 것은 흐리게, 없으면 빈 줄로 높이만 맞춘다. */
+function DueSubline({ dueAt, testId }: { dueAt: string | null; testId: string }) {
+  const { due } = describeDue({ recommended_due_at: null, due_at: dueAt }, { passed: null });
+  return (
+    <div
+      data-testid={due ? testId : undefined}
+      data-tone={due?.tone}
+      className={`mt-0.5 font-mono text-[10.5px] ${due?.tone === "faint" ? "text-ink/35" : "text-ink/60"}`}
+    >
+      {due ? `~${due.text}` : "\u00a0"}
+    </div>
+  );
 }
 
 const CELL = "whitespace-nowrap border-b border-rule px-2.5 py-2 text-center";
@@ -173,7 +200,16 @@ function ExpelDialog({
   );
 }
 
-export function ParticipantsTab({ classId, onChanged }: { classId: number; onChanged?: () => void }) {
+export function ParticipantsTab({
+  classId,
+  dueAtByProblem,
+  onChanged,
+}: {
+  classId: number;
+  /** 문제별 마감(#770) — 격자 응답에는 없어 문제 탭이 받은 목록에서 넘긴다. 머리 아래 「~M/D」 한 줄. */
+  dueAtByProblem: Record<number, string | null>;
+  onChanged?: () => void;
+}) {
   const { state, expel, expelError } = useRosterGrid(classId);
   const [expelling, setExpelling] = useState<GridMemberRow | null>(null);
   const [busy, setBusy] = useState(false);
@@ -221,6 +257,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
 
   const { problems, members } = state.grid;
   const hasContestEntries = members.some((member) => member.cells.some((cell) => cell.contest_entry));
+  const hasLate = members.some((member) => member.cells.some((cell) => cell.late));
 
   if (members.length === 0) {
     return (
@@ -255,7 +292,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                   className={`${CELL} ${HEAD}`}
                   data-testid={`participants-header-problem-${problem.id}`}
                 >
-                  {problem.title}
+                  <span className="whitespace-nowrap">{problem.title}</span>
                   {PROBLEM_STATUS_LABEL[problem.status] ? (
                     <span
                       data-testid={`participants-header-problem-${problem.id}-${problem.status}-badge`}
@@ -266,6 +303,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                       </Badge>
                     </span>
                   ) : null}
+                  <DueSubline dueAt={dueAtByProblem[problem.id] ?? null} testId={`participants-header-problem-${problem.id}-due`} />
                 </th>
               ))}
               <th className={`${CELL} ${HEAD} text-right`}>통과</th>
@@ -304,12 +342,14 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                     data-testid={`participant-cell-${member.id}-${cell.problem_id}`}
                     data-status={cell.status}
                     data-contest-entry={cell.contest_entry ?? undefined}
+                    data-late={cell.late || undefined}
                     aria-label={cellLabel(cell)}
                     title={cellLabel(cell)}
                   >
                     <span className="relative mx-auto block w-fit">
                       <StatusMark status={cell.status} />
                       {cell.contest_entry ? <ContestEntryMark entry={cell.contest_entry} /> : null}
+                      {cell.late ? <LateMark /> : null}
                     </span>
                   </td>
                 ))}
@@ -380,6 +420,16 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
             </li>
           ))}
         </ul>
+        {hasLate ? (
+          <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <LateMark inline />
+              </span>
+              권장 기한 뒤 제출
+            </li>
+          </ul>
+        ) : null}
         {hasContestEntries ? (
           <ul data-testid="participants-contest-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <li className="flex items-center gap-2 text-[12px] text-ink/60">

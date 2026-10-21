@@ -94,6 +94,9 @@ export type ProblemRow = {
   pass_rate: number | null;
   // 이 문제의 참여자 제출 중 최신(#632) — 없으면 null.
   last_submitted_at: string | null;
+  // 권장 기한·마감(#769, ADR-0063) — ISO 8601 또는 null. 표기는 `due-dates.ts`.
+  recommended_due_at: string | null;
+  due_at: string | null;
   // 참여자(강사 본인·내보낸 사람 제외)의 시도 수(#674) — 제출 현황의 「시도」와 같은 집합.
   participant_attempt_count: number;
   published_template: PublishedProblemTemplateSummary | null;
@@ -175,6 +178,9 @@ export function createProblem(
     grading_guideline_text?: string;
     // 문법 검사 기본 항목의 켜짐 여부(#410). 생략하면 서버 기본값(켜짐)이 된다.
     syntax_check_enabled?: boolean;
+    // 권장 기한·마감(#770) — ISO 8601(오프셋 포함), 비우면 null.
+    recommended_due_at?: string | null;
+    due_at?: string | null;
     // true면 만든 직후 바로 연다("만들고 바로 열기"). 필수 항목이 하나도
     // 없으면 서버가 400으로 거부하고 문제도 생기지 않는다 — 화면은 이
     // 경우를 누르기 전에 이미 막아 둔다.
@@ -199,6 +205,9 @@ export function updateProblem(
     syntax_check_enabled: boolean;
     // 공모전 문제의 수업용 안내(#548) — 공모전 문제가 아니면 서버가 422.
     instructor_note: string;
+    // 권장 기한·마감(#770) — 생략하면 그대로, null 이면 비운다. 권장 > 마감이면 서버가 422.
+    recommended_due_at: string | null;
+    due_at: string | null;
   }>,
 ): Promise<ApiResult<ProblemRow>> {
   return apiRequest<ProblemRow>(

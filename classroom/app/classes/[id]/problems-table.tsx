@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
+import { DueInline } from "@/app/components/DueLabel";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { achievementTone } from "@/lib/problems/achievement";
@@ -31,7 +32,7 @@ function RateCell({ problem }: { problem: ProblemRow }) {
   const pct = Math.round(problem.pass_rate * 100);
   return (
     <span className="flex items-center gap-2.5">
-      <span aria-hidden="true" className="relative block h-1.5 w-[56px] shrink-0 md:w-[110px] border border-rule bg-paper">
+      <span aria-hidden="true" className="relative block h-1.5 w-[48px] shrink-0 md:w-[90px] border border-rule bg-paper">
         <span className={`absolute inset-y-0 left-0 ${TONE_BAR[tone]}`} style={{ width: `${Math.min(100, pct)}%` }} />
       </span>
       <span className={`font-mono text-[13px] font-semibold ${TONE_TEXT[tone]}`}>{pct}%</span>
@@ -229,10 +230,12 @@ export function ProblemsTable({
                   <Link
                     href={`/classes/${classId}/problems/${problem.id}`}
                     data-testid={`problem-row-${problem.id}-link`}
-                    className="hover:underline"
+                    className="whitespace-nowrap hover:underline"
                   >
                     {problem.title}
                   </Link>
+                  {/* 열을 늘리지 않는다 — 제목 옆 한 줄로 마감만, 권장은 표에 없다(#770). */}
+                  <DueInline problem={problem} testId={`problem-row-${problem.id}-due`} />
                   {problem.status !== "open" ? (
                     <span data-testid={`problem-row-${problem.id}-status`} className="ml-2 align-middle">
                       <Badge tone={problem.status === "hidden" ? "attention" : "neutral"}>
