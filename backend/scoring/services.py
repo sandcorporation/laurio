@@ -65,10 +65,11 @@ from core.clock import Clock
 from core.llm_scoring import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
-from repositories.adapters import ClonedRepository, get_github_adapter
+from repositories.adapters import ClonedRepository, GitHubRefNotFoundError, get_github_adapter
 from repositories.models import RepositorySnapshot
 from storage.adapters import StorageAdapterError, get_storage_adapter
 from submissions.models import RequirementResponse, SubmissionAsset
+from submissions.repository_pins import clone_repository_asset
 # 아래 두 상수는 재노출이다 — 원본은 `submissions.scoring_basis`에 있다(#246
 # 모듈 docstring 참고). 이름을 그대로 다시 import해 `scoring.services.
 # NO_SCORING_INPUT_MODEL_VERSION`처럼 기존 경로로도 계속 접근할 수 있게 한다.
@@ -270,6 +271,13 @@ _NO_SCORING_INPUT_REASONING = (
     "채점할 입력이 없었다 — 소스 자료가 없고 저장소는 마감 시점에 도달할 수 없었다 "
     "(비공개이거나 삭제·이름 변경됨). AI가 판정하지 않았다."
 )
+#: 같은 자동 미달이되, 저장소는 공개인데 낸 브랜치·커밋이 없었던 경우(#777, ADR-0065) — 오타·
+#: 지워진 브랜치·force push 로 사라진 커밋. 기본 브랜치로 대신 채점하지 **않는다** — 참가자가
+#: 낸 것이 아닌 코드를 채점하면 그 점수가 누구 것인지 말할 수 없다.
+_NO_SCORING_INPUT_REF_NOT_FOUND_REASONING = (
+    "채점할 입력이 없었다 — 소스 자료가 없고 저장소는 마감 시점에 도달할 수 없었다 "
+    "(비공개이거나 삭제·이름 변경됨, 또는 낸 브랜치·커밋을 찾을 수 없었다). AI가 판정하지 않았다."
+)
 
 #: #222(ADR-0031)의 자동 미달 Score가 `model_version`에 남기는 값 — ADR-0030의
 #: `NO_SCORING_INPUT_MODEL_VERSION`과 짝이지만 책임 주체가 반대다(참가자가 아니라
@@ -367,6 +375,40 @@ def _finalize_score(
     _notify_scored(submission)
 
     return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
+
+
+def _try_clone(
+    submission,
+    asset: SubmissionAsset,
+    github,
+    cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]],
+    ref_missing_ids: set[int],
+) -> None:
+    """저장소 자산 하나를 clone 해 `cloned_repositories` 에 더한다 — 실패는 그 자산만 빼고
+    진행한다(ADR-0027). 낸 브랜치·커밋이 없다는 확정 실패(`GitHubRefNotFoundError`, #777)만
+    `ref_missing_ids` 에 남겨 비공개와 같은 「도달 불가」로 센다 — 네트워크 순단·rate limit 은
+    「아직 모른다」라 거기 들지 않는다. 브랜치·커밋 제출은 `clone_repository_asset` 이 고정
+    커밋을(아직 없으면 지금 박고) 받는다."""
+
+    try:
+        cloned_repositories.append((asset, clone_repository_asset(asset, github)))
+    except GitHubRefNotFoundError as exc:
+        ref_missing_ids.add(asset.id)
+        SubmissionAsset.objects.filter(pk=asset.pk).update(repository_ref_found=False)
+        logger.warning(
+            "Submission(pk=%s) 저장소 자산(pk=%s)의 브랜치·커밋을 찾을 수 없어 그 자산만 빼고 "
+            "진행: %s",
+            submission.id,
+            asset.id,
+            exc,
+        )
+    except Exception as exc:  # noqa: BLE001 - 저장소 하나의 clone 실패가 채점 전체를 막으면 안 된다.
+        logger.warning(
+            "Submission(pk=%s) 저장소 자산(pk=%s) clone 실패, 그 자산만 빼고 진행: %s",
+            submission.id,
+            asset.id,
+            exc,
+        )
 
 
 def _live_repository_reachability(
@@ -610,19 +652,12 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
     # 진행하며 permanent로 표시하지 않는다(ADR-0027).
     repository_assets = [a for a in repository_assets_all if a.is_public is True]
     cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]] = []
+    # 낸 브랜치·커밋이 GitHub 에 없다고 확정된 자산(#777) — 비공개와 같은 줄의 「도달 불가」다.
+    ref_missing_ids: set[int] = set()
     if repository_assets:
         github = get_github_adapter()
         for asset in repository_assets:
-            try:
-                cloned_repositories.append((asset, github.clone(asset.value)))
-            except Exception as exc:  # noqa: BLE001 - 저장소 하나의 clone 실패가 채점 전체를 막으면 안 된다.
-                logger.warning(
-                    "Submission(pk=%s) 저장소 자산(pk=%s) clone 실패, 그 자산만 빼고 "
-                    "진행: %s",
-                    submission.id,
-                    asset.id,
-                    exc,
-                )
+            _try_clone(submission, asset, github, cloned_repositories, ref_missing_ids)
 
     # #218(ADR-0030): 채점 입력이 하나도 남지 않았다 — 읽을 수 있는 소스도, clone에
     # 성공한 저장소도 없다. 저장소만으로 낸 제출에서만 실제로 일어난다(소스가
@@ -651,16 +686,7 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
         if newly_public_assets:
             github = get_github_adapter()
             for asset in newly_public_assets:
-                try:
-                    cloned_repositories.append((asset, github.clone(asset.value)))
-                except Exception as exc:  # noqa: BLE001 - 이 저장소 하나의 clone 실패가 채점 전체를 막으면 안 된다.
-                    logger.warning(
-                        "Submission(pk=%s) 저장소 자산(pk=%s) 재확인 후 clone 실패, "
-                        "그 자산만 빼고 진행: %s",
-                        submission.id,
-                        asset.id,
-                        exc,
-                    )
+                _try_clone(submission, asset, github, cloned_repositories, ref_missing_ids)
 
     if not readable_sources and not cloned_repositories:
         # **자동 미달은 모든 저장소가 확정적으로 도달 불가능일 때만 발동한다.**
@@ -674,7 +700,7 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
             entry["asset_id"]: entry["is_public"] for entry in repository_reachability_payload
         }
         all_confirmed_unreachable = bool(repository_assets_all) and all(
-            effective_is_public_by_id.get(a.id, a.is_public) is False
+            effective_is_public_by_id.get(a.id, a.is_public) is False or a.id in ref_missing_ids
             for a in repository_assets_all
         )
         if not all_confirmed_unreachable:
@@ -690,12 +716,17 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
         # 모든 저장소가 확정적으로 닫혀 있다(private 또는 404) — ADR-0030의
         # 자동 미달. LLM을 부르지 않는다: 답이 정해진 호출에 돈을 쓸 이유가 없고,
         # 응답이 흔들려 100%가 나오면 더 나쁘다.
+        no_input_reasoning = (
+            _NO_SCORING_INPUT_REF_NOT_FOUND_REASONING
+            if ref_missing_ids
+            else _NO_SCORING_INPUT_REASONING
+        )
         return _finalize_score(
             submission,
             percentage=Decimal("0.00"),
             model_version=NO_SCORING_INPUT_MODEL_VERSION,
-            prompt=_NO_SCORING_INPUT_REASONING,
-            reasoning_payload=_all_unmet_reasoning(submission, reasoning=_NO_SCORING_INPUT_REASONING),
+            prompt=no_input_reasoning,
+            reasoning_payload=_all_unmet_reasoning(submission, reasoning=no_input_reasoning),
             scored_assets_payload=[],
             repository_reachability_check=repository_reachability_payload,
         )

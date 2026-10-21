@@ -46,10 +46,10 @@ from policies.services import get_current_policy
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import (
-    GITHUB_REPO_URL_PATTERN,
     Submission,
     SubmissionAsset,
-    normalize_github_repo_url,
+    REPOSITORY_URL_SHAPES_MESSAGE,
+    parse_github_submission_url,
 )
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
@@ -657,7 +657,8 @@ def _serialize_classroom_submission(
         problem_id=submission.problem_id,
         attempt_number=submission.attempt_number,
         submission_format=asset.kind,
-        value=asset.value,
+        value=asset.submitted_url,
+        commit_sha=asset.repository_commit_sha or None,
         download_url=download_url,
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
@@ -712,7 +713,8 @@ def _serialize_instructor_submission(
         member_display_name=submission.member.display_name,
         attempt_number=submission.attempt_number,
         submission_format=asset.kind,
-        value=asset.value,
+        value=asset.submitted_url,
+        commit_sha=asset.repository_commit_sha or None,
         download_url=download_url,
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
@@ -2461,9 +2463,13 @@ def _create_submission_row(request: HttpRequest, problem, member, payload, *, as
         asset_kind = SubmissionAsset.Kind.SOURCE
         content_type = (payload.content_type or "").strip()
     else:
-        value = normalize_github_repo_url(value)
-        if not GITHUB_REPO_URL_PATTERN.match(value):
-            raise HttpError(422, "저장소는 https://github.com/<owner>/<repo> 형식만 받습니다.")
+        # 저장소 · `/tree/<브랜치>` · `/commit/<sha>` 셋을 받는다(#777). 저장은 저장소 URL 과
+        # ref·SHA 로 나뉘고, 공모전에도 내기(#549)에는 낸 URL 그대로 넘겨 공모전 쪽이 같은
+        # 규칙으로 다시 나눈다.
+        target = parse_github_submission_url(value)
+        if target is None:
+            raise HttpError(422, REPOSITORY_URL_SHAPES_MESSAGE)
+        value = target.url
         asset_kind = SubmissionAsset.Kind.REPOSITORY
 
     # 「공모전에도 내기」(#549) — 시도를 만들기 전에 거른다. 끄고 낸 시도면 None.
@@ -2473,6 +2479,15 @@ def _create_submission_row(request: HttpRequest, problem, member, payload, *, as
         entry_in=payload.contest_entry,
         scoring_asset=EntryAsset(kind=asset_kind, value=value, content_type=content_type),
         as_instructor=as_instructor,
+    )
+    asset_fields = (
+        {
+            "value": target.repo_url,
+            "repository_ref": target.ref,
+            "repository_commit_sha": target.commit_sha,
+        }
+        if asset_kind == SubmissionAsset.Kind.REPOSITORY
+        else {"value": value}
     )
 
     with transaction.atomic():
@@ -2491,7 +2506,7 @@ def _create_submission_row(request: HttpRequest, problem, member, payload, *, as
             attempt_number=next_attempt,
         )
         asset = SubmissionAsset.objects.create(
-            submission=submission, kind=asset_kind, value=value, content_type=content_type
+            submission=submission, kind=asset_kind, content_type=content_type, **asset_fields
         )
         # 이 시도가 생겼다는 신호를 그 참여자와 그 클래스 강사에게 낸다
         # (#383, ADR-0046) — 강사 제출 현황이 새로고침 없이 새 시도를 보여줄

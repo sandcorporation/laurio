@@ -113,6 +113,8 @@ class AssetSummaryOut(Schema):
 class SubmissionAssetOut(Schema):
     id: int
     kind: str
+    #: `repository` 는 **낸 URL 그대로**(저장소·`/tree/<브랜치>`·`/commit/<sha>`, #777) — 다시
+    #: 보내면 서버가 같은 규칙으로 나눈다.
     value: str
     label: str
     test_account: str
@@ -120,6 +122,13 @@ class SubmissionAssetOut(Schema):
     # `repository`가 공개인가 — null은 "비공개"가 아니라 "아직 확인하지 않음"이다
     # (#190/#193). 다른 종류에서는 항상 null이다.
     is_public: bool | None = None
+    # `repository` 의 고정 커밋(#777) — 커밋 URL 이면 낸 SHA(첫 스캔이 40자로 확정), 브랜치
+    # URL 이면 첫 스캔이 박은 SHA. 저장소 URL 제출·다른 종류는 null.
+    commit_sha: str | None = None
+    # 낸 브랜치·커밋을 GitHub 에서 찾았는가(#777) — `is_public` 과 같은 세 값. False 는
+    # 비공개와 같은 줄의 배지(「브랜치를 찾을 수 없음 — 채점에 반영되지 않습니다」)다.
+    # 저장소 URL 제출·다른 종류는 항상 null.
+    repository_ref_found: bool | None = None
     # 이 자료를 참가자가 아니라 플랫폼이 만들었는가 (#220, ADR-0030) — 저장소만
     # 낸 제출의 채점 박제가 남긴 소스 자료만 True다. 화면이 "이 자료는 지우거나
     # 고칠 수 없다"를 보일 근거가 된다.

@@ -10,7 +10,7 @@
 // 를 의도적으로 막는다(운영자 세션이 새는 길을 새로 만들지 않기 위해서다, #43).
 // 그래서 이 화면은 상한을 하드코딩해 미리 막는 대신 "추가"를 항상 허용하고,
 // 넘치면 서버가 저장 시점에 422 로 알리는 문구를 그대로 보여준다(submit-error).
-import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
+import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { UploadField } from "@/components/upload/upload-field";
@@ -32,6 +32,10 @@ export interface EditableAsset {
   testAccount: string;
   /** `repository` 자료만 의미가 있다 — #193 의 스캔이 채우기 전까지는 null. */
   isPublic?: boolean | null;
+  /** `repository` 자료만 — 낸 브랜치·커밋을 찾았는가(#777). 저장소 주소만 낸 행·확인 전은 null. */
+  refFound?: boolean | null;
+  /** `repository` 자료만 — 고정 커밋(#777). 커밋 주소의 SHA 또는 첫 스캔이 박은 브랜치 HEAD. */
+  commitSha?: string | null;
   /** `demo_video` 자료만 의미가 있다(#262) — 파일이 지워지는(또는 지워진) 시각.
    * 아직 정해지지 않았으면(진행 중 공모전) undefined. */
   retentionDeadline?: string | null;
@@ -91,7 +95,26 @@ function DemoVideoRetentionNote({
   );
 }
 
-function RepositoryBadge({ isPublic }: { isPublic: boolean | null | undefined }) {
+function RepositoryBadge({
+  isPublic,
+  refFound,
+  isCommit,
+}: {
+  isPublic: boolean | null | undefined;
+  /** 낸 브랜치·커밋을 GitHub 에서 찾았는가(#777) — 저장소 주소만 낸 행은 늘 null. */
+  refFound?: boolean | null;
+  /** 커밋 주소로 낸 행인가 — 못 찾았을 때 「브랜치」 대신 「커밋」이라 말한다. */
+  isCommit?: boolean;
+}) {
+  if (isPublic === true && refFound === false) {
+    // 비공개와 같은 줄의 새 상태 — 공개 저장소지만 낸 브랜치·커밋이 없다(오타·지워진 브랜치·
+    // force push). 마감 전에 고치면 다시 확인된다. 기본 브랜치로 대신 채점하지 않는다.
+    return (
+      <p className="text-xs text-attention" data-testid="repository-ref-missing-badge">
+        {isCommit ? "커밋을 찾을 수 없음" : "브랜치를 찾을 수 없음"} — 채점에 반영되지 않습니다.
+      </p>
+    );
+  }
   if (isPublic === true) {
     return (
       <p className="text-xs text-verified" data-testid="repository-public-badge">
@@ -336,7 +359,7 @@ export function AssetKindSection({
                       // 채점에 반영됩니다")를 그대로 붙인 채 거짓말한다.
                       update(index, {
                         value: event.target.value,
-                        ...(kind === "repository" ? { isPublic: null } : {}),
+                        ...(kind === "repository" ? { isPublic: null, refFound: null, commitSha: null } : {}),
                       })
                     }
                     data-testid={`${testIdPrefix}-${index}-value`}
@@ -357,7 +380,14 @@ export function AssetKindSection({
                         type="button"
                         data-testid={`${testIdPrefix}-${index}-suggestion`}
                         disabled={disabled}
-                        onClick={() => update(index, { value: repoInvalid.suggestion ?? "", isPublic: null })}
+                        onClick={() =>
+                          update(index, {
+                            value: repoInvalid.suggestion ?? "",
+                            isPublic: null,
+                            refFound: null,
+                            commitSha: null,
+                          })
+                        }
                         className="font-mono underline"
                       >
                         {repoInvalid.suggestion}
@@ -368,7 +398,27 @@ export function AssetKindSection({
                 </p>
               )}
 
-              {kind === "repository" && <RepositoryBadge isPublic={row.isPublic} />}
+              {kind === "repository" && (
+                <div className="flex items-center justify-between gap-2">
+                  <RepositoryBadge
+                    isPublic={row.isPublic}
+                    refFound={row.refFound}
+                    isCommit={/\/commit\/[0-9a-f]+$/i.test(row.value.trim())}
+                  />
+                  {/* 고정 커밋(#777) — 브랜치·커밋으로 낸 행만. 낸 주소 그대로를 위 입력칸이, 짧은 SHA 를 커밋 링크로. */}
+                  {row.commitSha ? (
+                    <a
+                      href={commitUrl(row.value, row.commitSha)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 font-mono text-xs text-ink/60 underline"
+                      data-testid={`${testIdPrefix}-${index}-commit`}
+                    >
+                      {shortSha(row.commitSha)}
+                    </a>
+                  ) : null}
+                </div>
+              )}
 
               {kind === "demo_url" && (
                 <label className="flex flex-col gap-1 text-sm">

@@ -16,7 +16,7 @@ import Link from "next/link";
 import { createElement, useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
 
-import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
+import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 import { MarkdownView } from "@codemit/markdown";
 
 import { SubmissionVerdictList, judgedByLabel } from "@/app/components/SubmissionVerdictList";
@@ -634,14 +634,28 @@ function AttemptRow({
             </button>
           ) : null}
           {submission.submission_format === "repository" ? (
-            <a
-              href={submission.value}
-              target="_blank"
-              rel="noreferrer"
-              className="shrink-0 text-attention hover:underline"
-            >
-              저장소
-            </a>
+            <>
+              <a
+                href={submission.value}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-attention hover:underline"
+              >
+                저장소
+              </a>
+              {/* 고정 커밋(#777) — 브랜치·커밋으로 낸 시도만. 낸 주소 옆에 짧은 SHA 를 커밋 링크로. */}
+              {submission.commit_sha ? (
+                <a
+                  href={commitUrl(submission.value, submission.commit_sha)}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid={`submission-row-${submission.id}-commit`}
+                  className="shrink-0 font-mono text-[12px] text-ink/60 hover:underline"
+                >
+                  {shortSha(submission.commit_sha)}
+                </a>
+              ) : null}
+            </>
           ) : submission.download_url ? (
             <a
               href={submission.download_url}

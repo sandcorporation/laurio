@@ -43,6 +43,7 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import re
 import zipfile
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -81,10 +82,19 @@ class GitHubRepositoryNotFoundError(GitHubAdapterError):
     """
 
 
+class GitHubRefNotFoundError(GitHubAdapterError):
+    """`resolve_ref` 가 그 브랜치·커밋을 찾지 못했다(#777) — GitHub 은 없는 브랜치에 404 를,
+    모양이 틀리거나 모호한 SHA 에 422 를 준다. 둘 다 「못 찾았다」는 확정 사실이라
+    네트워크 순단·5xx 와 구별한다 — 스캔은 이것만 `repository_ref_found=False` 로 쓰고,
+    채점은 이것만 「브랜치·커밋을 찾을 수 없었다」 0% 의 근거로 센다. 다른 실패는 다음
+    턴이 다시 본다(ADR-0003).
+    """
+
+
 @dataclass(frozen=True)
 class ClonedRepository:
-    """`clone()`의 결과 — 기본 브랜치 최신 커밋의 선별 가능한 파일들을 담은 zip과
-    그 커밋의 SHA.
+    """`clone()`의 결과 — 기본 브랜치 최신 커밋(또는 `commit_sha` 로 고정한 커밋, #777)의
+    선별 가능한 파일들을 담은 zip과 그 커밋의 SHA.
 
     `zip_bytes`는 `scoring.source_selection.select_source_files`가 업로드된
     소스 zip과 똑같이 다룬다 — 저장소도 소스와 같은 선별·예산 규율을 받는다는
@@ -118,7 +128,9 @@ class GitHubAdapter(Protocol):
 
     def check_visibility(self, url: str, *, etag: str | None = None) -> RepositoryVisibility: ...
 
-    def clone(self, url: str) -> ClonedRepository: ...
+    def resolve_ref(self, url: str, ref: str) -> str: ...
+
+    def clone(self, url: str, *, commit_sha: str | None = None) -> ClonedRepository: ...
 
 
 def _parse_github_url(url: str) -> tuple[str, str]:
@@ -147,6 +159,9 @@ def _parse_github_url(url: str) -> tuple[str, str]:
     return owner, repo
 
 
+_HEX_REF = re.compile(r"^[0-9A-Fa-f]{7,40}$")
+
+
 class FakeGitHubAdapter:
     """dev/test 전용. 네트워크 없이 결정적으로 동작한다.
 
@@ -163,7 +178,10 @@ class FakeGitHubAdapter:
     - 그 밖에는 공개이고, `clone()`은
       `settings.GITHUB_FAKE_REPO_FILES`에서 그 URL에 등록된 파일들(없으면
       기본 파일 하나)을 담은 zip과, URL에서 결정적으로 유도한 40자리 hex
-      커밋 SHA를 돌려준다.
+      커밋 SHA를 돌려준다. `commit_sha` 를 주면 그 값이 그대로 결과의 SHA 다(#777).
+    - `resolve_ref()` 는 ref 에 "missing" 이 들어가면 `GitHubRefNotFoundError`, 7~40자
+      16진수면 그 접두어를 유지한 40자 SHA, 그 밖에는 URL+ref 에서 결정적으로 유도한
+      40자 SHA 를 돌려준다(#777).
     """
 
     def check_public(self, url: str) -> bool:
@@ -179,7 +197,16 @@ class FakeGitHubAdapter:
         # 흉내 GitHub 에는 ETag 가 없다 — 언제나 조건 없는 조회처럼 답한다.
         return RepositoryVisibility(is_public=self.check_public(url), etag=None)
 
-    def clone(self, url: str) -> ClonedRepository:
+    def resolve_ref(self, url: str, ref: str) -> str:
+        _parse_github_url(url)
+        if "missing" in ref.lower():
+            raise GitHubRefNotFoundError(f"fake GitHub 어댑터에 그 ref 가 없다(url={url}, ref={ref}).")
+        derived = hashlib.sha1(f"{url}@{ref}".encode("utf-8")).hexdigest()
+        if _HEX_REF.match(ref):
+            return ref.lower() + derived[len(ref) :]
+        return derived
+
+    def clone(self, url: str, *, commit_sha: str | None = None) -> ClonedRepository:
         owner, repo = _parse_github_url(url)
         if "cloneerror" in owner.lower() or "cloneerror" in repo.lower():
             raise GitHubAdapterError(
@@ -187,16 +214,21 @@ class FakeGitHubAdapter:
                 "실패 시나리오)."
             )
 
-        files = getattr(settings, "GITHUB_FAKE_REPO_FILES", {}).get(url) or {
-            "app.py": f"# fake clone of {url}\n"
-        }
+        fake_files = getattr(settings, "GITHUB_FAKE_REPO_FILES", {})
+        files = (
+            (commit_sha and fake_files.get(f"{url}@{commit_sha}"))
+            or fake_files.get(url)
+            or {"app.py": f"# fake clone of {url}\n"}
+        )
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
             for path, content in files.items():
                 zf.writestr(path, content)
 
-        commit_sha = hashlib.sha1(url.encode("utf-8")).hexdigest()
-        return ClonedRepository(commit_sha=commit_sha, zip_bytes=buf.getvalue())
+        return ClonedRepository(
+            commit_sha=commit_sha or hashlib.sha1(url.encode("utf-8")).hexdigest(),
+            zip_bytes=buf.getvalue(),
+        )
 
 
 _GITHUB_API_BASE = "https://api.github.com"
@@ -321,8 +353,48 @@ class GitHubAPIAdapter:
         # 있다.
         return RepositoryVisibility(is_public=not bool(info.get("private", True)), etag=new_etag)
 
-    def clone(self, url: str) -> ClonedRepository:
+    def resolve_ref(self, url: str, ref: str) -> str:
+        """브랜치·태그·(짧은) SHA 를 전체 커밋 SHA 로 — `/repos/{o}/{r}/commits/{ref}` 하나가
+        셋을 모두 푼다(#777). 슬래시가 든 브랜치 이름(`release/2024`)은 GitHub 이 경로 그대로
+        받으므로(문서의 `heads/BRANCH_NAME` 꼴도 슬래시째다) 슬래시는 남기고 나머지만 인코딩한다.
+        404(없는 브랜치)·422(모양이 틀리거나 모호한 SHA)는 `GitHubRefNotFoundError` 다."""
+
         owner, repo = _parse_github_url(url)
+        response = self._request(
+            f"{_GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{quote(ref, safe='/')}",
+            what="GitHub 커밋 조회",
+            owner=owner,
+            repo=repo,
+        )
+        if response.status_code in (404, 422):
+            raise GitHubRefNotFoundError(
+                f"브랜치·커밋을 찾을 수 없다(owner={owner}, repo={repo}, ref={ref!r}, "
+                f"status={response.status_code})."
+            )
+        if response.status_code != 200:
+            raise GitHubAdapterError(
+                f"GitHub 커밋 조회가 실패했다(status={response.status_code}, "
+                f"owner={owner}, repo={repo}, ref={ref!r})."
+            )
+        try:
+            sha = response.json()["sha"]
+        except (ValueError, KeyError, TypeError):
+            raise GitHubAdapterError(
+                f"GitHub 커밋 응답에서 SHA를 읽을 수 없다(owner={owner}, repo={repo}, ref={ref!r})."
+            ) from None
+        if not isinstance(sha, str) or not _HEX_REF.match(sha) or len(sha) != 40:
+            raise GitHubAdapterError(
+                f"GitHub 커밋 응답의 SHA 모양이 이상하다(owner={owner}, repo={repo}, sha={sha!r})."
+            )
+        return sha.lower()
+
+    def clone(self, url: str, *, commit_sha: str | None = None) -> ClonedRepository:
+        owner, repo = _parse_github_url(url)
+        if commit_sha:
+            # 고정 커밋(#777) — 저장소·브랜치 조회 없이 그 커밋의 zip 만 받는다.
+            return ClonedRepository(
+                commit_sha=commit_sha, zip_bytes=self._download_zip(owner, repo, commit_sha)
+            )
         info = self._repo_info(owner, repo)
         default_branch = info.get("default_branch")
         if not default_branch:
@@ -353,6 +425,11 @@ class GitHubAPIAdapter:
                 f"GitHub 브랜치 응답에서 커밋 SHA를 읽을 수 없다(owner={owner}, repo={repo})."
             ) from None
 
+        return ClonedRepository(
+            commit_sha=commit_sha, zip_bytes=self._download_zip(owner, repo, commit_sha)
+        )
+
+    def _download_zip(self, owner: str, repo: str, commit_sha: str) -> bytes:
         # `with`로 감싼다 — non-200 분기에서도, 아래 반복 도중 다운로드 상한에
         # 걸려 예외를 던질 때도 스트리밍 연결이 열린 채 남으면 안 된다(#193
         # 코드리뷰 지적). GC가 나중에 거둘 때까지 소켓·커넥션 풀 슬롯이 샌다 —
@@ -382,7 +459,7 @@ class GitHubAPIAdapter:
                     )
                 chunks.append(chunk)
 
-        return ClonedRepository(commit_sha=commit_sha, zip_bytes=b"".join(chunks))
+        return b"".join(chunks)
 
 
 def get_github_adapter() -> GitHubAdapter:

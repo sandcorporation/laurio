@@ -5176,6 +5176,8 @@ export interface components {
         ClassroomInstructorSubmissionOut: {
             /** Attempt Number */
             attempt_number: number;
+            /** Commit Sha */
+            commit_sha?: string | null;
             contest_entry?: components["schemas"]["ClassroomContestEntryOut"] | null;
             /**
              * Created At
@@ -5456,6 +5458,8 @@ export interface components {
         ClassroomSubmissionOut: {
             /** Attempt Number */
             attempt_number: number;
+            /** Commit Sha */
+            commit_sha?: string | null;
             contest_entry?: components["schemas"]["ClassroomContestEntryOut"] | null;
             /**
              * Created At
@@ -8498,6 +8502,8 @@ export interface components {
         };
         /** SubmissionAssetOut */
         SubmissionAssetOut: {
+            /** Commit Sha */
+            commit_sha?: string | null;
             /**
              * Created By Platform
              * @default false
@@ -8520,6 +8526,8 @@ export interface components {
             label: string;
             /** Order */
             order: number;
+            /** Repository Ref Found */
+            repository_ref_found?: boolean | null;
             /** Test Account */
             test_account: string;
             /** Value */
