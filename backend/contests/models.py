@@ -283,6 +283,16 @@ class Contest(models.Model):
     # db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     allows_classroom_import = models.BooleanField(default=False, db_default=False)
 
+    # 데모 시드가 만든 행이라는 표지 (#254, ADR-0064). **쓰는 곳은 `seed_demo_contests`
+    # 하나뿐이다** — 어떤 API 스키마에도 없고(tests/test_seed_demo_contests_reseed.py 가
+    # 소스를 훑어 고정한다), 그래서 「표지가 True 다 = 시드가 심었다」가 성립한다. 이 표지가
+    # 재시드의 삭제 범위이고, 그 Contest 에 매달린 append-only `Score` 를 하드 삭제하는 좁은
+    # 우회(`scoring.models.hard_delete_demo_seed_scores`)의 유일한 근거다. 제목의 `[데모] `
+    # 접두어는 사람에게 보이는 표시일 뿐 삭제 기준이 아니다 — 사람이 그 접두어로 실제
+    # 공모전을 열어도 시드가 그것을 지우지 않는다.
+    # db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    is_demo_seed = models.BooleanField(default=False, db_default=False)
+
     # 심사기간 종료 시각 (#13, ADR-0003). CLOSED 전이가 일어나는 조건부 UPDATE 안에서
     # deadline_at + PlatformPolicy.judging_period_days(#78/ADR-0023)로 함께
     # 채워진다. 유료 연장은 이 컬럼만

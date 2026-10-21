@@ -16,8 +16,14 @@
 데이터를 만들자고 샌드박스 결제를 여러 건 일으키는 것은 목적과 무관한 비용이고,
 실패하면 원인이 시드인지 결제인지 갈리지 않는다. ORM 으로 상태를 직접 만든다.
 
-**멱등하다** — `[데모]` 접두어가 붙은 것만 지우고 다시 만든다. 접두어가 없는
-실데이터는 건드리지 않는다(`seed_e2e_contests` 의 `[E2E]` 규율 그대로).
+**멱등하다 — 채점이 돈 뒤에도, staging 에서도** (#254, ADR-0064). 지우는 기준은 제목의
+`[데모]` 접두어가 아니라 이 시드만 쓰는 표지 `Contest.is_demo_seed` 다 — 표지가 없는
+실데이터는 제목이 무엇이든 건드리지 않는다. 데모 Contest 에 매달린 append-only `Score`
+는 `scoring.models.hard_delete_demo_seed_scores` 가 그 표지로 범위를 고정한 채 지운다
+(production 에서는 그 함수도 이 명령도 거부한다). 조건 하나 — 데모 Submission 을 PROTECT
+로 잡는 다른 행(배분 몫·이의 판독 등)이 생기면 지우지 못하고 **무엇이 잡고 있는지를
+말하며 거절한다**; 그런 행은 데모가 실물 돈·심판 경로에 들어갔다는 뜻이라 시드가
+조용히 지울 물건이 아니다.
 
 **production 에서는 거부한다.** staging 은 검증용 서브 호스트지만 production 은
 아니다 — 홈에 가짜 공모전이 실려 나가는 것은 되돌리기 어려운 종류의 사고다.
@@ -73,6 +79,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 
 from accounts.models import DeveloperProfile, SponsorProfile
@@ -80,6 +87,7 @@ from awards.models import Award
 from contests.curation import HomeCurationBucket, home_bucket_for
 from contests.models import Category, Contest, ContestSubmission, DeliverableType, Requirement
 from contests.submission_target_refs import target_ref_for_asset_kind
+from scoring.models import hard_delete_demo_seed_scores
 from submissions.models import Evidence, RequirementResponse, Submission, SubmissionAsset
 from verification.models import Verification
 
@@ -380,7 +388,12 @@ class Command(BaseCommand):
         )
 
     def _clear(self) -> int:
-        """`[데모]` 접두어가 붙은 것만 지운다.
+        """표지(`Contest.is_demo_seed`)가 붙은 것만 지운다 (#254, ADR-0064).
+
+        **삭제 기준은 제목이 아니라 표지다.** 제목 접두어로 지우면 사람이 `[데모] ` 로
+        시작하는 실제 공모전을 열었을 때 그 행과 그 Score 가 이 시드에 지워진다 — 표지는
+        이 시드만 쓰므로(tests/test_seed_demo_contests_reseed.py 가 소스를 훑어 고정한다)
+        그 사고가 구조적으로 없다.
 
         **스토리지 오브젝트는 남는다**(#253). 재시드마다 새 `uuid4` 키를 받으므로
         옛 오브젝트는 아무도 참조하지 않는 채로 버킷에 남는다. 지우려면 스토리지
@@ -395,10 +408,39 @@ class Command(BaseCommand):
         # 것을 감안하지 않고 PROTECT 를 만나는 즉시 막는다 — Contest 부터 지우면
         # ProtectedError 로 명령 전체가 죽어 멱등성이 깨진다(`seed_e2e_contests`
         # 가 같은 자리에서 이미 한 번 겪었다).
-        Award.objects.filter(contest__title__startswith=PREFIX).delete()
-        removed, _ = Contest.objects.filter(title__startswith=PREFIX).delete()
-        get_user_model().objects.filter(username__startswith="demo-seed-").delete()
+        demo_contests = Contest.objects.filter(is_demo_seed=True)
+        Award.objects.filter(contest__in=demo_contests).delete()
+        # **Score 도 먼저 지운다** — `Score.submission` 역시 PROTECT 이고(#240), 채점 스캔이
+        # 한 번 돌면 마감된 데모 공모전마다 Score 가 생겨 Contest 삭제를 막는다. Score 는
+        # append-only 라 `.delete()` 가 거부되므로, 표지로 범위를 고정한 좁은 우회
+        # (`hard_delete_demo_seed_scores`)로만 지운다. e2e 시드의 우회
+        # (`hard_delete_e2e_fixture_rows`)는 배포 환경에서 거부되므로 여기서 쓸 수 없고,
+        # 그 거부를 푸는 것은 #240 이 막은 문을 다시 여는 일이라 하지 않는다.
+        hard_delete_demo_seed_scores()
+        try:
+            removed, _ = demo_contests.delete()
+            # 데모 계정은 표지가 붙은 Contest 의 발주자·참가자다 — 사람이 만든 계정은
+            # 이 접두어를 갖지 않지만, 그래도 표지가 붙은 Contest 와 묶인 것만 지운다.
+            get_user_model().objects.filter(username__in=self._demo_usernames()).delete()
+        except ProtectedError as exc:
+            # 의도된 거절이다 — Django 내부 예외를 그대로 내보내지 않는다(#254 AC).
+            holders = sorted({type(obj).__name__ for obj in exc.protected_objects})
+            raise CommandError(
+                "데모 데이터를 지울 수 없다 — 데모 Submission 을 PROTECT 로 잡고 있는 행이 "
+                f"있다: {', '.join(holders)}. 데모가 실물 돈·심판 경로(배분·이의 판독)에 들어갔다는 "
+                "뜻이므로 시드가 조용히 지우지 않는다. 그 행이 왜 생겼는지 먼저 보고, 데모 "
+                "데이터가 맞으면 그 행을 만든 경로에서 치운 뒤 다시 돌린다."
+            ) from exc
         return removed
+
+    @staticmethod
+    def _demo_usernames() -> list[str]:
+        """이 시드가 만드는 계정 이름 전부 — 발주자 하나와 참가자들(`_demo_developer` 가
+        짓는 이름과 같은 규칙)."""
+        return [
+            "demo-seed-sponsor",
+            *(f"demo-seed-dev-{i:02d}" for i in range(len(_DEMO_DEVELOPERS))),
+        ]
 
     def _demo_verification(self, user, *, ci_seed: str, label: str) -> Verification:
         """VERIFIED 신원 하나 — 모듈 docstring의 경계(CI는 채우되 합성값, DI는
@@ -649,6 +691,8 @@ class Command(BaseCommand):
             required_minimum_prize=deliverable_type.minimum_prize,
             is_underfunded=prize < deliverable_type.minimum_prize,
             judging_ends_at=judging_ends_at,
+            # 재시드의 삭제 범위이자 Score 하드 삭제의 근거 — 이 자리 말고는 아무도 쓰지 않는다.
+            is_demo_seed=True,
         )
         contest.deliverable_types.set([deliverable_type])
         Requirement.objects.create(
