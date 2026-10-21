@@ -54,10 +54,16 @@ cd backend && CODEMIT_DB_PORT=55432 \
   uv run python manage.py seed_demo_contests
 ```
 
-**그리고 채점이 한 번 돈 뒤에는 다시 심을 수 없다.** `Score.submission` 이 PROTECT 라
-데모 Contest 삭제가 `ProtectedError` 로 막히고, append-only 우회는 배포 환경에서
-거부된다(#240) — 즉 staging 에서는 재시드가 통째로 불가능하다. 시드가 스스로 「멱등하다」고
-적어 둔 계약이 그 지점에서 깨져 있다.
+**채점이 한 번 돈 뒤에도 다시 심어진다 — staging 에서도**(#254, ADR-0064). 시드는
+제목 접두어가 아니라 자기만 쓰는 표지 `Contest.is_demo_seed` 로 지울 것을 고르고, 데모
+Contest 에 매달린 append-only `Score` 는 `scoring.models.hard_delete_demo_seed_scores`
+가 그 표지로 범위를 고정한 채 지운다. #240 의 `hard_delete_e2e_fixture_rows` 는 그대로
+배포 환경에서 거부되고, 새 함수는 production 에서 거부된다(시드 자체도 production 을
+거부한다). 조건 하나 — 데모 Submission 을 PROTECT 로 잡는 다른 행(배분 몫·이의 판독)이
+있으면 시드는 **무엇이 잡고 있는지를 말하며 거절한다**; 그 행은 데모가 실물 돈·심판
+경로에 들어갔다는 뜻이라 시드가 조용히 치울 물건이 아니다. staging 에서는
+`ssh sub 'docker exec codemit-staging-backend-1 python manage.py seed_demo_contests'`
+(컨테이너가 실물 스토리지를 물고 있어 위 환경변수는 필요 없다).
 
 **강의실 데모는 `seed_demo_classroom` 이 심는다 — 그리고 이쪽은 다시 심을 수 있다.**
 한 강사 계정에 화면의 갈래가 전부 보이는 한 벌을 만든다(진행중 클래스 둘·보관된 것

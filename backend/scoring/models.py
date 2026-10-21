@@ -21,9 +21,10 @@ Contest·Submission은 지금처럼 지워진다(PROTECT는 참조가 있을 때
 
 from __future__ import annotations
 
+from django.conf import settings
 from django.db import models
 
-from ledger.models import AppendOnlyModel
+from ledger.models import AppendOnlyError, AppendOnlyModel
 
 
 class Score(AppendOnlyModel):
@@ -71,6 +72,36 @@ class Score(AppendOnlyModel):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Score(submission={self.submission_id}, percentage={self.percentage})"
+
+
+def hard_delete_demo_seed_scores() -> int:
+    """데모 시드가 심은 Contest 에 매달린 `Score` 만 append-only 가드를 우회해 지운다
+    (#254, ADR-0064). 지운 행 수를 돌려준다.
+
+    **왜 `hard_delete_e2e_fixture_rows`(#240) 를 쓰지 않는가** — 그 함수는 아무 queryset
+    이나 받아 지우므로 데모 행과 실데이터 행을 구별할 수 없고, 그래서 배포 환경에서는 스스로
+    거부한다. 그 거부를 풀면 #240 이 막은 문이 다시 열린다. 이 함수는 반대로 **queryset 을
+    받지 않는다** — 삭제 범위는 여기서 `Contest.is_demo_seed`(그 표지를 쓰는 곳은
+    `seed_demo_contests` 하나뿐이다) 로 고정되고, 호출부가 그 범위를 넓힐 길이 없다.
+    표지가 없는 Score 는 제목·소유자가 무엇이든 이 함수의 집합에 들어오지 않는다.
+
+    **staging 에서는 돈다, production 에서는 거부한다.** 데모 시드 자체가 production 을
+    거부하므로(`seed_demo_contests.handle`) 이 함수가 production 에서 불릴 정상 경로는
+    없지만, 호출부의 규율에 맡기지 않는다 — #240 과 ADR-0033 이 남긴 교훈이 「독스트링은
+    뚫린다」였다. `hard_delete_e2e_fixture_rows` 와 같은 모양으로 함수 자신이 거부한다.
+
+    `models.QuerySet.delete` 를 언바운드로 직접 호출해 `AppendOnlyQuerySet.delete` 의
+    오버라이드를 건너뛰는 것은 #240 과 같다.
+    """
+    if settings.IS_PRODUCTION_DEPLOYMENT:
+        raise AppendOnlyError(
+            f"CODEMIT_DEPLOYMENT_TARGET={settings.CODEMIT_DEPLOYMENT_TARGET} 인데 "
+            "hard_delete_demo_seed_scores 가 호출됐다 — 데모 시드는 production 에 심지 "
+            "않으므로 지울 데모 Score 도 없다. append-only 실데이터를 지우려는 시도로 취급한다."
+        )
+    queryset = Score.objects.filter(submission__contestsubmission__contest__is_demo_seed=True)
+    deleted, _ = models.QuerySet.delete(queryset)
+    return deleted
 
 
 class ScoringAttempt(models.Model):
