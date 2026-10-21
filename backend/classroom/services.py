@@ -118,6 +118,15 @@ PROBLEM_FIELD_TRANSFER_TABLE: tuple[ProblemFieldTransferRule, ...] = (
         templates=False,
         note="공모전 문제의 수업용 안내(#548) — 템플릿은 공모전 문제를 받지 않는다",
     ),
+    ProblemFieldTransferRule(
+        "recommended_due_at",
+        copies=False,
+        templates=False,
+        note="권장 기한(#769) — 다음 기수·남의 클래스의 날짜는 가져간 사람이 새로 정한다",
+    ),
+    ProblemFieldTransferRule(
+        "due_at", copies=False, templates=False, note="마감(#769) — 권장 기한과 같은 이유로 어디서도 옮기지 않는다"
+    ),
     ProblemFieldTransferRule("created_at", copies=False, templates=False, note="시각 — auto_now_add"),
     ProblemFieldTransferRule("updated_at", copies=False, templates=False, note="시각 — auto_now"),
 )

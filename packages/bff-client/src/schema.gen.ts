@@ -1240,8 +1240,9 @@ export interface paths {
         put?: never;
         /**
          * Create Classroom Submission
-         * @description 제출할 때마다 새 시도가 쌓인다 — 마감도 시도 횟수 상한도 없다
-         *     (ADR-0039, CONTEXT.md 「Problem」). 근거 연결도 자가 체크도 없다: 소스
+         * @description 제출할 때마다 새 시도가 쌓인다 — 시도 횟수 상한은 없다(ADR-0039, CONTEXT.md
+         *     「Problem」). 마감(`Problem.due_at`, #769)이 지나면 참여자만 막힌다 — 아래
+         *     `SUBMIT_BLOCKED_DEADLINE_PASSED`. 근거 연결도 자가 체크도 없다: 소스
          *     또는 저장소 값 하나만 받는다.
          */
         post: operations["classroom_api_create_classroom_submission"];
@@ -5138,6 +5139,11 @@ export interface components {
         ClassroomGridCellOut: {
             /** Contest Entry */
             contest_entry?: string | null;
+            /**
+             * Late
+             * @default false
+             */
+            late: boolean;
             /** Problem Id */
             problem_id: number;
             /** Status */
@@ -5185,6 +5191,11 @@ export interface components {
              * @default false
              */
             is_current_contest_entry: boolean;
+            /**
+             * Late
+             * @default false
+             */
+            late: boolean;
             /** Member Display Name */
             member_display_name: string;
             /** Member Id */
@@ -5246,12 +5257,21 @@ export interface components {
              * @default 0
              */
             attempt_count: number;
+            /** Due At */
+            due_at?: string | null;
             /** Id */
             id: number;
             /** Last Attempted At */
             last_attempted_at?: string | null;
+            /**
+             * Late
+             * @default false
+             */
+            late: boolean;
             /** Passed */
             passed: boolean;
+            /** Recommended Due At */
+            recommended_due_at?: string | null;
             /**
              * Status
              * @default not_submitted
@@ -5287,6 +5307,8 @@ export interface components {
             contest?: components["schemas"]["ProblemContestOut"] | null;
             /** Description */
             description: string;
+            /** Due At */
+            due_at?: string | null;
             /** Grading Guideline Text */
             grading_guideline_text: string;
             /** Grading Strictness */
@@ -5303,6 +5325,8 @@ export interface components {
              * @default false
              */
             passed: boolean;
+            /** Recommended Due At */
+            recommended_due_at?: string | null;
             /** Submission Formats */
             submission_formats: string[];
             /**
@@ -5364,6 +5388,11 @@ export interface components {
             attempt_number: number;
             /** Id */
             id: number;
+            /**
+             * Late
+             * @default false
+             */
+            late: boolean;
             /** Member Display Name */
             member_display_name: string;
             /** Member Id */
@@ -5433,6 +5462,11 @@ export interface components {
             download_url?: string | null;
             /** Id */
             id: number;
+            /**
+             * Late
+             * @default false
+             */
+            late: boolean;
             /**
              * Passed
              * @default false
@@ -7527,6 +7561,8 @@ export interface components {
              * @default
              */
             description: string;
+            /** Due At */
+            due_at?: string | null;
             /**
              * Grading Guideline Text
              * @default
@@ -7557,6 +7593,8 @@ export interface components {
              * @default
              */
             reasoning_effort: string;
+            /** Recommended Due At */
+            recommended_due_at?: string | null;
             /** Submission Formats */
             submission_formats: string[];
             /**
@@ -7589,6 +7627,8 @@ export interface components {
             deletable: boolean;
             /** Description */
             description: string;
+            /** Due At */
+            due_at?: string | null;
             /** Effective Model */
             effective_model: string;
             /**
@@ -7646,6 +7686,8 @@ export interface components {
              * @default
              */
             reasoning_effort: string;
+            /** Recommended Due At */
+            recommended_due_at?: string | null;
             /**
              * Scoring Model Rejected
              * @default false
@@ -7668,6 +7710,8 @@ export interface components {
         ProblemPatchIn: {
             /** Description */
             description?: string | null;
+            /** Due At */
+            due_at?: string | null;
             /** Grading Guideline Text */
             grading_guideline_text?: string | null;
             /** Grading Strictness */
@@ -7680,6 +7724,8 @@ export interface components {
             model_is_reasoning?: boolean | null;
             /** Reasoning Effort */
             reasoning_effort?: string | null;
+            /** Recommended Due At */
+            recommended_due_at?: string | null;
             /** Submission Formats */
             submission_formats?: string[] | null;
             /** Syntax Check Enabled */

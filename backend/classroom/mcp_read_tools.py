@@ -312,6 +312,14 @@ _PROBLEM_OBJECT = {
         },
         "grading_guideline_text": {"type": "string", "description": "직접 쓴 채점 지침(custom 일 때만)"},
         "syntax_check_enabled": {"type": "boolean", "description": "문법 검사 항목이 켜져 있는가"},
+        "recommended_due_at": {
+            "type": ["string", "null"],
+            "description": "권장 기한(ISO 8601) — 이 뒤에 낸 시도는 「늦음」이다. null 이면 없음",
+        },
+        "due_at": {
+            "type": ["string", "null"],
+            "description": "마감(ISO 8601) — 지나면 참여자는 새로 못 낸다. null 이면 없음",
+        },
         "checklist_items": {
             "type": "array",
             "description": "체크리스트 — 필수 항목을 모두 만족해야 통과다",

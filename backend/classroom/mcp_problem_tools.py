@@ -106,10 +106,16 @@ def _problem_out(problem: Problem, class_obj: Class) -> dict:
         "model": problem.model,
         "reasoning_effort": problem.reasoning_effort,
         "syntax_check_enabled": problem.syntax_check_enabled,
+        "recommended_due_at": _iso_or_none(problem.recommended_due_at),
+        "due_at": _iso_or_none(problem.due_at),
         "checklist_items": _items_out(problem),
         "available_transitions": _transitions_out(problem, class_obj),
         **_warning_out(problem),
     }
+
+
+def _iso_or_none(value) -> str | None:
+    return None if value is None else value.isoformat().replace("+00:00", "Z")
 
 
 def _warning_out(problem: Problem) -> dict:
@@ -182,6 +188,15 @@ _SYNTAX_CHECK = {
     "type": "boolean",
     "description": "기본 항목 「소스에 문법 오류가 없다」를 켤 것인가.",
 }
+#: 권장 기한·마감(#769) — ISO 8601 시각. 고치기에서 보내지 않으면 그대로, null 이면 비운다.
+_RECOMMENDED_DUE_AT = {
+    "type": ["string", "null"],
+    "description": "권장 기한(ISO 8601). 이 뒤에 낸 시도는 「늦음」으로 표시된다. null 이면 없음. 마감보다 늦을 수 없다.",
+}
+_DUE_AT = {
+    "type": ["string", "null"],
+    "description": "마감(ISO 8601). 지나면 참여자는 새로 못 낸다(강사는 낸다). null 이면 없음.",
+}
 
 _ITEM_OUT = {
     "type": "object",
@@ -225,6 +240,8 @@ _PROBLEM_OUT = {
         "model": {"type": "string"},
         "reasoning_effort": {"type": "string"},
         "syntax_check_enabled": {"type": "boolean"},
+        "recommended_due_at": _RECOMMENDED_DUE_AT,
+        "due_at": _DUE_AT,
         "checklist_items": {"type": "array", "items": _ITEM_OUT},
         "available_transitions": _TRANSITIONS_OUT,
     },
@@ -239,6 +256,8 @@ _PROBLEM_OUT = {
         "model",
         "reasoning_effort",
         "syntax_check_enabled",
+        "recommended_due_at",
+        "due_at",
         "checklist_items",
         "available_transitions",
     ],
@@ -301,6 +320,8 @@ _CREATE_PROBLEM_INPUT = _object(
         "grading_strictness": {**_GRADING_STRICTNESS, "default": "normal"},
         "grading_guideline_text": _GRADING_GUIDELINE_TEXT,
         "syntax_check_enabled": {**_SYNTAX_CHECK, "default": True},
+        "recommended_due_at": _RECOMMENDED_DUE_AT,
+        "due_at": _DUE_AT,
         "open": {
             "type": "boolean",
             "default": False,
@@ -337,6 +358,8 @@ _UPDATE_PROBLEM_INPUT = _object(
         "grading_strictness": _GRADING_STRICTNESS,
         "grading_guideline_text": _GRADING_GUIDELINE_TEXT,
         "syntax_check_enabled": _SYNTAX_CHECK,
+        "recommended_due_at": _RECOMMENDED_DUE_AT,
+        "due_at": _DUE_AT,
     },
     ["class_id", "problem_id"],
 )
@@ -553,9 +576,10 @@ PROBLEM_TOOLS: list[Tool] = [
         name="create_problem",
         title="문제 만들기",
         description=(
-            "클래스에 문제를 하나 만든다 — 제목·설명·제출 형식·체크리스트·채점 설정을 한 번에. "
+            "클래스에 문제를 하나 만든다 — 제목·설명·제출 형식·체크리스트·채점 설정·권장 기한·마감을 한 번에. "
             "기본은 초안(참여자에게 안 보임)이고, open 을 참으로 주면 바로 연다(필수 체크리스트 항목이 "
-            f"하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
+            "하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. 권장 기한 뒤의 시도는 「늦음」으로 "
+            f"표시되고, 마감이 지나면 참여자는 새로 못 낸다(강사는 낸다). {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_CREATE_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,
@@ -566,8 +590,9 @@ PROBLEM_TOOLS: list[Tool] = [
         name="update_problem",
         title="문제 고치기",
         description=(
-            "문제의 제목·설명·제출 형식·채점 모델·추론 강도·채점 지침·문법 검사를 고친다. 보낸 칸만 "
-            "바뀌고 보내지 않은 칸은 그대로다. 체크리스트는 체크리스트 도구로 고친다. "
+            "문제의 제목·설명·제출 형식·채점 모델·추론 강도·채점 지침·문법 검사·권장 기한·마감을 고친다. "
+            "보낸 칸만 바뀌고 보내지 않은 칸은 그대로다 — 두 날짜는 null 을 보내면 비운다(ISO 8601). "
+            "체크리스트는 체크리스트 도구로 고친다. "
             f"{_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_UPDATE_PROBLEM_INPUT,

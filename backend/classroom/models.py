@@ -201,8 +201,15 @@ class Class(models.Model):
 
 
 class Problem(models.Model):
-    """Class 안의 문제 하나. Contest와 달리 **마감이 없다**(ADR-0039) — 이
-    모델에는 마감 필드가 아예 없다. 제출 형식은 소스 또는 저장소뿐이다.
+    """Class 안의 문제 하나. 제출 형식은 소스 또는 저장소뿐이다.
+
+    **마감은 문제마다 강사가 둔다**(#769, ADR-0063) — `recommended_due_at`(권장
+    기한)·`due_at`(마감) 둘 다 비울 수 있다. ADR-0039 가 「강의실 문제에는 마감이
+    없다」를 전제로 제출 모델을 갈랐던 것은 그때의 판단이고, 지금은 그 전제가
+    뒤집혔다 — 다만 Contest 와 달리 마감이 **채점을 가르지 않는다**: 마감은
+    참여자의 새 시도를 막을 뿐이고(강사는 언제나 낸다), 권장 기한은 그 뒤의
+    시도를 「늦음」으로 세게 할 뿐이다. 둘 다 시도에 박히지 않고 응답마다 다시
+    셈한다(`classroom.participation`).
 
     `status`(초안/열림/숨김, #405)는 여기서 이미 구별되고, 참여자가 실제로
     무엇을 보게 거르는 표면은 `ClassMember`(#280) 위에 선다 — 열린 문제는
@@ -308,6 +315,18 @@ class Problem(models.Model):
     #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     instructor_note = models.TextField(blank=True, default="", db_default="")
 
+    #: 권장 기한(#769, CONTEXT.md 「Problem」) — 이 시각 뒤에 낸 시도는 「늦음」이다.
+    #: 늦음은 여기 저장되지 않고 응답마다 `created_at` 과 이 값을 견줘 센다 — 날짜를
+    #: 옮기면 같은 시도의 판정이 따라 바뀐다(체크리스트를 고치면 달성률만 다시
+    #: 셈하는 것과 같은 결). 비우면 늦음이 없다.
+    recommended_due_at = models.DateTimeField(null=True, blank=True, default=None)
+    #: 마감(#769) — 이 시각이 지나면 **참여자**는 새 시도를 낼 수 없다. 강사·공동
+    #: 강사는 언제나 낸다. 지난 시도·판정은 그대로 보이고 채점 중이던 시도는 끝까지
+    #: 채점된다. 둘 다 있으면 `recommended_due_at <= due_at` 이어야 한다(API 가 422
+    #: 로 막는다). 복사·템플릿은 두 날짜를 옮기지 않는다(`services.
+    #: PROBLEM_FIELD_TRANSFER_TABLE`). 보관된 클래스에서는 다른 칸처럼 못 고친다.
+    due_at = models.DateTimeField(null=True, blank=True, default=None)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -316,6 +335,16 @@ class Problem(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Problem(id={self.pk}, title={self.title!r})"
+
+    def deadline_passed(self, now) -> bool:
+        """마감이 있고 `now` 가 그 뒤인가 — 서버 시각 기준이고 어디에도 저장하지 않는다."""
+
+        return self.due_at is not None and now > self.due_at
+
+    def is_late(self, submitted_at) -> bool:
+        """`submitted_at` 에 낸 시도가 권장 기한 뒤인가(#769). 권장 기한이 없으면 거짓이다."""
+
+        return self.recommended_due_at is not None and submitted_at > self.recommended_due_at
 
     def effective_model(self) -> str:
         """실제 채점에 쓰이는 모델(#402, CONTEXT.md 「채점 모델」, #436) — 이
