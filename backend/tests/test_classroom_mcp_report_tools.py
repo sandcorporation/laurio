@@ -147,11 +147,11 @@ def test_the_report_gives_the_same_numbers_as_the_grid_and_the_submission_lists(
         for problem in (repo_problem, source_problem)
     }
 
-    # 문제 줄의 달성률은 격자의 것과 같다.
-    assert [
-        {k: p[k] for k in ("id", "title", "status", "passed_count", "member_count", "pass_rate")}
-        for p in report["problems"]
-    ] == grid["problems"]
+    # 문제 줄의 달성률은 격자의 것과 같다(격자 머리의 기한 두 칸(#774)은 보고서 줄에 없어 견주지 않는다).
+    stats_keys = ("id", "title", "status", "passed_count", "member_count", "pass_rate")
+    assert [{k: p[k] for k in stats_keys} for p in report["problems"]] == [
+        {k: p[k] for k in stats_keys} for p in grid["problems"]
+    ]
     # 참여자는 격자와 같은 사람들, 같은 순서 — 내보낸 이둘도 표시와 함께 있다.
     assert [(m["id"], m["display_name"], m["is_instructor"], m["expelled"]) for m in report["participants"]] == [
         (m["id"], m["display_name"], m["is_instructor"], m["expelled"]) for m in grid["members"]
