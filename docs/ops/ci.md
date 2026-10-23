@@ -198,22 +198,22 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
-- **잡 이름은 `codemit-<역할>-<대상>` 이다**(2026-10-15, #708). 잡이 다섯이다.
+- **잡 이름은 `codemit-<역할>-<대상>` 이다**(2026-10-15, #708). 잡이 넷이다(2026-10-23, #779 —
+  `codemit-deploy-prod` 는 `codemit-deploy-staging` 의 「prod 배포」 단계가 됐다).
 
   | 잡 | 파일 | 워크스페이스·이름에 묶인 것 |
   | --- | --- | --- |
   | `codemit-ci-pr`(Multibranch) | `Jenkinsfile.pr` | sub 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
   | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
-  | `codemit-deploy-staging` | `Jenkinsfile` | sub `workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`, 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'` |
-  | `codemit-deploy-prod` | `Jenkinsfile.production` | oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
+  | `codemit-deploy-staging` | `Jenkinsfile` | sub `workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`, 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'`, prod 단계(에이전트 `oracle`) `customWorkspace 'codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
   | `codemit-ghcr-prune` | 저장소 밖 | |
 
   이전 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 잡을 이름으로 부르는 자리는
   `Jenkinsfile.pr` 의 `build job: '/codemit-ci-train'` 하나다(실패해도 열차는 30분 cron 으로 돈다).
   자격증명 `codemit-train-webhook-token` 은 잡 이름이 아니라 ID 라 그대로 뒀다. `macos-sweep.sh` 는
   rename 직전에 남은 `jenkins-codemit-(pr|train)-*` 도 한동안 같이 걷는다 — 2026-11-15 이후 #735 로 지운다(지울 조건은 그 파일 머리말).
-  끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이다 — `codemit-deploy-prod` 는 사용자가 prod
-  승격을 말할 때 처음 돈다.
+  끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이었다 — 옛 `codemit-deploy-prod` 는 10-21 prod #177
+  이 마지막 빌드였고 #779 로 사라졌다.
 - **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — 같은 규칙을 세 곳이 쓴다. PR CI 는 `scripts/ci/changed.sh`(merge-base 와 견준다), 열차는 `scripts/ci/train.py` 의 `touches_code`(묶음 전체가 문서뿐이면 시험·이미지 대신 `문서만` 단계), `codemit-deploy-staging` 잡은 다시 `changed.sh`(`codemit-deploy-staging` 은 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅

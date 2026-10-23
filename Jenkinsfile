@@ -1,5 +1,5 @@
-// main 의 커밋 하나의 여정 전부 (#52 → #705) — 이미지 → 부팅 가드 → `staging` 앞당기기 → staging 배포 →
-// `production` 앞당기기. 단계는 보이게, 논리는 스크립트에.
+// main 의 커밋 하나의 여정 전부 (#52 → #705 → #779) — 이미지 → 부팅 가드 → `staging` 앞당기기 → staging 배포 →
+// (PROMOTE_PRODUCTION 이면) prod 배포 → `production` 앞당기기. 단계는 보이게, 논리는 스크립트에.
 //
 // **잡 `codemit-deploy-staging`(#708 전에는 `laurio`)은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`, GitHub 웹훅
 // `GitHubPushTrigger`). 2026-10-15 까지는 GitHub Actions(`.github/workflows/images.yaml`)가 이미지
@@ -22,9 +22,15 @@
 //                           `deploy.sh staging <명령>` 한 줄이다. 무엇을 바꿔 끼우는지는 전부 deploy.sh 주석에
 //                           있다(여기에 논리를 두면 아무도 읽지 않는 두 번째 사본이 된다 — 예전 freestyle 잡
 //                           시절 빌드 #4: `cannot open ./deploy.sh`)
-//   (post success)          PROMOTE_PRODUCTION 이면 `production` 을 같은 커밋으로 → prod 잡(Jenkinsfile.production)
+//   prod 배포(oracle)        PROMOTE_PRODUCTION 이면 같은 단계를 `deploy.sh prod <명령>` 으로 — 노드는 prod 스택이
+//                           떠 있는 Oracle A1 호스트의 인바운드 에이전트 `oracle`, 워크스페이스는 `codemit-deploy-prod`
+//                           (아래 그 단계의 주석). 2026-10-23(#779) 전에는 별도 잡 `codemit-deploy-prod`
+//                           (`Jenkinsfile.production`, 이 파일의 배포 단계를 복제한 198줄)이 `production` 의 웹훅으로 돌았다
+//   production 앞당기기      prod 배포가 초록으로 끝난 **뒤** `production` 을 같은 커밋으로 — 「prod 에 배포된 커밋」의
+//                           기록이자 `ghcr_prune.py` 의 보호 대상. 이제 이 push 는 아무 잡도 깨우지 않는다
 //
-// `Jenkinsfile.production` 도 배포 단계를 같은 모양으로 갖는다 — 한쪽을 바꾸면 다른 쪽도 같이 고친다.
+// prod 만 다시 돌리고 싶으면 이 잡을 PROMOTE_PRODUCTION=true 로 다시 돌린다 — staging 단계는 `deploy.sh plan` 이
+// 「이미 배포됨」으로 비우고 prod 단계만 일한다.
 //
 // **IMAGES_ONLY** 를 켜면 이미지·부팅 가드까지만 돌고 앞당기기·배포는 건너뛴다 — 브랜치를 가리지 않는다.
 // 이 파일을 바꾼 PR 을 병합 전에 돌려 보는 길이다(PR 브랜치를 가리키는 임시 잡). PR CI 는 이 파일을 보지 못한다.
@@ -33,9 +39,7 @@
 // 다른 커밋을 받을 수 있다 — 첫 단계가 적은 DEPLOY_SHA 로 되돌려 놓는다(pin()).
 
 def deployTarget = 'staging'
-
-// 디스코드 알림에 쓸 대상 이름(아래 post 참고).
-def TARGET_LABEL = 'staging'
+def prodTarget = 'prod'
 
 // 이 노드의 체크아웃을 첫 단계가 고른 커밋으로 맞춘다. main 은 앞으로만 가므로 그 커밋은 언제나 있다.
 def pin() {
@@ -83,14 +87,14 @@ pipeline {
   }
 
   parameters {
-    // 켜면 staging 이 초록일 때 production 을 같은 커밋으로 앞당긴다. **기본은 꺼짐이다**(2026-10-14)
+    // 켜면 staging 이 초록일 때 같은 빌드가 prod 로 배포하고 production 을 같은 커밋으로 앞당긴다. **기본은 꺼짐이다**(2026-10-14)
     // — 강의실 화면을 시안 v2 로 크게 고치는 동안 prod 를 붙잡아 둔다. 웹훅 빌드는 기본값으로
     // 도므로 그동안 main 의 커밋은 staging 까지만 간다. prod 로 보내려면 이 잡을 손으로
     // 「Build with Parameters」 로 켜서 돌리거나, 다시 기본값을 true 로 되돌린다. 선언형
     // 파이프라인은 이 블록을 빌드 시작 때 잡 설정에 다시 쓰므로 Jenkins 의 저장된 기본값도
     // 이 값을 따라간다.
     booleanParam(name: 'PROMOTE_PRODUCTION', defaultValue: false,
-                 description: '초록이면 production 을 이 커밋으로 앞당긴다(→ prod 배포)')
+                 description: 'staging 이 초록이면 같은 빌드가 prod 로 배포하고 production 을 이 커밋으로 앞당긴다')
     booleanParam(name: 'IMAGES_ONLY', defaultValue: false,
                  description: '이미지·부팅 가드까지만 — staging·production 은 건드리지 않는다(어느 브랜치든)')
   }
@@ -98,7 +102,7 @@ pipeline {
   options {
     timestamps()
     disableConcurrentBuilds()          // 같은 호스트의 같은 스택을 두 빌드가 밟지 않게
-    buildDiscarder(logRotator(numToKeepStr: '30'))
+    buildDiscarder(logRotator(numToKeepStr: '50'))
   }
 
   stages {
@@ -374,6 +378,7 @@ pipeline {
         stage('배포 표식') {
           steps {
             sh "sh ./deploy.sh ${deployTarget} mark"
+            script { env.STAGING_DEPLOYED = 'true' }   // 디스코드 알림이 staging 결과를 prod 와 따로 적는 근거
           }
         }
 
@@ -384,6 +389,148 @@ pipeline {
           steps {
             sh "sh ./deploy.sh ${deployTarget} prune || echo '정리를 건너뛴다 — 배포 결과와 무관하다'"
           }
+        }
+      }
+    }
+
+    // staging 에서 초록이었던 **그 커밋**(DEPLOY_SHA)을 prod 로 보낸다 — 단계는 위 staging 배포와 같고 대상만
+    // `prod`(docker/compose.prod.yaml, docker/.env.prod, 배포 표식 .jenkins-prod-deployed)다. 2026-10-23(#779)
+    // 전에는 별도 잡 `codemit-deploy-prod` 가 `production` 브랜치의 웹훅으로 돌았다 — 같은 단계의 복제였고,
+    // 「prod 는 staging 이 배포한 그 커밋을 따라가야 한다」는 조건을 브랜치 한 다리로 건넜다. 같은 빌드의
+    // 단계면 같은 DEPLOY_SHA 라 저절로 만족한다.
+    //
+    // **어디서 도는가.** prod 스택이 떠 있는 Oracle A1 호스트다 — 이 컨트롤러에 붙은 인바운드 에이전트
+    // `oracle` 이 거기서 돈다. 에이전트는 호스트의 `jenkins-desktop-agent` 컨테이너(root, 호스트 docker 소켓,
+    // docker CLI·compose·buildx·git 포함 — 이미지 정의는 호스트의 `/server/jenkins`)이고, 호스트의
+    // `/var/jenkins_home/workspace` 가 컨테이너의 `/home/jenkins/agent/workspace` 로 붙어 있다. 그래서 노드의
+    // Remote root directory 는 **컨테이너 안 경로** `/home/jenkins/agent` 여야 하고, 워크스페이스는
+    // `customWorkspace 'codemit-deploy-prod'`(옛 잡의 이름 — #708 전에는 `codemit`)여야 호스트의
+    // `/var/jenkins_home/workspace/codemit-deploy-prod` 가 된다 — 거기에 사람이 둔 `docker/.env.prod`(chmod 600)와
+    // 배포 표식이 있다(`deploy.sh` 의 `ENV_FILE="docker/.env.${TARGET}"`). 경로가 바뀌면 preflight 가 멈춘다.
+    // 서버의 파일은 옮기지 않는다. 컨트롤러에서 돌면 prod 가 아니라 sub 호스트에 스택을 띄우므로 `built-in` 을
+    // 쓰지 않는다.
+    stage('prod 배포') {
+      when {
+        beforeAgent true
+        expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY && params.PROMOTE_PRODUCTION }
+      }
+      agent { node { label 'oracle'; customWorkspace 'codemit-deploy-prod' } }
+      stages {
+        stage('prod Preflight') {
+          steps {
+            script { env.PROD_DEPLOY = 'running' }
+            pin()
+            sh "sh ./deploy.sh ${prodTarget} preflight"
+          }
+        }
+
+        stage('prod 변경 계획') {
+          steps {
+            sh "sh ./deploy.sh ${prodTarget} plan"
+            script {
+              // staging 의 계획이 env 에 남아 있다 — prod 의 계획 파일이 같은 키 전부를 다시 적는다(deploy.sh plan).
+              readFile(".jenkins-${prodTarget}-plan").split('\n').each { line ->
+                def parts = line.split('=', 2)
+                if (parts.length == 2) { env."${parts[0].trim()}" = parts[1].trim() }
+              }
+            }
+          }
+        }
+
+        stage('prod 이미지 받기') {
+          when { expression { env.DEPLOY_ANY == 'true' } }
+          parallel {
+            stage('prod backend') {
+              when { expression { env.BUILD_BACKEND == 'true' } }
+              steps { sh "sh ./deploy.sh ${prodTarget} image backend" }
+            }
+            stage('prod frontend') {
+              when { expression { env.BUILD_FRONTEND == 'true' } }
+              steps { sh "sh ./deploy.sh ${prodTarget} image frontend" }
+            }
+            stage('prod operator') {
+              when { expression { env.BUILD_OPERATOR == 'true' } }
+              steps { sh "sh ./deploy.sh ${prodTarget} image operator" }
+            }
+            stage('prod classroom') {
+              when { expression { env.BUILD_CLASSROOM == 'true' } }
+              steps { sh "sh ./deploy.sh ${prodTarget} image classroom" }
+            }
+            stage('prod search') {
+              when { expression { env.BUILD_SEARCH == 'true' } }
+              steps { sh "sh ./deploy.sh ${prodTarget} image search" }
+            }
+          }
+        }
+
+        stage('prod 교체') {
+          when { expression { env.DEPLOY_ANY == 'true' } }
+          steps {
+            sh "sh ./deploy.sh ${prodTarget} up"
+          }
+        }
+
+        stage('prod 확인') {
+          when { expression { env.DEPLOY_ANY == 'true' } }
+          stages {
+            stage('prod 컨테이너') {
+              steps { sh "sh ./deploy.sh ${prodTarget} verify" }
+            }
+            stage('prod backend 응답') {
+              steps { sh "sh ./deploy.sh ${prodTarget} health backend" }
+            }
+            stage('prod events 응답') {
+              steps { sh "sh ./deploy.sh ${prodTarget} health events" }
+            }
+            stage('prod search 응답') {
+              steps { sh "sh ./deploy.sh ${prodTarget} health search" }
+            }
+            stage('prod 검색 재색인') {
+              when { expression { env.BUILD_SEARCH == 'true' || env.BUILD_BACKEND == 'true' } }
+              steps { sh "sh ./deploy.sh ${prodTarget} reindex" }
+            }
+            // 떠 있는 앱·backend 가 열차의 e2e 가 본 그 이미지인지(#729) — 관측만, 다르다고 붉히지 않는다.
+            stage('prod e2e 대조') {
+              steps {
+                catchError(buildResult: null, stageResult: null, message: 'e2e 대조를 하지 못했다 — 배포와 무관하다') {
+                  sh "sh ./deploy.sh ${prodTarget} e2e-digest"
+                }
+              }
+            }
+          }
+        }
+
+        stage('prod 배포 표식') {
+          steps {
+            sh "sh ./deploy.sh ${prodTarget} mark"
+            script { env.PROD_DEPLOY = 'done' }
+          }
+        }
+
+        // 위 staging 의 「정리」와 같다. **이 파일과 deploy.sh 가 다른 커밋에서 온다**(파이프라인은 main 의
+        // 최신에서 읽고 deploy.sh 는 DEPLOY_SHA 를 체크아웃해 쓴다) — prune 이 생기기 전 커밋을 배포한 빌드가
+        // 「알 수 없는 명령」으로 빨갛게 끝났다(2026-09-17, 교체·확인·표식은 다 끝난 뒤였다).
+        stage('prod 정리') {
+          steps {
+            sh "sh ./deploy.sh ${prodTarget} prune || echo '정리를 건너뛴다 — 배포 결과와 무관하다'"
+          }
+        }
+      }
+    }
+
+    // `production` 은 「prod 에 배포된 커밋」의 기록이다(`ghcr_prune.py` 가 그 이미지를 지키는 근거이기도 하다)
+    // — 그래서 prod 배포가 초록으로 끝난 **뒤에** 앞당긴다(#779 전에는 배포 **전**에 앞당겨 웹훅으로 prod 잡을
+    // 깨웠다). 이 push 는 이제 아무 잡도 깨우지 않는다. 토큰은 staging 앞당기기와 같다(Contents 쓰기).
+    // 실패하면 빌드가 빨갛다 — prod 는 바뀌었는데 기록이 따라가지 않은 상태라 사람이 봐야 한다.
+    stage('production 앞당기기') {
+      when {
+        beforeAgent true
+        expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY && params.PROMOTE_PRODUCTION }
+      }
+      agent { label 'built-in' }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
+          sh 'python3 scripts/ci/fast_forward.py production "$DEPLOY_SHA"'
         }
       }
     }
@@ -413,7 +560,14 @@ pipeline {
               def sha = (env.DEPLOY_SHA ?: '').take(12)
               def took = currentBuild.durationString.replace(' and counting', '')
               def what = params.IMAGES_ONLY ? '이미지' : '배포'
-              def text = "${mark} ${TARGET_LABEL} ${what} ${result} — #${env.BUILD_NUMBER}" +
+              // staging 과 prod 를 한 줄에 — 예: `✅ staging 배포 SUCCESS · prod 배포 SUCCESS — #N (sha)`.
+              // prod 를 돌리지 않은 빌드는 staging 만 적는다. staging 표식까지 간 뒤 prod 나 production
+              // 앞당기기에서 붉어진 빌드는 어디서 붉어졌는지 그 자리에 적는다.
+              def stagingResult = env.STAGING_DEPLOYED == 'true' ? 'SUCCESS' : result
+              def prodPart = env.PROD_DEPLOY == 'done' ? ' · prod 배포 SUCCESS' :
+                (env.PROD_DEPLOY == 'running' ? " · prod 배포 ${result}" : '')
+              if (env.PROD_DEPLOY == 'done' && result != 'SUCCESS') { prodPart += " · production 앞당기기 ${result}" }
+              def text = "${mark} staging ${what} ${stagingResult}${prodPart} — #${env.BUILD_NUMBER}" +
                 (sha ? " (${sha})" : '') + " · ${took} · ${env.BUILD_URL}"
               // 본문은 JSON 이라 따옴표·역슬래시를 그대로 실으면 깨진다 — Groovy 가
               // 만들어 준 문자열을 셸이 다시 해석하지 않도록 파일로 넘긴다.
@@ -424,27 +578,8 @@ pipeline {
         }
       }
     }
-    // staging 에서 초록이었던 커밋을 prod 로 보낸다. `production` 이 움직이면 웹훅이 prod 잡을
-    // 부른다. 토큰은 PR CI 의 자동 병합과 같은 것이다(Contents 쓰기 — 워크플로 파일을 바꾼 커밋은
-    // Workflows 쓰기도 있어야 한다). 실패하면 빌드가 빨갛다 — staging 은 바뀌었는데 prod 가 따라가지
-    // 않은 상태라 사람이 봐야 한다. 문서만·이미지만 빌드는 staging 에 아무것도 올리지 않았으므로 앞당기지 않는다.
-    success {
-      script {
-        if (env.DOCS_ONLY == 'true' || params.IMAGES_ONLY) {
-          echo 'staging 에 배포하지 않은 빌드다 — production 은 그대로 둔다.'
-        } else if (params.PROMOTE_PRODUCTION == false) {
-          echo 'PROMOTE_PRODUCTION 이 꺼져 있다 — production 은 그대로 둔다.'
-        } else {
-          node('built-in') {
-            withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-              sh 'python3 scripts/ci/fast_forward.py production "$DEPLOY_SHA"'
-            }
-          }
-        }
-      }
-    }
     failure {
-      echo '실패 — staging·production 은 이 커밋으로 옮기지 않았거나(앞 단계) 배포 표식을 옮기지 않았다(배포 단계). 다음 빌드가 같은 범위를 다시 시도한다.'
+      echo '실패 — staging·production 은 이 커밋으로 옮기지 않았거나(앞 단계) 그 대상의 배포 표식을 옮기지 않았다(staging·prod 배포 단계). 다음 빌드가 같은 범위를 다시 시도한다.'
     }
   }
 }

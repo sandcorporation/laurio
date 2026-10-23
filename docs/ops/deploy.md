@@ -159,29 +159,36 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 3. **`staging` → staging 배포.** 같은 빌드가 이어서 배포 단계를 돈다(아래 「staging 배포는 …」).
    예전(2026-10-02 ~ 10-15)에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging`
    을 앞당겼고, 그 push 가 이 잡을 불렀다 — 조직의 Actions 분량이 바닥나 떠났다(ADR-0061).
-4. **staging 초록 → `production` → prod 배포.** 그 잡이 끝에서 `production` 을 같은 커밋으로
-   fast-forward 하고(`scripts/ci/fast_forward.py`, Jenkins 자격증명 `github-sandcorporation-token`),
-   웹훅이 `codemit-deploy-prod` 잡(`Jenkinsfile.production`)을 부른다. **이 넷째 길은 지금 꺼져 있다**
+4. **staging 초록 → prod 배포 → `production`.** 같은 빌드의 「prod 배포」 단계가 에이전트 `oracle` 에서
+   같은 커밋(`DEPLOY_SHA`)을 `deploy.sh prod <명령>` 으로 배포하고, 초록이면 **그 뒤에** `production` 을
+   그 커밋으로 fast-forward 한다(`scripts/ci/fast_forward.py`, Jenkins 자격증명 `github-sandcorporation-token`)
+   — 「prod 에 배포된 커밋」의 기록이고 이 push 는 아무 잡도 깨우지 않는다. 2026-10-23(#779) 전에는 배포
+   **전**에 앞당기고 웹훅이 별도 잡 `codemit-deploy-prod`(`Jenkinsfile.production`)를 깨웠다 — 그 파일은
+   `Jenkinsfile` 의 배포 단계를 복제한 것이라 없앴다. **이 넷째 길은 지금 꺼져 있다**
    (2026-10-14, `Jenkinsfile` 의 `PROMOTE_PRODUCTION` 기본값 `false`) — 강의실 화면을 시안 v2 로
    고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `codemit-deploy-staging` 잡을 「Build with
    Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다(2026-10-16 02:30 KST 에 그렇게 한 번
    승격했다 — `buildWithParameters?delay=…sec` 의 조용 기간으로 예약, DB 백업 02:00 과 겹치지 않게).
+   **prod 만 다시 돌리고 싶을 때도 같은 길이다** — 같은 잡을 `PROMOTE_PRODUCTION=true` 로 다시 돌리면
+   staging 단계는 `deploy.sh plan` 이 「이미 배포됨」으로 비우고 prod 단계만 일한다. 따로 파라미터가 없다.
 
 `staging`·`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
 멈춘다. **두 브랜치에 직접 커밋하지 않는다.** (예전에는 main 의 Actions CI 가 시험까지 돌리고
 초록이면 `promote-production.yaml` 이 `production` 을 앞당겼다 — staging 을 거치지 않았다.)
 
-prod 배포의 `Jenkinsfile.production` 은 `production` 브랜치
-빌드일 때만 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(staging 과 같은 컨트롤러)에
-붙은 에이전트 `oracle`** 에서 돈다(라벨 `oracle`). 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
+`Jenkinsfile` 의 「prod 배포」 단계(2026-10-23, #779 — 그 전에는 별도 잡 `codemit-deploy-prod` 의
+`Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(같은 컨트롤러)에
+붙은 에이전트 `oracle`** 에서 돈다(`agent { node { label 'oracle'; customWorkspace 'codemit-deploy-prod' } }`).
+에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
 컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고, 이제 **이미지를 굽지
 않고 ghcr 에서 받기만 한다**(아래). 비상용 로컬 빌드(`DEPLOY_IMAGE_SOURCE=build`)를 쓸 때만 그 이미지에
 buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 네 빌드가 전부 죽었다(2026-09-14 빌드
 #4~#6, 지금은 `deploy.sh` preflight 가 먼저 멈춘다). 호스트 `/var/jenkins_home/workspace` 가 컨테이너
 `/home/jenkins/agent/workspace` 로 붙어 있어, 노드의 Remote root directory 는 컨테이너 경로
-`/home/jenkins/agent`, 잡 이름은 `codemit-deploy-prod` 여야 호스트의 `/var/jenkins_home/workspace/codemit-deploy-prod` 에 둔
-`docker/.env.prod`(chmod 600)·배포 표식을 쓴다. 잡·노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
+`/home/jenkins/agent`, 단계의 `customWorkspace` 는 `codemit-deploy-prod`(옛 잡 이름) 여야 호스트의
+`/var/jenkins_home/workspace/codemit-deploy-prod` 에 둔 `docker/.env.prod`(chmod 600)·배포 표식 `.jenkins-prod-deployed` 를
+쓴다 — 경로가 바뀌면 preflight 가 멈춘다. 노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
 **이미지는 Jenkins `codemit-deploy-staging` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
 2026-10-15 Jenkins — #705, ADR-0061). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
@@ -253,11 +260,12 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 움직여도 한 빌드는 한 커밋이다. 2026-10-02 ~ 10-15 에는 브랜치 지정이 `*/staging` 이었고 Actions 가
 그 브랜치를 움직였다. 늦게 도착한 옛 커밋은
 `deploy.sh plan` 이 「더 새 커밋이 이미 배포돼 있다」로 건너뛰고, 배포 표식도 뒤로 옮기지
-않는다. 초록이면 끝에서 `production` 을 같은 커밋으로 앞당긴다(위 넷째 길). 예전에는 main 의
+않는다. `PROMOTE_PRODUCTION` 이 켜져 있고 초록이면 이어서 「prod 배포」 단계가 돌고, 그것도 초록이면
+끝에서 `production` 을 같은 커밋으로 앞당긴다(위 넷째 길). 예전에는 main 의
 CI 가 `buildWithParameters` 로 `DEPLOY_SHA` 를 채워 불렀다(그때 브랜치 지정은 `*/main`).
 
-**배포는 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** 두
-Jenkinsfile 이 「(staging 은 대상 확인 → 이미지 → 부팅 가드 → staging 앞당기기 →) Preflight → 변경 계획 → 이미지 받기(서비스별 병렬 pull) →
+**배포는 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** staging 배포 단계와 prod 배포
+단계가 「Preflight → 변경 계획 → 이미지 받기(서비스별 병렬 pull) →
 교체 → 확인(prod 는 끝에 「e2e 대조」 — `deploy.sh prod e2e-digest`, 떠 있는 이미지가 열차의 e2e 가 본
 그것인지 콘솔에 적기만 한다, #729) → 배포 표식 → 정리」를
 각각 한 단계로 보여주고, 단계 본문은 `sh ./deploy.sh <대상> <명령>` 한 줄이다 — `plan` 이
@@ -267,9 +275,9 @@ Jenkinsfile 이 「(staging 은 대상 확인 → 이미지 → 부팅 가드 �
 보였다. 더 예전에는 잡이 freestyle 이라 `Jenkinsfile` 이 읽히지 않았고, 그걸 모르고
 Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
 
-**빌드가 끝나면 디스코드로 결과가 간다**(2026-09-18). 두 Jenkinsfile 의 `post { always }`
-가 성공·실패·중단을 가리지 않고 한 줄을 보낸다 — 대상(staging/prod)·결과·빌드 번호·커밋
-12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
+**빌드가 끝나면 디스코드로 결과가 간다**(2026-09-18). `Jenkinsfile` 의 `post { always }`
+가 성공·실패·중단을 가리지 않고 한 줄을 보낸다 — staging 결과, prod 를 돌렸으면 prod 결과(예:
+`✅ staging 배포 SUCCESS · prod 배포 SUCCESS — #N (sha)`), 빌드 번호·커밋 12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
 사실이 사람에게 닿는 자리가 없었고, 실패는 더 그랬다(2026-09-17 staging 배포가 정리
 단계에서 빨갛게 끝난 것을 한참 뒤에 알았다).
 
@@ -279,10 +287,10 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 `catchError` 와 `|| true` 가 그것을 보장하므로, 자격증명이 없는 Jenkins 에서도 배포는
 그대로 돈다.
 
-**「다른 프로젝트가 빌드된 뒤에」 트리거(`triggers { upstream(...) }`)는 쓰지 않는다** — prod
-잡은 staging 잡의 **커밋**을 따라가야 하는데, upstream 트리거는 prod 잡이 자기 브랜치의 끝을
-배포하게 한다. 그래서 staging 잡이 `production` 브랜치를 그 커밋으로 옮기고, prod 잡은 자기
-브랜치의 웹훅으로 돈다.
+**prod 배포는 staging 과 같은 빌드의 단계다**(2026-10-23, #779) — prod 는 staging 이 배포한 **그
+커밋**을 따라가야 하는데, 같은 `DEPLOY_SHA` 를 쓰는 단계면 저절로 그렇다. 그 전에는 staging 잡이
+`production` 브랜치를 옮기고 웹훅이 별도 prod 잡을 깨웠다(upstream 트리거는 prod 잡이 자기 브랜치의
+끝을 배포하게 해서 쓰지 않았다).
 
 **배포 끝에 호스트의 도커 디스크를 비운다**(`deploy.sh <대상> prune`, 2026-09-17). 커밋마다
 ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle 에는 ghcr 이전에 굽던 빌드 캐시가

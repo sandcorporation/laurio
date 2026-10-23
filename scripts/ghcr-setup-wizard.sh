@@ -163,7 +163,7 @@ finish() {
 cd "$(dirname "$0")/.."
 REPO="sandcorporation/laurio"
 STAGING_ENV="/server/jenkins/workspace/codemit-deploy-staging/docker/.env.staging"   # sub 호스트
-PROD_ENV="/var/jenkins_home/workspace/codemit-deploy-prod/docker/.env.prod"       # oracle 호스트
+PROD_ENV="/var/jenkins_home/workspace/codemit-deploy-prod/docker/.env.prod"       # oracle 호스트 — codemit-deploy-staging 의 prod 단계 customWorkspace(#779, 옛 잡 이름)
 # 다시 돌릴 때의 기본값 — 저장소 밖에 둔다(비밀값이 섞인다).
 ENV_FILE="${HOME}/.config/codemit-ghcr-wizard.env"
 mkdir -p "$(dirname "$ENV_FILE")"; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
