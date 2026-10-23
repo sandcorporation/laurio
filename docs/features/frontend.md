@@ -19,6 +19,11 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 **콘솔 가드는 함수 하나다** — 미들웨어 `matcher` 가 `/console/:path*` 하나이고 그 경로군
 전체가 한 함수에 걸린다. 화면마다 반복해 확인하지 않는다.
 
+**방문 메트릭 스니펫(Sandcorp 공통, #785)은 운영에서만 실린다** — 루트 레이아웃 `<head>` 가 실행
+env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 이 있을 때만 `<script defer src=… data-site="codemit">` 한 줄을
+그린다(`lib/public-config.ts` `metricsSnippetSrc`). 쿠키 없이 경로 변경마다 조회 한 건을 보내고,
+비어 있는 로컬·시험·staging 에는 태그가 없다. 강의실 앱도 같은 모양이고 운영자 앱에는 없다.
+
 **토큰은 브라우저가 보지 않는다**(ADR-0016). BFF 가 HttpOnly 쿠키로 쥐고, 인증이 필요한
 호출은 전부 `/api/backend/[...path]` 프록시를 지나며 거기서 JWT 가 헤더로 바뀐다. 방어는
 **허용목록**과 **Origin 검증**이 함께 선다 — 하나만으로는 성립하지 않는다.

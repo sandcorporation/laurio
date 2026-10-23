@@ -3,7 +3,13 @@ import * as path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PUBLIC_CONFIG_NAMES, publicConfig, publicConfigFromEnv, publicConfigScript } from "./public-config";
+import {
+  PUBLIC_CONFIG_NAMES,
+  metricsSnippetSrc,
+  publicConfig,
+  publicConfigFromEnv,
+  publicConfigScript,
+} from "./public-config";
 
 describe("공개 설정은 실행 때 env 에서 온다 (#711)", () => {
   afterEach(() => {
@@ -45,5 +51,23 @@ describe("공개 설정은 실행 때 env 에서 온다 (#711)", () => {
     const layout = fs.readFileSync(path.resolve(__dirname, "..", "app", "layout.tsx"), "utf8");
     expect(layout).toMatch(/export\s+const\s+dynamic\s*=\s*["']force-dynamic["']/);
     expect(layout).toContain("publicConfigScript(publicConfigFromEnv(process.env))");
+  });
+
+  // 방문 메트릭 스니펫(#785)은 서버가 그리는 `<script src>` 하나라 브라우저로 가는 목록(`PUBLIC_CONFIG_NAMES`)
+  // 밖이다 — env 가 비어 있으면(로컬·시험·CI·staging) 태그 자체가 없어야 한다.
+  it("방문 메트릭 스니펫 src 는 env 가 비어 있으면 null, 있으면 다듬은 값이다 (#785)", () => {
+    expect(metricsSnippetSrc({})).toBeNull();
+    expect(metricsSnippetSrc({ CODEMIT_PUBLIC_METRICS_SNIPPET_URL: "" })).toBeNull();
+    expect(metricsSnippetSrc({ CODEMIT_PUBLIC_METRICS_SNIPPET_URL: "   " })).toBeNull();
+    expect(metricsSnippetSrc({ CODEMIT_PUBLIC_METRICS_SNIPPET_URL: " https://metrics.sandcorp.co.kr/m.js " })).toBe(
+      "https://metrics.sandcorp.co.kr/m.js",
+    );
+  });
+
+  it("루트 레이아웃은 그 src 가 있을 때만 data-site=codemit 스크립트를 JSX 속성으로 그린다 (#785)", () => {
+    const layout = fs.readFileSync(path.resolve(__dirname, "..", "app", "layout.tsx"), "utf8");
+    expect(layout).toContain("metricsSnippetSrc(process.env)");
+    expect(layout).toMatch(/<script\s+defer\s+src=\{metricsSrc\}\s+data-site="codemit"\s*\/>/);
+    expect(layout).not.toContain("metrics.sandcorp.co.kr");
   });
 });

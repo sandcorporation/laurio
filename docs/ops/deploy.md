@@ -229,6 +229,10 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   공개 값(Sentry DSN·환경·release, 토스 클라이언트 키, 포트원 store·channel, 문의 주소, 공모전·유료
   공모전 스위치)은 compose 의 `environment:` 가 서버의 `docker/.env.<target>` 에서 `CODEMIT_PUBLIC_*` 로
   넣고, 앱은 서버에서 그것을 읽어 루트 레이아웃이 브라우저로 넘긴다(`<앱>/lib/public-config.ts`).
+  방문 메트릭 스니펫(Sandcorp 공통, #785)도 같은 길이다 — `.env.<target>` 의 `METRICS_SNIPPET_URL` 이
+  frontend·classroom 둘의 `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 로 들어가 `<head>` 의 `<script defer
+  src=… data-site="codemit">` 한 줄이 된다. operator 에는 없고, 비우면(staging) 태그 자체가 없다 —
+  켜고 끄는 데 코드 변경이 없다.
   그래서 amd64 이미지 = staging, arm64 이미지 = prod 이고 커밋당 굽는 수가 최대 여섯이다(예전 열둘).
   값을 바꾸면 `.env.<target>` 을 고치고 배포한다 — `deploy.sh plan` 이 떠 있는 앱의 compose 설정 해시를
   지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 견주지 못하면(`config --hash` 실패 등)

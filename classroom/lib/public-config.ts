@@ -47,3 +47,11 @@ export function publicConfig(): PublicConfig {
 export function publicConfigScript(config: PublicConfig): string {
   return `window.__CODEMIT_PUBLIC__=${JSON.stringify(config).replace(/</g, "\\u003c")};`;
 }
+
+/** 방문 메트릭 스니펫(Sandcorp 공통, #785)의 `src`. 실행 때 env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 을
+ * 읽어 공백을 다듬고, 비어 있으면 `null` — 루트 레이아웃이 태그를 아예 그리지 않는다(로컬·시험·CI·staging).
+ * 브라우저가 이 값을 읽을 일은 없어 위 `PUBLIC_CONFIG_NAMES` 에는 넣지 않는다. */
+export function metricsSnippetSrc(env: Record<string, string | undefined>): string | null {
+  const value = (env.CODEMIT_PUBLIC_METRICS_SNIPPET_URL ?? "").trim();
+  return value === "" ? null : value;
+}

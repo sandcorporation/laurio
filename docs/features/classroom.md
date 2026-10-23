@@ -8,6 +8,11 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 
 ## 앱 전체에 걸리는 것
 
+**방문 메트릭 스니펫(Sandcorp 공통, #785)은 운영에서만 실린다** — 공개 앱과 같은 모양으로 루트
+레이아웃 `<head>` 가 실행 env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 이 있을 때만 `<script defer src=…
+data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippetSrc`). 비어 있는 로컬·시험·
+staging 에는 태그가 없고, 운영자 앱에는 넣지 않는다(`frontend.md` 「앱 전체에 걸리는 것」).
+
 **"/login"·"/join/{code}"·"/invite/{token}"(#561)·루트("/")를 뺀 전부가 인증 구역이다**(운영자 앱과 같은
 이유 — 색인될 공개 표면이 랜딩 하나뿐이다). 미들웨어가 쿠키의 존재만 보고, 유효성은
 언제나 백엔드가 판정한다. **아이콘 경로(`/icon`·`/apple-icon`)와 `/robots.txt`·
