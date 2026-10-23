@@ -4,7 +4,7 @@ import Link from "next/link";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
 
-import { publicConfigFromEnv, publicConfigScript } from "@/lib/public-config";
+import { metricsSnippetSrc, publicConfigFromEnv, publicConfigScript } from "@/lib/public-config";
 import { MeProvider } from "@/lib/auth/me-context";
 import { EventStreamProvider } from "@/lib/events/stream-context";
 import { classroomAppOrigin } from "@/lib/seo/origin";
@@ -88,6 +88,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const cookieStore = await cookies();
   const themePreference = parseThemePreference(cookieStore.get(THEME_COOKIE)?.value);
+  const metricsSrc = metricsSnippetSrc(process.env);
 
   return (
     <html
@@ -102,6 +103,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           id="codemit-public-config"
           dangerouslySetInnerHTML={{ __html: publicConfigScript(publicConfigFromEnv(process.env)) }}
         />
+        {/* 방문 메트릭 스니펫(Sandcorp 공통, #785) — 실행 env 에 주소가 있을 때만 그린다. 쿠키 없이
+            경로 변경마다 조회 한 건을 보내고, 운영자 앱에는 넣지 않는다. */}
+        {metricsSrc && <script defer src={metricsSrc} data-site="codemit" />}
       </head>
       <body>
         <MeProvider>

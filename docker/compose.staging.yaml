@@ -587,6 +587,9 @@ services:
       CODEMIT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_FRONTEND:-}
       CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: staging
       CODEMIT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # 방문 메트릭 스니펫(Sandcorp 공통, #785) — 사용자가 보는 두 앱(frontend·classroom)만, operator 는 없다.
+      # 비어 있으면 루트 레이아웃이 태그를 그리지 않는다(`<앱>/lib/public-config.ts` metricsSnippetSrc).
+      CODEMIT_PUBLIC_METRICS_SNIPPET_URL: ${METRICS_SNIPPET_URL:-}
       # 포트원 본인확인 브라우저 SDK — 백엔드가 서버-투-서버 조회에 쓰는 것과 같은 줄을 나눠 읽는다.
       CODEMIT_PUBLIC_PORTONE_STORE_ID: ${PORT_ONE_V2_STORE_ID:?}
       CODEMIT_PUBLIC_PORTONE_CHANNEL_KEY: ${KG_INICIS_CHANNEL_KEY:?}
@@ -741,6 +744,9 @@ services:
       CODEMIT_PUBLIC_SENTRY_DSN: ${SENTRY_DSN_CLASSROOM:-}
       CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: staging
       CODEMIT_PUBLIC_SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+      # 방문 메트릭 스니펫(Sandcorp 공통, #785) — 사용자가 보는 두 앱(frontend·classroom)만, operator 는 없다.
+      # 비어 있으면 루트 레이아웃이 태그를 그리지 않는다(`<앱>/lib/public-config.ts` metricsSnippetSrc).
+      CODEMIT_PUBLIC_METRICS_SNIPPET_URL: ${METRICS_SNIPPET_URL:-}
       CODEMIT_DEPLOYMENT_TARGET: staging
       CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE 전용 베이스 URL(ADR-0046, #380) — 나머지 API는 전부
