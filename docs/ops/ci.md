@@ -205,7 +205,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   | --- | --- | --- |
   | `codemit-ci-pr`(Multibranch) | `Jenkinsfile.pr` | sub 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
   | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
-  | `codemit-deploy-staging` | `Jenkinsfile` | sub `workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`, 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'`, prod 단계(에이전트 `oracle`) `customWorkspace 'codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
+  | `codemit-deploy-staging` | `Jenkinsfile` | sub `workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`, 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'`, prod 단계(에이전트 `oracle`) `customWorkspace 'workspace/codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
   | `codemit-ghcr-prune` | 저장소 밖 | |
 
   이전 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 잡을 이름으로 부르는 자리는

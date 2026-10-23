@@ -179,16 +179,18 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 
 `Jenkinsfile` 의 「prod 배포」 단계(2026-10-23, #779 — 그 전에는 별도 잡 `codemit-deploy-prod` 의
 `Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(같은 컨트롤러)에
-붙은 에이전트 `oracle`** 에서 돈다(`agent { node { label 'oracle'; customWorkspace 'codemit-deploy-prod' } }`).
+붙은 에이전트 `oracle`** 에서 돈다(`agent { node { label 'oracle'; customWorkspace 'workspace/codemit-deploy-prod' } }`).
 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
 컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고, 이제 **이미지를 굽지
 않고 ghcr 에서 받기만 한다**(아래). 비상용 로컬 빌드(`DEPLOY_IMAGE_SOURCE=build`)를 쓸 때만 그 이미지에
 buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 네 빌드가 전부 죽었다(2026-09-14 빌드
 #4~#6, 지금은 `deploy.sh` preflight 가 먼저 멈춘다). 호스트 `/var/jenkins_home/workspace` 가 컨테이너
 `/home/jenkins/agent/workspace` 로 붙어 있어, 노드의 Remote root directory 는 컨테이너 경로
-`/home/jenkins/agent`, 단계의 `customWorkspace` 는 `codemit-deploy-prod`(옛 잡 이름) 여야 호스트의
+`/home/jenkins/agent`, 단계의 `customWorkspace` 는 `workspace/codemit-deploy-prod`(옛 잡 이름) 여야 호스트의
 `/var/jenkins_home/workspace/codemit-deploy-prod` 에 둔 `docker/.env.prod`(chmod 600)·배포 표식 `.jenkins-prod-deployed` 를
-쓴다 — 경로가 바뀌면 preflight 가 멈춘다. 노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
+쓴다 — 경로가 바뀌면 preflight 가 멈춘다. 상대 `customWorkspace` 는 노드의 Remote root 기준이지 그 아래
+`workspace/` 가 아니다(`codemit-deploy-prod` 로 뒀던 #520 은 `/home/jenkins/agent/codemit-deploy-prod` 에 새로 clone 해
+「`.env.prod` 이 없다」로 멈췄다). 노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
 **이미지는 Jenkins `codemit-deploy-staging` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
 2026-10-15 Jenkins — #705, ADR-0061). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
