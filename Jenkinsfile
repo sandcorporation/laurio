@@ -404,9 +404,11 @@ pipeline {
     // docker CLI·compose·buildx·git 포함 — 이미지 정의는 호스트의 `/server/jenkins`)이고, 호스트의
     // `/var/jenkins_home/workspace` 가 컨테이너의 `/home/jenkins/agent/workspace` 로 붙어 있다. 그래서 노드의
     // Remote root directory 는 **컨테이너 안 경로** `/home/jenkins/agent` 여야 하고, 워크스페이스는
-    // `customWorkspace 'codemit-deploy-prod'`(옛 잡의 이름 — #708 전에는 `codemit`)여야 호스트의
+    // `customWorkspace 'workspace/codemit-deploy-prod'`(옛 잡의 이름 — #708 전에는 `codemit`)여야 호스트의
     // `/var/jenkins_home/workspace/codemit-deploy-prod` 가 된다 — 거기에 사람이 둔 `docker/.env.prod`(chmod 600)와
     // 배포 표식이 있다(`deploy.sh` 의 `ENV_FILE="docker/.env.${TARGET}"`). 경로가 바뀌면 preflight 가 멈춘다.
+    // **상대 경로는 노드의 Remote root 기준이지 그 아래 `workspace/` 가 아니다** — `'codemit-deploy-prod'` 로 뒀더니
+    // `/home/jenkins/agent/codemit-deploy-prod` 에 새로 clone 해 「docker/.env.prod 이 없다」로 멈췄다(2026-10-23 #520).
     // 서버의 파일은 옮기지 않는다. 컨트롤러에서 돌면 prod 가 아니라 sub 호스트에 스택을 띄우므로 `built-in` 을
     // 쓰지 않는다.
     stage('prod 배포') {
@@ -414,7 +416,7 @@ pipeline {
         beforeAgent true
         expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY && params.PROMOTE_PRODUCTION }
       }
-      agent { node { label 'oracle'; customWorkspace 'codemit-deploy-prod' } }
+      agent { node { label 'oracle'; customWorkspace 'workspace/codemit-deploy-prod' } }
       stages {
         stage('prod Preflight') {
           steps {
