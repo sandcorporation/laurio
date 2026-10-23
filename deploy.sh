@@ -4,7 +4,7 @@
 #   sh ./deploy.sh <staging|prod> [명령] [인자]
 #
 # **명령을 하나씩 부를 수 있다 — Jenkins 파이프라인이 단계마다 하나씩 부른다.**
-# `Jenkinsfile`(staging)·`Jenkinsfile.production`(prod)이 「대상 확인 → preflight →
+# `Jenkinsfile` 의 staging 배포 단계와 prod 배포 단계가 「preflight →
 # 변경 계획 → 빌드(서비스별 병렬) → 교체 → 확인 → 배포 표식」을 각각 한 단계로
 # 보여주고, 각 단계의 본문은 여기 명령 한 줄이다. 예전에는 파이프라인이 이 파일을
 # 통째로 한 번 불러 Jenkins 화면에 「배포」 단계 하나만 보였고, 네 이미지의 빌드
@@ -561,7 +561,8 @@ cmd_plan() {
   fi
 
   # 파이프라인은 이 파일을 `KEY=value` 줄로 읽어 단계의 `when` 을 정한다 — 모양을
-  # 바꾸면 두 Jenkinsfile 을 같이 고친다.
+  # 바꾸면 Jenkinsfile 의 staging·prod 두 「변경 계획」 단계를 같이 고친다. prod 단계는
+  # staging 의 계획이 env 에 남은 채 돌므로 키 전부를 언제나 적는다.
   {
     echo "DEPLOY_ANY=$ANY"
     echo "BUILD_BACKEND=$BUILD_BACKEND"
