@@ -2,7 +2,7 @@
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
-**시험은 Jenkins `codemit-ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다**(2026-10-02). GitHub
+**시험은 Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다**(2026-10-02). GitHub
 소스 `sandcorporation/laurio` 의 브랜치(`main`·`staging`·`production` 은 뺀다)마다 하위 잡이
 생기고, 5분마다 훑어 새 push 를 찾는다. 결과는 GitHub 커밋 상태로 남는다. 같은 브랜치에 새로
 push 하면 옛 빌드를 끊는다.
@@ -13,9 +13,9 @@ push 하면 옛 빌드를 끊는다.
 | --- | --- | --- |
 | 변경 | sub(`laurio-staging`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
 | 시험(병렬) | sub | `scripts/ci/sub-checks.sh` — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어 검사, 단위 시험 여섯, 세 앱 typecheck |
-| 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit-ci-train` 을 부른다 |
+| 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit/ci-train` 을 부른다 |
 
-**묶음마다** — Jenkins `codemit-ci-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
+**묶음마다** — Jenkins `codemit/ci-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
 최신 `main` 위에 차례로 쌓아 **한 번** 시험하고 초록이면 차례로 합친다. PR CI 가 부르고, GitHub 의
 `pull_request` 웹훅이 hold 를 떼거나·초안을 풀거나·다시 연 PR 에서 부르며(아래 「줄에서 빠지는 법·돌아오는
 법」), 30분마다 스스로도 돈다(뒷받침). 규칙은 `scripts/ci/train.py` 머리말에 있다.
@@ -37,9 +37,9 @@ prune 된 서비스는 열차가 같은 문맥을 다시 구워 digest 만 바�
 열차 산출물을 Jenkins API 로 읽지 않고 레지스트리를 쓰는 이유: oracle 에이전트에는 Jenkins 자격증명이 없고
 (copyartifact 플러그인도 없다) ghcr 로그인은 이미 있으며, 쌓은 sha·main sha 는 달라도 **트리**는 같다. ctx 태그는 시험 두 가지가 초록인 묶음에만, 「병합」 단계가 **병합 전에** 붙인다(#709 의 「초록 뒤에만」,
 #729 — ctx·e2e 태그 둘 다 5분 제한이고 끊기거나 실패해도 병합은 간다, `catchError` 안의 `timeout`, #740). 붉은 묶음의 이미지는 커밋 태그만 남고 ctx 가 없어, 반으로 갈라 다시 도는 묶음이나 다음 빌드가 다시
-굽는다. 병합 뒤에 붙이던 때(#712)는 병합 push 가 깨운 `codemit-deploy-staging` 이 ctx 보다 먼저 떠 같은 트리를
+굽는다. 병합 뒤에 붙이던 때(#712)는 병합 push 가 깨운 `codemit/deploy` 가 ctx 보다 먼저 떠 같은 트리를
 다시 굽기도 했다. ctx 는 내용 기준의 사실이라 병합이 거절돼도 무해하다(main 의 트리가 다르면 해시가 다르다).
-병합 뒤 `codemit-deploy-staging` 은 「대상 확인」(built-in)에서 `images.sh` 의 **retag**(굽지 않고 커밋 태그만 더한다,
+병합 뒤 `codemit/deploy` 는 「대상 확인」(built-in)에서 `images.sh` 의 **retag**(굽지 않고 커밋 태그만 더한다,
 빌더도 띄우지 않는다)를 먼저 해 보고, 한 아키텍처가 전부 「건너뛴다」면 그 이미지 가지를 돌지 않는다 —
 macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문맥 태그 단계도 할 일이 없어 건너뛴다.
 
@@ -70,7 +70,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
   먼저 합쳐진 PR 과 충돌하는 PR 이 초록인 채 남았다(#530 이 #531·#532 와 그렇게 충돌했다).
 - **줄에서 빠지는 법·돌아오는 법.** 새로 push 하면 새 커밋에는 상태가 없어 저절로 빠지고, PR CI
-  가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit-ci-pr/job/<브랜치>/build`)
+  가 다시 세운다. `failure` 를 받은 커밋은 PR CI 를 다시 돌리면(`POST /job/codemit/job/ci-pr/job/<브랜치>/build`)
   줄로 돌아온다 — 위 판정에 들지 않는 인프라 고장으로 붉은 묶음이 가르기 끝에 PR 하나를 억울하게 잡았을 때의 길이다.
   초안을 풀거나 `hold` 를 떼거나 PR 을 다시 열면 다시 빌드하지 않아도 열차가 곧 데려간다(#709) — 셋은
   push 가 아니라 PR CI 가 부르지 않으므로, `Jenkinsfile.train` 의 `GenericTrigger`(플러그인
@@ -79,7 +79,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   이고 초안이 아니며 base 가 `main` 인 것에서만 열차를 깨운다. 그 밖의 이벤트(opened·synchronize·labeled·
   closed)는 PR CI 가 push 로 다룬다. 웹훅이 빠지면 30분 cron 이 데려간다. Jenkins 는 `triggers` 를 **잡이 한
   번 돈 뒤에** 반영하므로, 이 블록을 바꾸면 그 뒤 첫 빌드부터 듣는다. 기다리기 싫으면 손으로 깨운다:
-  `POST /job/codemit-ci-train/buildWithParameters`.
+  `POST /job/codemit/job/ci-train/buildWithParameters`.
 
 - **macos 의 Docker VM 디스크는 96GiB 이고, 묶음마다 무엇이 남는지 정해 두어야 찬다.** 맥 호스트
   디스크가 남아도 Docker Desktop 의 `Docker.raw` 가 차면 MinIO 가 `XMinioStorageFull` 로 업로드를
@@ -137,7 +137,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   잡는다), Jenkins 가 남긴 빌드(최근 50개)를 이렇게 센다 — `JENKINS_*` 는 `~/.config/codemit-ghcr-wizard.env`:
 
   ```bash
-  for n in $(curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_UI_URL/job/codemit-ci-train/api/json?tree=builds%5Bnumber%5D" | python3 -c 'import json,sys;print(*[b["number"] for b in json.load(sys.stdin)["builds"]])'); do curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_UI_URL/job/codemit-ci-train/$n/consoleText" | grep -q 'Z\] 인프라 고장으로 분류: ' && echo "$n"; done
+  for n in $(curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_UI_URL/job/codemit/job/ci-train/api/json?tree=builds%5Bnumber%5D" | python3 -c 'import json,sys;print(*[b["number"] for b in json.load(sys.stdin)["builds"]])'); do curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_UI_URL/job/codemit/job/ci-train/$n/consoleText" | grep -q 'Z\] 인프라 고장으로 분류: ' && echo "$n"; done
   ```
 
   2026-10-15 에 센 값은 #1890~#1939 에서 둘(#1902·#1906, 둘 다 #723 이 고친 코드 탓)이고 #723 병합(#1911)
@@ -194,30 +194,37 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   다이어그램 최신성 시험이 그것을 읽는다(빼먹었을 때 넷이 「파일이 없다」로 빨갰다).
 - **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
   운영자 4초 · 강의실 4초(이미지 굽기 제외).
-- **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit-ci-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
+- **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit/ci-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`)은 사람이
   Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
-- **잡 이름은 `codemit-<역할>-<대상>` 이다**(2026-10-15, #708). 잡이 넷이다(2026-10-23, #779 —
-  `codemit-deploy-prod` 는 `codemit-deploy-staging` 의 「prod 배포」 단계가 됐다).
+- **잡은 폴더 `codemit/` 안에 넷이다**(2026-10-23, #780) — Jenkins 첫 화면에는 폴더 하나만 보인다. 2026-10-15(#708)
+  부터는 `codemit-<역할>-<대상>` 으로 나란히 섰고, #779 가 `codemit-deploy-prod` 를 `codemit-deploy-staging` 의 「prod 배포」
+  단계로 합쳐 넷이 남자 폴더로 묶으며 접두 `codemit-` 을 뗐다. 접두를 뗀 이유는 `BUILD_TAG`(`jenkins-<전체 이름의 / 를 - 로>-<번호>`)
+  가 **그대로**이기 때문이다 — `codemit/ci-train` → `jenkins-codemit-ci-train-N`. 그래서 `macos-sweep.sh` 의 compose
+  프로젝트 패턴과 #735 는 건드리지 않았다. API 경로는 `/job/codemit/job/<이름>/…`, 잡 디렉터리는
+  `/var/jenkins_home/jobs/codemit/jobs/<이름>/` 이다.
 
-  | 잡 | 파일 | 워크스페이스·이름에 묶인 것 |
-  | --- | --- | --- |
-  | `codemit-ci-pr`(Multibranch) | `Jenkinsfile.pr` | sub 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
-  | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
-  | `codemit-deploy-staging` | `Jenkinsfile` | sub `workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`, 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'`, prod 단계(에이전트 `oracle`) `customWorkspace 'workspace/codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
-  | `codemit-ghcr-prune` | 저장소 밖 | |
+  | 잡 | 옛 이름 | 파일 | 워크스페이스·이름에 묶인 것 |
+  | --- | --- | --- | --- |
+  | `codemit/ci-pr`(Multibranch) | `codemit-ci-pr` | `Jenkinsfile.pr` | sub 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
+  | `codemit/ci-train` | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
+  | `codemit/deploy` | `codemit-deploy-staging` | `Jenkinsfile` | built-in 단계 전부 `customWorkspace 'workspace/codemit-deploy-staging'` = sub 호스트 `/server/jenkins/workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`(이름이 바뀌어도 서버의 파일은 옮기지 않았다), 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'`, prod 단계(에이전트 `oracle`) `customWorkspace 'workspace/codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
+  | `codemit/ghcr-prune` | `codemit-ghcr-prune` | 저장소 밖 | |
 
-  이전 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 잡을 이름으로 부르는 자리는
-  `Jenkinsfile.pr` 의 `build job: '/codemit-ci-train'` 하나다(실패해도 열차는 30분 cron 으로 돈다).
-  자격증명 `codemit-train-webhook-token` 은 잡 이름이 아니라 ID 라 그대로 뒀다. `macos-sweep.sh` 는
+  더 전의 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 잡을 이름으로 부르는 자리는
+  `Jenkinsfile.pr` 의 `build job: '/codemit/ci-train'` 하나다(실패해도 열차는 30분 cron 으로 돈다).
+  GitHubPushTrigger(저장소 URL)·GenericTrigger(토큰, invoke URL 에 잡 이름이 없다)·cron·전역 자격증명·GitHub 커밋
+  상태 문맥(`codemit/automerge`, `continuous-integration/jenkins/branch`)은 잡 이름과 무관하다. 자격증명
+  `codemit-train-webhook-token` 은 잡 이름이 아니라 ID 라 그대로 뒀다. 열차·PR CI·prune 의 워크스페이스는 새로 받아도 되는
+  체크아웃이라 붙잡지 않았다(옮긴 뒤 첫 빌드가 통째로 clone 해 한 번 느리다). `macos-sweep.sh` 는
   rename 직전에 남은 `jenkins-codemit-(pr|train)-*` 도 한동안 같이 걷는다 — 2026-11-15 이후 #735 로 지운다(지울 조건은 그 파일 머리말).
-  끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이었다 — 옛 `codemit-deploy-prod` 는 10-21 prod #177
+  #708 끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이었다 — 옛 `codemit-deploy-prod` 는 10-21 prod #177
   이 마지막 빌드였고 #779 로 사라졌다.
-- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — 같은 규칙을 세 곳이 쓴다. PR CI 는 `scripts/ci/changed.sh`(merge-base 와 견준다), 열차는 `scripts/ci/train.py` 의 `touches_code`(묶음 전체가 문서뿐이면 시험·이미지 대신 `문서만` 단계), `codemit-deploy-staging` 잡은 다시 `changed.sh`(`codemit-deploy-staging` 은 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — 같은 규칙을 세 곳이 쓴다. PR CI 는 `scripts/ci/changed.sh`(merge-base 와 견준다), 열차는 `scripts/ci/train.py` 의 `touches_code`(묶음 전체가 문서뿐이면 시험·이미지 대신 `문서만` 단계), `codemit/deploy` 잡은 다시 `changed.sh`(`codemit/deploy` 는 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
-  가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit-deploy-staging` 잡(`Jenkinsfile`)의 앞 단계가 됐다
+  가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit/deploy` 잡(`Jenkinsfile`)의 앞 단계가 됐다
   (「배포」 절). 이미지는 macos 가 arm64 여섯, sub 가 amd64 여섯을 함께 굽고(`scripts/ci/images.sh`),
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
   (`ctx-<해시>`)는 이미지 두 가지와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,

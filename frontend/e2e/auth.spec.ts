@@ -109,7 +109,7 @@ test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE
   //
   // "production에서는 켜진다"는 반대쪽 절반은 이 e2e 시임으로 증명할 수 없다 —
   // 이 스택 자체가 production 설정으로 뜨지 않기 때문이다. 그건
-  // scripts/ci/deploy-guard.sh frontend(Jenkins codemit-deploy-staging 잡의 부팅 가드)가 실제 프로덕션
+  // scripts/ci/deploy-guard.sh frontend(Jenkins codemit/deploy 잡의 부팅 가드)가 실제 프로덕션
   // 이미지를 프로덕션 환경변수로 띄워 별도로 증명한다. 이 테스트는 그 짝 —
   // "dev에서는 꺼져 있다"만 이 시임 안에서 확인한다.
   test("dev(CODEMIT_DEPLOYMENT_TARGET 미설정)에서는 Secure가 붙지 않는다", async ({

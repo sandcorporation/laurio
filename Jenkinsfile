@@ -1,8 +1,8 @@
 // main 의 커밋 하나의 여정 전부 (#52 → #705 → #779) — 이미지 → 부팅 가드 → `staging` 앞당기기 → staging 배포 →
 // (PROMOTE_PRODUCTION 이면) prod 배포 → `production` 앞당기기. 단계는 보이게, 논리는 스크립트에.
 //
-// **잡 `codemit-deploy-staging`(#708 전에는 `laurio`)은 Pipeline 이다**(`scriptPath: Jenkinsfile`, 브랜치 `*/main`, GitHub 웹훅
-// `GitHubPushTrigger`). 2026-10-15 까지는 GitHub Actions(`.github/workflows/images.yaml`)가 이미지
+// **잡 `codemit/deploy`(#780 전에는 `codemit-deploy-staging`, #708 전에는 `laurio`)는 Pipeline 이다**(`scriptPath: Jenkinsfile`,
+// 브랜치 `*/main`, GitHub 웹훅 `GitHubPushTrigger`). 2026-10-15 까지는 GitHub Actions(`.github/workflows/images.yaml`)가 이미지
 // 열둘과 부팅 가드 셋을 돌리고 `staging` 을 앞당겼고, 이 잡은 `staging` push 에서 배포만 했다 —
 // 조직의 Actions 분량(Free, 월 2,000분)이 바닥나 `staging` 이 멈춘 뒤 Actions 를 떠났다(ADR-0061).
 // 이제 커밋 하나가 이 잡의 빌드 하나에 다 보인다.
@@ -78,6 +78,13 @@ pipeline {
   // nodes with the label" 로 스케줄되지 않아 빌드가 통째로 멈췄다. 배포를 `agent any` 로 두지 않는
   // 이유: 이 컨트롤러에는 다른 에이전트(prod 의 `oracle` 등)도 붙어 있는데 거기엔 staging 스택도
   // `docker/.env.staging` 도 없다.
+  //
+  // **built-in 단계는 전부 `customWorkspace 'workspace/codemit-deploy-staging'`** — 컨테이너의
+  // `/var/jenkins_home/workspace/codemit-deploy-staging`(호스트 `/server/jenkins/workspace/codemit-deploy-staging`)이고,
+  // 사람이 둔 `docker/.env.staging`(chmod 600)과 배포 표식 `.jenkins-staging-deployed` 가 거기 있다. 2026-10-23(#780)에
+  // 잡을 폴더 `codemit/` 로 옮겨 `deploy` 로 이름을 바꾸면서 기본 워크스페이스 경로가 바뀌었는데, 서버의 파일은 옮기지
+  // 않고 여기서 옛 자리를 붙잡았다. 상대 경로는 노드의 Remote root(컨트롤러는 `$JENKINS_HOME`) 기준이라 `workspace/`
+  // 를 붙인다(아래 prod 단계의 #520 교훈). 앞당기기 두 단계도 같은 자리를 쓴다 — 컨트롤러에 체크아웃을 하나만 두려는 것.
   agent none
 
   // 이미지는 이 잡이 앞 단계에서 굽고 배포는 ghcr 에서 받는다(deploy.sh 머리 주석). ghcr 가 막혔을
@@ -107,7 +114,7 @@ pipeline {
 
   stages {
     stage('대상 확인') {
-      agent { label 'built-in' }
+      agent { node { label 'built-in'; customWorkspace 'workspace/codemit-deploy-staging' } }
       steps {
         script {
           // 이 파일이 main 이 아닌 브랜치로 돌면(잡 브랜치 지정 실수) 시험을 거치지 않은 커밋을 staging 에
@@ -281,7 +288,7 @@ pipeline {
         beforeAgent true
         expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY }
       }
-      agent { label 'built-in' }
+      agent { node { label 'built-in'; customWorkspace 'workspace/codemit-deploy-staging' } }
       steps {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/fast_forward.py staging "$DEPLOY_SHA"'
@@ -294,7 +301,7 @@ pipeline {
         beforeAgent true
         expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY }
       }
-      agent { label 'built-in' }
+      agent { node { label 'built-in'; customWorkspace 'workspace/codemit-deploy-staging' } }
       stages {
         stage('Preflight') {
           steps {
@@ -529,7 +536,7 @@ pipeline {
         beforeAgent true
         expression { env.DOCS_ONLY != 'true' && !params.IMAGES_ONLY && params.PROMOTE_PRODUCTION }
       }
-      agent { label 'built-in' }
+      agent { node { label 'built-in'; customWorkspace 'workspace/codemit-deploy-staging' } }
       steps {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/fast_forward.py production "$DEPLOY_SHA"'

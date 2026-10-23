@@ -139,12 +139,12 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 
 **커밋이 prod 까지 가는 길은 넷이다**(2026-10-02, 둘째·셋째는 2026-10-15 에 한 잡으로 — #705):
 
-1. **브랜치 → PR → `main`.** Jenkins `codemit-ci-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
-   sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit-ci-train`(`Jenkinsfile.train`)이 줄 선
+1. **브랜치 → PR → `main`.** Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
+   sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit/ci-train`(`Jenkinsfile.train`)이 줄 선
    PR 을 최신 `main` 위에 묶어 e2e 까지 한 번 시험한 뒤 차례로 **rebase 병합**한다(초안·`hold`
    라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 staging 까지 간다.
-2. **`main` → `staging`.** `main` 의 push 가 웹훅으로 Jenkins `codemit-deploy-staging` 잡(`Jenkinsfile`)을 부른다.
+2. **`main` → `staging`.** `main` 의 push 가 웹훅으로 Jenkins `codemit/deploy` 잡(`Jenkinsfile`, #780 전 이름 `codemit-deploy-staging`)을 부른다.
    그 잡이 이미지(바뀐 서비스만, 아래)와 부팅 가드를 돌리고, 다 초록이면 구운 이미지에 문맥 태그를 붙인 뒤 `staging` 을 그 커밋으로
    **fast-forward** 한다(`scripts/ci/fast_forward.py staging <sha>`, 자격증명
    `github-sandcorporation-token`). 마지막 staging 배포(배포 표식) 뒤로 문서(`.md`·`docs/`)만 바뀌었으면
@@ -166,7 +166,7 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
    **전**에 앞당기고 웹훅이 별도 잡 `codemit-deploy-prod`(`Jenkinsfile.production`)를 깨웠다 — 그 파일은
    `Jenkinsfile` 의 배포 단계를 복제한 것이라 없앴다. **이 넷째 길은 지금 꺼져 있다**
    (2026-10-14, `Jenkinsfile` 의 `PROMOTE_PRODUCTION` 기본값 `false`) — 강의실 화면을 시안 v2 로
-   고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `codemit-deploy-staging` 잡을 「Build with
+   고치는 동안 커밋은 staging 까지만 간다. prod 로 보내려면 `codemit/deploy` 잡을 「Build with
    Parameters」 로 켜서 손으로 돌리거나 기본값을 되돌린다(2026-10-16 02:30 KST 에 그렇게 한 번
    승격했다 — `buildWithParameters?delay=…sec` 의 조용 기간으로 예약, DB 백업 02:00 과 겹치지 않게).
    **prod 만 다시 돌리고 싶을 때도 같은 길이다** — 같은 잡을 `PROMOTE_PRODUCTION=true` 로 다시 돌리면
@@ -192,7 +192,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 `workspace/` 가 아니다(`codemit-deploy-prod` 로 뒀던 #520 은 `/home/jenkins/agent/codemit-deploy-prod` 에 새로 clone 해
 「`.env.prod` 이 없다」로 멈췄다). 노드·`.env.prod` 는 저장소 밖에서 사람이 만든다.
 
-**이미지는 Jenkins `codemit-deploy-staging` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
+**이미지는 Jenkins `codemit/deploy` 잡이 굽는다 — staging·prod 서버는 받기만 한다**(2026-09-17 ghcr,
 2026-10-15 Jenkins — #705, ADR-0061). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
 배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 `Jenkinsfile` 의 「이미지」
 단계가 두 노드에서 함께 `scripts/ci/images.sh` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
@@ -254,7 +254,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   `.env.<target>`(#711), Jenkins 의 GitHub 쓰기는 자격증명 `github-sandcorporation-token`, GlitchTip 쓰기
   토큰은 Jenkins 자격증명 `glitchtip-automation-token` 이다. 조직 셀프호스티드 러너는 0대다(2026-10-15).
 
-**staging 배포는 `main` 의 push 가 부른다**(2026-10-15, #705). Jenkins 잡(`/var/jenkins_home/jobs/codemit-deploy-staging`)은
+**staging 배포는 `main` 의 push 가 부른다**(2026-10-15, #705). Jenkins 잡 `codemit/deploy`(`/var/jenkins_home/jobs/codemit/jobs/deploy`)는
 **Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main`,
 트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. 같은 빌드가 이미지 → 부팅 가드 → `staging` 앞당기기
 → 배포를 차례로 돌므로 배포 단계에 닿는 순간 이미지는 ghcr 에 있다. 단계마다 노드가 달라 다시
@@ -303,7 +303,7 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 끝나 배포를 실패로 만들지 않는다. 되돌리기는 ghcr 에서 다시 받는다.
 
 **그 정리는 호스트 디스크만 비운다 — ghcr 쪽은 따로 지운다**(2026-09-20, Jenkins 잡
-`codemit-ghcr-prune` — `Jenkinsfile.ghcr-prune`·`scripts/ci/ghcr_prune.py`, 2026-10-02 에 Actions
+`codemit/ghcr-prune` — `Jenkinsfile.ghcr-prune`·`scripts/ci/ghcr_prune.py`, 2026-10-02 에 Actions
 에서 옮겼다). 레지스트리에 쌓이는 옛 버전을 아무도 걷지 않아 **쓰기가 403 으로 막혔다**:
 09-18 까지 초록이던 이미지 잡이 09-20 부터 전부 ghcr 토큰 교환에서 403 을 받아 **배포가 이틀
 멈췄다**. 그때 실측이 이미지 여섯 99 버전 · 빌드 캐시(`codemit-buildcache`) **176 버전**이다 —
@@ -503,9 +503,10 @@ jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개�
 컨테이너도 경로도 없다).
 
 Jenkins 컨테이너는 호스트 docker 소켓을 물고 root 로 돈다. 빌드 로그는
-`docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/codemit-deploy-staging/builds/<N>/log'`.
-워크스페이스는 컨테이너의 `/var/jenkins_home/workspace/codemit-deploy-staging` 이자 호스트의
-`/server/jenkins/workspace/codemit-deploy-staging` 다 — **경로가 다르므로** compose 에 상대경로
+`docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/codemit/jobs/deploy/builds/<N>/log'`.
+워크스페이스는 `Jenkinsfile` 의 `customWorkspace 'workspace/codemit-deploy-staging'` 이 붙잡은 컨테이너의
+`/var/jenkins_home/workspace/codemit-deploy-staging` 이자 호스트의 `/server/jenkins/workspace/codemit-deploy-staging` 다(잡 이름이
+`codemit/deploy` 로 바뀐 #780 뒤에도 그대로) — **경로가 다르므로** compose 에 상대경로
 바인드 마운트를 넣으면 호스트 데몬이 엉뚱한 곳을 본다. 지금은 named volume 뿐이다.
 
 **마이그레이션이 앱마다 단일 initial 로 다시 만들어졌다**(#364, 부모 #358).

@@ -24,7 +24,7 @@
 #   GHCR_TOKEN / GHCR_USER     ghcr 쓰기 토큰(Jenkins `ghcr-push-token`). 없으면 노드의 로그인을 쓴다
 #   CODEMIT_IMAGES_MODE        push(기본) | plan | retag — plan 은 해시와 판단만 적고 굽지도 태그를 더하지도
 #                              않는다. retag 는 건너뛸 것에만 커밋 태그를 더하고 구울 것은 `서비스=pending` 으로
-#                              남긴다 — 빌더를 띄우지 않아 어느 노드에서나 돈다. `codemit-deploy-staging` 이 열차가
+#                              남긴다 — 빌더를 띄우지 않아 어느 노드에서나 돈다. `codemit/deploy` 가 열차가
 #                              이미 구운 커밋을 macos 없이 끝내는 길이다(#729, Jenkinsfile 「대상 확인」)
 #   CODEMIT_IMAGES_SERVICES    다룰 서비스(공백으로 가름, 기본 여섯 전부)
 #   CODEMIT_IMAGE_REGISTRY     기본 ghcr.io/sandcorporation (로컬 시험은 localhost:<포트>)

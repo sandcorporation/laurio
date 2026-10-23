@@ -28,7 +28,7 @@
 cherry-pick, 병합은 rebase 라 main 의 sha 가 다르다). 순서로만 자르면 이것들이 `--keep-images` 를 채워
 되돌리기 창(main 커밋의 이미지)이 줄었다. 그래서 `--main-shas`(main 의 커밋 목록 파일)를 주면, **커밋 태그가
 전부 main 에 없고 `ctx-` 태그도 없는** 버전을 먼저 지우고 나머지로 `keep` 을 센다. 초록 묶음의 이미지는 병합
-전에 ctx 가 붙고 `codemit-deploy-staging` 이 main 커밋 태그를 같은 버전에 더하므로 여기 들지 않는다. 지금 도는
+전에 ctx 가 붙고 `codemit/deploy` 가 main 커밋 태그를 같은 버전에 더하므로 여기 들지 않는다. 지금 도는
 열차의 이미지를 지우지 않도록 `--unmerged-grace-hours`(기본 6시간 — 열차 한도 45분의 여러 배) 안에 갱신된
 버전은 남긴다. 목록이 비었거나 `MIN_MAIN_SHAS` 보다 짧으면(얕은 체크아웃) 이 규칙을 쓰지 않는다.
 
