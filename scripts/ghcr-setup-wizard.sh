@@ -229,7 +229,7 @@ pause "계속하려면 Enter"
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
 stage "ghcr push 토큰 → Jenkins 자격증명 ghcr-push-token"
-say "이미지는 Jenkins 잡 codemit-deploy-staging 이 굽고 올립니다(#705 — macos 가 arm64, sub 가 amd64). 쓰기 토큰이 필요합니다."
+say "이미지는 Jenkins 잡 codemit/deploy 가 굽고 올립니다(#705 — macos 가 arm64, sub 가 amd64). 쓰기 토큰이 필요합니다."
 open_url "https://github.com/settings/tokens/new?scopes=write:packages&description=codemit-ghcr-push"
 step "Select scopes: write:packages(read:packages 가 따라 붙습니다) → Generate token → 복사"
 step "Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials"

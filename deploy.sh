@@ -25,7 +25,7 @@
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
-# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `codemit-deploy-staging` 잡의
+# **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `codemit/deploy` 잡의
 # 앞 단계가 커밋마다 여섯 이미지를 ghcr 에 올린다(scripts/ci/images.sh — amd64 는 sub, arm64 는
 # macos 가 굽고, 바뀌지 않은 서비스는 옛 이미지에 커밋 태그만 더한다, #705) — backend·
 # search·pgbouncer 와 세 앱 모두 `<sha>-amd64`(staging)·`<sha>-arm64`(prod) 다 — 앱도 환경을
@@ -637,7 +637,7 @@ cmd_pull() {
   # shellcheck disable=SC2086
   if ! $COMPOSE pull $services; then
     echo "ghcr 에 이 커밋($CODEMIT_IMAGE_TAG)의 $1 이미지가 없거나 받을 수 없다."
-    echo "codemit-deploy-staging 잡의 이미지 단계가 끝났는지(prod 는 macos 노드), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
+    echo "codemit/deploy 잡의 이미지 단계가 끝났는지(prod 는 macos 노드), 저장해 둔 PAT 가 만료되지 않았는지 확인하라."
     echo "급하면 DEPLOY_IMAGE_SOURCE=build."
     exit 1
   fi

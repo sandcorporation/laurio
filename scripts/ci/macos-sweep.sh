@@ -10,6 +10,8 @@
 #
 # 이름은 Jenkins 의 BUILD_TAG(`jenkins-<잡 이름>-<번호>`)에서 온다(CODEMIT_CI_RUN_ID, e2e.sh·celery-broker.sh).
 # #708(2026-10-15)이 잡 이름을 codemit-pr → codemit-ci-pr, codemit-train → codemit-ci-train 으로 바꿨다.
+# #780(2026-10-23)이 잡을 폴더 codemit/ 로 옮겨 ci-pr·ci-train 이 됐지만 BUILD_TAG 는 전체 이름의 / 를 - 로 바꾼
+# jenkins-codemit-ci-pr-N·jenkins-codemit-ci-train-N 그대로라 아래 패턴은 바뀌지 않았다.
 # **옛 이름 jenkins-codemit-(pr|train)- 도 같이 걷는다** — rename 직전에 중단된 빌드가 남긴 것이다.
 # 지울 때: rename 뒤 macos 에서 `docker ps -a`·`docker volume ls`·`docker image ls` 에 옛 이름이 하나도
 # 없음을 본 뒤 아래 PAT 에서 `|pr|train` 을 빼고 `ci-(pr|train)` 만 남긴다 — 2026-11-15 이후 #735 로 지운다.
