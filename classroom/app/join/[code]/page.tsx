@@ -4,6 +4,9 @@
 // (`index: false, follow: false`)을 그대로 쓴다 — 가입 코드는 반쯤 비공개 주소다.
 import type { Metadata } from "next";
 
+// 서버가 런타임 env(CODEMIT_API_BASE_URL)로 백엔드를 부른다 — 빌드 때 굽지 않는다.
+export const dynamic = "force-dynamic";
+
 import { backendBaseUrl } from "@/lib/auth/backend";
 import { fetchJoinPreviewForCard, joinShareMetadata } from "@/lib/join/share-metadata";
 

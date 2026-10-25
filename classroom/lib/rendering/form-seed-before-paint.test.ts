@@ -134,7 +134,7 @@ describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌�
   );
 
   it("이름이 state 가 아니어도, useLayoutEffect 여도 잡고 함수형 갱신은 통과시킨다", () => {
-    const join = SCREENS.find((s) => s.file.endsWith(path.join("join", "[code]", "page.tsx")))!;
+    const join = SCREENS.find((s) => s.file.endsWith(path.join("join", "[code]", "join-view.tsx")))!;
     const names = hookResultNames(join.source);
     const functional = 'setDisplayName((current) => (current === "" ? preview.preview.suggested_name! : current));';
     expect(join.source).toContain(functional);
@@ -174,7 +174,7 @@ describe("읽은 값으로 폼 칸을 채우는 일은 효과가 아니라 렌�
   });
 
   it("Next 내비게이션 훅이 돌려준 값은 읽은 상태가 아니다(#697)", () => {
-    const join = SCREENS.find((s) => s.file.endsWith(path.join("join", "[code]", "page.tsx")))!;
+    const join = SCREENS.find((s) => s.file.endsWith(path.join("join", "[code]", "join-view.tsx")))!;
     const params = "const params = useParams<{ code: string }>();";
     expect(join.source).toContain(params);
     expect(join.source).toContain("const router = useRouter();");
