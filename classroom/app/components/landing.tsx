@@ -12,9 +12,9 @@ import Link from "next/link";
 
 import { Badge, Card, PageShell, buttonClass } from "@/app/components/ui";
 
-export const LANDING_TITLE = "Codemit 클래스 — AI가 채점하는 코드 문제";
-export const LANDING_DESCRIPTION =
-  "문제를 내고 가입 링크로 참여자를 부르면, 제출할 때마다 AI가 체크리스트 항목별로 채점해 통과 여부를 보여줍니다.";
+import { LANDING_DESCRIPTION, LANDING_TITLE } from "@/lib/landing-copy";
+
+export { LANDING_DESCRIPTION, LANDING_TITLE };
 
 const STEPS = [
   {

@@ -62,3 +62,44 @@ test("로그아웃 상태로 가입 링크를 열고 로그인하면 같은 가�
   await expect(page).toHaveURL(`/classes/${classId}/problems/mine`);
   await expect(page.getByTestId("my-problems-progress-count")).toHaveText("0/1 통과");
 });
+
+// 공유 카드(#788) — 크롤러는 JS 를 돌리지 않으므로 서버가 만든 `<head>` 를 본다. 비로그인으로 연다.
+// 살아 있는 코드는 클래스 이름·문제 수를, 죽은 코드는 이유 없이 일반 카드를 낸다. 강사 이름·참여자 수는 없다.
+test("가입 링크의 공유 카드는 클래스 이름과 한 줄 설명을 싣고, 죽은 코드는 일반 카드다", async ({
+  page,
+}) => {
+  const stamp = `${test.info().workerIndex}-${Date.now()}`;
+  const className = `공유 카드 ${stamp}`;
+  await establishClassroomSession(page, `e2e-join-card-${stamp}`);
+  const api = classroomApi(page);
+  const created = await api.post("/api/backend/classroom/classes", {
+    data: { name: className, instructor_display_name: "김비공개" },
+  });
+  expect(created.ok()).toBeTruthy();
+  const base = `/api/backend/classroom/classes/${(await created.json()).id}`;
+  const joinCode = (await (await api.get(base)).json()).join_code as string;
+  await page.context().clearCookies();
+
+  // 메신저 크롤러처럼 JS 없이 HTML 만 받는다(봇 UA 면 Next 가 메타데이터를 `<head>` 에 싣는다).
+  const head = async (path: string) => {
+    const res = await page.request.get(path, { headers: { "user-agent": "facebookexternalhit/1.1" } });
+    expect(res.status()).toBe(200);
+    const html = await res.text();
+    const meta = (name: string) => {
+      const tag = html.match(new RegExp(`<meta[^>]*(?:property|name)="${name}"[^>]*>`))?.[0] ?? "";
+      return tag.match(/content="([^"]*)"/)?.[1] ?? null;
+    };
+    return { html, meta };
+  };
+
+  const live = await head(`/join/${joinCode}`);
+  expect(live.meta("og:title")).toBe(`${className} — Codemit 클래스`);
+  expect((live.meta("og:description") ?? "").length).toBeGreaterThan(0);
+  expect(live.meta("twitter:card")).toBe("summary_large_image");
+  expect(live.meta("robots")).toContain("noindex");
+  expect(live.html).not.toContain("김비공개");
+
+  const dead = await head("/join/no-such-code-0000");
+  expect(dead.meta("og:title")).toBe("Codemit 클래스");
+  expect((dead.meta("og:description") ?? "").length).toBeGreaterThan(0);
+});
