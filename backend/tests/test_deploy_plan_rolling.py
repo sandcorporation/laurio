@@ -8,8 +8,14 @@
 
 풀러의 정의가 그대로면 풀러를 바꿀 까닭이 없다. 이 시험은 임시 git 저장소에 직전 배포와
 지금 커밋을 만들고 진짜 `deploy.sh prod plan` 을 돌린다. `docker` 는 PATH 의 가짜다 — 컨테이너는
-다 떠 있다고 답하고, `compose -f <파일> config <서비스>` 에는 그 파일의 그 서비스 정의를
-내놓는다(compose 가 렌더한 정의를 비교하는 자리를 그대로 흉내 낸다).
+다 떠 있다고 답하고, `compose -f <파일> config <서비스>` 에는 진짜 compose 처럼 그 서비스와
+그것이 `depends_on` 으로 기대는 서비스의 정의를 함께 내놓는다. `config --hash pgbouncer` 에는
+풀러 자신의 정의만으로 낸 해시를 낸다(진짜 compose 도 그 서비스만 해시한다).
+
+2026-10-26 prod(GlitchTip 75 재발): #790 이 `db`·`redis` 이미지를 digest 로 고정했다. `db` 는
+배포가 다시 만들지 않는데(`up --no-recreate`), 풀러 비교가 `config pgbouncer` 의 렌더 —
+`depends_on` 의 `db` 까지 든 — 를 견줘 「풀러가 바뀌었다」가 됐고, backend 넷이 31초 내려가
+공개 앱 `/contests` 가 `fetch failed`(ENOTFOUND backend)로 500 을 냈다.
 """
 
 from __future__ import annotations
@@ -49,19 +55,31 @@ while [ $# -gt 0 ]; do
 done
 case "$1" in
   ps) [ "$2" = -q ] && echo "cid-$3" ;;
-  config) shift; [ "$1" = --hash ] && { echo "$2 same"; exit 0; }; exec "$(dirname "$0")/docker-config" "$compose_file" "$@" ;;
+  config) shift; exec "$(dirname "$0")/docker-config" "$compose_file" "$@" ;;
 esac
 exit 0
 """
 
+# `--hash` 는 풀러만 진짜로 낸다 — 세 앱의 해시는 위 `inspect` 와 같은 `same` 이다.
 FAKE_DOCKER_CONFIG = f"""#!{sys.executable}
-import json, sys
+import hashlib, json, sys
 import yaml
 
 compose_file, *names = sys.argv[1:]
 with open(compose_file, encoding="utf-8") as f:
     services = yaml.safe_load(f)["services"]
-print(json.dumps({{s: services[s] for s in names}}, sort_keys=True))
+if names[0] == "--hash":
+    for s in names[1:]:
+        digest = hashlib.sha256(json.dumps(services[s], sort_keys=True).encode()).hexdigest()
+        print(s, digest if s == "pgbouncer" else "same")
+    sys.exit(0)
+rendered, todo = {{}}, list(names)
+while todo:
+    s = todo.pop()
+    if s not in rendered:
+        rendered[s] = services[s]
+        todo.extend(services[s].get("depends_on") or ())
+print(json.dumps(rendered, sort_keys=True))
 """
 
 
@@ -170,6 +188,24 @@ def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(pooler_ch
 
     assert plan["BUILD_PGBOUNCER"] == "true"
     assert plan["ROLLING_BACKEND"] == "false"
+
+
+@pytest.fixture
+def db_image_pinned(tmp_path):
+    # #790 의 모양 — 풀러가 기대는 db 의 이미지만 digest 로 고정한다.
+    def change(compose: str) -> str:
+        changed = compose.replace("image: postgres:17-alpine@sha256:", "image: postgres:17-alpine@sha256:0", 1)
+        assert changed != compose
+        return changed
+
+    return _prepare(tmp_path, change)
+
+
+def test_compose_change_to_the_db_the_pooler_relies_on_leaves_the_pooler_alone(db_image_pinned):
+    plan = _plan(db_image_pinned)
+
+    assert plan["BUILD_PGBOUNCER"] == "false"
+    assert plan["ROLLING_BACKEND"] == "true"
 
 
 # 이미지 문맥 해시로 고른다(#712, codemit-deploy-staging #474) — 문맥 밖 파일만 바뀐 커밋은 그 앱을 다시 띄우지 않는다.
