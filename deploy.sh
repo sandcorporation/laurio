@@ -22,6 +22,7 @@
 #   e2e-digest          떠 있는 앱·backend 가 열차의 e2e 가 본 이미지인지 견준다(prod, 관측만 — #729)
 #   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
+#   recreate-infra      db·redis 를 compose 의 이미지(digest)대로 다시 만든다 — 사람이 손으로만(#790)
 #   mark                배포 표식을 지금 커밋으로 옮긴다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
@@ -828,8 +829,11 @@ cmd_up() {
   fi
 
   # 인프라는 항상 떠 있어야 한다(idempotent — 이미 떠 있으면 아무 일도 일어나지
-  # 않는다).
-  $COMPOSE up -d db redis
+  # 않는다). **`--no-recreate`**(#790): 같은 호스트의 다른 프로젝트가 `redis:7-alpine`
+  # 태그를 새로 받으면 compose 가 이미지 id 가 달라졌다며 redis·db 를 재생성해 Redis
+  # 가 비워졌다. 기반 서비스는 배포가 건드리지 않는다 — 올릴 때는 compose 의 digest 를
+  # 커밋으로 바꾸고 `deploy.sh recreate-infra` 로 한다.
+  $COMPOSE up -d --no-recreate db redis
   # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
 
   if [ "$BUILD_PGBOUNCER" = true ]; then
@@ -1201,6 +1205,14 @@ cmd_prune() {
   return 0
 }
 
+# 기반 서비스(db·redis)를 의도적으로 바꿀 때만 쓴다(#790). `up` 은 `--no-recreate` 라
+# 건드리지 않는다. compose 의 digest 를 커밋으로 바꾼 뒤 사람이 부른다 — Redis 는 비워지고
+# db 는 잠시 끊긴다.
+cmd_recreate_infra() {
+  log "db·redis 를 compose 의 이미지대로 다시 만든다(의도적 재생성)."
+  $COMPOSE up -d --no-deps $UP_FLAGS db redis
+}
+
 # ------------------------------------------------------------------ 진입점
 
 case "$COMMAND" in
@@ -1223,6 +1235,7 @@ case "$COMMAND" in
     cmd_health "$ARG"
     ;;
   reindex) cmd_reindex_search ;;
+  recreate-infra) cmd_recreate_infra ;;
   mark) cmd_mark ;;
   prune) cmd_prune ;;
   all)

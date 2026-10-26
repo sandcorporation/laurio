@@ -282,7 +282,7 @@ x-backend-env: &backend-env
 services:
   db:
     logging: *default-logging
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?prod POSTGRES_DB 를 .env.prod 에 설정하라}
       POSTGRES_USER: ${POSTGRES_USER:?prod POSTGRES_USER 를 .env.prod 에 설정하라}
@@ -301,7 +301,7 @@ services:
 
   redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
     logging: *default-logging
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
     # AOF 는 기본으로 꺼져 있다. 세션을 여기 얹었으므로(#43) 켜지 않으면 RDB
     # 스냅샷 창 안의 재시작이 조사 중인 운영자를 전부 튕긴다 — dev 와 같은 이유다.
     command: ["redis-server", "--appendonly", "yes"]

@@ -330,6 +330,13 @@ main 커밋의 되돌리기 창이 줄었다. 잡이 main 의 커밋 목록(`--m
 **되돌릴 수 없지만 돌고 있는 서비스는 영향이 없다**: 배포된 이미지는 이미 그 호스트에 있고,
 지워서 잃는 것은 그 커밋으로 pull 해 되돌리는 길뿐이다(최근 몇 커밋은 남는다).
 
+**기반 서비스(db·redis)는 배포가 건드리지 않는다**(#790, 2026-10-26). `deploy.sh up` 은
+`up -d --no-recreate db redis` 이고 compose 의 두 이미지는 멀티아키 인덱스 digest 로 고정이다
+(`redis:7-alpine@sha256:…`). 같은 호스트의 다른 프로젝트가 `redis:7-alpine` 태그를 새로 받으면
+compose 가 이미지 id 가 달라졌다며 redis 를 재생성해(prod 10-26 00:03) 큐가 비워졌다. 올릴 때는
+compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh <staging|prod> recreate-infra`
+를 손으로 부른다(Redis 비워짐·db 잠깐 끊김을 감수할 때만).
+
 **backend·events 는 겹쳐 바꾼다 — 배포 중에도 요청이 끊기지 않는다**(#485, 2026-09-22).
 예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(staging
 실측, GlitchTip 64·74·75 — BFF 재시도 예산 약 15.8초보다 길었다). 지금은 `deploy.sh` 의
