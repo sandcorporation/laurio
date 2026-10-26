@@ -96,10 +96,14 @@ test("가입 링크의 공유 카드는 클래스 이름과 한 줄 설명을 �
   expect(live.meta("og:title")).toBe(`${className} — Codemit 클래스`);
   expect((live.meta("og:description") ?? "").length).toBeGreaterThan(0);
   expect(live.meta("twitter:card")).toBe("summary_large_image");
+  expect(live.meta("og:image")).toMatch(/\/opengraph-image/);
+  expect(live.meta("twitter:image")).toMatch(/\/opengraph-image/);
   expect(live.meta("robots")).toContain("noindex");
   expect(live.html).not.toContain("김비공개");
 
   const dead = await head("/join/no-such-code-0000");
   expect(dead.meta("og:title")).toBe("Codemit 클래스");
   expect((dead.meta("og:description") ?? "").length).toBeGreaterThan(0);
+  expect(dead.meta("og:image")).toMatch(/\/opengraph-image/);
+  expect(dead.meta("twitter:image")).toMatch(/\/opengraph-image/);
 });

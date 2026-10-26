@@ -17,12 +17,24 @@ export const MAX_CLASS_NAME_LENGTH = 60;
 
 const GRADING = "제출할 때마다 AI가 체크리스트 항목별로 채점합니다";
 
+// 세그먼트가 `openGraph`·`twitter` 를 내면 Next 는 그 객체를 통째로 교체해 루트
+// `app/opengraph-image.tsx` 가 채우던 `images` 상속이 끊긴다(#791). 그래서 같은 이미지를 명시한다.
+// 상대 경로는 `metadataBase` 기준 절대 주소가 된다. 파일 컨벤션이 붙이는 `?<해시>` 는 캐시
+// 무효화용이라 뺀다(경로 자체가 이미지를 낸다).
+export const SHARE_IMAGE = {
+  url: "/opengraph-image",
+  alt: "Codemit 클래스",
+  width: 1200,
+  height: 630,
+  type: "image/png",
+};
+
 function card(title: string, description: string): Metadata {
   return {
     title,
     description,
-    openGraph: { title, description, type: "website" },
-    twitter: { card: "summary_large_image", title, description },
+    openGraph: { title, description, type: "website", images: [SHARE_IMAGE] },
+    twitter: { card: "summary_large_image", title, description, images: [SHARE_IMAGE] },
   };
 }
 
