@@ -25,6 +25,26 @@ describe("joinShareMetadata", () => {
     expect((m.twitter as { card?: string }).card).toBe("summary_large_image");
   });
 
+  it("정상 카드와 일반 카드 모두 루트 OG 이미지를 명시한다 — 상속이 끊기므로(#791)", () => {
+    for (const m of [
+      joinShareMetadata(base),
+      joinShareMetadata(null),
+      joinShareMetadata({ ...base, archived: true }),
+    ]) {
+      for (const images of [m.openGraph?.images, m.twitter?.images]) {
+        expect(images).toEqual([
+          {
+            url: "/opengraph-image",
+            alt: "Codemit 클래스",
+            width: 1200,
+            height: 630,
+            type: "image/png",
+          },
+        ]);
+      }
+    }
+  });
+
   it("열린 문제가 0개면 문제 수 조각을 뺀다", () => {
     const m = joinShareMetadata({ ...base, open_problem_count: 0 });
     expect(m.description).toBe("제출할 때마다 AI가 체크리스트 항목별로 채점합니다");
