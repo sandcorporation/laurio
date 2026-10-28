@@ -729,7 +729,7 @@ CONTEXT.md 「Withdrawal」) — 신원이 사라지면 참여자들이 새 문�
 새 값을 쓴다 — 저장한 키 자체는 다시 보여주지 않는다.
 
 **「채점 연결」은 「OpenAI 키」·「Claude(Anthropic) 키」·「호환 서버」 중 하나를 고른다**(#601, #796, CONTEXT.md 「채점 연결」,
-ADR-0058). 「호환 서버」를 고르면 주소(`https://…/v1`)와 인증 값(`Authorization: Bearer`, 비워 둘 수
+ADR-0058). 개인정보처리방침 개정 시행일 전에는(#803) 서버가 `anthropic_key_selectable=false` 를 주고 「Claude(Anthropic) 키」 선택지가 보이지 않는다 — 시행일에 저절로 나타난다(`lib/classes/connection-kinds.ts`). 「호환 서버」를 고르면 주소(`https://…/v1`)와 인증 값(`Authorization: Bearer`, 비워 둘 수
 있다) 칸, 「확인하고 저장」이 나온다. 저장할 때 서버에 한 번 닿아 모델 목록을 받아 보고, 거부되면
 이유를 한 문장으로 말한다(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·인증 실패) — 기존
 연결은 그대로 남는다. 저장되면 폼이 닫히고 상태 줄이 「호환 서버」·호스트·인증 값 끝 네 자리를 보인다. 상태 줄

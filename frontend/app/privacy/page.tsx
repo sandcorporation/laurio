@@ -31,8 +31,11 @@ export const metadata = {
   description: "Codemit 이 수집하는 개인정보 항목과 보유 기간, 위탁·국외 이전 상대를 밝힙니다.",
 };
 
-const EFFECTIVE_DATE = "2026년 10월 3일";
-const PREVIOUS_EFFECTIVE_DATE = "2026년 9월 21일";
+// 시행일은 백엔드 설정 `PRIVACY_POLICY_EFFECTIVE_DATE` 와 같은 값이다 — 시행일 전 Claude(Anthropic)
+// 키 저장 잠금이 그 설정을 본다(#803, `backend/tests/test_privacy_policy_lock.py` 가 두 값이 같은지 지킨다).
+// 이 파일은 백엔드 없이도 그려져야 하므로 값을 요청으로 받지 않고 나란히 고친다.
+const EFFECTIVE_DATE = "2026년 11월 6일";
+const PREVIOUS_EFFECTIVE_DATE = "2026년 10월 3일";
 
 function Article({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -68,7 +71,7 @@ export default function PrivacyPolicyPage() {
         <Article title="1. 수집하는 개인정보의 항목과 수집 방법">
           <p>
             서비스는 회원가입과 각 기능을 이용하는 시점에 그 기능에 필요한 항목만 수집합니다.
-            둘러보기만 하는 이용자의 개인정보는 수집하지 않습니다.
+            둘러보기만 하는 이용자에게서는 아래 방문 기록 외의 개인정보를 수집하지 않습니다.
           </p>
           <Items>
             <li>
@@ -82,6 +85,10 @@ export default function PrivacyPolicyPage() {
             <li>클래스 이용: 해당 클래스에서 사용할 표시 이름(참여자가 직접 입력), 제출한 소스코드</li>
             <li>클래스 개설: 강사가 등록한 인공지능 서비스 키(암호화하여 저장)</li>
             <li>서비스 이용 중: 로그인 상태 유지와 화면 설정을 위한 쿠키(9항)</li>
+            <li>
+              서비스 이용 중: 방문한 페이지의 주소와 유입 경로(쿠키와 이용자 식별자 없이 방문 수를
+              집계하는 데에만 쓰며, 회원 정보와 연결하지 않습니다)
+            </li>
           </Items>
           <p>
             수집 방법은 회원이 서비스 화면에서 직접 입력하거나, 소셜 로그인 제공자로부터 회원의
@@ -157,6 +164,10 @@ export default function PrivacyPolicyPage() {
           <p>서비스는 원활한 서비스 제공을 위해 다음과 같이 개인정보 처리 업무를 위탁합니다.</p>
           <Items>
             <li>OpenAI, L.L.C. — 제출물의 채점(위탁 항목: 제출한 소스코드와 자가 응답)</li>
+            <li>
+              Anthropic, PBC — 강사가 Claude 키로 채점을 연결한 클래스의 제출물 채점(위탁 항목:
+              제출한 소스코드)
+            </li>
             <li>Oracle Corporation — 제출 파일과 이미지의 보관(위탁 항목: 제출물 파일)</li>
           </Items>
           <p>
@@ -168,6 +179,7 @@ export default function PrivacyPolicyPage() {
 
         <Article title="6. 개인정보의 국외 이전">
           <p>서비스는 제출물의 채점을 위해 다음과 같이 개인정보를 국외로 이전합니다.</p>
+          <p>① OpenAI, L.L.C.</p>
           <Items>
             <li>이전받는 자: OpenAI, L.L.C.</li>
             <li>이전되는 국가: 미국</li>
@@ -176,9 +188,23 @@ export default function PrivacyPolicyPage() {
             <li>이전 목적: 요구사항 충족 여부의 자동 채점과 판정 근거 생성</li>
             <li>보유·이용 기간: 채점에 필요한 기간</li>
           </Items>
+          <p>② Anthropic, PBC</p>
+          <Items>
+            <li>이전받는 자: Anthropic, PBC</li>
+            <li>이전되는 국가: 미국</li>
+            <li>이전 일시와 방법: 채점할 때마다 정보통신망을 통해 전송</li>
+            <li>이전 항목: 강사가 Claude 키로 채점을 연결한 클래스에서 제출한 소스코드</li>
+            <li>이전 목적: 요구사항 충족 여부의 자동 채점과 판정 근거 생성</li>
+            <li>
+              보유·이용 기간: 이전받는 자가 받은 날부터 30일 이내에 삭제(이용 정책 위반으로
+              분류된 경우 최대 2년)
+            </li>
+          </Items>
           <p>
             채점 결과에 함께 표시되는 판정 근거에는 제출한 소스의 일부가 인용될 수 있습니다.
-            클래스의 채점은 강사가 등록한 키로 이루어지며, 이전받는 자와 이전 항목은 위와 같습니다.
+            클래스의 채점은 강사가 등록한 키로 이루어지며, 강사가 OpenAI 키를 등록한 클래스는
+            OpenAI, L.L.C. 로, Claude(Anthropic) 키를 등록한 클래스는 Anthropic, PBC 로 이전되고
+            이전 항목은 위와 같습니다.
           </p>
           <p>
             정보주체는 국외 이전을 거부할 수 있습니다. 다만 거부하는 경우 제출물의 채점을 이용할

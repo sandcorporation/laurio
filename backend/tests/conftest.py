@@ -17,6 +17,8 @@ import os
 import resource
 import time
 
+from datetime import date
+
 import pytest
 from django.core.cache import caches
 from django.db import connections
@@ -362,3 +364,11 @@ def _reset_operator_sessions():
     caches["sessions"].clear()
     yield
     caches["sessions"].clear()
+
+
+@pytest.fixture(autouse=True)
+def _privacy_policy_already_in_effect(settings):
+    """방침 개정 시행일(#803)이 지난 상태를 기본으로 한다 — Claude 키 저장 잠금은 그것을 보는
+    시험(`test_privacy_policy_lock.py`)만 시행일을 미래로 되돌린다."""
+
+    settings.PRIVACY_POLICY_EFFECTIVE_DATE = date(2000, 1, 1)
