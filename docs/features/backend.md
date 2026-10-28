@@ -751,6 +751,10 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 백업은 기록된 키로 지운다. 이력은 `DatabaseBackup` 행이다. tick 이나 `/scans/{name}` 으로는 돌지
 않는다.
 
+**두 번째 정해진 시각의 작업은 모델 단가 표 대조다(#798) — 매일 04:10(서울).** beat 가 `classroom.check_price_drift`
+를 부르고, 워커가 LiteLLM 단가 파일 한 주소를 받아 `scoring_cost.PRICES` 와 견준다(표에 없는 쓰인 모델·1% 초과·
+받기 실패·형식 바뀜일 때만 GlitchTip 경고, 표는 고치지 않는다 — `docs/ops/operations.md`). 내부 HTTP 를 거치지 않는다.
+
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.

@@ -361,6 +361,13 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
 ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
 ```
 
+**모델 단가 표 대조 알림은 GlitchTip 경고로 간다**(2026-10-28, #798). 매일 04:10(서울) beat 가
+`classroom.check_price_drift` 를 돌려 `classroom/scoring_cost.py` 의 `PRICES` 를 LiteLLM 단가 파일과
+견주고, (a) 최근 7일 채점에 쓰였는데 표에 없는 모델 (b) 상대 차이 1% 초과 (c) 파일을 못 받음·형식 바뀜이면
+`PriceDriftAlert` 경고 하나를 보낸다(지문 `["price-drift", 종류]`, 태그 `alert=price-drift` — 같은 종류는 이슈
+하나로 묶인다). 다 맞으면 로그 한 줄뿐이다. 오류 수집기가 꺼진 dev·CI 에서는 바깥에 나가지 않는다. **표는
+자동으로 고치지 않는다** — 사람이 공식 가격 페이지를 보고 고친다. 자동 진단은 예외 이름으로 이것을 거른다.
+
 **그 오류를 에이전트가 집어 진단한다**(2026-09-18). Orca automation 「GlitchTip prod 오류
 진단」이 매분 `scripts/glitchtip_pick.py` 를 precheck 로 돌려 **prod 의 미해결·미클레임
 오류 하나**를 고르고(프로젝트 slug 가 `codemit-` 인 것만 — 같은 GlitchTip 조직에 2026-10-16 부터
@@ -424,6 +431,7 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   하나가 「사고가 아니다」라고 스스로 적힌 예외를 재현하려 애쓴다. 판정은
   `metadata.type`(예외 클래스 이름)으로 한다, 제목 문자열이 아니다 — 그 메시지는
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
+  `PriceDriftAlert`(#798, 아래 「모델 단가 표 대조」)도 같은 목록에 있다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
   `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Jenkins
   `codemit/ci-pr` 가 sub 검사로 줄 세우고 열차 `codemit/ci-train` 이 초록 묶음을 `main` 에 병합하고, **곧바로 그 PR 범위**
