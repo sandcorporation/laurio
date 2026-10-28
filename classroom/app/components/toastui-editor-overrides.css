@@ -30,6 +30,11 @@
 
 .codemit-toastui-editor .toastui-editor-defaultUI-toolbar {
   background-color: var(--color-surface);
+  /* 라이브러리는 칸 폭을 재서 넘치는 단추를 「…」로 접는다. 그 재기가 어긋나 단추
+   * 줄이 접히지 않은 채 남으면 줄이 칸 밖으로 삐져나가 페이지에 가로 스크롤을
+   * 만든다(#813) — 그 경우에도 줄만 칸 안에서 옆으로 밀리게 한다. */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .codemit-toastui-editor .toastui-editor-md-tab-container {

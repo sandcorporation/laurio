@@ -111,3 +111,13 @@ test("미리보기 탭은 지금 입력한 제목을 참여자 화면으로 비�
   await expect(page.getByTestId("edit-problem-preview-panel")).toContainText("저장 전 제목");
   await expect(page.getByTestId("edit-problem-preview-panel")).toContainText("통과 조건");
 });
+
+test("390px 폭에서 설명 편집기가 페이지에 가로 스크롤을 만들지 않는다 (#813)", async ({ page }) => {
+  const { classId, problemId } = await seedProblem(page, `edit-narrow-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"]);
+  await page.setViewportSize({ width: 390, height: 900 });
+  for (const path of [`/classes/${classId}/problems/new`, `/classes/${classId}/problems/${problemId}`]) {
+    await page.goto(path);
+    await expect(page.locator(".toastui-editor-defaultUI-toolbar")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  }
+});
