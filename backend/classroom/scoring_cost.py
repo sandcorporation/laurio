@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from django.db.models import Avg, Count
@@ -76,7 +77,7 @@ class ModelPrice:
     long_context_output_multiplier: float = 1.0
 
 
-#: 모델별 단가(USD / 100만 토큰, 2026-10 기준, 표준 등급). 여기 없는 모델은 「비용 미확인」이다 —
+#: 모델별 단가(USD / 100만 토큰, 2026-10 기준, 표준 등급). 여기 없는 모델은 「단가 모름」이다(`price_for`) —
 #: 모델 카탈로그가 아는 모델(`scoring_models._KNOWN_CONTEXT_WINDOWS`)은 전부 여기 있어야 한다(#617).
 #: 출처: https://developers.openai.com/api/docs/pricing (2026-10-06 확인 — gpt-5.1 도 이 표에서
 #: 확인했다), 교차 확인 https://www.morphllm.com/openai-api-pricing ·
@@ -117,6 +118,37 @@ PRICES: dict[str, ModelPrice] = {
     "claude-sonnet-5": ModelPrice(2.00, 10.00),
     "claude-sonnet-4-6": ModelPrice(3.00, 15.00),
 }
+
+
+#: 단가표에 없는 모델의 비용을 부르는 한 이름(#797) — 화면·MCP 가 같은 낱말을 쓴다. 호환 서버의
+#: 「토큰만」(#604)과는 다르다: 그쪽은 단가를 **알 수 없는** 연결이고, 이쪽은 단가를 **아직 못 적은** 모델이다.
+PRICE_UNKNOWN = "단가 모름"
+
+#: 모델 이름 끝의 날짜 접미사(`-2024-07-18`·`-20251001`)와 `-latest` — 같은 모델의 변형이다.
+#: Claude 의 `-5-5` 같은 버전 마디는 날짜가 아니라 이름의 일부라 떼지 않는다(마디가 두 자리 수까지).
+_NAME_VARIANT_SUFFIX = re.compile(r"(?:-\d{4}-\d{2}-\d{2}|-\d{8}|-latest)$")
+
+
+def canonical_model_id(model_id: str) -> str:
+    """날짜·`-latest` 접미사를 뗀 표준 이름(#797) — `gpt-4o-mini-2024-07-18` → `gpt-4o-mini`,
+    `claude-haiku-4-5-20251001` → `claude-haiku-4-5`. 접미사가 없으면 그대로, 접두어만 같은 다른 모델
+    (`gpt-4o` 와 `gpt-4o-mini`)은 건드리지 않는다. 단가표에 있는지는 보지 않는다 — `price_for` 가 본다."""
+
+    return _NAME_VARIANT_SUFFIX.sub("", model_id.strip(), count=1)
+
+
+def price_for(model_id: str) -> ModelPrice | None:
+    """모델의 단가 — 이름을 표준으로 맞춘 뒤에도 표에 없으면 `None`(「단가 모름」, #797)."""
+
+    return PRICES.get(model_id) or PRICES.get(canonical_model_id(model_id))
+
+
+def sum_known_krw(amounts: "list[float | None]") -> tuple[float, bool]:
+    """여러 모델의 원화를 더한다 — (합계, 일부 미포함). 단가를 모르는 항목(`None`)은 합계에 넣지 않고
+    `True` 로 알린다: 모르는 것을 0원으로 더해 합계가 작아 보이게 하지 않는다(#797)."""
+
+    known = [a for a in amounts if a is not None]
+    return sum(known), len(known) < len(amounts)
 
 
 @dataclass(frozen=True)
@@ -172,7 +204,7 @@ def _takes_effort(model_id: str) -> bool:
 def attempt_cost(model_id: str, reasoning_effort: str | None, *, prompt_chars: int) -> AttemptCost | None:
     """시도 하나를 이 모델·강도로 채점하는 어림 비용 — 단가표에 없는 모델은 `None`."""
 
-    price = PRICES.get(model_id)
+    price = price_for(model_id)
     if price is None:
         return None
     effort = _effort_for(model_id, reasoning_effort)
@@ -289,7 +321,7 @@ def estimate(
     """이 클래스(와 문제)의 예상 채점 비용표.
 
     줄은 이 키로 쓸 수 있는 모델(`catalog_model_ids`) 전부를 카탈로그 순서로, 그 뒤에 카탈로그에
-    없는 지금 설정(`current_model_ids`)을 — 단가가 없는 모델만 「비용 미확인」 줄이다(#617)."""
+    없는 지금 설정(`current_model_ids`)을 — 단가가 없는 모델만 「단가 모름」 줄이다(#617)."""
 
     sample_count, avg_chars = 0, None
     basis = "source_sizes"
@@ -336,8 +368,8 @@ def estimate(
             CostRow(
                 model_id=model_id,
                 reasoning_effort=effort,
-                priced=model_id in PRICES,
-                open_ended=model_id in PRICES and effort in _OPEN_ENDED_EFFORTS,
+                priced=price_for(model_id) is not None,
+                open_ended=price_for(model_id) is not None and effort in _OPEN_ENDED_EFFORTS,
                 per_attempt=per_attempt,
                 per_problem_krw=(
                     per_attempt.krw * participant_count * attempts if per_attempt is not None else None

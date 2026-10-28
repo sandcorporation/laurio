@@ -218,7 +218,7 @@ class ScoringCostRowOut(Schema):
     model_id: str
     #: 추론 모델이면 low·medium·high, 아니면 `None`.
     reasoning_effort: str | None = None
-    #: 단가표에 있는가 — 거짓이면 화면은 「비용 미확인」이다.
+    #: 단가표에 있는가 — 거짓이면 화면은 「단가 모름」이다.
     priced: bool
     #: 위로 열린 어림인가(추론 강도 높음) — 화면은 「약 N원~」.
     open_ended: bool = False

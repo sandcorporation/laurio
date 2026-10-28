@@ -89,6 +89,8 @@ def _cost_summary(estimate: scoring_cost.CostEstimate, model_id: str, reasoning_
     if estimate.unit == "tokens":
         return _token_summary(summary, estimate, row)
     if row is None or not row.priced:
+        # 단가표에 없는 모델 — 0원·생략이 아니라 이름 붙은 상태로 낸다(#797).
+        summary["cost"] = scoring_cost.PRICE_UNKNOWN
         return summary
     if row.per_attempt is not None:
         summary["per_attempt_krw"] = round(row.per_attempt.krw)
@@ -245,6 +247,7 @@ _SCORING_COST_ESTIMATE = {
         "model": {"type": "string"},
         "reasoning_effort": {"type": ["string", "null"], "description": "추론 모델일 때만"},
         "priced": {"type": "boolean", "description": "거짓이면 이 모델의 단가를 몰라 비용을 셈하지 못했다"},
+        "cost": {"type": "string", "description": "unit 이 krw 인데 단가를 모르는 모델이면 「단가 모름」 — 0원이 아니다"},
         "per_attempt_krw": {"type": "integer", "description": "시도 1건(원)"},
         "per_problem_krw": {"type": "integer", "description": "문제 하나(참여자 수 × 1인 평균 시도 수, 원)"},
         "participant_count": _COUNT,

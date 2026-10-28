@@ -14,7 +14,7 @@ import {
   scoringStatusTone,
   type ScoringStatus,
 } from "@/lib/classes/scoring-status";
-import { findCostRow, formatKrw, usageKrw } from "@/lib/scoring/cost";
+import { findCostRow, usageCostText } from "@/lib/scoring/cost";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 
 function Row({ label, testId, children }: { label: string; testId: string; children: React.ReactNode }) {
@@ -31,8 +31,11 @@ function UsageRow({ classroom }: { classroom: ClassRow }) {
   const tokens = classroom.token_usage_total;
   let won: string | null = null;
   if (cost.status === "ready" && cost.estimate.unit === "krw") {
-    const krw = usageKrw(tokens, findCostRow(cost.estimate, classroom.default_model, classroom.default_reasoning_effort));
-    if (krw !== null && krw > 0) won = formatKrw(krw);
+    won = usageCostText(
+      tokens,
+      findCostRow(cost.estimate, classroom.default_model, classroom.default_reasoning_effort),
+      classroom.default_model,
+    );
   }
   return (
     <Row label="사용량" testId="scoring-card-usage">

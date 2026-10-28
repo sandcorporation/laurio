@@ -10,6 +10,7 @@ import {
   formatRatio,
   formatTokens,
   problemCostLine,
+  usageCostText,
   usageKrw,
   type ScoringCostEstimate,
   type ScoringCostRow,
@@ -121,6 +122,21 @@ describe("예상 채점 비용 적기 (#591)", () => {
   });
 });
 
+describe("단가 모름 (#797)", () => {
+  it("토큰이 있는데 단가를 모르면 비우지 않고 모델 이름과 함께 「단가 모름」으로 적는다", () => {
+    const unpriced = row({ model_id: "claude-haiku-9-9", priced: false, per_attempt: null });
+    expect(usageCostText(500_000, unpriced, "claude-haiku-9-9")).toBe("단가 모름 (모델 claude-haiku-9-9)");
+    expect(usageCostText(500_000, null, "o3")).toBe("단가 모름 (모델 o3)");
+  });
+
+  it("단가를 알면 원화를, 토큰이 없으면 아무것도 적지 않는다", () => {
+    const measured = row({ per_attempt: { krw: 30, tokens: 20_000 } });
+    expect(usageCostText(500_000, measured, "gpt-4.1-mini")).toBe("약 750원");
+    expect(usageCostText(0, measured, "gpt-4.1-mini")).toBeNull();
+    expect(usageCostText(0, null, "o3")).toBeNull();
+  });
+});
+
 describe("호환 서버 — 토큰으로 (#604)", () => {
   it("토큰은 만 단위로 줄여 「약 N만 토큰」으로 적는다", () => {
     expect(formatTokens(18_652)).toBe("약 1.9만 토큰");
@@ -154,7 +170,7 @@ describe("접힌 비용 표의 머리줄 (#619)", () => {
     ).toBe("지금 설정 gpt-5.1 · 추론 높음 · 시도 1건 약 210원~");
   });
 
-  it("소스 크기별이면 가운데 크기로, 단가가 없으면 「비용 미확인」", () => {
+  it("소스 크기별이면 가운데 크기로, 단가가 없으면 「단가 모름」", () => {
     const bySize = row({
       by_source_size: [
         { krw: 8, tokens: 5_500 },
@@ -166,7 +182,7 @@ describe("접힌 비용 표의 머리줄 (#619)", () => {
       "지금 설정 gpt-4.1-mini · 소스 약 5만 자면 시도 1건 약 14원",
     );
     expect(classCostSummary(estimate({}), row({ model_id: "o3", priced: false, ratio_to_baseline: null }))).toBe(
-      "지금 설정 o3 · 비용 미확인",
+      "지금 설정 o3 · 단가 모름",
     );
   });
 });

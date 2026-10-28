@@ -17,6 +17,7 @@ import {
   problemCostLine,
   type ScoringCostEstimate,
   type ScoringCostRow,
+  UNPRICED_TEXT,
 } from "@/lib/scoring/cost";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 
@@ -25,7 +26,6 @@ const BILLING_NOTE = "실제 청구액은 키를 낸 곳의 사용량 화면이 
 const TOKEN_NOTE =
   "호환 서버는 단가를 알 수 없어 토큰으로만 셈합니다. 사용량도 토큰으로 세고, 서버가 사용량을 알려 주지 않으면 프롬프트 길이로 어림해 셉니다.";
 const BAND_NAMES = ["작은 과제", "보통", "큰 프로젝트"];
-const UNPRICED = "비용 미확인";
 
 function ratioText(row: ScoringCostRow): string {
   return row.ratio_to_baseline === null ? "—" : formatRatio(row.ratio_to_baseline, row.open_ended);
@@ -144,7 +144,7 @@ export function ProblemScoringCost({
         </div>
       ) : (
         <p data-testid={`${testIdPrefix}-scoring-cost-unpriced`} className="px-3.5 py-3 text-[13px] text-ink/60">
-          {costRowLabel({ model_id: modelId, reasoning_effort: isReasoning ? reasoningEffort : null })} · {UNPRICED}
+          {costRowLabel({ model_id: modelId, reasoning_effort: isReasoning ? reasoningEffort : null })} · {UNPRICED_TEXT}
         </p>
       )}
       {cheaperText ? (
@@ -253,7 +253,7 @@ export function ProblemCostLine({
   const line = problemCostLine(estimate, row);
   return (
     <p data-testid={`${testIdPrefix}-scoring-cost`} className="border-t border-rule pt-3 text-[12.5px] text-ink/75">
-      {line ?? `${modelId} · ${UNPRICED}`}
+      {line ?? `${UNPRICED_TEXT} (모델 ${modelId})`}
     </p>
   );
 }

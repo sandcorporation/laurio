@@ -293,7 +293,7 @@ def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_s
     assert (problem_estimate["model"], problem_estimate["reasoning_effort"]) == ("gpt-4.1-mini", None)
     assert problem_estimate["ratio_to_gpt_4_1_mini"] == 1.0
 
-    # 카탈로그의 모델은 모두 단가가 있다(#617) — 단가표에서 하나를 빼 「비용 미확인」을 만든다.
+    # 카탈로그의 모델은 모두 단가가 있다(#617) — 단가표에서 하나를 빼 「단가 모름」을 만든다.
     monkeypatch.delitem(scoring_cost.PRICES, "gpt-4o")
     patch_class(client, access, class_id, {"default_model": "gpt-4o"})
     unpriced = _structured(client, token, "get_class", class_id=class_id)["scoring_cost_estimate"]
@@ -303,4 +303,5 @@ def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_s
         "model": "gpt-4o",
         "reasoning_effort": None,
         "priced": False,
+        "cost": "단가 모름",
     }
