@@ -38,6 +38,25 @@ test("채점 연결은 「연결 없음」에서 시작해 키를 저장하면 �
   await expect(page.getByTestId("openai-key-input")).toBeVisible();
 });
 
+test("「Claude(Anthropic) 키」를 고르고 저장하면 상태 줄이 그 종류와 끝 네 자리로 연결됨이 되고, 새로고침해도 남는다", async ({
+  page,
+}) => {
+  const { classId } = await newClass(page, "claude");
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+
+  await page.getByTestId("scoring-connection-kind-anthropic_key").click();
+  await page.getByTestId("anthropic-key-input").fill("sk-ant-e2e-test-key-9c1d");
+  await page.getByTestId("anthropic-key-submit").click();
+
+  await expect(page.getByTestId("anthropic-key-status")).toContainText("연결됨");
+  await expect(page.getByTestId("anthropic-key-status")).toContainText("Claude(Anthropic) 키");
+  await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");
+  await expect(page.getByTestId("anthropic-key-input")).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");
+});
+
 test("기본 모델은 라디오 표에서 골라 저장하고, 새로고침해도 그 모델이 기본값이다", async ({ page }) => {
   const { api, classId } = await newClass(page, "model");
   const key = await api.put(`/api/backend/classroom/classes/${classId}/openai-key`, {

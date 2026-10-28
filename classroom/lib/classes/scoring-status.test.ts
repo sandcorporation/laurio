@@ -24,6 +24,13 @@ describe("scoringStatus — 배너 넷의 조건 그대로", () => {
     ).toEqual({ kind: "connected", connection: "호환 서버 · llm.example.kr" });
   });
 
+  it("Claude(Anthropic) 키는 종류 이름과 마스킹을 적는다", () => {
+    expect(scoringStatus({ ...base, scoring_connection_kind: "anthropic_key", openai_key_masked: "sk-ant-…9c1d" })).toEqual({
+      kind: "connected",
+      connection: "Claude(Anthropic) 키 · sk-ant-…9c1d",
+    });
+  });
+
   it("키가 없으면 연결 없음(문제)", () => {
     expect(scoringStatus({ ...base, has_openai_key: false, openai_key_status: null })).toEqual({
       kind: "missing",

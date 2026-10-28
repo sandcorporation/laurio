@@ -167,6 +167,45 @@ def test_switching_back_to_an_openai_key_moves_the_default_model_back(client, db
     assert body["default_model"] == "gpt-4.1-mini"
 
 
+def _problem_model(client, access: str, class_id: int, problem_id: int) -> dict:
+    listed = client.get(f"{CLASSES_URL}/{class_id}/problems", **auth_header(access)).json()
+    return next(p for p in listed if p["id"] == problem_id)
+
+
+def test_switching_to_a_claude_key_returns_the_per_problem_openai_models_to_the_class_default(client, db):
+    owner = login(client, uid="owner")
+    class_id = create_class(client, owner["access"], with_key=False)
+    own = create_open_problem(client, owner["access"], class_id, title="자기 모델", model="gpt-4.1")
+    plain = create_open_problem(client, owner["access"], class_id, title="기본 모델")
+
+    set_anthropic_key(client, owner["access"], class_id)
+
+    assert _problem_model(client, owner["access"], class_id, own.id)["effective_model"] == "claude-haiku-5-5"
+    assert _problem_model(client, owner["access"], class_id, plain.id)["effective_model"] == "claude-haiku-5-5"
+
+
+def test_switching_back_to_an_openai_key_returns_the_per_problem_claude_models_but_keeps_openai_ones(client, db):
+    owner = login(client, uid="owner")
+    class_id = create_class(client, owner["access"], with_key=False)
+    set_anthropic_key(client, owner["access"], class_id)
+    claude = create_open_problem(client, owner["access"], class_id, title="클로드", model="claude-sonnet-5-5")
+
+    set_key(client, owner["access"], class_id, "sk-openai-key")
+
+    assert _problem_model(client, owner["access"], class_id, claude.id)["effective_model"] == "gpt-4.1-mini"
+
+
+def test_saving_the_same_kind_again_keeps_the_per_problem_model(client, db):
+    owner = login(client, uid="owner")
+    class_id = create_class(client, owner["access"], with_key=False)
+    set_anthropic_key(client, owner["access"], class_id)
+    own = create_open_problem(client, owner["access"], class_id, model="claude-sonnet-5-5")
+
+    set_anthropic_key(client, owner["access"], class_id, "sk-ant-another-key")
+
+    assert _problem_model(client, owner["access"], class_id, own.id)["effective_model"] == "claude-sonnet-5-5"
+
+
 def test_handing_the_class_over_drops_the_givers_claude_key(client, db):
     owner = login(client, uid="owner")
     co = login(client, uid="co")

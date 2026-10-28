@@ -78,7 +78,7 @@ export function DefaultModelTable({
               data-testid={`scoring-model-option-${model.id}`}
               className="accent-ink"
             />
-            <span className="min-w-0 flex-1">
+            <span className="min-w-[11rem] flex-1">
               <span className="block font-mono text-[13.5px]">{model.id}</span>
               {model.id === savedModel ? <span className="block text-[11.5px] text-ink/45">클래스 기본값</span> : null}
             </span>

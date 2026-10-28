@@ -43,7 +43,7 @@ export type ClassRow = {
   // 채점 연결이 마지막으로 실제로 닿은 시각(#671) — 상태 한 줄의 「M/D 확인」. 없으면 null.
   scoring_connection_verified_at: string | null;
   // 채점 연결의 종류(#601) — 「OpenAI 키」 또는 「호환 서버」.
-  scoring_connection_kind: "openai_key" | "compatible_server";
+  scoring_connection_kind: "openai_key" | "anthropic_key" | "compatible_server";
   // 호환 서버의 호스트 — 공동 강사도 읽는다.
   scoring_server_host: string | null;
   // 호환 서버의 주소 전체와 인증 값 끝 네 자리 — 소유자에게만 온다.
@@ -144,6 +144,13 @@ export function renameMyInstructorName(classId: number, displayName: string): Pr
 // `ClassRow`뿐이다.
 export function setOpenAIKey(classId: number, apiKey: string): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/openai-key`, "PUT", {
+    api_key: apiKey,
+  });
+}
+
+// 채점 연결을 「Claude(Anthropic) 키」로 저장한다(#796) — 소유자만, Anthropic 이 거절하면 이유가 `detail` 로 온다.
+export function setAnthropicKey(classId: number, apiKey: string): Promise<ApiResult<ClassRow>> {
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/anthropic-key`, "PUT", {
     api_key: apiKey,
   });
 }

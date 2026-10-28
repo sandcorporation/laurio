@@ -41,6 +41,9 @@ export function describeConnection(c: StatusInput): string {
   if (c.scoring_connection_kind === "compatible_server") {
     return c.scoring_server_host ? `호환 서버 · ${c.scoring_server_host}` : "호환 서버";
   }
+  if (c.scoring_connection_kind === "anthropic_key") {
+    return c.openai_key_masked ? `Claude(Anthropic) 키 · ${c.openai_key_masked}` : "Claude(Anthropic) 키";
+  }
   return c.openai_key_masked ? `OpenAI 키 · ${c.openai_key_masked}` : "OpenAI 키";
 }
 
@@ -63,13 +66,13 @@ export function scoringStatusTone(status: ScoringStatus): "verified" | "attentio
   return "attention";
 }
 
-/** 설정의 상태 한 줄(#669) — 카드와 같은 낱말·톤에, 아직 검증되지 않은 OpenAI 키면 「미검증」만 덧붙인다. */
+/** 설정의 상태 한 줄(#669) — 카드와 같은 낱말·톤에, 아직 검증되지 않은 키(OpenAI·Claude)면 「미검증」만 덧붙인다. */
 export function settingsStatusBadges(c: StatusInput): { label: string; tone: "verified" | "attention" | "neutral" }[] {
   const status = scoringStatus(c);
   const badges: { label: string; tone: "verified" | "attention" | "neutral" }[] = [
     { label: SCORING_STATUS_LABEL[status.kind], tone: scoringStatusTone(status) },
   ];
-  if (status.kind === "connected" && c.scoring_connection_kind === "openai_key" && c.openai_key_status === "unverified") {
+  if (status.kind === "connected" && c.scoring_connection_kind !== "compatible_server" && c.openai_key_status === "unverified") {
     badges.push({ label: "미검증", tone: "neutral" });
   }
   return badges;

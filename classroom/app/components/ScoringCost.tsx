@@ -20,7 +20,7 @@ import {
 } from "@/lib/scoring/cost";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 
-const BILLING_NOTE = "실제 청구액은 OpenAI 사용량 화면이 기준입니다.";
+const BILLING_NOTE = "실제 청구액은 키를 낸 곳의 사용량 화면이 기준입니다.";
 // 호환 서버(#604) — 단가를 몰라 토큰으로만 보인다.
 const TOKEN_NOTE =
   "호환 서버는 단가를 알 수 없어 토큰으로만 셈합니다. 사용량도 토큰으로 세고, 서버가 사용량을 알려 주지 않으면 프롬프트 길이로 어림해 셉니다.";

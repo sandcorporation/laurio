@@ -93,7 +93,7 @@ export function ConsentPanel({ params }: { params: AuthorizeParams }) {
             있습니다. 앞으로 만드는 클래스도 포함됩니다.
           </li>
           <li className="px-4 py-3">참여자의 제출물과 참여자가 클래스에서 쓰는 이름이 이 앱으로 전달될 수 있습니다.</li>
-          <li className="px-4 py-3">클래스의 OpenAI 키는 넣거나 바꿀 수 없습니다.</li>
+          <li className="px-4 py-3">클래스의 채점 키는 넣거나 바꿀 수 없습니다.</li>
           <li className="px-4 py-3">「연결된 앱」에서 언제든 끊을 수 있습니다. 90일 동안 쓰지 않으면 저절로 끊깁니다.</li>
         </ul>
       </Card>

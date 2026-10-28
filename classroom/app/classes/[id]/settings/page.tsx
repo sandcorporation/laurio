@@ -733,13 +733,17 @@ export default function ClassSettingsPage() {
                 ) : null}
                 {isCompatibleServer ? null : (
                   <a
-                    href="https://platform.openai.com/usage"
+                    href={
+                      classroom.scoring_connection_kind === "anthropic_key"
+                        ? "https://platform.claude.com/usage"
+                        : "https://platform.openai.com/usage"
+                    }
                     target="_blank"
                     rel="noreferrer noopener"
                     data-testid="token-usage-openai-link"
                     className="text-ink/45 hover:text-ink sm:ml-auto"
                   >
-                    OpenAI 사용량 화면 ↗
+                    {classroom.scoring_connection_kind === "anthropic_key" ? "Claude" : "OpenAI"} 사용량 화면 ↗
                   </a>
                 )}
               </div>
