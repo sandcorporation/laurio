@@ -23,7 +23,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -49,21 +48,26 @@ E2E_ONLY = [
 STRING_RE = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`")
 
 
+SKIP_DIRS = {"node_modules", ".next", ".git", "backend", "test-results", "playwright-report", "dist", "build"}
+
+
 def test_files() -> list[str]:
-    out = subprocess.run(
-        ["git", "ls-files", "--", "*.ts", "*.tsx", "*.mts", "*.mjs"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
+    """git 없이 훑는다 — CI 이미지에는 .git 이 없다."""
     keep = []
-    for path in out:
-        if path.startswith("backend/") or "/node_modules/" in path or path.endswith(".gen.ts"):
-            continue
-        if is_e2e(path) or re.search(r"\.(test|spec)\.tsx?$", path):
-            keep.append(path)
-    return keep
+    stack = [ROOT]
+    while stack:
+        directory = stack.pop()
+        for entry in directory.iterdir():
+            if entry.is_dir():
+                if entry.name not in SKIP_DIRS and not entry.name.startswith("."):
+                    stack.append(entry)
+                continue
+            path = entry.relative_to(ROOT).as_posix()
+            if not re.search(r"\.(ts|tsx|mts|mjs)$", path) or path.endswith(".gen.ts"):
+                continue
+            if is_e2e(path) or re.search(r"\.(test|spec)\.tsx?$", path):
+                keep.append(path)
+    return sorted(keep)
 
 
 def is_e2e(path: str) -> bool:
