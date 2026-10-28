@@ -141,6 +141,7 @@ ROUTES: list[Route] = [
         owner_only=True,
     ),
     Route("set_class_openai_key", "put", lambda w: f"{_c(w)}/openai-key", lambda w: {"api_key": "sk-new"}, 200, owner_only=True),
+    Route("set_class_anthropic_key", "put", lambda w: f"{_c(w)}/anthropic-key", lambda w: {"api_key": "sk-ant-new"}, 200, owner_only=True),
     Route("set_class_compatible_server", "put", lambda w: f"{_c(w)}/compatible-server", lambda w: {"server_url": "https://llm.example.com/v1"}, 200, owner_only=True),
     Route("copy_class_view", "post", lambda w: f"{_c(w)}/copy", None, 201),
     Route("list_class_scoring_models", "get", lambda w: f"{_c(w)}/scoring-models", None, 200),
