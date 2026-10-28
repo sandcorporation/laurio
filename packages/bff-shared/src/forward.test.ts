@@ -71,6 +71,8 @@ type Upstream = {
   url: string;
   idle: () => number;
   serving: () => number;
+  /** 요청에 답하는 중인 연결이 하나도 없을 때까지 — 연결이 닫히는 사건마다 다시 본다. */
+  servingEnded: () => Promise<void>;
   close: () => Promise<void>;
 };
 
@@ -82,16 +84,22 @@ type Upstream = {
  */
 async function upstream(stream = false): Promise<Upstream> {
   const sockets = new Map<Socket, boolean>();
+  const onChange = new Set<() => void>();
+  const gone = (socket: Socket) => {
+    sockets.delete(socket);
+    for (const notify of [...onChange]) notify();
+  };
   const server = createServer((socket) => {
     sockets.set(socket, false);
     socket.on("data", () => {
       if (sockets.get(socket)) return;
       sockets.set(socket, true);
       if (stream) socket.write("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\r\n");
+      // TEST-WAIT-EXCEPTION: 느린 backend 흉내다 — 시험이 기다리는 시간이 아니라 서버가 답을 늦추는 시간(20ms)이다
       else setTimeout(() => socket.end("HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok"), 20);
     });
-    socket.on("close", () => sockets.delete(socket));
-    socket.on("error", () => sockets.delete(socket));
+    socket.on("close", () => gone(socket));
+    socket.on("error", () => gone(socket));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -99,6 +107,16 @@ async function upstream(stream = false): Promise<Upstream> {
     url: `http://127.0.0.1:${port}/api/x`,
     idle: () => [...sockets.values()].filter((sent) => !sent).length,
     serving: () => [...sockets.values()].filter((sent) => sent).length,
+    servingEnded: () =>
+      new Promise<void>((resolve) => {
+        const done = () => {
+          if ([...sockets.values()].some((sent) => sent)) return;
+          onChange.delete(done);
+          resolve();
+        };
+        onChange.add(done);
+        done();
+      }),
     close: () =>
       new Promise((resolve) => {
         for (const socket of sockets.keys()) socket.destroy();
@@ -107,6 +125,7 @@ async function upstream(stream = false): Promise<Upstream> {
   };
 }
 
+// TEST-WAIT-EXCEPTION: 「이 시간 안에 위쪽에 요청 없는 연결이 남지 않는다」는 부정 단언의 창이다 — 닫힘 사건을 기다리면 누수된 연결이 keep-alive(4초)로 닫힐 때까지 기다려 누수를 놓친다
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("forwardRequest — 끊김 전달", () => {
@@ -115,6 +134,7 @@ describe("forwardRequest — 끊김 전달", () => {
     try {
       for (let i = 0; i < 4; i += 1) {
         const browser = new AbortController();
+        // TEST-WAIT-EXCEPTION: 요청이 나간 다음 매크로태스크에 끊는 순서 제어다(0ms) — 기다림이 아니다
         setTimeout(() => browser.abort(), 0);
         await forwardRequest("GET", server.url, new Headers(), undefined, browser.signal)
           .then((response) => response.arrayBuffer())
@@ -135,8 +155,8 @@ describe("forwardRequest — 끊김 전달", () => {
       expect(response.status).toBe(200);
       expect(server.serving()).toBe(1);
       browser.abort();
-      // 느린 러너에서도 닫힘을 기다린다 — 닫히지 않으면 2초 뒤 붉다.
-      for (let waited = 0; server.serving() > 0 && waited < 2000; waited += 20) await settle(20);
+      // 닫힘 사건을 기다린다 — 닫히지 않으면 시험 한도에서 붉다.
+      await server.servingEnded();
       expect(server.serving()).toBe(0);
     } finally {
       await server.close();

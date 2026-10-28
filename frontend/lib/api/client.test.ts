@@ -30,6 +30,7 @@ describe("공개 SSR 클라이언트", () => {
     vi.stubEnv("CODEMIT_API_BASE_URL", `http://127.0.0.1:${port}`);
     const { fetchContests } = await import("./contests");
 
+    // TEST-WAIT-EXCEPTION: 고장 주입이다 — 클라이언트 재시도 간격(실시간)이 시험 대상이고, 이 시간은 backend 가 늦게 돌아오는 상황을 만든다
     setTimeout(() => {
       server = createServer((_req, res) => {
         res.writeHead(200, { "content-type": "application/json" });
@@ -52,6 +53,7 @@ describe("공개 SSR 클라이언트", () => {
     vi.stubEnv("CODEMIT_API_BASE_URL", `http://127.0.0.1:${port}`);
     const { fetchHomeCuration } = await import("./contests");
 
+    // TEST-WAIT-EXCEPTION: 고장 주입이다 — 클라이언트 재시도 간격(실시간)이 시험 대상이고, 이 시간은 backend 가 늦게 돌아오는 상황을 만든다
     setTimeout(() => {
       server = createServer((_req, res) => {
         res.writeHead(200, { "content-type": "application/json" });

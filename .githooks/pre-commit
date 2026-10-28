@@ -43,7 +43,8 @@ fail=0
 for check in \
   scripts/check_adr_status.py \
   scripts/check_screen_language.py \
-  scripts/check_backend_error_language.py
+  scripts/check_backend_error_language.py \
+  scripts/check_test_waits.py
 do
   if ! python3 "$check"; then
     fail=1
