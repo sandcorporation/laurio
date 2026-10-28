@@ -58,6 +58,7 @@ from .instructor_scope import class_scope, problem_scope
 from .instructors import classes_taught_by, is_instructor
 from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA
 from .models import ClassroomSubmission, ConnectedApp
+from .verdicts import verdict_of
 
 #: 채점 근거 한 줄의 글자 상한 — 리포트는 클래스 전체를 한 번에 담으므로 근거가 길면
 #: 참여자 수 × 문제 수 × 항목 수만큼 불어난다. 다 읽으려면 제출 하나를 연다.
@@ -127,6 +128,7 @@ def _latest_attempt(submission: ClassroomSubmission, class_obj, problem, checkli
             {
                 "checklist_item_id": verdict["checklist_item_id"],
                 "is_met": bool(verdict["is_met"]),
+                "verdict": verdict_of(verdict),
                 "reasoning": reasoning,
                 "reasoning_truncated": cut,
             }
@@ -406,7 +408,12 @@ _VERDICT = {
     "type": "object",
     "properties": {
         "checklist_item_id": {"type": "integer", "description": "체크리스트 항목 번호(problems[].checklist_items 의 id)"},
-        "is_met": {"type": "boolean", "description": "충족했는가"},
+        "is_met": {"type": "boolean", "description": "충족했는가 — 확인 불가도 false"},
+        "verdict": {
+            "type": "string",
+            "enum": ["met", "unmet", "unverifiable"],
+            "description": "판정 — met 충족, unmet 미충족, unverifiable 확인 불가(소스의 정적 내용으로는 판정할 수 없음)",
+        },
         "reasoning": {"type": "string", "description": f"판정 근거(최대 {REASONING_MAX_CHARS}자, 넘으면 잘린다)"},
         "reasoning_truncated": {"type": "boolean"},
     },

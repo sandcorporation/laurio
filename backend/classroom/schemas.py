@@ -798,7 +798,10 @@ class ClassroomSubmissionIn(Schema):
 
 class ClassroomChecklistVerdictOut(Schema):
     checklist_item_id: int
+    #: 충족인가 — 확인 불가도 `false` 다(#811, 확인 불가는 충족이 아니다). 통과 규칙은 이 값만 본다.
     is_met: bool
+    #: 세 갈래 판정(#811, ADR-0067) — 옛 기록은 `is_met` 에서 유도한다(`classroom.verdicts.verdict_of`).
+    verdict: Literal["met", "unmet", "unverifiable"]
     reasoning: str
 
 

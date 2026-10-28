@@ -558,3 +558,78 @@ def test_deployed_boot_check_passes_when_openai_adapter_has_credential():
         errors = check_llm_adapter_mode(None)
 
     assert errors == []
+
+
+# --- 「확인 불가」(#811, ADR-0067) — 강의실만 받는다 ------------------------------------
+
+
+def _capture_post(monkeypatch, body, sent: list) -> None:
+    def fake_post(url, headers=None, json=None, timeout=None):
+        sent.append(json)
+        return _FakeResponse(200, body)
+
+    monkeypatch.setattr("scoring.adapters.requests.post", fake_post)
+
+
+def test_the_contest_adapter_keeps_is_met_and_does_not_ask_for_a_verdict(monkeypatch):
+    sent: list = []
+    # 공모전 응답에는 verdict 가 없다 — 지금 그대로 읽히고, verdict 는 비어 있다.
+    _capture_post(
+        monkeypatch,
+        _chat_completion_body(
+            [
+                {"requirement_id": 10, "is_met": True, "reasoning": "확인됨"},
+                {"requirement_id": 11, "is_met": False, "reasoning": "없음"},
+            ]
+        ),
+        sent,
+    )
+
+    output = OpenAIScoringAdapter().score(_scoring_input(requirement_ids=[10, 11]))
+
+    item = sent[0]["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["items"]
+    assert item["required"] == ["requirement_id", "is_met", "reasoning"] and "verdict" not in item["properties"]
+    assert [(v.is_met, v.verdict) for v in output.verdicts] == [(True, None), (False, None)]
+
+
+def test_the_classroom_adapter_reads_all_three_verdicts(monkeypatch):
+    sent: list = []
+    _capture_post(
+        monkeypatch,
+        _chat_completion_body(
+            [
+                {"requirement_id": 10, "verdict": "met", "reasoning": "코드가 있다"},
+                {"requirement_id": 11, "verdict": "unmet", "reasoning": "코드가 없다"},
+                {"requirement_id": 12, "verdict": "unverifiable", "reasoning": "접속해야 안다"},
+            ]
+        ),
+        sent,
+    )
+
+    output = OpenAIScoringAdapter(allow_unverifiable=True).score(_scoring_input(requirement_ids=[10, 11, 12]))
+
+    schema = sent[0]["response_format"]["json_schema"]
+    assert schema["strict"] is True
+    assert schema["schema"]["properties"]["verdicts"]["items"]["properties"]["verdict"]["enum"] == [
+        "met",
+        "unmet",
+        "unverifiable",
+    ]
+    assert [(v.is_met, v.verdict) for v in output.verdicts] == [
+        (True, "met"),
+        (False, "unmet"),
+        (False, "unverifiable"),
+    ]
+
+
+@pytest.mark.parametrize("bad", ["maybe", None, True, "MET"])
+def test_a_verdict_outside_the_three_values_fails_the_attempt(monkeypatch, bad):
+    _capture_post(
+        monkeypatch,
+        _chat_completion_body([{"requirement_id": 10, "verdict": bad, "is_met": False, "reasoning": "?"}]),
+        [],
+    )
+
+    with pytest.raises(LLMAdapterError) as exc:
+        OpenAIScoringAdapter(allow_unverifiable=True).score(_scoring_input(requirement_ids=[10]))
+    assert SECRET_SOURCE_MARKER not in str(exc.value)

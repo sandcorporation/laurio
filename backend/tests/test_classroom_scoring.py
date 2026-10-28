@@ -88,7 +88,7 @@ def test_scan_scores_a_submission_with_a_key(client, db, monkeypatch):
     submission_out = mine_out["submissions"][0]
     assert submission_out["status"] == "scored"
     assert submission_out["score"]["reasoning"] == [
-        {"checklist_item_id": ctx["item_id"], "is_met": True, "reasoning": "판정 근거"}
+        {"checklist_item_id": ctx["item_id"], "is_met": True, "verdict": "met", "reasoning": "판정 근거"}
     ]
 
 
@@ -248,7 +248,7 @@ def test_source_submission_is_scored_from_the_uploaded_object(client, db, monkey
     assert result["count"] == 1
     assert "SOURCE_MARKER" in captured_prompts[0]["messages"][1]["content"]
     score = ClassroomScore.objects.get(submission_id=submitted["id"])
-    assert score.reasoning == [{"checklist_item_id": problem.item_id, "is_met": True, "reasoning": "판정 근거"}]
+    assert score.reasoning == [{"checklist_item_id": problem.item_id, "is_met": True, "verdict": "met", "reasoning": "판정 근거"}]
 
 
 def test_text_files_outside_code_extensions_reach_the_model_but_known_noise_does_not(

@@ -95,11 +95,11 @@ _SYSTEM_PROMPT = llm_scoring._OPENAI_SYSTEM_PROMPT + (
 )
 
 
-def _verdict_schema() -> dict:
+def _verdict_schema(*, allow_unverifiable: bool = False) -> dict:
     """OpenAI 와 같은 판정 스키마(`core.llm_scoring._openai_verdict_response_schema` 의 `schema`) —
-    Anthropic 은 이름·strict 없이 스키마만 받는다."""
+    Anthropic 은 이름·strict 없이 스키마만 받는다. 강의실은 「확인 불가」를 받는 쪽이다(#811)."""
 
-    return llm_scoring._openai_verdict_response_schema()["schema"]
+    return llm_scoring._openai_verdict_response_schema(allow_unverifiable=allow_unverifiable)["schema"]
 
 
 def _headers(api_key: str, *, json_body: bool) -> dict[str, str]:
@@ -196,7 +196,9 @@ def _usage_int(usage: Any, key: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
 
-def parse_messages_response(body: Any, *, requirement_ids: list[int], submission_id: int) -> ScoringOutput:
+def parse_messages_response(
+    body: Any, *, requirement_ids: list[int], submission_id: int, allow_unverifiable: bool = False
+) -> ScoringOutput:
     """Messages API 응답 → `ScoringOutput`. 잘렸거나 거절한 응답은 판정으로 쓰지 않는다."""
 
     if not isinstance(body, dict):
@@ -216,7 +218,11 @@ def parse_messages_response(body: Any, *, requirement_ids: list[int], submission
     if not texts:
         raise LLMAdapterError(f"Anthropic 응답에 text 블록이 없다(submission={submission_id}).")
     verdict_by_id = verdicts_from_content(
-        texts[0], requirement_ids=requirement_ids, submission_id=submission_id, vendor="Anthropic"
+        texts[0],
+        requirement_ids=requirement_ids,
+        submission_id=submission_id,
+        vendor="Anthropic",
+        allow_unverifiable=allow_unverifiable,
     )
     usage = body.get("usage") or {}
     # 입력은 캐시 읽기·쓰기까지 모두 더한 것이 프롬프트 전체다(문서 「rate limits」) — 채점은 캐시를
@@ -254,6 +260,8 @@ class AnthropicScoringAdapter:
         async_transport=None,
         product: str = "classroom",
         log_context: dict | None = None,
+        #: 판정에 「확인 불가」를 받는가(#811) — `OpenAIScoringAdapter` 와 같은 인자. 강의실이 True 로 준다.
+        allow_unverifiable: bool = False,
     ) -> None:
         if not api_key:
             raise LLMAdapterError("Anthropic 채점 어댑터는 키 없이 만들 수 없다.")
@@ -265,10 +273,13 @@ class AnthropicScoringAdapter:
         self._async_transport = async_transport
         self._product = product
         self._log_context = dict(log_context or {})
+        self._allow_unverifiable = allow_unverifiable
         self.model_version = model
 
     def _payload(self, scoring_input: ScoringInput) -> dict:
-        output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": _verdict_schema()}}
+        output_config: dict[str, Any] = {
+            "format": {"type": "json_schema", "schema": _verdict_schema(allow_unverifiable=self._allow_unverifiable)}
+        }
         if self._reasoning_effort is not None:
             output_config["effort"] = self._reasoning_effort
         return {
@@ -289,6 +300,7 @@ class AnthropicScoringAdapter:
                 body,
                 requirement_ids=[r.requirement_id for r in scoring_input.requirements],
                 submission_id=scoring_input.submission_id,
+                allow_unverifiable=self._allow_unverifiable,
             )
         except LLMAdapterError:
             raise

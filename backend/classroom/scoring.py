@@ -106,6 +106,7 @@ from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 from . import pending_scoring, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
+from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
 from .models import (
     ChecklistItem,
     Class,
@@ -122,6 +123,7 @@ from .scoring_connection import (
     openai_key_connection,
 )
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
+from .verdicts import VERDICT_UNMET, entry_from_model, reasoning_entry
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +277,8 @@ def _scoring_adapter(
             # 지표의 제품 라벨과 호출별 로그의 클래스·문제 번호(#585) — 라벨이 아니라 로그 필드다.
             "product": "classroom",
             "log_context": log_context or {},
+            # 강의실 판정은 「확인 불가」를 받는다(#811, ADR-0067) — 공모전은 이 인자를 주지 않는다.
+            "allow_unverifiable": True,
         },
     )
 
@@ -345,8 +349,11 @@ def _build_prompt(
         # 영어로 쓴다. 코드 식별자는 그대로 두되 문장은 한국어로.
         "판정 근거(reasoning)는 소스가 어느 언어로 쓰였든 반드시 한국어 문장으로 쓰세요 "
         "(함수·파일 이름 같은 식별자는 원래 표기 그대로 둬도 됩니다). "
-        "판정 근거는 아래 채점 지침에 비추어 왜 충족/미충족인지도 함께 설명하세요."
+        "판정 근거는 아래 채점 지침에 비추어 왜 그렇게 판정했는지도 함께 설명하세요."
     )
+    lines.append("")
+    # 세 갈래 판정(#811, ADR-0067) — 「확인할 수 없는 것」 목록은 MCP·화면의 안내와 같은 말이다.
+    lines.append(UNVERIFIABLE_VERDICT_RULE)
     lines.append("")
     # 강사의 문장은 신뢰할 수 있는 입력(그 클래스의 강사 본인)이지만, 그래도
     # 판정 방식에 대한 지시로만 구획한다(#386, #385 Implementation Decisions
@@ -651,7 +658,7 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
 
 def _finalize_platform_failure(submission: ClassroomSubmission, checklist_items: list[ChecklistItem]) -> ClassroomScore:
     reasoning = [
-        {"checklist_item_id": item.id, "is_met": False, "reasoning": _PLATFORM_FAILURE_REASONING}
+        reasoning_entry(item.id, verdict=VERDICT_UNMET, reasoning=_PLATFORM_FAILURE_REASONING)
         for item in checklist_items
     ]
     score = ClassroomScore.objects.create(
@@ -1025,9 +1032,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     mark_verified(class_obj.pk, connection)
 
     reasoning = [
-        {"checklist_item_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
-        for v in output.verdicts
-        if v.requirement_id != SYNTAX_CHECK_ITEM_ID
+        entry_from_model(v) for v in output.verdicts if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
     syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
     score = ClassroomScore.objects.create(

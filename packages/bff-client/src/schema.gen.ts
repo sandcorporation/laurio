@@ -5173,6 +5173,11 @@ export interface components {
             is_met: boolean;
             /** Reasoning */
             reasoning: string;
+            /**
+             * Verdict
+             * @enum {string}
+             */
+            verdict: "met" | "unmet" | "unverifiable";
         };
         /** ClassroomContestEntryOut */
         ClassroomContestEntryOut: {

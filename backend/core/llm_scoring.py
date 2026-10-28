@@ -90,11 +90,21 @@ class ScoringInput:
     requirements: list[RequirementInput]
 
 
+#: 강의실 판정의 세 값(#811, ADR-0067). 공모전 판정은 이 값을 쓰지 않는다(`RequirementVerdict.verdict` 가 None).
+VERDICT_MET = "met"
+VERDICT_UNMET = "unmet"
+VERDICT_UNVERIFIABLE = "unverifiable"
+VERDICT_VALUES = (VERDICT_MET, VERDICT_UNMET, VERDICT_UNVERIFIABLE)
+
+
 @dataclass(frozen=True)
 class RequirementVerdict:
     requirement_id: int
     is_met: bool
     reasoning: str
+    #: 세 갈래 판정(#811) — 어댑터를 `allow_unverifiable=True` 로 만든 강의실 채점만 채운다. 공모전은 None.
+    #: 채워졌으면 `is_met` 은 `verdict == "met"` 이다(확인 불가는 충족이 아니다).
+    verdict: str | None = None
 
 
 @dataclass(frozen=True)
@@ -340,8 +350,16 @@ _OPENAI_RATE_LIMIT_HTTP_STATUS = 429
 _OPENAI_QUOTA_EXHAUSTED_LABELS = frozenset({"insufficient_quota", "credit_balance_exhausted"})
 
 
-def _openai_verdict_response_schema() -> dict:
+#: 강의실 판정 프롬프트(#811)는 `classroom.scoring._build_prompt` 가 사용자 메시지에 싣는다 — 「확인할 수 없는
+#: 것」의 목록이 강의실 모듈(`classroom.gradability_hint`)에 있고 core 는 강의실을 모른다. 여기는 스키마뿐이다.
+
+
+def _openai_verdict_response_schema(*, allow_unverifiable: bool = False) -> dict:
     """OpenAI Structured Outputs용 JSON 스키마.
+
+    `allow_unverifiable=True`(강의실, #811)면 `is_met` 대신 `verdict`(met·unmet·unverifiable)를 받는다 —
+    둘을 함께 받으면 서로 어긋나는 응답을 어느 쪽으로 읽을지 정해야 해 하나만 둔다. `is_met` 은 파서가
+    `verdict` 에서 만든다. 공모전(기본값)은 지금 그대로 `is_met` 이다.
 
     `strict: True`가 타입은 강제하지만(정수·불리언·문자열, 필수 키), 요청에 실린
     requirement_id를 빠짐없이 채웠는지·중복 없이 채웠는지는 스키마가 보장하지
@@ -360,10 +378,14 @@ def _openai_verdict_response_schema() -> dict:
                         "type": "object",
                         "properties": {
                             "requirement_id": {"type": "integer"},
-                            "is_met": {"type": "boolean"},
+                            **(
+                                {"verdict": {"type": "string", "enum": list(VERDICT_VALUES)}}
+                                if allow_unverifiable
+                                else {"is_met": {"type": "boolean"}}
+                            ),
                             "reasoning": {"type": "string"},
                         },
-                        "required": ["requirement_id", "is_met", "reasoning"],
+                        "required": ["requirement_id", "verdict" if allow_unverifiable else "is_met", "reasoning"],
                         "additionalProperties": False,
                     },
                 },
@@ -574,7 +596,7 @@ async def _openai_round_trip_async(
 
 
 def _parse_openai_scoring_response(
-    body: dict, *, requirement_ids: list[int], submission_id: int
+    body: dict, *, requirement_ids: list[int], submission_id: int, allow_unverifiable: bool = False
 ) -> ScoringOutput:
     """OpenAI 응답 본문을 검증하고 `ScoringOutput`으로 바꾼다.
 
@@ -621,7 +643,11 @@ def _parse_openai_scoring_response(
         ) from None
 
     verdict_by_id = verdicts_from_content(
-        content, requirement_ids=requirement_ids, submission_id=submission_id, vendor="OpenAI"
+        content,
+        requirement_ids=requirement_ids,
+        submission_id=submission_id,
+        vendor="OpenAI",
+        allow_unverifiable=allow_unverifiable,
     )
 
     model_used = body.get("model") or "unknown"
@@ -642,12 +668,21 @@ def _parse_openai_scoring_response(
 
 
 def verdicts_from_content(
-    content: Any, *, requirement_ids: list[int], submission_id: int, vendor: str
+    content: Any,
+    *,
+    requirement_ids: list[int],
+    submission_id: int,
+    vendor: str,
+    allow_unverifiable: bool = False,
 ) -> dict[int, RequirementVerdict]:
     """판정 JSON(`{"verdicts": [...]}`) 문자열을 검증해 requirement_id 별 판정으로 바꾼다 — OpenAI
     (`message.content`)와 Anthropic(`content` 의 text 블록, #795) 응답이 같은 규율을 쓴다. 규율은
     `_parse_openai_scoring_response` docstring 그대로다(정수 id·중복·빠짐·빈 근거는 예외, 예외 메시지에
-    본문을 싣지 않는다). `vendor` 는 예외 메시지의 벤더 이름뿐이다."""
+    본문을 싣지 않는다). `vendor` 는 예외 메시지의 벤더 이름뿐이다.
+
+    `allow_unverifiable`(강의실, #811)이면 항목마다 `verdict`(세 값 중 하나)를 읽어 `is_met` 을 만든다 —
+    `verdict` 키가 없으면 `is_met` 으로 읽는다(옛 모양의 응답·녹화본). 꺼져 있으면(공모전) `verdict` 를
+    보지도 요구하지도 않는다."""
 
     try:
         parsed = json.loads(content)
@@ -668,9 +703,14 @@ def verdicts_from_content(
             raise LLMAdapterError(
                 f"{vendor} 응답의 verdict 항목이 객체가 아니다(submission={submission_id})."
             )
+        verdict: str | None = None
         try:
             requirement_id_raw = raw["requirement_id"]
-            is_met = raw["is_met"]
+            if allow_unverifiable and "verdict" in raw:
+                verdict = raw["verdict"]
+                is_met = verdict == VERDICT_MET
+            else:
+                is_met = raw["is_met"]
             reasoning = raw["reasoning"]
         except (KeyError, TypeError):
             raise LLMAdapterError(
@@ -685,6 +725,13 @@ def verdicts_from_content(
                 f"(submission={submission_id})."
             )
         requirement_id = requirement_id_raw
+        if allow_unverifiable and "verdict" in raw and verdict not in VERDICT_VALUES:
+            raise LLMAdapterError(
+                f"{vendor} 응답의 verdict가 정해진 값이 아니다(requirement_id={requirement_id}, "
+                f"submission={submission_id})."
+            )
+        if allow_unverifiable and verdict is None and isinstance(is_met, bool):
+            verdict = VERDICT_MET if is_met else VERDICT_UNMET
         if not isinstance(is_met, bool):
             raise LLMAdapterError(
                 f"{vendor} 응답의 is_met이 boolean이 아니다(requirement_id={requirement_id}, "
@@ -701,7 +748,7 @@ def verdicts_from_content(
                 f"(submission={submission_id})."
             )
         verdict_by_id[requirement_id] = RequirementVerdict(
-            requirement_id=requirement_id, is_met=is_met, reasoning=reasoning.strip()
+            requirement_id=requirement_id, is_met=is_met, reasoning=reasoning.strip(), verdict=verdict
         )
 
     missing = [rid for rid in requirement_ids if rid not in verdict_by_id]
@@ -772,6 +819,9 @@ class OpenAIScoringAdapter:
         product: str = "contest",
         #: 호출별 로그에 실리는 식별 번호(클래스·문제 등) — 지표 라벨이 아니다. 본문·키를 담지 않는다.
         log_context: dict | None = None,
+        #: 판정에 「확인 불가」를 받는가(#811, ADR-0067) — 강의실만 True 로 준다. 공모전은 주지 않아
+        #: 스키마·파서가 지금 그대로(`is_met`)다.
+        allow_unverifiable: bool = False,
     ) -> None:
         api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
         if not api_key and transport is None:
@@ -793,6 +843,7 @@ class OpenAIScoringAdapter:
         self._async_transport = async_transport
         self._product = product
         self._log_context = dict(log_context or {})
+        self._allow_unverifiable = allow_unverifiable
         # 부팅 가드(core.adapters.check_adapter_mode)의 isinstance(LLMScoringAdapter)
         # 검사가 요구하는 자리 — 실제 호출에 쓰인 모델 식별자는 매 score() 호출마다
         # OpenAI 응답의 "model" 필드에서 새로 읽어 ScoringOutput.model_version으로
@@ -809,7 +860,7 @@ class OpenAIScoringAdapter:
             ],
             "response_format": {
                 "type": "json_schema",
-                "json_schema": _openai_verdict_response_schema(),
+                "json_schema": _openai_verdict_response_schema(allow_unverifiable=self._allow_unverifiable),
             },
         }
         # 추론 모델은 temperature를 받지 않고 reasoning_effort를 받는다
@@ -834,6 +885,7 @@ class OpenAIScoringAdapter:
                 body,
                 requirement_ids=requirement_ids,
                 submission_id=scoring_input.submission_id,
+                allow_unverifiable=self._allow_unverifiable,
             )
         except LLMAdapterError:
             raise

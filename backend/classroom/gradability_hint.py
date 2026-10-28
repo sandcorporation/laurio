@@ -1,9 +1,10 @@
 """채점이 확인할 수 있는 것과 없는 것 — 연결된 앱(MCP)이 문제·체크리스트를 만들 때 알린다(#805).
 
 강의실 채점(`core.llm_scoring`·`llm_scoring_anthropic`)은 **제출한 소스 텍스트를 모델에 한 번 보낼
-뿐**이다. 도구·웹 접속·코드 실행이 없고 판정 스키마는 `is_met`·`reasoning` 뿐이라 「확인 불가」가
-없다. 그래서 「공개 /숫자 주소가 실제로 리디렉션된다」 같은 실행·접속형 항목은 README 의 주장을
-믿느냐 마느냐로 갈리고, 시도마다 판정이 흔들린다(2026-10-28 클래스 6 문제 59).
+뿐**이다. 도구·웹 접속·코드 실행이 없다. 「확인 불가」 판정이 생기기 전(#811)에는 「공개 /숫자 주소가
+실제로 리디렉션된다」 같은 실행·접속형 항목이 README 의 주장을 믿느냐 마느냐로 갈려 시도마다 흔들렸다
+(2026-10-28 클래스 6 문제 59). 지금은 그런 항목이 「확인 불가」로 나오고(`UNVERIFIABLE_VERDICT_RULE`),
+확인 불가는 충족이 아니라 필수 항목이면 통과하지 못한다 — 그래서 만들 때 알리는 이 안내가 여전히 필요하다.
 
 이 모듈은 두 가지를 한 자리에 둔다.
 
@@ -21,11 +22,14 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+#: 「확인할 수 없는 것」의 목록 — 안내 문장과 채점 프롬프트(`UNVERIFIABLE_VERDICT_RULE`, #811)가 같은 말을 쓴다.
+UNVERIFIABLE_THINGS = "실행 결과, 배포 주소 접속, HTTP 응답, 성능·동시성 실측, 브라우저 동작, 외부 서비스 상태"
+
 #: MCP 서버 instructions 에 들어가는 본문.
 GRADABILITY_GUIDE = (
     "체크리스트 항목은 채점이 확인할 수 있는 것만 쓴다. 채점은 제출한 소스·설정 파일·README 의 정적 내용만 읽는다. "
     "확인할 수 있는 것: 기능이 코드에 구현돼 있는지, 설정이 있는지, 문서에 적혀 있는지. "
-    "확인할 수 없는 것: 실행 결과, 배포 주소 접속, HTTP 응답, 성능·동시성 실측, 브라우저 동작, 외부 서비스 상태. "
+    f"확인할 수 없는 것: {UNVERIFIABLE_THINGS}. "
     "그런 항목은 「…하는 코드가 있다」식으로 바꿔 쓰거나, 강사가 직접 확인할 일이면 필수에서 빼고 문제 설명에 둔다. "
     "예: 「/숫자 주소가 실제로 이동한다」 → 「/숫자 경로를 리디렉션 응답(301/302/307/308)으로 처리하는 코드가 있다」."
 )
@@ -48,6 +52,18 @@ GRADABILITY_LABEL_NOTE = (
 #: 강의실 화면의 항목 입력칸 아래 한 줄(#810). 같은 문장이 `classroom/lib/problems/gradability.ts` 에도 있고
 #: 두 곳이 같음을 `tests/test_classroom_gradability_hint.py` 가 지킨다(vitest 는 파이썬을 못 읽는다).
 GRADABILITY_FORM_NOTE = "채점은 소스·설정·README 의 정적 내용만 확인합니다 — 실행·접속 결과는 「…하는 코드가 있다」로 씁니다."
+
+#: 강의실 채점 프롬프트의 판정 규칙(#811, ADR-0067) — `classroom.scoring._build_prompt` 가 싣는다. 판정은 세 값이고,
+#: 「확인 불가」는 정적 내용으로 판정할 수 없을 때만이다. 정적으로 판정할 수 있는데 미루지 말라는 문장이 짝이다.
+UNVERIFIABLE_VERDICT_RULE = (
+    "판정(verdict)은 met(충족)·unmet(미충족)·unverifiable(확인 불가) 중 하나입니다. "
+    "채점은 제출한 소스·설정 파일·README 의 정적 내용만 읽습니다. "
+    f"항목이 {UNVERIFIABLE_THINGS}를 봐야만 판정할 수 있을 때만 unverifiable 로 하고, "
+    "근거에는 판정하려면 무엇이 필요한지 씁니다. "
+    "README 가 실행 결과를 주장하는 것만으로는 met 이 아닙니다. "
+    "소스·설정·README 의 정적 내용으로 판정할 수 있는 항목은 판단이 어렵더라도 unverifiable 로 미루지 말고 "
+    "met 또는 unmet 으로 판정합니다."
+)
 
 # (이유, 어구) — 이유는 응답에 그대로 실린다. 영어 낱말은 단어 경계로 자른다.
 _RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
