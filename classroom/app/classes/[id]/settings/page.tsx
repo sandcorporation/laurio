@@ -414,7 +414,7 @@ export default function ClassSettingsPage() {
   const classId = Number(params.id);
   const { state, reload, setArchived } = useClass(classId);
   const { state: modelsState, reload: reloadModels } = useScoringModels(classId);
-  const costState = useScoringCost(classId);
+  const { reload: reloadCost, ...costState } = useScoringCost(classId);
 
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultReasoningEffort, setDefaultReasoningEffort] = useState("low");
@@ -604,6 +604,7 @@ export default function ClassSettingsPage() {
                 // 연결이 바뀌면 그 연결로 실제로 쓸 수 있는 모델이 달라진다(#401, #601) — 이 화면을
                 // 떠나지 않아도 모델 선택지가 바로 갱신된다.
                 reloadModels();
+                reloadCost();
               }}
             />
           </SettingsCard>

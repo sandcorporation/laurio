@@ -15,19 +15,23 @@ export type ScoringCostState =
   | { status: "error" }
   | { status: "ready"; estimate: ScoringCostEstimate };
 
-export function useScoringCost(classId: number, problemId?: number): ScoringCostState {
+// `reload` — 채점 연결이 바뀌면 단가표의 줄(키 종류마다 쓸 수 있는 모델)이 달라지므로 설정 화면이 저장 뒤에 다시 받는다(#801).
+export function useScoringCost(
+  classId: number,
+  problemId?: number,
+): ScoringCostState & { reload: () => void } {
   const path =
     problemId === undefined
       ? `/api/backend/classroom/classes/${classId}/scoring-cost`
       : `/api/backend/classroom/classes/${classId}/scoring-cost?problem_id=${problemId}`;
-  const { state } = useBackendQuery<ScoringCostEstimate>(bffClient, path);
+  const { state, reload } = useBackendQuery<ScoringCostEstimate>(bffClient, path);
   return useMemo(
     () =>
       state.status === "loading"
-        ? { status: "loading" }
+        ? { status: "loading", reload }
         : state.status === "error"
-          ? { status: "error" }
-          : { status: "ready", estimate: state.data },
-    [state],
+          ? { status: "error", reload }
+          : { status: "ready", estimate: state.data, reload },
+    [state, reload],
   );
 }
