@@ -44,6 +44,12 @@ test("「Claude(Anthropic) 키」를 고르고 저장하면 상태 줄이 그 �
   const { classId } = await newClass(page, "claude");
   await page.goto(`/classes/${classId}/settings#scoring-key`);
 
+  // 방침 개정 시행일(#803) 전에는 선택지가 없고, 지나면 저절로 열린다 — 어느 쪽이든 이 시험이 맞아야 한다.
+  await expect(page.getByTestId("scoring-connection-kind-openai_key")).toBeVisible();
+  if ((await page.getByTestId("scoring-connection-kind-anthropic_key").count()) === 0) {
+    await expect(page.getByTestId("scoring-connection-kind-compatible_server")).toBeVisible();
+    return;
+  }
   await page.getByTestId("scoring-connection-kind-anthropic_key").click();
   await page.getByTestId("anthropic-key-input").fill("sk-ant-e2e-test-key-9c1d");
   await page.getByTestId("anthropic-key-submit").click();

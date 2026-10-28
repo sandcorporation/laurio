@@ -39,6 +39,7 @@ from core.clock import Clock
 from core.contest_catalog import EntryAsset, contest_catalog
 from core.crypto import encrypt
 from core.events import Event, EventBusDisconnected, get_event_bus
+from core import privacy_policy
 from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
 from core.observability import tag_error_scope
@@ -239,6 +240,7 @@ def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None
         ),
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
         scoring_connection_kind=class_obj.scoring_connection_kind,
+        anthropic_key_selectable=privacy_policy.anthropic_key_connection_open(),
         # 공동 강사는 종류와 호스트만 읽는다(#601) — 주소 전체·인증 값 마스킹은 소유자에게만.
         scoring_server_host=scoring_connection.server_host(class_obj.scoring_server_url) if compatible else None,
         scoring_server_url=class_obj.scoring_server_url if compatible and viewer_is_owner else None,
@@ -857,6 +859,11 @@ _DEFAULT_MODEL_FOR_KIND = {
 
 
 def _save_vendor_key(request: HttpRequest, class_obj: Class, api_key: str, *, kind: str) -> ClassOut:
+    # 방침 개정 시행일 전에는 Claude 키 연결을 저장할 수 없다(#803) — 제출 소스가 고지 없이 국외로 나가지 않게.
+    if kind == Class.ScoringConnectionKind.ANTHROPIC_KEY and not privacy_policy.anthropic_key_connection_open():
+        raise HttpError(
+            422, f"Claude(Anthropic) 키 연결은 {privacy_policy.anthropic_key_connection_opens_label()}부터 쓸 수 있습니다."
+        )
     raw_key = api_key.strip()
     if not raw_key:
         raise HttpError(422, "채점 키를 입력해주세요.")

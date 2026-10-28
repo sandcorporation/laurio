@@ -92,6 +92,9 @@ class ClassOut(Schema):
     openai_key_masked: str | None = None
     #: 채점 연결의 종류(#601) — "openai_key" | "compatible_server".
     scoring_connection_kind: str = "openai_key"
+    #: 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일(KST 0시) 전에는 거짓이고
+    #: 화면이 그 선택지를 보이지 않는다(저장 API 도 거절한다). 시행일이 지나면 저절로 참이다.
+    anthropic_key_selectable: bool = False
     #: 호환 서버의 호스트 — 공동 강사도 읽는다(종류와 호스트만, #601).
     scoring_server_host: str | None = None
     #: 호환 서버의 주소 전체 — 소유자에게만 싣는다.

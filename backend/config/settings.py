@@ -6,7 +6,7 @@
 import hashlib
 import os
 import sys
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 # Fernet 은 VERIFICATION_ENCRYPTION_KEY 가 **쓸 수 있는 키인지**를 부팅 시점에
@@ -101,6 +101,12 @@ CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_CONTEST_PRODUCT_ENABLED", True)
 # 만 이 환경변수의 기본값을 false로 겹쳐 쓴다(dev·CI는 건드리지 않으므로 여전히
 # 켜진 채다 — 기존 유료 공모전 테스트가 계속 초록이어야 한다).
 PAID_CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_PAID_CONTEST_PRODUCT_ENABLED", True)
+
+# 개인정보처리방침의 시행일(#803) — **한국 시간 0시부터** 시행한다. 이 값이 하나다: 방침 화면
+# (`frontend/app/privacy/page.tsx` 의 EFFECTIVE_DATE — `tests/test_privacy_policy_effective_date.py`
+# 가 두 값이 같은지 지킨다), 시행일 전 Claude(Anthropic) 키 저장 잠금(`core.privacy_policy`)이 모두
+# 이 값을 본다. 방침을 고칠 때는 시행일 7일 전부터 공지해야 하므로(12항) 병합일 +7일 이상으로 옮긴다.
+PRIVACY_POLICY_EFFECTIVE_DATE = date(2026, 11, 6)
 
 # production인데 DEBUG=true로 뜨면 에러 페이지가 스택 트레이스·환경변수·SQL을 그대로
 # 노출한다(Django check --deploy의 security.W018과 같은 위협). DEBUG는 개별

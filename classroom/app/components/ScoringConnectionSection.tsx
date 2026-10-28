@@ -9,13 +9,10 @@ import type { FormEvent } from "react";
 
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { setAnthropicKey, setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
+import { CLAUDE_KEY_LABEL, connectionKindOptions, initialConnectionKind, type ConnectionKind } from "@/lib/classes/connection-kinds";
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
-
-type ConnectionKind = ClassRow["scoring_connection_kind"];
-
-export const CLAUDE_KEY_LABEL = "Claude(Anthropic) 키";
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
@@ -72,12 +69,16 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
   );
 }
 
-function KindChoice({ value, onChange }: { value: ConnectionKind; onChange: (kind: ConnectionKind) => void }) {
-  const options: { kind: ConnectionKind; label: string }[] = [
-    { kind: "openai_key", label: "OpenAI 키" },
-    { kind: "anthropic_key", label: CLAUDE_KEY_LABEL },
-    { kind: "compatible_server", label: "호환 서버" },
-  ];
+function KindChoice({
+  value,
+  onChange,
+  claudeSelectable,
+}: {
+  value: ConnectionKind;
+  onChange: (kind: ConnectionKind) => void;
+  claudeSelectable: boolean;
+}) {
+  const options = connectionKindOptions(claudeSelectable);
   return (
     <div role="radiogroup" aria-label="채점 연결" className="flex flex-wrap gap-2">
       {options.map((option) => (
@@ -281,7 +282,9 @@ export function ScoringConnectionSection({
   isOwner: boolean;
   onSaved: () => void;
 }) {
-  const [kind, setKind] = useState<ConnectionKind>(classroom.scoring_connection_kind);
+  const [kind, setKind] = useState<ConnectionKind>(
+    initialConnectionKind(classroom.scoring_connection_kind, classroom.anthropic_key_selectable),
+  );
   // 연결이 없으면 바꿀 것이 없다 — 폼이 처음부터 열려 있고, 있으면 「바꾸기」를 눌러야 열린다.
   const [open, setOpen] = useState(!classroom.has_openai_key);
   const switching = classroom.has_openai_key && kind !== classroom.scoring_connection_kind;
@@ -318,7 +321,7 @@ export function ScoringConnectionSection({
       </div>
       {formOpen ? (
         <div className="flex flex-col gap-4 border-t border-rule pt-4">
-          <KindChoice value={kind} onChange={setKind} />
+          <KindChoice value={kind} onChange={setKind} claudeSelectable={classroom.anthropic_key_selectable} />
           {switching ? (
             <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-attention">
               {`저장하면 지금의 ${currentLabel}${classroom.scoring_connection_kind === "compatible_server" ? " 주소와 인증 값" : ""}이 지워집니다.`}

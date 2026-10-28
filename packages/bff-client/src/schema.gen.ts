@@ -4917,6 +4917,11 @@ export interface components {
         /** ClassOut */
         ClassOut: {
             /**
+             * Anthropic Key Selectable
+             * @default false
+             */
+            anthropic_key_selectable: boolean;
+            /**
              * Archived
              * @default false
              */

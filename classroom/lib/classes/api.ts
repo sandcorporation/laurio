@@ -44,6 +44,8 @@ export type ClassRow = {
   scoring_connection_verified_at: string | null;
   // 채점 연결의 종류(#601) — 「OpenAI 키」 또는 「호환 서버」.
   scoring_connection_kind: "openai_key" | "anthropic_key" | "compatible_server";
+  // 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일 전에는 false, 지나면 백엔드가 true 로 준다.
+  anthropic_key_selectable: boolean;
   // 호환 서버의 호스트 — 공동 강사도 읽는다.
   scoring_server_host: string | null;
   // 호환 서버의 주소 전체와 인증 값 끝 네 자리 — 소유자에게만 온다.
