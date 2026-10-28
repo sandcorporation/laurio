@@ -22,6 +22,12 @@ from __future__ import annotations
 import pydantic
 
 from . import problem_authoring
+from .gradability_hint import (
+    GRADABILITY_LABEL_NOTE,
+    GRADABILITY_TOOL_NOTE,
+    gradability_warning_text,
+    gradability_warnings,
+)
 from .git_history_hint import zip_git_history_item_ids, zip_git_history_warning_text
 from .instructor_scope import class_scope, problem_scope
 from .mcp_tool import Tool, ToolInputError, WriteResult
@@ -91,7 +97,7 @@ def _items_out(problem: Problem) -> list[dict]:
     return [_item_out(item) for item in problem.checklist_items.all()]
 
 
-def _problem_out(problem: Problem, class_obj: Class) -> dict:
+def _problem_out(problem: Problem, class_obj: Class, *, gradability: bool = False) -> dict:
     """만들기·고치기·복사의 결과 — 문제 요약. **설명·채점 지침 원문은 싣지 않는다**(#579):
     방금 앱이 보낸 글을 그대로 되돌려 대화를 채울 이유가 없고, 원문은 `get_problem` 이 준다."""
 
@@ -111,6 +117,7 @@ def _problem_out(problem: Problem, class_obj: Class) -> dict:
         "checklist_items": _items_out(problem),
         "available_transitions": _transitions_out(problem, class_obj),
         **_warning_out(problem),
+        **(_gradability_out(problem.checklist_items.all()) if gradability else {}),
     }
 
 
@@ -125,6 +132,16 @@ def _warning_out(problem: Problem) -> dict:
     return {"warning": zip_git_history_warning_text(item_ids)} if item_ids else {}
 
 
+def _gradability_out(items) -> dict:
+    """채점이 확인할 수 없을 수 있는 항목(#805) — 어구 규칙에 걸린 것이 있을 때만 키가 생긴다.
+    **저장은 막지 않는다**: 이미 저장된 뒤의 보조 안전망이다(주된 길은 만들기 전 안내)."""
+
+    warnings = gradability_warnings(items)
+    if not warnings:
+        return {}
+    return {"gradability_warnings": warnings, "gradability_warning": gradability_warning_text(warnings)}
+
+
 def _transition_out(problem: Problem, class_obj: Class) -> dict:
     """상태 바꾸기의 결과 — 번호·제목·새 상태와 다음에 할 수 있는 상태 바꾸기만(#579)."""
 
@@ -136,10 +153,13 @@ def _transition_out(problem: Problem, class_obj: Class) -> dict:
     }
 
 
-def _checklist_out(problem: Problem) -> dict:
+def _checklist_out(problem: Problem, *, gradability_for: list[int] | None = None) -> dict:
     """체크리스트 도구의 결과에 붙는 그 문제의 항목 목록(#579) — 설명·채점 설정은 빠진다."""
 
-    return {"problem_id": problem.id, "checklist_items": _items_out(problem), **_warning_out(problem)}
+    out = {"problem_id": problem.id, "checklist_items": _items_out(problem), **_warning_out(problem)}
+    if gradability_for is not None:  # 방금 더하거나 고친 항목만 — 목록 전체를 매번 다시 나무라지 않는다
+        out.update(_gradability_out(i for i in problem.checklist_items.all() if i.id in gradability_for))
+    return out
 
 
 # --- 스키마 조각 ------------------------------------------------------------------
@@ -155,7 +175,7 @@ _SUBMISSION_FORMATS = {
     "items": {"type": "string", "enum": [v for v, _ in Problem.SubmissionFormat.choices]},
     "description": "제출 형식 — source(소스 파일·zip), repository(GitHub 저장소 주소). 하나 이상.",
 }
-_LABEL = {"type": "string", "minLength": 1, "maxLength": 200, "description": "체크리스트 항목 문장"}
+_LABEL = {"type": "string", "minLength": 1, "maxLength": 200, "description": GRADABILITY_LABEL_NOTE}
 _REQUIRED = {
     "type": "boolean",
     "description": "필수 항목인가. 필수 항목을 모두 만족해야 통과다. 열린·숨긴 문제는 필수 항목이 하나 이상 있어야 한다.",
@@ -290,12 +310,36 @@ _WARNING_OUT = {
     "type": "string",
     "description": "zip 제출에는 Git 기록이 없어 zip 으로 낸 사람이 언제나 놓칠 필수 항목이 있으면 그 경고. 없으면 키가 없다.",
 }
+_GRADABILITY_WARNINGS_OUT = {
+    "type": "array",
+    "description": (
+        "채점이 확인할 수 없을 수 있는 항목(실행·접속·HTTP 응답·동시성·브라우저 동작을 묻는 듯한 것). "
+        "저장은 이미 됐다 — 항목을 「…하는 코드가 있다」식으로 고치거나 필수에서 뺀다. 없으면 키가 없다."
+    ),
+    "items": {
+        "type": "object",
+        "properties": {
+            "checklist_item_id": {"type": "integer"},
+            "text": {"type": "string"},
+            "reason": {"type": "string"},
+        },
+        "required": ["checklist_item_id", "text", "reason"],
+    },
+}
+_GRADABILITY_WARNING_OUT = {"type": "string", "description": "위 목록을 사람이 읽을 한 줄로. 없으면 키가 없다."}
+_GRADABILITY_OUT = {
+    "gradability_warnings": _GRADABILITY_WARNINGS_OUT,
+    "gradability_warning": _GRADABILITY_WARNING_OUT,
+}
 _PROBLEM_OUT["properties"]["warning"] = _WARNING_OUT
+_PROBLEM_OUT["properties"].update(_GRADABILITY_OUT)
 
 
 _PROBLEM_RESULT = _object({"problem": _PROBLEM_OUT}, ["problem"])
 _TRANSITION_RESULT = _object({"problem": _TRANSITION_OUT}, ["problem"])
-_ITEM_RESULT = _object({"item": _ITEM_OUT, **_CHECKLIST_OUT, "warning": _WARNING_OUT}, ["item", *_CHECKLIST_OUT])
+_ITEM_RESULT = _object(
+    {"item": _ITEM_OUT, **_CHECKLIST_OUT, "warning": _WARNING_OUT, **_GRADABILITY_OUT}, ["item", *_CHECKLIST_OUT]
+)
 _CHECKLIST_RESULT = _object({**_CHECKLIST_OUT, "warning": _WARNING_OUT}, list(_CHECKLIST_OUT))
 _DELETED_ITEM_RESULT = _object(
     {"deleted_item_id": {"type": "integer", "description": "지운 항목 번호"}, **_CHECKLIST_OUT, "warning": _WARNING_OUT},
@@ -313,7 +357,7 @@ _CREATE_PROBLEM_INPUT = _object(
         "checklist_items": {
             "type": "array",
             "items": _CHECKLIST_ITEM_IN,
-            "description": "체크리스트 항목들 — 적은 순서가 그대로 순서가 된다.",
+            "description": "체크리스트 항목들 — 적은 순서가 그대로 순서가 된다. " + GRADABILITY_LABEL_NOTE,
         },
         "model": _MODEL,
         "reasoning_effort": _REASONING_EFFORT,
@@ -339,7 +383,7 @@ def _create_problem(grant: ConnectedApp, arguments: dict) -> WriteResult:
     problem = problem_authoring.create_problem(class_obj, payload)
     opened = " — 바로 열었다" if payload.open else ""
     return WriteResult(
-        structured={"problem": _problem_out(problem, class_obj)},
+        structured={"problem": _problem_out(problem, class_obj, gradability=True)},
         class_id=class_obj.id,
         problem_id=problem.id,
         summary=f"「{problem.title}」{opened}",
@@ -374,7 +418,7 @@ def _update_problem(grant: ConnectedApp, arguments: dict) -> WriteResult:
     problem = problem_authoring.update_problem(scope.class_obj, scope.problem, payload)
     changed = ", ".join(sorted(payload.model_fields_set)) or "없음"
     return WriteResult(
-        structured={"problem": _problem_out(problem, scope.class_obj)},
+        structured={"problem": _problem_out(problem, scope.class_obj, gradability=True)},
         class_id=scope.class_obj.id,
         problem_id=problem.id,
         summary=f"「{problem.title}」 — 고친 칸: {changed}",
@@ -481,7 +525,7 @@ def _add_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     )
     item = problem_authoring.add_checklist_item(scope.problem, payload)
     return WriteResult(
-        structured={"item": _item_out(item), **_checklist_out(scope.problem)},
+        structured={"item": _item_out(item), **_checklist_out(scope.problem, gradability_for=[item.id])},
         class_id=scope.class_obj.id,
         problem_id=scope.problem.id,
         summary=f"항목 {item.id} 「{item.label}」",
@@ -508,7 +552,7 @@ def _update_checklist_item(grant: ConnectedApp, arguments: dict) -> WriteResult:
     )
     item = problem_authoring.update_checklist_item(scope.problem, _id(arguments, "item_id"), payload)
     return WriteResult(
-        structured={"item": _item_out(item), **_checklist_out(scope.problem)},
+        structured={"item": _item_out(item), **_checklist_out(scope.problem, gradability_for=[item.id])},
         class_id=scope.class_obj.id,
         problem_id=scope.problem.id,
         summary=f"항목 {item.id} 「{item.label}」 — 고친 칸: {', '.join(sorted(payload.model_fields_set)) or '없음'}",
@@ -579,7 +623,7 @@ PROBLEM_TOOLS: list[Tool] = [
             "클래스에 문제를 하나 만든다 — 제목·설명·제출 형식·체크리스트·채점 설정·권장 기한·마감을 한 번에. "
             "기본은 초안(참여자에게 안 보임)이고, open 을 참으로 주면 바로 연다(필수 체크리스트 항목이 "
             "하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. 권장 기한 뒤의 시도는 「늦음」으로 "
-            f"표시되고, 마감이 지나면 참여자는 새로 못 낸다(강사는 낸다). {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
+            f"표시되고, 마감이 지나면 참여자는 새로 못 낸다(강사는 낸다). {GRADABILITY_TOOL_NOTE} {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_CREATE_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,
@@ -593,7 +637,7 @@ PROBLEM_TOOLS: list[Tool] = [
             "문제의 제목·설명·제출 형식·채점 모델·추론 강도·채점 지침·문법 검사·권장 기한·마감을 고친다. "
             "보낸 칸만 바뀌고 보내지 않은 칸은 그대로다 — 두 날짜는 null 을 보내면 비운다(ISO 8601). "
             "체크리스트는 체크리스트 도구로 고친다. "
-            f"{_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
+            f"{GRADABILITY_TOOL_NOTE} {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_UPDATE_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,
@@ -603,7 +647,7 @@ PROBLEM_TOOLS: list[Tool] = [
     Tool(
         name="add_checklist_item",
         title="체크리스트 항목 더하기",
-        description=f"문제의 체크리스트 맨 뒤에 항목을 하나 더한다. {_ARCHIVED_NOTE} {_CHECKLIST_NOTE}",
+        description=f"문제의 체크리스트 맨 뒤에 항목을 하나 더한다. {GRADABILITY_TOOL_NOTE} {_ARCHIVED_NOTE} {_CHECKLIST_NOTE}",
         input_schema=_ADD_ITEM_INPUT,
         output_schema=_ITEM_RESULT,
         read_only=False,
@@ -614,7 +658,7 @@ PROBLEM_TOOLS: list[Tool] = [
         title="체크리스트 항목 고치기",
         description=(
             "체크리스트 항목의 문장이나 필수 여부를 고친다. 열린·숨긴 문제의 마지막 필수 항목은 필수를 "
-            f"풀 수 없다. {_ARCHIVED_NOTE} {_CHECKLIST_NOTE}"
+            f"풀 수 없다. {GRADABILITY_TOOL_NOTE} {_ARCHIVED_NOTE} {_CHECKLIST_NOTE}"
         ),
         input_schema=_UPDATE_ITEM_INPUT,
         output_schema=_ITEM_RESULT,
