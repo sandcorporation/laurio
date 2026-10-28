@@ -44,7 +44,7 @@ import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-chec
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
-import { findCostRow, formatKrw, usageKrw } from "@/lib/scoring/cost";
+import { findCostRow, formatKrw, usageCostText, usageKrw } from "@/lib/scoring/cost";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
@@ -488,14 +488,14 @@ export default function ClassSettingsPage() {
   // 것을 바꾼다(#565) — 이 칸은 보는 사람의 이름이다.
   const isOwner = classroom.role === "owner";
   const isCompatibleServer = classroom.scoring_connection_kind === "compatible_server";
-  const usageKrwValue =
+  const usageKrwText =
     costState.status === "ready" && costState.estimate.unit === "krw"
-      ? usageKrw(
+      ? usageCostText(
           classroom.token_usage_total,
           findCostRow(costState.estimate, classroom.default_model, classroom.default_reasoning_effort),
+          classroom.default_model,
         )
       : null;
-  const usageKrwText = usageKrwValue !== null && usageKrwValue > 0 ? formatKrw(usageKrwValue) : null;
   const selectedIsReasoning =
     modelsState.status === "ready" &&
     isSelectedModelReasoning(

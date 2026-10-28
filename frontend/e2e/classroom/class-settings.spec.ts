@@ -54,7 +54,7 @@ test("「Claude(Anthropic) 키」를 고르고 저장하면 상태 줄이 그 �
   await expect(page.getByTestId("anthropic-key-input")).toHaveCount(0);
   // 새로고침 없이도 단가표에 있는 Claude 모델은 원화로 보인다(#801) — 비용은 연결이 바뀐 뒤에 다시 받는다.
   await expect(page.getByTestId("scoring-model-cost-claude-haiku-5-5")).toContainText("원");
-  await expect(page.getByTestId("scoring-model-cost-claude-sonnet-5-5")).not.toContainText("비용 미확인");
+  await expect(page.getByTestId("scoring-model-cost-claude-sonnet-5-5")).not.toContainText("단가 모름");
 
   await page.reload();
   await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");

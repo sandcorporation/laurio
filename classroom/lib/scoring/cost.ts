@@ -12,7 +12,7 @@ export type ScoringCostRow = {
   model_id: string;
   // 추론 모델이면 low·medium·high, 아니면 null.
   reasoning_effort: string | null;
-  // 거짓이면 단가를 몰라 「비용 미확인」이다.
+  // 거짓이면 단가를 몰라 「단가 모름」이다.
   priced: boolean;
   // 위로 열린 어림(추론 강도 높음) — 「약 N원~」.
   open_ended: boolean;
@@ -47,7 +47,7 @@ export type ScoringCostEstimate = {
 
 const EFFORT_LABEL: Record<string, string> = { low: "낮음", medium: "보통", high: "높음" };
 
-/** 고른 모델·강도의 줄 — 추론 모델이 아니면 강도는 보지 않는다. 없으면 「비용 미확인」이다. */
+/** 고른 모델·강도의 줄 — 추론 모델이 아니면 강도는 보지 않는다. 없으면 「단가 모름」이다. */
 export function findCostRow(
   estimate: ScoringCostEstimate,
   modelId: string,
@@ -61,6 +61,9 @@ export function findCostRow(
     ) ?? null
   );
 }
+
+/** 단가표에 없는 모델의 비용을 부르는 한 이름(#797) — 호환 서버의 「토큰만」(#604)과 섞지 않는다. */
+export const UNPRICED_TEXT = "단가 모름";
 
 export function costRowLabel(row: Pick<ScoringCostRow, "model_id" | "reasoning_effort">): string {
   return row.reasoning_effort === null
@@ -134,7 +137,7 @@ function representativeAttempt(row: ScoringCostRow): ScoringCostAttempt | null {
 
 /**
  * 누적 사용량(토큰)의 원화 어림(#629) — 지금 설정(기본 모델·강도)의 토큰당 단가로 셈한다. 지난 시도가
- * 다른 모델이었어도 가리지 않는 어림이다. 단가를 모르면(호환 서버·비용 미확인) null.
+ * 다른 모델이었어도 가리지 않는 어림이다. 단가를 모르면(호환 서버·단가 모름) null.
  */
 export function usageKrw(tokens: number, row: ScoringCostRow | null): number | null {
   if (!row || !row.priced) return null;
@@ -144,17 +147,28 @@ export function usageKrw(tokens: number, row: ScoringCostRow | null): number | n
 }
 
 /**
+ * 누적 사용량 옆의 원화 칸(#797) — 토큰이 있는데 지금 모델의 단가를 모르면 비우지 않고
+ * 「단가 모름 (모델 X)」로 낸다. 토큰이 없으면 null.
+ */
+export function usageCostText(tokens: number, row: ScoringCostRow | null, modelId: string): string | null {
+  if (tokens <= 0) return null;
+  const krw = usageKrw(tokens, row);
+  if (krw === null) return `${UNPRICED_TEXT} (모델 ${modelId})`;
+  return krw > 0 ? formatKrw(krw) : null;
+}
+
+/**
  * 접힌 「모델별 예상 채점 비용」 표의 머리줄(#619) — 펼치지 않아도 지금 설정의 시도 1건 비용이
  * 보인다. 기준이 소스 크기별이면 가운데(「보통」) 크기로 적는다.
  */
 export function classCostSummary(estimate: ScoringCostEstimate, current: ScoringCostRow): string {
   const head = `지금 설정 ${costRowLabel(current)}`;
-  if (!current.priced) return `${head} · 비용 미확인`;
+  if (!current.priced) return `${head} · ${UNPRICED_TEXT}`;
   if (current.per_attempt) return `${head} · 시도 1건 ${formatKrw(current.per_attempt.krw, current.open_ended)}`;
   const middle = Math.floor(current.by_source_size.length / 2);
   const cost = current.by_source_size[middle];
   const chars = estimate.source_size_bands[middle];
-  if (!cost || chars === undefined) return `${head} · 비용 미확인`;
+  if (!cost || chars === undefined) return `${head} · ${UNPRICED_TEXT}`;
   return `${head} · 소스 약 ${formatManCount(chars)} 자면 시도 1건 ${formatKrw(cost.krw, current.open_ended)}`;
 }
 
@@ -179,7 +193,7 @@ export function problemCostLine(estimate: ScoringCostEstimate, row: ScoringCostR
 
 /**
  * 기본 모델 표의 한 칸(#636) — 그 모델의 시도 1건 비용. 호환 서버(토큰 단위)는 토큰을, OpenAI 키는
- * 원화를 적고, 단가를 모르면 「비용 미확인」이다. 기준이 소스 크기별이면 가운데(「보통」) 크기로 본다.
+ * 원화를 적고, 단가를 모르면 「단가 모름」이다. 기준이 소스 크기별이면 가운데(「보통」) 크기로 본다.
  */
 export function modelCostCell(estimate: ScoringCostEstimate, row: ScoringCostRow | null): string {
   if (!row) return UNPRICED_TEXT;
@@ -189,4 +203,3 @@ export function modelCostCell(estimate: ScoringCostEstimate, row: ScoringCostRow
   return formatKrw(attempt.krw, row.open_ended);
 }
 
-const UNPRICED_TEXT = "비용 미확인";

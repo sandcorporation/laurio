@@ -77,6 +77,44 @@ def test_a_model_missing_from_the_price_table_has_no_cost():
 
 
 @pytest.mark.parametrize(
+    ("raw", "canonical"),
+    [
+        ("gpt-4o-mini-2024-07-18", "gpt-4o-mini"),
+        ("gpt-4.1-2025-04-14", "gpt-4.1"),
+        ("gpt-5-mini-latest", "gpt-5-mini"),
+        ("claude-haiku-4-5-20251001", "claude-haiku-4-5"),
+        ("claude-sonnet-5-5-latest", "claude-sonnet-5-5"),
+        # 버전 마디는 이름의 일부다 — 날짜가 아니라 떼지 않는다.
+        ("claude-haiku-5-5", "claude-haiku-5-5"),
+        ("claude-sonnet-4-6", "claude-sonnet-4-6"),
+        # 접두어만 같은 다른 모델은 그대로.
+        ("gpt-4o", "gpt-4o"),
+        ("gpt-4o-mini", "gpt-4o-mini"),
+        ("gpt-4o-mini-preview", "gpt-4o-mini-preview"),
+    ],
+)
+def test_canonical_model_id_strips_only_date_and_latest_suffixes(raw, canonical):
+    assert scoring_cost.canonical_model_id(raw) == canonical
+
+
+def test_a_dated_variant_is_priced_as_its_canonical_model_and_an_unknown_one_is_not():
+    dated = scoring_cost.attempt_cost("gpt-4o-mini-2024-07-18", None, prompt_chars=10_000)
+    plain = scoring_cost.attempt_cost("gpt-4o-mini", None, prompt_chars=10_000)
+    assert dated == plain and dated is not None
+    claude = scoring_cost.attempt_cost("claude-haiku-5-5-20261001", "low", prompt_chars=10_000)
+    assert claude == scoring_cost.attempt_cost("claude-haiku-5-5", "low", prompt_chars=10_000)
+    # 맞춘 뒤에도 표에 없으면 모른다 — 접두어가 같은 모델의 단가를 빌리지 않는다.
+    assert scoring_cost.price_for("gpt-4o-preview-2026-01-01") is None
+    assert scoring_cost.attempt_cost("claude-haiku-9-9-20270101", None, prompt_chars=10_000) is None
+
+
+def test_a_sum_leaves_unknown_prices_out_and_says_so():
+    assert scoring_cost.sum_known_krw([10.0, 5.5]) == (15.5, False)
+    assert scoring_cost.sum_known_krw([10.0, None]) == (10.0, True)
+    assert scoring_cost.sum_known_krw([None]) == (0, True)
+
+
+@pytest.mark.parametrize(
     ("model_id", "input_usd", "output_usd"),
     [
         ("gpt-4o", 2.50, 10.00),
