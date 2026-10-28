@@ -35,6 +35,7 @@ async function upstream(reply?: string): Promise<Upstream> {
   };
 }
 
+// TEST-WAIT-EXCEPTION: 「이 시간 안에 위쪽에 요청 없는 연결이 남지 않는다」는 부정 단언의 창이다 — 닫힘 사건을 기다리면 누수된 연결이 keep-alive 로 닫힐 때까지 기다려 누수를 놓친다
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("probeBackendHealth", () => {

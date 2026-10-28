@@ -352,6 +352,7 @@ test.describe("액세스 만료 시 리프레시가 조용히 처리된다", () 
         return inflightRevive;
       }
       function sleep(ms: number): Promise<void> {
+        // TEST-WAIT-EXCEPTION: 브라우저 안에서 실제 클라이언트(`bff-client`)의 401 재시도 백오프를 흉내 낸 코드다 — 시험이 기다리는 시간이 아니다
         return new Promise((resolve) => setTimeout(resolve, ms));
       }
       async function sessionFetch(path: string): Promise<Response> {

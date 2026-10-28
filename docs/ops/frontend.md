@@ -152,6 +152,14 @@ cd <worktree>
   「결제 화면 → 공개」로 나눴다.
 - **사건을 놓치지 않게 먼저 기다린다** — 응답 대기는 화면을 열기 **전에** 건다(공모전
   이미지 시험이 응답을 놓치고 15초를 채우던 것이 CI 의 17초였다).
+- **시간으로 기다리지 않는다 — 기계가 막는다**(#808) — `waitForTimeout`·`waitForFunction`·
+  `toPass`·`expect.poll`·`networkidle`·`setTimeout`/`setInterval`/`requestAnimationFrame`·
+  e2e 의 `while (` 은 시험 파일과 `e2e/` 지원 파일에서 `scripts/check_test_waits.py` 가
+  막는다(JS 린터가 없어 문서 검사와 같은 파이썬 하나; 커밋 훅과 PR CI 의
+  `sub-checks-inside.sh` 「시험의 고정 대기 금지」 단계가 부른다). 기다릴 것은 화면 단언
+  (`toHaveText`·`toHaveURL`), 동작 전에 건 `waitForResponse`, 요소 `waitFor` 다. 시험의
+  대기가 아닌 것(고장 주입의 늦은 서버, 부정 단언의 창, 브라우저 안 백오프 흉내)만 그 줄
+  윗줄에 `// TEST-WAIT-EXCEPTION: <이유>` 로 연다 — 이유가 비면 실패한다.
 - **서버 쪽 비용** — dev·CI 는 빠른 비밀번호 해셔를 쓴다(운영자 시드 1.06 → 0.08초,
   로그인 0.55 → 0.23초; 배포는 PBKDF2 그대로, `config/settings.py`). dev·CI 의 Postgres 는
   `synchronous_commit=off`(시드 하나가 커밋 대기로 1.5초를 썼다). CI 의 e2e 백엔드는

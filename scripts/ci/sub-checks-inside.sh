@@ -59,6 +59,8 @@ step "이미지 문맥 해시(건너뛰기)" python3 scripts/test_image_context.
 step "ghcr 정리가 살아 있는 커밋을 남긴다" python3 scripts/test_ghcr_prune.py
 step "e2e 정지의 인프라 판정" python3 scripts/test_e2e_stall.py
 step "백엔드 오류 문구 언어" python3 scripts/check_backend_error_language.py
+step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
+step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py
 for pkg in packages/bff-shared packages/markdown packages/banned-words; do
   step "단위 시험 $pkg" pnpm --dir "$pkg" run test
 done

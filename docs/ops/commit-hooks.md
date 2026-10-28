@@ -23,7 +23,7 @@
   자동으로 같이 스테이징한다(생성물이라 사람이 리뷰할 것이 없다) — 문서만
   고친 커밋은 이 2.1초를 안 낸다. 재생성 명령이 실패하면 커밋을 거절한다.
 - **항상** `check_adr_status.py`·`check_screen_language.py`·
-  `check_backend_error_language.py` 세 문서 검사를 돈다(합쳐 0.35초) — 하나라도
+  `check_backend_error_language.py`·`check_test_waits.py`(시험의 고정 대기, #808) 네 검사를 돈다(합쳐 0.4초) — 하나라도
   걸리면 커밋을 거절한다.
 
 **`git commit --no-verify` 로 넘어갈 수 있다** — 훅은 피드백을 6분에서 몇
