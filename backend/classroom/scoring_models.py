@@ -155,16 +155,11 @@ FALLBACK_SCORING_MODEL_CHOICES: tuple[ScoringModelChoice, ...] = tuple(
         ]
     )
 )
-_FALLBACK_MODEL_IDS = {choice.id for choice in FALLBACK_SCORING_MODEL_CHOICES}
 
 #: 새 클래스의 기본 채점 모델(#401 AC) — 가장 오래된 모델이 아니라 빠르고
 #: 검증된 모델에서 시작한다. 기존 클래스의 저장된 값은 마이그레이션이 건드리지
 #: 않는다.
 DEFAULT_SCORING_MODEL = "gpt-4.1-mini"
-
-
-def is_fallback_model(model_id: str) -> bool:
-    return model_id in _FALLBACK_MODEL_IDS
 
 
 #: 추론 강도 세 단계(#402, CONTEXT.md 「추론 강도」) — Class 기본값·Problem
@@ -180,3 +175,68 @@ _REASONING_EFFORT_VALUES = {value for value, _label in REASONING_EFFORT_CHOICES}
 
 def is_valid_reasoning_effort(value: str) -> bool:
     return value in _REASONING_EFFORT_VALUES
+
+
+# --- Claude(Anthropic) 키 연결 (#795, ADR-0066) ----------------------------------------------
+#
+# 목록은 벤더의 `/v1/models` 가 `line`·`capabilities` 로 이미 걸렀다(`core.llm_scoring_anthropic.
+# scoring_model_ids_from`) — 여기서는 화면 이름을 만들고 채점 시점의 이름 검사만 한다. 모든 Claude
+# 채점 모델은 추론 강도(`output_config.effort`)를 받는다: Haiku 5.5·Sonnet 5.5 는 사고가 기본으로 켜져
+# 있어 강도가 곧 비용·깊이의 손잡이다.
+
+_CLAUDE_ID_PATTERN = re.compile(r"^claude-(haiku|sonnet|opus)-([0-9]+)(?:-([0-9]))?(?:-([0-9]{8}))?$")
+_CLAUDE_LINE_LABEL = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus"}
+
+#: 문서(2026-10-28, https://platform.claude.com/docs/en/about-claude/models/overview)의 컨텍스트 크기.
+_KNOWN_CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
+    "claude-haiku-5-5": 1_000_000,
+    "claude-sonnet-5-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+}
+
+#: 「Claude(Anthropic) 키」 연결의 기본 채점 모델 — Haiku 계열 최신(#795: 비용).
+DEFAULT_ANTHROPIC_SCORING_MODEL = "claude-haiku-5-5"
+
+
+def is_claude_model_id(model_id: str) -> bool:
+    """Claude 모델 이름 모양인가 — 「Claude(Anthropic) 키」 연결이 채점 시점에 받는 이름."""
+
+    return _CLAUDE_ID_PATTERN.match(model_id) is not None
+
+
+def parse_claude_model_choice(model_id: str) -> ScoringModelChoice | None:
+    match = _CLAUDE_ID_PATTERN.match(model_id)
+    if match is None:
+        return None
+    line, major, minor = match.group(1), match.group(2), match.group(3)
+    version = f"{major}.{minor}" if minor else major
+    return ScoringModelChoice(
+        id=model_id,
+        label=f"Claude {_CLAUDE_LINE_LABEL[line]} {version}",
+        context_window=_KNOWN_CLAUDE_CONTEXT_WINDOWS.get(model_id),
+        is_reasoning_model=True,
+    )
+
+
+def build_claude_catalog(vendor_model_ids: Iterable[str]) -> list[ScoringModelChoice]:
+    """벤더 순서(최신 먼저)를 지키되 Haiku 를 앞에 — 기본 추천이 맨 위에 오게."""
+
+    parsed = [parse_claude_model_choice(model_id) for model_id in dict.fromkeys(vendor_model_ids)]
+    return sorted((c for c in parsed if c is not None), key=lambda c: 0 if c.id.startswith("claude-haiku-") else 1)
+
+
+ANTHROPIC_FALLBACK_SCORING_MODEL_CHOICES: tuple[ScoringModelChoice, ...] = tuple(
+    build_claude_catalog([DEFAULT_ANTHROPIC_SCORING_MODEL, "claude-sonnet-5-5"])
+)
+
+
+def fallback_choices_for(kind: str) -> tuple[ScoringModelChoice, ...]:
+    """조회하지 못했을 때의 작은 목록 — 연결 종류마다 다르다(OpenAI 목록은 Claude 키에 뜻이 없다)."""
+
+    if kind == "anthropic_key":
+        return ANTHROPIC_FALLBACK_SCORING_MODEL_CHOICES
+    return FALLBACK_SCORING_MODEL_CHOICES
+
+
+def is_fallback_model_for(kind: str, model_id: str) -> bool:
+    return any(choice.id == model_id for choice in fallback_choices_for(kind))

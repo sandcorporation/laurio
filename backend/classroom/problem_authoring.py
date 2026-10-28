@@ -28,7 +28,7 @@ from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPa
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_connection import connection_for, mark_verified
 from .scoring_model_probe import ScoringModelProbeFailed, ensure_model_keeps_scoring_format
-from .scoring_models import is_fallback_model, is_valid_reasoning_effort
+from .scoring_models import is_fallback_model_for, is_valid_reasoning_effort
 
 # --- 검증 ----------------------------------------------------------------------
 
@@ -99,7 +99,7 @@ def validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_va
             return
         raise HttpError(422, f"이 키로 쓸 수 없는 채점 모델입니다: {model_id}")
 
-    if model_id == current_value or is_fallback_model(model_id):
+    if model_id == current_value or is_fallback_model_for(class_obj.scoring_connection_kind, model_id):
         return
     raise HttpError(
         422,

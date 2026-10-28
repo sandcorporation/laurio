@@ -109,6 +109,17 @@ def set_key(client, access: str, class_id: int, key: str = "sk-test-instructor-k
     assert response.status_code == 200, response.content
 
 
+def set_anthropic_key(client, access: str, class_id: int, key: str = "sk-ant-test-instructor-key"):
+    """「Claude(Anthropic) 키」로 저장한다(#795) — 응답을 그대로 돌려준다(거절을 보는 시험이 있다)."""
+
+    return client.put(
+        f"{CLASSES_URL}/{class_id}/anthropic-key",
+        data={"api_key": key},
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+
 def get_class(client, access: str, class_id: int) -> dict:
     response = client.get(f"{CLASSES_URL}/{class_id}", **auth_header(access))
     assert response.status_code == 200, response.content

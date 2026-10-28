@@ -41,12 +41,13 @@ class Class(models.Model):
         REJECTED = "rejected", "거부됨"
 
     class ScoringConnectionKind(models.TextChoices):
-        """이 클래스의 채점이 모델에 닿는 길(#599, CONTEXT.md 「채점 연결」) — 「OpenAI 키」
-        또는 「호환 서버」(#601, ADR-0058). 주소·인증 값은
+        """이 클래스의 채점이 모델에 닿는 길(#599, CONTEXT.md 「채점 연결」) — 「OpenAI 키」,
+        「호환 서버」(#601, ADR-0058), 「Claude(Anthropic) 키」(#795, ADR-0066). 주소·인증 값은
         `classroom.scoring_connection.connection_for` 가 이 값으로 고른다."""
 
         OPENAI_KEY = "openai_key", "OpenAI 키"
         COMPATIBLE_SERVER = "compatible_server", "호환 서버"
+        ANTHROPIC_KEY = "anthropic_key", "Claude(Anthropic) 키"
 
     #: 이 클래스를 연 강사. `accounts.SponsorProfile`이 아니라 `User`를 바로
     #: 가리킨다 — 프로필을 쓰지 않기로 한 것 자체가 ADR-0037의 합의다.

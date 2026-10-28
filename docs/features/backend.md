@@ -244,6 +244,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
 | `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도·「추론 모델」 스위치(`default_model_is_reasoning`, 호환 서버만 뜻이 있다, #602)를 고친다(#402) — 소유자의 강사 이름 칸은 소유자만. 채점 상한 칸은 없다(#629, ADR-0060) — 응답의 `token_usage_total`·`token_usage_estimated` 가 누적 사용량이다. 호환 서버에서 모델이나 스위치가 바뀌면 시험 호출(`classroom.scoring_model_probe`)이 채점과 같은 `json_schema` 판정 하나를 받아 보고, 못 지키면 이유 문장의 422. 통과는 (연결, 모델, 추론 여부) 단위로 하루 캐시한다 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284). 채점 연결이 「OpenAI 키」가 되고 호환 서버 주소는 지워진다(#601) |
+| `PUT /api/classroom/classes/{id}/anthropic-key` | 채점 연결을 「Claude(Anthropic) 키」로 저장한다(#795, ADR-0066) — 소유자 전용, 몸통은 `openai-key` 와 같은 `{"api_key": …}`. 저장 전 `GET https://api.anthropic.com/v1/models`(`x-api-key`·`anthropic-version: 2023-06-01`)로 한 번 확인해 401·403 만 422, 닿지 못하면 「미검증」으로 저장(#681). 키 칸·끝 네 자리(`openai_key_masked`)·상태는 OpenAI 키와 같은 칸이고 `scoring_connection_kind="anthropic_key"`. 기본 모델이 OpenAI 이름이면 `claude-haiku-5-5` 로 옮긴다(Claude 키에서 OpenAI 키로 돌아가면 `gpt-4.1-mini`). 채점은 `core.llm_scoring_anthropic` — 네이티브 Messages API(`POST /v1/messages`)에 구조화 출력(`output_config.format` json_schema, 같은 판정 스키마)과 추론 강도(`output_config.effort`)를 싣는다. 모델 목록은 `/v1/models` 의 `line`(haiku·sonnet)·`capabilities`(structured_outputs·effort)로 거르고 Haiku 가 먼저, 조회 실패면 Haiku 5.5·Sonnet 5.5 두 줄. 예상 비용은 Claude 단가(`classroom.scoring_cost.PRICES`)로 원화다 |
 | `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다. `ClassOut.scoring_connection_verified_at` 은 연결이 마지막으로 실제로 닿은 시각이다(#671) — 키 저장 때 벤더가 받았을 때·호환 서버 저장·호환 서버 모델 시험 호출 통과·채점 성공이 찍고, 벤더에 닿지 못한 키 저장과 소유권 이전이 지운다(벤더를 기다리는 사이 연결이 바뀌었으면 찍지 않는다). 강사 누구나 읽고, 연결된 앱의 `get_class` 에는 싣지 않는다 |
 | `GET /api/classroom/classes/{id}/scoring-models` | 그 클래스의 키로 실제로 쓸 수 있는 채점 모델·컨텍스트 크기·추론 모델 여부(#401, 예전 전역 `/scoring-models`를 대신한다). 호환 서버면 그 서버의 목록을 거르지 않고, 목록을 주지 않으면 `source="manual"` — 모델 이름을 직접 넣는다(#601) |
 | `GET /api/classroom/classes/{id}/scoring-cost[?problem_id=]` | 예상 채점 비용(#591) — 그 키로 쓸 수 있는 모델(추론 모델은 강도별)의 시도 1건·문제 하나·gpt-4.1-mini 대비 배율. 카탈로그 모델 전부를 카탈로그 순서로, 단가가 없는 것만 `priced=false`(#617). 기준은 그 문제의 지난 시도 평균 → 클래스 평균 → 소스 크기별(평균은 시도 `min_sample_count`=3건부터), 셈은 `classroom.scoring_cost`. 호환 서버 클래스는 `unit="tokens"` — 지금 설정 줄만, 원화·배율 없이 토큰(#604) |
@@ -278,7 +279,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286), 소스 업로드 상한(`max_source_asset_bytes`, 운영자 정책 값 그대로, #671) |
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286). 저장소는 저장소·`/tree/<브랜치>`·`/commit/<sha>` 셋을 받고(#777) 응답 `value` 는 낸 URL 그대로, `commit_sha` 는 고정 커밋 |
 | `POST .../problems/{id}/copy` | 문제를 자기 다른 클래스로 복사한다 — 체크리스트·채점 설정은 따라오고 제출물·시도·Score는 없다, 복사본은 언제나 초안이다(#292) |
-| `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·채점 연결(OpenAI 키·호환 서버 주소와 인증 값)은 따라오지 않는다(#293, #605) |
+| `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·채점 연결(OpenAI 키·Claude 키·호환 서버 주소와 인증 값)은 따라오지 않는다(#293, #605) |
 | `POST .../problems/{id}/publish-template` | 문제를 공개 시점의 사본(템플릿)으로 뜬다 — 원본을 고치거나 지워도 바뀌지 않는다, 채점 모델은 담기지 않는다(#316) |
 | `GET /api/classroom/problem-templates` | 공개된 템플릿을 제목 검색·최신순으로 찾는다, 페이지네이션(#318) |
 | `GET .../problem-templates/mine` | 내가 올린 템플릿 전부(내려간 것 포함) — 내리기 화면이 여기서 고른다(#316) |
@@ -362,7 +363,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 행을 잠가 클래스마다 대기 하나를 지키고, 만료는 요청한 때 + 7일, 상태는 수락·거절·취소·만료
 시각에서 읽는다. 수락은 한 트랜잭션이다: `Class.instructor` 가 받는 사람으로 바뀌고, 받는
 사람의 공동 강사 줄이 사라지고 넘긴 사람이 공동 강사가 된다(강사 이름은 각자의 것을 들고
-자리만 바꾼다), 채점 키(암호문·끝 네 자리·상태)가 비워진다 — 호환 서버였으면 주소도 비우고 연결은 「OpenAI 키」로 돌아간다(#601). 사용량은
+자리만 바꾼다), 채점 키(암호문·끝 네 자리·상태)가 비워진다 — 호환 서버였으면 주소도 비우고, 호환 서버든 Claude 키든 연결은 「OpenAI 키」로 돌아간다(#601, #795). 사용량은
 그대로다 — 키가 빈 동안 낸 시도는 채점 대기 사유 「키」(`no_api_key`)로 기다리다 새 소유자가
 키를 넣으면 채점된다. 그 순간부터 소유자 전용은 새 소유자에게 열리고 넘긴 사람에게는 403
 이다. 키 저장은 「지금도 소유자인가」를 조건으로 쓰므로 수락과 겹친 넘긴 사람의 키 저장은
