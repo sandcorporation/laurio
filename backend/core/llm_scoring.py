@@ -620,68 +620,9 @@ def _parse_openai_scoring_response(
             f"OpenAI 응답에 message.content가 없다(submission={submission_id})."
         ) from None
 
-    try:
-        parsed = json.loads(content)
-    except (TypeError, ValueError):
-        raise LLMAdapterError(
-            f"OpenAI 응답 content가 유효한 JSON이 아니다(submission={submission_id})."
-        ) from None
-
-    raw_verdicts = parsed.get("verdicts") if isinstance(parsed, dict) else None
-    if not isinstance(raw_verdicts, list):
-        raise LLMAdapterError(
-            f"OpenAI 응답에 verdicts 배열이 없다(submission={submission_id})."
-        )
-
-    verdict_by_id: dict[int, RequirementVerdict] = {}
-    for raw in raw_verdicts:
-        if not isinstance(raw, dict):
-            raise LLMAdapterError(
-                f"OpenAI 응답의 verdict 항목이 객체가 아니다(submission={submission_id})."
-            )
-        try:
-            requirement_id_raw = raw["requirement_id"]
-            is_met = raw["is_met"]
-            reasoning = raw["reasoning"]
-        except (KeyError, TypeError):
-            raise LLMAdapterError(
-                f"OpenAI 응답의 verdict 항목이 필드를 빠뜨렸다(submission={submission_id})."
-            ) from None
-        # bool은 int의 서브클래스라 isinstance(True, int)가 True다 — 명시적으로
-        # 걷어낸다. int()로 강제 변환하면 10.9→10, True→1처럼 절삭·변환되어
-        # 남의 requirement_id에 판정이 붙고도 아래 중복·누락 검사를 통과한다.
-        if not isinstance(requirement_id_raw, int) or isinstance(requirement_id_raw, bool):
-            raise LLMAdapterError(
-                f"OpenAI 응답의 requirement_id가 정수가 아니다"
-                f"(submission={submission_id})."
-            )
-        requirement_id = requirement_id_raw
-        if not isinstance(is_met, bool):
-            raise LLMAdapterError(
-                f"OpenAI 응답의 is_met이 boolean이 아니다(requirement_id={requirement_id}, "
-                f"submission={submission_id})."
-            )
-        if not isinstance(reasoning, str) or not reasoning.strip():
-            raise LLMAdapterError(
-                f"OpenAI 응답의 reasoning이 비어 있다(requirement_id={requirement_id}, "
-                f"submission={submission_id})."
-            )
-        if requirement_id in verdict_by_id:
-            raise LLMAdapterError(
-                f"OpenAI 응답에 requirement_id={requirement_id}가 중복됐다"
-                f"(submission={submission_id})."
-            )
-        verdict_by_id[requirement_id] = RequirementVerdict(
-            requirement_id=requirement_id, is_met=is_met, reasoning=reasoning.strip()
-        )
-
-    missing = [rid for rid in requirement_ids if rid not in verdict_by_id]
-    if missing:
-        raise LLMAdapterError(
-            f"OpenAI 응답이 일부 requirement에 대한 판정을 빠뜨렸다"
-            f"(missing_requirement_ids={missing}, submission={submission_id}) — "
-            "미충족으로 채우지 않고 채점 자체를 실패로 남긴다."
-        )
+    verdict_by_id = verdicts_from_content(
+        content, requirement_ids=requirement_ids, submission_id=submission_id, vendor="OpenAI"
+    )
 
     model_used = body.get("model") or "unknown"
     verdicts = [verdict_by_id[rid] for rid in requirement_ids]
@@ -699,6 +640,79 @@ def _parse_openai_scoring_response(
         output_tokens=_usage_count(usage, "completion_tokens"),
     )
 
+
+def verdicts_from_content(
+    content: Any, *, requirement_ids: list[int], submission_id: int, vendor: str
+) -> dict[int, RequirementVerdict]:
+    """판정 JSON(`{"verdicts": [...]}`) 문자열을 검증해 requirement_id 별 판정으로 바꾼다 — OpenAI
+    (`message.content`)와 Anthropic(`content` 의 text 블록, #795) 응답이 같은 규율을 쓴다. 규율은
+    `_parse_openai_scoring_response` docstring 그대로다(정수 id·중복·빠짐·빈 근거는 예외, 예외 메시지에
+    본문을 싣지 않는다). `vendor` 는 예외 메시지의 벤더 이름뿐이다."""
+
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError):
+        raise LLMAdapterError(
+            f"{vendor} 응답 content가 유효한 JSON이 아니다(submission={submission_id})."
+        ) from None
+
+    raw_verdicts = parsed.get("verdicts") if isinstance(parsed, dict) else None
+    if not isinstance(raw_verdicts, list):
+        raise LLMAdapterError(
+            f"{vendor} 응답에 verdicts 배열이 없다(submission={submission_id})."
+        )
+
+    verdict_by_id: dict[int, RequirementVerdict] = {}
+    for raw in raw_verdicts:
+        if not isinstance(raw, dict):
+            raise LLMAdapterError(
+                f"{vendor} 응답의 verdict 항목이 객체가 아니다(submission={submission_id})."
+            )
+        try:
+            requirement_id_raw = raw["requirement_id"]
+            is_met = raw["is_met"]
+            reasoning = raw["reasoning"]
+        except (KeyError, TypeError):
+            raise LLMAdapterError(
+                f"{vendor} 응답의 verdict 항목이 필드를 빠뜨렸다(submission={submission_id})."
+            ) from None
+        # bool은 int의 서브클래스라 isinstance(True, int)가 True다 — 명시적으로
+        # 걷어낸다. int()로 강제 변환하면 10.9→10, True→1처럼 절삭·변환되어
+        # 남의 requirement_id에 판정이 붙고도 아래 중복·누락 검사를 통과한다.
+        if not isinstance(requirement_id_raw, int) or isinstance(requirement_id_raw, bool):
+            raise LLMAdapterError(
+                f"{vendor} 응답의 requirement_id가 정수가 아니다"
+                f"(submission={submission_id})."
+            )
+        requirement_id = requirement_id_raw
+        if not isinstance(is_met, bool):
+            raise LLMAdapterError(
+                f"{vendor} 응답의 is_met이 boolean이 아니다(requirement_id={requirement_id}, "
+                f"submission={submission_id})."
+            )
+        if not isinstance(reasoning, str) or not reasoning.strip():
+            raise LLMAdapterError(
+                f"{vendor} 응답의 reasoning이 비어 있다(requirement_id={requirement_id}, "
+                f"submission={submission_id})."
+            )
+        if requirement_id in verdict_by_id:
+            raise LLMAdapterError(
+                f"{vendor} 응답에 requirement_id={requirement_id}가 중복됐다"
+                f"(submission={submission_id})."
+            )
+        verdict_by_id[requirement_id] = RequirementVerdict(
+            requirement_id=requirement_id, is_met=is_met, reasoning=reasoning.strip()
+        )
+
+    missing = [rid for rid in requirement_ids if rid not in verdict_by_id]
+    if missing:
+        raise LLMAdapterError(
+            f"{vendor} 응답이 일부 requirement에 대한 판정을 빠뜨렸다"
+            f"(missing_requirement_ids={missing}, submission={submission_id}) — "
+            "미충족으로 채우지 않고 채점 자체를 실패로 남긴다."
+        )
+
+    return verdict_by_id
 
 def _usage_count(usage: Any, key: str) -> int:
     value = usage.get(key, 0) if isinstance(usage, dict) else 0

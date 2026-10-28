@@ -30,7 +30,7 @@ from django.db.models import Avg, Count
 from django.db.models.functions import Length
 
 from .models import Class, ClassroomScore, ClassroomSubmission, Problem
-from .scoring_models import REASONING_EFFORT_CHOICES, is_reasoning_model_id
+from .scoring_models import REASONING_EFFORT_CHOICES, is_claude_model_id, is_reasoning_model_id
 
 #: 원화 환산 고정 환율(2026-10 기준). 달러 단가를 원화로 보일 때만 쓴다.
 KRW_PER_USD = 1_380
@@ -102,6 +102,20 @@ PRICES: dict[str, ModelPrice] = {
     "gpt-5.4-mini": ModelPrice(0.75, 4.50),
     "gpt-5.4-nano": ModelPrice(0.20, 1.25),
     "gpt-5.5": ModelPrice(5.00, 30.00, **_LONG_CONTEXT),
+    # Claude(Anthropic) 키 연결(#795) — 출처: https://platform.claude.com/docs/en/about-claude/pricing
+    # (2026-10-28 확인, 표준 입력·출력). Haiku 5.5 는 프롬프트가 10만 토큰을 넘으면 그 호출 전체가
+    # 입력·출력 모두 5배다(0.10→0.50, 0.50→2.50). Sonnet 5.5·5·4.6 은 1M 컨텍스트 전체가 표준 단가다.
+    # 사고(adaptive thinking) 토큰은 출력으로 청구된다 — 추론 강도별 출력 어림(`REASONING_OUTPUT_TOKENS`)을 쓴다.
+    "claude-haiku-5-5": ModelPrice(
+        0.10,
+        0.50,
+        long_context_input_tokens=100_000,
+        long_context_input_multiplier=5.0,
+        long_context_output_multiplier=5.0,
+    ),
+    "claude-sonnet-5-5": ModelPrice(2.00, 10.00),
+    "claude-sonnet-5": ModelPrice(2.00, 10.00),
+    "claude-sonnet-4-6": ModelPrice(3.00, 15.00),
 }
 
 
@@ -146,7 +160,13 @@ def estimated_usage_tokens(prompt: str, reasoning_effort: str | None) -> int:
 
 
 def _effort_for(model_id: str, reasoning_effort: str | None) -> str | None:
-    return (reasoning_effort or "low") if is_reasoning_model_id(model_id) else None
+    return (reasoning_effort or "low") if _takes_effort(model_id) else None
+
+
+def _takes_effort(model_id: str) -> bool:
+    """채점 요청에 추론 강도가 실리는 모델인가 — GPT-5 이후와 모든 Claude 채점 모델(#795, ADR-0066)."""
+
+    return is_reasoning_model_id(model_id) or is_claude_model_id(model_id)
 
 
 def attempt_cost(model_id: str, reasoning_effort: str | None, *, prompt_chars: int) -> AttemptCost | None:
@@ -250,7 +270,7 @@ def _attempts_per_participant(class_obj: Class) -> tuple[float, bool]:
 def _setting_keys(model_ids: list[str]) -> list[tuple[str, str | None]]:
     keys: list[tuple[str, str | None]] = []
     for model_id in model_ids:
-        if is_reasoning_model_id(model_id):
+        if _takes_effort(model_id):
             keys.extend((model_id, effort) for effort, _label in REASONING_EFFORT_CHOICES)
         else:
             keys.append((model_id, None))

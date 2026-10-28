@@ -72,7 +72,7 @@ from django.db import OperationalError, connection, models, transaction
 from django.db.models import Count
 from psycopg import errors as psycopg_errors
 
-from core.adapters import resolve_adapter
+from core.adapters import is_fake_adapter_binding, resolve_adapter
 from core.clock import Clock
 from core.events import collect_instead_of_publishing
 from core.llm_scoring import (
@@ -114,7 +114,13 @@ from .models import (
     ClassroomSubmission,
     Problem,
 )
-from .scoring_connection import ScoringConnection, connection_for, mark_verified, openai_key_connection
+from .scoring_connection import (
+    ScoringConnection,
+    anthropic_key_connection,
+    connection_for,
+    mark_verified,
+    openai_key_connection,
+)
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
 
 logger = logging.getLogger(__name__)
@@ -239,8 +245,14 @@ def _scoring_adapter(
     주소와 인증 값은 채점 연결(`connection`, #599)이 준다 — 이 함수는 OpenAI 주소를 모른다.
     인증 값은 fake 모드에서도 여기서 풀린다(예전에도 호출부가 풀어 넘겼다)."""
 
+    mode = settings.CLASSROOM_SCORING_ADAPTER_MODE
+    if connection.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY and not is_fake_adapter_binding(mode):
+        # 「Claude(Anthropic) 키」 연결(#795, ADR-0066)은 벤더가 달라 실물 어댑터가 따로다. 스위치
+        # (`CLASSROOM_SCORING_ADAPTER_MODE`)는 그대로 「실제로 나가는가」만 가르고 — fake 면 위 fake
+        # 어댑터 — 나간다면 어느 벤더의 어댑터인지는 연결 종류가 정한다.
+        mode = ANTHROPIC_SCORING_ADAPTER
     return resolve_adapter(
-        mode=settings.CLASSROOM_SCORING_ADAPTER_MODE,
+        mode=mode,
         fake_factory=FakeClassroomScoringAdapter,
         not_implemented_hint=(
             "CLASSROOM_SCORING_ADAPTER_MODE가 가리키는 dotted path를 import할 수 없다 — "
@@ -267,7 +279,12 @@ def _scoring_adapter(
     )
 
 
-def check_scoring_key(*, api_key: str) -> LLMKeyCheckStatus:
+#: 「Claude(Anthropic) 키」 연결의 실물 어댑터(#795) — 배포 환경 값이 아니라 코드에 고정한다(벤더가
+#: 하나뿐이고, 스위치 값은 OpenAI 어댑터를 가리키며 부팅 가드가 그쪽을 검증한다).
+ANTHROPIC_SCORING_ADAPTER = "core.llm_scoring_anthropic.AnthropicScoringAdapter"
+
+
+def check_scoring_key(*, api_key: str, kind: str = Class.ScoringConnectionKind.OPENAI_KEY) -> LLMKeyCheckStatus:
     """저장할 때 이 키가 살아 있는지 강의실 채점 어댑터를 통해 한 번 쳐 본다
     (#354). `_scoring_adapter`와 정확히 같은 스위치(`CLASSROOM_SCORING_
     ADAPTER_MODE`)를 타므로, dev·CI는 `FakeClassroomScoringAdapter`가 항상
@@ -275,7 +292,12 @@ def check_scoring_key(*, api_key: str) -> LLMKeyCheckStatus:
     확인에 쓰이지 않는다(OpenAI의 키 확인은 모델과 무관한 엔드포인트를
     친다) — `_scoring_adapter`의 인자 모양만 맞추려고 빈 문자열을 넘긴다."""
 
-    adapter = _scoring_adapter(connection=openai_key_connection(api_key), model="")
+    connection = (
+        anthropic_key_connection(api_key)
+        if kind == Class.ScoringConnectionKind.ANTHROPIC_KEY
+        else openai_key_connection(api_key)
+    )
+    adapter = _scoring_adapter(connection=connection, model="")
     return adapter.check_key()
 
 

@@ -405,12 +405,15 @@ CLASS_OUTPUT_SCHEMA = {
         "default_reasoning_effort": {"type": "string", "description": "기본 추론 강도(low·medium·high)"},
         "has_openai_key": {
             "type": "boolean",
-            "description": "채점 연결(OpenAI 키든 호환 서버든)이 들어 있는가 — 이름은 예전 그대로다",
+            "description": "채점 연결(OpenAI 키·Claude 키·호환 서버)이 들어 있는가 — 이름은 예전 그대로다",
         },
         "scoring_connection_kind": {
             "type": "string",
-            "enum": ["openai_key", "compatible_server"],
-            "description": "채점 연결의 종류 — openai_key OpenAI 키, compatible_server 강사가 둔 호환 서버",
+            "enum": ["openai_key", "compatible_server", "anthropic_key"],
+            "description": (
+                "채점 연결의 종류 — openai_key OpenAI 키, compatible_server 강사가 둔 호환 서버, "
+                "anthropic_key Claude(Anthropic) 키"
+            ),
         },
         "scoring_server_host": {
             "type": ["string", "null"],
@@ -422,7 +425,7 @@ CLASS_OUTPUT_SCHEMA = {
         },
         "scoring_quota_exhausted": {
             "type": "boolean",
-            "description": "채점 키의 OpenAI 크레딧이 떨어져 채점이 멈춰 있는가 — 충전하면 이어진다",
+            "description": "채점 키의 크레딧(OpenAI·Anthropic)이 떨어져 채점이 멈춰 있는가 — 충전하면 이어진다",
         },
         "scoring_server_unreachable": {
             "type": "boolean",

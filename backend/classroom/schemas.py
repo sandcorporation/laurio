@@ -237,7 +237,7 @@ class ScoringCostRowOut(Schema):
 class ScoringCostEstimateOut(Schema):
     """강사가 모델·추론 강도를 고를 때 미리 보는 예상 채점 비용(#591, CONTEXT.md
     「예상 채점 비용」). `basis` — problem(이 문제의 지난 시도 평균) | class(클래스 평균) |
-    source_sizes(시도가 `min_sample_count` 건 미만이라 소스 크기별). `unit` — krw(OpenAI 키, 단가표로 원화) |
+    source_sizes(시도가 `min_sample_count` 건 미만이라 소스 크기별). `unit` — krw(OpenAI 키·Claude 키, 단가표로 원화) |
     tokens(호환 서버, 단가를 몰라 지금 설정만 토큰으로, #604)."""
 
     unit: str = "krw"

@@ -5,7 +5,9 @@
 — 이 모두 여기서 주소(base URL)·인증 값·추론 강도를 실을지를 받는다. 강의실 경로는 OpenAI
 주소를 직접 쓰지 않는다(공모전은 `core.llm_scoring` 의 기본값을 그대로 쓴다).
 
-연결 종류는 둘이다 — 「OpenAI 키」와 「호환 서버」(#601, ADR-0058). 호환 서버는 강사가 적은
+연결 종류는 셋이다 — 「OpenAI 키」, 「호환 서버」(#601, ADR-0058), 「Claude(Anthropic) 키」(#795,
+ADR-0066). Claude 키는 주소가 Anthropic 으로 고정이고 어댑터가 따로다(`core.llm_scoring_anthropic`) —
+저장·암호화·끝 네 자리·상태 칸은 OpenAI 키와 같은 칸을 쓴다. 호환 서버는 강사가 적은
 주소라 모든 왕복이 `core.safe_outbound.SafeOutbound` 를 거친다(`ScoringConnection.transport`):
 https·공인 IP 만, 푼 IP 로 직접 붙고, 리다이렉트를 따라가지 않는다. 저장할 때는
 `probe_compatible_server` 가 그 서버의 모델 목록을 한 번 받아 닿는지·인증이 맞는지 본다.
@@ -29,10 +31,11 @@ from core.adapters import is_fake_adapter_binding
 from core.clock import Clock
 from core.crypto import decrypt
 from core.llm_scoring import OPENAI_API_BASE_URL, AsyncTransport, Transport
+from core.llm_scoring_anthropic import ANTHROPIC_API_BASE_URL
 from core.safe_outbound import OutboundReason, OutboundRefused, SafeOutbound
 
 from .models import Class
-from .scoring_models import is_reasoning_model_id, matches_naming_rule
+from .scoring_models import is_claude_model_id, is_reasoning_model_id, matches_naming_rule
 
 #: 「OpenAI 키」 연결의 주소 — 공모전과 같은 OpenAI API 다.
 OPENAI_KEY_BASE_URL = OPENAI_API_BASE_URL
@@ -86,6 +89,8 @@ class ScoringConnection:
 
         if self.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
             return bool(model_id.strip())
+        if self.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
+            return is_claude_model_id(model_id)
         return matches_naming_rule(model_id)
 
     def sends_reasoning_effort(self, model_id: str, *, marked_reasoning: bool) -> bool:
@@ -95,6 +100,9 @@ class ScoringConnection:
 
         if self.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
             return marked_reasoning
+        if self.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
+            # Claude 채점 모델은 모두 `output_config.effort` 를 받는다(#795, ADR-0066).
+            return is_claude_model_id(model_id)
         return is_reasoning_model_id(model_id)
 
 
@@ -107,6 +115,12 @@ def connection_for(class_obj: Class) -> ScoringConnection | None:
         return ScoringConnection(
             kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER,
             base_url=class_obj.scoring_server_url.strip(),
+            _encrypted_auth=class_obj.openai_api_key_encrypted.strip(),
+        )
+    if class_obj.scoring_connection_kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
+        return ScoringConnection(
+            kind=Class.ScoringConnectionKind.ANTHROPIC_KEY,
+            base_url=ANTHROPIC_API_BASE_URL,
             _encrypted_auth=class_obj.openai_api_key_encrypted.strip(),
         )
     return ScoringConnection(
@@ -148,6 +162,16 @@ def openai_key_connection(api_key: str) -> ScoringConnection:
     return ScoringConnection(
         kind=Class.ScoringConnectionKind.OPENAI_KEY,
         base_url=OPENAI_KEY_BASE_URL,
+        _plain_auth=api_key,
+    )
+
+
+def anthropic_key_connection(api_key: str) -> ScoringConnection:
+    """저장하기 전의 Claude(Anthropic) 키로 만든 연결 — 저장 시점 키 확인(#795)이 쓴다."""
+
+    return ScoringConnection(
+        kind=Class.ScoringConnectionKind.ANTHROPIC_KEY,
+        base_url=ANTHROPIC_API_BASE_URL,
         _plain_auth=api_key,
     )
 

@@ -160,7 +160,12 @@ from .scoring import check_scoring_key, enqueue_scoring
 from . import scoring_cost
 from .scoring_model_catalog import get_scoring_model_catalog, remember_model_ids
 from . import scoring_connection
-from .scoring_models import is_reasoning_model_id
+from .scoring_models import (
+    DEFAULT_ANTHROPIC_SCORING_MODEL,
+    DEFAULT_SCORING_MODEL,
+    is_claude_model_id,
+    is_reasoning_model_id,
+)
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class, instructor_classes
 
@@ -181,6 +186,8 @@ def _sends_reasoning_effort(class_obj: Class, model_id: str, *, marked_reasoning
 
     if class_obj.scoring_connection_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         return marked_reasoning
+    if class_obj.scoring_connection_kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
+        return is_claude_model_id(model_id)
     return is_reasoning_model_id(model_id)
 
 
@@ -825,12 +832,36 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     # 와 같은 판단, `classroom.participation` 「열어 두는 것」). 키는 소유자의 비용이라
     # 소유자 전용이다(ADR-0055).
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    return 200, _save_vendor_key(request, class_obj, payload.api_key, kind=Class.ScoringConnectionKind.OPENAI_KEY)
 
-    raw_key = payload.api_key.strip()
+
+@router.put(
+    "/classes/{class_id}/anthropic-key",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def set_class_anthropic_key(request: HttpRequest, class_id: int, payload: OpenAIKeyIn):
+    """채점 연결을 「Claude(Anthropic) 키」로 저장한다(#795, ADR-0066) — OpenAI 키 저장과 같은 규율:
+    소유자 전용(ADR-0055), 암호화 저장·끝 네 자리, 저장 전 `GET /v1/models` 로 한 번 확인(401·403 만
+    거절, 닿지 못하면 「미검증」으로 저장, #681). 이전 연결(OpenAI 키·호환 서버)의 값은 덮여 지워진다."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    return 200, _save_vendor_key(request, class_obj, payload.api_key, kind=Class.ScoringConnectionKind.ANTHROPIC_KEY)
+
+
+#: 연결 종류별 새 기본 모델 — 지금 기본 모델을 그 연결이 받지 않을 때만 바꾼다(#795).
+_DEFAULT_MODEL_FOR_KIND = {
+    Class.ScoringConnectionKind.OPENAI_KEY: DEFAULT_SCORING_MODEL,
+    Class.ScoringConnectionKind.ANTHROPIC_KEY: DEFAULT_ANTHROPIC_SCORING_MODEL,
+}
+
+
+def _save_vendor_key(request: HttpRequest, class_obj: Class, api_key: str, *, kind: str) -> ClassOut:
+    raw_key = api_key.strip()
     if not raw_key:
         raise HttpError(422, "채점 키를 입력해주세요.")
 
-    check_result = check_scoring_key(api_key=raw_key)
+    check_result = check_scoring_key(api_key=raw_key, kind=kind)
     if check_result == LLMKeyCheckStatus.REJECTED:
         raise HttpError(422, "이 채점 키를 벤더가 거절했습니다 — 키를 다시 확인해 저장해주세요.")
 
@@ -849,16 +880,25 @@ def set_class_openai_key(request: HttpRequest, class_id: int, payload: OpenAIKey
     # 아직 바닥이면 그 채점이 다시 멈추고 다시 알린다.
     class_obj.scoring_quota_exhausted_at = None
     class_obj.scoring_server_unreachable_at = None
-    # OpenAI 키를 저장하면 연결이 「OpenAI 키」로 바뀌고 호환 서버 주소는 지운다(#601).
-    class_obj.scoring_connection_kind = Class.ScoringConnectionKind.OPENAI_KEY
+    # 키를 저장하면 연결이 그 종류로 바뀌고 호환 서버 주소는 지운다(#601, #795).
+    class_obj.scoring_connection_kind = kind
     class_obj.scoring_server_url = ""
+    # 벤더가 OpenAI ↔ Claude 로 바뀌면 지금 기본 모델은 새 키로 쓸 수 없다 — 그 연결의 기본 모델로
+    # 옮긴다(#795). 호환 서버에서 오는 이름은 어느 벤더 것인지 알 수 없어 그대로 둔다(예전과 같다).
+    extra = {}
+    if is_claude_model_id(class_obj.default_model) != (kind == Class.ScoringConnectionKind.ANTHROPIC_KEY):
+        class_obj.default_model = _DEFAULT_MODEL_FOR_KIND[kind]
+        extra["default_model"] = class_obj.default_model
     # 벤더 확인을 기다리는 사이 소유권이 넘어갔을 수 있다(#564) — 넘긴 사람의 키가 새 소유자의
     # 클래스에 남지 않게, 저장은 「지금도 부른 사람이 소유자인가」를 조건으로 한 번에 한다.
-    _save_scoring_connection(request, class_obj)
-    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
+    _save_scoring_connection(request, class_obj, **extra)
+    return _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
-def _save_scoring_connection(request: HttpRequest, class_obj: Class) -> None:
+def _save_scoring_connection(request: HttpRequest, class_obj: Class, **extra) -> None:
+    """`extra` 는 연결과 함께 바뀌는 다른 칸(벤더가 바뀌어 옮긴 기본 모델) — 바뀐 칸만 싣는다(다른 강사가
+    그사이 고친 값을 덮지 않게)."""
+
     saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
         scoring_connection_kind=class_obj.scoring_connection_kind,
         scoring_server_url=class_obj.scoring_server_url,
@@ -870,6 +910,7 @@ def _save_scoring_connection(request: HttpRequest, class_obj: Class) -> None:
         # 확인이 이미 그 서버에 닿았다.
         scoring_server_unreachable_at=None,
         scoring_connection_verified_at=class_obj.scoring_connection_verified_at,
+        **extra,
     )
     if not saved:
         raise HttpError(403, OWNER_ONLY_MESSAGE)

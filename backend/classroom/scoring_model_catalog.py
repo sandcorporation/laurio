@@ -22,6 +22,11 @@ Fernet 암호화는 매 호출 비결정적(#284)이라 같은 클래스가 같�
 **호환 서버(#601)는 거르지 않는다** — 그 서버가 내놓는 이름을 그대로 보여 주고(OpenAI 이름
 규칙은 OpenAI 의 것이다), 목록을 주지 않거나 받지 못하면 `source="manual"` 로 모델 이름을
 직접 넣게 한다(기본 목록은 OpenAI 모델이라 그 서버에 뜻이 없다).
+
+**Claude(Anthropic) 키(#795)는 벤더가 `line`·`capabilities` 로 거른 목록이다** — Haiku·Sonnet 계열에
+구조화 출력·추론 강도를 받는 모델만(`core.llm_scoring_anthropic.scoring_model_ids_from`). fake 스위치에서는
+문서 예시 모양의 몸통(`FAKE_MODELS_BODY`)을 같은 거름으로 돌린다. 조회하지 못하면 Claude 의 작은 목록
+(`ANTHROPIC_FALLBACK_SCORING_MODEL_CHOICES`)이다.
 """
 
 from __future__ import annotations
@@ -33,10 +38,11 @@ from django.core.cache import cache
 
 from core.adapters import is_fake_adapter_binding
 from core.llm_scoring import list_openai_models
+from core.llm_scoring_anthropic import FAKE_MODELS_BODY, list_anthropic_scoring_models, scoring_model_ids_from
 
 from .models import Class
 from .scoring_connection import FAKE_COMPATIBLE_MODEL_IDS, ScoringConnection, connection_for
-from .scoring_models import FALLBACK_SCORING_MODEL_CHOICES, ScoringModelChoice, build_catalog
+from .scoring_models import ScoringModelChoice, build_catalog, build_claude_catalog, fallback_choices_for
 
 _CACHE_KEY_PREFIX = "classroom:scoring-models:"
 _CACHE_TTL_SECONDS = 300
@@ -59,8 +65,13 @@ _FAKE_VENDOR_MODEL_IDS = (
 
 def _list_vendor_models(connection: ScoringConnection) -> list[str] | None:
     compatible = connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER
+    anthropic = connection.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY
     if is_fake_adapter_binding(settings.CLASSROOM_SCORING_ADAPTER_MODE):
+        if anthropic:
+            return scoring_model_ids_from(FAKE_MODELS_BODY)
         return list(FAKE_COMPATIBLE_MODEL_IDS if compatible else _FAKE_VENDOR_MODEL_IDS)
+    if anthropic:
+        return list_anthropic_scoring_models(connection.auth_value())
     return list_openai_models(
         connection.auth_value(), base_url=connection.base_url, transport=connection.transport()
     )
@@ -93,16 +104,14 @@ class ScoringModelCatalog:
     unavailable_reason: str | None = None
 
 
-def _fallback(reason: str) -> ScoringModelCatalog:
-    return ScoringModelCatalog(
-        models=FALLBACK_SCORING_MODEL_CHOICES, source="fallback", unavailable_reason=reason
-    )
+def _fallback(reason: str, kind: str = Class.ScoringConnectionKind.OPENAI_KEY) -> ScoringModelCatalog:
+    return ScoringModelCatalog(models=fallback_choices_for(kind), source="fallback", unavailable_reason=reason)
 
 
 def get_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
     connection = connection_for(class_obj)
     if connection is None:
-        return _fallback("no_api_key")
+        return _fallback("no_api_key", class_obj.scoring_connection_kind)
 
     # 연결(종류·주소·암호문)이 같으면 같은 목록이다 — 캐시가 맞으면 인증 값을 풀지 않는다.
     cache_key = _CACHE_KEY_PREFIX + connection.cache_identity
@@ -110,13 +119,17 @@ def get_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
     compatible = connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER
     if vendor_ids is None:
         vendor_ids = _list_vendor_models(connection)
-        if vendor_ids is None or (compatible and not vendor_ids):
+        # 호환 서버·Claude 키는 빈 목록도 「받지 못했다」로 본다 — Claude 는 벤더가 이미 걸렀으니 빈
+        # 목록이면 쓸 모델이 없다는 뜻이고, 작은 목록으로 물러선다.
+        if vendor_ids is None or (not vendor_ids and connection.kind != Class.ScoringConnectionKind.OPENAI_KEY):
             if compatible:
                 return ScoringModelCatalog(models=(), source="manual", unavailable_reason="no_model_list")
-            return _fallback("fetch_failed")
+            return _fallback("fetch_failed", connection.kind)
         cache.set(cache_key, vendor_ids, timeout=_CACHE_TTL_SECONDS)
 
     if compatible:
         return ScoringModelCatalog(models=_unfiltered_choices(vendor_ids), source="live")
 
+    if connection.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
+        return ScoringModelCatalog(models=tuple(build_claude_catalog(vendor_ids)), source="live")
     return ScoringModelCatalog(models=tuple(build_catalog(vendor_ids)), source="live")

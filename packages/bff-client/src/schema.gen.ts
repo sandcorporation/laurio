@@ -351,6 +351,28 @@ export interface paths {
         patch: operations["classroom_api_update_class"];
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/anthropic-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Class Anthropic Key
+         * @description 채점 연결을 「Claude(Anthropic) 키」로 저장한다(#795, ADR-0066) — OpenAI 키 저장과 같은 규율:
+         *     소유자 전용(ADR-0055), 암호화 저장·끝 네 자리, 저장 전 `GET /v1/models` 로 한 번 확인(401·403 만
+         *     거절, 닿지 못하면 「미검증」으로 저장, #681). 이전 연결(OpenAI 키·호환 서버)의 값은 덮여 지워진다.
+         */
+        put: operations["classroom_api_set_class_anthropic_key"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/archive": {
         parameters: {
             query?: never;
@@ -8242,7 +8264,7 @@ export interface components {
          * ScoringCostEstimateOut
          * @description 강사가 모델·추론 강도를 고를 때 미리 보는 예상 채점 비용(#591, CONTEXT.md
          *     「예상 채점 비용」). `basis` — problem(이 문제의 지난 시도 평균) | class(클래스 평균) |
-         *     source_sizes(시도가 `min_sample_count` 건 미만이라 소스 크기별). `unit` — krw(OpenAI 키, 단가표로 원화) |
+         *     source_sizes(시도가 `min_sample_count` 건 미만이라 소스 크기별). `unit` — krw(OpenAI 키·Claude 키, 단가표로 원화) |
          *     tokens(호환 서버, 단가를 몰라 지금 설정만 토큰으로, #604).
          */
         ScoringCostEstimateOut: {
@@ -9371,6 +9393,59 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ClassPatchIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_set_class_anthropic_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpenAIKeyIn"];
             };
         };
         responses: {
