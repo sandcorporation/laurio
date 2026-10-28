@@ -214,7 +214,9 @@ def _live_problem_template(problem: Problem) -> ProblemTemplate | None:
     return problem.templates.filter(taken_down_at__isnull=True).first()
 
 
-def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None = None) -> ClassOut:
+def _serialize_class(
+    class_obj: Class, *, viewer_id: int, row_stats: dict | None = None, claude_selectable: bool | None = None
+) -> ClassOut:
     """`viewer_id`는 부른 사람 — 그 사람이 소유자인지 공동 강사인지(`role`)를 싣는다(#561)."""
 
     has_key = class_obj.has_scoring_key()
@@ -240,7 +242,9 @@ def _serialize_class(class_obj: Class, *, viewer_id: int, row_stats: dict | None
         ),
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
         scoring_connection_kind=class_obj.scoring_connection_kind,
-        anthropic_key_selectable=privacy_policy.anthropic_key_connection_open(),
+        anthropic_key_selectable=(
+            privacy_policy.anthropic_key_connection_open() if claude_selectable is None else claude_selectable
+        ),
         # 공동 강사는 종류와 호스트만 읽는다(#601) — 주소 전체·인증 값 마스킹은 소유자에게만.
         scoring_server_host=scoring_connection.server_host(class_obj.scoring_server_url) if compatible else None,
         scoring_server_url=class_obj.scoring_server_url if compatible and viewer_is_owner else None,
@@ -754,8 +758,11 @@ def list_my_classes(request: HttpRequest):
 
     classes = list(instructor_classes(request.auth_user.id))
     row_stats = _class_row_stats(classes)
+    # 시계(DB 한 번)는 목록에서 한 번만 읽는다 — 클래스 수만큼 늘지 않게.
+    selectable = privacy_policy.anthropic_key_connection_open()
     return 200, [
-        _serialize_class(c, viewer_id=request.auth_user.id, row_stats=row_stats[c.id]) for c in classes
+        _serialize_class(c, viewer_id=request.auth_user.id, row_stats=row_stats[c.id], claude_selectable=selectable)
+        for c in classes
     ]
 
 
