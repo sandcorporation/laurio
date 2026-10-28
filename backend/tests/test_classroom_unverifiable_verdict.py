@@ -95,7 +95,12 @@ def test_an_unverifiable_required_item_does_not_pass_and_both_surfaces_say_unver
     item = body["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["items"]
     assert item["properties"]["verdict"] == {"type": "string", "enum": ["met", "unmet", "unverifiable"]}
     assert item["required"] == ["requirement_id", "verdict", "reasoning"] and "is_met" not in item["properties"]
-    assert UNVERIFIABLE_VERDICT_RULE in body["messages"][1]["content"]
+    prompt = body["messages"][1]["content"]
+    assert UNVERIFIABLE_VERDICT_RULE in prompt
+    # 실제 동작을 말하는 항목은 코드가 있어도 확인 불가, 존재를 말하는 항목은 정적 판정 — 판정 예시 두 줄(#816).
+    assert "그 동작을 하는 코드가 있어도" in prompt and "어느 파일·함수" in prompt
+    assert "→ unverifiable(근거: app.py 의 follow() 가 302 로 보내는 코드는 있다)" in prompt
+    assert "리디렉션 응답으로 처리하는 코드가 있다」 → met." in prompt
 
     # REST: 필수 항목 하나가 확인 불가라 통과가 아니다. is_met 은 확인 불가에서 false.
     [attempt] = mine(client, participant["access"], class_id, problem.id)["submissions"]
@@ -193,6 +198,14 @@ def test_the_report_output_schema_keeps_is_met_required_and_verdict_optional():
 def test_the_prompt_rule_uses_the_same_list_as_the_authoring_guide():
     assert UNVERIFIABLE_THINGS in GRADABILITY_GUIDE and UNVERIFIABLE_THINGS in UNVERIFIABLE_VERDICT_RULE
     assert "미루지 말고" in UNVERIFIABLE_VERDICT_RULE
+
+
+def test_the_contest_scoring_never_loads_the_classroom_verdict_rule():
+    import core.llm_scoring as contest
+
+    source = open(contest.__file__, encoding="utf-8").read()
+    assert "UNVERIFIABLE_VERDICT_RULE" not in source.replace("`UNVERIFIABLE_VERDICT_RULE`", "")
+    assert "import" not in "".join(line for line in source.splitlines() if "gradability_hint" in line)
 
 
 @pytest.mark.parametrize(

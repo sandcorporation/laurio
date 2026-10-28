@@ -636,7 +636,8 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 `allow_unverifiable=True` 로 만들어(`classroom.scoring._scoring_adapter`, OpenAI·Anthropic 둘 다) 스키마가 `is_met`
 대신 `verdict`(`met`·`unmet`·`unverifiable`)를 받고, 프롬프트에 판정 규칙(`gradability_hint.UNVERIFIABLE_VERDICT_RULE`
 — 「확인할 수 없는 것」 목록이 위 안내와 같은 말이다: 그것을 봐야만 판정할 수 있을 때만 확인 불가, 근거에 무엇이
-필요한지, 정적으로 판정할 수 있으면 미루지 말 것)이 실린다. `ClassroomScore.reasoning` 항목은 `is_met`(확인 불가면
+필요한지, 정적으로 판정할 수 있으면 미루지 말 것, **실제 동작·결과를 말하는 항목은 그 동작을 하는 코드가 있어도 확인 불가**이고
+근거에 어느 파일·함수가 그 코드인지 적을 것, 코드·설정·문서의 존재를 말하면 정적 판정, 판정 예시 두 줄 — #816)이 실린다. `ClassroomScore.reasoning` 항목은 `is_met`(확인 불가면
 `false`)과 `verdict` 를 함께 저장한다 — 옛 기록(`verdict` 없음)은 `classroom.verdicts.verdict_of` 한 자리에서
 `is_met` 으로 유도한다. 통과·달성률·명단 격자·`met_count` 는 `is_met` 만 본다(확인 불가는 충족 아님). REST
 `ClassroomChecklistVerdictOut.verdict`, MCP `get_participant_report` 의 판정 `verdict`(출력 스키마에서는 선택 필드,
