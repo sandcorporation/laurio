@@ -291,3 +291,19 @@ def test_the_async_path_sends_the_same_request_and_classifies_the_same_way():
 
 def jsonlib_dumps(body) -> bytes:
     return json.dumps(body).encode("utf-8")
+
+
+def test_with_unverifiable_the_schema_asks_for_three_verdicts_and_reads_them(monkeypatch):
+    calls: list = []
+    verdicts = [
+        {"requirement_id": 11, "verdict": "met", "reasoning": "README 가 있다."},
+        {"requirement_id": 12, "verdict": "unverifiable", "reasoning": "실행해야 안다."},
+    ]
+    _post(monkeypatch, 200, messages_body(verdicts), calls)
+
+    output = _adapter(allow_unverifiable=True).score(INPUT)
+
+    item = calls[0]["json"]["output_config"]["format"]["schema"]["properties"]["verdicts"]["items"]
+    assert item["required"] == ["requirement_id", "verdict", "reasoning"]
+    assert item["properties"]["verdict"]["enum"] == ["met", "unmet", "unverifiable"]
+    assert [(v.is_met, v.verdict) for v in output.verdicts] == [(True, "met"), (False, "unverifiable")]

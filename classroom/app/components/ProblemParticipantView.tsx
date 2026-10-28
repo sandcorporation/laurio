@@ -40,6 +40,7 @@ import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
 import { attemptEntryLabel } from "@/lib/submissions/contest-entry";
+import { VERDICT_LABEL, type VerdictValue, verdictFromMet, verdictMarkerClass, verdictOf } from "@/lib/submissions/verdict";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
@@ -436,7 +437,10 @@ function ChecklistWithVerdict({
       )}
       <ul data-testid="my-problem-checklist" className="divide-y divide-rule border-t border-rule">
         {syntaxCheckEnabled ? (
-          <ChecklistLine testId="checklist-item-syntax-check" met={judgedSummary?.syntaxMet ?? null}>
+          <ChecklistLine
+            testId="checklist-item-syntax-check"
+            verdict={judgedSummary?.syntaxMet == null ? null : verdictFromMet(judgedSummary.syntaxMet)}
+          >
             <div className="text-[13.5px]">
               {SYNTAX_CHECK_LABEL} <Badge>기본</Badge>
               {syntax ? (
@@ -467,12 +471,9 @@ function ChecklistWithVerdict({
         ) : null}
         {items.map((item) => {
           const verdict = verdictById.get(item.id);
+          const value = verdict ? verdictOf(verdict) : null;
           return (
-            <ChecklistLine
-              key={item.id}
-              testId={`checklist-item-${item.id}`}
-              met={verdict ? verdict.is_met : null}
-            >
+            <ChecklistLine key={item.id} testId={`checklist-item-${item.id}`} verdict={value}>
               <div className="text-[13.5px]">
                 {item.label}
                 {item.required ? null : (
@@ -481,6 +482,14 @@ function ChecklistWithVerdict({
                     <Badge>선택</Badge>
                   </>
                 )}
+                {value === "unverifiable" ? (
+                  <>
+                    {" "}
+                    <span data-testid={`checklist-item-${item.id}-unverifiable`}>
+                      <Badge>{VERDICT_LABEL.unverifiable}</Badge>
+                    </span>
+                  </>
+                ) : null}
               </div>
               {verdict ? (
                 <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{verdict.reasoning}</div>
@@ -501,22 +510,21 @@ function ChecklistWithVerdict({
   );
 }
 
-// 항목 한 줄 — 표식은 충족(채움) · 미충족(붉은 테두리) · 아직 판정 없음(옅은 테두리). 글자로도 읽히게 sr-only.
+// 항목 한 줄 — 표식은 충족(채움) · 미충족(붉은 테두리) · 확인 불가(점선) · 아직 판정 없음(옅은 테두리).
+// 글자로도 읽히게 sr-only(확인 불가는 줄 안의 표시가 보이는 글자로도 말한다).
 function ChecklistLine({
   testId,
-  met,
+  verdict,
   children,
 }: {
   testId: string;
-  met: boolean | null;
+  verdict: VerdictValue | null;
   children: ReactNode;
 }) {
-  const marker =
-    met === null ? "border-rule" : met ? "border-verified bg-verified" : "border-attention";
   return (
     <li data-testid={testId} className="flex items-start gap-3 px-4 py-3">
-      <span aria-hidden className={`mt-1 h-[14px] w-[14px] shrink-0 border ${marker}`} />
-      {met === null ? null : <span className="sr-only">{met ? "충족" : "미충족"}</span>}
+      <span aria-hidden className={`mt-1 h-[14px] w-[14px] shrink-0 border ${verdictMarkerClass(verdict)}`} />
+      {verdict === null ? null : <span className="sr-only">{VERDICT_LABEL[verdict]}</span>}
       <div className="min-w-0 flex-1 leading-relaxed">{children}</div>
     </li>
   );

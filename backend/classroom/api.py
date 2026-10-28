@@ -172,6 +172,7 @@ from .scoring_models import (
 )
 from .submission_target_refs import source_target_ref
 from .services import copy_class, copy_problem_to_class, instructor_classes
+from .verdicts import verdict_of
 
 logger = logging.getLogger(__name__)
 
@@ -643,6 +644,7 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
             ClassroomChecklistVerdictOut(
                 checklist_item_id=r["checklist_item_id"],
                 is_met=r["is_met"],
+                verdict=verdict_of(r),
                 reasoning=r["reasoning"],
             )
             for r in score.reasoning

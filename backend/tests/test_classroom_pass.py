@@ -325,10 +325,12 @@ def test_participant_sees_the_reasoning_behind_each_checklist_verdict(client, db
     assert reasoning_by_item[ctx["required_id"]] == {
         "checklist_item_id": ctx["required_id"],
         "is_met": True,
+        "verdict": "met",
         "reasoning": "필수 항목 사유",
     }
     assert reasoning_by_item[ctx["optional_id"]] == {
         "checklist_item_id": ctx["optional_id"],
         "is_met": False,
+        "verdict": "unmet",
         "reasoning": "선택 항목 사유",
     }

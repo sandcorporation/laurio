@@ -620,9 +620,9 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 언제나 놓칠 필수 항목이 있을 때만 `warning` 한 줄이 붙는다(#587, 위 「zip 에는 Git 기록이 없다」).
 
 **채점이 확인할 수 있는 것·없는 것을 만들기 전에 알린다**(#805, `classroom.gradability_hint`).
-강의실 채점은 제출 소스 텍스트를 모델에 한 번 보낼 뿐이라(도구·접속·실행 없음, 판정은 `is_met` 뿐 —
-「확인 불가」가 없다) 「공개 /숫자 주소가 실제로 리디렉션된다」 같은 실행·접속형 항목은 README 의
-주장을 믿느냐로 갈려 시도마다 흔들린다. 그래서 같은 안내(소스·설정·README 의 정적 내용은 확인하고,
+강의실 채점은 제출 소스 텍스트를 모델에 한 번 보낼 뿐이라(도구·접속·실행 없음) 「공개 /숫자 주소가
+실제로 리디렉션된다」 같은 실행·접속형 항목은 판정할 수 없다 — 지금은 「확인 불가」로 나오고(#811, 아래),
+확인 불가는 충족이 아니라 필수 항목이면 통과하지 못한다. 그래서 같은 안내(소스·설정·README 의 정적 내용은 확인하고,
 실행 결과·배포 접속·HTTP 응답·동시성·브라우저 동작은 못 한다, 「…하는 코드가 있다」로 바꿔 쓴다)를
 서버 instructions·`create_problem`/`update_problem`/`add_checklist_item`/`update_checklist_item`
 설명·항목 문장 인자의 description 에 각각 둔다(한 자리에서 본문을 두고 가리키지 않는다 — 각자 따로 읽어도
@@ -631,6 +631,19 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 `gradability_warnings`(`{checklist_item_id, text, reason}`)와 사람이 읽을 `gradability_warning` 한 줄로
 돌려준다 — 오탐은 허용하고 저장은 막지 않는다. 만들기·문제 고치기는 항목 전부를, 항목 더하기·고치기는
 방금 다룬 항목만 본다.
+
+**강의실 판정은 세 값이다 — 충족·미충족·확인 불가**(#811, ADR-0067). 강의실 채점만 어댑터를
+`allow_unverifiable=True` 로 만들어(`classroom.scoring._scoring_adapter`, OpenAI·Anthropic 둘 다) 스키마가 `is_met`
+대신 `verdict`(`met`·`unmet`·`unverifiable`)를 받고, 프롬프트에 판정 규칙(`gradability_hint.UNVERIFIABLE_VERDICT_RULE`
+— 「확인할 수 없는 것」 목록이 위 안내와 같은 말이다: 그것을 봐야만 판정할 수 있을 때만 확인 불가, 근거에 무엇이
+필요한지, 정적으로 판정할 수 있으면 미루지 말 것)이 실린다. `ClassroomScore.reasoning` 항목은 `is_met`(확인 불가면
+`false`)과 `verdict` 를 함께 저장한다 — 옛 기록(`verdict` 없음)은 `classroom.verdicts.verdict_of` 한 자리에서
+`is_met` 으로 유도한다. 통과·달성률·명단 격자·`met_count` 는 `is_met` 만 본다(확인 불가는 충족 아님). REST
+`ClassroomChecklistVerdictOut.verdict`, MCP `get_participant_report` 의 판정 `verdict`(출력 스키마에서는 선택 필드,
+`is_met` 은 그대로 필수)로 나간다. 강사가 손으로 판정을 바꾸는 길은 없다. **공모전 채점은 바꾸지 않았다** —
+`core.llm_scoring.get_adapter()` 는 이 인자를 주지 않아 스키마·파서가 `is_met` 그대로다. 확인 불가 쏠림은
+`manage.py measure_unverifiable_verdicts`(키는 `CODEMIT_MEASURE_OPENAI_KEY`·`CODEMIT_MEASURE_ANTHROPIC_KEY`
+환경변수에서만, 어림 500원 상한)로 실제 모델에서 잰다.
 
 강의실 화면(사람이 직접 쓸 때)도 같은 안내를 받는다(#810). 항목 입력칸 아래 한 줄은 `GRADABILITY_FORM_NOTE`
 (강의실 `lib/problems/gradability.ts` 에 같은 문장이 있고 `tests/test_classroom_gradability_hint.py` 가 같음을 지킨다),

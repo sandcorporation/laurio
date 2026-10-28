@@ -3,6 +3,7 @@
 // testid 는 `${testIdPrefix}-verdicts` · `-syntax-check` · `-syntax-check-finding-n`.
 import { Badge } from "@/app/components/ui";
 import type { ClassroomScore } from "@/lib/submissions/api";
+import { VERDICT_LABEL, verdictMarkerClass, verdictOf } from "@/lib/submissions/verdict";
 
 // 판정 주체 표시(#409) — 파서 판정은 신뢰도가 높고(파이썬 표준 파서·tree-sitter), AI 판정은 파서가 없는
 // 언어이거나 크기·시간 제한에 걸렸을 때만 쓰인다.
@@ -47,23 +48,21 @@ export function SubmissionVerdictList({
           </span>
         </li>
       ) : null}
-      {score.reasoning.map((verdict) => (
-        <li key={verdict.checklist_item_id} className="flex gap-2.5">
-          <span
-            aria-hidden
-            className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
-              verdict.is_met ? "border-verified bg-verified" : "border-attention"
-            }`}
-          />
-          <span className="text-[13px] leading-relaxed">
-            <span className={verdict.is_met ? "" : "text-ink"}>
-              {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
-            </span>{" "}
-            <span className="text-ink/45">— {verdict.is_met ? "충족" : "미충족"}</span>
-            <span className="block text-ink/60">{verdict.reasoning}</span>
-          </span>
-        </li>
-      ))}
+      {score.reasoning.map((verdict) => {
+        const value = verdictOf(verdict);
+        return (
+          <li key={verdict.checklist_item_id} className="flex gap-2.5">
+            <span aria-hidden className={`mt-1 h-[13px] w-[13px] shrink-0 border ${verdictMarkerClass(value)}`} />
+            <span className="text-[13px] leading-relaxed">
+              <span className={verdict.is_met ? "" : "text-ink"}>
+                {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
+              </span>{" "}
+              <span className="text-ink/45">— {VERDICT_LABEL[value]}</span>
+              <span className="block text-ink/60">{verdict.reasoning}</span>
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

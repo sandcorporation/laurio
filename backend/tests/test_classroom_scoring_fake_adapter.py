@@ -76,6 +76,7 @@ def test_scan_scores_a_passing_submission_without_any_network_call(client, db, m
         {
             "checklist_item_id": ctx["item_id"],
             "is_met": True,
+            "verdict": "met",
             "reasoning": "체크리스트 문구가 제출된 소스에서 그대로 확인되어 충족으로 판정했다.",
         }
     ]
@@ -95,6 +96,7 @@ def test_scan_scores_a_failing_submission_without_any_network_call(client, db, m
         {
             "checklist_item_id": ctx["item_id"],
             "is_met": False,
+            "verdict": "unmet",
             "reasoning": "체크리스트 문구를 제출된 소스에서 찾지 못해 미달로 판정했다.",
         }
     ]

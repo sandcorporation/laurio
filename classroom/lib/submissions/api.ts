@@ -12,6 +12,7 @@ import type {
   ZipGitHistoryWarning,
 } from "@/lib/problems/api";
 import type { ContestEntryForm, ContestEntryInput } from "./contest-entry";
+import type { VerdictValue } from "./verdict";
 
 export type ProblemMine = {
   id: number;
@@ -85,7 +86,10 @@ export type MyProblems = {
 
 export type ChecklistVerdict = {
   checklist_item_id: number;
+  // 확인 불가도 false 다(#811) — 통과·필수 m/n 은 이 값만 센다.
   is_met: boolean;
+  // 세 갈래 판정(#811) — 읽을 때는 `verdictOf`(lib/submissions/verdict.ts)로.
+  verdict?: VerdictValue;
   reasoning: string;
 };
 
