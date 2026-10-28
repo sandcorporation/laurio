@@ -1,19 +1,21 @@
 "use client";
 
 // 「채점 연결」(#601, CONTEXT.md 「채점 연결」) — 클래스 설정의 첫 구획(`#scoring-key`, 카드는 쪽이
-// 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: 「OpenAI 키」 또는 「호환 서버」(소유자가
+// 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: 「OpenAI 키」·「Claude(Anthropic) 키」 또는 「호환 서버」(소유자가
 // 바깥에 열어 둔 OpenAI 호환 주소와 Bearer 값). 상태 한 줄이 먼저 보이고(#636) 폼은 「바꾸기」 뒤에
 // 열린다. 공동 강사는 상태 한 줄만 본다(ADR-0055).
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
-import { setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
+import { setAnthropicKey, setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
 
 type ConnectionKind = ClassRow["scoring_connection_kind"];
+
+export const CLAUDE_KEY_LABEL = "Claude(Anthropic) 키";
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
@@ -59,10 +61,11 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
       </p>
     );
   }
+  const anthropic = classroom.scoring_connection_kind === "anthropic_key";
   return (
-    <p data-testid="openai-key-status" className={STATUS_CLASS}>
+    <p data-testid={anthropic ? "anthropic-key-status" : "openai-key-status"} className={STATUS_CLASS}>
       {badges}
-      <span>OpenAI 키</span>
+      <span>{anthropic ? CLAUDE_KEY_LABEL : "OpenAI 키"}</span>
       <span className="font-mono text-ink/60">{classroom.openai_key_masked}</span>
       <VerifiedDay classroom={classroom} />
     </p>
@@ -72,6 +75,7 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
 function KindChoice({ value, onChange }: { value: ConnectionKind; onChange: (kind: ConnectionKind) => void }) {
   const options: { kind: ConnectionKind; label: string }[] = [
     { kind: "openai_key", label: "OpenAI 키" },
+    { kind: "anthropic_key", label: CLAUDE_KEY_LABEL },
     { kind: "compatible_server", label: "호환 서버" },
   ];
   return (
@@ -93,7 +97,16 @@ function KindChoice({ value, onChange }: { value: ConnectionKind; onChange: (kin
   );
 }
 
-function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => void }) {
+function KeyForm({
+  classId,
+  provider,
+  onSaved,
+}: {
+  classId: number;
+  provider: "openai" | "anthropic";
+  onSaved: () => void;
+}) {
+  const anthropic = provider === "anthropic";
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +116,8 @@ function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => v
 
   useEffect(() => {
     const trimmed = apiKey.trim();
-    if (trimmed === "") {
+    // 브라우저에서 벤더에 바로 묻는 것은 OpenAI 만이다 — Claude 키는 저장 때 서버가 확인한다.
+    if (anthropic || trimmed === "") {
       setLiveCheck("idle");
       return;
     }
@@ -118,13 +132,13 @@ function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => v
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [apiKey]);
+  }, [apiKey, anthropic]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError(null);
-    const result = await setOpenAIKey(classId, apiKey);
+    const result = await (anthropic ? setAnthropicKey : setOpenAIKey)(classId, apiKey);
     if (result.ok) {
       setApiKey("");
       onSaved();
@@ -136,23 +150,23 @@ function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => v
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
-      <label htmlFor="openai-api-key">
+      <label htmlFor={`${provider}-api-key`}>
         <FieldLabel>채점 키</FieldLabel>
       </label>
       <div className="flex flex-wrap items-center gap-2">
         <input
-          id="openai-api-key"
-          data-testid="openai-key-input"
+          id={`${provider}-api-key`}
+          data-testid={`${provider}-key-input`}
           type="password"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
           required
           className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
-          placeholder="sk-..."
+          placeholder={anthropic ? "sk-ant-..." : "sk-..."}
         />
         <button
           type="submit"
-          data-testid="openai-key-submit"
+          data-testid={`${provider}-key-submit`}
           disabled={saving || apiKey.trim() === ""}
           className={buttonClass("primary")}
         >
@@ -160,25 +174,25 @@ function OpenAIKeyForm({ classId, onSaved }: { classId: number; onSaved: () => v
         </button>
       </div>
       {liveCheck === "checking" ? (
-        <p data-testid="openai-key-live-check" className="text-[12px] text-ink/45">
+        <p data-testid={`${provider}-key-live-check`} className="text-[12px] text-ink/45">
           확인하는 중...
         </p>
       ) : liveCheck === "valid" ? (
-        <p data-testid="openai-key-live-check">
+        <p data-testid={`${provider}-key-live-check`}>
           <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
         </p>
       ) : liveCheck === "invalid" ? (
-        <p data-testid="openai-key-live-check">
+        <p data-testid={`${provider}-key-live-check`}>
           <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
         </p>
       ) : liveCheck === "unknown" ? (
-        <p data-testid="openai-key-live-check">
+        <p data-testid={`${provider}-key-live-check`}>
           <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
         </p>
       ) : null}
       {error ? (
         <ErrorNote>
-          <span data-testid="openai-key-error">{error}</span>
+          <span data-testid={`${provider}-key-error`}>{error}</span>
         </ErrorNote>
       ) : null}
     </form>
@@ -272,6 +286,11 @@ export function ScoringConnectionSection({
   const [open, setOpen] = useState(!classroom.has_openai_key);
   const switching = classroom.has_openai_key && kind !== classroom.scoring_connection_kind;
   const formOpen = isOwner && open;
+  const currentLabel = {
+    openai_key: "OpenAI 키",
+    anthropic_key: CLAUDE_KEY_LABEL,
+    compatible_server: "호환 서버",
+  }[classroom.scoring_connection_kind];
   const handleSaved = () => {
     setOpen(false);
     onSaved();
@@ -302,13 +321,16 @@ export function ScoringConnectionSection({
           <KindChoice value={kind} onChange={setKind} />
           {switching ? (
             <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-attention">
-              {kind === "compatible_server"
-                ? "저장하면 지금의 OpenAI 키가 지워집니다."
-                : "저장하면 지금의 호환 서버 주소와 인증 값이 지워집니다."}
+              {`저장하면 지금의 ${currentLabel}${classroom.scoring_connection_kind === "compatible_server" ? " 주소와 인증 값" : ""}이 지워집니다.`}
             </p>
           ) : null}
-          {kind === "openai_key" ? (
-            <OpenAIKeyForm classId={classroom.id} onSaved={handleSaved} />
+          {kind === "openai_key" || kind === "anthropic_key" ? (
+            <KeyForm
+              key={kind}
+              classId={classroom.id}
+              provider={kind === "anthropic_key" ? "anthropic" : "openai"}
+              onSaved={handleSaved}
+            />
           ) : (
             <CompatibleServerForm classroom={classroom} onSaved={handleSaved} />
           )}

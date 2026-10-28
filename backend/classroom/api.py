@@ -891,29 +891,49 @@ def _save_vendor_key(request: HttpRequest, class_obj: Class, api_key: str, *, ki
         extra["default_model"] = class_obj.default_model
     # 벤더 확인을 기다리는 사이 소유권이 넘어갔을 수 있다(#564) — 넘긴 사람의 키가 새 소유자의
     # 클래스에 남지 않게, 저장은 「지금도 부른 사람이 소유자인가」를 조건으로 한 번에 한다.
-    _save_scoring_connection(request, class_obj, **extra)
+    _save_scoring_connection(request, class_obj, vendor_kind=kind, **extra)
     return _serialize_class(class_obj, viewer_id=request.auth_user.id)
 
 
-def _save_scoring_connection(request: HttpRequest, class_obj: Class, **extra) -> None:
+def _return_foreign_problem_models_to_default(class_obj: Class, kind: str) -> None:
+    """문제마다 따로 고른 모델 중 새 연결이 받지 않는 벤더의 것은 클래스 기본으로 되돌린다(#796) —
+    그대로 두면 채점 때 「알 수 없는 채점 모델」로 영구 실패한다. 모델을 바꾼 것과 같게 그 문제의
+    「모델 거부」 표지도 푼다. 호환 서버는 모델 이름을 거르지 않아 이 함수를 부르지 않는다."""
+
+    want_claude = kind == Class.ScoringConnectionKind.ANTHROPIC_KEY
+    stale = [
+        problem_id
+        for problem_id, model in class_obj.problems.exclude(model="").values_list("id", "model")
+        if is_claude_model_id(model) != want_claude
+    ]
+    if stale:
+        Problem.objects.filter(id__in=stale).update(
+            model="", model_marked_reasoning=False, scoring_model_rejected_at=None
+        )
+
+
+def _save_scoring_connection(request: HttpRequest, class_obj: Class, *, vendor_kind: str | None = None, **extra) -> None:
     """`extra` 는 연결과 함께 바뀌는 다른 칸(벤더가 바뀌어 옮긴 기본 모델) — 바뀐 칸만 싣는다(다른 강사가
     그사이 고친 값을 덮지 않게)."""
 
-    saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
-        scoring_connection_kind=class_obj.scoring_connection_kind,
-        scoring_server_url=class_obj.scoring_server_url,
-        openai_api_key_encrypted=class_obj.openai_api_key_encrypted,
-        openai_api_key_last4=class_obj.openai_api_key_last4,
-        openai_api_key_status=class_obj.openai_api_key_status,
-        scoring_quota_exhausted_at=None,
-        # 호환 서버에 닿지 않아 멈춰 있었다면(#603) 다시 저장이 「고쳤다」는 신호다 — 저장 전
-        # 확인이 이미 그 서버에 닿았다.
-        scoring_server_unreachable_at=None,
-        scoring_connection_verified_at=class_obj.scoring_connection_verified_at,
-        **extra,
-    )
-    if not saved:
-        raise HttpError(403, OWNER_ONLY_MESSAGE)
+    with transaction.atomic():
+        saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
+            scoring_connection_kind=class_obj.scoring_connection_kind,
+            scoring_server_url=class_obj.scoring_server_url,
+            openai_api_key_encrypted=class_obj.openai_api_key_encrypted,
+            openai_api_key_last4=class_obj.openai_api_key_last4,
+            openai_api_key_status=class_obj.openai_api_key_status,
+            scoring_quota_exhausted_at=None,
+            # 호환 서버에 닿지 않아 멈춰 있었다면(#603) 다시 저장이 「고쳤다」는 신호다 — 저장 전
+            # 확인이 이미 그 서버에 닿았다.
+            scoring_server_unreachable_at=None,
+            scoring_connection_verified_at=class_obj.scoring_connection_verified_at,
+            **extra,
+        )
+        if not saved:
+            raise HttpError(403, OWNER_ONLY_MESSAGE)
+        if vendor_kind is not None:
+            _return_foreign_problem_models_to_default(class_obj, vendor_kind)
 
 
 @router.put(
