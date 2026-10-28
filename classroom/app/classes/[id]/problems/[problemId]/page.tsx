@@ -19,6 +19,12 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { ChecklistRows } from "@/app/components/ChecklistRows";
+import {
+  GRADABILITY_FORM_NOTE,
+  gradabilityWarningLine,
+  takeWarnings,
+  type GradabilityWarning,
+} from "@/lib/problems/gradability";
 import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
@@ -27,7 +33,7 @@ import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemSideActions } from "@/app/components/ProblemSideActions";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { useClass } from "@/lib/classes/use-class";
@@ -119,6 +125,21 @@ export default function EditProblemPage() {
   // 체크리스트 조작(추가·항목 저장·필수 토글·삭제·순서 바꾸기·문법 검사
   // 켬끔)은 오류 표시 자리(`checklist-error`)를 공유해 한 훅으로 묶는다.
   const checklistMutation = useMutationRequest();
+  // 방금 저장한 항목 가운데 채점이 확인할 수 없을 수 있는 것(#810) — 항목 번호별로 든다. 저장은 막지 않는다.
+  const [gradabilityWarnings, setGradabilityWarnings] = useState<Record<number, GradabilityWarning>>({});
+  function noteGradability(itemId: number, warnings: GradabilityWarning[] | undefined) {
+    setGradabilityWarnings((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      for (const w of warnings ?? []) next[w.checklist_item_id] = w;
+      return next;
+    });
+  }
+  // 문제 만들기 화면이 건넨 경고 — 한 번만 읽힌다.
+  useEffect(() => {
+    const handed = takeWarnings(window.sessionStorage, problemId);
+    if (handed.length > 0) setGradabilityWarnings(Object.fromEntries(handed.map((w) => [w.checklist_item_id, w])));
+  }, [problemId]);
   const openMutation = useMutationRequest();
   // 「숨기기」는 한 번 더 확인을 받는다(#405 AC) — 이미 낸 참여자가 어떻게
   // 되는지 알고 누르게 하기 위해서다. 다른 버튼들과 달리 클릭 한 번으로
@@ -271,7 +292,8 @@ export default function EditProblemPage() {
       {
         fallbackMessage: "항목을 추가하지 못했습니다. 잠시 후 다시 시도해주세요.",
         reload,
-        onSuccess: () => {
+        onSuccess: (item) => {
+          noteGradability(item.id, item.gradability_warnings);
           setNewItemLabel("");
           setNewItemRequired(true);
         },
@@ -290,6 +312,7 @@ export default function EditProblemPage() {
     void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { label }), {
       fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
+      onSuccess: (item) => noteGradability(item.id, item.gradability_warnings),
     });
   }
 
@@ -635,7 +658,7 @@ export default function EditProblemPage() {
                       <Badge>공모전 요구사항</Badge>
                     </div>
                   ) : (
-                    <form onSubmit={handleAddItem} className="flex items-center gap-2.5 border-t border-rule px-4 py-3">
+                    <form onSubmit={handleAddItem} className="flex flex-wrap items-center gap-2.5 border-t border-rule px-4 py-3">
                       <label htmlFor="new-item-label" className="sr-only">
                         새 항목
                       </label>
@@ -668,8 +691,28 @@ export default function EditProblemPage() {
                       >
                         추가
                       </button>
+                      <p data-testid="checklist-gradability-note" className="basis-full text-[12px] text-ink/60">
+                        {GRADABILITY_FORM_NOTE}
+                      </p>
                     </form>
                   )}
+
+                  {problem.checklist_items.some((item) => gradabilityWarnings[item.id]?.text === item.label) ? (
+                    <div className="border-t border-rule px-4 py-3" data-testid="checklist-gradability-warnings">
+                      <ul className="flex flex-col gap-1.5">
+                        {problem.checklist_items
+                          .filter((item) => gradabilityWarnings[item.id]?.text === item.label)
+                          .map((item) => (
+                            <li key={item.id} data-testid={`checklist-gradability-warning-${item.id}`} className="text-[13px]">
+                              <span className="text-ink">{item.label}</span>
+                              <span className="block text-attention">
+                                {gradabilityWarningLine(gradabilityWarnings[item.id].reason)}
+                              </span>
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                  ) : null}
 
                   {checklistMutation.error ? (
                     <div className="border-t border-rule p-4">

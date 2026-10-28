@@ -4,6 +4,7 @@ import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
 import type { GradingStrictness } from "@/lib/problems/grading-guideline";
+import type { GradabilityWarning } from "@/lib/problems/gradability";
 
 export type SubmissionFormat = "source" | "repository";
 export type ProblemStatus = "draft" | "open" | "hidden";
@@ -26,6 +27,9 @@ export type ChecklistItemRow = {
   required: boolean;
   order: number;
 };
+
+// 항목 만들기·고치기 응답(#810) — 방금 저장한 항목이 채점이 확인할 수 없을 수 있어 보이면 채워진다.
+export type SavedChecklistItemRow = ChecklistItemRow & { gradability_warnings?: GradabilityWarning[] };
 
 // 전이 표(`classroom.problem_transitions`) 한 줄(#440) — 지금 이 문제 상태에서
 // 나갈 수 있는 전이 하나와 막힌 이유. `blocked_reason`이 `null`이면 지금 바로
@@ -186,8 +190,11 @@ export function createProblem(
     // 경우를 누르기 전에 이미 막아 둔다.
     open?: boolean;
   },
-): Promise<ApiResult<ProblemRow>> {
-  return bffClient.post<ProblemRow>(`/api/backend/classroom/classes/${classId}/problems`, input);
+): Promise<ApiResult<ProblemRow & { gradability_warnings?: GradabilityWarning[] }>> {
+  return bffClient.post<ProblemRow & { gradability_warnings?: GradabilityWarning[] }>(
+    `/api/backend/classroom/classes/${classId}/problems`,
+    input,
+  );
 }
 
 export function updateProblem(
@@ -310,8 +317,8 @@ export function createChecklistItem(
   classId: number,
   problemId: number,
   input: { label: string; required: boolean },
-): Promise<ApiResult<ChecklistItemRow>> {
-  return bffClient.post<ChecklistItemRow>(checklistItemsPath(classId, problemId), input);
+): Promise<ApiResult<SavedChecklistItemRow>> {
+  return bffClient.post<SavedChecklistItemRow>(checklistItemsPath(classId, problemId), input);
 }
 
 export function updateChecklistItem(
@@ -319,8 +326,8 @@ export function updateChecklistItem(
   problemId: number,
   itemId: number,
   patch: Partial<{ label: string; required: boolean }>,
-): Promise<ApiResult<ChecklistItemRow>> {
-  return apiRequest<ChecklistItemRow>(
+): Promise<ApiResult<SavedChecklistItemRow>> {
+  return apiRequest<SavedChecklistItemRow>(
     `${checklistItemsPath(classId, problemId)}/${itemId}`,
     "PATCH",
     patch,

@@ -155,3 +155,67 @@ def test_descriptions_stay_under_the_client_limit_of_2048_characters():
     assert len(INSTRUCTIONS) <= 2048
     for name in ["create_problem", "update_problem", "add_checklist_item", "update_checklist_item"]:
         assert len(TOOLS[name].description) <= 2048, name
+
+
+# --- 강의실 화면의 REST (#810) ---------------------------------------------------------------
+
+
+def _post(client, access, url, data):
+    from tests.classroom_scenarios import auth_header
+
+    return client.post(url, data=data, content_type="application/json", **auth_header(access))
+
+
+def _patch(client, access, url, data):
+    from tests.classroom_scenarios import auth_header
+
+    return client.patch(url, data=data, content_type="application/json", **auth_header(access))
+
+
+def test_the_classroom_screen_hears_the_warning_for_the_item_it_just_saved(client, db):
+    instructor = login(client, uid="gradable-rest")["access"]
+    class_id = create_class(client, instructor, with_key=False)
+    base = f"/api/classroom/classes/{class_id}/problems"
+
+    created = _post(
+        client,
+        instructor,
+        base,
+        {
+            "title": "Dioxus로 숫자형 단축 URL 서비스",
+            "description": "",
+            "submission_formats": ["repository"],
+            "checklist_items": [{"label": label} for label in STATIC + RUN_OR_ACCESS],
+        },
+    )
+    assert created.status_code == 201, created.content
+    body = created.json()
+    assert len(body["checklist_items"]) == 9  # 저장은 막지 않는다
+    ids = [i["id"] for i in body["checklist_items"]]
+    assert [w["checklist_item_id"] for w in body["gradability_warnings"]] == ids[3:]
+    assert set(body["gradability_warnings"][0]) == {"checklist_item_id", "text", "reason"}
+
+    items_url = f"{base}/{body['id']}/checklist-items"
+    ok = _post(client, instructor, items_url, {"label": "/숫자 경로를 리디렉션 응답으로 처리하는 코드가 있다"})
+    assert ok.status_code == 201 and ok.json()["gradability_warnings"] == []  # 정적 확인 어구가 함께 있으면 안 걸린다
+
+    bad = _post(client, instructor, items_url, {"label": "공개 주소로 접속하면 열린다"})
+    assert bad.status_code == 201
+    assert [w["checklist_item_id"] for w in bad.json()["gradability_warnings"]] == [bad.json()["id"]]  # 방금 더한 것만
+
+    item_url = f"{items_url}/{bad.json()['id']}"
+    toggled = _patch(client, instructor, item_url, {"required": False})
+    assert toggled.json()["gradability_warnings"] == []  # 문구를 안 고쳤으면 다시 나무라지 않는다
+    still = _patch(client, instructor, item_url, {"label": "배포가 실제로 연결되어 있다"})
+    assert len(still.json()["gradability_warnings"]) == 1
+    fixed = _patch(client, instructor, item_url, {"label": "공개 주소 안내가 README 에 적혀 있다"})
+    assert fixed.json()["gradability_warnings"] == []
+
+
+def test_the_screen_note_is_the_same_sentence_in_python_and_the_classroom_app():
+    from pathlib import Path
+
+    from classroom.gradability_hint import GRADABILITY_FORM_NOTE
+
+    ts = Path(__file__).resolve().parents[2] / "classroom" / "lib" / "problems" / "gradability.ts"
+    assert f'"{GRADABILITY_FORM_NOTE}"' in ts.read_text(encoding="utf-8")

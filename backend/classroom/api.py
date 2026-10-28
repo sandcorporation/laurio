@@ -77,6 +77,8 @@ from .contest_problems import contest_state, import_contest_problem
 from .schemas import (
     ChecklistItemIn,
     ChecklistItemOut,
+    ChecklistItemSavedOut,
+    GradabilityWarningOut,
     ImportableContestOut,
     ImportableContestPageOut,
     ImportContestIn,
@@ -140,6 +142,7 @@ from .schemas import (
     ZipGitHistoryWarningOut,
 )
 from .git_history_hint import zip_git_history_item_ids
+from .gradability_hint import gradability_warnings
 from . import pending_scoring
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
@@ -286,6 +289,19 @@ def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> Pending
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
     return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
+
+
+def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool = True) -> ChecklistItemSavedOut:
+    """방금 더하거나 고친 항목 — MCP 와 같은 `gradability_warnings()` 로 가린다(#810). 저장은 막지 않는다.
+    문구를 건드리지 않은 고침(필수 켬끔)은 가리지 않는다 — 문구를 안 고쳤는데 다시 나무라지 않는다."""
+
+    return ChecklistItemSavedOut(
+        id=item.id,
+        label=item.label,
+        required=item.required,
+        order=item.order,
+        gradability_warnings=gradability_warnings([item]) if text_changed else [],
+    )
 
 
 def _active_member_ids(class_obj: Class) -> set[int]:
@@ -1864,7 +1880,9 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = problem_authoring.create_problem(class_obj, payload)
-    return 201, _serialize_problem(problem, class_obj)
+    out = _serialize_problem(problem, class_obj)
+    out.gradability_warnings = [GradabilityWarningOut(**w) for w in gradability_warnings(problem.checklist_items.all())]
+    return 201, out
 
 
 @router.get(
@@ -2687,7 +2705,7 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
 
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/checklist-items",
-    response={201: ChecklistItemOut, 404: ErrorOut, 422: ErrorOut},
+    response={201: ChecklistItemSavedOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def create_checklist_item(
@@ -2695,7 +2713,7 @@ def create_checklist_item(
 ):
     problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False).problem
     item = problem_authoring.add_checklist_item(problem, payload)
-    return 201, _serialize_checklist_item(item)
+    return 201, _serialize_saved_checklist_item(item)
 
 
 @router.post(
@@ -2716,7 +2734,7 @@ def reorder_checklist_items(
 
 @router.patch(
     "/classes/{class_id}/problems/{problem_id}/checklist-items/{item_id}",
-    response={200: ChecklistItemOut, 404: ErrorOut, 422: ErrorOut},
+    response={200: ChecklistItemSavedOut, 404: ErrorOut, 422: ErrorOut},
     auth=jwt_auth,
 )
 def update_checklist_item(
@@ -2732,7 +2750,7 @@ def update_checklist_item(
 
     problem = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False).problem
     item = problem_authoring.update_checklist_item(problem, item_id, payload)
-    return 200, _serialize_checklist_item(item)
+    return 200, _serialize_saved_checklist_item(item, text_changed=payload.label is not None)
 
 
 @router.delete(

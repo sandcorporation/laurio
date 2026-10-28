@@ -281,6 +281,20 @@ class ChecklistItemOut(Schema):
     order: int
 
 
+class GradabilityWarningOut(Schema):
+    """채점이 확인할 수 없을 수 있는 항목(#810) — MCP 응답의 `gradability_warnings` 와 같은 모양이다."""
+
+    checklist_item_id: int
+    text: str
+    reason: str
+
+
+class ChecklistItemSavedOut(ChecklistItemOut):
+    """항목 만들기·고치기 응답 — 방금 저장한 그 항목이 걸렸을 때만 경고가 채워진다(#810)."""
+
+    gradability_warnings: list[GradabilityWarningOut] = []
+
+
 class ChecklistReorderIn(Schema):
     item_ids: list[int]
 
@@ -458,6 +472,8 @@ class ProblemOut(Schema):
     #: CONTEXT.md 「문법 검사」). 기본은 켜짐이고, 강사는 끌 수만 있다(#410).
     syntax_check_enabled: bool = True
     checklist_items: list[ChecklistItemOut] = []
+    #: 문제 만들기 응답에서만 채워진다(#810) — 방금 만든 항목 가운데 채점이 확인할 수 없을 수 있는 것.
+    gradability_warnings: list[GradabilityWarningOut] = []
     #: 이 문제를 한 번이라도 통과한 참여자 수(#289, CONTEXT.md 「달성률」) —
     #: 강사 본인과 내보내진 참여자는 빼고 센다.
     passed_count: int = 0
