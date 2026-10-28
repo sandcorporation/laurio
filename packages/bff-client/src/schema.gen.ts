@@ -4864,6 +4864,25 @@ export interface components {
             /** Required */
             required?: boolean | null;
         };
+        /**
+         * ChecklistItemSavedOut
+         * @description 항목 만들기·고치기 응답 — 방금 저장한 그 항목이 걸렸을 때만 경고가 채워진다(#810).
+         */
+        ChecklistItemSavedOut: {
+            /**
+             * Gradability Warnings
+             * @default []
+             */
+            gradability_warnings: components["schemas"]["GradabilityWarningOut"][];
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+            /** Order */
+            order: number;
+            /** Required */
+            required: boolean;
+        };
         /** ChecklistReorderIn */
         ChecklistReorderIn: {
             /** Item Ids */
@@ -6405,6 +6424,18 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * GradabilityWarningOut
+         * @description 채점이 확인할 수 없을 수 있는 항목(#810) — MCP 응답의 `gradability_warnings` 와 같은 모양이다.
+         */
+        GradabilityWarningOut: {
+            /** Checklist Item Id */
+            checklist_item_id: number;
+            /** Reason */
+            reason: string;
+            /** Text */
+            text: string;
+        };
         /** HandoverOut */
         HandoverOut: {
             /** Award Id */
@@ -7676,6 +7707,11 @@ export interface components {
              * @default
              */
             effective_reasoning_effort: string;
+            /**
+             * Gradability Warnings
+             * @default []
+             */
+            gradability_warnings: components["schemas"]["GradabilityWarningOut"][];
             /** Grading Guideline Text */
             grading_guideline_text: string;
             /** Grading Strictness */
@@ -10683,7 +10719,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChecklistItemOut"];
+                    "application/json": components["schemas"]["ChecklistItemSavedOut"];
                 };
             };
             /** @description Not Found */
@@ -10814,7 +10850,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ChecklistItemOut"];
+                    "application/json": components["schemas"]["ChecklistItemSavedOut"];
                 };
             };
             /** @description Not Found */

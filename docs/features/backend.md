@@ -630,7 +630,12 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 정적 확인 어구 「코드가 있다」「구현되어 있다」「README 에 적혀」가 함께 있으면 면제)에 걸린 항목을 응답의
 `gradability_warnings`(`{checklist_item_id, text, reason}`)와 사람이 읽을 `gradability_warning` 한 줄로
 돌려준다 — 오탐은 허용하고 저장은 막지 않는다. 만들기·문제 고치기는 항목 전부를, 항목 더하기·고치기는
-방금 다룬 항목만 본다. 화면(사람이 직접 만들 때)에는 아직 같은 안내가 없다.
+방금 다룬 항목만 본다.
+
+강의실 화면(사람이 직접 쓸 때)도 같은 안내를 받는다(#810). 항목 입력칸 아래 한 줄은 `GRADABILITY_FORM_NOTE`
+(강의실 `lib/problems/gradability.ts` 에 같은 문장이 있고 `tests/test_classroom_gradability_hint.py` 가 같음을 지킨다),
+저장 뒤 경고는 REST 응답의 `gradability_warnings` — 항목 만들기·고치기(`ChecklistItemSavedOut`, 문구를 고친 때만)와
+문제 만들기(`ProblemOut`)가 MCP 와 **같은 `gradability_warnings()`** 로 방금 쓴 항목만 가려 싣는다. 저장은 막지 않는다.
 
 읽기 도구 다섯(#513)은 화면 라우트와 **같은 함수**를 부른다 — 범위는 `instructor_scope`
 (`write=False`)가, 값은 `classroom.api` 의 직렬화 함수가 정하고, 화면과 같은 인코더로 내보내

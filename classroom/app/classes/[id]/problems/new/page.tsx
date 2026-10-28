@@ -32,6 +32,7 @@ import { ContestPickerSheet } from "@/app/components/ContestPickerSheet";
 import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
+import { GRADABILITY_FORM_NOTE, stashWarnings } from "@/lib/problems/gradability";
 import { createProblem, type ProblemRow, type SubmissionFormat } from "@/lib/problems/api";
 import {
   DUE_ORDER_MESSAGE,
@@ -189,6 +190,8 @@ export default function NewProblemPage() {
       open,
     });
     if (result.ok) {
+      // 방금 만든 항목 가운데 채점이 확인할 수 없을 수 있는 것(#810) — 상세 화면이 한 번 보인다.
+      stashWarnings(window.sessionStorage, result.data.id, result.data.gradability_warnings ?? []);
       router.push(`/classes/${classId}/problems/${result.data.id}`);
     } else {
       setError(result.detail);
@@ -378,7 +381,7 @@ export default function NewProblemPage() {
                     />
                   )}
 
-                  <form onSubmit={handleAddItem} className="flex items-center gap-2.5 border-t border-rule px-4 py-3">
+                  <form onSubmit={handleAddItem} className="flex flex-wrap items-center gap-2.5 border-t border-rule px-4 py-3">
                     <label htmlFor="new-item-label" className="sr-only">
                       새 항목
                     </label>
@@ -408,6 +411,9 @@ export default function NewProblemPage() {
                     >
                       추가
                     </button>
+                    <p data-testid="new-problem-checklist-gradability-note" className="basis-full text-[12px] text-ink/60">
+                      {GRADABILITY_FORM_NOTE}
+                    </p>
                   </form>
                 </Card>
               </>

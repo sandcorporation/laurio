@@ -45,6 +45,10 @@ GRADABILITY_LABEL_NOTE = (
     "예: 「/숫자 주소가 실제로 이동한다」 → 「/숫자 경로를 리디렉션 응답(301/302/307/308)으로 처리하는 코드가 있다」."
 )
 
+#: 강의실 화면의 항목 입력칸 아래 한 줄(#810). 같은 문장이 `classroom/lib/problems/gradability.ts` 에도 있고
+#: 두 곳이 같음을 `tests/test_classroom_gradability_hint.py` 가 지킨다(vitest 는 파이썬을 못 읽는다).
+GRADABILITY_FORM_NOTE = "채점은 소스·설정·README 의 정적 내용만 확인합니다 — 실행·접속 결과는 「…하는 코드가 있다」로 씁니다."
+
 # (이유, 어구) — 이유는 응답에 그대로 실린다. 영어 낱말은 단어 경계로 자른다.
 _RULES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (reason, re.compile(pattern, re.IGNORECASE))
