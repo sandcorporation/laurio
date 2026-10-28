@@ -52,9 +52,13 @@ test("「Claude(Anthropic) 키」를 고르고 저장하면 상태 줄이 그 �
   await expect(page.getByTestId("anthropic-key-status")).toContainText("Claude(Anthropic) 키");
   await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");
   await expect(page.getByTestId("anthropic-key-input")).toHaveCount(0);
+  // 새로고침 없이도 단가표에 있는 Claude 모델은 원화로 보인다(#801) — 비용은 연결이 바뀐 뒤에 다시 받는다.
+  await expect(page.getByTestId("scoring-model-cost-claude-haiku-5-5")).toContainText("원");
+  await expect(page.getByTestId("scoring-model-cost-claude-sonnet-5-5")).not.toContainText("비용 미확인");
 
   await page.reload();
   await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");
+  await expect(page.getByTestId("scoring-model-cost-claude-haiku-5-5")).toContainText("원");
 });
 
 test("기본 모델은 라디오 표에서 골라 저장하고, 새로고침해도 그 모델이 기본값이다", async ({ page }) => {
