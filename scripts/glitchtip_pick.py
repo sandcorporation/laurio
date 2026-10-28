@@ -97,9 +97,12 @@ CLAIM_PREFIX = "[자동 진단]"
 #: 쏘고 GlitchTip 화면에서 눈으로 본다. 즉 **그 오류가 도착한 것이 곧 성공**이고, 그걸
 #: 고치려 드는 것은 정확히 거꾸로다.
 #:
+#: `PriceDriftAlert`(#798)는 하루 한 번 모델 단가 표를 LiteLLM 파일과 견주다 다르면 보내는 경고다 —
+#: 고칠 곳은 코드 버그가 아니라 사람이 공식 가격 페이지를 보고 적는 표라 자동 진단이 표를 고치러 들면 안 된다.
+#:
 #: 필터는 `metadata.type`(정확히 예외 클래스 이름이다)으로 본다 — 제목 문자열로 보면
 #: 메시지가 바뀔 때 조용히 새고, 그 메시지는 한국어라 더 잘 바뀐다.
-DELIBERATE_EXCEPTION_TYPES = frozenset({"SentrySmokeError"})
+DELIBERATE_EXCEPTION_TYPES = frozenset({"SentrySmokeError", "PriceDriftAlert"})
 
 TIMEOUT_SECONDS = 20
 
