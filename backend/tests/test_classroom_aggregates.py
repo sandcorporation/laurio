@@ -415,3 +415,47 @@ def test_problem_participant_attempt_count_is_the_submissions_screens_attempts(c
     assert detail["participant_attempt_count"] == 2
     assert rows[problem.id]["participant_attempt_count"] == 2
     assert rows[other.id]["participant_attempt_count"] == 0
+
+
+@pytest.fixture
+def scored_class(client, db, monkeypatch):
+    """채점까지 끝난 클래스 하나 — 질의를 처음 세는 상태라 준비다(#701, #819)."""
+
+    owner, class_id, problem, a, b = _class_with_two_learners(client)
+    submit_repository(client, a["access"], class_id, problem.id)
+    submit_repository(client, b["access"], class_id, problem.id)
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=True)
+    run_scan(client)
+    return owner, class_id
+
+
+def _class_detail_queries(client, access: str, class_id: int) -> list[str]:
+    with CaptureQueriesContext(connection) as ctx:
+        assert _get(client, access, f"/{class_id}").status_code == 200
+    return [q["sql"] for q in ctx.captured_queries]
+
+
+def test_class_detail_skips_scoring_prompts_and_query_count_stays_flat(
+    client, scored_class, monkeypatch, django_assert_max_num_queries
+):
+    """클래스 상세(#819) — 달성률은 판정(`reasoning`·문법 검사)만 읽는다. 채점 프롬프트는 시도마다
+    수십 KB(제출 소스가 그 안에 있다)라 prod 에서 시도 158개에 4MB 를 끌어와 응답이 100~250ms 였다.
+    질의 수는 문제·참여자·시도를 더해도 늘지 않는다."""
+
+    owner, class_id = scored_class
+    before = _class_detail_queries(client, owner["access"], class_id)
+    assert not [sql for sql in before if '"classroom_classroomscore"."prompt"' in sql]
+
+    second = create_open_problem(client, owner["access"], class_id, title="2주차")
+    for name in ("다", "라"):
+        extra = login(client, f"extra-{name}")
+        join_class(client, extra["access"], class_id, instructor_access=owner["access"], display_name=name)
+        submit_repository(client, extra["access"], class_id, second.id)
+    respond_with_verdict(monkeypatch, second.item_id, is_met=False)
+    run_scan(client)
+
+    # 인증 둘·클래스 하나·집계 여섯·직렬화(제출 유무·템플릿·시계 둘·소유권 이전) — 지금 14개다.
+    assert len(before) <= 14
+    with django_assert_max_num_queries(len(before)):
+        detail = get_class(client, owner["access"], class_id)
+    assert detail["scored_attempt_count"] == 4
