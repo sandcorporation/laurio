@@ -9,7 +9,7 @@
 # 같은 node:22 에서 가져온다.
 FROM node:22-bookworm-slim AS node
 
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy \

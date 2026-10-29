@@ -2,7 +2,7 @@
 name = "codemit-backend"
 version = "0.1.0"
 description = "Codemit — 공개 공모전 플랫폼 backend"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     "bleach>=6.4.0",
     "cryptography>=50.0.1",

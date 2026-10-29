@@ -210,7 +210,7 @@ def _key():
 
 
 def _cert(subject_name, issuer_name, public_key, signing_key, *, ca: bool, san: list[str] | None = None):
-    # Python 3.13 의 기본 검증(VERIFY_X509_STRICT)은 키 식별자·용도가 없는 인증서를 받지 않는다.
+    # Python 3.13 이후의 기본 검증(VERIFY_X509_STRICT)은 키 식별자·용도가 없는 인증서를 받지 않는다.
     now = datetime.datetime.now(datetime.UTC)
     builder = (
         x509.CertificateBuilder()

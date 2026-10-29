@@ -8,7 +8,7 @@
 # 감싼 엔드포인트가 있고(list_contests, #39), 그 래퍼는 원본 함수의 `__globals__` 를
 # 가져갈 수 없어서 문자열이 된 어노테이션(`Query[ContestListFilters]`)을 해석하지
 # 못한다 — 필터 하나 붙이려다 `QueryParams is not fully defined` 로 500 이 났다.
-# Python 3.13 은 `int | None` 같은 문법을 런타임에 그대로 지원하므로 이 임포트가
+# Python 3.14 는 `int | None` 같은 문법을 런타임에 그대로 지원하므로 이 임포트가
 # 없어도 아쉬울 것이 없다.
 
 import logging
