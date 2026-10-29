@@ -196,6 +196,19 @@ def _sends_reasoning_effort(class_obj: Class, model_id: str, *, marked_reasoning
     return is_reasoning_model_id(model_id)
 
 
+#: 시도 목록이 채점과 함께 불러올 때 빼는 칸 — 채점 프롬프트는 제출 소스를 품어 시도마다 수십 KB 다.
+#: 달성률·판정 표시는 `reasoning`·`syntax_check_result` 만 읽는다(#819: prod 클래스 상세가 시도
+#: 158개의 프롬프트 4MB 를 끌어와 100~250ms 걸렸다). 프롬프트가 필요한 곳(`mcp_report_tools`)은 따로 읽는다.
+_SCORE_PROMPT = ("classroom_score__prompt",)
+#: 통과 판정(`Problem.is_score_passed`)에 드는 칸만 — 집계가 시도를 통째로 만들지 않게 한다(#819).
+_PASS_JUDGMENT_FIELDS = (
+    "problem_id",
+    "member_id",
+    "classroom_score__reasoning",
+    "classroom_score__syntax_check_result",
+)
+
+
 def _mask_from_last4(last4: str) -> str:
     return f"{_KEY_MASK_PREFIX}{last4}"
 
@@ -332,7 +345,7 @@ def _problem_pass_stats(
     if submissions is None:
         submissions = ClassroomSubmission.objects.filter(
             problem=problem, member_id__in=active_member_ids
-        ).select_related("classroom_score")
+        ).select_related("classroom_score").defer(*_SCORE_PROMPT)
 
     passed_member_ids: set[int] = set()
     for submission in submissions:
@@ -407,6 +420,9 @@ def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
         _participant_submissions()
         .filter(problem__classroom_id__in=class_ids, problem__status=Problem.Status.OPEN)
         .select_related("classroom_score")
+        # 달성률은 누가 어느 문제에서 어떤 판정을 받았나만 본다(#819) — 부모 행·프롬프트·정렬은 필요 없다.
+        .only(*_PASS_JUDGMENT_FIELDS)
+        .order_by()
     ):
         submissions_by_problem.setdefault(submission.problem_id, []).append(submission)
 
@@ -454,7 +470,7 @@ def _joined_progress(memberships: list[ClassMember]) -> dict[int, tuple[int, int
     passed_by_member: dict[int, set[int]] = {}
     for submission in ClassroomSubmission.objects.filter(
         member_id__in=[m.id for m in memberships], problem_id__in=problems_by_id
-    ).select_related("classroom_score"):
+    ).select_related("classroom_score").defer(*_SCORE_PROMPT):
         problem = problems_by_id[submission.problem_id]
         if problem.is_score_passed(getattr(submission, "classroom_score", None)):
             passed_by_member.setdefault(submission.member_id, set()).add(submission.problem_id)
@@ -1763,7 +1779,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
 
     submissions = ClassroomSubmission.objects.filter(
         problem__in=problems, member__in=members
-    ).select_related("classroom_score")
+    ).select_related("classroom_score").defer(*_SCORE_PROMPT)
     submissions_by_key: dict[tuple[int, int], list[ClassroomSubmission]] = {}
     for submission in submissions:
         submissions_by_key.setdefault((submission.problem_id, submission.member_id), []).append(submission)
@@ -1915,7 +1931,7 @@ def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
     submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
     for submission in ClassroomSubmission.objects.filter(
         problem__classroom_id=class_obj.id, member_id__in=active_member_ids
-    ).select_related("classroom_score"):
+    ).select_related("classroom_score").defer(*_SCORE_PROMPT):
         submissions_by_problem.setdefault(submission.problem_id, []).append(submission)
     # `_live_problem_template` 과 같은 답 — 살아 있는 템플릿은 `unique_live_problem_template_per_source`
     # 제약으로 문제당 하나뿐이라, 어느 순서로 고르든 같은 것이 나온다.
@@ -2090,7 +2106,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
     all_problems = problems + hidden_problems
     submissions = ClassroomSubmission.objects.filter(
         problem__in=all_problems, member=member
-    ).select_related("classroom_score")
+    ).select_related("classroom_score").defer(*_SCORE_PROMPT)
     submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
     for s in submissions:
         submissions_by_problem.setdefault(s.problem_id, []).append(s)
@@ -2333,7 +2349,7 @@ def _serialize_own_submissions(problem, member, user, checklist_items) -> list:
         return []
     submissions = (
         ClassroomSubmission.objects.filter(problem=problem, member=member)
-        .select_related("classroom_score")
+        .select_related("classroom_score").defer(*_SCORE_PROMPT)
         .prefetch_related("assets")
         .order_by("-attempt_number")
     )
