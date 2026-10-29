@@ -569,14 +569,14 @@ pipeline {
               def sha = (env.DEPLOY_SHA ?: '').take(12)
               def took = currentBuild.durationString.replace(' and counting', '')
               def what = params.IMAGES_ONLY ? '이미지' : '배포'
-              // staging 과 prod 를 한 줄에 — 예: `✅ staging 배포 SUCCESS · prod 배포 SUCCESS — #N (sha)`.
+              // staging 과 prod 를 한 줄에 — 예: `✅ [Codemit] staging 배포 SUCCESS · prod 배포 SUCCESS — #N (sha)`.
               // prod 를 돌리지 않은 빌드는 staging 만 적는다. staging 표식까지 간 뒤 prod 나 production
               // 앞당기기에서 붉어진 빌드는 어디서 붉어졌는지 그 자리에 적는다.
               def stagingResult = env.STAGING_DEPLOYED == 'true' ? 'SUCCESS' : result
               def prodPart = env.PROD_DEPLOY == 'done' ? ' · prod 배포 SUCCESS' :
                 (env.PROD_DEPLOY == 'running' ? " · prod 배포 ${result}" : '')
               if (env.PROD_DEPLOY == 'done' && result != 'SUCCESS') { prodPart += " · production 앞당기기 ${result}" }
-              def text = "${mark} staging ${what} ${stagingResult}${prodPart} — #${env.BUILD_NUMBER}" +
+              def text = "${mark} [Codemit] staging ${what} ${stagingResult}${prodPart} — #${env.BUILD_NUMBER}" +
                 (sha ? " (${sha})" : '') + " · ${took} · ${env.BUILD_URL}"
               // 본문은 JSON 이라 따옴표·역슬래시를 그대로 실으면 깨진다 — Groovy 가
               // 만들어 준 문자열을 셸이 다시 해석하지 않도록 파일로 넘긴다.

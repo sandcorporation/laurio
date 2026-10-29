@@ -283,7 +283,7 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 
 **빌드가 끝나면 디스코드로 결과가 간다**(2026-09-18). `Jenkinsfile` 의 `post { always }`
 가 성공·실패·중단을 가리지 않고 한 줄을 보낸다 — staging 결과, prod 를 돌렸으면 prod 결과(예:
-`✅ staging 배포 SUCCESS · prod 배포 SUCCESS — #N (sha)`), 빌드 번호·커밋 12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
+`✅ [Codemit] staging 배포 SUCCESS · prod 배포 SUCCESS — #N (sha)`), 빌드 번호·커밋 12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
 사실이 사람에게 닿는 자리가 없었고, 실패는 더 그랬다(2026-09-17 staging 배포가 정리
 단계에서 빨갛게 끝난 것을 한참 뒤에 알았다).
 
