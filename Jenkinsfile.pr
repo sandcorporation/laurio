@@ -29,7 +29,7 @@ pipeline {
 
   stages {
     stage('변경') {
-      agent { label 'laurio-staging' }
+      agent { label 'built-in' }
       steps {
         script {
           def plan = sh(
@@ -53,7 +53,7 @@ pipeline {
             beforeAgent true
             expression { env.RUN_TESTS == '1' }
           }
-          agent { label 'laurio-staging' }
+          agent { label 'built-in' }
           steps {
             sh 'bash scripts/ci/sub-checks.sh'
           }
@@ -69,7 +69,7 @@ pipeline {
             beforeAgent true
             expression { env.RUN_TESTS == '0' }
           }
-          agent { label 'laurio-staging' }
+          agent { label 'built-in' }
           steps {
             sh 'python3 scripts/check_adr_status.py'
           }
@@ -82,7 +82,7 @@ pipeline {
         beforeAgent true
         expression { currentBuild.currentResult == 'SUCCESS' }
       }
-      agent { label 'laurio-staging' }
+      agent { label 'built-in' }
       steps {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/train.py enqueue "$(git rev-parse HEAD)"'
