@@ -23,6 +23,15 @@ export function SiteFooter() {
         <a href={`${origin}/terms`} data-testid="footer-link-terms" className="hover:text-ink">
           이용약관
         </a>
+        <a
+          href="https://sandcorp.co.kr/?utm_source=codemit&utm_medium=footer"
+          target="_blank"
+          rel="noopener"
+          data-testid="footer-link-sandcorp"
+          className="hover:text-ink"
+        >
+          Made by Sandcorp
+        </a>
       </div>
     </footer>
   );
