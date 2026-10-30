@@ -45,6 +45,9 @@ SCHEDULED_JOBS = {
     "classroom:price-drift": {"task": "classroom.check_price_drift", "schedule": crontab(hour=4, minute=10)},
     # 매분 닫힌 분의 운영 지표(Redis 해시)를 DB 집계 행으로 옮긴다(#827).
     "ops-metrics:flush": {"task": "ops_metrics.flush_minutes", "schedule": crontab()},
+    # 매분 운영 경보 규칙을 검사해 울림·해소를 디스코드로 보낸다(#830). 밀려 1분을 넘긴 검사는 버린다 —
+    # 다음 검사가 같은 일을 더 새 값으로 한다.
+    "ops-metrics:alerts": {"task": "ops_metrics.check_alerts", "schedule": crontab(), "options": {"expires": 55}},
     # 매일 03:40 90일보다 오래된 운영 지표 집계 행을 지운다(#827).
     "ops-metrics:purge": {"task": "ops_metrics.purge_old_minutes", "schedule": crontab(hour=3, minute=40)},
 }

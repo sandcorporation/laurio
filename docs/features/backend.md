@@ -781,6 +781,11 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 큐 대기 p95·동시 채점 최댓값을 합계와 시간대 버킷(1분·15분·1시간, 빈 칸은 0)으로 낸다. 같은 응답의 `requests` 영역(#828)은
 백엔드 요청의 초당 요청·상태코드별 수·5xx 비율·지연 p50/p95 를 합계와 버킷으로, 경로별 상위 10(메서드 · URL 패턴,
 수와 p95)을 합계로 낸다 — 미들웨어가 프로세스 안에 모아 5초마다 Redis 로 보낸 것을 같은 flush 가 `RequestMinute` 로 옮긴다.
+**운영 경보도 beat 가 돌린다(#830).** 매분 `ops_metrics.check_alerts` 가 LLM 채점 여섯 규칙(타임아웃 비율·쿼터·
+속도 제한·인증 거부·강의실 큐 대기 p95·grader 생존 신호)을 DB 집계 행 + 아직 옮기지 않은 Redis 분으로 검사해
+`AlertState` 에 기록하고, 울리기 시작할 때와 해소될 때 한 번씩 디스코드 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`,
+비면 보내지 않는다)으로 보낸다. 같은 응답의 `alerts` 가 지금 울리는 목록(규칙·시작·값·기준)이다
+(`docs/ops/operations.md` 「운영 경보」).
 
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
@@ -1009,4 +1014,4 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `notifications` | Notification · NotificationDispatch · NotificationOptIn |
 | `policies` | PlatformPolicy · PolicyChange |
 | `core` | ClockOverride · ScheduledStateDemo |
-| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute · RequestMinute(#828)(1분 집계, 90일 보관) |
+| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute · RequestMinute(#828)(1분 집계, 90일 보관) · AlertState(#830, 규칙마다 한 행) |

@@ -1,7 +1,8 @@
 """운영자 콘솔의 운영 지표(#827) — `GET /api/operator/ops-metrics?range=1h|24h|7d`.
 
 **운영자 전원이 본다**(`OperatorAuth`, 사용 현황과 같은 등급) — 읽기 전용이고 라벨이 닫힌 집합이라 사람을
-가리키는 값이 없다. 응답은 영역별(`llm`·`requests`(#828), 뒤 티켓이 경보를 더한다)로 `totals` 와 `buckets` 를 낸다.
+가리키는 값이 없다. 응답은 영역별(`llm`·`requests`(#828))로 `totals` 와 `buckets` 를 내고, 같은 층의 `alerts`(#830)가
+지금 울리는 경보다(기간과 무관하다 — 마지막 검사의 상태).
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from ninja import Query, Router, Schema
 from core.clock import Clock
 from core.operator_auth import OperatorAuth
 
+from .alerts import firing
 from .summary import summarize
 
 ops_metrics_operator_router = Router(tags=["operator", "ops-metrics"], auth=OperatorAuth())
@@ -85,6 +87,16 @@ class RequestMetricsOut(Schema):
     top_routes: list[TopRouteOut]
 
 
+class OpsAlertOut(Schema):
+    #: 규칙 이름, 예 `LLMTimeoutRatioHigh`.
+    rule: str
+    #: 울리기 시작한 시각.
+    since: datetime
+    #: 마지막 검사의 값과 기준 — 단위까지 붙은 문자열.
+    value: str
+    threshold: str
+
+
 class OpsMetricsOut(Schema):
     range: RangeKey
     start: datetime
@@ -92,11 +104,16 @@ class OpsMetricsOut(Schema):
     bucket_seconds: int
     llm: LlmMetricsOut
     requests: RequestMetricsOut
+    #: 지금 울리는 경보 — 오래 울린 것부터.
+    alerts: list[OpsAlertOut]
 
 
 @ops_metrics_operator_router.get("/ops-metrics", response=OpsMetricsOut)
 def ops_metrics(request, range_key: RangeKey = Query("1h", alias="range")):
     """기간의 LLM 채점 지표(결과별 호출 수·지연 p50/p95·토큰·큐 대기 p95·동시 채점 최댓값)와 백엔드 요청 지표
-    (초당 요청·상태코드별 수·5xx 비율·지연 p50/p95·경로별 상위 10)."""
+    (초당 요청·상태코드별 수·5xx 비율·지연 p50/p95·경로별 상위 10), 그리고 지금 울리는 경보."""
 
-    return summarize(range_key, now=Clock.now())
+    alerts = [
+        {"rule": a.rule, "since": a.started_at, "value": a.value, "threshold": a.threshold} for a in firing()
+    ]
+    return {**summarize(range_key, now=Clock.now()), "alerts": alerts}

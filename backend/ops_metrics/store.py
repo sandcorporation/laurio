@@ -1,10 +1,11 @@
-"""분 해시를 담는 저장소 — Redis(배포·dev) 와 프로세스 안 흉내(시험) 둘이 같은 다섯 동작을 한다.
+"""분 해시를 담는 저장소 — Redis(배포·dev) 와 프로세스 안 흉내(시험) 둘이 같은 여섯 동작을 한다.
 
 - `add(key, increments, maxes)` — 필드마다 더하고(`HINCRBY`), `maxes` 는 더 클 때만 바꾼다. 키에 TTL 을
   다시 건다. **한 번의 왕복**이다(Lua 하나 — 더하기·최댓값·TTL 이 원자적으로 함께 간다).
 - `keys(prefix)` — 그 접두어의 키들(`SCAN`, 이 용도만 쓰는 DB 인덱스라 다른 키를 보지 않는다).
 - `take(key)` — 읽고 지우기를 **원자적으로**(`MULTI` 안의 `HGETALL`+`DEL`). flush 가 같은 분을 두 번
   옮겨도 두 번째는 빈 손이다 — 값이 두 배가 될 수 없다.
+- `read(key)` — 지우지 않고 읽기(`HGETALL`). 경보 검사(#830)가 아직 옮겨지지 않은 분을 본다.
 - `set_value`/`get_value` — 생존 신호 같은 낱값(TTL 있음).
 
 비동기 쪽(`*_async`)은 grader(asyncio) 가 쓴다 — `redis.asyncio` 클라이언트는 이벤트 루프에 묶이므로
@@ -47,6 +48,7 @@ class MinuteStore(Protocol):
     async def add_async(self, key: str, increments: dict[str, int], maxes: dict[str, int], ttl: int) -> None: ...
     def keys(self, prefix: str) -> list[str]: ...
     def take(self, key: str) -> dict[str, int]: ...
+    def read(self, key: str) -> dict[str, int]: ...
     def set_value(self, key: str, value: str, ttl: int) -> None: ...
     async def set_value_async(self, key: str, value: str, ttl: int) -> None: ...
     def get_value(self, key: str) -> str | None: ...
@@ -107,6 +109,10 @@ class RedisMinuteStore:
         values, _ = pipe.execute()
         return {(f.decode() if isinstance(f, bytes) else f): int(v) for f, v in values.items()}
 
+    def read(self, key):
+        values = self._client().hgetall(key)
+        return {(f.decode() if isinstance(f, bytes) else f): int(v) for f, v in values.items()}
+
     def set_value(self, key, value, ttl):
         self._client().set(key, value, ex=ttl)
 
@@ -163,6 +169,11 @@ class MemoryMinuteStore:
         self._check()
         with self._lock:
             return self.hashes.pop(key, {})
+
+    def read(self, key):
+        self._check()
+        with self._lock:
+            return dict(self.hashes.get(key, {}))
 
     def set_value(self, key, value, ttl):
         self._check()

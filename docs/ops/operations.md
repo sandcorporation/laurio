@@ -209,6 +209,8 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 **대시보드·경보·긁기 대상은 저장소 밖(oracle `/server/prometheus`)에 2026-10-14 에 적용했다** — 아래가 들어간
 그대로다. 바꾸기 전 파일은 같은 자리에 `*.bak-20261014-*` 로 남겼다. 대시보드는 「prod 백엔드 요청」과 「호스트 자원」
 사이의 「LLM 채점」 줄이고, 경보는 `alerts.yml` 의 `codemit-llm` 그룹(6개)이다. 고칠 때는 이 절과 그 파일을 같이 고친다.
+**같은 여섯 규칙을 #830 부터 codemit 이 직접 검사해 디스코드로 보낸다**(아래 「운영 경보」) — `alerts.yml` 의
+그룹을 걷는 것은 저장소 밖 일이라 대장이 맡는다. 걷기 전까지는 두 곳에서 울릴 수 있다.
 
 1. **긁기 대상**(`prometheus.yml`) — grader 는 prod 네트워크의 `grader:9102` 다(prometheus 컨테이너가 이미
    `codemit-prod_default` 에 붙어 있다). 백엔드 대상은 이미 있어 공모전 지표는 따로 할 일이 없다. grader 는
@@ -307,6 +309,29 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
   잃는다. 보내기가 실패하면 그 묶음을 버린다. 옮긴 행은 `RequestMinute`, API 의 `requests` 영역이 초당 요청·
   상태코드별 수·5xx 비율·지연 p50/p95 를 합계와 버킷으로, 경로별 상위 10(수와 p95)을 합계로 낸다 — DB 가
   `date_bin` 으로 접어 기간이 길어도 쿼리 둘이다.
+- **운영 경보(#830, `ops_metrics.alerts`).** celery beat 가 매분 `ops_metrics.check_alerts` 를 돌린다(밀려 55초를
+  넘긴 것은 버린다). 규칙과 「지속」(연속으로 참인 검사 수):
+
+  | 규칙 | 조건 | 지속 |
+  | --- | --- | --- |
+  | `LLMTimeoutRatioHigh` | 15분 timeout ÷ 전체 > 20%(호출이 있을 때) | 5회 |
+  | `LLMQuotaExhausted` | 10분 `quota_exhausted` > 0 | 1회 |
+  | `LLMRateLimited` | 10분 `rate_limited` ≥ 5 | 1회 |
+  | `LLMAuthRejected` | 30분 `auth` > 0 | 1회 |
+  | `ClassroomScoringQueueSlow` | 10분 강의실 큐 대기 p95 > 300초(대기가 있을 때) | 10회 |
+  | `GraderDown` | grader 생존 신호가 180초 넘게 없음(키가 없어도) | 1회 |
+
+  **입력은 DB 집계 행 + 아직 옮기지 않은 Redis 분 해시다.** 「N분」 창은 지금 분(쓰는 중)과 그 앞의 N−1 개
+  닫힌 분이다 — 지금 분을 넣어야 `> 0` 규칙이 첫 거부가 난 그 분에 울리고(flush 를 기다리면 1분 늦다),
+  N−1 개만 더해야 부분인 지금 분과 합쳐 N분을 넘지 않는다. 분마다 DB 행과 Redis 해시를 **둘 다** 더해 flush
+  가 아직 못 옮긴 분과 이미 옮긴 분에 늦게 닿은 기록을 함께 센다(`take` 가 원자적이라 두 번 세지 않는다).
+  Redis 를 읽지 못하면 DB 만 본다(경고 로그). 상태는 규칙마다 `AlertState` 한 행(상태 firing/resolved ·
+  연속 참 횟수 · 시작 · 마지막 확인 · 해소 · 값 · 기준 · 아직 못 보낸 알림)이다. 울리기 시작할 때
+  `🔥 [Codemit] <규칙> 발생 — 값 · 기준 · <CODEMIT_OPERATOR_ORIGIN>/ops`, 해소될 때 `✅ [Codemit] <규칙> 해소 —
+  <지속 시간> 지속` 을 **한 번씩** 보낸다 — 이미 울리는 규칙은 다시 보내지 않는다. 전송이 실패하면 경고 로그를
+  남기고 다음 검사가 다시 보낸다. 「발생」이 닿기 전에 해소되면 둘 다 버린다. 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`)이
+  비면 보내지 않고 상태만 기록한다. 겹쳐 돈 검사는 advisory 잠금을 못 잡아 건너뛴다. 지금 울리는 목록은 같은
+  `GET /api/operator/ops-metrics` 의 `alerts`(기간과 무관)로 콘솔 `/ops` 맨 위 패널에 보인다.
 
 **로그 소음 둘을 걷었다**(2026-09-21, Loki 로 처음 보였다). pgbouncer 가 트랜잭션 모드에서
 연결·끊김마다 한 줄씩 **시간당 492줄**(prod 전체의 절반 가까이)을 찍어 `log_connections`·

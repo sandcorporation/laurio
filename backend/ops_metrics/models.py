@@ -66,3 +66,28 @@ class RequestMinute(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["minute", "method", "route", "status"], name="ops_request_minute_labels_unique"),
         ]
+
+
+class AlertState(models.Model):
+    """운영 경보 규칙 하나의 지금 상태(#830) — 규칙마다 한 행이고 검사가 그 자리에서 고친다(이력은 두지 않는다).
+
+    `streak` 은 조건이 연속으로 참이었던 검사 수다 — 규칙의 「지속」(예 5분)은 이것이 그 횟수에 닿을 때다.
+    `pending_notice` 는 아직 디스코드에 닿지 못한 알림(`firing`/`resolved`, 없으면 빈 칸) — 다음 검사가 다시 보낸다.
+    """
+
+    class Status(models.TextChoices):
+        FIRING = "firing"
+        RESOLVED = "resolved"
+
+    rule = models.CharField(max_length=64, unique=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.RESOLVED)
+    streak = models.PositiveIntegerField(default=0)
+    #: 마지막으로 울리기 시작한 시각 — 한 번도 울리지 않았으면 null.
+    started_at = models.DateTimeField(null=True)
+    last_checked_at = models.DateTimeField(null=True)
+    #: 마지막으로 해소된 시각 — 울리는 중이면 null.
+    resolved_at = models.DateTimeField(null=True)
+    #: 마지막 검사의 값과 기준 — 화면·메시지에 그대로 쓰는 문자열(단위 포함).
+    value = models.CharField(max_length=100, blank=True, default="")
+    threshold = models.CharField(max_length=100, blank=True, default="")
+    pending_notice = models.CharField(max_length=16, blank=True, default="")
