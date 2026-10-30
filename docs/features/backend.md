@@ -774,6 +774,12 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 를 부르고, 워커가 LiteLLM 단가 파일 한 주소를 받아 `scoring_cost.PRICES` 와 견준다(표에 없는 쓰인 모델·1% 초과·
 받기 실패·형식 바뀜일 때만 GlitchTip 경고, 표는 고치지 않는다 — `docs/ops/operations.md`). 내부 HTTP 를 거치지 않는다.
 
+**운영 지표 1분 집계도 beat 가 돌린다(#827).** 매분 `ops_metrics.flush_minutes` 가 닫힌 분의 Redis 해시를
+`LlmMinute`·`LlmQueueMinute` 행으로 옮기고, 매일 03:40(서울) `ops_metrics.purge_old_minutes` 가 90일보다
+오래된 행을 지운다. 둘 다 내부 HTTP 를 거치지 않는다(`docs/ops/operations.md` 「감시」). 읽는 쪽은
+`GET /api/operator/ops-metrics?range=1h|24h|7d`(운영자 전원)다 — LLM 채점의 결과별 호출 수·지연 p50/p95·토큰·
+큐 대기 p95·동시 채점 최댓값을 합계와 시간대 버킷(1분·15분·1시간, 빈 칸은 0)으로 낸다.
+
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.
@@ -1001,3 +1007,4 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `notifications` | Notification · NotificationDispatch · NotificationOptIn |
 | `policies` | PlatformPolicy · PolicyChange |
 | `core` | ClockOverride · ScheduledStateDemo |
+| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute(1분 집계, 90일 보관) |

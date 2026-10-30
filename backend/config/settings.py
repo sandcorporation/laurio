@@ -176,6 +176,7 @@ INSTALLED_APPS = [
     # 순간부터 물게 하려고 `tests/test_app_boundaries.py` 의 분류표에 먼저
     # 이름을 적어 뒀다.
     "classroom",
+    "ops_metrics",
 ]
 
 MIDDLEWARE = [
@@ -1107,6 +1108,23 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(EVENT_BUS_ADAPTER_MODE):
 # Operator 세션(DB 1)·Celery 브로커(DB 0)와 같은 Redis 인스턴스, 다른 DB
 # 인덱스(2) — 세 용도가 키를 섞지 않게 한다(SESSION_REDIS_URL 주석과 같은 이유).
 EVENT_BUS_REDIS_URL = _env("EVENT_BUS_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PORT}/2")
+
+# --- 운영 지표 1분 집계 (#827, `ops_metrics`) -----------------------------------------
+#
+# 호출 지점이 그 분(UTC 분 시작 시각)의 Redis 해시에 더하기만 하고, celery beat 가 1분마다 닫힌 분을
+# DB 행으로 옮긴다. 세션(1)·브로커(0)·이벤트 버스(2)와 같은 인스턴스, **DB 인덱스 3** — 키를 섞지 않고,
+# 이 인덱스를 통째로 훑어도(SCAN) 다른 용도의 키를 보지 않는다. 시험은 프로세스 안 흉내 저장소를 쓴다
+# (위 세션 캐시와 같은 이유 — 같은 Redis 를 여러 체크아웃이 나눠 쓴다).
+OPS_METRICS_REDIS_URL = _env("OPS_METRICS_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PORT}/3")
+OPS_METRICS_STORE = "memory" if _RUNNING_TESTS else "redis"
+#: 분 해시의 TTL — flush 가 멈춰도(beat 가 죽어도) 사흘 안에 되살리면 잃지 않는다. 그보다 길면 버린다.
+OPS_METRICS_KEY_TTL_SECONDS = 3 * 24 * 3600
+#: grader 생존 신호(`ops:heartbeat:grader`)의 TTL — 30초마다 쓴다. 경보(#830)는 「3분 넘게 없음」을 보므로
+#: 그보다 길게 둬 「마지막으로 산 시각」을 읽을 수 있게 한다. 키가 없으면 10분 넘게 소식이 없는 것이다.
+OPS_METRICS_HEARTBEAT_SECONDS = 30
+OPS_METRICS_HEARTBEAT_TTL_SECONDS = 600
+#: 집계 행을 두는 날 수 — 매일 새벽 정리 작업이 이보다 오래된 행을 지운다.
+OPS_METRICS_RETENTION_DAYS = 90
 
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #

@@ -54,7 +54,8 @@ from tests.ast_scan_support import BACKEND_ROOT
 #: 코드(자식 모델·제출 API·「다음 행동」 판정·target_ref 조립·파기 스캔)는
 #: `contests.submission_*`로 옮겨갔다 — 이 앱에는 부모·자료·근거·자가 응답과 그
 #: 규칙만 남는다.
-SHARED = frozenset({"accounts", "core", "policies", "storage", "notifications", "submissions"})
+#: `ops_metrics`(#827)는 운영 지표의 1분 집계 — `core.llm_metrics` 가 부르고 기능 앱을 모른다.
+SHARED = frozenset({"accounts", "core", "policies", "storage", "notifications", "submissions", "ops_metrics"})
 
 #: 공모전 제품. `verification`(본인확인)과 `payments`·`ledger`·`payouts` 계열이 여기 있는
 #: 이유는 강의실이 본인확인도 결제도 쓰지 않기로 했기 때문이다(ADR-0037).

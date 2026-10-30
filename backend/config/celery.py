@@ -43,6 +43,10 @@ SCHEDULED_JOBS = {
     "backup:database": {"task": "core.backup_database", "schedule": crontab(hour=2, minute=0)},
     # 매일 04:10 모델 단가 표를 LiteLLM 파일과 대조해 다르면 GlitchTip 경고로 알린다(#798, 표는 안 고친다).
     "classroom:price-drift": {"task": "classroom.check_price_drift", "schedule": crontab(hour=4, minute=10)},
+    # 매분 닫힌 분의 운영 지표(Redis 해시)를 DB 집계 행으로 옮긴다(#827).
+    "ops-metrics:flush": {"task": "ops_metrics.flush_minutes", "schedule": crontab()},
+    # 매일 03:40 90일보다 오래된 운영 지표 집계 행을 지운다(#827).
+    "ops-metrics:purge": {"task": "ops_metrics.purge_old_minutes", "schedule": crontab(hour=3, minute=40)},
 }
 
 

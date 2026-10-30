@@ -271,6 +271,10 @@ x-backend-env: &backend-env
   EVENT_BUS_ADAPTER_MODE: ${EVENT_BUS_ADAPTER_MODE:?이벤트 버스 어댑터의 dotted path를 .env.prod 에 채워라 — core.events_redis.RedisEventBus(ADR-0046)}
   EVENT_BUS_REDIS_URL: redis://redis:6379/2
 
+  # --- 운영 지표 1분 집계 (#827) ---
+  # 같은 Redis, DB 인덱스 3 — 세션(1)·브로커(0)·이벤트 버스(2)와 키를 섞지 않는다(config/settings.py).
+  OPS_METRICS_REDIS_URL: redis://redis:6379/3
+
   # --- 공모전 검색 (#450/#451, 부모 #444 스펙, ADR-0007) ---
   # staging의 x-backend-env 앵커와 같은 이유·같은 구조다(compose.staging.yaml
   # 참고) — 값이 없어도 부팅이 막히지 않도록 컴포즈 레벨 기본값을 실물

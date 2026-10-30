@@ -285,6 +285,10 @@ x-backend-env: &backend-env
   # compose.dev.yaml의 backend/events 서비스와 같은 값이다.
   EVENT_BUS_REDIS_URL: redis://redis:6379/2
 
+  # --- 운영 지표 1분 집계 (#827) ---
+  # 같은 Redis, DB 인덱스 3 — 세션(1)·브로커(0)·이벤트 버스(2)와 키를 섞지 않는다(config/settings.py).
+  OPS_METRICS_REDIS_URL: redis://redis:6379/3
+
   # --- 공모전 검색 (#450/#451, 부모 #444 스펙, ADR-0007) ---
   # 다른 *_ADAPTER_MODE와 다르다 — 값이 없어도 부팅이 막히지 않도록 **컴포즈
   # 레벨 기본값을 실물 dotted path로 준다**(#451 AC "첫 배포에서 막히지 않게",

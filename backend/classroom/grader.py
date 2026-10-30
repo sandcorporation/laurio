@@ -39,6 +39,7 @@ import asyncio
 import logging
 import os
 import socket
+import time
 import uuid
 from functools import partial
 from collections import Counter
@@ -51,6 +52,7 @@ from core.clock import Clock
 from core import llm_metrics
 from core.events import publish_all
 from core.llm_scoring import LLMAdapterError
+from ops_metrics import recorder as ops_recorder
 
 from . import scoring
 from .scoring import Concluded, PreparedScoring, VendorOutcome
@@ -184,7 +186,7 @@ class Grader:
                 scoring.prepare_claimed_head, submission_id, owner=owner, as_of=as_of
             )
             if not isinstance(prepared, Concluded):
-                self._observe_queue_wait(prepared.submission, as_of)
+                await self._observe_queue_wait(prepared.submission, as_of)
                 prepared = await self._source(scoring.prepare_tail, prepared)
             if isinstance(prepared, Concluded):
                 result = await self._write(
@@ -221,12 +223,22 @@ class Grader:
         )
 
     @staticmethod
-    def _observe_queue_wait(submission, as_of) -> None:
-        """「큐에 넣은 시각」(즉시 채점·스캔이 찍는다) → 임대를 집은 시각(#585). 지표가 이 간격의 분포를 센다."""
+    async def _observe_queue_wait(submission, as_of) -> None:
+        """「큐에 넣은 시각」(즉시 채점·스캔이 찍는다) → 임대를 집은 시각(#585). 지표가 이 간격의 분포를 센다 —
+        prometheus 와 1분 집계(#827) 둘에."""
 
         queued_at = submission.scoring_queued_at
         if queued_at is not None:
-            llm_metrics.QUEUE_WAIT.labels("classroom").observe(max((as_of - queued_at).total_seconds(), 0.0))
+            waited = max((as_of - queued_at).total_seconds(), 0.0)
+            llm_metrics.QUEUE_WAIT.labels("classroom").observe(waited)
+            await ops_recorder.record_queue_wait_async(product="classroom", seconds=waited)
+
+    async def _heartbeat(self) -> None:
+        """생존 신호(#827) — 경보(#830)가 「grader 가 3분 넘게 소식이 없다」를 이것으로 본다. 같은 때에 지금의
+        동시 채점 수를 그 분의 최댓값 후보로 남긴다 — 호출이 없이 오래 걸리는 분도 비어 보이지 않게."""
+
+        await ops_recorder.beat_async("grader")
+        await ops_recorder.record_in_flight_async(product="classroom", count=llm_metrics.async_in_flight("classroom"))
 
     def _extend(self, submission_id: int) -> bool:
         return scoring.extend_lease(submission_id, owner=self.owner, as_of=Clock.now())
@@ -249,7 +261,12 @@ class Grader:
             "grader 시작: owner=%s 전역 %s·연결당 %s", self.owner, self.global_limit, self.per_connection_limit
         )
         failures = 0
+        last_beat = None
         while not stop.is_set():
+            now = time.monotonic()
+            if last_beat is None or now - last_beat >= settings.OPS_METRICS_HEARTBEAT_SECONDS:
+                last_beat = now
+                await self._heartbeat()
             try:
                 await self.pick()
                 failures = 0
