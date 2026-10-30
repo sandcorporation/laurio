@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# 프론트 배포 부팅 가드(FE-13, #38) — 방금 올린 staging 이미지가 설정 없이는 죽고, 완전한 설정으로는
-# 뜨는지 본다(#705, Jenkinsfile 「부팅 가드」, sub 에서 돈다).
+# 프론트 배포 부팅 가드(FE-13, #38) — 방금 올린 이미지가 설정 없이는 죽고, 완전한 설정으로는 뜨는지 본다.
+# prod(arm64) 이미지는 열차의 macos 단계가(#838), staging(amd64) 이미지는 sub 가(열차 sub 단계·Jenkinsfile
+# 「부팅 가드」, `CODEMIT_GUARD_ARCH=amd64`) 이 스크립트로 본다.
 #
-#   scripts/ci/deploy-guard.sh <frontend|operator|classroom>
+#   [CODEMIT_GUARD_ARCH=arm64|amd64] scripts/ci/deploy-guard.sh <frontend|operator|classroom>
 #
 # 예전에는 GitHub Actions(`images.yaml` 의 `*-deploy-guard` 셋)였다 — 로직은 그대로 옮겼다.
 #
 # **왜 실행 중인 앱을 치는 e2e 시임이 아닌가.** ADR-0017 은 프론트 시험 시임을 「실행 중인 Next 앱
 # 하나」로 못 박는데, 여기서 증명할 것은 정반대다 — **앱이 뜨지 않는 것**. 그래서 배포되는 바로 그
-# 이미지(ghcr 의 `<sha>-amd64`)를 받아 컨테이너로 띄우고 종료 코드와 로그를 본다. 처음에는
+# 이미지(ghcr 의 `<sha>-<arch>`)를 받아 컨테이너로 띄우고 종료 코드와 로그를 본다. 처음에는
 # instrumentation.ts 의 register() 가 throw 만 하면 될 줄 알았지만, standalone(`node server.js`)은
 # 그 에러를 unhandledRejection 으로 로그만 찍고 삼켜 컨테이너가 Up 인 채 모든 요청에 500 을 냈다 —
 # 그래서 instrumentation.ts 가 `process.exit(1)` 로 끊고, 이 가드는 「빌드가 됐다」가 아니라
@@ -18,7 +19,11 @@
 # (`--network container:<이름>`) 친다. sub 의 Jenkins 는 컨테이너라 바인드 마운트도 쓰지 않는다.
 #
 # 환경변수: GHCR_TOKEN/GHCR_USER(읽기에 쓴다, 없으면 노드의 로그인), CODEMIT_IMAGE_REGISTRY,
-# CODEMIT_GUARD_IMAGE(받을 이미지를 통째로 바꾼다 — 로컬 시험용). bash 3.2 문법만 쓴다.
+# CODEMIT_GUARD_ARCH(받을 태그의 아키텍처, 기본 arm64 — prod 이미지), CODEMIT_GUARD_IMAGE(받을 이미지를
+# 통째로 바꾼다 — 로컬 시험용). bash 3.2 문법만 쓰고 GNU `timeout` 에 기대지 않는다(macos 노드에 없다).
+#
+# **이미지 아키텍처가 이 노드의 것과 같아야 한다.** 다르면(amd64 노드에 arm64 이미지) 컨테이너가
+# exec format error 로 곧장 죽어 「설정 없이는 죽는다」가 거짓으로 통과한다 — 그래서 받은 뒤 먼저 견준다.
 #
 # 앱 이미지는 환경을 모른다(#711, ADR-0062) — 공개 값(`CODEMIT_PUBLIC_*`)은 실행 env 로 받는다. 그래서
 # 이 가드도 값을 `-e` 로 주고, 그 값이 서버 렌더(/privacy)와 브라우저(`window.__CODEMIT_PUBLIC__`)에
@@ -37,9 +42,15 @@ cd "$(dirname "$0")/../.."
 
 registry="${CODEMIT_IMAGE_REGISTRY:-ghcr.io/sandcorporation}"
 sha="$(git -c safe.directory="$PWD" rev-parse HEAD)"
-image="${CODEMIT_GUARD_IMAGE:-$registry/codemit-$app:$sha-amd64}"
+arch="${CODEMIT_GUARD_ARCH:-arm64}"
+case "$arch" in
+  arm64|amd64) ;;
+  *) echo "CODEMIT_GUARD_ARCH 는 arm64 또는 amd64 다: $arch" >&2; exit 2 ;;
+esac
+image="${CODEMIT_GUARD_IMAGE:-$registry/codemit-$app:$sha-$arch}"
 local_image="codemit-$app-runner-ci"
 box="$app-boot-ok"
+doomed="$app-must-die"
 probe="codemit-$app-context-probe"
 curl_image="curlimages/curl:8.11.1"
 
@@ -51,7 +62,7 @@ fail() {
 cleanup() {
   rc=$?
   if [ "$rc" -ne 0 ]; then docker ps -a || true; fi
-  docker rm -f "$box" >/dev/null 2>&1 || true
+  docker rm -f "$box" "$doomed" >/dev/null 2>&1 || true
   docker rmi -f "$local_image" >/dev/null 2>&1 || true
   docker rmi -f "$probe" >/dev/null 2>&1 || true
   rm -f "$app/.env"
@@ -71,6 +82,12 @@ ghcr_login
 step "이 커밋이 배포하는 $app 이미지를 받는다: $image"
 docker pull -q "$image"
 docker tag "$image" "$local_image"
+image_arch="$(docker image inspect -f '{{.Architecture}}' "$local_image")"
+node_arch="$(docker version -f '{{.Server.Arch}}')"
+echo "이미지 아키텍처: $image_arch, 노드: $node_arch"
+if [ "$image_arch" != "$arch" ] || [ "$node_arch" != "$arch" ]; then
+  fail "가드는 $arch 이미지를 $arch 노드에서 본다(이미지 $image_arch, 노드 $node_arch) — 다르면 「죽는다」가 거짓으로 통과한다"
+fi
 
 # ── .dockerignore 가 시크릿과 호스트 node_modules 를 빌드 문맥에서 실제로 막는가 ────────────
 step ".dockerignore 가 시크릿·호스트 node_modules 를 문맥에서 뺀다"
@@ -110,11 +127,23 @@ if [ -f "$app/.env.guard-backup" ]; then mv "$app/.env.guard-backup" "$app/.env"
 
 # ── 설정이 모자라면 죽는가 ─────────────────────────────────────────────────────
 # 죽어야 하는 실행 — 0(떴다)이나 124(60초 동안 살아 있었다)면 가드가 깨졌다. 출력은 $out 에.
+# `timeout 60 docker run` 대신 띄워 두고 60초 동안 상태를 본다 — macos 에는 GNU timeout 이 없다(#838).
 must_die() {
   local why="$1"
   shift
-  local status=0
-  out="$(timeout 60 docker run --rm "$@" "$local_image" 2>&1)" || status=$?
+  local status=124 i=0
+  docker rm -f "$doomed" >/dev/null 2>&1 || true
+  docker run -d --name "$doomed" "$@" "$local_image" >/dev/null
+  while [ "$i" -lt 60 ]; do
+    if [ "$(docker inspect -f '{{.State.Running}}' "$doomed")" = false ]; then
+      status="$(docker inspect -f '{{.State.ExitCode}}' "$doomed")"
+      break
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  out="$(docker logs "$doomed" 2>&1)"
+  docker rm -f "$doomed" >/dev/null 2>&1 || true
   echo "$out"
   if [ "$status" -eq 0 ] || [ "$status" -eq 124 ]; then
     fail "$why 없이도 컨테이너가 죽지 않았다(status=$status) — 부팅 가드가 깨졌다"

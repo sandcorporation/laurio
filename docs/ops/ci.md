@@ -61,8 +61,8 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
 | 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
-| 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` → 초록이면 `scripts/ci/images.sh amd64`(staging 여섯, #712) → 이번에 구운 앱만 부팅 가드(`scripts/ci/deploy-guard.sh`) |
-| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-ci-pr-*`·`jenkins-codemit-ci-train-*` 스택(#708 전 이름 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 도 한동안 — 「잡 이름」)·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
+| 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh` → 초록이면 `scripts/ci/images.sh amd64`(staging 여섯, #712) → 이번에 구운 앱만 부팅 가드(`CODEMIT_GUARD_ARCH=amd64 scripts/ci/deploy-guard.sh`) |
+| | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-ci-pr-*`·`jenkins-codemit-ci-train-*` 스택(#708 전 이름 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 도 한동안 — 「잡 이름」)·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → 이번에 구운 앱만 부팅 가드(`CODEMIT_GUARD_ARCH=arm64 scripts/ci/deploy-guard.sh`, #838 — prod 에 가는 이미지를 네이티브로, 붉으면 판정 없이 가른다) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
 | 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) — 그 **앞에** 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712·#729) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
 | 붉으면 | sub | 붉은 쪽마다 「인프라 고장」 판정이 있으면(macos 의 e2e 정지·이미지 굽기, sub 의 이미지 굽기 — sub 는 검사가 초록일 때만) **같은 묶음을 한 번 더**(아래 「backend 요청 0건 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
@@ -229,7 +229,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
   (`ctx-<해시>`)는 이미지 두 가지와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,
   sub)가 붙인다(#709) — 그래서 「건너뛴다」는 언제나 앞 빌드가 끝까지 초록으로 본 이미지이고, 가드가 빨갛거나
-  한 가지가 실패한 빌드의 이미지는 다음 빌드가 다시 굽고 가드도 다시 돈다. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, sub)은
+  한 가지가 실패한 빌드의 이미지는 다음 빌드가 다시 굽고 가드도 다시 돈다. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, staging 의 amd64 는 sub·prod 의 arm64 는 열차의 macos(#838))은
   **방금 올린 그 이미지를 ghcr 에서 받아** 배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다 — 이번에
   구운 앱만(건너뛴 앱의 이미지는 이미 한 번 지났다). 앱 이미지는 환경을 모르므로(#711) 가드가 공개 값을
   `-e CODEMIT_PUBLIC_*` 로 주고, 방침의 문의 주소가 `/privacy` 에, 토스 클라이언트 키가 첫 화면의

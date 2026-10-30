@@ -240,7 +240,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   `docker/staging.env.example`·`prod.env.example` 과 compose 두 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
-- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, sub)는 이번에 구운 앱만 본다 — 건너뛴 앱의 이미지는
+- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — staging(amd64)은 sub 가, prod(arm64)는 열차의 macos 단계가 본다(#838, 이미지와 노드의 아키텍처가 같아야 돈다) — 건너뛴 앱의 이미지는
   ctx 태그가 가드 뒤에만 붙으므로 이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
