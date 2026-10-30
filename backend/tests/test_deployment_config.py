@@ -38,7 +38,7 @@ _STRONG_SECRET_KEY = "prod-Kx8f3Kq0mN2pR7tYcVbGhJkLdSaWeUiOaXzCvBnMqWeRtYuIoPaSd
 # --- VERIFICATION/PAYMENT/PAYOUT/SELLER/LLM*_ADAPTER_MODE 용 stub (#83) ---------
 #
 # 실물 어댑터(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는 아직 없다.
-# 이 파일이 검증하는 것은 "완전한 production/staging 환경이 부팅되는가"이지
+# 이 파일이 검증하는 것은 "완전한 production 환경이 부팅되는가"이지
 # "실물 벤더가 실제로 연결되는가"가 아니므로, `tests/adapter_stubs.py`가 이름이
 # Fake로 시작하지 않고 각 Protocol을 구조적으로 만족하는 최소 stub 클래스를
 # dotted path로 제공한다(그 모듈 자체에 상세 설명이 있다) — 부팅 가드(#83,
@@ -56,7 +56,7 @@ _FERNET_KEY = "A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo="
 
 
 def _base_env(*, target: str, secret_key: str) -> dict[str, str]:
-    """`target`("staging"|"production")에서 전부 채워야 정상 부팅되는 최소 완전 환경.
+    """`target`(보통 "production")에서 전부 채워야 정상 부팅되는 최소 완전 환경.
 
     모든 시크릿·어댑터 모드를 명시적으로 채운다 — 테스트가 실행되는 셸이 우연히
     가진 환경변수에 기대지 않기 위해서다(`_run_check`가 이 dict로 os.environ의
@@ -133,14 +133,6 @@ def _production_env(**overrides: str) -> dict[str, str]:
     return env
 
 
-def _staging_env(**overrides: str) -> dict[str, str]:
-    # staging은 SECRET_KEY 강도 가드 대상이 아니다 — 짧은 값도 통과해야 한다는 것 자체가
-    # 이 파일의 회귀 테스트 중 하나다.
-    env = _base_env(target="staging", secret_key="staging-secret-key")
-    env.update(overrides)
-    return env
-
-
 def _run_check(env: dict[str, str], *, deploy: bool = False) -> subprocess.CompletedProcess:
     """새 프로세스에서 `manage.py check` 를 돌린다(`tests/boot_process.py` — 매번
     파이썬을 새로 띄우지 않는다).
@@ -173,10 +165,9 @@ def test_production_config_passes_check_deploy_with_zero_warnings():
     assert "System check identified no issues" in result.stdout
 
 
-@pytest.mark.parametrize("env_builder", [_production_env, _staging_env])
-def test_deployed_environments_hash_passwords_with_the_slow_default(env_builder):
+def test_deployed_environment_hashes_passwords_with_the_slow_default():
     """dev·CI 는 빠른 해셔로 비밀번호를 만든다(`config/settings.py`, 시험 시간 때문이다)
-    — 그 분기가 배포 환경으로 새면 운영자 비밀번호가 MD5 로 저장된다. 배포 두 환경이
+    — 그 분기가 배포 환경으로 새면 운영자 비밀번호가 MD5 로 저장된다. production 이
     Django 기본값(PBKDF2)을 그대로 쓰는지 본다."""
 
     import os
@@ -186,7 +177,7 @@ def test_deployed_environments_hash_passwords_with_the_slow_default(env_builder)
         "from django.contrib.auth.hashers import get_hasher;"
         "print('HASHER=' + get_hasher().algorithm)"
     )
-    result = boot_process.run(["-c", program], {**os.environ, **env_builder()})
+    result = boot_process.run(["-c", program], {**os.environ, **_production_env()})
 
     assert result.returncode == 0, result.stderr
     assert "HASHER=pbkdf2_sha256" in result.stdout
@@ -220,13 +211,7 @@ def test_production_config_refuses_eager_celery_tasks():
     assert "ImproperlyConfigured" in result.stderr
 
 
-# --- staging: 강도 가드는 면제되지만 fake 어댑터 가드는 production과 동일 -------------
-
-
-def test_staging_config_boots_fine_with_a_short_secret_key():
-    result = _run_check(_staging_env())
-
-    assert result.returncode == 0, result.stderr
+# --- fake 어댑터는 배포 환경에서 부팅을 거부한다 ----------------------------------------
 
 
 _FAKE_ADAPTER_OVERRIDES = [
@@ -248,16 +233,14 @@ _FAKE_ADAPTER_OVERRIDES = [
 ]
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
 @pytest.mark.parametrize("field,fake_value", _FAKE_ADAPTER_OVERRIDES)
-def test_deployed_environment_refuses_to_boot_with_a_fake_adapter(target, field, fake_value):
-    env_builder = _production_env if target == "production" else _staging_env
-    env = env_builder(**{field: fake_value})
+def test_deployed_environment_refuses_to_boot_with_a_fake_adapter(field, fake_value):
+    env = _production_env(**{field: fake_value})
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        f"{target} config with {field}={fake_value!r} booted successfully — "
+        f"production config with {field}={fake_value!r} booted successfully — "
         "이 값이 fake로 배포되면 요청은 200을 돌려주면서 실제로는 아무 일도 일어나지 "
         "않는다(스토리지는 파일이 사라지고, 결제/지급/채점/알림은 아무것도 하지 않는다)."
     )
@@ -310,12 +293,15 @@ def test_development_target_still_boots_with_every_adapter_fake():
 
 
 @pytest.mark.parametrize(
-    "bad_target", ["prod", "Production", "PRODUCTION", "stagng", "prod ", " production"]
+    "bad_target",
+    # "staging" 은 2026-10-30(#836)에 없앤 배포 대상이다 — 옛 `.env` 가 되살아나도 다른
+    # 오타와 똑같이 거부돼야 한다(조용히 development 로 흘러 가드가 꺼지면 안 된다).
+    ["prod", "Production", "PRODUCTION", "staging", "Staging", "stagng", "prod ", " production"],
 )
 def test_unknown_deployment_target_refuses_to_boot(bad_target):
     """오타·대소문자 실수 하나가 조용히 "development"로 흘러 이 티켓의 모든 가드
     (fake 어댑터 거부·SECRET_KEY 강도·DEBUG 거부·TLS 하드닝)를 무력화하면 안 된다 —
-    허용된 세 값이 아니면 그 자리에서 바로 죽어야 한다."""
+    허용된 두 값(development·production)이 아니면 그 자리에서 바로 죽어야 한다."""
 
     env = _production_env(CODEMIT_DEPLOYMENT_TARGET=bad_target)
 
@@ -323,7 +309,7 @@ def test_unknown_deployment_target_refuses_to_boot(bad_target):
 
     assert result.returncode != 0, (
         f"CODEMIT_DEPLOYMENT_TARGET={bad_target!r} 가 조용히 통과했다 — 이 값이 "
-        "'production'/'staging'과 매치하지 않으면 모든 배포 가드가 꺼진 채로 부팅된다."
+        "'production'과 매치하지 않으면 모든 배포 가드가 꺼진 채로 부팅된다."
     )
     assert "ImproperlyConfigured" in result.stderr
     assert "CODEMIT_DEPLOYMENT_TARGET" in result.stderr
@@ -352,10 +338,9 @@ _FAKE_DOTTED_PATH_BYPASSES = [
 ]
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
 @pytest.mark.parametrize("field,fake_dotted_path", _FAKE_DOTTED_PATH_BYPASSES)
 def test_deployed_environment_refuses_a_fake_adapter_named_by_dotted_path(
-    target, field, fake_dotted_path
+    field, fake_dotted_path
 ):
     """STORAGE_BACKEND는 "fake"가 별칭 dict를 거쳐 실제 dotted path로 풀리고,
     LLM_ADAPTER_MODE/LLM_REQUIREMENT_CHAT_ADAPTER_MODE는 "fake"가 아니면 뭐든
@@ -363,13 +348,12 @@ def test_deployed_environment_refuses_a_fake_adapter_named_by_dotted_path(
     "fake"만 피하면 실제로는 여전히 Fake 어댑터가 조용히 바인딩된다. 이전 가드는
     `value == "fake"`만 봐서 이 경로를 놓쳤다."""
 
-    env_builder = _production_env if target == "production" else _staging_env
-    env = env_builder(**{field: fake_dotted_path})
+    env = _production_env(**{field: fake_dotted_path})
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        f"{target} config with {field}={fake_dotted_path!r} booted successfully — "
+        f"production config with {field}={fake_dotted_path!r} booted successfully — "
         "'fake' 별칭 문자열만 피했을 뿐 실제로는 여전히 Fake 어댑터가 바인딩된다."
     )
     assert "ImproperlyConfigured" in result.stderr
@@ -403,9 +387,8 @@ _UNRESOLVABLE_ADAPTER_MODE_FIELDS = [
 ]
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
 @pytest.mark.parametrize("field", _UNRESOLVABLE_ADAPTER_MODE_FIELDS)
-def test_deployed_environment_refuses_to_boot_with_an_unresolvable_adapter_value(target, field):
+def test_deployed_environment_refuses_to_boot_with_an_unresolvable_adapter_value(field):
     """`"real"`은 dotted path가 아니다 — `import_string`이 시도조차 되지 않고 바로
     `ImportError`가 난다. 이 값으로 배포되면 컨테이너는 뜨지만 실제 요청에서만
     죽는다는 것이 이 티켓(#83)이 고치는 버그다.
@@ -415,13 +398,12 @@ def test_deployed_environment_refuses_to_boot_with_an_unresolvable_adapter_value
     실물 어댑터에서 `AppRegistryNotReady`가 난다) — 그래서 실패 신호가
     `ImproperlyConfigured`가 아니라 `SystemCheckError`/`core.E001`이다."""
 
-    env_builder = _production_env if target == "production" else _staging_env
-    env = env_builder(**{field: "real"})
+    env = _production_env(**{field: "real"})
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        f"{target} config with {field}='real' 이 부팅에 성공했다 — 'real'은 아무 클래스도 "
+        f"production config with {field}='real' 이 부팅에 성공했다 — 'real'은 아무 클래스도 "
         "가리키지 않는 문자열이므로, 이 값 그대로 배포되면 요청이 들어올 때까지 아무도 "
         "이 실수를 모른다."
     )
@@ -515,8 +497,8 @@ def test_deployed_environment_refuses_a_search_adapter_that_exists_but_does_not_
 # 부팅을 거부한다.
 
 
-def test_staging_boots_with_aligo_sms_lms_adapters_and_credentials():
-    env = _staging_env(
+def test_production_boots_with_aligo_sms_lms_adapters_and_credentials():
+    env = _production_env(
         NOTIFICATION_SMS_ADAPTER="notifications.adapters_aligo.AligoSmsAdapter",
         NOTIFICATION_LMS_ADAPTER="notifications.adapters_aligo.AligoLmsAdapter",
         ALIGO_API_KEY="dummy-key",
@@ -529,12 +511,12 @@ def test_staging_boots_with_aligo_sms_lms_adapters_and_credentials():
     assert result.returncode == 0, result.stderr
 
 
-def test_staging_alimtalk_adapter_boots_with_aligo_credentials():
+def test_production_alimtalk_adapter_boots_with_aligo_credentials():
     """알림톡 어댑터(#51)는 아직 벤더를 호출하지 않지만, 승인 이후 그대로 실물
     호출로 바꿀 수 있도록 자격증명은 미리 검증한다 — 그래서 이 값도 같은
     자격증명을 요구한다."""
 
-    env = _staging_env(
+    env = _production_env(
         NOTIFICATION_ALIMTALK_ADAPTER="notifications.adapters_aligo.AligoAlimtalkAdapter",
         ALIGO_API_KEY="dummy-key",
         ALIGO_USER_ID="dummy-user",
@@ -564,10 +546,10 @@ def test_staging_alimtalk_adapter_boots_with_aligo_credentials():
         ("NOTIFICATION_LMS_ADAPTER", "AligoAlimtalkAdapter"),
     ],
 )
-def test_staging_refuses_boot_when_a_notification_setting_points_at_the_wrong_channel(
+def test_production_refuses_boot_when_a_notification_setting_points_at_the_wrong_channel(
     field, wrong_class_name
 ):
-    env = _staging_env(
+    env = _production_env(
         **{field: f"notifications.adapters_aligo.{wrong_class_name}"},
         ALIGO_API_KEY="dummy-key",
         ALIGO_USER_ID="dummy-user",
@@ -601,8 +583,8 @@ def test_staging_refuses_boot_when_a_notification_setting_points_at_the_wrong_ch
         "AligoLmsAdapter",
     ],
 )
-def test_staging_refuses_boot_without_any_aligo_credential_env_var(field, class_name):
-    env = _staging_env(**{field: f"notifications.adapters_aligo.{class_name}"})
+def test_production_refuses_boot_without_any_aligo_credential_env_var(field, class_name):
+    env = _production_env(**{field: f"notifications.adapters_aligo.{class_name}"})
 
     result = _run_check(env)
 
@@ -617,24 +599,11 @@ def test_staging_refuses_boot_without_any_aligo_credential_env_var(field, class_
 
 # --- 토스 결제 어댑터의 자격증명 환경변수 이름(#87 코드리뷰 지적 6) -----------------------
 #
-# TossPGAdapter는 settings.TOSS_API_SECRET_KEY를 읽는데, staging/prod
-# compose는 그 이름이 아니라 TOSS_SANDBOX_SECRET_KEY/TOSS_LIVE_SECRET_KEY를
-# 주입한다(옛 compose.staging.yaml, docker/compose.prod.yaml — 새드박스
-# 키와 실물 키를 다른 이름으로 두어 운영자가 실수로 실물 키를 staging에
-# 붙여넣어도 그 변수가 애초에 읽히지 않는다). settings.py가 이 셋 중 먼저
-# 채워진 값을 쓰도록 폴백하지 않으면, 문서대로 TOSS_SANDBOX_SECRET_KEY/
-# TOSS_LIVE_SECRET_KEY를 채워도 core.E002로 부팅이 거부된다.
-
-
-def test_staging_toss_adapter_boots_with_sandbox_secret_key_env_var():
-    env = _staging_env(
-        PAYMENT_ADAPTER_MODE="payments.adapters_toss.TossPGAdapter",
-        TOSS_SANDBOX_SECRET_KEY="test_sk_dummy_sandbox",
-    )
-
-    result = _run_check(env)
-
-    assert result.returncode == 0, result.stderr
+# TossPGAdapter는 settings.TOSS_API_SECRET_KEY를 읽는데, prod compose는 그 이름이
+# 아니라 TOSS_LIVE_SECRET_KEY를 주입한다(docker/compose.prod.yaml). settings.py가
+# 그 이름으로 폴백하지 않으면 TOSS_LIVE_SECRET_KEY를 채워도 core.E002로 부팅이
+# 거부된다. 옛 staging 의 샌드박스 이름(TOSS_SANDBOX_SECRET_KEY)은 staging 과 함께
+# 거뒀다(#844) — 그 이름만 채워져 있으면 키가 없는 것으로 본다.
 
 
 def test_production_toss_adapter_boots_with_live_secret_key_env_var():
@@ -648,13 +617,18 @@ def test_production_toss_adapter_boots_with_live_secret_key_env_var():
     assert result.returncode == 0, result.stderr
 
 
-def test_staging_toss_adapter_refuses_boot_without_any_toss_secret_key_env_var():
-    env = _staging_env(PAYMENT_ADAPTER_MODE="payments.adapters_toss.TossPGAdapter")
+def test_production_toss_adapter_refuses_boot_without_any_toss_secret_key_env_var():
+    env = _production_env(
+        PAYMENT_ADAPTER_MODE="payments.adapters_toss.TossPGAdapter",
+        TOSS_API_SECRET_KEY="",
+        TOSS_LIVE_SECRET_KEY="",
+        TOSS_SANDBOX_SECRET_KEY="test_sk_dummy_sandbox",
+    )
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        "TOSS_API_SECRET_KEY도 TOSS_SANDBOX_SECRET_KEY도 없으면 "
+        "TOSS_API_SECRET_KEY도 TOSS_LIVE_SECRET_KEY도 없으면(옛 샌드박스 이름만 있어도) "
         "TossPGAdapter의 생성자(ImproperlyConfigured)가 실패해 "
         "core.E002로 부팅이 거부되어야 한다."
     )
@@ -691,18 +665,17 @@ def test_internal_endpoints_are_exempt_from_ssl_redirect_but_other_paths_are_not
 # --- 운영자 오리진: 비어 있으면 배포 환경에서 부팅을 거부한다 (#43 후속) ------------
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
-def test_deployed_environment_refuses_to_boot_without_an_operator_origin(target):
-    """비면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는 production 에만
-    걸린다 — TLS 종단 뒤의 staging 에서는 scheme 이 http 로 잡혀 브라우저가 보낸
-    https 오리진과 어긋나고, **로그인을 포함한 모든 변경 요청이 403** 이 된다.
+def test_deployed_environment_refuses_to_boot_without_an_operator_origin():
+    """비면 Host 헤더 유도로 떨어지는데, 프록시 뒤에서 유도한 오리진은 브라우저가 보낸
+    https 오리진과 어긋날 수 있고(옛 staging 에서 scheme 이 http 로 잡혀 실제로 그랬다),
+    **로그인을 포함한 모든 변경 요청이 403** 이 된다.
     fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
 
     프론트엔드가 CODEMIT_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
     막았다(frontend/instrumentation.ts).
     """
 
-    env = (_production_env if target == "production" else _staging_env)()
+    env = _production_env()
     env["CODEMIT_OPERATOR_ORIGIN"] = ""
 
     result = _run_check(env)
@@ -726,12 +699,11 @@ def test_development_target_boots_without_an_operator_origin():
 # --- 공개 이미지 버킷 기준 주소: 비어 있으면 배포 환경에서 부팅을 거부한다 (#233, ADR-0032) --
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
-def test_deployed_environment_refuses_to_boot_without_a_storage_images_base_url(target):
+def test_deployed_environment_refuses_to_boot_without_a_storage_images_base_url():
     """비면 컨테이너가 뜬 채 Contest 이미지 링크가 전부 깨진다 — CODEMIT_OPERATOR_ORIGIN
     과 같은 판단으로, 첫 요청에서야 드러나는 대신 정직하게 못 뜬다."""
 
-    env = (_production_env if target == "production" else _staging_env)()
+    env = _production_env()
     env["STORAGE_IMAGES_BASE_URL"] = ""
 
     result = _run_check(env)
@@ -763,34 +735,20 @@ def test_development_target_boots_without_a_storage_images_base_url():
 # 실패 모드와 같다).
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
 @pytest.mark.parametrize(
     "field", ["KAKAO_REST_API_KEY", "KAKAO_SECRET_KEY", "KAKAO_REDIRECT_URI"]
 )
-def test_deployed_environment_refuses_to_boot_without_a_kakao_oauth_credential(target, field):
-    env_builder = _production_env if target == "production" else _staging_env
-    env = env_builder(**{field: ""})
+def test_deployed_environment_refuses_to_boot_without_a_kakao_oauth_credential(field):
+    env = _production_env(**{field: ""})
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        f"{target} config with {field}='' 가 부팅에 성공했다 — 카카오 로그인 버튼이 "
+        f"production config with {field}='' 가 부팅에 성공했다 — 카카오 로그인 버튼이 "
         "컨테이너가 뜬 채로 항상 실패한다."
     )
     assert "ImproperlyConfigured" in result.stderr
     assert field in result.stderr
-
-
-def test_staging_boots_with_kakao_oauth_credentials():
-    env = _staging_env(
-        KAKAO_REST_API_KEY="staging-kakao-rest-api-key",
-        KAKAO_SECRET_KEY="staging-kakao-secret-key",
-        KAKAO_REDIRECT_URI="https://staging.codemit.example/api/auth/social/kakao/callback",
-    )
-
-    result = _run_check(env)
-
-    assert result.returncode == 0, result.stderr
 
 
 def test_development_target_boots_without_kakao_oauth_credentials():
@@ -820,11 +778,10 @@ def test_development_target_boots_without_kakao_oauth_credentials():
         pytest.param("한글은 base64가 아니다", id="base64가 아닌 문자"),
     ],
 )
-@pytest.mark.parametrize("target", ["staging", "production"])
-def test_deployed_environment_refuses_a_verification_key_that_is_not_a_fernet_key(target, bad_key):
+def test_deployed_environment_refuses_a_verification_key_that_is_not_a_fernet_key(bad_key):
     """**비어 있지 않은 것만으로는 부족하다** (#52).
 
-    staging 에서 실제로 겪었다 — 사람이 이 칸에 아무 문자열이나 채웠고, 가드가
+    옛 staging 에서 실제로 겪었다 — 사람이 이 칸에 아무 문자열이나 채웠고, 가드가
     "비어 있지 않다"만 보고 통과시켰다. 컨테이너는 멀쩡히 떴고, 본인확인이
     **성공해서 실명을 암호화하려는 순간** `Fernet key must be 32 url-safe
     base64-encoded bytes` 로 500 이 났다. 사용자에게는 본인확인이 깨진 것으로만
@@ -834,14 +791,13 @@ def test_deployed_environment_refuses_a_verification_key_that_is_not_a_fernet_ke
     채로 첫 요청에서야 죽는 것보다, 정직하게 못 뜨는 편을 택했다").
     """
 
-    env_builder = _production_env if target == "production" else _staging_env
-    env = env_builder()
+    env = _production_env()
     env["VERIFICATION_ENCRYPTION_KEY"] = bad_key
 
     result = _run_check(env)
 
     assert result.returncode != 0, (
-        f"{target} config with VERIFICATION_ENCRYPTION_KEY={bad_key!r} booted successfully — "
+        f"production config with VERIFICATION_ENCRYPTION_KEY={bad_key!r} booted successfully — "
         "이 값으로는 본인확인이 성공하는 순간 500이 난다."
     )
     assert "ImproperlyConfigured" in result.stderr
@@ -850,12 +806,10 @@ def test_deployed_environment_refuses_a_verification_key_that_is_not_a_fernet_ke
     assert "Fernet" in result.stderr
 
 
-@pytest.mark.parametrize("target", ["staging", "production"])
-def test_deployed_environment_boots_with_a_real_fernet_key(target):
+def test_deployed_environment_boots_with_a_real_fernet_key():
     """유효한 키는 그대로 통과한다 — 가드가 정상 배포를 막지 않는다."""
 
-    env_builder = _production_env if target == "production" else _staging_env
-    result = _run_check(env_builder())
+    result = _run_check(_production_env())
 
     assert result.returncode == 0, result.stderr
 
@@ -868,7 +822,7 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
 
     Django 기본 로깅에서 `django.request` 의 ERROR 는 `mail_admins` 로만 간다 —
     `DEBUG=False` 인 배포에서는 500 이 나도 `docker compose logs` 에 **한 줄도**
-    남지 않는다. staging 에서 본인확인 500 을 쫓을 때 실제로 그랬다: 로그는
+    남지 않는다. 옛 staging 에서 본인확인 500 을 쫓을 때 실제로 그랬다: 로그는
     멀쩡한데 사용자만 500 을 받았고, 원인은 같은 요청을 손으로 재현해서야 나왔다.
 
     이 파일의 다른 테스트들과 같은 이유로 서브프로세스로 확인한다 — pytest 의
@@ -888,7 +842,7 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
         # 깨진다.
         ".error('CODEMIT_REQUEST_ERROR_MARKER')"
     )
-    result = boot_process.run(["-c", program], {**os.environ, **_staging_env()})
+    result = boot_process.run(["-c", program], {**os.environ, **_production_env()})
 
     assert "CODEMIT_REQUEST_ERROR_MARKER" in (result.stdout + result.stderr), (
         "django.request 의 ERROR 가 프로세스 stdout/stderr 어디에도 나오지 않는다 — "
@@ -901,11 +855,10 @@ def test_unhandled_errors_reach_stdout_so_docker_logs_shows_them():
     "env_builder, expected",
     [
         (_production_env, "[]"),
-        (_staging_env, "[]"),
         (lambda: {"CODEMIT_DEPLOYMENT_TARGET": "development"},
          "['core.source_converters.packet_tracer.PacketTracerConverter']"),
     ],
-    ids=["production", "staging", "development"],
+    ids=["production", "development"],
 )
 def test_packet_tracer_conversion_is_off_in_deployed_environments_by_default(env_builder, expected):
     """Packet Tracer 해독(#497)은 Cisco 약관 검토(#498) 전까지 배포 환경에서 꺼져 있다 —

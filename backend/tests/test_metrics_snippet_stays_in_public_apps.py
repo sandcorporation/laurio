@@ -2,7 +2,7 @@
 
 태그는 `<script defer src=… data-site="codemit">` 한 줄이고, `src` 는 실행 때 env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL`
 에서 온다(ADR-0062 — 빌드에 굳히지 않는다, `test_next_public_env_stays_out.py`). 비어 있으면 태그를 그리지 않으므로
-로컬·시험·CI·staging 에는 태그가 없다. 배선은 compose prod·staging 의 frontend·classroom 서비스에만 있다 —
+로컬·시험·CI 에는 태그가 없다. 배선은 compose prod 의 frontend·classroom 서비스에만 있다 —
 operator 에 누가 같은 줄을 더하면 여기서 걸린다.
 
 시험 파일(`*.test.*`·`*.spec.*`)은 보지 않는다.

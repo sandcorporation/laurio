@@ -41,7 +41,7 @@ INDEX_ALIAS = "contests"
 _INDEX_PREFIX = f"{INDEX_ALIAS}-"
 
 #: 검색 요청 자체의 타임아웃(초). dev `search` 프로필의 단일 노드 기준 —
-#: staging·prod도 같은 값을 쓴다(내부망 호출이라 여유를 크게 둘 이유가 없다).
+#: prod도 같은 값을 쓴다(내부망 호출이라 여유를 크게 둘 이유가 없다).
 _DEFAULT_TIMEOUT_SECONDS = 3.0
 
 _ANALYSIS_SETTINGS = {

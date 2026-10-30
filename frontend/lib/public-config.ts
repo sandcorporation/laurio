@@ -1,8 +1,8 @@
 // 공개 설정 — 실행 때 서버 env 에서 읽어 브라우저로 한 번 넘긴다 (#711, ADR-0062).
 //
 // 예전에는 이 값들이 `NEXT_PUBLIC_*` 라 **빌드 때** 번들에 굳었고, 그래서 같은 코드를
-// staging 과 prod 로 두 번 구웠다. 이제 이미지는 환경을 모르고, 값은 컨테이너의
-// env(`docker/.env.staging`·`.env.prod` → compose `environment:`)에서 온다.
+// 환경마다 따로 구웠다. 이제 이미지는 환경을 모르고, 값은 컨테이너의
+// env(서버의 `docker/.env.prod` → compose `environment:`)에서 온다.
 //
 // - 서버(서버 컴포넌트·라우트·`instrumentation.ts`)는 요청 때 `process.env` 를 읽는다.
 //   접두어가 `NEXT_PUBLIC_` 이 아니라 Next 가 번들에 굳히지 않는다.
@@ -55,7 +55,7 @@ export function publicConfigScript(config: PublicConfig): string {
 }
 
 /** 방문 메트릭 스니펫(Sandcorp 공통, #785)의 `src`. 실행 때 env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 을
- * 읽어 공백을 다듬고, 비어 있으면 `null` — 루트 레이아웃이 태그를 아예 그리지 않는다(로컬·시험·CI·staging).
+ * 읽어 공백을 다듬고, 비어 있으면 `null` — 루트 레이아웃이 태그를 아예 그리지 않는다(로컬·시험·CI).
  * 브라우저가 이 값을 읽을 일은 없어 위 `PUBLIC_CONFIG_NAMES` 에는 넣지 않는다. */
 export function metricsSnippetSrc(env: Record<string, string | undefined>): string | null {
   const value = (env.CODEMIT_PUBLIC_METRICS_SNIPPET_URL ?? "").trim();

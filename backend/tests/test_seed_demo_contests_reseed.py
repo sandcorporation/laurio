@@ -3,10 +3,10 @@
 `seed_demo_contests` 는 「멱등하다 — 데모만 지우고 다시 만든다」고 적어 두었는데, 채점
 스캔이 한 번 도는 순간 `Score.submission` 의 PROTECT 가 데모 Contest 삭제를 막아
 그 약속이 깨졌다. append-only 우회(`hard_delete_e2e_fixture_rows`, #240)는 배포
-환경에서 스스로 거부하므로 staging 에서는 재시드가 통째로 불가능했다.
+환경에서 스스로 거부하므로 옛 staging 에서는 재시드가 통째로 불가능했다.
 
 이 파일이 고정하는 것 — 재시드는 **시드가 스스로 표지(`Contest.is_demo_seed`)를 붙인
-행**만 지운다. 그래서 (1) 채점 뒤에도, staging 설정에서도 다시 심어지고, (2) 표지가 없는
+행**만 지운다. 그래서 (1) 채점 뒤에도 다시 심어지고, (2) 표지가 없는
 행은 제목이 무엇이든 손대지 않으며, (3) production 은 여전히 거부하고, (4) #240 의
 `hard_delete_e2e_fixture_rows` 는 그대로 배포 환경에서 거부한다(`test_ledger`).
 """
@@ -141,19 +141,14 @@ def test_reseed_after_scoring_replaces_demo_scores_and_grading_reaches_again(
 
 
 @pytest.mark.django_db
-def test_reseed_works_in_the_staging_configuration_and_spares_real_scores(
-    client, settings, one_submission_per_scan
-):
-    """staging 과 같은 설정(`IS_DEPLOYED_ENVIRONMENT`)에서도 재시드가 거부되지 않는다 —
-    그리고 그 재시드는 **표지 없는 실데이터 Score** 를 지우지 않는다."""
+def test_reseed_after_scoring_spares_real_scores(client, one_submission_per_scan):
+    """채점이 돈 뒤의 재시드는 데모 Score 만 지우고 **표지 없는 실데이터 Score** 는
+    지우지 않는다(옛 staging 설정 갈래는 staging 과 함께 거뒀다, #844)."""
 
     real_submission_id = _real_scored_submission(client)
     _seed()
     _run_pending(client)
     assert _demo_scores().exists()
-
-    settings.CODEMIT_DEPLOYMENT_TARGET = "staging"
-    settings.IS_DEPLOYED_ENVIRONMENT = True
 
     _seed()
 

@@ -1,6 +1,6 @@
 // 부팅 시점 설정 가드 (#63, ADR-0019 — frontend/instrumentation.ts와 같은 원칙).
 //
-// 배포 환경(staging/production)에서 필수 설정이 비어 있으면 첫 요청을 받기 전에
+// 배포 환경(production)에서 필수 설정이 비어 있으면 첫 요청을 받기 전에
 // 부팅 자체를 거부한다. backend/config/settings.py의 OPERATOR_WEB_ORIGIN 가드가
 // "CODEMIT_OPERATOR_ORIGIN이 배포 환경에서 비어 있으면 부팅을 거부한다"고 이미
 // 정했다 — 이 앱도 자기 쪽에서 같은 값을 요구해야, 둘 중 하나만 잊혀 "한쪽은
@@ -8,6 +8,7 @@
 // 맞은 실패")를 부팅 시점에 막는다.
 import * as Sentry from "@sentry/nextjs";
 
+import { invalidDeploymentTarget, isDeployedEnvironment } from "@/lib/auth/cookies";
 import { buildSentryOptions } from "@/lib/observability/sentry-options";
 
 const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }> = [
@@ -43,8 +44,14 @@ export async function register(): Promise<void> {
   startSentry();
 
   const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
-  const isDeployed = target === "staging" || target === "production";
-  if (!isDeployed) return;
+  // 알 수 없는 배포 대상(없앤 staging 포함)은 아래 필수 설정 가드보다 먼저 거부한다 —
+  // 그대로 두면 development 로 흘러 이 가드 전체가 꺼진 채 뜬다.
+  const invalid = invalidDeploymentTarget(target);
+  if (invalid) {
+    console.error(invalid);
+    process.exit(1);
+  }
+  if (!isDeployedEnvironment()) return;
 
   const missing = REQUIRED_IN_DEPLOYED_ENVIRONMENTS.filter(({ name }) => !process.env[name]);
   if (missing.length === 0) return;

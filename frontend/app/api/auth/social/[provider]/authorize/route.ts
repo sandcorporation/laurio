@@ -54,7 +54,7 @@ export async function GET(
   if (!config) {
     // 이 환경에는 이 제공자의 앱이 설정되지 않았다 — 자격증명이 없는 authorize
     // URL로 보내 제공자 자신의 에러 페이지를 보게 하지 않는다. 대신 우리
-    // 로그인 화면으로 돌려보내 이유를 보여준다. 배포 환경(staging/production)은
+    // 로그인 화면으로 돌려보내 이유를 보여준다. 배포 환경(production)은
     // 카카오에 한해 이 상황 자체가 부팅 시점에 이미 거부되지만(#96,
     // config/settings.py·frontend/instrumentation.ts) GitHub·구글은 자격증명이
     // 배포 환경에서도 선택 사항이다(#189 — 사람이 OAuth 앱을 등록하기 전까지는

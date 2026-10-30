@@ -32,7 +32,7 @@ from .base import DEFAULT_CONTENT_TYPE, Bucket, PresignedDownload, PresignedUplo
 
 class FakeStorageAdapter:
     base_url = "https://fake-storage.test/codemit-dev"
-    # 실제 dev/staging/prod 버킷 이름(`config/settings.py` 기본값)의 명명 규칙을
+    # 실제 dev/prod 버킷 이름(`config/settings.py` 기본값)의 명명 규칙을
     # 그대로 흉내낸다 — "public"과 "images"가 둘 다 들어간다(ADR-0032).
     images_base_url = "https://fake-storage.test/codemit-dev-public-images"
 

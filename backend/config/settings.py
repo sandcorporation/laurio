@@ -1,6 +1,6 @@
 """Codemit backend 설정.
 
-환경별 차이는 전부 환경변수로 주입한다. dev/staging/prod compose 분리는 티켓 22에서 다룬다.
+환경별 차이는 전부 환경변수로 주입한다. 배포는 `docker/compose.prod.yaml` 하나다.
 """
 
 import hashlib
@@ -56,22 +56,22 @@ DEBUG = _env_bool("DJANGO_DEBUG", True)
 # 운영 배포는 아니라서 Fake 어댑터로 돌아야 한다. 이 둘을 같은 스위치(DEBUG)로
 # 묶으면 "DEBUG=false인데 fake는 위험하다"는 안전장치가 CI에서도 그대로 터진다.
 # 그래서 "정말 운영 배포인가"는 별도 값으로 뗀다 — 미설정(dev·CI 포함)은 항상
-# False이고, staging/prod compose(#23)만 명시적으로 production을 준다.
+# False이고, prod compose(`docker/compose.prod.yaml`)만 명시적으로 production을 준다.
 #
-# staging은 "production"이 아니지만(TLS 종단·시크릿 강도 요구사항이 다르다) "fake
-# 어댑터가 섞이면 안 된다"는 요구사항은 production과 동일하다 — ADR-0007이 그리는
-# 3단계 바인딩(dev=Fake, staging=토스 샌드박스, prod=토스 실물)에서 staging도 이미
-# 실제 연동 규약을 검증하는 자리이기 때문이다. 그래서 어댑터 fake 가드는
-# IS_PRODUCTION_DEPLOYMENT가 아니라 이 둘을 합친 IS_DEPLOYED_ENVIRONMENT를 본다 —
-# "TLS·시크릿 강도처럼 production에만 해당하는 하드닝"과 "fake 금지처럼 배포된 모든
-# 환경에 해당하는 안전장치"는 서로 다른 질문이라 별도 플래그로 뗀다.
-_VALID_DEPLOYMENT_TARGETS = {"development", "staging", "production"}
+# 배포 대상은 production 하나다. staging 은 2026-10-30(#836, ADR-0068)에 없앴고, 그
+# 값은 이제 아래 검증에서 다른 오타와 똑같이 부팅을 거부당한다 — 옛 staging 용
+# `.env` 가 어디서 되살아나도 조용히 development 로 흘러 가드가 꺼지는 일은 없다.
+# 아래 두 플래그는 지금 같은 값이다. 둘을 남기는 것은 읽는 자리가 묻는 질문이
+# 달라서다: IS_DEPLOYED_ENVIRONMENT 는 「fake 어댑터·시드·진단 표면이 섞이면 안
+# 되는 자리인가」, IS_PRODUCTION_DEPLOYMENT 는 「TLS·시크릿 강도 하드닝을 거는
+# 자리인가」를 묻는다.
+_VALID_DEPLOYMENT_TARGETS = {"development", "production"}
 CODEMIT_DEPLOYMENT_TARGET = _env("CODEMIT_DEPLOYMENT_TARGET", "development")
 # 코디네이터 리뷰 지적: 이 값이 검증되지 않으면 "prod", "Production", 오타 하나가
-# 조용히 "development"로도, "staging"/"production" 어느 쪽으로도 매치하지 않는
+# 조용히 "development"로도, "production"으로도 매치하지 않는
 # 상태로 흘러 아래 모든 가드(fake 어댑터 거부·SECRET_KEY 강도·DEBUG 거부·TLS
 # 하드닝)를 통째로 무력화한다 — 이 티켓의 목적 자체가 "조용히 통과하는 대신 크게
-# 실패한다"이므로, 허용된 세 값이 아니면 그 자리에서 바로 죽는다.
+# 실패한다"이므로, 허용된 두 값이 아니면 그 자리에서 바로 죽는다.
 if CODEMIT_DEPLOYMENT_TARGET not in _VALID_DEPLOYMENT_TARGETS:
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 는 유효하지 않다. "
@@ -80,7 +80,7 @@ if CODEMIT_DEPLOYMENT_TARGET not in _VALID_DEPLOYMENT_TARGETS:
         "전부 무력화하므로 미설정 기본값(development)으로 조용히 흘려보내지 않는다."
     )
 IS_PRODUCTION_DEPLOYMENT = CODEMIT_DEPLOYMENT_TARGET == "production"
-IS_DEPLOYED_ENVIRONMENT = CODEMIT_DEPLOYMENT_TARGET in {"staging", "production"}
+IS_DEPLOYED_ENVIRONMENT = IS_PRODUCTION_DEPLOYMENT
 
 # 공모전 제품 스위치(#271/#413) — 방향이 바뀌어 공모전은 나중을 위한 기능이
 # 됐다가(ADR-0037), 돈을 다루지 않는 무료 공모전로 다시 열렸다(ADR-0048). 코드도
@@ -132,10 +132,9 @@ SECRET_KEY = _secret_key
 
 # manage.py check --deploy의 security.W009: 50자 미만·고유 문자 5종 미만·
 # "django-insecure-" 접두(Django가 `startproject`로 자동 생성한 키의 표식)는 전부
-# "누구나 추측 가능한 키"의 신호다. staging은 아직 실제 세션·CSRF 서명 신뢰 경계가
-# production만큼 엄격하지 않아도 되므로(하드닝은 아래 IS_PRODUCTION_DEPLOYMENT
-# 블록 참고) 이 강도 검사는 production에만 건다 — CI의 비-production 잡이 쓰는
-# 짧은 더미 키(ci-only-insecure-key)까지 걸리면 안 되기 때문이다.
+# "누구나 추측 가능한 키"의 신호다. 이 강도 검사는 production에만 건다 — CI의
+# 비-production 잡이 쓰는 짧은 더미 키(ci-only-insecure-key)까지 걸리면 안 되기
+# 때문이다.
 if IS_PRODUCTION_DEPLOYMENT and (
     len(SECRET_KEY) < 50 or len(set(SECRET_KEY)) < 5 or SECRET_KEY.startswith("django-insecure-")
 ):
@@ -202,7 +201,7 @@ MIDDLEWARE = [
     # SecurityMiddleware 바로 다음(whitenoise 공식 권장 위치). 원래는 admin 의
     # CSS/JS 를 서빙하려고 넣었는데 admin 을 내렸으므로(#46, ADR-0019) 지금 이
     # 백엔드에는 서빙할 정적 파일이 사실상 없다. 그래도 남겨둔다 — DEBUG=False 인
-    # staging/prod 에서 Django 는 정적 파일을 스스로 서빙하지 않고, 이 저장소에는
+    # prod 에서 Django 는 정적 파일을 스스로 서빙하지 않고, 이 저장소에는
     # 아직 리버스 프록시가 없다. STATIC_ROOT 에 산출물이 없으면 그냥 통과시킬
     # 뿐이라 아무 비용도 들지 않는다.
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -314,7 +313,7 @@ DATABASES = {
         # 클라이언트에게 넘어가 버려서다. 이 값을 True 로 켜면 같은 코드가
         # 그대로 통과한다(같은 재현으로 확인). dev 기본은 풀러 없이 직접 DB 에
         # 붙으므로 그대로 False(Django 기본값)다 — 풀러 프로필
-        # (`--profile pgbouncer`)이나 staging·prod compose 가
+        # (`--profile pgbouncer`)이나 prod compose 가
         # `CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`로 켠다. 준비된 문장
         # (prepared statement)은 이미 Django 가 psycopg3 백엔드에서 기본으로
         # 끈다(django/db/backends/postgresql/base.py 의 `prepare_threshold=None`
@@ -425,10 +424,10 @@ CLASSROOM_MCP_CALLS_PER_MINUTE = int(_env("CODEMIT_CLASSROOM_MCP_CALLS_PER_MINUT
 CLASSROOM_MCP_SOURCE_CALLS_PER_MINUTE = int(_env("CODEMIT_CLASSROOM_MCP_SOURCE_CALLS_PER_MINUTE", "20"))
 
 if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
-    # 비어 있으면 Host 헤더 유도로 떨어지는데, `SECURE_PROXY_SSL_HEADER` 는
-    # production 에만 걸린다 — TLS 종단 프록시 뒤의 staging 에서는 scheme 이 http 로
-    # 잡혀 브라우저가 보낸 https 오리진과 어긋나고, **로그인을 포함한 모든 변경
-    # 요청이 403** 이 된다. fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
+    # 비어 있으면 Host 헤더 유도로 떨어지는데, 프록시 뒤에서 유도한 오리진은
+    # 브라우저가 보낸 https 오리진과 어긋날 수 있고(옛 staging 에서 scheme 이 http 로
+    # 잡혀 실제로 그랬다), 그러면 **로그인을 포함한 모든 변경 요청이 403** 이 된다.
+    # fail-closed 라 보안 구멍은 아니지만 운영이 통째로 죽는다.
     #
     # 프론트엔드가 CODEMIT_WEB_ORIGIN 에 대해 이미 같은 실패를 겪고 같은 방식으로
     # 막았다(frontend/instrumentation.ts) — 여기서 그 결을 맞춘다.
@@ -441,22 +440,21 @@ if IS_DEPLOYED_ENVIRONMENT and not OPERATOR_WEB_ORIGIN:
 
 # 스토리지 어댑터 (ADR-0005, ADR-0007): "fake"가 기본값이라 아무것도 설정하지 않아도
 # 테스트·CI는 MinIO 없이 돈다. dev compose가 backend 컨테이너에만 STORAGE_BACKEND=s3
-# 를 주입해 MinIO로 바인딩한다(docker/compose.dev.yaml). staging/prod는 같은 "s3"
+# 를 주입해 MinIO로 바인딩한다(docker/compose.dev.yaml). prod는 같은 "s3"
 # 백엔드가 실제 S3·OCI 엔드포인트를 가리키도록 환경변수만 바꾼다.
 STORAGE_BACKEND = _env("STORAGE_BACKEND", "fake")
 
 # DJANGO_SECRET_KEY 가드(위)와 같은 이유다. STORAGE_BACKEND 를 잊고 배포하면
 # FakeStorageAdapter가 200과 함께 https://fake-storage.test/... 를 돌려주고, 업로드도
 # 다운로드도 겉보기엔 성공한 채 파일만 소리 없이 사라진다. 실제 운영 배포에서는 아예
-# 못 뜨게 막는다 — DEBUG가 아니라 CODEMIT_DEPLOYMENT_TARGET을 본다. staging도 대상이다
-# (ADR-0007: staging은 S3/OCI에 실제로 붙어 연동 규약을 검증하는 자리다). CI는
+# 못 뜨게 막는다 — DEBUG가 아니라 CODEMIT_DEPLOYMENT_TARGET을 본다. CI는
 # DEBUG=false로 돌면서도 배포된 환경이 아니므로(위 설명) 이 가드에 걸리지 않고
 # fake로 테스트를 돌릴 수 있어야 한다.
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(STORAGE_BACKEND):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 STORAGE_BACKEND 가 "
         "fake 다. presigned URL이 200으로 발급되면서 파일이 소리 없이 유실된다. "
-        "staging/production 배포에서는 STORAGE_BACKEND=s3 를 반드시 설정해야 한다."
+        "운영 배포에서는 STORAGE_BACKEND=s3 를 반드시 설정해야 한다."
     )
 
 STORAGE_BUCKET = _env("STORAGE_BUCKET", "codemit-dev")
@@ -471,7 +469,7 @@ STORAGE_ENDPOINT_URL = _env("STORAGE_ENDPOINT_URL", "http://127.0.0.1:19000")
 # 실제로 열 수 있는 주소(호스트에 매핑된 포트)를 이 값으로 별도로 준다.
 # STORAGE_ENDPOINT_URL은 서버 프로세스 자신이 붙는 주소(read_object 등)로 계속
 # 쓴다 — presign은 네트워크를 타지 않는 순수 로컬 서명이라(storage/adapters/s3.py)
-# 두 값이 갈라져도 서버 쪽 동작에는 영향이 없다. staging/prod는 실제 S3/OCI
+# 두 값이 갈라져도 서버 쪽 동작에는 영향이 없다. prod는 실제 S3/OCI
 # 엔드포인트 자체가 이미 공개 주소라 보통 값이 같으므로, 기본값은
 # STORAGE_ENDPOINT_URL을 그대로 물려받는다.
 STORAGE_PUBLIC_ENDPOINT_URL = _env("STORAGE_PUBLIC_ENDPOINT_URL", STORAGE_ENDPOINT_URL)
@@ -628,13 +626,13 @@ REFRESH_TOKEN_TTL = timedelta(days=int(_env("REFRESH_TOKEN_TTL_DAYS", "14")))
 # 소셜 로그인 어댑터 (ADR-0007). STORAGE_BACKEND와 같은 원칙: 기본값은 DEBUG와
 # 무관하게 항상 fake다 — "어떤 구현체를 쓸지"와 "이게 진짜 운영 배포인지"는 다른
 # 질문이기 때문이다(위 CODEMIT_DEPLOYMENT_TARGET 설명 참고). 실제 카카오·GitHub·구글
-# API를 부르려면 SOCIAL_AUTH_MODE=real 을 명시해야 한다 — staging/production 배포(#23)가
+# API를 부르려면 SOCIAL_AUTH_MODE=real 을 명시해야 한다 — production 배포가
 # 그렇게 한다.
 SOCIAL_AUTH_MODE = _env("SOCIAL_AUTH_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SOCIAL_AUTH_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 SOCIAL_AUTH_MODE 가 "
-        "fake 다. staging/production 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
+        "fake 다. 운영 배포에서는 SOCIAL_AUTH_MODE=real 을 반드시 설정해야 한다."
     )
 
 # 카카오 OAuth 앱 자격증명 (#95/#96, spec #92). authorize 리다이렉트・code→token
@@ -680,7 +678,7 @@ if IS_DEPLOYED_ENVIRONMENT:
 # 때만 붙는다 — 그래서 `DEBUG=False` 인 배포에서는 500 이 나도 `docker compose
 # logs` 에 **한 줄도** 남지 않는다.
 #
-# staging 에서 본인확인 500 을 쫓을 때 실제로 그랬다: 로그는 멀쩡한데 사용자만
+# 옛 staging 에서 본인확인 500 을 쫓을 때 실제로 그랬다: 로그는 멀쩡한데 사용자만
 # 500 을 받았고, 원인(VERIFICATION_ENCRYPTION_KEY 가 Fernet 키가 아니었다)은 같은
 # 요청을 손으로 재현해서야 나왔다. 우리 코드가 남기는 logger.error 는 보이는데
 # 처리되지 않은 예외만 안 보이는 상태라, 「로그에 없으니 백엔드는 무사하다」는
@@ -713,13 +711,13 @@ LOGGING = {
 }
 
 # --- Verification (ADR-0011, ADR-0007) ------------------------------------
-# 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, staging/production 배포만
+# 본인확인 어댑터도 같은 원칙: 기본값은 항상 fake이고, production 배포만
 # real을 명시한다.
 VERIFICATION_ADAPTER_MODE = _env("VERIFICATION_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(VERIFICATION_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
-        "VERIFICATION_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 실제 "
+        "VERIFICATION_ADAPTER_MODE 가 fake 다. 운영 배포에서는 실제 "
         "본인확인 어댑터의 dotted path를 반드시 설정해야 한다."
     )
 # 실명·생년월일·CI/DI를 저장 시 암호화하는 대칭키(Fernet). SECRET_KEY와 마찬가지로
@@ -733,7 +731,7 @@ if not _verification_key:
         )
     _verification_key = "A0crfksMrBmbSY37jIyOwcPRFpK9rc_eIaNnL89lIfo="
 
-# **비어 있지 않은 것만으로는 부족하다.** staging 에서 실제로 겪었다 — 사람이 이
+# **비어 있지 않은 것만으로는 부족하다.** 옛 staging 에서 실제로 겪었다 — 사람이 이
 # 칸에 아무 문자열이나 채웠고, 「비어 있는지」만 보는 가드가 통과시켰다. 컨테이너는
 # 멀쩡히 떴고, 본인확인이 **성공해서 실명을 암호화하려는 순간**
 # `Fernet key must be 32 url-safe base64-encoded bytes` 로 500 이 났다. 사용자에게는
@@ -757,15 +755,14 @@ VERIFICATION_ENCRYPTION_KEY = _verification_key
 
 # --- 결제 · Escrow 예치 (#9, ADR-0007) --------------------------------------
 # PG 어댑터도 같은 원칙: 기본값은 항상 Fake PG다 — 웹훅 재전송·타임아웃·순서 뒤바뀜을
-# 네트워크 없이 결정적으로 주입할 수 있다. staging은 토스 "샌드박스"(연동 규약만
-# 검증, 실제 돈은 안 움직인다), production은 토스 "실물"에 PAYMENT_ADAPTER_MODE=real로
-# 명시한다(ADR-0008, #23의 범위). 샌드박스냐 실물이냐는 이 모드 값이 아니라 함께
-# 주입하는 토스 자격증명·엔드포인트가 어디를 가리키는지로 갈린다.
+# 네트워크 없이 결정적으로 주입할 수 있다. production은 토스 "실물"에
+# PAYMENT_ADAPTER_MODE=real로 명시한다(ADR-0008). 샌드박스냐 실물이냐는 이 모드 값이
+# 아니라 함께 주입하는 토스 자격증명·엔드포인트가 어디를 가리키는지로 갈린다.
 PAYMENT_ADAPTER_MODE = _env("PAYMENT_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 PAYMENT_ADAPTER_MODE 가 "
-        "fake 다. staging/production 배포에서는 실제 PG 어댑터의 dotted path를 반드시 "
+        "fake 다. 운영 배포에서는 실제 PG 어댑터의 dotted path를 반드시 "
         "설정해야 한다."
     )
 
@@ -778,18 +775,12 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYMENT_ADAPTER_MODE):
 # `core.E002`로 부팅을 거부한다(AC: 자격증명 누락은 배포에서 부팅 실패다).
 #
 # 환경별로 실제 주입되는 변수 이름이 다르다(#87 코드리뷰 지적 6) — dev는 저장소
-# 루트 .env가 이미 `TOSS_API_SECRET_KEY`라는 이름을 쓰고, staging/prod compose는
-# 그보다 먼저(#82/#83 스캐폴딩 시점) `TOSS_SANDBOX_SECRET_KEY`/`TOSS_LIVE_SECRET_KEY`로
-# 못박아 뒀다 — 샌드박스 키와 실물 키를 다른 이름으로 두면 운영자가 실수로 실물
-# 키를 staging에 붙여넣어도 그 변수가 애초에 읽히지 않는다. 세 이름 중 먼저 채워진
-# 값을 쓴다 — 배포 환경마다 하나만 채워지므로 순서는 충돌하지 않는다. compose
-# 파일·env example을 새 이름으로 바꾸지 않는 이유는 이 구분 자체가 의도된
-# 안전장치이기 때문이다.
-TOSS_API_SECRET_KEY = (
-    _env("TOSS_API_SECRET_KEY", "")
-    or _env("TOSS_SANDBOX_SECRET_KEY", "")
-    or _env("TOSS_LIVE_SECRET_KEY", "")
-)
+# 루트 .env가 이미 `TOSS_API_SECRET_KEY`라는 이름을 쓰고, prod compose는
+# `TOSS_LIVE_SECRET_KEY`로 못박아 뒀다 — 실물 키는 그 이름으로만 들어온다. 두 이름 중
+# 먼저 채워진 값을 쓴다 — 환경마다 하나만 채워지므로 순서는 충돌하지 않는다. 옛
+# staging 의 샌드박스 이름 `TOSS_SANDBOX_SECRET_KEY` 는 staging 과 함께 거뒀다(#844 —
+# prod compose 는 그 이름을 컨테이너에 넘기지 않았다).
+TOSS_API_SECRET_KEY = _env("TOSS_API_SECRET_KEY", "") or _env("TOSS_LIVE_SECRET_KEY", "")
 # 벤더가 문서화한 API 버전 헤더값(`TossPayments-api-version`). dev의 테스트 키는
 # 2022-11-16을 쓴다 — 값 자체는 벤더 사실이라 코드에 하드코딩하지 않고 환경에서 읽는다.
 TOSS_API_VERSION = _env("TOSS_API_VERSION", "2022-11-16")
@@ -893,7 +884,7 @@ DB_BACKUP_TIMEOUT_SECONDS = int(_env("DB_BACKUP_TIMEOUT_SECONDS", "1800"))
 # 2026-09-18 prod 장애("too many clients already")의 재발 방지 — 한도에 가까워지면
 # 사람이 500 을 보기 전에 오류 수집기로 먼저 알린다.
 #
-# 어느 DB 별칭을 볼지도 설정이다: 지금은 "default"(dev·CI·지금의 staging·prod가 보는
+# 어느 DB 별칭을 볼지도 설정이다: 지금은 "default"(dev·CI·prod가 보는
 # 그 Postgres) 하나뿐이지만, 연결 풀러(pgbouncer)가 앞에 서면(#458) 앱이 보는
 # "default" 연결은 풀러가 흡수한 뒤의 것이라 실제 서버 연결 수를 보여주지 않는다 —
 # 그때는 풀러를 건너뛰는 별도 DATABASES 별칭을 추가하고 이 값만 그 이름으로 바꾸면
@@ -921,7 +912,7 @@ if _RUNNING_TESTS:
 # 한도(`tests/conftest.py`)를 넘은 원인도 이것이었다. 시험이 보는 것은 「맞는
 # 비밀번호로만 들어간다」이지 해시 알고리즘의 강도가 아니다(Django 문서가 테스트에
 # 권하는 그대로). 판정은 다른 배포 가드와 같은 `IS_DEPLOYED_ENVIRONMENT` 라
-# staging·prod 는 Django 기본값(PBKDF2)을 그대로 쓴다 — `tests/
+# prod 는 Django 기본값(PBKDF2)을 그대로 쓴다 — `tests/
 # test_deployment_config.py` 가 고정한다. PBKDF2 를 둘째로 남기는 이유는 이미 그
 # 해시로 저장된 dev 계정도 그대로 로그인되게 하려는 것이다.
 if not IS_DEPLOYED_ENVIRONMENT:
@@ -955,7 +946,7 @@ for _notification_setting_name, _notification_adapter_path in (
         raise ImproperlyConfigured(
             f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
             f"{_notification_setting_name}={_notification_adapter_path!r} 가 Fake 구현체다. "
-            "staging/production 배포에서는 실제 벤더 어댑터의 dotted path를 반드시 "
+            "운영 배포에서는 실제 벤더 어댑터의 dotted path를 반드시 "
             "설정해야 한다."
         )
 del _notification_setting_name, _notification_adapter_path
@@ -983,14 +974,14 @@ ALIGO_SENDER_PHONE_NUMBER = _env("ALIGO_SENDER_PHONE_NUMBER", "")
 # --- AI 채점 어댑터 (#12, ADR-0006, ADR-0007, ADR-0014) -----------------------------
 #
 # PAYMENT_ADAPTER_MODE·STORAGE_BACKEND와 같은 원칙: 기본값은 항상 fake다. dev/CI는
-# 네트워크 없이 결정적으로 채점 플로우 전체를 돈다. staging/production 배포만
+# 네트워크 없이 결정적으로 채점 플로우 전체를 돈다. production 배포만
 # LLM_ADAPTER_MODE에 실제 어댑터의 dotted path(또는 향후 등록될 별칭)를 명시한다.
 LLM_ADAPTER_MODE = _env("LLM_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 LLM_ADAPTER_MODE 가 "
         "fake 다. Score가 실제 채점 없이 만들어지면 Distribution 대상 판정이 통째로 "
-        "무효가 된다. staging/production 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
+        "무효가 된다. 운영 배포에서는 실제 LLM 어댑터를 반드시 설정해야 한다."
     )
 
 # --- 강의실 채점 어댑터 모드 (#340, ADR-0043) ---------------------------------------
@@ -1001,7 +992,7 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_ADAPTER_MODE):
 # 것은 "그 키로 실제로 네트워크에 나가는가" 하나뿐이다: 기본값 fake는 배포되지
 # 않은 환경(dev·CI)에서 네트워크 없이 결정적으로 강의실 채점을 끝낸다
 # (`classroom.scoring.FakeClassroomScoringAdapter`) — 가짜 키를 넣으면 실제
-# OpenAI로 나가고 진짜 키를 넣으면 돈이 나가던 문제(#340)를 없앤다. staging/
+# OpenAI로 나가고 진짜 키를 넣으면 돈이 나가던 문제(#340)를 없앤다.
 # production은 이 값을 실제 어댑터의 dotted path로 반드시 설정해야 한다 — 강사
 # 본인의 키로 실물 OpenAI를 쓰는 배포 환경의 원칙은 이 설정으로 바뀌지 않는다.
 CLASSROOM_SCORING_ADAPTER_MODE = _env("CLASSROOM_SCORING_ADAPTER_MODE", "fake")
@@ -1009,7 +1000,7 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(CLASSROOM_SCORING_ADAPTE
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
         "CLASSROOM_SCORING_ADAPTER_MODE 가 fake 다. 강의실 ClassroomScore가 실제 채점 "
-        "없이 만들어지면 참여자에게 통과·미통과가 보증 없이 내려간다. staging/production "
+        "없이 만들어지면 참여자에게 통과·미통과가 보증 없이 내려간다. 운영 "
         "배포에서는 실제 LLM 어댑터의 dotted path를 반드시 설정해야 한다."
     )
 
@@ -1032,7 +1023,7 @@ LLM_REQUIREMENT_CHAT_ADAPTER_MODE = _env("LLM_REQUIREMENT_CHAT_ADAPTER_MODE", "f
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(LLM_REQUIREMENT_CHAT_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 "
-        "LLM_REQUIREMENT_CHAT_ADAPTER_MODE 가 fake 다. staging/production 배포에서는 "
+        "LLM_REQUIREMENT_CHAT_ADAPTER_MODE 가 fake 다. 운영 배포에서는 "
         "실제 LLM 어댑터를 반드시 설정해야 한다."
     )
 
@@ -1050,7 +1041,7 @@ LLM_REQUIREMENT_CHAT_FAKE_RAISING_CONTEST_IDS = [
 # (`core.source_converters.check_source_converters`)가 거절한다.
 #
 # dev·CI 기본값에는 Packet Tracer(#497)가 켜져 있고, **배포 환경의 기본값은 빈
-# 목록이다** — Cisco 약관 검토(#498)가 끝나기 전에는 staging·prod 에서 켜지 않는다.
+# 목록이다** — Cisco 약관 검토(#498)가 끝나기 전에는 prod 에서 켜지 않는다.
 # `_env` 가 아니라 `os.environ.get` 인 이유: 빈 문자열을 「미설정」이 아니라 「빈
 # 목록」으로 읽어야 compose 가 명시적으로 끌 수 있다.
 _DEFAULT_SOURCE_CONVERTERS = (
@@ -1065,7 +1056,7 @@ SOURCE_CONVERTERS = [
 # --- GitHub 저장소 어댑터 (#193, ADR-0007, ADR-0027) --------------------------------
 #
 # LLM_ADAPTER_MODE와 같은 원칙: 기본값은 항상 fake다. dev/CI는 네트워크 없이
-# 결정적으로 공개 여부 판정·clone을 흉내낸다. staging/production 배포만
+# 결정적으로 공개 여부 판정·clone을 흉내낸다. production 배포만
 # GITHUB_ADAPTER_MODE에 실제 어댑터의 dotted path를 명시한다 — 이 값이
 # fake이거나 임포트되지 않으면 `core.adapters.check_adapter_mode`(#83)가 부팅을
 # 거부한다(여섯 값이던 것이 이제 일곱이다).
@@ -1073,7 +1064,7 @@ GITHUB_ADAPTER_MODE = _env("GITHUB_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(GITHUB_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 GITHUB_ADAPTER_MODE 가 "
-        "fake 다. staging/production 배포에서는 실제 GitHub 어댑터의 dotted path를 "
+        "fake 다. 운영 배포에서는 실제 GitHub 어댑터의 dotted path를 "
         "반드시 설정해야 한다."
     )
 
@@ -1094,7 +1085,7 @@ GITHUB_FAKE_REPO_FILES: dict = {}
 # 다른 `*_ADAPTER_MODE`와 같은 원칙으로 기본값은 항상 fake다. #380이 두 env
 # 예시 파일(`docker/prod.env.example`)에 실제
 # 값(`core.events_redis.RedisEventBus`)을 채우는 것과 같은 커밋에서 이 부팅
-# 가드를 더한다 — 그 전에 가드만 먼저 걸면 `.env.staging`이 아직 이 값을
+# 가드를 더한다 — 그 전에 가드만 먼저 걸면 서버의 `.env` 가 아직 이 값을
 # 모르는 채로 다음 자동 배포가 부팅을 거부하며 죽는다(`core/events.py` 모듈
 # docstring 참고).
 EVENT_BUS_ADAPTER_MODE = _env("EVENT_BUS_ADAPTER_MODE", "fake")
@@ -1102,7 +1093,7 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(EVENT_BUS_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 EVENT_BUS_ADAPTER_MODE 가 "
         "fake 다. 강의실 화면이 실시간 신호를 받지 못해 조용히 폴링에만 의존하게 된다. "
-        "staging/production 배포에서는 실제 이벤트 버스 어댑터(core.events_redis.RedisEventBus)의 "
+        "운영 배포에서는 실제 이벤트 버스 어댑터(core.events_redis.RedisEventBus)의 "
         "dotted path를 반드시 설정해야 한다."
     )
 # Operator 세션(DB 1)·Celery 브로커(DB 0)와 같은 Redis 인스턴스, 다른 DB
@@ -1143,12 +1134,12 @@ OPS_ALERT_DISCORD_TIMEOUT_SECONDS = 5
 # --- Payout 실행 (#15, ADR-0004/0008) -------------------------------------------------
 #
 # 토스 지급대행 어댑터도 PAYMENT_ADAPTER_MODE와 같은 원칙: 기본값은 항상 Fake다.
-# staging은 토스 지급대행 샌드박스, production은 실물에 real로 바인딩한다(ADR-0008).
+# production은 토스 지급대행 실물에 real로 바인딩한다(ADR-0008).
 PAYOUT_ADAPTER_MODE = _env("PAYOUT_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(PAYOUT_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 PAYOUT_ADAPTER_MODE 가 "
-        "fake 다. staging/production 배포에서는 실제 지급대행 어댑터의 dotted path를 "
+        "fake 다. 운영 배포에서는 실제 지급대행 어댑터의 dotted path를 "
         "반드시 설정해야 한다."
     )
 
@@ -1166,8 +1157,8 @@ if not _payout_webhook_secret:
 PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 
 # 플랫폼 수수료·원천징수 공제율은 더 이상 여기 없다(#75, ADR-0023). settings.py가
-# 환경변수로 읽었지만 staging·prod 어디에도 그 값을 준 적이 없어 실질적으로 코드
-# 상수였고, 요율은 환경의 성질이 아니라 사업 정책이다 — staging과 production에서
+# 환경변수로 읽었지만 어느 배포에도 그 값을 준 적이 없어 실질적으로 코드
+# 상수였고, 요율은 환경의 성질이 아니라 사업 정책이다 — 환경마다
 # 달라지면 그것은 설정이 아니라 버그다. `policies.models.PlatformPolicy`(DB 단일
 # 행)가 대신하고, `policies.scope.current_policy()`로 읽는다. 두 경로를
 # 남기지 않는다 — CSRF 방어를 두 기계로 두었다가 한쪽 발급처가 사라져 영구 403이
@@ -1176,13 +1167,13 @@ PAYOUT_WEBHOOK_SECRET = _payout_webhook_secret
 # --- Seller(지급대행사 수취인) 등록 어댑터 (#50, ADR-0007, ADR-0020) -------------------
 #
 # PAYOUT_ADAPTER_MODE와 같은 원칙: 기본값은 항상 fake다. 실제 토스 지급대행 셀러
-# 등록은 이 티켓 범위 밖이다(#57) — staging/production에서만 real dotted path를
+# 등록은 이 티켓 범위 밖이다(#57) — production에서만 real dotted path를
 # 요구한다.
 SELLER_ADAPTER_MODE = _env("SELLER_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 SELLER_ADAPTER_MODE "
-        "가 fake 다. staging/production 배포에서는 실제 Seller 등록 어댑터의 dotted "
+        "가 fake 다. 운영 배포에서는 실제 Seller 등록 어댑터의 dotted "
         "path를 반드시 설정해야 한다."
     )
 
@@ -1196,11 +1187,11 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SELLER_ADAPTER_MODE):
 # 다른 `*_ADAPTER_MODE`와 같은 원칙으로 기본값은 항상 fake다 — pytest·CI·dev는
 # `contests.search.FakeContestSearchAdapter`(DB 포함 검색)로 네트워크 없이 돈다.
 #
-# **설정 이름은 코디네이터가 2026-09-17에 고정했다**(#449 코멘트) — staging·prod의
+# **설정 이름은 코디네이터가 2026-09-17에 고정했다**(#449 코멘트) — prod의
 # `.env`가 이미 이 이름과 값을 쓴다. 실물은 dotted path
 # `contests.search_opensearch.OpenSearchContestSearch`(모듈
 # `contests/search_opensearch.py`, #450이 만든다)이고, 그 어댑터의 접속 주소는
-# 별도 설정 `OPENSEARCH_URL`이다(staging·prod 는 `http://search:9200`) — 이 설정은
+# 별도 설정 `OPENSEARCH_URL`이다(prod 는 `http://search:9200`) — 이 설정은
 # #450이 더한다.
 #
 # 실물 어댑터가 이제 있다(#450, `contests.search_opensearch.
@@ -1213,12 +1204,12 @@ SEARCH_ADAPTER_MODE = _env("SEARCH_ADAPTER_MODE", "fake")
 if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SEARCH_ADAPTER_MODE):
     raise ImproperlyConfigured(
         f"CODEMIT_DEPLOYMENT_TARGET={CODEMIT_DEPLOYMENT_TARGET!r} 인데 SEARCH_ADAPTER_MODE 가 "
-        "fake 다. staging/production 배포에서는 실제 검색 어댑터의 dotted path"
+        "fake 다. 운영 배포에서는 실제 검색 어댑터의 dotted path"
         "(contests.search_opensearch.OpenSearchContestSearch)를 반드시 설정해야 한다."
     )
 
 # 실물 어댑터(`contests.search_opensearch.OpenSearchContestSearch`, #450)의 접속
-# 주소다. staging·prod는 `http://search:9200`(compose 서비스 이름 `search`,
+# 주소다. prod는 `http://search:9200`(compose 서비스 이름 `search`,
 # #451이 그 서비스를 띄운다). dev `search` 프로필(docker/compose.dev.yaml)은
 # 호스트 포트로도 내므로 컨테이너 밖(pytest 없는 수동 확인·live 테스트)에서는
 # `CODEMIT_SEARCH_PORT`로 붙는다 — 기본값은 컴포즈 내부망 주소다.
@@ -1251,9 +1242,8 @@ NOTIFICATION_DAYTIME_HOUR = int(_env("NOTIFICATION_DAYTIME_HOUR", "10"))
 # 이 검사를 처음 켰을 때 다섯 경고가 났다: HSTS 미설정(W004), SSL 리다이렉트 꺼짐
 # (W008), 약한 SECRET_KEY(W009, 위에서 해소), 세션 쿠키가 secure가 아님(W012), CSRF
 # 쿠키가 secure가 아님(W016). 침묵시키는 대신(`SILENCED_SYSTEM_CHECKS`) 실제 설정을
-# 고친다 — dev/staging은 TLS 종단 구성이 서로 다르거나(staging은 검증용 서브호스트라
-# 아직 리버스 프록시가 없을 수 있다) 아예 HTTP로도 돌아야 하므로, 이 하드닝은
-# IS_PRODUCTION_DEPLOYMENT에만 켠다. staging에서도 fake 어댑터가 섞이지 않게 막는
+# 고친다 — dev·CI는 HTTP로도 돌아야 하므로, 이 하드닝은
+# IS_PRODUCTION_DEPLOYMENT에만 켠다. fake 어댑터가 섞이지 않게 막는
 # 것(위 IS_DEPLOYED_ENVIRONMENT 가드들)과는 다른 질문이라는 걸 여기서도 반복한다.
 SECURE_SSL_REDIRECT = IS_PRODUCTION_DEPLOYMENT
 SECURE_HSTS_SECONDS = int(_env("SECURE_HSTS_SECONDS", "31536000")) if IS_PRODUCTION_DEPLOYMENT else 0

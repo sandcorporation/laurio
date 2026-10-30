@@ -9,7 +9,7 @@ lifespan.` 을 던진다. uvicorn 은 기본(`--lifespan auto`)으로 시작할 
 그 자체가 소음이므로, 여기서 lifespan 을 정상 응답으로 받아 던지지 않게 한다.
 
 서버 기동 명령에 `--lifespan off` 를 붙이는 대안은 버렸다 — compose 파일 세
-곳(dev·staging·prod)에 같은 말을 적어야 하고, 새 파일이 생기면 조용히 빠진다.
+곳(dev·prod)에 같은 말을 적어야 하고, 새 파일이 생기면 조용히 빠진다.
 """
 
 import os

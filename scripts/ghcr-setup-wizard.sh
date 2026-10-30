@@ -163,9 +163,11 @@ finish() {
 cd "$(dirname "$0")/.."
 REPO="sandcorporation/laurio"
 PROD_ENV="/var/jenkins_home/workspace/codemit-deploy-prod/docker/.env.prod"       # oracle 호스트 — 옛 잡 이름 codemit-deploy-staging 의 customWorkspace(#779)
-# 다시 돌릴 때의 기본값 — 저장소 밖에 둔다(비밀값이 섞인다).
-ENV_FILE="${HOME}/.config/codemit-ghcr-wizard.env"
-mkdir -p "$(dirname "$ENV_FILE")"; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
+# 값을 파일에 남기지 않는다(#844) — 개발용 자격증명은 한 곳(대장 쪽)에서 관리한다(2026-10-30
+# 결정). 비워 두면 라이브러리의 `_existing` 이 기본값을 찾지 않는다. 토큰은 이번 실행의
+# 셸 변수로만 들고 있다가 두 에이전트에 로그인하는 데만 쓴다. Jenkins 주소는 셸 env 의
+# JENKINS_URL 을 쓴다.
+ENV_FILE=""
 
 _ssh_noise='post-quantum|store now|upgraded'
 # on_sub / on_oracle: 표준입력의 bash 스크립트를 그 호스트에서 돈다. 값은 명령줄이
@@ -198,8 +200,6 @@ GHCR_USER=$(gh api user --jq .login)
 note "토큰 주인: ${GHCR_USER} (sandcorporation 패키지를 읽을 수 있는 계정이어야 합니다)"
 ask_secret GHCR_READ_TOKEN "토큰을 붙여 넣으세요 (ghp_...):"
 [[ "$GHCR_READ_TOKEN" == ghp_* ]] || warn "classic PAT 는 보통 ghp_ 로 시작합니다 — 다시 확인하세요"
-write_env GHCR_USER "$GHCR_USER"
-write_env GHCR_READ_TOKEN "$GHCR_READ_TOKEN"   # 다시 돌릴 때의 기본값(저장소 밖, 600)
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
 stage "두 배포 에이전트에 ghcr 로그인 저장"
@@ -227,9 +227,8 @@ open_url "https://github.com/settings/tokens/new?scopes=write:packages&descripti
 step "Select scopes: write:packages(read:packages 가 따라 붙습니다) → Generate token → 복사"
 step "Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials"
 step "Kind: Secret text · ID: ghcr-push-token · Secret: 방금 복사한 토큰"
-[[ -n "${JENKINS_UI_URL:-$(_existing JENKINS_UI_URL)}" ]] && open_url "$(_existing JENKINS_UI_URL)/manage/credentials/store/system/domain/_/newCredentials"
+[[ -n "${JENKINS_URL:-}" ]] && open_url "${JENKINS_URL%/}/manage/credentials/store/system/domain/_/newCredentials"
 note "토큰은 이 위저드가 저장하지 않습니다 — Jenkins 에만 둡니다."
 pause "만들었으면 Enter"
 
 finish
-note "위저드 기본값 파일: $ENV_FILE (비밀값 포함, 권한 600) — 다 끝나면 지워도 됩니다."

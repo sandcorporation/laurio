@@ -14,14 +14,14 @@ describe("오류 수집 설정", () => {
     const options = buildSentryOptions(
       {
         CODEMIT_PUBLIC_SENTRY_DSN: "https://key@glitchtip.example/2",
-        CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "staging",
+        CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "production",
         CODEMIT_PUBLIC_SENTRY_RELEASE: "abc1234",
       },
       "browser",
     );
     expect(options).toMatchObject({
       dsn: "https://key@glitchtip.example/2",
-      environment: "staging",
+      environment: "production",
       release: "abc1234",
     });
   });

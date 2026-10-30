@@ -5,8 +5,8 @@
 // BFF가 쿠키로 들고 있는 것과 같은 이유).
 //
 // NEXT_PUBLIC_ 접두어를 붙이지 않는다 — 붙이면 빌드 시점에 브라우저 번들에
-// 그대로 인라인된다(frontend/docker/compose.staging.yaml의 PORTONE 채널키가
-// 그 반대 사례다). 이 세 값은 런타임에 Node 서버 프로세스만 읽는다.
+// 그대로 인라인된다(옛 compose.staging.yaml의 PORTONE 채널키가
+// 그 반대 사례였다). 이 세 값은 런타임에 Node 서버 프로세스만 읽는다.
 export interface KakaoOAuthConfig {
   clientId: string;
   clientSecret: string;

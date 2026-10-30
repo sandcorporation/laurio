@@ -49,7 +49,7 @@ def _generate_identity_verification_id() -> str:
 
     포트원 V2의 가맹점 지정 식별자 길이 상한은 40자다(#85 코드리뷰 지적 1) —
     ``"codemit-iv-" + secrets.token_urlsafe(24)``는 42자로 그 상한을 넘어 dev
-    Fake 경로에서는 절대 안 걸리고 staging/prod에서 실제 벤더를 칠 때만
+    Fake 경로에서는 절대 안 걸리고 prod에서 실제 벤더를 칠 때만
     깨졌다. `secrets.token_urlsafe(18)`은 24자라 접두어(10자)를 더해도 34자로
     여유 있게 들어간다.
     """

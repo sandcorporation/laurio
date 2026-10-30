@@ -413,7 +413,7 @@ def test_hard_delete_e2e_fixture_rows_refuses_in_a_deployed_environment():
     모양의 독스트링 규율로 적어 뒀지만 #207에서 실제로 뚫려 ADR-0033이 남긴 교훈이다.
     이 테스트는 그 규율을 코드로 고정한다: 배포 환경으로 설정을 덮으면 이 함수 자신이
     거부해야 한다 — 어떤 관리 명령이 호출부가 되든(`seed_e2e_contests`에는 배포 거부
-    가드가 없다) staging에서 실물 `Score`가 하드 삭제될 길이 구조적으로 막힌다."""
+    가드가 없다) 배포 환경에서 실물 `Score`가 하드 삭제될 길이 구조적으로 막힌다."""
 
     from django.test import override_settings
 
@@ -421,7 +421,7 @@ def test_hard_delete_e2e_fixture_rows_refuses_in_a_deployed_environment():
 
     entry = JournalEntry.objects.create(contest_id=uuid.uuid4(), memo="배포 가드 확인용")
 
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="staging"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="production"):
         with pytest.raises(AppendOnlyError):
             hard_delete_e2e_fixture_rows(JournalEntry.objects.filter(pk=entry.pk))
 

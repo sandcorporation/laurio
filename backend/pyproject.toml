@@ -13,17 +13,17 @@ dependencies = [
     "pyjwt>=2.13.0",
     "python-dotenv>=1.2.3",
     # celery[redis] 로 선언한다 — extra 없이 celery 만 넣으면 redis 트랜스포트
-    # 드라이버가 설치되지 않아, redis:// 브로커를 쓰는 staging·prod 의 worker·beat 가
+    # 드라이버가 설치되지 않아, redis:// 브로커를 쓰는 prod 의 worker·beat 가
     # 붙지 못한다(#40). Operator 세션도 같은 패키지를 쓴다(#43).
     "celery[redis]>=5.4",
     "requests>=2.32",
     # 오류를 자체 GlitchTip 으로 보낸다(core/observability.py) — DSN 이 없으면 꺼진
     # 채로 돌므로 dev·CI 는 네트워크를 치지 않는다.
     "sentry-sdk>=2.30",
-    # staging/prod 배포용 WSGI 서버(#23). `manage.py runserver`는 Django 자신이 문서화한
+    # prod 배포용 WSGI 서버(#23). `manage.py runserver`는 Django 자신이 문서화한
     # 대로 개발 전용이라 dev compose에서만 쓴다.
     "gunicorn>=23.0.0",
-    # DEBUG=False(staging/prod)에서는 Django 자신이 정적 파일을 서빙하지 않는다 —
+    # DEBUG=False(prod)에서는 Django 자신이 정적 파일을 서빙하지 않는다 —
     # 이 저장소에 리버스 프록시(nginx 등)가 아직 없으므로, whitenoise가 WSGI 프로세스
     # 자신에게서 STATIC_ROOT를 직접 서빙한다. 그게 없으면 ADR-0002가 운영 백오피스로
     # 지정한 /admin/ 이 CSS/JS 없이 깨진 채로 뜬다(코디네이터 리뷰 지적 #23).
