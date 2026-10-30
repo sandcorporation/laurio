@@ -202,7 +202,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 단계가 macos 에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
 비공개)에 여섯 전부 `codemit-<서비스>:<sha>-arm64` 로 올린다 — backend·세 앱·search(#450/#451)·pgbouncer
 (#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. #840 전에는 sub(`laurio-staging`)가 같은 여섯을
-staging 용 `-amd64` 로도 구웠다(열차는 T3 까지 amd64 를 굽는다, #836). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
+staging 용 `-amd64` 로도 구웠다(열차의 sub 도 #841 까지 구웠다, #836). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
 를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
 내보내지 못한다)가 남아 제 캐시를 20GB 까지 둔다. 예전에는 GitHub 호스티드(그 전 셀프호스티드 mac, 그
 전 sub)가 커밋마다 열둘을 다 구웠다.

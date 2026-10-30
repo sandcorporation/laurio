@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # 배포 이미지 여섯을 한 아키텍처로 굽거나, 바뀌지 않았으면 건너뛴다(#705, Jenkinsfile 「이미지」).
 #
-#   scripts/ci/images.sh amd64     staging 호스트(sub)의 것 — 여섯 전부 `-amd64`
-#   scripts/ci/images.sh arm64     prod 호스트(oracle)의 것 — 여섯 전부 `-arm64`
+#   scripts/ci/images.sh arm64     prod 호스트(oracle)의 것 — 여섯 전부 `-arm64`. 배포는 이것 하나다
+#   scripts/ci/images.sh amd64     로컬 시험용 — 열차·배포 잡은 부르지 않는다(staging 제거, #841). 문맥 해시의
+#                                  플랫폼 구분(`image_context.py`)과 그 시험이 아직 두 값을 전제해 인자는 남겼다
 #
 # 태그는 `ghcr.io/sandcorporation/codemit-<서비스>:<커밋 sha>-<arch>` — deploy.sh 가 그 이름으로
 # 받는다. 세 Next 앱도 환경을 모른다(#711, ADR-0062) — 공개 값은 빌드 인자가 아니라 실행 env
