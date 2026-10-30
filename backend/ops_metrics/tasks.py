@@ -20,3 +20,17 @@ def purge_old_minutes() -> int:
     from ops_metrics.flush import purge_old_minutes as purge
 
     return purge(now=Clock.now())
+
+
+@shared_task(name="ops_metrics.check_alerts", ignore_result=True)
+def check_alerts() -> dict | None:
+    """1분마다 — 운영 경보 규칙을 검사하고 울림·해소를 디스코드로 보낸다(`ops_metrics.alerts`, #830).
+
+    시각은 벽시계다(`Clock` 이 아니다) — 지표를 쓰는 쪽(`recorder`·grader 생존 신호)이 벽시계로 분을 정한다."""
+
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from ops_metrics.alerts import check_alerts as check
+
+    return check(now=datetime.now(dt_timezone.utc))

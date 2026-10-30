@@ -293,6 +293,12 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 `catchError` 와 `|| true` 가 그것을 보장하므로, 자격증명이 없는 Jenkins 에서도 배포는
 그대로 돈다.
 
+**운영 경보는 다른 웹훅으로 간다**(#830) — backend·celery 의 env `OPS_ALERT_DISCORD_WEBHOOK_URL`
+(`.env.staging`/`.env.prod`, compose 세 파일이 `${OPS_ALERT_DISCORD_WEBHOOK_URL:-}` 로 이름만 넘긴다,
+예시는 `docker/*.env.example`·`backend/.env.example`). 빌드 알림의 Jenkins 자격증명은 CI 의 것이라 쓰지
+않는다. **비어 있으면 보내지 않고 상태만 기록한다** — 콘솔 `/ops` 경보 패널은 그대로 채워진다. 값은 대표가
+서버의 env 파일에 넣고, 저장소·로그에는 남기지 않는다(전송 실패 로그도 예외 종류만 적는다).
+
 **prod 배포는 staging 과 같은 빌드의 단계다**(2026-10-23, #779) — prod 는 staging 이 배포한 **그
 커밋**을 따라가야 하는데, 같은 `DEPLOY_SHA` 를 쓰는 단계면 저절로 그렇다. 그 전에는 staging 잡이
 `production` 브랜치를 옮기고 웹훅이 별도 prod 잡을 깨웠다(upstream 트리거는 prod 잡이 자기 브랜치의

@@ -3774,7 +3774,7 @@ export interface paths {
         /**
          * Ops Metrics
          * @description 기간의 LLM 채점 지표(결과별 호출 수·지연 p50/p95·토큰·큐 대기 p95·동시 채점 최댓값)와 백엔드 요청 지표
-         *     (초당 요청·상태코드별 수·5xx 비율·지연 p50/p95·경로별 상위 10).
+         *     (초당 요청·상태코드별 수·5xx 비율·지연 p50/p95·경로별 상위 10), 그리고 지금 울리는 경보.
          */
         get: operations["ops_metrics_operator_api_ops_metrics"];
         put?: never;
@@ -7362,8 +7362,24 @@ export interface components {
             /** Next */
             next: string | null;
         };
+        /** OpsAlertOut */
+        OpsAlertOut: {
+            /** Rule */
+            rule: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+            /** Threshold */
+            threshold: string;
+            /** Value */
+            value: string;
+        };
         /** OpsMetricsOut */
         OpsMetricsOut: {
+            /** Alerts */
+            alerts: components["schemas"]["OpsAlertOut"][];
             /** Bucket Seconds */
             bucket_seconds: number;
             /**

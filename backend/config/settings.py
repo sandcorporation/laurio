@@ -1129,6 +1129,11 @@ OPS_METRICS_RETENTION_DAYS = 90
 #: Redis 가 멈추면 0.25초가 요청마다 붙는다(`ops_metrics.request_buffer`). SIGKILL 된 워커는 이만큼을 잃는다.
 #: 시험은 0(버퍼 없이 바로 더한다).
 OPS_METRICS_REQUEST_FLUSH_SECONDS = 0 if _RUNNING_TESTS else 5
+#: 운영 경보(#830, `ops_metrics.alerts`)를 보낼 디스코드 웹훅 — 비면 보내지 않고 상태만 기록한다(조용히 꺼짐).
+#: 값은 배포 .env 에만 있다. 콘솔 링크는 `OPERATOR_WEB_ORIGIN` + `/ops` 다.
+OPS_ALERT_DISCORD_WEBHOOK_URL = _env("OPS_ALERT_DISCORD_WEBHOOK_URL", "")
+#: 웹훅 한 번의 소켓 한도(초) — 검사는 1분마다 돌고 규칙이 여섯이라 최악에도 1분 안에 끝난다.
+OPS_ALERT_DISCORD_TIMEOUT_SECONDS = 5
 
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #

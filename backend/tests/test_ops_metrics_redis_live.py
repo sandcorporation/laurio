@@ -41,8 +41,10 @@ def test_add_take_and_max_behave_like_the_memory_store(redis_store):
 
     assert store.keys(prefix) == [key]
     assert 0 < store._client().ttl(key) <= 60
+    assert store.read(key) == {"a|n": 3, "a|ms": 30, "a|max_inflight": 3}
     assert store.take(key) == {"a|n": 3, "a|ms": 30, "a|max_inflight": 3}
     assert store.take(key) == {}
+    assert store.read(key) == {}
 
 
 @live_infra

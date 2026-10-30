@@ -177,7 +177,7 @@ function RequestTotals({ requests }: { requests: RequestMetrics }) {
   );
 }
 
-// 경보 티켓(#830)이 응답에 영역을 더하면 여기서 꺼내 넘긴다.
+// 응답이 오기 전·실패했을 때 경보 패널은 비어 있다(지표 패널이 그 사정을 말한다).
 const NO_ALERTS: readonly OpsAlert[] = [];
 
 function windowLabel(metrics: OpsMetrics): string {
@@ -203,7 +203,7 @@ function OpsInner() {
     <>
       <PageHeader crumb="운영 · 운영 지표" title="운영 지표" titleTestId="ops-heading" actions={<RangeLinks current={range} />} />
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
-        <AlertPanel alerts={NO_ALERTS} />
+        <AlertPanel alerts={state.status === "loaded" ? state.metrics.alerts : NO_ALERTS} />
         <Panel title="LLM 채점" meta={state.status === "loaded" ? windowLabel(state.metrics) : undefined}>
           {state.status === "loading" && (
             <p data-testid="ops-llm-loading" className="px-4 py-3.5 text-[13px] text-ink/62">

@@ -1,5 +1,4 @@
-// 「현재 울리는 경보」 패널(#829) — 자리만 있고 데이터는 경보 티켓(#830)이 채운다. 그 전에는 비어 있다.
-// 경보 티켓은 `alerts` 를 응답에서 받아 넘기면 된다(OpsAlert 모양은 lib/ops/types.ts).
+// 「현재 울리는 경보」 패널(#829) — 운영 지표 응답의 `alerts`(#830, 마지막 경보 검사의 상태)를 그린다.
 import { Panel } from "@/app/components/panel";
 import type { OpsAlert } from "@/lib/ops/types";
 

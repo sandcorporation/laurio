@@ -274,6 +274,8 @@ x-backend-env: &backend-env
   # --- 운영 지표 1분 집계 (#827) ---
   # 같은 Redis, DB 인덱스 3 — 세션(1)·브로커(0)·이벤트 버스(2)와 키를 섞지 않는다(config/settings.py).
   OPS_METRICS_REDIS_URL: redis://redis:6379/3
+  # 운영 경보(#830)의 디스코드 웹훅 — 비면 보내지 않고 상태만 기록한다(값은 .env 에만 둔다).
+  OPS_ALERT_DISCORD_WEBHOOK_URL: ${OPS_ALERT_DISCORD_WEBHOOK_URL:-}
 
   # --- 공모전 검색 (#450/#451, 부모 #444 스펙, ADR-0007) ---
   # staging의 x-backend-env 앵커와 같은 이유·같은 구조다(compose.staging.yaml
