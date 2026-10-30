@@ -253,6 +253,42 @@ cmd_preflight() {
 
 # ------------------------------------------------------- 무엇이 바뀌었나
 
+# 두 커밋 사이에 문맥 해시(`scripts/ci/image_context.py changed`)가 바뀐 서비스 → `CTX_CHANGED`(공백 구분),
+# 어디서 냈는지 → `CTX_FROM`. 내지 못하면 1 을 돌리고 그 이유 한 줄을 `CTX_WHY` 에 둔다.
+#
+# **prod 에이전트에는 python3 가 없다**(#849). `jenkins-desktop-agent` 는 docker CLI·git 만 든 Debian
+# 컨테이너라 이 머리에서 python3 를 부르면 늘 실패했고, `2>/dev/null` 이 그 이유를 삼켜 매 배포가 경로 비교로
+# 떨어졌다(#554·#559·#563 — `backend/tests/` 만 바뀌어도 backend 다섯을 다시 띄웠다). 그래서 python3 가 있는
+# 컨트롤러가 「대상 확인」 단계에서 같은 명령을 GitHub 의 `production`(= 직전 성공 배포) 기준으로 돌려
+# `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·`CODEMIT_CTX_CHANGED` 로 넘긴다(Jenkinsfile). 여기서는 python3 가 있으면
+# 손수 내고, 없으면 그 값을 **기준과 대상 커밋이 둘 다 같을 때만** 쓴다 — 배포 표식이 `production` 과 어긋났으면
+# 그 답은 다른 질문의 답이다. `CODEMIT_DEPLOY_PYTHON` 은 시험이 「python3 없는 에이전트」를 흉내 내는 자리다.
+context_changed() {
+  CTX_CHANGED=""; CTX_FROM=""; CTX_WHY=""
+  ctx_head=$($GIT rev-parse "$2" 2>/dev/null) || { CTX_WHY="$2 을 모른다"; return 1; }
+  ctx_py=${CODEMIT_DEPLOY_PYTHON:-python3}
+  if command -v "$ctx_py" >/dev/null 2>&1; then
+    ctx_err=$(mktemp)
+    if CTX_CHANGED=$("$ctx_py" scripts/ci/image_context.py changed "$1" "$2" 2>"$ctx_err"); then
+      rm -f "$ctx_err"; CTX_FROM="이 호스트"; return 0
+    fi
+    CTX_WHY="image_context.py 가 실패했다: $(tail -n 1 "$ctx_err")"
+    rm -f "$ctx_err"; CTX_CHANGED=""
+    return 1
+  fi
+  if [ -z "${CODEMIT_CTX_BASE:-}" ]; then
+    CTX_WHY="$ctx_py 가 없고 컨트롤러가 넘긴 값(CODEMIT_CTX_BASE)도 없다"
+  elif [ "$CODEMIT_CTX_BASE" != "$1" ]; then
+    CTX_WHY="$ctx_py 가 없고 컨트롤러가 낸 값의 기준($(echo "$CODEMIT_CTX_BASE" | cut -c1-12))이 $(echo "$1" | cut -c1-12) 와 다르다"
+  elif [ "${CODEMIT_CTX_HEAD:-}" != "$ctx_head" ]; then
+    CTX_WHY="$ctx_py 가 없고 컨트롤러가 낸 값의 대상($(echo "${CODEMIT_CTX_HEAD:-없음}" | cut -c1-12))이 $(echo "$ctx_head" | cut -c1-12) 와 다르다"
+  else
+    CTX_CHANGED=${CODEMIT_CTX_CHANGED:-}; CTX_FROM="컨트롤러가 낸 값"
+    return 0
+  fi
+  return 1
+}
+
 # 직전 배포($PREVIOUS)의 compose 와 지금 것에서 풀러의 설정 해시가 다른가. 옛 파일은
 # 지금 파일과 같은 디렉터리에 잠깐 꺼내 둔다 — 상대 경로(`build.context: ..`)와 프로젝트
 # 이름이 같은 자리에서 풀려야 두 렌더가 비교된다. 무엇이든 실패하면 「바뀌었다」(참)다.
@@ -340,9 +376,10 @@ cmd_plan() {
     # 그 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로 중 `.dockerignore` 가 빼지 않는 것)를
     # 직전 배포와 지금 커밋에서 내어 다른 서비스만 바꿔 끼운다. 그래서 「이미지가 같다」와 「다시 띄우지
     # 않는다」가 한 기준이다 — 경로 패턴은 문맥 밖의 파일(e2e 스펙·playwright 설정)만 바뀐 커밋에도 그 앱을
-    # 다시 띄웠다(옛 staging 배포 #474). python3 가 없거나 해시를 내지 못하면 아래 경로 패턴으로 떨어진다.
-    if CTX_CHANGED=$(python3 scripts/ci/image_context.py changed "$PREVIOUS" HEAD 2>/dev/null); then
-      log "문맥 해시로 고른다 — 바뀐 서비스: $(echo $CTX_CHANGED)"
+    # 다시 띄웠다(옛 staging 배포 #474). 해시를 내지 못하면(`context_changed` — 이유 한 줄을 찍는다) 아래 경로
+    # 패턴으로 떨어진다.
+    if context_changed "$PREVIOUS" HEAD; then
+      log "문맥 해시로 고른다($CTX_FROM) — 바뀐 서비스: $(echo ${CTX_CHANGED:-없음})"
       for svc in $CTX_CHANGED; do
         case "$svc" in
           backend) BUILD_BACKEND=true ;;
@@ -355,6 +392,7 @@ cmd_plan() {
       done
     else
       log "문맥 해시를 내지 못했다 — 경로로 고른다."
+      log "  이유: $CTX_WHY"
       # 한 경로가 여러 서비스를 건드린다. 그 팬아웃이 이 스크립트의 전부다.
       if touched '^(backend/|docker/backend\.Dockerfile$)'; then
         BUILD_BACKEND=true
@@ -1143,7 +1181,8 @@ cmd_e2e_digest() {
           # 답하고 0 으로 끝난다. `plan` 에는 그것이 맞는 답(모르면 바꿔 끼운다)이라 `changed` 는 그대로 둔다.
           if ! $GIT cat-file -e "${started}^{commit}" 2>/dev/null; then
             ctx_ok=false
-          elif ctx_changed=$(python3 scripts/ci/image_context.py changed "$started" HEAD 2>/dev/null); then
+          elif context_changed "$started" HEAD; then
+            ctx_changed=$CTX_CHANGED
             ctx_ok=true
           else
             ctx_ok=false

@@ -232,3 +232,80 @@ def test_a_file_in_the_image_context_replaces_only_that_app(frontend_page_change
     assert plan["BUILD_FRONTEND"] == "true"
     assert plan["BUILD_OPERATOR"] == "false"
     assert plan["BUILD_BACKEND"] == "false"
+
+
+# prod 에이전트에는 python3 가 없다(#849) — 그 자리에서는 컨트롤러가 「대상 확인」 단계에서 낸 문맥 해시의 답을
+# env 로 받아 쓴다. 기준(배포 표식)과 대상(HEAD)이 둘 다 맞을 때만이고, 못 쓰면 이유 한 줄을 찍고 경로로 떨어진다.
+NO_PYTHON = {"CODEMIT_DEPLOY_PYTHON": "python3-없는-에이전트"}
+
+
+def _controller(prepared: tuple[Path, dict[str, str]], changed: str, **override: str) -> tuple[Path, dict[str, str]]:
+    repo, env = prepared
+    answer = {
+        "CODEMIT_CTX_BASE": (repo / ".jenkins-prod-deployed").read_text(encoding="utf-8").strip(),
+        "CODEMIT_CTX_HEAD": _git(repo, "rev-parse", "HEAD"),
+        "CODEMIT_CTX_CHANGED": changed,
+    }
+    return repo, {**env, **NO_PYTHON, **answer, **override}
+
+
+def _plan_logged(prepared: tuple[Path, dict[str, str]]) -> tuple[dict[str, str], str]:
+    repo, env = prepared
+    result = subprocess.run(
+        ["sh", "deploy.sh", "prod", "plan"], cwd=repo, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    plan = (repo / ".jenkins-prod-plan").read_text(encoding="utf-8")
+    return dict(line.split("=", 1) for line in plan.splitlines() if "=" in line), result.stdout
+
+
+@pytest.fixture
+def no_python_controller_says_nothing_changed(tmp_path):
+    return _controller(_prepare(tmp_path, lambda c: c, touch=("frontend/playwright.config.ts",)), "")
+
+
+def test_without_python_the_controllers_answer_skips_every_unchanged_image(no_python_controller_says_nothing_changed):
+    plan, out = _plan_logged(no_python_controller_says_nothing_changed)
+
+    assert "문맥 해시로 고른다(컨트롤러가 낸 값) — 바뀐 서비스: 없음" in out
+    assert [k for k, v in plan.items() if k.startswith("BUILD_") and v == "true"] == []
+
+
+@pytest.fixture
+def no_python_controller_says_frontend(tmp_path):
+    return _controller(_prepare(tmp_path, lambda c: c, touch=("frontend/app/page.tsx",)), "frontend")
+
+
+def test_without_python_the_controllers_answer_replaces_only_the_changed_image(no_python_controller_says_frontend):
+    plan, out = _plan_logged(no_python_controller_says_frontend)
+
+    assert "바뀐 서비스: frontend" in out
+    assert plan["BUILD_FRONTEND"] == "true"
+    assert plan["BUILD_BACKEND"] == plan["BUILD_OPERATOR"] == plan["BUILD_CLASSROOM"] == "false"
+
+
+@pytest.fixture
+def controller_answer_from_another_base(tmp_path):
+    return _controller(
+        _prepare(tmp_path, lambda c: c, touch=("frontend/playwright.config.ts",)), "", CODEMIT_CTX_BASE="0" * 40
+    )
+
+
+def test_a_controller_answer_for_another_base_is_not_used_and_says_why(controller_answer_from_another_base):
+    plan, out = _plan_logged(controller_answer_from_another_base)
+
+    assert "문맥 해시를 내지 못했다 — 경로로 고른다." in out
+    assert "이유: python3-없는-에이전트 가 없고 컨트롤러가 낸 값의 기준(000000000000)이" in out
+    assert plan["BUILD_FRONTEND"] == "true"
+
+
+@pytest.fixture
+def no_python_no_answer(tmp_path):
+    repo, env = _prepare(tmp_path, lambda c: c, touch=("frontend/playwright.config.ts",))
+    return repo, {**env, **NO_PYTHON}
+
+
+def test_without_python_or_an_answer_the_reason_is_printed(no_python_no_answer):
+    _, out = _plan_logged(no_python_no_answer)
+
+    assert "이유: python3-없는-에이전트 가 없고 컨트롤러가 넘긴 값(CODEMIT_CTX_BASE)도 없다" in out
