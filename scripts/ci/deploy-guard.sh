@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 프론트 배포 부팅 가드(FE-13, #38) — 방금 올린 이미지가 설정 없이는 죽고, 완전한 설정으로는 뜨는지 본다.
-# prod(arm64) 이미지는 열차의 macos 단계가(#838), staging(amd64) 이미지는 sub 가(열차 sub 단계·Jenkinsfile
-# 「부팅 가드」, `CODEMIT_GUARD_ARCH=amd64`) 이 스크립트로 본다.
+# prod(arm64) 이미지는 열차의 macos 단계(#838)와 배포 잡 `Jenkinsfile` 의 「이미지」 단계(macos, #840)가,
+# staging(amd64) 이미지는 열차의 sub 단계가(`CODEMIT_GUARD_ARCH=amd64`) 이 스크립트로 본다.
 #
 #   [CODEMIT_GUARD_ARCH=arm64|amd64] scripts/ci/deploy-guard.sh <frontend|operator|classroom>
 #
