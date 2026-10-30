@@ -131,14 +131,37 @@ pipeline {
                 | awk '$2 == "refs/heads/production" { print $1 }') || base=""
               if [ -n "$base" ] && git -c safe.directory="$PWD" cat-file -e "${base}^{commit}" 2>/dev/null; then
                 echo "문서만 판단의 기준: production ${base}" >&2
+                echo "$base" > .jenkins-production-base
                 bash scripts/ci/changed.sh "$base"
               else
+                rm -f .jenkins-production-base
                 echo "production 을 못 읽었다(${base:-없음}) — 전부 돈다" >&2
                 echo TESTS=1
               fi
             ''').trim()
           }
           env.DOCS_ONLY = (changed == 'TESTS=0') ? 'true' : 'false'
+          // **문맥 해시는 여기서 낸다**(#849) — prod 에이전트(`jenkins-desktop-agent`)에는 python3 가 없어
+          // `deploy.sh plan` 이 매번 경로 비교로 떨어졌다. 같은 기준(`production` = 직전 성공 배포)으로 낸 답을
+          // env 로 넘기면 `deploy.sh` 의 `context_changed` 가 배포 표식·대상 커밋이 둘 다 같을 때만 쓴다.
+          def ctx = sh(returnStdout: true, script: '''
+            base=$(cat .jenkins-production-base 2>/dev/null) || base=""
+            if [ -z "$base" ]; then echo "FAIL production 을 못 읽었다"; exit 0; fi
+            if out=$(python3 scripts/ci/image_context.py changed "$base" HEAD 2>&1); then
+              echo "OK $base" $out
+            else
+              echo "FAIL $(printf '%s\\n' "$out" | tail -n 1)"
+            fi
+          ''').trim()
+          if (ctx.startsWith('OK ')) {
+            def parts = ctx.split(' ', 3)
+            env.CODEMIT_CTX_BASE = parts[1]
+            env.CODEMIT_CTX_HEAD = env.DEPLOY_SHA
+            env.CODEMIT_CTX_CHANGED = parts.length > 2 ? parts[2] : ''
+            echo "문맥 해시(production ${parts[1].take(12)} → 이 커밋) — 바뀐 서비스: ${env.CODEMIT_CTX_CHANGED ?: '없음'}"
+          } else {
+            echo "문맥 해시를 컨트롤러에서 내지 못했다 — ${ctx.substring(5)}"
+          }
           if (env.DOCS_ONLY == 'true') {
             echo '문서만 바뀌었다 — 이미지·가드·배포를 건너뛴다.'
             currentBuild.description += ' 문서만'

@@ -209,7 +209,10 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   견준다, #729·#738) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
   아무것도 다시 띄우지 않는다(예전의 경로 패턴은 `frontend/playwright.config.ts` 주석 하나에
-  frontend 를 다시 띄웠다, #474). 해시를 내지 못하면(호스트에 python3 가 없다 등) 경로 패턴으로 떨어진다. compose
+  frontend 를 다시 띄웠다, #474). **prod 에이전트(`jenkins-desktop-agent`)에는 python3 가 없다**(#849) — 그래서 컨트롤러가 「대상 확인」
+  단계에서 같은 명령을 `production` 기준으로 돌려 `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·`CODEMIT_CTX_CHANGED` 로
+  넘기고, `plan` 은 그 기준·대상이 배포 표식·HEAD 와 둘 다 같을 때만 쓴다(콘솔 「문맥 해시로 고른다(컨트롤러가
+  낸 값)」). 해시를 내지 못하면 「이유:」 한 줄을 찍고 경로 패턴으로 떨어진다. compose
   파일·없는 컨테이너·앱 실행 env 의 규칙은 그대로다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
   새 경로를 `COPY` 하는데 표에 없으면 빨갛다. 빠뜨리면 그 경로를 고친 커밋이 옛 이미지로 배포된다.
