@@ -1,4 +1,4 @@
-"""공모전 제품 스위치 (#271, ADR-0037) — staging 에서 공모전 표면을 내린다.
+"""공모전 제품 스위치 (#271, ADR-0037) — 배포에서 공모전 표면을 내린다.
 
 좋은 테스트는 스위치의 구현(설정 값을 읽었는가)이 아니라 결과(꺼진 상태에서 공모전을
 개최할 수 있는가)를 본다 — `CLAUDE.md` "HTTP가 유일한 시임이다". 이 파일은 세 가지를
@@ -75,7 +75,7 @@ def landing_type(db):
 @pytest.fixture
 def published_contest(db, category, landing_type):
     """이미 존재하는 공모전 — 이 티켓은 데이터를 지우지 않으므로 스위치가 꺼져도
-    이런 행이 staging 에 그대로 남아 있는 상태를 흉내낸다."""
+    이런 행이 배포 DB 에 그대로 남아 있는 상태를 흉내낸다."""
 
     from accounts.models import SponsorProfile
     from django.contrib.auth import get_user_model

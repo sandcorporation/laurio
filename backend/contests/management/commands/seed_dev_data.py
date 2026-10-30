@@ -9,7 +9,7 @@ compose를 새로 띄우면 그 목록이 전부 비어 있어 아무것도 진�
 이 커맨드는 멱등하다(get_or_create) — 몇 번을 다시 돌려도 중복이 생기지 않고,
 운영자가 admin에서 이미 채워놓은 값이 있어도 건드리지 않는다. dev compose가
 매 기동마다 migrate 다음 단계로 이 커맨드를 부른다(docker/compose.dev.yaml).
-staging/prod compose는 부르지 않는다 — 실제 카테고리·요구형태 확정은 TBD고
+prod compose는 부르지 않는다 — 실제 카테고리·요구형태 확정은 TBD고
 (REQUEST.md), 운영자가 admin에서 직접 채운다.
 
 **원래 `core`에 있었다(#465 전까지).** 심는 것이 Category·DeliverableType

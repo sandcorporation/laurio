@@ -89,7 +89,7 @@ def test_seed_e2e_operator_is_idempotent_for_an_operator_it_already_made():
 
 @pytest.mark.django_db
 def test_seed_e2e_operator_refuses_to_run_in_a_deployed_environment():
-    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="staging"):
+    with override_settings(IS_DEPLOYED_ENVIRONMENT=True, CODEMIT_DEPLOYMENT_TARGET="production"):
         with pytest.raises(CommandError):
             call_command("seed_e2e_operator", username="seed-e2e-op-deployed-guard")
 

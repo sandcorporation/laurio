@@ -1,4 +1,4 @@
-"""S3 호환 API(dev=MinIO, staging/prod=S3·OCI) 스토리지 어댑터.
+"""S3 호환 API(dev=MinIO, prod=S3·OCI) 스토리지 어댑터.
 
 ADR-0005: 소스가 사는 버킷은 영구히 private이다. 이 클래스는 put_object_acl·
 copy_object 같이 공개 전환에 쓰일 수 있는 호출을 의도적으로 두지 않는다.
@@ -74,7 +74,7 @@ class S3StorageAdapter:
         # 서버 프로세스 자신이 스토리지에 붙는 self._client와 호스트가 다를 수
         # 있다(FE-09, #34: dev 컨테이너 내부 DNS "minio:9000"은 브라우저가 못
         # 푼다). STORAGE_PUBLIC_ENDPOINT_URL이 STORAGE_ENDPOINT_URL과 같으면
-        # (staging/prod처럼) lru_cache가 같은 인스턴스를 돌려준다.
+        # (prod처럼) lru_cache가 같은 인스턴스를 돌려준다.
         self._public_client = _build_client(
             settings.STORAGE_PUBLIC_ENDPOINT_URL,
             settings.STORAGE_ACCESS_KEY,

@@ -1,7 +1,7 @@
 """배포 compose 의 backend 가 쓰는 gunicorn 설정(2026-09-21, 워커 종류는 #725).
 
-prod·staging·PR CI 셋이 모두 `-c config/gunicorn.conf.py` 로 이 파일을 읽는다.
-바인드·워커 수는 compose 의 명령줄에 둔다(곳마다 다르다 — prod·CI 4, staging 3).
+prod·PR CI 둘이 모두 `-c config/gunicorn.conf.py` 로 이 파일을 읽는다.
+바인드·워커 수는 compose 의 명령줄에 둔다(prod·CI 4).
 워커가 **어떻게** 도는지는 여기 하나에 둔다 — 설정이 두 곳으로 갈리지 않게.
 
 **gthread 워커(#725).** 예전 sync 워커는 연결 하나를 받으면 요청 머리가 올 때까지 그
@@ -38,7 +38,7 @@ def child_exit(server, worker):
     """죽은 워커의 지표 파일을 정리한다. `core/metrics.py` 가 워커마다 값을
     `PROMETHEUS_MULTIPROC_DIR` 에 파일로 쓰고 긁을 때 합산하는데, 워커가 재시작되면
     죽은 워커의 게이지 값이 남아 합산을 오염시킨다. prometheus_client 문서가 권하는
-    대로 여기서 표시한다. 그 디렉터리가 없는 배포(staging)에서는 하는 일이 없다."""
+    대로 여기서 표시한다. 그 디렉터리가 없는 곳(PR CI)에서는 하는 일이 없다."""
     if not os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
         return
     from prometheus_client import multiprocess

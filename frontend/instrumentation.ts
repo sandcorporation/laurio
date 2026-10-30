@@ -1,7 +1,7 @@
 // 부팅 시점 설정 가드 (ADR-0016 — 코드리뷰 지적 수정).
 //
 // backend/config/settings.py의 IS_DEPLOYED_ENVIRONMENT 가드와 같은 원칙을
-// 프론트엔드에도 세운다: 배포 환경(staging/production)에서 필수 설정이
+// 프론트엔드에도 세운다: 배포 환경(production)에서 필수 설정이
 // 비어 있으면 첫 요청을 받기 전에 부팅 자체를 거부한다 — "설정이 비어 있는
 // 채로 조용히 뜬다"는 실패 모드를 애초에 없앤다.
 //
@@ -20,10 +20,9 @@
 // 그대로 죽는다 — backend의 `${VAR:?...}` compose 가드, JWT_SIGNING_KEY
 // 부팅 가드와 같은 "설정이 없으면 뜨지 않는다" 규율을 그대로 반복한다.
 //
-// docker/staging.env.example, docker/prod.env.example에 CODEMIT_WEB_ORIGIN
-// 항목을 함께 추가해뒀다 — FE-13(#38)이 compose.staging.yaml/compose.prod.yaml에
-// frontend 서비스를 붙이며 CODEMIT_DEPLOYMENT_TARGET을 주입하는 순간부터 이
-// 가드가 즉시 작동한다.
+// docker/prod.env.example에 CODEMIT_WEB_ORIGIN 항목이 있다 — compose.prod.yaml이
+// frontend 서비스에 CODEMIT_DEPLOYMENT_TARGET=production을 주입하므로 이 가드가
+// 배포마다 작동한다.
 //
 // FE-13(#38) 추가 — CODEMIT_API_BASE_URL도 같은 이유로 여기 합류한다.
 // lib/api/client.ts·lib/auth/backend.ts·app/healthz/route.ts 셋 다
@@ -39,6 +38,7 @@
 // 여기 배열에 추가한다.
 import * as Sentry from "@sentry/nextjs";
 
+import { invalidDeploymentTarget, isDeployedEnvironment } from "@/lib/auth/cookies";
 import { buildSentryOptions } from "@/lib/observability/sentry-options";
 
 const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }> = [
@@ -83,7 +83,7 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
     name: "KAKAO_REDIRECT_URI",
     reason:
       "카카오 콘솔에 등록한 값과 한 글자라도 다르면 카카오가 code→token 교환을 " +
-      "거절한다(docker/staging.env.example 참고) — 비어 있으면 그 사고를 배포 " +
+      "거절한다(docker/prod.env.example 참고) — 비어 있으면 그 사고를 배포 " +
       "시점에 막는다.",
   },
   // 토스 결제창 브라우저 SDK의 클라이언트 키(#112 lib/payments/toss.ts, #115).
@@ -103,8 +103,8 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
       "(lib/payments/toss.ts의 getTossClientKey) — 배포 환경은 PG 어댑터가 " +
       "언제나 실물(TossPGAdapter)이라 위젯을 반드시 거치는데, 이 값이 " +
       "비어 있으면 사용자가 결제하기를 누른 순간에야 실패가 드러난다. " +
-      "서버의 docker/.env.staging·.env.prod 에 CODEMIT_PUBLIC_TOSS_CLIENT_KEY 를 " +
-      "채우고 컨테이너를 다시 띄운다(docker/staging.env.example 참고).",
+      "서버의 docker/.env.prod 에 TOSS_LIVE_CLIENT_KEY 를 채우고 컨테이너를 다시 " +
+      "띄운다(docker/prod.env.example 참고).",
   },
   // 세션 쿠키의 domain 속성(ADR-0038, #273) — lib/auth/cookies.ts가 이 값이
   // 비어 있으면 domain을 아예 주지 않아 dev와 똑같이 호스트 전용 쿠키로
@@ -139,8 +139,14 @@ export async function register(): Promise<void> {
   startSentry();
 
   const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
-  const isDeployed = target === "staging" || target === "production";
-  if (!isDeployed) return;
+  // 알 수 없는 배포 대상(없앤 staging 포함)은 아래 필수 설정 가드보다 먼저 거부한다 —
+  // 그대로 두면 development 로 흘러 이 가드 전체가 꺼진 채 뜬다.
+  const invalid = invalidDeploymentTarget(target);
+  if (invalid) {
+    console.error(invalid);
+    process.exit(1);
+  }
+  if (!isDeployedEnvironment()) return;
 
   const missing = REQUIRED_IN_DEPLOYED_ENVIRONMENTS.filter(({ name }) => !process.env[name]);
   if (missing.length === 0) return;
@@ -149,7 +155,7 @@ export async function register(): Promise<void> {
   const message = `CODEMIT_DEPLOYMENT_TARGET=${target} 인데 다음 필수 설정이 비어 있다:\n${detail}`;
 
   // FE-13(#38) 발견: `throw` 만으로는 부팅이 실패하지 않는다 — standalone
-  // 산출물의 `node server.js`(compose.staging/prod.yaml이 실제로 도는 그 실행
+  // 산출물의 `node server.js`(compose.prod.yaml이 실제로 도는 그 실행
   // 파일)로 직접 재현해 확인했다. register()의 에러는 Next가 "unhandledRejection"
   // 으로 로그만 찍고 삼켜, HTTP 서버는 계속 듣고 있다가 모든 요청에 이유 없는
   // 500을 낸다 — 컨테이너는 Up 상태로 남고 `restart: unless-stopped`도 재시작할

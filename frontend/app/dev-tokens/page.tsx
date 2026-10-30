@@ -19,7 +19,7 @@ import { isDeployedEnvironment } from "@/lib/auth/cookies";
 //
 // **배포 환경에서는 404 다**(#93 코드리뷰). 미들웨어(middleware.ts) 매처는
 // `/console/:path*` 뿐이라 이 경로는 그 가드 밖이고, robots 도 이 경로를 막지
-// 않는다 — 게이트 없이 두면 staging/production 호스트에 주인 없는 진단 화면이
+// 않는다 — 게이트 없이 두면 production 호스트에 주인 없는 진단 화면이
 // 그대로 200 으로 뜬다. 시크릿이 새는 것은 아니지만("아무 의미도 없는 값 넷"),
 // 운영 호스트에 목적을 알 수 없는 페이지가 살아 있는 것 자체가 사고다.
 // `lib/auth/cookies.ts` 의 `isDeployedEnvironment()` 를 그대로 재사용한다 —

@@ -85,7 +85,7 @@ def hard_delete_demo_seed_scores() -> int:
     `seed_demo_contests` 하나뿐이다) 로 고정되고, 호출부가 그 범위를 넓힐 길이 없다.
     표지가 없는 Score 는 제목·소유자가 무엇이든 이 함수의 집합에 들어오지 않는다.
 
-    **staging 에서는 돈다, production 에서는 거부한다.** 데모 시드 자체가 production 을
+    **dev 에서는 돈다, production 에서는 거부한다.** 데모 시드 자체가 production 을
     거부하므로(`seed_demo_contests.handle`) 이 함수가 production 에서 불릴 정상 경로는
     없지만, 호출부의 규율에 맡기지 않는다 — #240 과 ADR-0033 이 남긴 교훈이 「독스트링은
     뚫린다」였다. `hard_delete_e2e_fixture_rows` 와 같은 모양으로 함수 자신이 거부한다.

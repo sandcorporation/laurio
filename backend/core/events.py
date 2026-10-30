@@ -19,7 +19,7 @@ RedisEventBus`) 둘이고, `EVENT_BUS_ADAPTER_MODE` 설정이 고른다.
 **배포 환경의 부팅 가드가 있다**(#380) — 다른 `*_ADAPTER_MODE`(#83)와 같은
 원칙으로 `IS_DEPLOYED_ENVIRONMENT`에서 fake 바인딩을 거부한다
 (`config/settings.py`)와 dotted path가 가리키는 값이 깨졌을 때를 잡는
-`core.checks.check_event_bus_adapter_mode`가 함께 선다. `.env.staging`/
+`core.checks.check_event_bus_adapter_mode`가 함께 선다. 서버의
 `.env.prod`가 `core.events_redis.RedisEventBus`를 채우는 것과 같은 커밋에서
 더해졌다.
 """
@@ -108,7 +108,7 @@ class FakeEventBus:
     _queues: dict[int, list[Event]] = {}
 
     #: 받는 사람마다 쌓아 두는 상한 — 배포 환경이 버스 값을 모르는 동안(#380 전)
-    #: staging 도 이 fake 로 뜨는데, 구독자가 없는 gunicorn·celery 프로세스에서는
+    #: 옛 staging 도 이 fake 로 떴는데, 구독자가 없는 gunicorn·celery 프로세스에서는
     #: 아무도 비우지 않아 신호가 영원히 쌓인다. 오래된 것부터 버린다.
     MAX_QUEUED_PER_RECIPIENT = 100
 

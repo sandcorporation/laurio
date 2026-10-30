@@ -12,22 +12,36 @@ export interface TokenPair {
   refresh: string;
 }
 
-// staging/production만 Secure를 건다(ADR-0016 인수조건 "Secure(배포 환경)").
+// production만 Secure를 건다(ADR-0016 인수조건 "Secure(배포 환경)").
 // dev는 컨테이너 간 http로만 통신하므로 Secure를 걸면 쿠키가 아예 안 실린다.
 // backend/config/settings.py의 CODEMIT_DEPLOYMENT_TARGET과 같은 이름·같은 값
-// 규약을 따른다 — ticket FE-13(#38)이 frontend 서비스를 compose.staging/prod.yaml에
-// 추가할 때 이 값만 주입하면 된다.
+// 규약을 따른다 — `docker/compose.prod.yaml` 이 frontend 서비스에 이 값을 주입한다.
 // #93 코드리뷰 — /dev-tokens(진단 화면, app/dev-tokens/page.tsx)가 같은 판정을
 // 재사용한다. 배포 환경인지 아닌지는 여기 이름·값 규약이 유일한 출처여야
 // 한다(로직이 두 곳에서 어긋나면 안 된다는 원칙 그대로).
 export function isDeployedEnvironment(): boolean {
-  const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
-  return target === "staging" || target === "production";
+  return process.env.CODEMIT_DEPLOYMENT_TARGET === "production";
+}
+
+// 받는 배포 대상은 backend/config/settings.py 의 `_VALID_DEPLOYMENT_TARGETS` 와 같은 두
+// 값이고, 비어 있으면 development 다. staging 은 2026-10-30(#836)에 없앴다 — 그 값을
+// 포함한 다른 값은 부팅 가드(instrumentation.ts)가 이 함수로 거부한다. 오타 하나가
+// 조용히 development 로 흘러 Secure 쿠키와 필수 설정 가드가 꺼지면 안 된다.
+const DEPLOYMENT_TARGETS = ["development", "production"];
+
+export function invalidDeploymentTarget(
+  target: string | undefined = process.env.CODEMIT_DEPLOYMENT_TARGET,
+): string | null {
+  if (!target || DEPLOYMENT_TARGETS.includes(target)) return null;
+  return (
+    `CODEMIT_DEPLOYMENT_TARGET=${target} 는 유효하지 않다. ${DEPLOYMENT_TARGETS.join("·")} 중 ` +
+    "하나여야 한다 — 다른 값이 development 로 흐르면 배포 가드가 전부 꺼진다."
+  );
 }
 
 // 부모 도메인(.codemit.…)으로 올려야 강의실 등 형제 서브도메인이 같은 로그인을
 // 공유한다(ADR-0038). dev(localhost)는 이 값을 비워 둔다 — domain을 주면 쿠키가
-// 아예 안 붙기 때문이다. staging/prod는 compose 파일이 이 값을 주입한다.
+// 아예 안 붙기 때문이다. prod는 compose 파일이 이 값을 주입한다.
 //
 // **테마 쿠키(#398, `app/api/theme/route.ts`)도 이 함수를 그대로 쓴다** — 로그인
 // 쿠키와 다른 도메인 규칙을 새로 만들면 두 쿠키가 다른 서브도메인 집합에만

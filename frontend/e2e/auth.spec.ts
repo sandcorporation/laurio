@@ -103,7 +103,7 @@ test.describe("Origin 검증 — CSRF 방어의 성립 조건 (ADR-0016)", () =>
 
 test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE-13 #38)", () => {
   // lib/auth/cookies.ts의 isDeployedEnvironment()는 CODEMIT_DEPLOYMENT_TARGET이
-  // "staging"|"production"일 때만 Secure를 켠다. 이 dev 스택(compose.dev.yaml)은
+  // "production"일 때만 Secure를 켠다. 이 dev 스택(compose.dev.yaml)은
   // 그 값을 절대 설정하지 않으므로 — 컨테이너 간 http로만 통신하고 Secure를 걸면
   // 쿠키가 아예 안 실린다 — 여기서는 항상 꺼져 있어야 한다.
   //
@@ -128,7 +128,7 @@ test.describe("쿠키 Secure — 배포 여부에 따라 갈린다 (ADR-0016, FE
   // 부모 도메인 쿠키(ADR-0038, #273)도 같은 이유로 dev에서는 꺼져 있어야 한다 —
   // CODEMIT_SESSION_COOKIE_DOMAIN을 dev compose는 절대 설정하지 않으므로(로컬은
   // 서브도메인이 아니라 포트로 앱을 가른다), domain 속성이 아예 없어야 한다.
-  // "staging/prod에서는 domain이 붙는다"는 반대쪽 절반은 위 Secure와 같은 이유로
+  // "prod에서는 domain이 붙는다"는 반대쪽 절반은 위 Secure와 같은 이유로
   // 여기서 증명할 수 없다 — lib/auth/cookies.test.ts(vitest)가 그 절반을 덮는다.
   test("dev(CODEMIT_SESSION_COOKIE_DOMAIN 미설정)에서는 쿠키에 domain이 붙지 않는다", async ({
     request,

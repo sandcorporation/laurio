@@ -163,17 +163,14 @@ case "$app" in
   frontend)
     origin_var=CODEMIT_WEB_ORIGIN
     origin=https://codemit.example
-    staging_origin=https://staging.codemit.example
     ;;
   operator)
     origin_var=CODEMIT_OPERATOR_ORIGIN
     origin=https://operator.codemit.example
-    staging_origin=https://operator.staging.codemit.example
     ;;
   classroom)
     origin_var=CODEMIT_CLASSROOM_ORIGIN
     origin=https://classroom.codemit.example
-    staging_origin=https://classroom.staging.codemit.example
     ;;
 esac
 
@@ -182,10 +179,18 @@ must_die "$origin_var/CODEMIT_API_BASE_URL" -e CODEMIT_DEPLOYMENT_TARGET=product
 must_say "$origin_var" CODEMIT_API_BASE_URL
 if [ "$app" = classroom ]; then must_say CODEMIT_SESSION_COOKIE_DOMAIN; fi
 
-step "staging 에서 필수 값 하나만 빠져도 죽는다"
-must_die CODEMIT_API_BASE_URL -e CODEMIT_DEPLOYMENT_TARGET=staging -e "$origin_var=$staging_origin"
+step "production 에서 필수 값 하나만 빠져도 죽는다"
+must_die CODEMIT_API_BASE_URL -e CODEMIT_DEPLOYMENT_TARGET=production -e "$origin_var=$origin"
 must_say CODEMIT_API_BASE_URL
 if [ "$app" = classroom ]; then must_say CODEMIT_SESSION_COOKIE_DOMAIN; fi
+
+# staging 은 2026-10-30(#836)에 없앤 배포 대상이다. 필수 값을 다 채워도 그 값이면 죽어야
+# 한다 — 조용히 development 로 흐르면 위 가드가 전부 꺼진 채 뜬다(#844).
+step "알 수 없는 배포 대상(staging)이면 필수 값이 다 있어도 죽는다"
+must_die "알 수 없는 배포 대상" -e CODEMIT_DEPLOYMENT_TARGET=staging \
+  -e "$origin_var=$origin" -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
+  -e CODEMIT_SESSION_COOKIE_DOMAIN=.codemit.example
+must_say CODEMIT_DEPLOYMENT_TARGET=staging
 
 if [ "$app" = frontend ]; then
   step "production 에서 카카오 자격증명이 없으면 죽는다"

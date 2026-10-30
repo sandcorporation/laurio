@@ -10,14 +10,29 @@ import type { NextResponse } from "next/server";
 // 조용하다.
 export const SESSION_COOKIE_NAME = "codemit_operator_session";
 
-// staging/production만 Secure를 건다 — frontend/lib/auth/cookies.ts와 같은 이유
+// production만 Secure를 건다 — frontend/lib/auth/cookies.ts와 같은 이유
 // (dev는 컨테이너 간 http로만 통신하므로 Secure를 걸면 쿠키가 아예 안 실린다).
 //
 // **테마 쿠키(#422, `app/api/theme/route.ts`)도 이 함수를 그대로 쓴다** — 공개
 // 앱·강의실과 같은 원칙(frontend/lib/auth/cookies.ts 상단 주석)이다.
 export function isDeployedEnvironment(): boolean {
-  const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
-  return target === "staging" || target === "production";
+  return process.env.CODEMIT_DEPLOYMENT_TARGET === "production";
+}
+
+// 받는 배포 대상은 backend/config/settings.py 의 `_VALID_DEPLOYMENT_TARGETS` 와 같은 두
+// 값이고, 비어 있으면 development 다. staging 은 2026-10-30(#836)에 없앴다 — 그 값을
+// 포함한 다른 값은 부팅 가드(instrumentation.ts)가 이 함수로 거부한다. 오타 하나가
+// 조용히 development 로 흘러 Secure 쿠키와 필수 설정 가드가 꺼지면 안 된다.
+const DEPLOYMENT_TARGETS = ["development", "production"];
+
+export function invalidDeploymentTarget(
+  target: string | undefined = process.env.CODEMIT_DEPLOYMENT_TARGET,
+): string | null {
+  if (!target || DEPLOYMENT_TARGETS.includes(target)) return null;
+  return (
+    `CODEMIT_DEPLOYMENT_TARGET=${target} 는 유효하지 않다. ${DEPLOYMENT_TARGETS.join("·")} 중 ` +
+    "하나여야 한다 — 다른 값이 development 로 흐르면 배포 가드가 전부 꺼진다."
+  );
 }
 
 // **운영자 자신의 세션 쿠키는 이 도메인을 쓰지 않는다** — Django 세션은 이

@@ -26,8 +26,23 @@ export interface TokenPair {
 }
 
 export function isDeployedEnvironment(): boolean {
-  const target = process.env.CODEMIT_DEPLOYMENT_TARGET;
-  return target === "staging" || target === "production";
+  return process.env.CODEMIT_DEPLOYMENT_TARGET === "production";
+}
+
+// 받는 배포 대상은 backend/config/settings.py 의 `_VALID_DEPLOYMENT_TARGETS` 와 같은 두
+// 값이고, 비어 있으면 development 다. staging 은 2026-10-30(#836)에 없앴다 — 그 값을
+// 포함한 다른 값은 부팅 가드(instrumentation.ts)가 이 함수로 거부한다. 오타 하나가
+// 조용히 development 로 흘러 Secure 쿠키와 필수 설정 가드가 꺼지면 안 된다.
+const DEPLOYMENT_TARGETS = ["development", "production"];
+
+export function invalidDeploymentTarget(
+  target: string | undefined = process.env.CODEMIT_DEPLOYMENT_TARGET,
+): string | null {
+  if (!target || DEPLOYMENT_TARGETS.includes(target)) return null;
+  return (
+    `CODEMIT_DEPLOYMENT_TARGET=${target} 는 유효하지 않다. ${DEPLOYMENT_TARGETS.join("·")} 중 ` +
+    "하나여야 한다 — 다른 값이 development 로 흐르면 배포 가드가 전부 꺼진다."
+  );
 }
 
 // dev는 이 값을 비워 둔다 — domain을 주면 localhost 쿠키가 아예 안 붙는다

@@ -84,10 +84,12 @@ ADR-0048이 amend). 스위치가 둘이다:
 `contests.search_opensearch.OpenSearchContestSearch`)이
 배포 환경에서 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다 — 컨테이너가 뜬 채로 첫 요청에서야 죽는 것보다 정직하게 못 뜨는 편이다.
 
-`config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(production)가 fake 어댑터
-바인딩을 부팅 시점에 거부하고, `IS_PRODUCTION_DEPLOYMENT`(production만)가 추가로
-`manage.py check --deploy`가 요구하는 HSTS·SSL 리다이렉트·secure 쿠키·강한
-`SECRET_KEY`를 강제한다. 운영자는 `POST /api/internal/tick`을 수동으로 쏠 수 있다(tick 은 스캔 등록부 `core/scans.py` 의 스캔
+`CODEMIT_DEPLOYMENT_TARGET` 이 받는 값은 `development`(미설정)와 `production` 둘뿐이다 — 그
+밖의 값(옛 `staging` 포함)은 백엔드(`config/settings.py`)와 세 앱의 `instrumentation.ts` 가
+부팅을 거부한다(#844). `config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT` 가 fake 어댑터
+바인딩을 부팅 시점에 거부하고, `IS_PRODUCTION_DEPLOYMENT` 가 `manage.py check --deploy`가
+요구하는 HSTS·SSL 리다이렉트·secure 쿠키·강한 `SECRET_KEY`를 강제한다 — 둘 다 production 에서만
+참이다(묻는 질문이 달라 이름을 둘로 둔다). 운영자는 `POST /api/internal/tick`을 수동으로 쏠 수 있다(tick 은 스캔 등록부 `core/scans.py` 의 스캔
 **전부**를 등록 순서로 한 바퀴 돈다 — 전이·채점·환불·배분·지급·알림. 스캔 하나만 돌리려면
 `POST /api/internal/scans/{name}`, #137/#140) — 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면
 부팅 자체가 거부된다.

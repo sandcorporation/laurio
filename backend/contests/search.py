@@ -7,7 +7,7 @@ OpenSearchContestSearch`, 접속 주소는 `OPENSEARCH_URL`, #450이 만든다)�
 색인 태스크(`contests.tasks.index_contest`)·매일 재색인 스캔(`contest-search-
 reindex`)은 이 파일이 아니라 각각 `contests/search_opensearch.py`·
 `contests/tasks.py`·`contests/apps.py`에 산다. 배포 부팅 가드는 #451이 켠다
-(설정 이름은 코디네이터가 2026-09-17에 고정했다 — staging·prod `.env`가 이미 이
+(설정 이름은 코디네이터가 2026-09-17에 고정했다 — prod `.env`가 이미 이
 이름을 쓴다, `config/settings.py` 주석 참고).
 
 **물러나기(#450, 부모 스펙 "실물 어댑터가 연결 실패·시간 초과로 실패하면...")도

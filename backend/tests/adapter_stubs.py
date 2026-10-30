@@ -1,7 +1,7 @@
 """배포 부팅 가드 테스트 전용 stub 어댑터 (#83).
 
 실물 벤더 클래스(#85 PortOne, #87 Toss, #57 Seller 등록, #88 OpenAI)는 아직
-없다. 이 모듈은 "완전한 production/staging 환경이 부팅되는가"를 검증하는
+없다. 이 모듈은 "완전한 production 환경이 부팅되는가"를 검증하는
 테스트(`tests/test_deployment_config.py`)와 PR CI 의 `check --deploy` 단계
 (`scripts/ci/deploy-check.env`)가 dotted path로 가리킬, 각 Protocol을 구조적으로
 만족하는 최소 구현체를 담는다.

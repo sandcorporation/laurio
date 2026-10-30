@@ -48,9 +48,10 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
   본다. 호스트 지표는 세 호스트(oracle·sub·sub2)의 node-exporter, 컨테이너 재시작은 oracle
   의 cadvisor(**prod 만** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고 지워 재시작이
   정상이다).
-- **언제 울리나**(`prometheus/alerts.yml`, 7개): 응답 없음 2분 · sub 호스트 다운 2분 ·
-  루트 디스크 85%(경고)/95%(위험) · 가용 메모리 10% 미만 5분 · 스왑 90% 이상 · prod 컨테이너
-  15분에 3회 재시작. prod 는 `critical` 이다(예전에는 staging 이 `warning` 이었다).
+- **언제 울리나**(`prometheus/alerts.yml`, 12개): 응답 없음 2분 · sub 호스트 다운 2분 ·
+  루트 디스크 85%(경고)/95%(위험) · 가용 메모리 10% 미만 5분 · 스왑 90% 이상, 그리고 아래
+  「LLM 채점」의 `codemit-llm` 그룹 6개. `codemit-containers` 그룹(컨테이너 재시작)은 지금 규칙이
+  비어 있다. prod 는 `critical` 이다(예전에는 staging 이 `warning` 이었다).
 - **어디로**: Alertmanager 가 **빌드 알림과 같은 Discord 채널**로 보낸다(채널을 늘리면 안
   보는 채널이 생긴다). 웹훅은 `alertmanager/discord_webhook`(chmod 600)에만 있고 설정
   파일에는 없다 — 바꾸려면 그 파일 한 줄을 고친다(재시작 불필요, 보낼 때마다 읽는다).

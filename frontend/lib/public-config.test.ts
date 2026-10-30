@@ -71,7 +71,7 @@ describe("공개 설정은 실행 때 env 에서 온다 (#711)", () => {
   });
 
   // 방문 메트릭 스니펫(#785)은 서버가 그리는 `<script src>` 하나라 브라우저로 가는 목록(`PUBLIC_CONFIG_NAMES`)
-  // 밖이다 — env 가 비어 있으면(로컬·시험·CI·staging) 태그 자체가 없어야 한다.
+  // 밖이다 — env 가 비어 있으면(로컬·시험·CI) 태그 자체가 없어야 한다.
   it("방문 메트릭 스니펫 src 는 env 가 비어 있으면 null, 있으면 다듬은 값이다 (#785)", () => {
     expect(metricsSnippetSrc({})).toBeNull();
     expect(metricsSnippetSrc({ CODEMIT_PUBLIC_METRICS_SNIPPET_URL: "" })).toBeNull();

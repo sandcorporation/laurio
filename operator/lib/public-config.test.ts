@@ -32,9 +32,9 @@ describe("공개 설정은 실행 때 env 에서 온다 (#711)", () => {
 
   it("브라우저에서는 레이아웃이 넘긴 객체를 읽는다", () => {
     (globalThis as { window?: unknown }).window = {
-      __CODEMIT_PUBLIC__: { CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "staging" },
+      __CODEMIT_PUBLIC__: { CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "production" },
     };
-    expect(publicConfig()).toEqual({ CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "staging" });
+    expect(publicConfig()).toEqual({ CODEMIT_PUBLIC_SENTRY_ENVIRONMENT: "production" });
   });
 
   it("스크립트 본문은 값 안의 </script> 로 끊기지 않는다", () => {
