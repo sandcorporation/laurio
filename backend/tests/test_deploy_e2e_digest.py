@@ -124,15 +124,15 @@ def test_each_service_is_reported_and_the_run_stays_green(prod) -> None:
     assert f"ghcr.io/sandcorporation/codemit-backend:e2e-{tree}-arm64" in (state / "pulled").read_text()
 
 
-def test_staging_is_not_compared(prod) -> None:
+@pytest.mark.parametrize("target", ["staging", ""])
+def test_unknown_or_missing_target_is_refused(prod, target) -> None:
+    # staging 은 없어졌다(#842) — 대상은 필수이고 prod 만 받는다. 기본값이 prod 면 인자 없이 친 사람이 배포한다.
     repo, env, state, _ = prod
-    (repo / "docker/compose.staging.yaml").write_text("services: {}\n")
-    (repo / "docker/.env.staging").write_text("")
 
-    done = _run(repo, env, "staging")
+    done = _run(repo, env, target)
 
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert "대조하지 않는다" in done.stdout
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "prod" in done.stdout
     assert not (state / "pulled").exists()
 
 

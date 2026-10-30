@@ -1,6 +1,6 @@
 """prod 배포가 migrate 전에 DB 를 덤프하는지 — 진짜 `deploy.sh` 를 가짜 `docker` 로 돌린다(#839).
 
-staging 이 없어지면(우산 #836 §7) 마이그레이션이 데이터가 든 DB 위에서 처음 도는 자리가 prod
+staging 이 없어져(우산 #836 §7) 마이그레이션이 데이터가 든 DB 위에서 처음 도는 자리가 prod
 다. 그래서 적용할 마이그레이션이 있는 배포만 migrate 앞에서 `pg_dump` 를 한 번 뜬다. 판정은
 새 backend 이미지의 `migrate --plan` 이 하고, 덤프는 db 컨테이너의 pg_dump 를 표준출력으로 받는다.
 
@@ -125,10 +125,10 @@ def test_too_little_disk_stops_before_dumping(deploy):
     assert "여유" in result.stdout
 
 
-def test_staging_never_dumps(deploy):
+def test_staging_is_refused_before_anything_runs(deploy):
     _, run = deploy
     result, calls = run(target="staging", FAKE_PLAN=PENDING)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 2, result.stdout + result.stderr
     assert calls == ""
 
 

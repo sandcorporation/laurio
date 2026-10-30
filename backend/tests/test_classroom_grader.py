@@ -533,7 +533,7 @@ def test_stopping_lets_the_running_attempts_finish_and_picks_no_new_ones(
 # --- 배포 구성 -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("target", ["staging", "prod"])
+@pytest.mark.parametrize("target", ["prod"])
 def test_deployed_compose_runs_the_grader_and_no_scoring_worker(target):
     compose = yaml.safe_load(
         (REPO_ROOT / "docker" / f"compose.{target}.yaml").read_text(encoding="utf-8")

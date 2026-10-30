@@ -97,7 +97,7 @@ CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_CONTEST_PRODUCT_ENABLED", True)
 # 필요한 유료 개최·유료 심사기간 연장·환불·배분·지급·인수인계 스캔)만 가른다.
 # `core.contest_switch.paid_contest_product_enabled()`가 위 CONTEST_PRODUCT_ENABLED
 # 와 AND로 묶는다 — 공모전 스위치가 꺼지면 이 값과 무관하게 유료도 함께 꺼진다.
-# **기본값은 켜짐**이고, `docker/compose.staging.yaml`·`docker/compose.prod.yaml`
+# **기본값은 켜짐**이고, `docker/compose.prod.yaml`
 # 만 이 환경변수의 기본값을 false로 겹쳐 쓴다(dev·CI는 건드리지 않으므로 여전히
 # 켜진 채다 — 기존 유료 공모전 테스트가 계속 초록이어야 한다).
 PAID_CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_PAID_CONTEST_PRODUCT_ENABLED", True)
@@ -650,7 +650,7 @@ if IS_DEPLOYED_ENVIRONMENT and _is_fake_adapter_binding(SOCIAL_AUTH_MODE):
 # 바로 그 실패 모드다.
 #
 # redirect_uri는 카카오 콘솔에 등록한 값과 한 글자도 다르면 안 된다 — 다르면
-# 카카오가 code→token 교환 자체를 거절한다(docker/staging.env.example 참고).
+# 카카오가 code→token 교환 자체를 거절한다(docker/prod.env.example 참고).
 KAKAO_REST_API_KEY = _env("KAKAO_REST_API_KEY", "")
 KAKAO_SECRET_KEY = _env("KAKAO_SECRET_KEY", "")
 KAKAO_REDIRECT_URI = _env("KAKAO_REDIRECT_URI", "")
@@ -1092,7 +1092,7 @@ GITHUB_FAKE_REPO_FILES: dict = {}
 #
 # 강의실이 새로고침 없이 화면을 갱신하는 데 쓰는 실시간 신호(`core.events`).
 # 다른 `*_ADAPTER_MODE`와 같은 원칙으로 기본값은 항상 fake다. #380이 두 env
-# 예시 파일(`docker/staging.env.example`/`docker/prod.env.example`)에 실제
+# 예시 파일(`docker/prod.env.example`)에 실제
 # 값(`core.events_redis.RedisEventBus`)을 채우는 것과 같은 커밋에서 이 부팅
 # 가드를 더한다 — 그 전에 가드만 먼저 걸면 `.env.staging`이 아직 이 값을
 # 모르는 채로 다음 자동 배포가 부팅을 거부하며 죽는다(`core/events.py` 모듈

@@ -162,8 +162,7 @@ finish() {
 
 cd "$(dirname "$0")/.."
 REPO="sandcorporation/laurio"
-STAGING_ENV="/server/jenkins/workspace/codemit-deploy-staging/docker/.env.staging"   # sub 호스트
-PROD_ENV="/var/jenkins_home/workspace/codemit-deploy-prod/docker/.env.prod"       # oracle 호스트 — codemit-deploy-staging 의 prod 단계 customWorkspace(#779, 옛 잡 이름)
+PROD_ENV="/var/jenkins_home/workspace/codemit-deploy-prod/docker/.env.prod"       # oracle 호스트 — 옛 잡 이름 codemit-deploy-staging 의 customWorkspace(#779)
 # 다시 돌릴 때의 기본값 — 저장소 밖에 둔다(비밀값이 섞인다).
 ENV_FILE="${HOME}/.config/codemit-ghcr-wizard.env"
 mkdir -p "$(dirname "$ENV_FILE")"; touch "$ENV_FILE"; chmod 600 "$ENV_FILE"
@@ -180,22 +179,16 @@ banner "Codemit — ghcr 이미지 배포 준비 (사람 작업)"
 
 # ── 1 ─────────────────────────────────────────────────────────────────────
 stage "사전 확인"
-say "gh 권한과 두 서버 접속, env 파일 둘을 확인합니다."
+say "gh 권한과 prod 서버 접속, env 파일을 확인합니다."
 gh auth status >/dev/null 2>&1 || { warn "gh 로그인이 필요합니다: gh auth login"; exit 1; }
 [[ "$(gh api "repos/$REPO" --jq .permissions.admin)" == "true" ]] || { warn "$REPO 관리자 권한이 필요합니다"; exit 1; }
-printf 'sudo -n test -f %q && stat -c "%%a" %q\n' "$STAGING_ENV" "$STAGING_ENV" | on_sub | sed 's/^/  sub   .env.staging 권한: /' \
-  || { warn "sub 에 접속하지 못했거나 $STAGING_ENV 가 없습니다(sudo 필요)"; exit 1; }
 printf 'sudo -n test -f %q && sudo -n stat -c "%%a" %q\n' "$PROD_ENV" "$PROD_ENV" | on_oracle | sed 's/^/  oracle .env.prod 권한: /' \
   || { warn "oracle 에 접속하지 못했거나 $PROD_ENV 가 없습니다(sudo 필요)"; exit 1; }
-warn ".env.staging 은 비밀값 파일인데 누구나 읽을 수 있는(644) 상태였습니다(2026-09-17 확인)."
-if confirm "sub 의 .env.staging 권한을 600 으로 바꿀까요? (Jenkins 는 root 로 돌아 영향 없음)"; then
-  printf 'sudo chmod 600 %q && stat -c "  → %%a" %q\n' "$STAGING_ENV" "$STAGING_ENV" | on_sub
-fi
 pause "계속하려면 Enter"
 
 # ── 2 ─────────────────────────────────────────────────────────────────────
 stage "ghcr pull 토큰 발급"
-say "staging·prod 서버가 비공개 이미지를 받을 때 쓸 읽기 전용 토큰입니다."
+say "prod 서버가 비공개 이미지를 받을 때 쓸 읽기 전용 토큰입니다."
 say "ghcr 는 SSH 키로 로그인할 수 없고, classic PAT 가 필요합니다."
 open_url "https://github.com/settings/tokens/new?scopes=read:packages&description=codemit-ghcr-pull"
 step "Note: codemit-ghcr-pull (미리 채워져 있음)"
@@ -229,7 +222,7 @@ pause "계속하려면 Enter"
 
 # ── 4 ─────────────────────────────────────────────────────────────────────
 stage "ghcr push 토큰 → Jenkins 자격증명 ghcr-push-token"
-say "이미지는 Jenkins 잡 codemit/deploy 가 굽고 올립니다(#705 — macos 가 arm64, sub 가 amd64). 쓰기 토큰이 필요합니다."
+say "이미지는 Jenkins 잡 codemit/deploy 가 굽고 올립니다(#705 — macos 가 arm64). 쓰기 토큰이 필요합니다."
 open_url "https://github.com/settings/tokens/new?scopes=write:packages&description=codemit-ghcr-push"
 step "Select scopes: write:packages(read:packages 가 따라 붙습니다) → Generate token → 복사"
 step "Jenkins → Manage Jenkins → Credentials → (global) → Add Credentials"

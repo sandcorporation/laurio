@@ -12,8 +12,7 @@
 pub/sub 위에 산다 — Celery 브로커(DB 0)·Operator 세션(DB 1)과 같은 Redis
 인스턴스의 DB 2다.
 
-**staging·prod 배포에도 이 서비스가 있다**(#380). `docker/compose.staging.yaml`·
-`docker/compose.prod.yaml`이 각각 `events` 서비스를 backend·celery-worker·
+**prod 배포에도 이 서비스가 있다**(#380). `docker/compose.prod.yaml`이 `events` 서비스를 backend·celery-worker·
 celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스가 실제로
 쓰지 않는 값도 포함 — URLconf·settings.py가 backend와 완전히 같은 코드라서다)로
 띄운다. `EVENT_BUS_ADAPTER_MODE`가 fake로 남으면 다른 `*_ADAPTER_MODE`와 같은

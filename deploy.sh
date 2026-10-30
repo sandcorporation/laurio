@@ -1,10 +1,10 @@
 #!/bin/sh
-# staging / prod 배포 (#52).
+# prod 배포 (#52).
 #
-#   sh ./deploy.sh <staging|prod> [명령] [인자]
+#   sh ./deploy.sh prod [명령] [인자]   (대상은 필수다 — 인자 없이 치면 거절한다)
 #
 # **명령을 하나씩 부를 수 있다 — Jenkins 파이프라인이 단계마다 하나씩 부른다.**
-# `Jenkinsfile` 의 staging 배포 단계와 prod 배포 단계가 「preflight →
+# `Jenkinsfile` 의 prod 배포 단계가 「preflight →
 # 변경 계획 → 빌드(서비스별 병렬) → 교체 → 확인 → 배포 표식」을 각각 한 단계로
 # 보여주고, 각 단계의 본문은 여기 명령 한 줄이다. 예전에는 파이프라인이 이 파일을
 # 통째로 한 번 불러 Jenkins 화면에 「배포」 단계 하나만 보였고, 네 이미지의 빌드
@@ -29,9 +29,9 @@
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
 # **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `codemit/deploy` 잡의
-# 앞 단계가 커밋마다 여섯 이미지를 ghcr 에 올린다(scripts/ci/images.sh — amd64 는 sub, arm64 는
+# 앞 단계가 커밋마다 여섯 이미지를 ghcr 에 올린다(scripts/ci/images.sh — arm64 를
 # macos 가 굽고, 바뀌지 않은 서비스는 옛 이미지에 커밋 태그만 더한다, #705) — backend·
-# search·pgbouncer 와 세 앱 모두 `<sha>-amd64`(staging)·`<sha>-arm64`(prod) 다 — 앱도 환경을
+# search·pgbouncer 와 세 앱 모두 `<sha>-arm64` 다 — 앱도 환경을
 # 모르고 공개 값은 실행 env 로 받는다(#711, ADR-0062). compose 파일의 `image:` 가 그 이름을 가리키고, 태그의
 # <sha> 는 여기서 체크아웃한 커밋이다(`CODEMIT_IMAGE_TAG`). 그래서 배포 단계는 굽지 않고, prod 는
 # oracle 이 더 이상 굽지 않는다 — oracle 은 prod 서버라 빌드가 서비스 속도를 갉아먹었다.
@@ -44,7 +44,7 @@
 # 로그인은 scripts/ghcr-setup-wizard.sh 가 한 번 해 둔다. 토큰은 저장소에도 env 에도 없다.
 #
 # **논리는 여전히 이 파일에 산다.** 파이프라인에 논리를 두면 아무도 읽지 않는 두 번째
-# 사본이 되고, 실제로 그렇게 한 번 어긋나 배포가 통째로 실패했다(staging 빌드 #4:
+# 사본이 되고, 실제로 그렇게 한 번 어긋나 배포가 통째로 실패했다(옛 staging 빌드 #4:
 # `cannot open ./deploy.sh`). 단계는 명령을 부르기만 한다.
 #
 # **바뀐 것만 바꿔 끼운다.** 이미지 태그가 커밋마다 달라지므로 계획 없이 `up` 하면
@@ -95,11 +95,12 @@
 
 set -eu
 
-TARGET="${1:-staging}"
+# 대상은 필수다 — 기본값을 prod 로 두면 인자 없이 친 사람이 prod 에 배포하게 된다.
+TARGET="${1:-}"
 case "$TARGET" in
-  staging) ;;
   prod|production) TARGET=prod ;;
-  *) echo "알 수 없는 대상: $TARGET (staging|prod)"; exit 2 ;;
+  "") echo "대상을 적어야 한다: sh ./deploy.sh prod [명령] [인자]"; exit 2 ;;
+  *) echo "알 수 없는 대상: $TARGET (prod)"; exit 2 ;;
 esac
 COMMAND="${2:-all}"
 ARG="${3:-}"
@@ -296,7 +297,7 @@ cmd_plan() {
   CHANGED_FILE=$(mktemp)
   trap 'rm -f "$CHANGED_FILE"' EXIT
 
-  # **이미 더 새 커밋이 배포돼 있으면 아무것도 하지 않는다.** staging 은 CI 가 커밋마다
+  # **이미 더 새 커밋이 배포돼 있으면 아무것도 하지 않는다.** CI 가 커밋마다
   # 이 잡을 부르므로, 늦게 끝난 옛 커밋의 실행이 새 배포를 되돌릴 수 있다.
   STALE=false
   head_sha=$($GIT rev-parse HEAD)
@@ -339,7 +340,7 @@ cmd_plan() {
     # 그 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로 중 `.dockerignore` 가 빼지 않는 것)를
     # 직전 배포와 지금 커밋에서 내어 다른 서비스만 바꿔 끼운다. 그래서 「이미지가 같다」와 「다시 띄우지
     # 않는다」가 한 기준이다 — 경로 패턴은 문맥 밖의 파일(e2e 스펙·playwright 설정)만 바뀐 커밋에도 그 앱을
-    # 다시 띄웠다(codemit-deploy-staging #474). python3 가 없거나 해시를 내지 못하면 아래 경로 패턴으로 떨어진다.
+    # 다시 띄웠다(옛 staging 배포 #474). python3 가 없거나 해시를 내지 못하면 아래 경로 패턴으로 떨어진다.
     if CTX_CHANGED=$(python3 scripts/ci/image_context.py changed "$PREVIOUS" HEAD 2>/dev/null); then
       log "문맥 해시로 고른다 — 바뀐 서비스: $(echo $CTX_CHANGED)"
       for svc in $CTX_CHANGED; do
@@ -457,7 +458,7 @@ cmd_plan() {
   # **견주지 못하면 다시 띄운다**(#727 — 풀러 비교와 같은 원칙, 「모르면 바꾼다」). 예전에는
   # 컨테이너를 읽지 못하거나 `config --hash` 가 실패하면 `2>/dev/null` 이 삼켜 「어긋나지 않음」이
   # 됐다 — 키를 돌린 배포가 옛 키를 문 앱을 조용히 남긴다. 실패는 그 메시지를 로그에 남긴다.
-  # codemit-deploy-staging #482(#711 뒤 앱 코드가 안 바뀐 첫 staging 배포)에서 세 앱 모두 「어긋난다」가 나오지 않아
+  # 옛 staging 배포 #482(#711 뒤 앱 코드가 안 바뀐 첫 배포)에서 세 앱 모두 「어긋난다」가 나오지 않아
   # 늘 다르게 나오지는 않는다 — 다만 그때는 실패를 삼켰는지 로그로 가를 수 없었다.
   # 반환값이 셋을 가른다(#733): 0 같음 · 1 어긋남 · 2 견줄 수 없음(컨테이너를 못 읽음·`config --hash`
   # 실패·떠 있는 컨테이너에 해시 라벨이 없음). 호출부는 1·2 둘 다 다시 띄우되 로그로 둘을 가른다 —
@@ -572,8 +573,7 @@ cmd_plan() {
   fi
 
   # 파이프라인은 이 파일을 `KEY=value` 줄로 읽어 단계의 `when` 을 정한다 — 모양을
-  # 바꾸면 Jenkinsfile 의 staging·prod 두 「변경 계획」 단계를 같이 고친다. prod 단계는
-  # staging 의 계획이 env 에 남은 채 돌므로 키 전부를 언제나 적는다.
+  # 바꾸면 Jenkinsfile 의 「변경 계획」 단계를 같이 고친다. 키 전부를 언제나 적는다.
   {
     echo "DEPLOY_ANY=$ANY"
     echo "BUILD_BACKEND=$BUILD_BACKEND"
@@ -712,7 +712,7 @@ django_answers() {
 }
 
 # **새 것을 먼저 띄우고 옛 것을 내린다**(#485). 예전에는 컨테이너를 내리고 새로 올려,
-# 배포마다 공개 앱이 13~16초 동안 500 을 냈다(staging 실측, GlitchTip 64·74·75 —
+# 배포마다 공개 앱이 13~16초 동안 500 을 냈다(당시 staging 실측, GlitchTip 64·74·75 —
 # BFF 재시도 예산 약 15.8초보다 길었다).
 #
 # 1. 서비스를 잠시 둘로 늘린다(`--scale 2 --no-recreate`) — 옛 것은 그대로 두고 새 설정·
@@ -724,7 +724,7 @@ django_answers() {
 #    bff-shared`). 세 호스트의 compose(2.33·5.1·5.5)에서 실측: 멈추는 7초 동안 699번 중
 #    거부 1번.
 # 4. 새 것의 이름을 옛 이름(`…-backend-1`)으로 바꾼다 — compose 는 이름이 아니라 라벨로
-#    컨테이너를 찾으므로 그대로 동작하고, 사람이 쓰는 `docker exec codemit-staging-backend-1`
+#    컨테이너를 찾으므로 그대로 동작하고, 사람이 쓰는 `docker exec codemit-prod-backend-1`
 #    이 배포마다 `-2`·`-1` 로 번갈아 바뀌지 않는다. 다음 교체의 번호는 compose 가 라벨의
 #    최댓값 다음으로 매겨 이름이 겹치지 않는다(같은 실측).
 #
@@ -786,7 +786,7 @@ rolling_replace() {
 # 이미 세웠고, 의존 서비스를 여기서 다시 세우게 두면 search 등을 건드릴 수 있다.
 #
 # prod 의 backend 환경에는 PROMETHEUS_MULTIPROC_DIR 가 있다 — 그 디렉터리가 없으면 지표를
-# 만드는 코드가 실패할 수 있어, 있을 때만 만든다(staging 은 그 값이 없다).
+# 만드는 코드가 실패할 수 있어, 있을 때만 만든다.
 run_migrations() {
   log "마이그레이션 — 새 이미지($(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12))의 일회성 컨테이너에서"
   # **잠금을 기다리는 시간에 상한을 둔다**(리허설 실측, ADR-0053 「장기 트랜잭션 뒤 줄 서기」):
@@ -830,7 +830,7 @@ run_migrations() {
 }
 
 # **적용할 마이그레이션이 있는 prod 배포는 migrate 전에 DB 를 한 번 덤프한다**(#839, 우산 #836 §7).
-# staging 이 사실상 해 주던 리허설 — 데이터가 든 DB 위에서 마이그레이션이 처음 도는 자리 — 가
+# 옛 staging 이 사실상 해 주던 리허설 — 데이터가 든 DB 위에서 마이그레이션이 처음 도는 자리 — 가
 # 없어지므로, 그 자리에서 잘못되면 바로 직전 상태로 돌아갈 수 있게 한다. 매일 02:00 백업
 # (`core/backups.py`, 오브젝트 스토리지 14일)은 최대 하루 전이라 이 자리를 메우지 못한다.
 #
@@ -878,7 +878,7 @@ pending_migrations() {
 }
 
 dump_before_migrate() {
-  # staging 은 곧 없어진다(#836) — 덤프는 prod 에만 건다.
+  # 대상은 prod 하나뿐이지만 다른 대상이 생겨도 덤프는 prod 에만 건다.
   [ "$TARGET" = prod ] || return 0
   if ! pending_migrations; then
     log "적용할 마이그레이션이 없다 — 배포 전 덤프를 건너뛴다"
@@ -955,7 +955,7 @@ cmd_up() {
     #
     # 먼저 내리면 **반쯤 처리된 질의가 끊기지 않는다** — `stop` 은 SIGTERM 이라
     # gunicorn 이 받던 요청을 마저 끝내고 내린다. **실패 창은 남는다**: 실측
-    # (2026-09-22, staging)으로 약 13초 동안 공개 앱이 500 을 내거나 응답하지
+    # (2026-09-22, 당시 staging)으로 약 13초 동안 공개 앱이 500 을 내거나 응답하지
     # 않았고(Next 는 살아 있으니 502 가 아니다), 그 실패는 공개 앱의
     # `fetch failed` 로 GlitchTip 에 오른다. backend 의 OperationalError 는 다시
     # 나지 않았다.
@@ -986,7 +986,7 @@ cmd_up() {
   if [ "$BUILD_SEARCH" = true ]; then
     # backend·celery-worker·celery-beat·events보다 먼저 올린다 — 그 넷의
     # compose depends_on이 search를 "시작 순서"로만 기다린다(헬스는 아니다,
-    # compose.staging/prod.yaml 주석 참고). 검색이 죽어도 backend는 뜬다
+    # compose.prod.yaml 주석 참고). 검색이 죽어도 backend는 뜬다
     # (DB 검색으로 물러난다) — 여기서 헬스를 기다리지 않는다.
     # shellcheck disable=SC2086
     $COMPOSE up -d --no-deps $UP_FLAGS search
@@ -1102,11 +1102,6 @@ cmd_verify() {
 # 모름)」. 어느 쪽이든 두 이미지 ID 와 떠 있는 커밋을 줄에 싣는다.
 cmd_e2e_digest() {
   arch=arm64
-  [ "$TARGET" = prod ] || arch=amd64
-  if [ "$arch" != arm64 ]; then
-    log "e2e 대조: e2e 는 arm64 이미지로 돈다 — $TARGET($arch)는 대조하지 않는다"
-    return 0
-  fi
   repo="${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}"
   tree=$($GIT rev-parse "HEAD^{tree}" 2>/dev/null) || { log "e2e 대조: 이 커밋의 트리를 모른다"; return 0; }
   head=$($GIT rev-parse HEAD 2>/dev/null)
@@ -1189,7 +1184,7 @@ cmd_e2e_digest() {
 # 루프백 평문 요청에 301(https 로)을 돌려준다 — 앞단 TLS 프록시를 거친 요청이 아니기
 # 때문이다. 헬스 체크는 그 프록시를 거친 요청처럼 보여야 한다. prod 첫 배포(Oracle
 # 빌드 #8)가 gunicorn 이 멀쩡히 뜬 채 「150초 안에 응답하지 않았다」로 실패했다
-# (같은 요청에 이 헤더를 붙이면 200 이었다). staging 은 리다이렉트가 없어 무해하다.
+# (같은 요청에 이 헤더를 붙이면 200 이었다).
 #
 # events 도 같은 식으로 확인한다(ADR-0046, #380) — URLconf 는 backend 와 완전히
 # 같은 코드이므로 `/api/health` 가 여기서도 그대로 선다(CLAUDE.md). 인증이 필요한

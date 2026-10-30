@@ -67,11 +67,11 @@ def _app_env(compose: str, service: str) -> dict:
 
 
 def test_compose_wires_the_env_to_the_two_public_apps_only():
-    for compose in ("compose.prod.yaml", "compose.staging.yaml"):
+    for compose in ("compose.prod.yaml",):
         for app in PUBLIC_APPS:
             assert _app_env(compose, app).get(ENV_NAME) == "${METRICS_SNIPPET_URL:-}", (compose, app)
         assert ENV_NAME not in _app_env(compose, "operator"), compose
         assert ENV_NAME not in (REPO_ROOT / "docker" / "compose.dev.yaml").read_text(encoding="utf-8")
-    for example in ("prod.env.example", "staging.env.example"):
+    for example in ("prod.env.example",):
         text = (REPO_ROOT / "docker" / example).read_text(encoding="utf-8")
         assert re.search(r"^METRICS_SNIPPET_URL=$", text, re.M), example

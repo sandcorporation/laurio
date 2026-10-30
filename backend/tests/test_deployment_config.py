@@ -378,7 +378,7 @@ def test_deployed_environment_refuses_a_fake_adapter_named_by_dotted_path(
 
 # --- 풀 수 없는(non-fake, non-importable) 어댑터 값은 부팅 자체를 거부한다 (#83) -----
 #
-# compose.staging.yaml이 실제로 겪었던 버그를 그대로 재현한다: PAYMENT_ADAPTER_MODE
+# 옛 compose.staging.yaml(#842 에서 지웠다)이 실제로 겪었던 버그를 그대로 재현한다: PAYMENT_ADAPTER_MODE
 # 같은 값에 "real"처럼 dotted path가 아닌(그리고 "fake"도 아닌) 문자열을 넣으면,
 # 이전에는 부팅이 통과하고 첫 결제·본인확인 요청에서야 NotImplementedError로 죽었다.
 
@@ -619,7 +619,7 @@ def test_staging_refuses_boot_without_any_aligo_credential_env_var(field, class_
 #
 # TossPGAdapter는 settings.TOSS_API_SECRET_KEY를 읽는데, staging/prod
 # compose는 그 이름이 아니라 TOSS_SANDBOX_SECRET_KEY/TOSS_LIVE_SECRET_KEY를
-# 주입한다(docker/compose.staging.yaml, docker/compose.prod.yaml — 새드박스
+# 주입한다(옛 compose.staging.yaml, docker/compose.prod.yaml — 새드박스
 # 키와 실물 키를 다른 이름으로 두어 운영자가 실수로 실물 키를 staging에
 # 붙여넣어도 그 변수가 애초에 읽히지 않는다). settings.py가 이 셋 중 먼저
 # 채워진 값을 쓰도록 폴백하지 않으면, 문서대로 TOSS_SANDBOX_SECRET_KEY/

@@ -775,7 +775,7 @@ class OpenAIScoringAdapter:
     `LLM_OPENAI_MODEL`(기본 `gpt-4o-mini`), temperature는
     `LLM_OPENAI_TEMPERATURE`(기본 0)로 배포 환경마다 바꿀 수 있다 — compose의
     `environment`에 실려 컨테이너까지 전달된다(#88 코드리뷰 지적 6, docker/
-    compose.staging.yaml·compose.prod.yaml).
+    compose.prod.yaml).
 
     **강의실 채점은 `api_key` 인자로 강사 본인의 키를 직접 넘긴다**(#287) —
     플랫폼이 대신 내지 않는다는 결정(CONTEXT.md 「Class」) 때문에 `resolve_adapter`가
