@@ -1125,6 +1125,10 @@ OPS_METRICS_HEARTBEAT_SECONDS = 30
 OPS_METRICS_HEARTBEAT_TTL_SECONDS = 600
 #: 집계 행을 두는 날 수 — 매일 새벽 정리 작업이 이보다 오래된 행을 지운다.
 OPS_METRICS_RETENTION_DAYS = 90
+#: 요청 지표(#828)를 프로세스 안에 모았다가 Redis 로 보내는 간격(초) — 요청마다 왕복하면 116~300µs 가 붙고
+#: Redis 가 멈추면 0.25초가 요청마다 붙는다(`ops_metrics.request_buffer`). SIGKILL 된 워커는 이만큼을 잃는다.
+#: 시험은 0(버퍼 없이 바로 더한다).
+OPS_METRICS_REQUEST_FLUSH_SECONDS = 0 if _RUNNING_TESTS else 5
 
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #

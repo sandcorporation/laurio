@@ -47,3 +47,22 @@ class LlmQueueMinute(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["minute", "product"], name="ops_llm_queue_minute_unique"),
         ]
+
+
+class RequestMinute(models.Model):
+    """한 분 동안의 백엔드 HTTP 요청(#828) — 메서드 · URL 패턴 · 상태코드마다 한 행. `/metrics` 는 세지 않는다."""
+
+    minute = models.DateTimeField()
+    method = models.CharField(max_length=8)
+    #: `resolver_match.route`(패턴, 실제 경로가 아니다) — 맞는 것이 없으면 `unmatched`.
+    route = models.CharField(max_length=200)
+    status = models.PositiveSmallIntegerField()
+    requests = models.BigIntegerField(default=0)
+    #: `core.metrics.DURATION_BOUNDS` 칸별 수(+Inf 칸 포함).
+    duration_buckets = models.JSONField(default=list)
+    duration_sum_ms = models.BigIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["minute", "method", "route", "status"], name="ops_request_minute_labels_unique"),
+        ]

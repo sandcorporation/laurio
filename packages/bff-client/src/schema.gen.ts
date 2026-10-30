@@ -3773,7 +3773,8 @@ export interface paths {
         };
         /**
          * Ops Metrics
-         * @description 기간의 LLM 채점 지표 — 결과별 호출 수·지연 p50/p95·토큰·큐 대기 p95·동시 채점 최댓값.
+         * @description 기간의 LLM 채점 지표(결과별 호출 수·지연 p50/p95·토큰·큐 대기 p95·동시 채점 최댓값)와 백엔드 요청 지표
+         *     (초당 요청·상태코드별 수·5xx 비율·지연 p50/p95·경로별 상위 10).
          */
         get: operations["ops_metrics_operator_api_ops_metrics"];
         put?: never;
@@ -7376,6 +7377,7 @@ export interface components {
              * @enum {string}
              */
             range: "1h" | "24h" | "7d";
+            requests: components["schemas"]["RequestMetricsOut"];
             /**
              * Start
              * Format: date-time
@@ -8115,6 +8117,53 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** RequestBucketOut */
+        RequestBucketOut: {
+            /** Latency P50 Seconds */
+            latency_p50_seconds: number | null;
+            /** Latency P95 Seconds */
+            latency_p95_seconds: number | null;
+            /** Per Second */
+            per_second: number;
+            /** Requests */
+            requests: number;
+            /** Server Error Ratio */
+            server_error_ratio: number | null;
+            /** Server Errors */
+            server_errors: number;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /** Statuses */
+            statuses: components["schemas"]["StatusCountOut"][];
+        };
+        /** RequestMetricsOut */
+        RequestMetricsOut: {
+            /** Buckets */
+            buckets: components["schemas"]["RequestBucketOut"][];
+            /** Top Routes */
+            top_routes: components["schemas"]["TopRouteOut"][];
+            totals: components["schemas"]["RequestStatsOut"];
+        };
+        /** RequestStatsOut */
+        RequestStatsOut: {
+            /** Latency P50 Seconds */
+            latency_p50_seconds: number | null;
+            /** Latency P95 Seconds */
+            latency_p95_seconds: number | null;
+            /** Per Second */
+            per_second: number;
+            /** Requests */
+            requests: number;
+            /** Server Error Ratio */
+            server_error_ratio: number | null;
+            /** Server Errors */
+            server_errors: number;
+            /** Statuses */
+            statuses: components["schemas"]["StatusCountOut"][];
+        };
         /** RequirementChatMessageIn */
         RequirementChatMessageIn: {
             /** Message */
@@ -8631,6 +8680,13 @@ export interface components {
             /** Display Name */
             display_name?: string | null;
         };
+        /** StatusCountOut */
+        StatusCountOut: {
+            /** Count */
+            count: number;
+            /** Status */
+            status: number;
+        };
         /**
          * SubmissionAssetIn
          * @description 제출 페이로드가 담는 자료 하나 (#190).
@@ -8762,6 +8818,17 @@ export interface components {
              * @default bearer
              */
             token_type: string;
+        };
+        /** TopRouteOut */
+        TopRouteOut: {
+            /** Latency P95 Seconds */
+            latency_p95_seconds: number | null;
+            /** Method */
+            method: string;
+            /** Requests */
+            requests: number;
+            /** Route */
+            route: string;
         };
         /** UnreadCountOut */
         UnreadCountOut: {
