@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCount, formatSeconds, rangeFromSearchParams } from "./range";
+import { formatCount, formatLatency, formatRate, formatRatio, formatSeconds, rangeFromSearchParams } from "./range";
 
 function params(range: string | null) {
   return { get: (name: string) => (name === "range" ? range : null) };
@@ -29,5 +29,21 @@ describe("값 표기", () => {
 
   it("수는 천 단위로 끊는다", () => {
     expect(formatCount(12345)).toBe("12,345");
+  });
+});
+
+describe("요청 지표 표기 (#828)", () => {
+  it("1초 아래 지연은 밀리초로, 그 위는 초로 쓴다", () => {
+    expect(formatLatency(0.0234)).toBe("23ms");
+    expect(formatLatency(2.5)).toBe("2.50초");
+    expect(formatLatency(null)).toBe("—");
+  });
+
+  it("초당 요청과 5xx 비율", () => {
+    expect(formatRate(0)).toBe("0/초");
+    expect(formatRate(0.0514)).toBe("0.05/초");
+    expect(formatRate(42.25)).toBe("42.3/초");
+    expect(formatRatio(5 / 184)).toBe("2.72%");
+    expect(formatRatio(null)).toBe("—");
   });
 });

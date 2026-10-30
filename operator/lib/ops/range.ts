@@ -39,3 +39,23 @@ export function formatSeconds(value: number | null | undefined): string {
 export function formatCount(value: number): string {
   return value.toLocaleString("ko-KR");
 }
+
+/** 요청 지연(#828) — 1초 아래는 밀리초로. 관측이 없으면 「—」. */
+export function formatLatency(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  if (value < 1) return `${Math.round(value * 1000)}ms`;
+  return formatSeconds(value);
+}
+
+/** 초당 요청 — 작은 값은 둘째 자리까지. */
+export function formatRate(value: number): string {
+  if (value === 0) return "0/초";
+  if (value < 10) return `${value.toFixed(2)}/초`;
+  return `${value.toFixed(1)}/초`;
+}
+
+/** 비율 → 백분율. 분모가 0 이면(요청이 없다) 「—」. */
+export function formatRatio(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(2)}%`;
+}

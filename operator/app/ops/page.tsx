@@ -1,8 +1,8 @@
 "use client";
 
-// 「운영 지표」(#827) — LLM 채점 호출의 기간 합계. 백엔드가 1분 집계 행을 접어 낸다
-// (`ops_metrics.operator_api`). 기간은 주소(`?range=1h|24h|7d`)에 산다 — 링크 셋이 그 주소를
-// 바꾼다. 시간대 버킷 차트·요청 지표·경보 패널은 뒤 티켓(#828·#829·#830)이 이 화면에 더한다.
+// 「운영 지표」(#827) — LLM 채점 호출과 백엔드 요청(#828)의 기간 합계. 백엔드가 1분 집계 행을 접어
+// 낸다(`ops_metrics.operator_api`). 기간은 주소(`?range=1h|24h|7d`)에 산다 — 링크 셋이 그 주소를
+// 바꾼다. 시간대 버킷 차트·경보 패널은 뒤 티켓(#829·#830)이 이 화면에 더한다.
 // 화면에는 라벨·값·버튼만 둔다.
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -15,11 +15,14 @@ import {
   LLM_RESULT_LABELS,
   OPS_RANGES,
   formatCount,
+  formatLatency,
+  formatRate,
+  formatRatio,
   formatSeconds,
   rangeFromSearchParams,
   type OpsRange,
 } from "@/lib/ops/range";
-import type { LlmStats, OpsMetrics } from "@/lib/ops/types";
+import type { LlmStats, OpsMetrics, RequestMetrics } from "@/lib/ops/types";
 import { useOpsMetrics } from "@/lib/ops/use-ops-metrics";
 
 const SEOUL_TIME = new Intl.DateTimeFormat("ko-KR", {
@@ -105,6 +108,72 @@ function LlmTotals({ totals }: { totals: LlmStats }) {
   );
 }
 
+// 좁은 화면에서는 경로가 한 줄을 다 쓰고 수·p95 가 그 아래 오른쪽에 온다 — 가로로 넘기면 수가 화면 밖에 숨는다.
+const ROUTE_GRID = "grid grid-cols-[3.5rem_minmax(0,1fr)_4.5rem_4.5rem] items-baseline gap-x-3.5 gap-y-0.5";
+
+function RequestTotals({ requests }: { requests: RequestMetrics }) {
+  const { totals } = requests;
+  return (
+    <>
+      <div data-testid="ops-requests-totals" className="grid items-start gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatGroup title="요청">
+          <StatRow label="전체" value={formatCount(totals.requests)} testId="ops-requests-total" />
+          <StatRow label="초당" value={formatRate(totals.per_second)} testId="ops-requests-per-second" />
+        </StatGroup>
+        <StatGroup title="상태코드">
+          {totals.statuses.length === 0 && <StatRow label="—" value="0" testId="ops-requests-status-none" muted />}
+          {totals.statuses.map(({ status, count }) => (
+            <StatRow key={status} label={String(status)} value={formatCount(count)} testId={`ops-requests-status-${status}`} />
+          ))}
+        </StatGroup>
+        <StatGroup title="5xx">
+          <StatRow
+            label="수"
+            value={formatCount(totals.server_errors)}
+            testId="ops-requests-5xx"
+            muted={totals.server_errors === 0}
+          />
+          <StatRow label="비율" value={formatRatio(totals.server_error_ratio)} testId="ops-requests-5xx-ratio" />
+        </StatGroup>
+        <StatGroup title="지연">
+          <StatRow label="p50" value={formatLatency(totals.latency_p50_seconds)} testId="ops-requests-latency-p50" />
+          <StatRow label="p95" value={formatLatency(totals.latency_p95_seconds)} testId="ops-requests-latency-p95" />
+        </StatGroup>
+      </div>
+      <div className="px-4 pb-4">
+        <div className="border border-rule">
+          <p className="border-b border-rule px-4 py-2 text-[11px] tracking-[0.06em] text-ink/45">경로별 상위 10</p>
+          <div data-testid="ops-requests-top-routes">
+            <div className={`${ROUTE_GRID} border-b border-rule px-4 py-2 text-[11px] tracking-[0.06em] text-ink/30`}>
+              <div>메서드</div>
+              <div className="col-span-3 sm:col-span-1">경로</div>
+              <div className="col-start-3 text-right sm:col-start-auto">요청</div>
+              <div className="text-right">p95</div>
+            </div>
+            {requests.top_routes.length === 0 && (
+              <p data-testid="ops-requests-top-routes-empty" className="px-4 py-2.5 text-[13px] text-ink/30">
+                —
+              </p>
+            )}
+            {requests.top_routes.map((route) => (
+              <div
+                key={`${route.method} ${route.route}`}
+                data-testid="ops-requests-top-route"
+                className={`${ROUTE_GRID} border-b border-rule px-4 py-2 font-mono text-[13px] last:border-b-0`}
+              >
+                <div className="text-ink/62">{route.method}</div>
+                <div className="col-span-3 min-w-0 break-all sm:col-span-1">{route.route}</div>
+                <div className="col-start-3 text-right sm:col-start-auto">{formatCount(route.requests)}</div>
+                <div className="text-right">{formatLatency(route.latency_p95_seconds)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function windowLabel(metrics: OpsMetrics): string {
   return `${SEOUL_TIME.format(new Date(metrics.start))} ~ ${SEOUL_TIME.format(new Date(metrics.end))}`;
 }
@@ -141,6 +210,11 @@ function OpsInner() {
           )}
           {state.status === "loaded" && <LlmTotals totals={state.metrics.llm.totals} />}
         </Panel>
+        {state.status === "loaded" && (
+          <Panel title="백엔드 요청" meta={windowLabel(state.metrics)}>
+            <RequestTotals requests={state.metrics.requests} />
+          </Panel>
+        )}
       </div>
     </>
   );

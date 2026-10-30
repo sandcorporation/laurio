@@ -44,3 +44,14 @@ def child_exit(server, worker):
     from prometheus_client import multiprocess
 
     multiprocess.mark_process_dead(worker.pid)
+
+
+def worker_exit(server, worker):
+    """정상으로 내려가는 워커가 프로세스 안에 모아 둔 요청 지표(#828, `ops_metrics.request_buffer`)를 보낸다.
+    SIGKILL 이면 불리지 않는다 — 그때 잃는 것은 마지막 `OPS_METRICS_REQUEST_FLUSH_SECONDS` 이하다."""
+    try:
+        from ops_metrics.request_buffer import flush_requests
+
+        flush_requests()
+    except Exception:  # noqa: BLE001 - 종료를 막지 않는다
+        pass

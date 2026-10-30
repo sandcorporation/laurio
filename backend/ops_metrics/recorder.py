@@ -6,10 +6,11 @@
 | --- | --- | --- |
 | `llm` | `<product>|<model>|<result>|<지표>` | `n` 호출 수 · `ms` 지연 합(밀리초) · `in`/`out` 토큰 · `b<i>` 지연 칸 |
 | `llmq` | `<product>|<지표>` | `n` 대기 수 · `ms` 대기 합 · `b<i>` 대기 칸 · `max_inflight` 동시 채점 최댓값 |
+| `req` | `<method>|<route>|<status>|<지표>` | `n` 요청 수 · `ms` 지연 합 · `b<i>` 지연 칸(`core.metrics.DURATION_BOUNDS`) — #828, `request_buffer` |
 
 `b<i>` 는 경계(`llm_metrics.DURATION_BOUNDS`·`QUEUE_WAIT_BOUNDS`)의 i 번째 칸 — 값이 그 경계 이하인
 첫 칸이고, 마지막 칸(i = 경계 수)이 +Inf 다. `max_` 로 시작하는 지표는 더하지 않고 큰 값을 남긴다
-(flush 도 같은 규칙으로 DB 에 합친다). 새 종류(요청 지표 등)는 같은 꼴로 `ops:<종류>:` 를 더하고
+(flush 도 같은 규칙으로 DB 에 합친다). 새 종류는 같은 꼴로 `ops:<종류>:` 를 더하고
 `flush.KINDS` 에 옮기는 함수를 단다.
 
 생존 신호는 낱값 `ops:heartbeat:<이름>` = 마지막으로 산 epoch 초(TTL `OPS_METRICS_HEARTBEAT_TTL_SECONDS`).
@@ -35,6 +36,7 @@ logger = logging.getLogger("codemit.ops_metrics")
 KEY_PREFIX = "ops"
 LLM = "llm"
 LLM_QUEUE = "llmq"
+REQUEST = "req"
 MAX_PREFIX = "max_"
 
 _failing = False
@@ -68,7 +70,7 @@ def _ok() -> None:
 def _failed(exc: BaseException) -> None:
     global _failing
     if not _failing:
-        logger.warning("운영 지표를 Redis 에 쓰지 못해 버린다(채점은 계속된다): %s", type(exc).__name__)
+        logger.warning("운영 지표를 Redis 에 쓰지 못해 버린다(채점·응답은 계속된다): %s", type(exc).__name__)
     _failing = True
 
 

@@ -298,6 +298,15 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 - **읽기.** `GET /api/operator/ops-metrics?range=1h|24h|7d`(운영자 전원) 가 결과별 호출 수·지연 p50/p95·토큰·
   큐 대기 p95·동시 채점 최댓값을 합계와 시간대 버킷(1분·15분·1시간)으로 낸다. 분위수는 버킷에서 prometheus
   `histogram_quantile` 과 같은 선형 보간으로 계산한다. 지금 분은 아직 옮기지 않아 기간의 끝은 지금 분의 시작이다.
+- **요청 지표(#828).** `core.metrics.MetricsMiddleware` 가 prometheus 와 나란히 요청마다 메서드 · URL 패턴
+  (`resolver_match.route`, 맞는 것이 없으면 `unmatched`) · 상태코드별 수와 지연 칸(prometheus 와 같은 경계)을
+  `ops:req:<분>` 에 더한다. `/metrics` 는 세지 않는다. **요청 경로에는 Redis 왕복이 없다** — 프로세스 안 버퍼에
+  더하고(미들웨어가 더하는 시간 약 2µs), 배경 스레드가 5초(`OPS_METRICS_REQUEST_FLUSH_SECONDS`)마다 분 하나에 Lua
+  한 번으로 보낸다. 요청마다 보내면 왕복이 116~300µs 이고 Redis 가 패킷을 삼키면 0.25초가 요청마다 붙어서다.
+  워커가 정상으로 내려가면 gunicorn `worker_exit` 훅이 남은 버퍼를 보내고, SIGKILL·OOM 이면 마지막 5초 이하를
+  잃는다. 보내기가 실패하면 그 묶음을 버린다. 옮긴 행은 `RequestMinute`, API 의 `requests` 영역이 초당 요청·
+  상태코드별 수·5xx 비율·지연 p50/p95 를 합계와 버킷으로, 경로별 상위 10(수와 p95)을 합계로 낸다 — DB 가
+  `date_bin` 으로 접어 기간이 길어도 쿼리 둘이다.
 
 **로그 소음 둘을 걷었다**(2026-09-21, Loki 로 처음 보였다). pgbouncer 가 트랜잭션 모드에서
 연결·끊김마다 한 줄씩 **시간당 492줄**(prod 전체의 절반 가까이)을 찍어 `log_connections`·

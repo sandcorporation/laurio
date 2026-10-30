@@ -778,7 +778,9 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 `LlmMinute`·`LlmQueueMinute` 행으로 옮기고, 매일 03:40(서울) `ops_metrics.purge_old_minutes` 가 90일보다
 오래된 행을 지운다. 둘 다 내부 HTTP 를 거치지 않는다(`docs/ops/operations.md` 「감시」). 읽는 쪽은
 `GET /api/operator/ops-metrics?range=1h|24h|7d`(운영자 전원)다 — LLM 채점의 결과별 호출 수·지연 p50/p95·토큰·
-큐 대기 p95·동시 채점 최댓값을 합계와 시간대 버킷(1분·15분·1시간, 빈 칸은 0)으로 낸다.
+큐 대기 p95·동시 채점 최댓값을 합계와 시간대 버킷(1분·15분·1시간, 빈 칸은 0)으로 낸다. 같은 응답의 `requests` 영역(#828)은
+백엔드 요청의 초당 요청·상태코드별 수·5xx 비율·지연 p50/p95 를 합계와 버킷으로, 경로별 상위 10(메서드 · URL 패턴,
+수와 p95)을 합계로 낸다 — 미들웨어가 프로세스 안에 모아 5초마다 Redis 로 보낸 것을 같은 flush 가 `RequestMinute` 로 옮긴다.
 
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
@@ -1007,4 +1009,4 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `notifications` | Notification · NotificationDispatch · NotificationOptIn |
 | `policies` | PlatformPolicy · PolicyChange |
 | `core` | ClockOverride · ScheduledStateDemo |
-| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute(1분 집계, 90일 보관) |
+| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute · RequestMinute(#828)(1분 집계, 90일 보관) |

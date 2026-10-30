@@ -22,10 +22,11 @@ from django.conf import settings
 from django.db import transaction
 
 from core.llm_metrics import DURATION_BOUNDS, QUEUE_WAIT_BOUNDS
+from core.metrics import DURATION_BOUNDS as REQUEST_DURATION_BOUNDS
 
-from .models import LlmMinute, LlmQueueMinute
+from .models import LlmMinute, LlmQueueMinute, RequestMinute
 from .quantile import add_counts
-from .recorder import KEY_PREFIX, LLM, LLM_QUEUE, MAX_PREFIX, minute_key, minute_of
+from .recorder import KEY_PREFIX, LLM, LLM_QUEUE, MAX_PREFIX, REQUEST, minute_key, minute_of
 from .store import get_store
 
 logger = logging.getLogger("codemit.ops_metrics")
@@ -99,14 +100,44 @@ def _merge_llm_queue(minute: datetime, values: dict[str, int]) -> None:
         LlmQueueMinute.objects.bulk_update(changed, ["waits", "wait_sum_ms", "wait_buckets", "in_flight_max"])
 
 
-#: 해시 종류 → 그 분의 값을 DB 에 더하는 함수. 새 지표(요청 지표 등)는 여기에 한 줄을 더한다.
+def _merge_requests(minute: datetime, values: dict[str, int]) -> None:
+    groups = _grouped(values, 3)
+    existing = {
+        (row.method, row.route, row.status): row
+        for row in RequestMinute.objects.select_for_update().filter(minute=minute)
+    }
+    size = len(REQUEST_DURATION_BOUNDS) + 1
+    new, changed = [], []
+    for (method, route, status), metrics in groups.items():
+        if not status.isdigit():
+            continue
+        labels = (method[:8], route[:200], int(status))
+        row = existing.get(labels)
+        if row is None:
+            row = RequestMinute(
+                minute=minute, method=labels[0], route=labels[1], status=labels[2], duration_buckets=[0] * size
+            )
+            existing[labels] = row
+            new.append(row)
+        elif row.pk is not None and row not in changed:
+            changed.append(row)
+        row.requests += metrics.get("n", 0)
+        row.duration_sum_ms += metrics.get("ms", 0)
+        row.duration_buckets = add_counts(list(row.duration_buckets), _buckets(metrics, size))
+    RequestMinute.objects.bulk_create(new)
+    if changed:
+        RequestMinute.objects.bulk_update(changed, ["requests", "duration_sum_ms", "duration_buckets"])
+
+
+#: 해시 종류 → 그 분의 값을 DB 에 더하는 함수. 새 지표는 여기에 한 줄을 더한다.
 KINDS: dict[str, Callable[[datetime, dict[str, int]], None]] = {
     LLM: _merge_llm,
     LLM_QUEUE: _merge_llm_queue,
+    REQUEST: _merge_requests,
 }
 
 #: 보관 정리가 지우는 모델들 — 모두 `minute` 칸을 가진다.
-RETAINED_MODELS = (LlmMinute, LlmQueueMinute)
+RETAINED_MODELS = (LlmMinute, LlmQueueMinute, RequestMinute)
 
 
 def _put_back(key: str, values: dict[str, int]) -> None:

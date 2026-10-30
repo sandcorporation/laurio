@@ -43,11 +43,13 @@ REQUESTS = Counter(
     "백엔드가 처리한 HTTP 요청 수",
     ["method", "route", "status"],
 )
+#: 요청 지연 히스토그램의 경계(초) — prometheus 와 운영 지표 1분 집계(#828)가 같은 칸을 쓴다.
+DURATION_BOUNDS = (0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
 DURATION = Histogram(
     "codemit_http_request_duration_seconds",
     "백엔드 HTTP 요청 처리 시간(초)",
     ["method", "route"],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+    buckets=DURATION_BOUNDS,
 )
 
 
@@ -59,18 +61,26 @@ def _route_of(request) -> str:
 
 class MetricsMiddleware:
     """요청 하나마다 수와 걸린 시간을 센다. `/metrics` 자신은 세지 않는다 — 긁는 소리가
-    요청량에 섞이면 트래픽이 없는 밤에도 그래프가 평평하지 않다."""
+    요청량에 섞이면 트래픽이 없는 밤에도 그래프가 평평하지 않다.
+
+    같은 수와 지연을 운영 지표 1분 집계(#828, `ops_metrics.request_buffer`)에도 남긴다 — 프로세스 안 버퍼에
+    더하기만 하고(0.5µs 남짓) Redis 로는 배경 스레드가 몇 초마다 보낸다. 요청 경로에는 Redis 왕복이 없다."""
 
     def __init__(self, get_response):
+        from ops_metrics.request_buffer import record_request
+
         self.get_response = get_response
+        self._record = record_request
 
     def __call__(self, request):
         started = time.perf_counter()
         response = self.get_response(request)
         if request.path != "/metrics":
+            seconds = time.perf_counter() - started
             route = _route_of(request)
             REQUESTS.labels(request.method, route, str(response.status_code)).inc()
-            DURATION.labels(request.method, route).observe(time.perf_counter() - started)
+            DURATION.labels(request.method, route).observe(seconds)
+            self._record(method=request.method, route=route, status=response.status_code, seconds=seconds)
         return response
 
 
