@@ -17,7 +17,9 @@
 #                       (아래 이미지 출처에 따라 pull 또는 build)
 #   pull <서비스>        ghcr 에서 그 커밋의 이미지를 받는다
 #   build <서비스>       이 호스트에서 직접 굽는다(비상용)
-#   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다
+#   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다 — prod 에서 backend 를 바꾸고
+#                       적용할 마이그레이션이 있으면 그 전에 DB 를 덤프한다(실패하면 멈춘다, #839)
+#   predeploy-dump      그 덤프만 — 적용할 마이그레이션이 있을 때만 뜬다(prod, 아래 dump_before_migrate)
 #   verify              컨테이너가 running 인지 본다
 #   e2e-digest          떠 있는 앱·backend 가 열차의 e2e 가 본 이미지인지 견준다(prod, 관측만 — #729)
 #   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
@@ -827,6 +829,98 @@ run_migrations() {
   log "마이그레이션 끝"
 }
 
+# **적용할 마이그레이션이 있는 prod 배포는 migrate 전에 DB 를 한 번 덤프한다**(#839, 우산 #836 §7).
+# staging 이 사실상 해 주던 리허설 — 데이터가 든 DB 위에서 마이그레이션이 처음 도는 자리 — 가
+# 없어지므로, 그 자리에서 잘못되면 바로 직전 상태로 돌아갈 수 있게 한다. 매일 02:00 백업
+# (`core/backups.py`, 오브젝트 스토리지 14일)은 최대 하루 전이라 이 자리를 메우지 못한다.
+#
+# **판정은 DB 에 묻는다** — 새 backend 이미지의 일회성 컨테이너에서 `migrate --plan`. plan 의
+# `MIGRATIONS`(배포 범위의 파일 diff)는 「파일이 바뀌었나」라 DB 와 어긋날 수 있다(복원한 DB,
+# 직전 배포가 중간에 멈춘 경우, 마이그레이션이 아닌 수정). 묻지 못하면(명령 실패) 있다고 보고
+# 덤프한다 — 덤프가 하나 더 생길 뿐 틀리지는 않는다.
+#
+# **pg_dump 는 db 컨테이너 안에서 돌리고 표준출력으로 받는다.** 서버와 같은 이미지라 버전이
+# 언제나 맞고(02:00 백업이 backend 이미지에 postgresql-client-17 을 따로 까는 이유가 이것이다),
+# 소켓으로 붙으니 비밀번호가 필요 없다. 파일 마운트를 쓰지 않는 이유: oracle 의 에이전트는
+# 컨테이너라 워크스페이스 경로가 호스트(`/var/jenkins_home/workspace`)와 다르다(deploy.md).
+# 형식은 02:00 백업과 같은 `--format=custom --no-owner` — 복원도 같은 `pg_restore` 한 줄이다.
+#
+# **자리는 이 배포 디렉터리의 `.jenkins-<대상>-dumps/`**(gitignore). `.env.<대상>`·배포 표식과
+# 같은 자리라 체크아웃에 살아남고, 디렉터리는 700·파일은 600 이다 — 개인정보가 통째로 든다.
+# 로그에는 경로와 크기만 남긴다. 이름은 02:00 백업과 같은 서울 시각 꼴에 커밋을 붙인다:
+# `codemit-predeploy-YYYYMMDD-HHMMSS-<sha12>.dump`. **최근 DEPLOY_DUMP_KEEP(기본 3)개만 둔다** —
+# 「방금 배포의 마이그레이션이 망가뜨렸다」를 되돌리는 용도이고, 그보다 오래된 것은 02:00
+# 백업이 맡는다. 새 덤프가 끝난 뒤에만 지운다.
+#
+# **여유가 모자라면 덤프하지 않고 멈춘다** — DB 크기(`pg_database_size`, 압축 전이라 덤프보다
+# 크다)에 1 GiB 를 더한 만큼이 그 디렉터리의 파일시스템에 있어야 한다. 덤프로 디스크를
+# 채워 prod 를 세우는 것이 마이그레이션 위험보다 나쁘다.
+#
+# 덤프가 실패하면 배포를 멈춘다 — migrate 하지 않고, 아무것도 내리지 않는다(cmd_up 이 교체
+# 전에 부른다). 반쯤 쓴 파일은 지운다.
+DUMP_DIR="${DEPLOY_DUMP_DIR:-.jenkins-${TARGET}-dumps}"
+DUMP_KEEP="${DEPLOY_DUMP_KEEP:-3}"
+
+# 적용할 마이그레이션이 있으면 0, 없으면 1. 이름만 로그에 남긴다.
+pending_migrations() {
+  if plan_out=$($COMPOSE run --rm --no-deps -T backend \
+    sh -c 'if [ -n "${PROMETHEUS_MULTIPROC_DIR:-}" ]; then mkdir -p "$PROMETHEUS_MULTIPROC_DIR"; fi; exec python manage.py migrate --plan' 2>&1); then
+    if printf '%s\n' "$plan_out" | grep -q 'No planned migration operations'; then
+      return 1
+    fi
+    names=$(printf '%s\n' "$plan_out" | grep -E '^[A-Za-z0-9_]+\.[0-9]{4}_' | tr '\n' ' ' || true)
+    log "적용할 마이그레이션: ${names:-(이름을 읽지 못했다)}"
+    return 0
+  fi
+  printf '%s\n' "$plan_out" | tail -n 20
+  log "적용할 마이그레이션이 있는지 묻지 못했다 — 있다고 보고 덤프한다"
+  return 0
+}
+
+dump_before_migrate() {
+  # staging 은 곧 없어진다(#836) — 덤프는 prod 에만 건다.
+  [ "$TARGET" = prod ] || return 0
+  if ! pending_migrations; then
+    log "적용할 마이그레이션이 없다 — 배포 전 덤프를 건너뛴다"
+    return 0
+  fi
+
+  (umask 077 && mkdir -p "$DUMP_DIR") && chmod 700 "$DUMP_DIR" || {
+    log "덤프 디렉터리($DUMP_DIR)를 만들지 못했다 — 배포를 멈춘다"; return 1; }
+  rm -f "$DUMP_DIR"/*.part
+
+  # shellcheck disable=SC2016
+  db_bytes=$($COMPOSE exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select pg_database_size(current_database())"' 2>/dev/null | tr -d '\r\n ' || true)
+  case "$db_bytes" in
+    ''|*[!0-9]*) log "DB 크기를 읽지 못했다 — 덤프하지 않고 배포를 멈춘다"; return 1 ;;
+  esac
+  free_kb=$(df -Pk "$DUMP_DIR" | awk 'NR==2 {print $4}')
+  need_kb=$((db_bytes / 1024 + 1048576))
+  if [ "${free_kb:-0}" -lt "$need_kb" ]; then
+    log "덤프 자리($DUMP_DIR)의 여유가 ${free_kb:-?} KiB — DB 크기+1GiB(${need_kb} KiB)보다 적다. 배포를 멈춘다"
+    return 1
+  fi
+
+  file="$DUMP_DIR/codemit-predeploy-$(TZ=Asia/Seoul date +%Y%m%d-%H%M%S)-$(echo "$CODEMIT_IMAGE_TAG" | cut -c1-12).dump"
+  log "배포 전 덤프 — DB $((db_bytes / 1048576)) MiB, 여유 $((free_kb / 1024)) MiB"
+  # shellcheck disable=SC2016
+  if (umask 077 && $COMPOSE exec -T db sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner' >"$file.part") \
+    && [ "$(head -c 5 "$file.part")" = PGDMP ] && chmod 600 "$file.part" && mv "$file.part" "$file"; then
+    :
+  else
+    rm -f "$file.part"
+    log "배포 전 덤프가 실패했다 — 마이그레이션을 돌리지 않고 배포를 멈춘다(아무것도 바꿔 끼우지 않았다)"
+    return 1
+  fi
+  log "배포 전 덤프 끝 — $file ($(wc -c <"$file" | tr -d ' ') 바이트)"
+
+  # 이름이 시각 순이라 이름으로 줄 세운다(mtime 은 복사·복원에 흔들린다).
+  for old in $(ls -1 "$DUMP_DIR" | grep -E '^codemit-predeploy-.*\.dump$' | sort -r | tail -n +"$((DUMP_KEEP + 1))"); do
+    rm -f "$DUMP_DIR/$old"
+    log "옛 배포 전 덤프를 지웠다 — $DUMP_DIR/$old"
+  done
+}
+
 # ------------------------------------------------------------ 바꿔 끼운다
 
 cmd_up() {
@@ -843,6 +937,12 @@ cmd_up() {
   # 커밋으로 바꾸고 `deploy.sh recreate-infra` 로 한다.
   $COMPOSE up -d --no-recreate db redis
   # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
+
+  # **바꿔 끼우기 전에, 마이그레이션이 있으면 덤프부터**(#839) — 풀러 블록보다 앞이라 덤프하는
+  # 동안 아직 아무것도 내려가지 않는다. 실패하면 여기서 끝난다(migrate 도, 교체도 없다).
+  if [ "$BUILD_BACKEND" = true ] && ! dump_before_migrate; then
+    exit 1
+  fi
 
   if [ "$BUILD_PGBOUNCER" = true ]; then
     # **풀러를 바꾸기 전에, 풀러를 거쳐 DB 에 붙어 있는 넷을 먼저 내린다**
@@ -1243,6 +1343,7 @@ case "$COMMAND" in
     cmd_health "$ARG"
     ;;
   reindex) cmd_reindex_search ;;
+  predeploy-dump) dump_before_migrate ;;
   recreate-infra) cmd_recreate_infra ;;
   mark) cmd_mark ;;
   prune) cmd_prune ;;
@@ -1268,7 +1369,7 @@ case "$COMMAND" in
     cmd_prune
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|e2e-digest|health|reindex|mark|prune|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|e2e-digest|health|reindex|predeploy-dump|recreate-infra|mark|prune|all)"
     exit 2
     ;;
 esac

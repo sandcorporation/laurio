@@ -56,6 +56,7 @@ node_modules/
 .jenkins-prod-plan
 .jenkins-staging-config-hash.err
 .jenkins-prod-config-hash.err
+.jenkins-prod-dumps/
 .images-amd64.result
 .images-arm64.result
 .images-amd64.ctx
