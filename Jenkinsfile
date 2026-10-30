@@ -232,7 +232,7 @@ pipeline {
           when { expression { env.IMAGE_AMD64_FRONTEND == 'built' } }
           steps {
             withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
-              sh 'bash scripts/ci/deploy-guard.sh frontend'
+              sh 'CODEMIT_GUARD_ARCH=amd64 bash scripts/ci/deploy-guard.sh frontend'
             }
           }
         }
@@ -240,7 +240,7 @@ pipeline {
           when { expression { env.IMAGE_AMD64_OPERATOR == 'built' } }
           steps {
             withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
-              sh 'bash scripts/ci/deploy-guard.sh operator'
+              sh 'CODEMIT_GUARD_ARCH=amd64 bash scripts/ci/deploy-guard.sh operator'
             }
           }
         }
@@ -248,7 +248,7 @@ pipeline {
           when { expression { env.IMAGE_AMD64_CLASSROOM == 'built' } }
           steps {
             withCredentials([string(credentialsId: 'ghcr-push-token', variable: 'GHCR_TOKEN')]) {
-              sh 'bash scripts/ci/deploy-guard.sh classroom'
+              sh 'CODEMIT_GUARD_ARCH=amd64 bash scripts/ci/deploy-guard.sh classroom'
             }
           }
         }
