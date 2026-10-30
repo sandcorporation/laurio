@@ -23,7 +23,9 @@ docker compose -f docker/compose.dev.yaml exec db psql -U codemit -d codemit
 **손으로 쓰는 beat 항목은 `config/celery.py` 의 `SCHEDULED_JOBS` 한 자리뿐이다.** DB 가
 `postgres:17` 이라 pg_dump 도 17 이어야 해서 backend 이미지가 PGDG 에서 `postgresql-client-17` 을
 설치한다 — 서버 메이저를 올리면 이 줄도 같이 올린다. **Celery 가 없는 dev 기본 스택에서는 돌지
-않는다.** 복원은 이렇게 한다:
+않는다.** 이와 별개로 **prod 배포는 적용할 마이그레이션이 있을 때 migrate 직전에 한 번 더 덤프한다** —
+oracle 의 배포 디렉터리 `.jenkins-prod-dumps/` 에 최근 3개(같은 custom 형식, 600)를 둔다([배포](deploy.md),
+#839). 복원은 이렇게 한다:
 
 ```bash
 pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit codemit-YYYYMMDD-HHMMSS.dump

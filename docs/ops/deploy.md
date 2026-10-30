@@ -408,6 +408,21 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   `backend/tests/test_migration_rolling_safety.py` 가 표식 없는 위험 연산을 막는다. 예전에는
   마이그레이션이 든 배포가 전부 내리고 올렸고, 2026-10-02 prod 에서 그 창이 공개 앱 재시도
   예산보다 길어 `/contests` 가 500 을 냈다(`0014_connected_apps`, GlitchTip 75·83).
+- **prod 는 적용할 마이그레이션이 있으면 migrate 전에 DB 를 덤프한다**(#839, 우산 #836 §7 — staging
+  리허설이 없어지는 자리를 메운다). `deploy.sh prod up` 이 backend 를 바꿀 때, 아무것도 내리기 전에
+  새 이미지의 일회성 컨테이너에서 `migrate --plan` 을 묻는다(배포 범위의 파일 diff 가 아니라 DB 의
+  답이다 — 묻지 못하면 있다고 본다). 있으면 db 컨테이너의 `pg_dump --format=custom --no-owner` 를
+  표준출력으로 받아 배포 디렉터리의 `.jenkins-prod-dumps/codemit-predeploy-YYYYMMDD-HHMMSS-<sha12>.dump`
+  (서울 시각, 디렉터리 700·파일 600, gitignore)에 둔다 — oracle 에서는 호스트
+  `/var/jenkins_home/workspace/codemit-deploy-prod/.jenkins-prod-dumps/`. 최근 3개(`DEPLOY_DUMP_KEEP`)만
+  남기고, 그보다 오래된 것은 02:00 백업(14일)이 맡는다. 그 파일시스템에 DB 크기+1 GiB 가 없거나
+  덤프가 실패하면(빈 파일·`PGDMP` 머리 없음 포함) **migrate 도 교체도 하지 않고 배포가 멈춘다**.
+  로그에는 경로와 크기만 남는다(`[deploy:prod] 배포 전 덤프 끝 — <경로> (<n> 바이트)`). 마이그레이션이
+  없으면 `배포 전 덤프를 건너뛴다` 한 줄이다. staging 에는 걸지 않는다. 손으로는
+  `sh ./deploy.sh prod predeploy-dump`. 되돌릴 때는 grader·backend·celery-worker·celery-beat·events 를 내리고
+  `docker compose … exec -T db sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < <덤프>`
+  ([운영](operations.md)의 02:00 백업 복원과 같은 줄이다).
+  `backend/tests/test_deploy_predeploy_dump.py` 가 가짜 docker 로 판정·멈춤·보관·권한을 본다.
 - **물러서는 배포가 셋이다** — 배포 범위의 마이그레이션에 `# ROLLING-DEPLOY-UNSAFE: <이유>`
   표식이 있을 때, 풀러를 바꿀 때(「풀러를 바꿔 끼울 때는」), 겹칠 옛 컨테이너가 없을 때(직전
   배포 표식이 없을 때 포함). 그때는 넷을 먼저 내리고 migrate 를 돌린 뒤 올린다. 그동안 backend
