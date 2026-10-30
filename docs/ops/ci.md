@@ -11,7 +11,7 @@ push 하면 옛 빌드를 끊는다.
 
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
-| 변경 | sub(`laurio-staging`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
+| 변경 | sub(`built-in`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
 | 시험(병렬) | sub | `scripts/ci/sub-checks.sh` — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어·시험의 고정 대기(`check_test_waits.py`) 검사, 단위 시험 여섯, 세 앱 typecheck |
 | 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit/ci-train` 을 부른다 |
 

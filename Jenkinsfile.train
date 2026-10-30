@@ -64,7 +64,7 @@ pipeline {
 
   stages {
     stage('묶기') {
-      agent { label 'laurio-staging' }
+      agent { label 'built-in' }
       steps {
         withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
           sh 'python3 scripts/ci/train.py plan --max "${MAX_PRS:-0}"'
@@ -93,7 +93,7 @@ pipeline {
             beforeAgent true
             expression { env.TRAIN_RUN_TESTS == '1' }
           }
-          agent { label 'laurio-staging' }
+          agent { label 'built-in' }
           steps {
             unstash 'plan'
             withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
@@ -185,7 +185,7 @@ pipeline {
             beforeAgent true
             expression { env.TRAIN_RUN_TESTS == '0' }
           }
-          agent { label 'laurio-staging' }
+          agent { label 'built-in' }
           steps {
             unstash 'plan'
             withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
@@ -202,7 +202,7 @@ pipeline {
         beforeAgent true
         expression { env.TRAIN_COUNT != '0' && currentBuild.currentResult == 'SUCCESS' }
       }
-      agent { label 'laurio-staging' }
+      agent { label 'built-in' }
       steps {
         unstash 'plan'
         sh 'rm -f .train-merged'
@@ -267,7 +267,7 @@ pipeline {
     failure {
       script {
         if (env.TRAIN_COUNT && env.TRAIN_COUNT != '0') {
-          node('laurio-staging') {
+          node('built-in') {
             unstash 'plan'
             // 인프라 판정(#716, #729) — 앞 빌드가 이 작업 공간에 남긴 것을 지우고, 이번 빌드가 남긴 것만 읽는다.
             // 붉은 쪽마다 판정이 있어야 넘긴다: sub 는 검사가 초록이고 이미지 굽기가 붉었을 때만(가드·검사가
