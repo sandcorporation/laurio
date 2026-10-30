@@ -95,7 +95,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
 - **노드는 실행기가 하나라 통째로 쓴다.** 예전에는 GitHub Actions 의 셀프호스티드 러너
   셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
   넘었다(#499 의 첫 CI — 공개 e2e 10건·단위 2건 타임아웃). 오래 걸리는 e2e 를 성능이 좋은
-  macos 에, 짧은 것을 staging 배포와 실행기를 나눠 쓰는 sub 에 둔다.
+  macos 에, 짧은 것을 배포 잡의 built-in 단계와 실행기를 나눠 쓰는 sub 에 둔다(#840 전에는 staging 배포 전체와 나눠 썼다).
 - **e2e 가 흔들리면 무엇을 보나**(#699). 열차 빌드의 산출물(`test-results/**`, macos 단계가 거둔다)에
   셋이 있다. ① `test-results/playwright/<프로젝트>[-exclusive]/<시험>/` — 실패한 시험의 `trace.zip`
   (`pnpm --dir frontend exec playwright show-trace <파일>` 로 연다)과 `error-context.md`. 성공한 시험의
@@ -209,7 +209,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   | --- | --- | --- | --- |
   | `codemit/ci-pr`(Multibranch) | `codemit-ci-pr` | `Jenkinsfile.pr` | sub 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
   | `codemit/ci-train` | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
-  | `codemit/deploy` | `codemit-deploy-staging` | `Jenkinsfile` | built-in 단계 전부 `customWorkspace 'workspace/codemit-deploy-staging'` = sub 호스트 `/server/jenkins/workspace/codemit-deploy-staging/`의 `docker/.env.staging`·`.jenkins-staging-deployed`(이름이 바뀌어도 서버의 파일은 옮기지 않았다), 이미지 단계 `customWorkspace 'codemit-deploy-staging-images'`, prod 단계(에이전트 `oracle`) `customWorkspace 'workspace/codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
+  | `codemit/deploy` | `codemit-deploy-staging` | `Jenkinsfile` | built-in 단계(대상 확인·`production` 앞당기기·알림)는 잡의 기본 워크스페이스 `workspace/codemit/deploy`(`.env` 가 필요 없다 — #840 전에는 staging 의 `workspace/codemit-deploy-staging` 을 붙잡았다), 이미지·가드는 macos 의 기본 워크스페이스, prod 단계(에이전트 `oracle`) `customWorkspace 'workspace/codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
   | `codemit/ghcr-prune` | `codemit-ghcr-prune` | 저장소 밖 | |
 
   더 전의 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 잡을 이름으로 부르는 자리는
@@ -221,15 +221,15 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   rename 직전에 남은 `jenkins-codemit-(pr|train)-*` 도 한동안 같이 걷는다 — 2026-11-15 이후 #735 로 지운다(지울 조건은 그 파일 머리말).
   #708 끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이었다 — 옛 `codemit-deploy-prod` 는 10-21 prod #177
   이 마지막 빌드였고 #779 로 사라졌다.
-- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — 같은 규칙을 세 곳이 쓴다. PR CI 는 `scripts/ci/changed.sh`(merge-base 와 견준다), 열차는 `scripts/ci/train.py` 의 `touches_code`(묶음 전체가 문서뿐이면 시험·이미지 대신 `문서만` 단계), `codemit/deploy` 잡은 다시 `changed.sh`(`codemit/deploy` 는 **마지막으로 staging 배포를 끝낸 커밋** — 배포 표식 `.jenkins-staging-deployed` — 과 견준다. `staging` 브랜치는 배포보다 먼저 앞당겨지므로, 그것과 견주면 배포가 실패한 커밋 뒤의 문서 커밋이 그 배포를 다시 시도하지 않고 초록이 됐다, #709). 그런 커밋은 staging·production 을 앞당기지 않고 다음 코드 커밋과 함께 간다.
+- **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 이미지도 건너뛴다** — 같은 규칙을 세 곳이 쓴다. PR CI 는 `scripts/ci/changed.sh`(merge-base 와 견준다), 열차는 `scripts/ci/train.py` 의 `touches_code`(묶음 전체가 문서뿐이면 시험·이미지 대신 `문서만` 단계), `codemit/deploy` 잡은 다시 `changed.sh`(`codemit/deploy` 는 **마지막으로 성공한 prod 배포** — GitHub 의 `production`, `ls-remote` 로 읽는다 — 와 견준다, #840. `production` 은 prod 배포가 초록인 뒤에만 앞당기므로 배포가 실패한 커밋 뒤의 문서 커밋도 그 배포를 다시 시도한다 — 배포보다 먼저 앞당기던 `staging` 과 견줬을 때는 초록으로 지나쳤다, #709). 그런 커밋은 prod 로 가지도 `production` 을 앞당기지도 않고 다음 코드 커밋과 함께 간다.
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit/deploy` 잡(`Jenkinsfile`)의 앞 단계가 됐다
-  (「배포」 절). 이미지는 macos 가 arm64 여섯, sub 가 amd64 여섯을 함께 굽고(`scripts/ci/images.sh`),
+  (「배포」 절, `staging` 앞당기기는 #840 에서 걷었다). 이미지는 macos 가 arm64 여섯을 굽고(`scripts/ci/images.sh`, #840 전에는 sub 가 amd64 여섯도),
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
-  (`ctx-<해시>`)는 이미지 두 가지와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,
-  sub)가 붙인다(#709) — 그래서 「건너뛴다」는 언제나 앞 빌드가 끝까지 초록으로 본 이미지이고, 가드가 빨갛거나
-  한 가지가 실패한 빌드의 이미지는 다음 빌드가 다시 굽고 가드도 다시 돈다. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, staging 의 amd64 는 sub·prod 의 arm64 는 열차의 macos(#838))은
+  (`ctx-<해시>`)는 굽기와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,
+  macos)가 붙인다(#709) — 그래서 「건너뛴다」는 언제나 앞 빌드가 끝까지 초록으로 본 이미지이고, 가드가 빨갛거나
+  굽기가 실패한 빌드의 이미지는 다음 빌드가 다시 굽고 가드도 다시 돈다. 부팅 가드 셋(`scripts/ci/deploy-guard.sh`, prod 의 arm64 를 열차의 macos(#838)와 배포 잡의 「이미지」 단계(macos, #840)가 본다 — 열차 sub 의 amd64 가드는 T3 까지 남는다)은
   **방금 올린 그 이미지를 ghcr 에서 받아** 배포 설정 없이는 죽고 완전한 설정으로는 뜨는지 본다 — 이번에
   구운 앱만(건너뛴 앱의 이미지는 이미 한 번 지났다). 앱 이미지는 환경을 모르므로(#711) 가드가 공개 값을
   `-e CODEMIT_PUBLIC_*` 로 주고, 방침의 문의 주소가 `/privacy` 에, 토스 클라이언트 키가 첫 화면의

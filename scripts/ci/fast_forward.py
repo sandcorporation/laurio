@@ -3,9 +3,9 @@
 
     GH_TOKEN=… scripts/ci/fast_forward.py <브랜치> <커밋>
 
-Jenkinsfile 이 이미지·가드가 초록이면 `staging` 을, prod 배포 단계까지 초록이면 `production` 을
-그 커밋으로 앞당긴다(2026-10-23 #779 전에는 `production` 의 push 가 별도 prod 잡을 깨웠다 — 지금은
-아무 잡도 깨우지 않는 기록이다). `production` 은 언제나 「prod 에 배포돼 초록이었던 커밋」 그
+Jenkinsfile 이 prod 배포 단계까지 초록이면 `production` 을 그 커밋으로 앞당긴다(2026-10-23 #779 전에는
+`production` 의 push 가 별도 prod 잡을 깨웠다 — 지금은 아무 잡도 깨우지 않는 기록이자, 다음 빌드가 「문서만
+바뀌었나」를 재는 기준이다). 2026-10-30(#840) 전에는 이미지·가드가 초록이면 `staging` 도 앞당겼다. `production` 은 언제나 「prod 에 배포돼 초록이었던 커밋」 그
 자체여야 하므로 머지 커밋을 만들지 않는다.
 
 - 브랜치가 이미 그 커밋을 품으면(더 새 커밋이 먼저 올라갔다) 아무것도 하지 않고 성공한다.
