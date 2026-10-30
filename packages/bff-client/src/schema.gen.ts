@@ -3764,6 +3764,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/ops-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ops Metrics
+         * @description 기간의 LLM 채점 지표 — 결과별 호출 수·지연 p50/p95·토큰·큐 대기 p95·동시 채점 최댓값.
+         */
+        get: operations["ops_metrics_operator_api_ops_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/payouts": {
         parameters: {
             query?: never;
@@ -6837,6 +6857,68 @@ export interface components {
             amount: number;
             side: components["schemas"]["EntrySide"];
         };
+        /** LlmBucketOut */
+        LlmBucketOut: {
+            calls: components["schemas"]["LlmCallsOut"];
+            /** In Flight Max */
+            in_flight_max: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Latency P50 Seconds */
+            latency_p50_seconds: number | null;
+            /** Latency P95 Seconds */
+            latency_p95_seconds: number | null;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Queue Wait P95 Seconds */
+            queue_wait_p95_seconds: number | null;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /** LlmCallsOut */
+        LlmCallsOut: {
+            /** Auth */
+            auth: number;
+            /** Ok */
+            ok: number;
+            /** Other */
+            other: number;
+            /** Quota Exhausted */
+            quota_exhausted: number;
+            /** Rate Limited */
+            rate_limited: number;
+            /** Server Error */
+            server_error: number;
+            /** Timeout */
+            timeout: number;
+            /** Total */
+            total: number;
+        };
+        /** LlmMetricsOut */
+        LlmMetricsOut: {
+            /** Buckets */
+            buckets: components["schemas"]["LlmBucketOut"][];
+            totals: components["schemas"]["LlmStatsOut"];
+        };
+        /** LlmStatsOut */
+        LlmStatsOut: {
+            calls: components["schemas"]["LlmCallsOut"];
+            /** In Flight Max */
+            in_flight_max: number;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Latency P50 Seconds */
+            latency_p50_seconds: number | null;
+            /** Latency P95 Seconds */
+            latency_p95_seconds: number | null;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Queue Wait P95 Seconds */
+            queue_wait_p95_seconds: number | null;
+        };
         /** LogoutIn */
         LogoutIn: {
             /** Refresh */
@@ -7278,6 +7360,27 @@ export interface components {
             items: components["schemas"]["OperatorPayoutOut"][];
             /** Next */
             next: string | null;
+        };
+        /** OpsMetricsOut */
+        OpsMetricsOut: {
+            /** Bucket Seconds */
+            bucket_seconds: number;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            llm: components["schemas"]["LlmMetricsOut"];
+            /**
+             * Range
+             * @enum {string}
+             */
+            range: "1h" | "24h" | "7d";
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
         };
         /**
          * OwnScoreOut
@@ -14415,6 +14518,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    ops_metrics_operator_api_ops_metrics: {
+        parameters: {
+            query?: {
+                range?: "1h" | "24h" | "7d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpsMetricsOut"];
                 };
             };
         };

@@ -59,6 +59,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { label: "운영팀 알림", href: "/notifications", testId: "nav-notifications" },
       { label: "무료 공모전", href: "/contests/free", testId: "nav-free-contests" },
       { label: "사용 현황", href: "/usage", testId: "nav-usage" },
+      { label: "운영 지표", href: "/ops", testId: "nav-ops" },
     ],
   },
 ];

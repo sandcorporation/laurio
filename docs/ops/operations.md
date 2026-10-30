@@ -276,6 +276,29 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
    먼저 본다. 큐 대기는 정상일 때 grader 폴링 간격(0.5초)과 동시성(64) 안쪽이라 초 단위이고, 벤더 한도가
    180초이므로 p95 300초는 「한 바퀴 이상 밀렸다」는 뜻이다. 모두 시작값이다 — 첫 일주일 값을 보고 조인다.
 
+**같은 LLM 채점 지표가 1분 집계로 DB 에도 쌓여 운영자 콘솔 `/ops` 에 보인다**(2026-10-30, #827, 앱
+`ops_metrics`). oracle 의 prometheus·grafana 스택을 콘솔로 옮기는 첫 단계라, 전환 기간에는 위 prometheus
+계측을 **지우지 않고 나란히** 둔다.
+
+- **기록.** 호출이 끝날 때(`llm_metrics._Call.finish` 뒤)와 grader 가 큐 대기를 잴 때, 그 분(UTC 분 시작
+  epoch 초)의 Redis 해시 `ops:<종류>:<분>` 에 한 번의 왕복(Lua 하나)으로 더한다 — 동기 경로는 redis-py,
+  grader 는 `redis.asyncio`. 종류는 `llm`(필드 `<product>|<model>|<result>|<n·ms·in·out·b<i>>`)과
+  `llmq`(`<product>|<n·ms·b<i>·max_inflight>`)다. 라벨은 위와 같은 닫힌 집합이고 히스토그램 경계도 같은
+  상수다. Redis 는 기존 인스턴스의 **DB 3**(`OPS_METRICS_REDIS_URL`, compose 가 준다), 키 TTL 은 사흘
+  (`OPS_METRICS_KEY_TTL_SECONDS`). **Redis 가 실패해도 채점은 막히지 않는다** — 그 기록을 버리고 실패가
+  이어지는 동안 `codemit.ops_metrics` 경고를 한 번 남긴다. 소켓 한도는 0.25초다.
+- **옮기기.** celery beat 가 매분 `ops_metrics.flush_minutes` 를 돌려 **닫힌 분**(지금 분보다 앞선 분)의
+  해시를 `LlmMinute`·`LlmQueueMinute` 행으로 옮긴다. 해시를 읽고 지우는 것이 원자적(`MULTI` 안의
+  `HGETALL`+`DEL`)이라 두 번 돌아도 두 배가 되지 않고, DB 에는 더하므로 분이 닫힌 뒤 늦게 닿은 기록도 같은
+  행에 합쳐진다. DB 쓰기가 실패하면 읽은 값을 해시에 되돌린다.
+- **보관.** 매일 03:40(서울) `ops_metrics.purge_old_minutes` 가 90일(`OPS_METRICS_RETENTION_DAYS`)보다 오래된
+  행을 지운다.
+- **grader 생존 신호.** grader 가 30초마다 `ops:heartbeat:grader` 에 epoch 초를 쓴다(TTL 10분). 같은 때에
+  지금의 동시 채점 수를 그 분의 최댓값 후보로 남긴다.
+- **읽기.** `GET /api/operator/ops-metrics?range=1h|24h|7d`(운영자 전원) 가 결과별 호출 수·지연 p50/p95·토큰·
+  큐 대기 p95·동시 채점 최댓값을 합계와 시간대 버킷(1분·15분·1시간)으로 낸다. 분위수는 버킷에서 prometheus
+  `histogram_quantile` 과 같은 선형 보간으로 계산한다. 지금 분은 아직 옮기지 않아 기간의 끝은 지금 분의 시작이다.
+
 **로그 소음 둘을 걷었다**(2026-09-21, Loki 로 처음 보였다). pgbouncer 가 트랜잭션 모드에서
 연결·끊김마다 한 줄씩 **시간당 492줄**(prod 전체의 절반 가까이)을 찍어 `log_connections`·
 `log_disconnections` 를 껐다(분당 stats 줄은 남긴다). 그리고 모을 정적 파일이 없어 `STATIC_ROOT`

@@ -233,8 +233,8 @@ scripts/test.sh backend tests/test_x.py   # db 하나만 띄우고(스크립트�
   `import` 든 Django 가 import 없이 앱을 묶는 길(`ForeignKey("contests.Contest")` 꼴
   문자열·`apps.get_model`)이든 걸린다. 표시로 열 수 있는 문이 하나라도 있으면 마감에
   몰린 사람이 그 문을 쓴다.
-- **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`,
-  #270 이 마지막을 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
+- **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`·`ops_metrics`,
+  #270 이 `submissions` 를, #827 이 운영 지표 집계를 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
   `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다** — **이유가 비면 표시 자체가
   실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **25줄**이 나오는데
   그중 **9줄은 검사 파일 자신**(독스트링·정규식·오류 문구·합성 픽스처)이고 실제 표시는
