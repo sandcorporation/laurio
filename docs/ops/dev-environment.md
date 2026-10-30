@@ -32,7 +32,7 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 서빙하는 프록시가 `/api/backend/classroom/events/stream` 경로(또는 그 도메인
 전체)에 대해 버퍼링을 끄고, 유휴 연결을 짧게 끊지 않도록 타임아웃도 넉넉히
 잡아야 한다 — storage.honeycombpizza.link의 버킷 생성과 같은 종류의 저장소 밖
-수작업이다(위 「staging 은 떠 있다」의 TLS 종단 프록시 문단 참고). 설정을
+수작업이다. 설정을
 잊으면 강의실 실시간 갱신이 "가끔 늦게 온다" 또는 "아예 안 온다"로 보인다 —
 화면이 폴링으로 물러나 기능 자체는 멈추지 않는다(ADR-0046).
 
@@ -40,7 +40,7 @@ celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스�
 `backend/config/asgi.py`). Django 의 ASGI 핸들러는 HTTP 가 아닌 scope 를 보면
 `ValueError: ... not lifespan.` 을 던지고, uvicorn 은 그 기능만 끄고 계속 뜬다 —
 서비스는 정상인데 **부팅마다 오류 하나가 남는다**. 오류 수집기를 붙이자마자 그
-예외가 staging 백엔드 프로젝트의 최다 이슈가 됐다(6건). 기동 명령에
+예외가 당시 배포 백엔드 프로젝트의 최다 이슈가 됐다(6건). 기동 명령에
 `--lifespan off` 를 붙이는 대안은 compose 세 곳에 같은 말을 적어야 해서 버렸다.
 
 **물러서는 배포(표식 단 마이그레이션·풀러 교체)에서는 backend 가 잠시 없다 — beat 의 tick 이

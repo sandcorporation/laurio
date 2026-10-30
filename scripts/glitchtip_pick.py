@@ -83,7 +83,7 @@ ORG_SLUG = os.environ.get("GLITCHTIP_ORG", "codemit")
 #: (2026-10-17~19 에 다섯 번 그랬다, `DAYPAGE-6` 등). 프로젝트 slug 로 가른다.
 PROJECT_PREFIX = os.environ.get("GLITCHTIP_PROJECT_PREFIX", "codemit-")
 
-#: 이 환경의 오류만 집는다. staging·dev 는 대개 사람이 그 자리에서 보고 있다.
+#: 이 환경의 오류만 집는다. dev 는 대개 사람이 그 자리에서 보고 있다.
 TARGET_ENVIRONMENT = "production"
 
 #: 클레임 코멘트의 첫 줄 — 사람이 GlitchTip 에서 보고 「자동화가 집었다」를 알 수 있게.
@@ -339,7 +339,7 @@ def _environments_of(issue: dict) -> set[str]:
     알림 규칙에는 environment 필터가 아예 없어서(상위 브랜치에만 있다) 이 판정을 여기서
     한다.
 
-    **하나가 아니라 집합이다.** 같은 예외가 staging 과 prod 에서 함께 나면 GlitchTip 은
+    **하나가 아니라 집합이다.** 같은 예외가 (staging 이 있던 때) staging 과 prod 에서 함께 나면 GlitchTip 은
     이슈 하나로 묶고 태그에 두 값을 다 담는다(실측: issue 1 = `['production',
     'staging']`, 2026-09-18). 그래서 「첫 값이 production 인가」로 보면 안 된다 —
     `topValues` 의 순서가 빈도순이라는 보장이 문서에 없고, prod 에서 난 오류가 staging
@@ -429,8 +429,8 @@ def _regression_of(
 
     **재발한 그 이벤트가 prod 에서 났어야 한다**(`environment`). 이슈의 환경 집합
     (`_environments_of`)은 「prod 에서 난 **적이 있는가**」라 재발 판정에는 맞지 않는다 —
-    한 번이라도 prod 에서 났던 오류는 staging 에서만 재발해도 통과한다. 실제로 그랬다
-    (2026-09-22): staging 배포가 backend 를 몇 초 내린 창의 `fetch failed`(오류 74)를
+    한 번이라도 prod 에서 났던 오류는 prod 가 아닌 환경에서만 재발해도 통과한다. 실제로 그랬다
+    (2026-09-22, staging 이 있던 때): staging 배포가 backend 를 몇 초 내린 창의 `fetch failed`(오류 74)를
     prod 재발로 집어 세션을 띄웠다. `environment` 가 None 이면(`--any-environment`)
     보지 않는다.
     """

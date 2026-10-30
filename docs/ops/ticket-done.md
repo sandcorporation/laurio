@@ -7,9 +7,9 @@
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. Jenkins
 `codemit/ci-pr` 가 sub 검사를 통과한 커밋을 줄 세우고, 묶음 병합 큐 `codemit/ci-train` 이 줄 선 PR 을
 최신 `main` 위에 묶어 e2e 까지 시험한 뒤 **스스로 `main` 에 rebase 병합한다**(2026-10-03) — 사람이 머지 버튼을
-누르지 않고, `main` 에 직접 push 하지 않는다(시험 없이 이미지가 구워져 staging 까지 간다).
+누르지 않고, `main` 에 직접 push 하지 않는다(시험 없이 이미지가 구워져 곧바로 prod 에 배포된다).
 병합을 막으려면 초안으로 열거나 `hold` 라벨을 붙인다. 다음 티켓을 시작하기 전에 PR 의 결과
-(빌드·`codemit/automerge` 상태)와 이어지는 이미지·staging 배포를 확인해 보고한다.
+(빌드·`codemit/automerge` 상태)와 이어지는 `main` push 의 prod 배포(`codemit/deploy`, 문서만이면 건너뜀)를 확인해 보고한다.
 
 **push 를 빠뜨리면 CI 는 아무것도 보지 않는다.** 실제로 그런 적이 있다 — 하루 작업 20커밋이
 푸시되지 않은 채 쌓였고, 그 사이 CI 잡 하나가 21시간 빨간 것도 아무도 몰랐다. e2e 를 CI 에

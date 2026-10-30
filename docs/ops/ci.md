@@ -3,7 +3,7 @@
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
 **시험은 Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다**(2026-10-02). GitHub
-소스 `sandcorporation/laurio` 의 브랜치(`main`·`staging`·`production` 은 뺀다)마다 하위 잡이
+소스 `sandcorporation/laurio` 의 브랜치(`main`·`production` 과 이제 움직이지 않는 옛 `staging` 은 뺀다)마다 하위 잡이
 생기고, 5분마다 훑어 새 push 를 찾는다. 결과는 GitHub 커밋 상태로 남는다. 같은 브랜치에 새로
 push 하면 옛 빌드를 끊는다.
 
@@ -134,10 +134,10 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   횟수를 센다**(2026-10-15 사용자 결정, #721 — 0 이 이어지면 걷는다). 이 판정은 VM 정지와 backend 워커가
   모두 붙잡히는 코드 탓 멈춤(#723)을 가르지 못한다 — 그런 멈춤이 다시 생기면 재실행 한 번을 공짜로
   얻는다. 발동은 열차 콘솔의 `인프라 고장으로 분류:` 줄이고(커밋 제목에도 같은 말이 있어 앞의 `Z] ` 까지
-  잡는다), Jenkins 가 남긴 빌드(최근 50개)를 이렇게 센다 — `JENKINS_*` 는 `~/.config/codemit-ghcr-wizard.env`:
+  잡는다), Jenkins 가 남긴 빌드(최근 50개)를 이렇게 센다 — `JENKINS_URL`·`JENKINS_USER`·`JENKINS_API_TOKEN` 은 셸 env(`~/.config/environment.d/50-jenkins.conf`):
 
   ```bash
-  for n in $(curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_UI_URL/job/codemit/job/ci-train/api/json?tree=builds%5Bnumber%5D" | python3 -c 'import json,sys;print(*[b["number"] for b in json.load(sys.stdin)["builds"]])'); do curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_UI_URL/job/codemit/job/ci-train/$n/consoleText" | grep -q 'Z\] 인프라 고장으로 분류: ' && echo "$n"; done
+  for n in $(curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_URL/job/codemit/job/ci-train/api/json?tree=builds%5Bnumber%5D" | python3 -c 'import json,sys;print(*[b["number"] for b in json.load(sys.stdin)["builds"]])'); do curl -s -u "$JENKINS_USER:$JENKINS_API_TOKEN" "$JENKINS_URL/job/codemit/job/ci-train/$n/consoleText" | grep -q 'Z\] 인프라 고장으로 분류: ' && echo "$n"; done
   ```
 
   2026-10-15 에 센 값은 #1890~#1939 에서 둘(#1902·#1906, 둘 다 #723 이 고친 코드 탓)이고 #723 병합(#1911)
@@ -189,7 +189,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
 - **sub 의 Jenkins 는 컨테이너라 node·pnpm·uv 가 없다** — 그래서 sub 쪽은 저장소를 담은
   시험 이미지(`docker/ci.Dockerfile`)를 굽고 사이드카 postgres(tmpfs·fsync 끔)와 같은 망에서
   `scripts/ci/sub-checks-inside.sh` 를 돈다. 바인드 마운트는 쓰지 않는다(컨테이너와 호스트의
-  경로가 다르다, 아래 「Jenkins 는 staging 배포 호스트에 있다」). 그 이미지는 루트
+  경로가 다르다, 아래 「Jenkins 는 sub 호스트에 있다」). 그 이미지는 루트
   `.dockerignore` 대신 `docker/ci.Dockerfile.dockerignore` 를 읽어 **문서를 들인다** — 문서 검사와
   다이어그램 최신성 시험이 그것을 읽는다(빼먹었을 때 넷이 「파일이 없다」로 빨갰다).
 - **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·

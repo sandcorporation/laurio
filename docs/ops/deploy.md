@@ -3,7 +3,7 @@
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
 compose 파일이 분리되어 있다 — 시크릿·어댑터 바인딩이 환경을 넘어 섞이지 않는다.
-**staging 은 없다**(2026-10-30, #836 — `docker/compose.staging.yaml`·`docker/staging.env.example` 은 #842 에서 지웠다):
+환경은 dev 와 prod 둘이다(staging 은 2026-10-30, #836 에서 걷었다):
 
 | | 파일 | `CODEMIT_DEPLOYMENT_TARGET` | 어댑터 | TLS·secure 쿠키 하드닝 |
 | --- | --- | --- | --- | --- |
@@ -54,7 +54,7 @@ ADR-0048이 amend). 스위치가 둘이다:
   「공모전 개최」(유료) CTA만 빠진다 — `/console/contests/new`가 전부 본인확인·
   견적·결제로 이어지는 유료 흐름이기 때문이다. 「무료 공모전 개최」가 가리키는
   `/console/contests/new-free`는 개최 권한이 결제를 대신하므로 유료 스위치와
-  무관하게 열려 있다(staging·prod의 기본값이 정확히 이 조합이다). 앱과
+  무관하게 열려 있다(prod의 기본값이 정확히 이 조합이다). 앱과
   백엔드가 어긋나면 링크는 보이는데 앞이 404인 것이 고른 실패 모양이다
   (`CODEMIT_OPERATOR_ORIGIN`과 같은 종류의 어긋남).
 - **유료 전용 스캔이 등록부에서 사라진다.** 유료 공모전 스위치가 꺼지면 환불
@@ -84,11 +84,10 @@ ADR-0048이 amend). 스위치가 둘이다:
 `contests.search_opensearch.OpenSearchContestSearch`)이
 배포 환경에서 fake 이거나 임포트되지 않으면 부팅 자체를 거부한다 — 컨테이너가 뜬 채로 첫 요청에서야 죽는 것보다 정직하게 못 뜨는 편이다.
 
-`config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(staging+production)가 fake 어댑터
+`config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`(production)가 fake 어댑터
 바인딩을 부팅 시점에 거부하고, `IS_PRODUCTION_DEPLOYMENT`(production만)가 추가로
 `manage.py check --deploy`가 요구하는 HSTS·SSL 리다이렉트·secure 쿠키·강한
-`SECRET_KEY`를 강제한다. staging은 검증용 서브 호스트라 운영자가
-`POST /api/internal/tick`을 수동으로 쏠 수 있다(tick 은 스캔 등록부 `core/scans.py` 의 스캔
+`SECRET_KEY`를 강제한다. 운영자는 `POST /api/internal/tick`을 수동으로 쏠 수 있다(tick 은 스캔 등록부 `core/scans.py` 의 스캔
 **전부**를 등록 순서로 한 바퀴 돈다 — 전이·채점·환불·배분·지급·알림. 스캔 하나만 돌리려면
 `POST /api/internal/scans/{name}`, #137/#140) — 두 파일 모두 `INTERNAL_API_TOKEN`이 없으면
 부팅 자체가 거부된다.
@@ -96,7 +95,7 @@ ADR-0048이 amend). 스위치가 둘이다:
 **tick 은 시간을 앞당기지 않는다.** 예전 문장은 「tick 을 쏴서 21일 시나리오를 몇 초에
 재현할 수 있다」였는데 그건 사실이 아니다 — tick 은 인자를 받지 않고(`core/api.py`),
 `/scans/{name}` 의 `params` 는 **fake 어댑터 시나리오 선택 전용**이며(환불의 `simulate` 등,
-staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실제 시계다(ADR-0003). tick 이 하는
+배포 환경은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실제 시계다(ADR-0003). tick 이 하는
 일은 **「지금 시점에서 이미 밀린 일을 beat 를 기다리지 않고 즉시 처리한다」**이지 미래로
 가는 것이 아니다.
 
@@ -106,7 +105,7 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 `payment-refund-request` 가 같은 `as_of` 안에서 연달아 돌아 토스에 실제 취소까지 갔다.
 이걸 모르고 tick 만 쏘면 「아무것도 안 움직인다」로 보인다.
 
-**내부 API 는 컨테이너 안에서 치고, Host 헤더를 붙인다.** staging·prod 의 backend 는 호스트
+**내부 API 는 컨테이너 안에서 치고, Host 헤더를 붙인다.** prod 의 backend 는 호스트
 포트를 열지 않는다(#485 — 아래 「backend·events 는 겹쳐 바꾼다」) — `docker exec
 codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Host 가
 `ALLOWED_HOSTS` 에 없으면 Django 가 **400** 을 낸다 — gunicorn 은 멀쩡한데 400 만 온다.
@@ -128,7 +127,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
-**커밋이 prod 까지 가는 길은 둘이다**(2026-10-30, #840 — staging 을 걷었다, ADR-0068):
+**커밋이 prod 까지 가는 길은 둘이다**(ADR-0068):
 
 1. **브랜치 → PR → `main`.** Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
    sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit/ci-train`(`Jenkinsfile.train`)이 줄 선
@@ -136,7 +135,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 prod 까지 간다.
 2. **`main` → prod → `production`.** **`main` 의 push 가 곧 prod 배포다.** 웹훅이 Jenkins `codemit/deploy`
-   잡(`Jenkinsfile`, #780 전 이름 `codemit-deploy-staging`)을 부르고, 그 잡이 한 빌드에서 차례로 돈다:
+   잡(`Jenkinsfile`)을 부르고, 그 잡이 한 빌드에서 차례로 돈다:
    - **대상 확인**(built-in) — `main` 인지, **마지막 prod 배포(GitHub 의 `production`, `ls-remote` 로 지금 읽는다)
      뒤로** 문서(`.md`·`docs/`)만 바뀌었는지(`scripts/ci/changed.sh`). 문서만이면 여기서 초록으로 끝난다.
      `production` 은 prod 배포가 초록인 **뒤에만** 앞당기므로 배포가 실패한 커밋 뒤에 문서 커밋이 와도 그 배포를
@@ -162,15 +161,13 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 
    예전 흐름: 2026-10-02 ~ 10-15 에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging` 을
    앞당겼고 그 push 가 이 잡을 불렀다(조직의 Actions 분량이 바닥나 떠났다 — ADR-0061). 10-15 ~ 10-30 에는
-   한 빌드가 amd64·arm64 둘을 굽고 `staging` 을 앞당겨 staging 에 배포한 뒤, 파라미터 `PROMOTE_PRODUCTION`
-   (기본 꺼짐, 2026-10-14)을 켠 빌드만 prod 로 갔다. 2026-10-23(#779) 전에는 `production` 을 배포 **전**에
+   한 빌드가 amd64·arm64 둘을 굽고 staging 에 배포했으며 prod 는 파라미터를 켠 빌드만 갔다(2026-10-30 에 staging 과 함께 걷었다, ADR-0068). 2026-10-23(#779) 전에는 `production` 을 배포 **전**에
    앞당기고 웹훅이 별도 잡 `codemit-deploy-prod`(`Jenkinsfile.production`, `Jenkinsfile` 의 배포 단계를 복제한
    것)를 깨웠다.
 
 `production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
-멈춘다. **직접 커밋하지 않는다.** (GitHub 의 `staging` 브랜치는 #840 뒤로 아무도 움직이지 않는다 —
-`Jenkinsfile.ghcr-prune` 의 보호 목록에서는 #842 에서 걷었다, #836.)
+멈춘다. **직접 커밋하지 않는다.** (GitHub 의 옛 `staging` 브랜치는 아무도 움직이지 않는다.)
 
 `Jenkinsfile` 의 「prod 배포」 단계(2026-10-23, #779 — 그 전에는 별도 잡 `codemit-deploy-prod` 의
 `Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(같은 컨트롤러)에
@@ -192,8 +189,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 `Jenkinsfile` 의 「이미지」
 단계가 macos 에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
 비공개)에 여섯 전부 `codemit-<서비스>:<sha>-arm64` 로 올린다 — backend·세 앱·search(#450/#451)·pgbouncer
-(#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. #840 전에는 sub(`laurio-staging`)가 같은 여섯을
-staging 용 `-amd64` 로도 구웠다(열차의 sub 도 #841 까지 구웠다, #836). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
+(#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 예전에는 sub 가 같은 여섯을 `-amd64` 로도 구웠다(2026-10-30 에 걷었다, #840·#841). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
 를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
 내보내지 못한다)가 남아 제 캐시를 20GB 까지 둔다. 예전에는 GitHub 호스티드(그 전 셀프호스티드 mac, 그
 전 sub)가 커밋마다 열둘을 다 구웠다.
@@ -210,8 +206,8 @@ staging 용 `-amd64` 로도 구웠다(열차의 sub 도 #841 까지 구웠다, #
   **같은 해시로** 바꿔 끼울 서비스를 고른다(#712, `image_context.py changed <직전 배포> HEAD` — 양쪽 커밋의 표에서 경로 목록·빌드 대상·`HASH_VERSION` 까지 읽어 해시 전체를
   견준다, #729·#738) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
-  아무것도 다시 띄우지 않는다(예전의 경로 패턴은 codemit-deploy-staging #474 에서 `frontend/playwright.config.ts` 주석 하나에
-  frontend 를 다시 띄웠다). 해시를 내지 못하면(호스트에 python3 가 없다 등) 경로 패턴으로 떨어진다. compose
+  아무것도 다시 띄우지 않는다(예전의 경로 패턴은 `frontend/playwright.config.ts` 주석 하나에
+  frontend 를 다시 띄웠다, #474). 해시를 내지 못하면(호스트에 python3 가 없다 등) 경로 패턴으로 떨어진다. compose
   파일·없는 컨테이너·앱 실행 env 의 규칙은 그대로다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
   새 경로를 `COPY` 하는데 표에 없으면 빨갛다. 빠뜨리면 그 경로를 고친 커밋이 옛 이미지로 배포된다.
@@ -221,9 +217,9 @@ staging 용 `-amd64` 로도 구웠다(열차의 sub 도 #841 까지 구웠다, #
   넣고, 앱은 서버에서 그것을 읽어 루트 레이아웃이 브라우저로 넘긴다(`<앱>/lib/public-config.ts`).
   방문 메트릭 스니펫(Sandcorp 공통, #785)도 같은 길이다 — `.env.<target>` 의 `METRICS_SNIPPET_URL` 이
   frontend·classroom 둘의 `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 로 들어가 `<head>` 의 `<script defer
-  src=… data-site="codemit">` 한 줄이 된다. operator 에는 없고, 비우면(staging) 태그 자체가 없다 —
+  src=… data-site="codemit">` 한 줄이 된다. operator 에는 없고, 비우면 태그 자체가 없다 —
   켜고 끄는 데 코드 변경이 없다.
-  그래서 배포 잡은 arm64 여섯만 굽는다(예전 staging 용 amd64 까지 열둘).
+  그래서 배포 잡은 arm64 여섯만 굽는다(예전에는 amd64 까지 열둘).
   값을 바꾸면 `.env.<target>` 을 고치고 배포한다 — `deploy.sh plan` 이 떠 있는 앱의 compose 설정 해시를
   지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 견주지 못하면(`config --hash` 실패 등)
   그 메시지와 「견줄 수 없어 다시 띄운다」를 찍고(실제 어긋남의 로그와 갈린다) 다시 띄운다(#727·#733, `backend/tests/test_deploy_plan_app_env.py`). 어느 키가 어느 이름으로 가는지는
@@ -243,13 +239,12 @@ staging 용 `-amd64` 로도 구웠다(열차의 sub 도 #841 까지 구웠다, #
   파라미터 `IMAGES_ONLY=true`(이미지·가드까지만, prod·`production` 은 건드리지 않는다) — PR CI 는 이 파일을
   보지 못한다.
 - **GitHub 쪽에는 CI·배포를 위한 것을 두지 않는다**(#752). `.github/workflows/` 가 없고, 저장소
-  변수·시크릿(옛 `STAGING_*`·`PROD_*`·`JENKINS_*`, `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN`·
+  변수·시크릿(옛 `PROD_*`·`JENKINS_*` 등, `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN`·
   `GLITCHTIP_TOKEN_FOR_AUTOMATION`)과 Deploy key `promote-production` 은 지웠다 — 공개 값은 서버의
   `.env.<target>`(#711), Jenkins 의 GitHub 쓰기는 자격증명 `github-sandcorporation-token`, GlitchTip 쓰기
   토큰은 Jenkins 자격증명 `glitchtip-automation-token` 이다. 조직 셀프호스티드 러너는 0대다(2026-10-15).
 
-**prod 배포는 `main` 의 push 가 부른다**(2026-10-30, #840 — 그 전에는 staging 까지만 가고 prod 는
-`PROMOTE_PRODUCTION` 을 켠 빌드만). Jenkins 잡 `codemit/deploy`(`/var/jenkins_home/jobs/codemit/jobs/deploy`)는
+**prod 배포는 `main` 의 push 가 부른다**(2026-10-30, #840). Jenkins 잡 `codemit/deploy`(`/var/jenkins_home/jobs/codemit/jobs/deploy`)는
 **Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main`,
 트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. 같은 빌드가 이미지 → 부팅 가드 → prod 배포 → `production`
 앞당기기를 차례로 돌므로 배포 단계에 닿는 순간 이미지는 ghcr 에 있다. 단계마다 노드가 달라 다시
@@ -273,7 +268,7 @@ Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 �
 가 성공·실패·중단을 가리지 않고 한 줄을 보낸다 — prod 배포 결과(예: `✅ [Codemit] prod 배포 SUCCESS — #N (sha)`,
 prod 배포 뒤 `production` 앞당기기에서 붉으면 `· production 앞당기기 FAILURE` 를 덧붙이고, `IMAGES_ONLY` 빌드는
 「이미지」), 빌드 번호·커밋 12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
-사실이 사람에게 닿는 자리가 없었고, 실패는 더 그랬다(2026-09-17 staging 배포가 정리
+사실이 사람에게 닿는 자리가 없었고, 실패는 더 그랬다(2026-09-17 배포가 정리
 단계에서 빨갛게 끝난 것을 한참 뒤에 알았다).
 
 **웹훅 주소는 저장소에 없다** — Jenkins 자격증명(Secret text) `discord-deploy-webhook`
@@ -308,7 +303,7 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 하나라도 못 읽으면 지우지 않고 멈춘다, #709) — 바뀌지 않은 서비스는 옛 버전에 커밋
 태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
 센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **빌드 캐시는
-이름으로 가른다**(#727): 지금 이름(`<서비스>-arm64`, 여섯)은 늘 남기고, 옛 이름(`<앱>-staging`·`-prod`·`<서비스>-amd64`)은 늘 지우고,
+이름으로 가른다**(#727): 지금 이름(`<서비스>-arm64`, 여섯)은 늘 남기고, 옛 이름(`<앱>-prod`·`<서비스>-amd64` 등)은 늘 지우고,
 캐시 10 은 태그 없는 버전에만 센다 — 순서로만 자르면 (당시 amd64 까지) 살아 있는 태그 열둘이 10 을 넘어 드물게 굽는 search·pgbouncer 의
 캐시가 지워졌다. **병합되지 않은 묶음의 이미지는 순서보다 먼저 지운다**(#729): 열차는 쌓은 커밋 sha 로
 이미지를 올리는데(붉은 묶음·가른 재실행 포함) 그 sha 는 main 에 오지 않아, 순서로만 자르면 이것들이 12 를 채워
@@ -328,7 +323,7 @@ compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh p
 를 손으로 부른다(Redis 비워짐·db 잠깐 끊김을 감수할 때만).
 
 **backend·events 는 겹쳐 바꾼다 — 배포 중에도 요청이 끊기지 않는다**(#485, 2026-09-22).
-예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(staging
+예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(당시 staging
 실측, GlitchTip 64·74·75 — BFF 재시도 예산 약 15.8초보다 길었다). 지금은 `deploy.sh` 의
 `rolling_replace` 가 서비스를 잠시 둘로 늘려(`--scale 2 --no-recreate`) 새 것이
 `/api/health` 에 답한 뒤에야 옛 것을 멈추고, 새 것의 이름을 옛 이름(`…-backend-1`)으로
@@ -392,8 +387,8 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   `backend/tests/test_migration_rolling_safety.py` 가 표식 없는 위험 연산을 막는다. 예전에는
   마이그레이션이 든 배포가 전부 내리고 올렸고, 2026-10-02 prod 에서 그 창이 공개 앱 재시도
   예산보다 길어 `/contests` 가 500 을 냈다(`0014_connected_apps`, GlitchTip 75·83).
-- **prod 는 적용할 마이그레이션이 있으면 migrate 전에 DB 를 덤프한다**(#839, 우산 #836 §7 — staging
-  리허설이 없어지는 자리를 메운다). `deploy.sh prod up` 이 backend 를 바꿀 때, 아무것도 내리기 전에
+- **prod 는 적용할 마이그레이션이 있으면 migrate 전에 DB 를 덤프한다**(#839, 우산 #836 §7 — 배포 전에 마이그레이션을
+  미리 돌려 보던 staging 이 없어진 자리를 메운다). `deploy.sh prod up` 이 backend 를 바꿀 때, 아무것도 내리기 전에
   새 이미지의 일회성 컨테이너에서 `migrate --plan` 을 묻는다(배포 범위의 파일 diff 가 아니라 DB 의
   답이다 — 묻지 못하면 있다고 본다). 있으면 db 컨테이너의 `pg_dump --format=custom --no-owner` 를
   표준출력으로 받아 배포 디렉터리의 `.jenkins-prod-dumps/codemit-predeploy-YYYYMMDD-HHMMSS-<sha12>.dump`
@@ -402,7 +397,7 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   남기고, 그보다 오래된 것은 02:00 백업(14일)이 맡는다. 그 파일시스템에 DB 크기+1 GiB 가 없거나
   덤프가 실패하면(빈 파일·`PGDMP` 머리 없음 포함) **migrate 도 교체도 하지 않고 배포가 멈춘다**.
   로그에는 경로와 크기만 남는다(`[deploy:prod] 배포 전 덤프 끝 — <경로> (<n> 바이트)`). 마이그레이션이
-  없으면 `배포 전 덤프를 건너뛴다` 한 줄이다. staging 에는 걸지 않는다. 손으로는
+  없으면 `배포 전 덤프를 건너뛴다` 한 줄이다. 손으로는
   `sh ./deploy.sh prod predeploy-dump`. 되돌릴 때는 grader·backend·celery-worker·celery-beat·events 를 내리고
   `docker compose … exec -T db sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < <덤프>`
   ([운영](operations.md)의 02:00 백업 복원과 같은 줄이다).
@@ -413,7 +408,7 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   가 없고, 그 창은 공개 앱 재시도 예산보다 길 수 있다. migrate 가 실패하면 내렸던 옛
   컨테이너를 다시 켠다. `deploy.sh plan` 이 어느 쪽인지와 이유를 출력한다.
 - **그래서 호스트 포트가 없다** — 같은 서비스 둘이 한 호스트 포트를 잡을 수 없다. 쓰는 곳이
-  없었다: 배포 헬스 체크는 컨테이너 안에서 치고 세 앱은 `backend:8000` 으로 간다. staging 의
+  없었다: 배포 헬스 체크는 컨테이너 안에서 치고 세 앱은 `backend:8000` 으로 간다. 옛 staging 의
   `api.laurio.honeycombpizza.link`(저장소 밖 npmplus → 호스트 8000)는 남은 로그 사흘 동안
   인증서 확인 말고는 스캐너뿐이었다 — 포트가 닫히며 끊긴다.
 - **실측**(세 호스트의 compose 2.33·5.1·5.5, 장난감 서비스): 둘인 동안 DNS 가 둘을 번갈아
@@ -446,16 +441,16 @@ OpenSearch 이미지 자체만 바뀐다. `docker/pgbouncer.Dockerfile`·`docker
 **동시 시청자의 천장은 자원이 아니라 열 수 있는 파일 개수였다**(2026-09-18).
 실시간 신호 스트림 하나가 이벤트 서비스에서 서술자 둘(브라우저 소켓 + Redis
 구독)을, 강의실 앱에서도 둘(브라우저 소켓 + 이벤트 서비스로 나가는 소켓)을
-쓴다. 컨테이너 기본 soft 한도가 1024 라 staging 실측에서 **약 505개**에서
+쓴다. 컨테이너 기본 soft 한도가 1024 라 당시 staging 실측에서 **약 505개**에서
 `Too many open files` 로 막혔다(1500개를 붙여 잰 값 — 그때도 이벤트 서비스는
 CPU 0.2%·메모리 180MB 로 거의 놀고 있었다). 두 서비스의 `nofile` soft 를
 65536 으로 올려 두었다(검색 서비스가 이미 쓰던 값, hard 는 원래 524288).
 
-**같은 날 잰 처리량**(staging, 컨테이너 직접, CI 유휴): 백엔드 API 는 동시 4에서
+**같은 날 잰 처리량**(당시 staging, 컨테이너 직접, CI 유휴): 백엔드 API 는 동시 4에서
 **602 rps**(그때는 sync gunicorn 워커가 넷이라 그 지점이 정점이고, 그 뒤로는 처리량이
 유지된 채 지연만 늘었다 — 지금은 워커마다 스레드 넷인 gthread 다, #725), 공개 앱의 서버 렌더링은 **약 135 rps**(Next 프로세스가
 하나다 — 사람이 쓰는 경로에서는 여기가 백엔드보다 먼저 막힌다). prod 는 코어 4의
-arm64 라 같은 페이지 한 건이 staging 11ms 대 prod 41ms 였다.
+arm64 라 같은 페이지 한 건이 당시 staging 11ms 대 prod 41ms 였다.
 
 **검색이 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다**(#450/#451,
 부모 #444 스펙과 같은 원칙). `backend`·`celery-worker`·`celery-beat`·`events`
@@ -480,8 +475,7 @@ rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — �
 (#453 사용자 스토리 13) — 그 경로 자체가 DB 까지 왕복해야 200 을 낸다.
 풀 모드는 트랜잭션이고, 그 제약(서버측 커서가 깨지는 것)을 dev pgbouncer
 프로필로 실제로 재현해 확인한 결과는 위 「Postgres 앞 연결 풀러」 절과
-`config/settings.py`의 `DISABLE_SERVER_SIDE_CURSORS` 주석에 있다 — staging·
-prod compose 는 그 환경변수(`CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`)를
+`config/settings.py`의 `DISABLE_SERVER_SIDE_CURSORS` 주석에 있다 — prod compose 는 그 환경변수(`CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`)를
 기본으로 켠다. **되돌리는 법**: 네 프로세스의 `POSTGRES_HOST`를 다시 `db`로
 (그리고 위 환경변수를 다시 `false`로) 돌리면 앱이 DB를 직접 가리키던
 이전 상태로 즉시 돌아간다 — 풀러 컨테이너 자체를 지울 필요는 없다.
@@ -496,7 +490,7 @@ prod compose 는 그 환경변수(`CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`)
 못한다). backend 를 바꾸지 않는 배포면 내린 그 컨테이너를 `start` 로 되살린다 —
 다시 만들지 않으므로 이미지가 그대로다.
 
-**실제로 돌려 본 결과**(2026-09-22, 풀러만 바꾼 `6c63063` 이 staging·prod 둘 다에
+**실제로 돌려 본 결과**(2026-09-22, 풀러만 바꾼 `6c63063` 이 당시 staging·prod 둘 다에
 배포됐다): 순서는 설계대로였고 backend 넷은 같은 컨테이너·같은 이미지로 되살아났으며,
 **backend 의 `OperationalError`(70~73)는 두 곳 모두 다시 나지 않았다.** 다만 **실패
 창이 사라지지는 않았다** — staging 공개 도메인을 0.5초마다 찔러 보니 **약 13초** 동안
@@ -514,20 +508,19 @@ prod compose 는 그 환경변수(`CODEMIT_DB_DISABLE_SERVER_SIDE_CURSORS=true`)
 `events` 의 `/api/health` 확인도 같은 규약을 따른다(URLconf 가 `backend` 와
 완전히 같은 코드다).
 
-**Jenkins 는 staging 배포 호스트에 있다 — 개발 머신이 아니다.** 아래 `docker exec
+**Jenkins 는 sub 호스트에 있다 — 개발 머신이 아니다.** 아래 `docker exec
 jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개발 머신에서 치면
 컨테이너도 경로도 없다).
 
 Jenkins 컨테이너는 호스트 docker 소켓을 물고 root 로 돈다. 빌드 로그는
 `docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/codemit/jobs/deploy/builds/<N>/log'`.
 컨트롤러에서 도는 단계(대상 확인·`production` 앞당기기·알림)의 워크스페이스는 잡의 기본 자리인 컨테이너의
-`/var/jenkins_home/workspace/codemit/deploy` 이자 호스트의 `/server/jenkins/workspace/codemit/deploy` 다(#840 전에는
-staging 의 `.env.staging`·배포 표식이 있는 `workspace/codemit-deploy-staging` 을 붙잡았다) — **경로가 다르므로** compose 에 상대경로
+`/var/jenkins_home/workspace/codemit/deploy` 이자 호스트의 `/server/jenkins/workspace/codemit/deploy` 다(예전에는 staging 의 `workspace/codemit-deploy-staging` 을 붙잡았다) — **경로가 다르므로** compose 에 상대경로
 바인드 마운트를 넣으면 호스트 데몬이 엉뚱한 곳을 본다. 지금은 named volume 뿐이다.
 
 **마이그레이션이 앱마다 단일 initial 로 다시 만들어졌다**(#364, 부모 #358).
 예전에는 `appeals` 하나만 그랬지만(#44), 과제를 걷으며 **열일곱 앱 전부**를 같은
-모양으로 정리했다 — prod 는 한 번도 배포된 적이 없고 staging 은 DB 를 통째로 다시
+모양으로 정리했다 — 당시 prod 는 한 번도 배포된 적이 없고 staging 은 DB 를 통째로 다시
 만들었으므로 잃을 이력이 없었다. 106개 파일이 27개가 됐다(순환 참조가 있는 앱은
 Django 가 둘로 가른다).
 

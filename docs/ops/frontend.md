@@ -36,7 +36,7 @@ docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm
 
 **강의실은 자기 로그인을 갖지 않는다**(ADR-0038, #276) — 회원은 공개 앱과 공유한다.
 그래서 강의실 e2e 스펙은 강의실에서 로그인하지 않는다: 부모 도메인 쿠키 공유는
-dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 공유는 staging에서만
+dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 공유는 배포 환경(prod)에서만
 검증된다(#277). 강의실의 인증 구역을 걷는 스펙(과 dev에서 눈으로 확인할 때)은 공개
 앱에 로그인해 받은 `codemit_access`/`codemit_refresh` 쿠키 값을 강의실 오리진에 수동으로
 심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
@@ -290,7 +290,7 @@ contrast.test.ts`가 두 테마 각각 여섯 조합(본문/바탕·본문/뜬 �
 두 앱의 `lib/theme/preference.ts`에 같은 모양의 순수 함수로 복사돼 있다(토큰·
 쿠키 도우미와 같은 방식). **dev(localhost 포트 구분)에서는 교차 앱 쿠키
 공유가 재현되지 않는다** — 로그인 쿠키와 같은 제약이라 같은 오리진 안에서의
-유지만 확인했고, 교차 공유는 staging 확인 항목으로 남는다.
+유지만 확인했고, 교차 공유는 prod 확인 항목으로 남는다.
 
 **문제 설명 에디터(Toast UI, 강의실만)도 같은 표시를 따른다**(#399). 이
 라이브러리는 색을 CSS 변수가 아니라 `.toastui-editor-dark` 클래스로 켠다 —
