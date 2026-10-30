@@ -10,8 +10,7 @@ Next.js + React. 강사·참여자가 쓰는 앱이다(ADR-0037) — 공모전 �
 
 **방문 메트릭 스니펫(Sandcorp 공통, #785)은 운영에서만 실린다** — 공개 앱과 같은 모양으로 루트
 레이아웃 `<head>` 가 실행 env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 이 있을 때만 `<script defer src=…
-data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippetSrc`). 비어 있는 로컬·시험·
-staging 에는 태그가 없고, 운영자 앱에는 넣지 않는다(`frontend.md` 「앱 전체에 걸리는 것」).
+data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippetSrc`). 비어 있는 로컬·시험에는 태그가 없고, 운영자 앱에는 넣지 않는다(`frontend.md` 「앱 전체에 걸리는 것」).
 
 **"/login"·"/join/{code}"·"/invite/{token}"(#561)·루트("/")를 뺀 전부가 인증 구역이다**(운영자 앱과 같은
 이유 — 색인될 공개 표면이 랜딩 하나뿐이다). 미들웨어가 쿠키의 존재만 보고, 유효성은
@@ -139,7 +138,7 @@ ADR-0043) — `CLASSROOM_SCORING_ADAPTER_MODE`(기본값 `fake`)가 결정적인
 `FakeClassroomScoringAdapter`를 쓴다: 체크리스트 문구가 제출된 소스에 그대로
 등장하면 충족, 아니면 미달이다. "키가 있어야 채점 후보에 든다"는 규칙은
 그대로다 — 이 스위치는 "그 키로 실제로 네트워크에 나가는가"만 가른다.
-staging/production은 이 값이 fake이면 부팅 자체가 거부되고, 실제로는 강사 본인의
+production은 이 값이 fake이면 부팅 자체가 거부되고, 실제로는 강사 본인의
 키로 `OpenAIScoringAdapter`가 돈다 — 배포 환경의 원칙은 바뀌지 않는다. dev·CI의
 모델 목록 조회(위 「채점 모델」 절)도 같은 스위치를 탄다 — 실제 `/v1/models` 대신
 고정된 id 목록(4o·4.1 계열과 gpt-5·gpt-5-mini)을 규칙으로 걸러 "live"로 돌려준다.
@@ -290,7 +289,7 @@ syntax_check_enabled`(기본 켜짐) 하나로 켜고 끌 뿐 체크리스트 �
 실패(비로그인)면 메뉴 대신 `/login` 링크를 보여준다.
 
 **버튼은 항상 「내 계정」이다**(#376) — 예전에는 username이 그대로 떴고
-(소셜 로그인 계정이면 `kakao:5069350637` 같은 제공자 식별자가 staging 헤더에
+(소셜 로그인 계정이면 `kakao:5069350637` 같은 제공자 식별자가 헤더에
 실제로 보였다), 공모전 앱은 그때 「내 콘솔」이라는 다른 이름·다른 동작(콘솔
 현관으로 이동)이었다 — #371이 두 앱을 「내 계정」 드롭다운 하나로 맞췄다.
 메뉴 모양과 바깥을 눌러 닫는 동작도 공개 앱(`frontend/app/components/

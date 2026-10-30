@@ -1,4 +1,4 @@
-# 개발용 스택. staging/prod 구성은 티켓 22(#23)에서 분리한다.
+# 개발용 스택. prod 구성은 `docker/compose.prod.yaml` 이다.
 #
 #   docker compose -f docker/compose.dev.yaml up
 #
@@ -41,7 +41,7 @@ services:
       retries: 20
 
   redis:
-    # Operator 세션 저장소(#43, ADR-0018). staging·prod 에는 Celery 브로커용 redis 가
+    # Operator 세션 저장소(#43, ADR-0018). prod 에는 Celery 브로커용 redis 가
     # 이미 있어 세션도 같은 인스턴스를 쓴다 — dev 에만 없어서 여기 붙인다.
     #
     # `--appendonly yes` 가 핵심이다. redis:7-alpine 은 AOF 가 기본으로 꺼져 있어서,
@@ -120,8 +120,8 @@ services:
   #   docker compose -f docker/compose.dev.yaml --profile search up -d
   #
   # 단일 노드·JVM 힙 1GB·컨테이너 메모리 한도 2GB(`mem_limit`)다. 보안 플러그인은
-  # `DISABLE_SECURITY_PLUGIN`으로 끈다(dev는 인증 없이 붙는다 — staging·prod도
-  # 같은 값이다, #451). **호스트 포트를 낸다** — staging·prod(#451, 내부망
+  # `DISABLE_SECURITY_PLUGIN`으로 끈다(dev는 인증 없이 붙는다 — prod도
+  # 같은 값이다, #451). **호스트 포트를 낸다** — prod(#451, 내부망
   # 전용)와 다른 점이다: live 테스트(`tests/test_contest_search_opensearch_live.py`)와
   # `rebuild_contest_search_index` 관리 명령이 컨테이너 밖(호스트 uv run)에서
   # 붙어야 db·redis·minio와 같은 이유다.

@@ -22,7 +22,7 @@ Next.js + React. 발주자·개발자·방문자가 쓰는 앱이다. 운영자�
 **방문 메트릭 스니펫(Sandcorp 공통, #785)은 운영에서만 실린다** — 루트 레이아웃 `<head>` 가 실행
 env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 이 있을 때만 `<script defer src=… data-site="codemit">` 한 줄을
 그린다(`lib/public-config.ts` `metricsSnippetSrc`). 쿠키 없이 경로 변경마다 조회 한 건을 보내고,
-비어 있는 로컬·시험·staging 에는 태그가 없다. 강의실 앱도 같은 모양이고 운영자 앱에는 없다.
+비어 있는 로컬·시험에는 태그가 없다. 강의실 앱도 같은 모양이고 운영자 앱에는 없다.
 
 **토큰은 브라우저가 보지 않는다**(ADR-0016). BFF 가 HttpOnly 쿠키로 쥐고, 인증이 필요한
 호출은 전부 `/api/backend/[...path]` 프록시를 지나며 거기서 JWT 가 헤더로 바뀐다. 방어는
@@ -51,7 +51,7 @@ env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 이 있을 때만 `<script defer src=�
 `/console/contests/new-free`는 결제 대신 개최 권한(운영자가 계정별로 켠다)을
 보므로 유료 스위치와 무관하게 열려 있다 — 다만 그 CTA는 **개최 권한이 켜진 로그인
 사용자에게만** 보인다(헤더가 로그인을 확인한 뒤 권한을 한 번 묻는다). 진짜 문은 백엔드다(`core.contest_
-switch`), 이 앱은 진입점을 감출 뿐이다. 기본은 둘 다 켜짐이고 staging·prod
+switch`), 이 앱은 진입점을 감출 뿐이다. 기본은 둘 다 켜짐이고 prod
 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」).
 
 **헤더·탭에 로고가 있다**(#392, #391 「커밋 노드 C」). 헤더는 심볼(`app/components/

@@ -48,7 +48,7 @@ Read an ADR for *why a decision was made*, never as a statement of current state
 goes for the "Problem Statement" of a spec issue: it describes the world the spec was
 written to change, which by the time you read it may already have been changed.
 
-**This bit us.** A session read the Problem Statement of a staging-integration spec —
+**This bit us.** A session read the Problem Statement of a real-adapter-integration spec —
 "only one adapter is actually implemented" — and told the user that as current fact. It had
 been true when the spec was written; by then all ten adapters were bound to real
 implementations. The spec was still open only because a few execution sub-issues remained.

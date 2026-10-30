@@ -121,7 +121,7 @@ ADR-0048). 공모전 스위치가 꺼지면 위 표의 `contests.api` 소관 표
 `award`·`handover`·`payout`·`metrics`·`submissions/compare`(각각 awards·
 handovers·payouts·submissions 앱 소관 — 이미 존재하는 공모전을 마무리하는
 표면이라 두 스위치와 무관하게 열려 있다)는 예외다. 기본은 둘 다 켜짐이고
-staging·prod 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」). 닫히는 표면의
+prod 배포만 유료 스위치를 끈다(`CLAUDE.md` 「배포」). 닫히는 표면의
 전체 목록은 `core.contest_switch` 모듈 docstring 이 든다.
 
 **제출을 받는 동안(published)에도 브리프·요구사항을 고칠 수 있다**(#473,

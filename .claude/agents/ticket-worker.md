@@ -43,12 +43,12 @@ description: Codemit 저장소에서 GitHub 이슈(티켓) 하나를 워크트�
 12. 쌓은 브랜치면: 앞 PR 이 병합됐는지 `gh pr view <번호> --json state` 로 **직접** 확인하고, 병합됐으면 `git rebase --onto origin/main <시작할 때 적어 둔 앞 tip>`.
 13. push → `main` 으로 PR(초안 아님). 본문에 `Closes #<번호>`, 판단과 근거, (있으면) 스크린샷 링크, 끝에 `🤖 Generated with [Claude Code](https://claude.com/claude-code)`. **main 에 직접 push 하지 않는다.** GitHub SSH 가 publickey 로 잠시 거절되면 잠시 뒤 다시.
 14. **PR 을 열자마자** `SendMessage` to `"main"`: `#<이슈> PR #<번호> 열림, 브랜치 <이름>, tip <해시>` 한 줄.
-15. 병합까지 위의 조용한 루프로 기다린다. 실패면 로그 끝을 보고 고쳐 다시 push(병합 충돌이면 `origin/main` 위로 rebase — 남의 최근 커밋을 걷어내야 하면 이유를 보고에 적는다). 인프라 탓이면 보고하고 멈춘다. 병합되면 **즉시** 다음 단계로.
+15. 병합까지 위의 조용한 루프로 기다린다. 실패면 로그 끝을 보고 고쳐 다시 push(병합 충돌이면 `origin/main` 위로 rebase — 남의 최근 커밋을 걷어내야 하면 이유를 보고에 적는다). 인프라 탓이면 보고하고 멈춘다. 병합되면 **병합 = prod 배포**다(ADR-0068) — 문서만 바뀐 병합은 `codemit/deploy` 가 건너뛴다. 배포가 돌았다면 prod `/api/health` 200 과 콘솔의 「디스코드 알림 실패」 0건을 확인한다(`ssh sub` 안에서 `ssh oracle`, 읽기만; Jenkins 자격증명은 셸 env 의 `JENKINS_URL`·`JENKINS_USER`·`JENKINS_API_TOKEN`, 값은 출력하지 않는다). 그다음 **즉시** 다음 단계로.
 16. 이슈가 닫혔는지 확인(안 닫혔으면 바꾼 것·시험 건수·남긴 것을 적어 close). `docker compose -p codemit-dev-<오프셋> down`, dev 서버 `stop-all`, 워크트리·로컬 브랜치 삭제.
 
 ## 하지 않는 것
 
-staging·prod 에 직접 배포하거나 원격 호스트에 쓰기. 공유 dev 스택 내리기. GlitchTip 이슈 상태 바꾸기. 이슈를 새로 만들기(후속거리는 보고에 적는다). 범위 밖 리팩터.
+prod 에 직접 배포하거나 원격 호스트에 쓰기. 공유 dev 스택 내리기. GlitchTip 이슈 상태 바꾸기. 이슈를 새로 만들기(후속거리는 보고에 적는다). 범위 밖 리팩터.
 
 ## 보고(마지막 메시지)
 

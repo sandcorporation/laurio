@@ -43,14 +43,14 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
 `/server/prometheus`(별도 compose — Prometheus 30일·Grafana·node-exporter·cadvisor, sub2 같은
 다른 호스트도 같이 보는 공용 스택)에 사람이 손으로 둔다. Jenkins·GlitchTip 과 같은 취급이다.
 
-- **무엇을 보나**: blackbox 프로브 6개(prod·staging × 공개 앱 `/contests`·강의실 `/login`·
+- **무엇을 보나**: blackbox 프로브 3개(prod 의 공개 앱 `/contests`·강의실 `/login`·
   운영자 앱) — `/contests` 는 서버 렌더링이 백엔드를 불러야 200 이라 **백엔드·DB 생존까지**
   본다. 호스트 지표는 세 호스트(oracle·sub·sub2)의 node-exporter, 컨테이너 재시작은 oracle
   의 cadvisor(**prod 만** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고 지워 재시작이
   정상이다).
 - **언제 울리나**(`prometheus/alerts.yml`, 7개): 응답 없음 2분 · sub 호스트 다운 2분 ·
   루트 디스크 85%(경고)/95%(위험) · 가용 메모리 10% 미만 5분 · 스왑 90% 이상 · prod 컨테이너
-  15분에 3회 재시작. prod 는 `critical`, staging 은 `warning` 이다.
+  15분에 3회 재시작. prod 는 `critical` 이다(예전에는 staging 이 `warning` 이었다).
 - **어디로**: Alertmanager 가 **빌드 알림과 같은 Discord 채널**로 보낸다(채널을 늘리면 안
   보는 채널이 생긴다). 웹훅은 `alertmanager/discord_webhook`(chmod 600)에만 있고 설정
   파일에는 없다 — 바꾸려면 그 파일 한 줄을 고친다(재시작 불필요, 보낼 때마다 읽는다).
@@ -80,14 +80,13 @@ compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 —
 스택에 **Loki**(30일, 메모리 상한 1GB)와 수집기 **Alloy**(도커 소켓으로 `codemit-prod-*`
 컨테이너만 따라간다)가 있어, 로그가 나오는 대로 Loki 로 간다. Grafana 의 Loki 데이터소스에서
 `{service="backend"}`·`{container="codemit-prod-events-1"}` 처럼 찾는다(라벨은 `container`·
-`service`·`env`). **staging 은 모으지 않는다** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고
-지워 거기서는 `docker logs` 로 본다(그래서 staging 은 여전히 배포하면 이전 로그가 사라진다).
+`service`·`env`). sub 는 CI 러너가 컨테이너를 늘 만들고 지워 모으지 않는다.
 
 **배포 환경에서 Django 가 찍는 로그는 한 줄 JSON 이고, 요청마다 id 가 붙는다**(2026-09-21).
 gunicorn 자신의 줄(워커 기동 등)과 Celery 자신의 줄은 각자 포맷 그대로다 — 그 둘은 Django 의
 LOGGING 을 지나지 않는다.
 `config/settings.py` 의 LOGGING 이 배포 여부(`IS_DEPLOYED_ENVIRONMENT`)로 포매터를 고른다 —
-staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`·
+prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`·
 `request_id`, 예외는 같은 줄의 `exc`), dev 는 지금처럼 사람이 읽는 한 줄 포맷이다. Loki 에서는
 `{service="backend"} | json | request_id="…"` 로 한 요청의 줄만 뽑는다.
 
@@ -104,8 +103,8 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 예전 sync 워커는 연결 하나를 받으면 요청 머리가 올 때까지 그 연결에 묶여 다른 연결을 받지
 못했다. BFF 의 undici 가 남긴 빈 연결(#723, `docs/ops/ci.md`)이 워커 수만큼 쌓이면 그동안
 아무도 응답을 못 받았다(prod 포함). 지금은 `config/gunicorn.conf.py` 가 `worker_class =
-"gthread"`·`threads = 4` 를 두고 prod·staging·PR CI 셋이 모두 그 파일을 `-c` 로 읽는다(워커
-수만 compose 에 — prod·CI 4, staging 3). 빈 연결은 스레드 하나만 쥐고 주 루프는 계속 받는다.
+"gthread"`·`threads = 4` 를 두고 prod·PR CI 둘이 모두 그 파일을 `-c` 로 읽는다(워커
+수만 compose 에 — 둘 다 4). 빈 연결은 스레드 하나만 쥐고 주 루프는 계속 받는다.
 `tests/test_gunicorn_idle_connections.py` 가 실제 gunicorn 으로 빈 연결을 워커 수만큼 쥔 채 다음
 요청이 1초 안에 오는 것을, `--worker-class sync` 로 덮으면 묶이는 것을 함께 본다.
 
@@ -137,16 +136,16 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 - **DB 연결 셈**: 스레드마다 Django 연결이 하나고 `CONN_MAX_AGE` 가 0 이라 요청이 끝나면 닫는다.
   모두 트랜잭션 모드 pgbouncer 를 거친다.
 
-  | 쓰는 쪽 | prod | staging | 근거 |
-  | --- | --- | --- | --- |
-  | backend(워커 × 스레드) | 4 × 4 = 16 | 3 × 4 = 12 | 예전 sync 는 4·3 |
-  | celery-worker(prefork) | 4 | 12 | `--concurrency` 미지정 → 호스트 코어 수 |
-  | celery-beat · grader DB 스레드 | 1 · 1 | 1 · 1 | |
-  | events(ASGI) | 따로 세지 않았다 | 같음 | 스트림을 여는 요청만 DB 를 쓴다 |
-  | **풀러 클라이언트 상한** | `max_client_conn` 200 | 200 | `docker/pgbouncer/docker-entrypoint.sh` |
-  | **풀러 → DB 서버 연결** | `default_pool_size` 20 | 20 | PostgreSQL `max_connections` 기본 100 안 |
+  | 쓰는 쪽 | prod | 근거 |
+  | --- | --- | --- |
+  | backend(워커 × 스레드) | 4 × 4 = 16 | 예전 sync 는 4 |
+  | celery-worker(prefork) | 4 | `--concurrency` 미지정 → 호스트 코어 수 |
+  | celery-beat · grader DB 스레드 | 1 · 1 | |
+  | events(ASGI) | 따로 세지 않았다 | 스트림을 여는 요청만 DB 를 쓴다 |
+  | **풀러 클라이언트 상한** | `max_client_conn` 200 | `docker/pgbouncer/docker-entrypoint.sh` |
+  | **풀러 → DB 서버 연결** | `default_pool_size` 20 | PostgreSQL `max_connections` 기본 100 안 |
 
-  클라이언트 쪽 최악(모두 동시에)은 prod 약 22·staging 약 26 으로 200 에 한참 못 미친다. 서버 연결 20 은
+  클라이언트 쪽 최악(모두 동시에)은 prod 약 22 로 200 에 한참 못 미친다. 서버 연결 20 은
   트랜잭션 동안만 쓰이므로(`ATOMIC_REQUESTS` 없음, 쿼리마다 자동 커밋) 동시에 DB 안에 있는
   스레드가 20을 넘을 때만 풀러가 줄 세운다 — 오류가 아니라 대기다.
 - **스레드 안전성**(2026-10-15 판정): 요청 경로의 가변 상태는 모두 Redis(호출 상한
@@ -171,8 +170,7 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
 - **gunicorn 워커 넷을 합산한다**(워커 안의 스레드는 pid 가 같아 한 파일을 함께 쓴다) — prod compose 가 backend 에만 `PROMETHEUS_MULTIPROC_DIR`
   를 주고 뜰 때마다 비우며, 죽은 워커 정리는 `config/gunicorn.conf.py` 의 `child_exit` 가
   한다(워커가 각자 카운터를 들면 긁을 때마다 무작위 워커 하나의 값이 와서 튄다). 워커 넷에
-  40번 보낸 뒤 긁으면 세 번 모두 같은 합계가 나오는 것을 실측으로 확인했다. staging 은 긁지
-  않으므로 그 설정이 없다.
+  40번 보낸 뒤 긁으면 세 번 모두 같은 합계가 나오는 것을 실측으로 확인했다.
 - **라벨은 URL 패턴이다, 실제 경로가 아니다** — `resolver_match.route`(`api/contests/
   <int:contest_id>` 꼴)로 세고 맞지 않은 요청은 `unmatched` 하나로 모은다. 실제 경로를 쓰면
   공모전 수만큼 시계열이 생긴다.
@@ -227,7 +225,7 @@ staging·prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`
    ```
 
    배포한 뒤 한 번 `curl -s http://grader:9102/metrics | grep codemit_llm_` (prometheus 컨테이너 안에서)로 줄이
-   나오는지 본다. staging 은 긁지 않는다.
+   나오는지 본다.
 2. **「Codemit prod」 대시보드 패널**(「LLM 채점」 줄, 패널 PromQL):
    - 결과별 호출률(누적 막대): `sum by (product, result) (rate(codemit_llm_calls_total[5m]))`
    - 응답 시간 p50 / p95: `histogram_quantile(0.5|0.95, sum by (le, product) (rate(codemit_llm_call_duration_seconds_bucket[5m])))`
@@ -352,7 +350,7 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
 - **DSN 이 없으면 꺼진 채로 돈다** — dev·CI 는 주지 않는다. 그래서 테스트가 네트워크를
   치지 않고, 잊고 배포해도 부팅은 막히지 않는다(오류 수집이 없어도 서비스는 돌아야
   한다). `SENTRY_DSN_BACKEND`·`SENTRY_DSN_FRONTEND`·`SENTRY_DSN_OPERATOR`·
-  `SENTRY_DSN_CLASSROOM` 을 `.env.staging`/`.env.prod` 가 채운다(두 env 예시 파일에
+  `SENTRY_DSN_CLASSROOM` 을 `.env.prod` 가 채운다(`docker/prod.env.example` 에
   자리가 있다). 세 앱은 compose 가 그 줄을 실행 env `CODEMIT_PUBLIC_SENTRY_DSN` 으로 넣고,
   서버 초기화는 그것을 읽고 브라우저는 루트 레이아웃이 넘긴 같은 값을 쓴다(#711,
   `<앱>/lib/public-config.ts`) — 한 줄이라 브라우저와 서버가 갈리지 않고, 바꾸면 배포가
@@ -417,7 +415,8 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   기본 실패 모양이라, 배포 뒤 한 번 쏴 보고 GlitchTip 에서 눈으로 본다.
 
 ```bash
-ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
+# sub 안에서 ssh oracle
+ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
 ```
 
 **모델 단가 표 대조 알림은 GlitchTip 경고로 간다**(2026-10-28, #798). 매일 04:10(서울) beat 가
@@ -475,14 +474,14 @@ ssh sub 'docker exec codemit-staging-backend-1 python manage.py sentry_smoke'
   넘긴 것) 원래 규칙대로 건너뛴다. 같은 재발을 매분 또 집지 않도록 「이 발생 시각에서
   이미 다시 집었다」를 `~/.codemit/glitchtip-regressions.json` 에 적는다 — 새 이벤트가
   오면 시각이 바뀌어 또 집힌다. **재발한 그 이벤트가 production 이어야 한다** — 이슈의
-  환경 집합은 「prod 에서 난 적이 있는가」라, 처음 판은 staging 배포 창의 이벤트를 prod
+  환경 집합은 「prod 에서 난 적이 있는가」라, 처음 판은 (그때 있던) staging 배포 창의 이벤트를 prod
   재발로 집었다(오류 74, 2026-09-22). 세션은 클레임 파일의 `regression_of`(지난 수정 커밋)를
   받아 **처음부터가 아니라 그 수정이 무엇을 놓쳤는지부터** 본다.
 - **동시 하나는 잠금 파일이 지킨다**(`~/.codemit/glitchtip-lock`). 세션이 끝낼 때 지우고,
   죽었으면 45분에 저절로 풀린다. `orca automations runs` 의 status 값을 보지 않는 이유는
   그 문자열 목록이 어디에도 문서화돼 있지 않아서다 — 추측하면 가드가 **항상 통과하고도
   조용하다**.
-- **환경 판정은 집합이다.** 같은 예외가 staging·prod 에서 함께 나면 GlitchTip 이 이슈
+- **환경 판정은 집합이다.** 같은 예외가 (staging 이 있던 때) staging·prod 에서 함께 나면 GlitchTip 이 이슈
   하나로 묶고 태그에 두 값을 다 담는다(실측: issue 1). 「첫 값이 production 인가」로 보면
   순서에 따라 prod 오류가 조용히 빠진다.
 - **우리가 일부러 던지는 예외는 집지 않는다.** `SentrySmokeError`(`manage.py
