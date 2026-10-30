@@ -2,7 +2,7 @@
 
 #711·#712 로 빌드 캐시 이름이 `codemit-buildcache:<앱>-staging/-prod` 에서 `<서비스>-<아키텍처>` 로
 바뀌었다. 정리 잡(`Jenkinsfile.ghcr-prune` → `scripts/ci/ghcr_prune.py`)은 캐시를 갱신 순서로만 잘랐는데,
-2026-10-15 ghcr 실측은 살아 있는 태그가 열둘(여섯 × 둘)이라 `--keep-cache 10` 이 드물게 굽는 search·
+2026-10-15 ghcr 실측은 살아 있는 태그가 열둘(여섯 × 둘, amd64 는 #841 에서 걷었다)이라 `--keep-cache 10` 이 드물게 굽는 search·
 pgbouncer 의 캐시를 지우고, 옛 이름 여섯은 그보다 최근에 갱신돼 남는 모양이었다.
 """
 
@@ -29,26 +29,30 @@ def _version(n: int, updated: str, *tags: str) -> dict:
 
 
 def test_cache_keeps_every_live_tag_and_drops_every_old_name():
-    # 2026-10-15 ghcr 의 모양 — 지금 이름 여덟이 가장 최근, 옛 이름 여섯, 그 뒤에 search·pgbouncer.
+    # 2026-10-15 ghcr 의 모양 — 지금 이름(arm64)이 가장 최근, 옛 이름 여섯과 amd64(#841 전, staging 용), 그 뒤에 search·pgbouncer.
     live_recent = [
         _version(i, f"2026-10-14T23:{i:02d}:00Z", f"{svc}-{arch}")
         for i, (svc, arch) in enumerate(
-            (s, a) for s in ("backend", "frontend", "operator", "classroom") for a in ("amd64", "arm64")
+            (s, a) for s in ("backend", "frontend", "operator", "classroom") for a in ("arm64",)
         )
     ]
     old_names = [
         _version(20 + i, "2026-10-14T22:21:00Z", f"{app}-{env}")
         for i, (app, env) in enumerate((a, e) for a in ("frontend", "operator", "classroom") for e in ("staging", "prod"))
+    ] + [
+        _version(30 + i, "2026-10-14T23:59:00Z", f"{svc}-amd64")
+        for i, svc in enumerate(("backend", "frontend", "operator", "classroom", "search", "pgbouncer"))
     ]
     live_rare = [
         _version(40 + i, "2026-10-14T20:00:00Z", f"{svc}-{arch}")
-        for i, (svc, arch) in enumerate((s, a) for s in ("search", "pgbouncer") for a in ("amd64", "arm64"))
+        for i, (svc, arch) in enumerate((s, a) for s in ("search", "pgbouncer") for a in ("arm64",))
     ]
     untagged = [_version(60 + i, f"2026-10-13T{i:02d}:00:00Z") for i in range(12)]
 
     doomed = {v["id"] for v in ghcr_prune.doomed_cache_versions(live_recent + old_names + live_rare + untagged, 10)}
 
     assert doomed.isdisjoint(v["id"] for v in live_recent + live_rare)
+    # amd64 캐시도 옛 이름이다 — 최근에 갱신됐어도 지운다.
     assert {v["id"] for v in old_names} <= doomed
     # 태그 없는 것은 예전처럼 최근 10개만 남긴다 — 가장 오래된 둘이 지워진다.
     assert {v["id"] for v in untagged} & doomed == {60, 61}

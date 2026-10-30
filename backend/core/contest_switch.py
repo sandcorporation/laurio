@@ -13,7 +13,7 @@
   `paid_contest_product_enabled()`가 두 값을 AND로 묶는 이유다.
 
 **기본값은 둘 다 켜짐**이다. `CODEMIT_DEPLOYMENT_TARGET`과는 무관한 독립 값들이고,
-staging·prod 배포(`docker/compose.staging.yaml`/`docker/compose.prod.yaml`)만 유료
+prod 배포(`docker/compose.prod.yaml`)만 유료
 스위치의 기본을 꺼짐으로 겹쳐 쓴다(공모전 스위치는 이제 그대로 켜짐이다) — dev·CI는
 둘 다 건드리지 않으므로 여전히 켜진 채다.
 

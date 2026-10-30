@@ -32,7 +32,7 @@ if [ "$1" = inspect ]; then
   svc=${4#cid-}
   if [ -e "$state/inspect-fails" ]; then echo "Error response from daemon: No such object: $4" >&2; exit 1; fi
   case "$3" in
-    *Config.Image*) echo "ghcr.io/sandcorporation/codemit-$svc:oldsha-amd64" ;;
+    *Config.Image*) echo "ghcr.io/sandcorporation/codemit-$svc:oldsha-arm64" ;;
     *Config.Env*) printf 'PORT=3000\\nCODEMIT_PUBLIC_SENTRY_RELEASE=oldsha\\n' ;;
     *config-hash*) cat "$state/label-$svc" 2>/dev/null ;;
   esac

@@ -50,11 +50,8 @@ design/*.html
 # 패턴은 모든 깊이에서 매치되므로 frontend/node_modules 도 이 규칙 하나로 커버된다.
 node_modules/
 /.pnpm-store/
-.jenkins-staging-deployed
 .jenkins-prod-deployed
-.jenkins-staging-plan
 .jenkins-prod-plan
-.jenkins-staging-config-hash.err
 .jenkins-prod-config-hash.err
 .jenkins-prod-dumps/
 .images-amd64.result

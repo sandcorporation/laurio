@@ -1,7 +1,6 @@
 """Celery 앱 정의 + beat 스케줄.
 
-브로커(Redis)는 staging/prod compose에 있다(docker/compose.staging.yaml,
-docker/compose.prod.yaml, #23). 이 모듈은 임포트 시점에 브로커에 연결하지 않으므로,
+브로커(Redis)는 prod compose에 있다(docker/compose.prod.yaml, #23). 이 모듈은 임포트 시점에 브로커에 연결하지 않으므로,
 브로커 없이도(dev·CI) 설정 자체는 임포트·검증할 수 있다.
 
 코디네이터 리뷰 지적(#23): beat 스케줄에 core.call_scheduler_tick 하나만 있으면

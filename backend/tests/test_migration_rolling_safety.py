@@ -215,7 +215,7 @@ def test_deployed_backend_does_not_migrate_on_boot():
     기동 command 에 남으면 겹쳐 바꾸는 동안 새 backend 가 스키마를 또 건드리고, 내리고 올리는
     배포에서는 옛 worker·beat·events 가 새 스키마 위에 남는다.
     """
-    for target in ("staging", "prod"):
+    for target in ("prod",):
         compose = yaml.safe_load((REPO_ROOT / "docker" / f"compose.{target}.yaml").read_text(encoding="utf-8"))
         for service in ("backend", "celery-worker", "celery-beat", "events"):
             command = compose["services"][service].get("command", "")

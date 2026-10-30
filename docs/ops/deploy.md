@@ -1,28 +1,19 @@
-# 배포 (dev / staging / prod)
+# 배포 (dev / prod)
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
-세 compose 파일이 분리되어 있다 — 시크릿·어댑터 바인딩이 환경을 넘어 섞이지 않는다:
+compose 파일이 분리되어 있다 — 시크릿·어댑터 바인딩이 환경을 넘어 섞이지 않는다.
+**staging 은 없다**(2026-10-30, #836 — `docker/compose.staging.yaml`·`docker/staging.env.example` 은 #842 에서 지웠다):
 
 | | 파일 | `CODEMIT_DEPLOYMENT_TARGET` | 어댑터 | TLS·secure 쿠키 하드닝 |
 | --- | --- | --- | --- | --- |
 | dev | `docker/compose.dev.yaml` | (미설정) | 전부 Fake (MinIO만 예외) | 없음 |
-| staging | `docker/compose.staging.yaml` | `staging` | 전부 real(토스 샌드박스, 스토리지는 자체 MinIO 등) | 없음 |
 | prod | `docker/compose.prod.yaml` | `production` | 전부 real(토스 실물, 스토리지는 OCI Object Storage — 버킷 `codemit-prod`·`codemit-prod-public-images`) | 있음 |
 
 어댑터 바인딩표(ADR-0007)는 각 compose 파일 상단 주석에 있다. 시크릿은
-`docker/staging.env.example`/`docker/prod.env.example`을 복사해 `docker/.env.staging`/
-`docker/.env.prod`로 채운다 — 둘 다 `.gitignore`가 막아 커밋되지 않는다.
+`docker/prod.env.example`을 복사해 `docker/.env.prod`로 채운다 — `.gitignore`가 막아 커밋되지 않는다.
 
-**staging 은 떠 있다** — `https://laurio.honeycombpizza.link`(공개 앱),
-`operator.laurio.honeycombpizza.link`(운영자 앱), `storage.honeycombpizza.link`(브라우저가
-직접 PUT 하는 MinIO), `classroom.laurio.honeycombpizza.link`(강의실 앱, #277 —
-`docker/compose.staging.yaml`의 `classroom` 서비스는 `${CODEMIT_CLASSROOM_WEB_PORT:-3002}`에
-평문 HTTP로만 듣는다, 그 앞단에 이 도메인을 그 포트로 넘겨주는 TLS 종단 리버스 프록시가
-저장소 밖의 수작업으로 있어야 실제로 열린다 — storage.honeycombpizza.link의 버킷 생성과
-같은 종류의 바깥 작업이다). **그 MinIO 안에 버킷이 둘이다**(#233, ADR-0032) — 제출물이 사는
-비공개 버킷과, 공모전 이미지만 사는 **익명 읽기 버킷**(`codemit-staging-public-images`)이다.
-버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. 어댑터가 전부
+**prod 의 버킷은 둘이다**(#233, ADR-0032) — 제출물이 사는 비공개 버킷 `codemit-prod`와, 공모전 이미지만 사는 **익명 읽기 버킷** `codemit-prod-public-images`다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. prod 의 어댑터가 전부
 실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
 `TossPGAdapter`(#87) · `TossPayoutAdapter`·`TossSellerAdapter`(#57) ·
 `OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
@@ -32,16 +23,16 @@
 `OpenSearchContestSearch`(#450/#451, 부모 #444 스펙 — `RedisEventBus`와 같은
 이유로 벤더가 아니라 compose 가 직접 띄우는 `search` 서비스 위에서 도는 코드,
 접속 주소는 `OPENSEARCH_URL=http://search:9200`).
-각 dotted path 는 `docker/staging.env.example` 에 그대로 적혀 있다.
+각 dotted path 는 `docker/prod.env.example` 에 그대로 적혀 있다.
 
-**staging·prod는 공모전 켜짐·유료 공모전 꺼짐이다**(#271/#413, ADR-0037을
+**prod는 공모전 켜짐·유료 공모전 꺼짐이다**(#271/#413, ADR-0037을
 ADR-0048이 amend). 스위치가 둘이다:
 
 - **공모전** — `CODEMIT_CONTEST_PRODUCT_ENABLED`(기본값 켜짐, `CODEMIT_DEPLOYMENT_
-  TARGET`과 무관한 독립 값). staging·prod도 이제 기본 켜짐이다(dev·CI는 원래부터
+  TARGET`과 무관한 독립 값). prod도 기본 켜짐이다(dev·CI는 원래부터
   켜진 채).
 - **유료 공모전** — `CODEMIT_PAID_CONTEST_PRODUCT_ENABLED`(같은 원칙의 독립 값).
-  `docker/compose.staging.yaml`·`docker/compose.prod.yaml`만 기본을 `false`로
+  `docker/compose.prod.yaml`만 기본을 `false`로
   겹쳐 쓴다 — dev·CI는 건드리지 않으므로 둘 다 켜진 채다(기존 유료 공모전
   테스트가 계속 초록인 이유).
 
@@ -75,7 +66,7 @@ ADR-0048이 amend). 스위치가 둘이다:
   공모전도 마감·심사종료·수상을 거친다)는 공모전 스위치만 보고 그대로 돈다.
 
 **한 곳에 모은 목록**은 `backend/core/contest_switch.py` 모듈 docstring이다 —
-다시 켤 때 읽을 자리. **되돌리는 법**: `.env.staging`/`.env.prod`에
+다시 켤 때 읽을 자리. **되돌리는 법**: `.env.prod`에
 `CODEMIT_PAID_CONTEST_PRODUCT_ENABLED=true` 한 줄을 추가하고 배포한다 — backend 와 frontend 가
 같은 줄을 나눠 읽고(frontend 는 실행 env `CODEMIT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED`, #711),
 `deploy.sh` 가 설정이 바뀐 앱을 다시 띄운다(이미지를 다시 굽지 않는다). ADR을 새로 쓰지 않는다 —
@@ -117,7 +108,7 @@ staging 은 실물 어댑터라 해당 없음), 배포 환경의 시계는 실�
 
 **내부 API 는 컨테이너 안에서 치고, Host 헤더를 붙인다.** staging·prod 의 backend 는 호스트
 포트를 열지 않는다(#485 — 아래 「backend·events 는 겹쳐 바꾼다」) — `docker exec
-codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Host 가
+codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Host 가
 `ALLOWED_HOSTS` 에 없으면 Django 가 **400** 을 낸다 — gunicorn 은 멀쩡한데 400 만 온다.
 `DJANGO_ALLOWED_HOSTS` 의 첫 항목을 쓴다(배포 헬스 체크가 이미 그렇게 한다).
 
@@ -129,7 +120,7 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 프로세스를 끊는다(`throw`만으로는 Next가 그 에러를 삼켜 컨테이너가 Up인 채로
 이유 없는 500만 낸다는 게 공개 앱 쪽에서 이미 확인된 사실이다).
 
-**`CODEMIT_OPERATOR_ORIGIN`은 백엔드와 운영자 앱이 같은 `.env.staging`/`.env.prod`
+**`CODEMIT_OPERATOR_ORIGIN`은 백엔드와 운영자 앱이 같은 `.env.prod`
 줄 하나를 나눠 읽는 값이다** — 백엔드의 `OperatorOriginMiddleware`가 기대하는
 오리진과 운영자 앱이 나가는 요청에 붙이는 오리진이 어긋나면 로그인을 포함한
 모든 운영자 변경 요청이 조용히 403이 된다(fail-closed라 보안 구멍은 아니지만
@@ -179,7 +170,7 @@ codemit-staging-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 
 `production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
 늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
 멈춘다. **직접 커밋하지 않는다.** (GitHub 의 `staging` 브랜치는 #840 뒤로 아무도 움직이지 않는다 —
-`Jenkinsfile.ghcr-prune` 의 보호 목록에서 걷은 뒤 지운다, #836.)
+`Jenkinsfile.ghcr-prune` 의 보호 목록에서는 #842 에서 걷었다, #836.)
 
 `Jenkinsfile` 의 「prod 배포」 단계(2026-10-23, #779 — 그 전에는 별도 잡 `codemit-deploy-prod` 의
 `Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(같은 컨트롤러)에
@@ -236,7 +227,7 @@ staging 용 `-amd64` 로도 구웠다(열차의 sub 도 #841 까지 구웠다, #
   값을 바꾸면 `.env.<target>` 을 고치고 배포한다 — `deploy.sh plan` 이 떠 있는 앱의 compose 설정 해시를
   지금 설정과 견줘 어긋난 앱을 다시 띄운다(이미지를 다시 굽지 않는다). 견주지 못하면(`config --hash` 실패 등)
   그 메시지와 「견줄 수 없어 다시 띄운다」를 찍고(실제 어긋남의 로그와 갈린다) 다시 띄운다(#727·#733, `backend/tests/test_deploy_plan_app_env.py`). 어느 키가 어느 이름으로 가는지는
-  `docker/staging.env.example`·`prod.env.example` 과 compose 두 파일의 앱 서비스에 있다.
+  `docker/prod.env.example` 과 compose 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
 - **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — prod(arm64) 이미지를 열차의 macos 단계와 이 잡의 「이미지」 단계(macos)가 본다(#838·#840, 이미지와 노드의 아키텍처가 같아야 돈다) — 건너뛴 앱의 이미지는
@@ -292,7 +283,7 @@ prod 배포 뒤 `production` 앞당기기에서 붉으면 `· production 앞당�
 그대로 돈다.
 
 **운영 경보는 다른 웹훅으로 간다**(#830) — backend·celery 의 env `OPS_ALERT_DISCORD_WEBHOOK_URL`
-(`.env.staging`/`.env.prod`, compose 세 파일이 `${OPS_ALERT_DISCORD_WEBHOOK_URL:-}` 로 이름만 넘긴다,
+(`.env.prod`, compose 파일이 `${OPS_ALERT_DISCORD_WEBHOOK_URL:-}` 로 이름만 넘긴다,
 예시는 `docker/*.env.example`·`backend/.env.example`). 빌드 알림의 Jenkins 자격증명은 CI 의 것이라 쓰지
 않는다. **비어 있으면 보내지 않고 상태만 기록한다** — 콘솔 `/ops` 경보 패널은 그대로 채워진다. 값은 대표가
 서버의 env 파일에 넣고, 저장소·로그에는 남기지 않는다(전송 실패 로그도 예외 종류만 적는다).
@@ -312,13 +303,13 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 멈췄다**. 그때 실측이 이미지 여섯 99 버전 · 빌드 캐시(`codemit-buildcache`) **176 버전**이다 —
 캐시 쪽은 대부분 태그 없는 블롭이라 화면에서 보이지도 않는다. **읽기는 그대로 됐다** — 쓰기만
 막히는 것이 용량 초과의 모양이다. 지금은 매일 새벽 4시(서울)와 손으로 도는 잡이 패키지마다
-최근 것만 남기고 지운다(이미지 24·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다 — 이미지는 2026-10-15 에 12 에서 24 로 올렸다: 하루에 열 번 넘게 배포하는 날은 12 로는 되돌리기 창이 하루가 안 됐다). **지금 `main`·`staging`·
+최근 것만 남기고 지운다(이미지 24·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다 — 이미지는 2026-10-15 에 12 에서 24 로 올렸다: 하루에 열 번 넘게 배포하는 날은 12 로는 되돌리기 창이 하루가 안 됐다). **지금 `main`·
 `production` 끝 커밋의 태그를 가진 버전은 몇 번째든 남긴다**(#705 — 셋은 지울 때마다 GitHub 에서 다시 읽고,
 하나라도 못 읽으면 지우지 않고 멈춘다, #709) — 바뀌지 않은 서비스는 옛 버전에 커밋
 태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
 센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **빌드 캐시는
-이름으로 가른다**(#727): 지금 이름(`<서비스>-<아키텍처>`, 열둘)은 늘 남기고, 옛 이름(`<앱>-staging`·`-prod`)은 늘 지우고,
-캐시 10 은 태그 없는 버전에만 센다 — 순서로만 자르면 살아 있는 태그 열둘이 10 을 넘어 드물게 굽는 search·pgbouncer 의
+이름으로 가른다**(#727): 지금 이름(`<서비스>-arm64`, 여섯)은 늘 남기고, 옛 이름(`<앱>-staging`·`-prod`·`<서비스>-amd64`)은 늘 지우고,
+캐시 10 은 태그 없는 버전에만 센다 — 순서로만 자르면 (당시 amd64 까지) 살아 있는 태그 열둘이 10 을 넘어 드물게 굽는 search·pgbouncer 의
 캐시가 지워졌다. **병합되지 않은 묶음의 이미지는 순서보다 먼저 지운다**(#729): 열차는 쌓은 커밋 sha 로
 이미지를 올리는데(붉은 묶음·가른 재실행 포함) 그 sha 는 main 에 오지 않아, 순서로만 자르면 이것들이 12 를 채워
 main 커밋의 되돌리기 창이 줄었다. 잡이 main 의 커밋 목록(`--main-shas`, 얕은 체크아웃이면 쓰지 않는다)을 넘기면
@@ -333,7 +324,7 @@ main 커밋의 되돌리기 창이 줄었다. 잡이 main 의 커밋 목록(`--m
 `up -d --no-recreate db redis` 이고 compose 의 두 이미지는 멀티아키 인덱스 digest 로 고정이다
 (`redis:7-alpine@sha256:…`). 같은 호스트의 다른 프로젝트가 `redis:7-alpine` 태그를 새로 받으면
 compose 가 이미지 id 가 달라졌다며 redis 를 재생성해(prod 10-26 00:03) 큐가 비워졌다. 올릴 때는
-compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh <staging|prod> recreate-infra`
+compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh prod recreate-infra`
 를 손으로 부른다(Redis 비워짐·db 잠깐 끊김을 감수할 때만).
 
 **backend·events 는 겹쳐 바꾼다 — 배포 중에도 요청이 끊기지 않는다**(#485, 2026-09-22).
@@ -341,7 +332,7 @@ compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh <
 실측, GlitchTip 64·74·75 — BFF 재시도 예산 약 15.8초보다 길었다). 지금은 `deploy.sh` 의
 `rolling_replace` 가 서비스를 잠시 둘로 늘려(`--scale 2 --no-recreate`) 새 것이
 `/api/health` 에 답한 뒤에야 옛 것을 멈추고, 새 것의 이름을 옛 이름(`…-backend-1`)으로
-되돌린다 — 그래서 `docker exec codemit-staging-backend-1` 은 배포 뒤에도 그대로다. 새 것이
+되돌린다 — 그래서 `docker exec codemit-prod-backend-1` 은 배포 뒤에도 그대로다. 새 것이
 150초 안에 답하지 않으면 새 것만 지우고 배포가 실패로 끝난다 — **옛 것은 계속 요청을
 받는다.** celery-worker·beat 는 지금처럼 내리고 올린다(beat 는 하나여야 하고 태스크는 Redis
 에서 기다린다).
