@@ -2,7 +2,8 @@
 
 // 「운영 지표」(#827) — LLM 채점 호출과 백엔드 요청(#828)의 기간 합계. 백엔드가 1분 집계 행을 접어
 // 낸다(`ops_metrics.operator_api`). 기간은 주소(`?range=1h|24h|7d`)에 산다 — 링크 셋이 그 주소를
-// 바꾼다. 시간대 버킷 차트·경보 패널은 뒤 티켓(#829·#830)이 이 화면에 더한다.
+// 바꾼다. 합계 밑에 시간대 버킷 차트(#829, 인라인 SVG)가 있고, 맨 위 「현재 울리는 경보」 패널은 경보
+// 티켓(#830)이 채운다 — 그 전에는 비어 있다.
 // 화면에는 라벨·값·버튼만 둔다.
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -10,6 +11,8 @@ import { type ReactNode, Suspense } from "react";
 
 import { PageHeader } from "@/app/components/page-header";
 import { Panel } from "@/app/components/panel";
+import { AlertPanel } from "@/app/ops/alert-panel";
+import { LlmCharts, RequestCharts } from "@/app/ops/chart-sections";
 import { useSession } from "@/lib/auth/use-session";
 import {
   LLM_RESULT_LABELS,
@@ -22,7 +25,7 @@ import {
   rangeFromSearchParams,
   type OpsRange,
 } from "@/lib/ops/range";
-import type { LlmStats, OpsMetrics, RequestMetrics } from "@/lib/ops/types";
+import type { LlmStats, OpsAlert, OpsMetrics, RequestMetrics } from "@/lib/ops/types";
 import { useOpsMetrics } from "@/lib/ops/use-ops-metrics";
 
 const SEOUL_TIME = new Intl.DateTimeFormat("ko-KR", {
@@ -174,6 +177,9 @@ function RequestTotals({ requests }: { requests: RequestMetrics }) {
   );
 }
 
+// 경보 티켓(#830)이 응답에 영역을 더하면 여기서 꺼내 넘긴다.
+const NO_ALERTS: readonly OpsAlert[] = [];
+
 function windowLabel(metrics: OpsMetrics): string {
   return `${SEOUL_TIME.format(new Date(metrics.start))} ~ ${SEOUL_TIME.format(new Date(metrics.end))}`;
 }
@@ -197,6 +203,7 @@ function OpsInner() {
     <>
       <PageHeader crumb="운영 · 운영 지표" title="운영 지표" titleTestId="ops-heading" actions={<RangeLinks current={range} />} />
       <div className="flex flex-1 flex-col gap-4 p-4 sm:p-8">
+        <AlertPanel alerts={NO_ALERTS} />
         <Panel title="LLM 채점" meta={state.status === "loaded" ? windowLabel(state.metrics) : undefined}>
           {state.status === "loading" && (
             <p data-testid="ops-llm-loading" className="px-4 py-3.5 text-[13px] text-ink/62">
@@ -208,11 +215,17 @@ function OpsInner() {
               {state.detail}
             </p>
           )}
-          {state.status === "loaded" && <LlmTotals totals={state.metrics.llm.totals} />}
+          {state.status === "loaded" && (
+            <>
+              <LlmTotals totals={state.metrics.llm.totals} />
+              <LlmCharts llm={state.metrics.llm} bucketSeconds={state.metrics.bucket_seconds} />
+            </>
+          )}
         </Panel>
         {state.status === "loaded" && (
           <Panel title="백엔드 요청" meta={windowLabel(state.metrics)}>
             <RequestTotals requests={state.metrics.requests} />
+            <RequestCharts requests={state.metrics.requests} bucketSeconds={state.metrics.bucket_seconds} />
           </Panel>
         )}
       </div>
