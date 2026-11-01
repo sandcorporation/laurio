@@ -153,8 +153,8 @@ def other_service_changed(tmp_path):
     # #582 의 모양 — 다른 서비스의 command 만 바꾼다.
     def change(compose: str) -> str:
         changed = compose.replace(
-            "command: celery -A config worker -Q celery --loglevel info",
-            "command: celery -A config worker -Q celery --loglevel debug",
+            "command: celery -A config worker -Q celery -B --schedule /tmp/celerybeat-schedule --concurrency 2 --loglevel info",
+            "command: celery -A config worker -Q celery -B --schedule /tmp/celerybeat-schedule --concurrency 2 --loglevel debug",
         )
         assert changed != compose
         return changed

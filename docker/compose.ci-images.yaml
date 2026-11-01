@@ -10,7 +10,7 @@
 # 초록이면 열차가 ctx 태그를 붙이고, 병합 뒤 codemit/deploy 는 같은 문맥을 「건너뛴다」로 두어 태그만 더한다.
 #
 # `compose.ci.yaml` 이 정한 것(`runner` 타깃, 마운트·포트 걷기, gunicorn 명령)은 그대로 받는다 — 여기서는
-# `build` 를 걷고 `image` 만 준다. backend 계열 다섯(backend·events·grader·celery-worker·celery-beat)은
+# `build` 를 걷고 `image` 만 준다. backend 계열 넷(backend·events·grader·celery-worker — beat 는 worker 안에서 돈다, #859)은
 # 배포처럼 `codemit-backend` 하나를 같이 쓴다. `pull_policy: always` — 노드에 같은 이름이 남아 있어도
 # 레지스트리의 매니페스트와 맞춰 본다(같으면 받지 않는다). 그래서 띄운 이미지 = 레지스트리의 그 digest.
 x-backend-image: &backend-image
@@ -23,7 +23,6 @@ services:
   events: *backend-image
   grader: *backend-image
   celery-worker: *backend-image
-  celery-beat: *backend-image
 
   frontend:
     image: ${CODEMIT_IMAGE_REGISTRY:-ghcr.io/sandcorporation}/codemit-frontend:${CODEMIT_IMAGE_TAG:?CODEMIT_IMAGE_TAG 가 없다}

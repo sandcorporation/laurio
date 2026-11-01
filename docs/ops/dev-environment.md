@@ -12,14 +12,14 @@
 pub/sub 위에 산다 — Celery 브로커(DB 0)·Operator 세션(DB 1)과 같은 Redis
 인스턴스의 DB 2다.
 
-**prod 배포에도 이 서비스가 있다**(#380). `docker/compose.prod.yaml`이 `events` 서비스를 backend·celery-worker·
-celery-beat와 같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스가 실제로
+**prod 배포에도 이 서비스가 있다**(#380). `docker/compose.prod.yaml`이 `events` 서비스를 backend·celery-worker와
+같은 `x-backend-env`(STORAGE_*·PAYMENT_* 등 이 프로세스가 실제로
 쓰지 않는 값도 포함 — URLconf·settings.py가 backend와 완전히 같은 코드라서다)로
 띄운다. `EVENT_BUS_ADAPTER_MODE`가 fake로 남으면 다른 `*_ADAPTER_MODE`와 같은
 원칙으로 부팅 자체를 거부한다(`config/settings.py`의 `IS_DEPLOYED_ENVIRONMENT`
 가드 + `core.checks.check_event_bus_adapter_mode`, #83과 같은 두 갈래) — 두 env
 예시 파일이 실물 값(`core.events_redis.RedisEventBus`)을 채워 둔다.
-`deploy.sh`는 `backend/` 변경에 이 서비스를 backend·celery-worker·celery-beat와
+`deploy.sh`는 `backend/` 변경에 이 서비스를 backend·celery-worker(beat 포함)·grader와
 함께 바꿔 끼우고(넷이 **같은 이미지**를 쓴다, 2026-09-17 — 그 전에는 이미지가 넷이라
 하나만 갈면 나머지가 옛 이미지에 남았다), 같은 방식(Host 헤더를 붙인 `/api/health`)으로
 헬스 체크한다.
@@ -64,8 +64,8 @@ compose up -d` 에 들어간다), CI 의 e2e 스택도 띄운다. 제출·스캔
 
 **그 밖의 Celery 태스크는 dev·CI 에서 eager 다**(#582) — `CELERY_TASK_ALWAYS_EAGER` 의 기본값이
 배포가 아닌 곳에서 켜짐이라 `.delay()` 자리에서 태스크가 그대로 돈다(공모전 이미지 최적화 등).
-`--profile celery` 의 worker·beat 는 이 값을 `false` 로 받는다 — beat 가 쏜 태스크를 beat 자신이
-돌리면 `scripts/ci/celery-broker.sh` 가 보는 beat → worker 경로가 끊긴다. 배포 환경은 이 값이
+`--profile celery` 의 worker(beat 를 `-B` 로 품는다, #859 — 배포와 같다)는 이 값을 `false` 로 받는다 — beat 가 쏜 태스크를 그 자리에서
+eager 로 돌리면 `scripts/ci/celery-broker.sh` 가 보는 beat → worker 경로가 끊긴다. 배포 환경은 이 값이
 켜지면 부팅을 거부한다.
 
 호스트에서 `uv run pytest`를 돌릴 때 붙는 DB 포트 기본값도 `CODEMIT_DB_PORT`를 따라간다

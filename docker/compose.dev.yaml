@@ -277,8 +277,8 @@ services:
   # 열리는 것이 SSE 엔드포인트 하나뿐인 것은 강의실 BFF 가 이 서비스로 그
   # 경로만 보내기 때문이지, 이 컨테이너가 다른 라우트를 몰라서가 아니다.
   # `migrate`는 여기서 부르지 않는다 — `backend`가 이미 부르고(같은 DB), 두
-  # 컨테이너가 동시에 마이그레이션을 트는 경쟁을 만들 이유가 없다(celery-worker·
-  # celery-beat 도 같은 이유로 migrate를 부르지 않는다).
+  # 컨테이너가 동시에 마이그레이션을 트는 경쟁을 만들 이유가 없다(celery-worker
+  # 도 같은 이유로 migrate를 부르지 않는다).
   events:
     build:
       context: ..
@@ -334,7 +334,7 @@ services:
       - ../backend:/app
     command: python manage.py grader
 
-  # Celery worker·beat (#40). **기본 기동에서는 빠져 있다** — `profiles` 때문에
+  # Celery worker(beat 를 `-B` 로 함께 돌린다, #859) (#40). **기본 기동에서는 빠져 있다** — `profiles` 때문에
   # `docker compose up -d` 로는 뜨지 않고, 필요할 때만 다음처럼 켠다:
   #
   #   docker compose -f docker/compose.dev.yaml --profile celery up -d
@@ -378,40 +378,9 @@ services:
       # beat 가 쏜 태스크를 beat 자신이 돌려 worker 에 닿지 않는다(`scripts/ci/
       # celery-broker.sh` 가 보는 바로 그 경로가 끊긴다).
       CELERY_TASK_ALWAYS_EAGER: "false"
-    command: celery -A config worker --loglevel info
+    # beat 도 이 안에서 돈다(`-B`, #859) — 배포 compose 와 같은 모양이다(prefork 자식 수 고정까지).
+    command: celery -A config worker -B --schedule /tmp/celerybeat-schedule --concurrency 2 --loglevel info
 
-  celery-beat:
-    profiles: ["celery"]
-    build:
-      context: ..
-      dockerfile: docker/backend.Dockerfile
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_started
-    environment:
-      <<: *default-postgres-env
-      POSTGRES_HOST: db
-      POSTGRES_PORT: "5432"
-      DJANGO_DEBUG: "true"
-      DJANGO_SECRET_KEY: dev-only-insecure-key
-      DJANGO_ALLOWED_HOSTS: "*"
-      SESSION_REDIS_URL: redis://redis:6379/1
-      OPS_METRICS_REDIS_URL: redis://redis:6379/3
-      # 운영 경보(#830)의 디스코드 웹훅 — 비면 보내지 않고 상태만 기록한다.
-      OPS_ALERT_DISCORD_WEBHOOK_URL: ${OPS_ALERT_DISCORD_WEBHOOK_URL:-}
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      # backend 서비스는 INTERNAL_API_TOKEN 을 주지 않아 DEBUG 기본값
-      # ("dev-only-internal-token", config/settings.py)을 쓴다 — celery 도 같은
-      # 값이어야 백엔드가 그 호출을 받아들인다. 이름을 다르게 주면 스캔이 전부
-      # 401 로 조용히 실패한다.
-      INTERNAL_API_BASE_URL: http://backend:8000
-      CELERY_TASK_ALWAYS_EAGER: "false"
-    command: celery -A config beat --loglevel info
 
   frontend:
     build:

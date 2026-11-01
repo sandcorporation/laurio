@@ -51,7 +51,7 @@
 # 바뀌지 않은 서비스까지 전부 다시 뜬다. 그런데 「바뀐 것」과 「바꿔 끼울 것」이
 # 1:1 이 아니다 — 그 어긋남이 이 파일의 대부분이다.
 #
-#   backend/             -> backend + celery-worker + celery-beat + events + grader
+#   backend/             -> backend + celery-worker(beat 포함, #859) + events + grader
 #                                                                   (이미지 하나 — events 는 ASGI 로
 #                                                                    강의실 실시간 신호만 여는 별도
 #                                                                    프로세스다, ADR-0046, #380;
@@ -75,8 +75,8 @@
 # 등록부의 `contest-search-reindex`는 하루에 한 번만 실제로 도는 안전망이라
 # (`contests/search_scan.py`) 배포 직후에는 이 즉시 명령으로 따로 맞춘다.
 #
-# **`backend` 만 바꿔 끼우는 것은 사고다.** celery-worker 와 beat 가 옛 코드로
-# 계속 돈다 — 그 둘이 마감 전이·채점·배분·지급을 실제로 진행시키는 주체다
+# **`backend` 만 바꿔 끼우는 것은 사고다.** celery-worker(beat 를 품는다)가 옛 코드로
+# 계속 돈다 — 그것이 마감 전이·채점·배분·지급을 실제로 진행시키는 주체다
 # (ADR-0003). events 도 같은 이유로 함께 간다 — 옛 코드가 URLconf 를 바꾼
 # 최신 backend 와 다른 스키마·응답 모양을 돌려주면 강의실 스트림만 조용히
 # 어긋난다. 새 코드가 만든 마이그레이션 위에서 옛 워커가 도는 상태가 되고,
@@ -157,8 +157,8 @@ UNSAFE_MIGRATION_MARKER='^[[:space:]]*#[[:space:]]*ROLLING-DEPLOY-UNSAFE:'
 
 log() { echo "[deploy:${TARGET}] $*"; }
 
-# 지금 compose 에 없는 채점 프로세스를 걷는다(#584) — `celery-scoring`(#582~#583 의 채점 워커)과
-# `grader`(#584) 둘 다. compose 파일에서 서비스가 사라져도 컨테이너는 남는다(고아):
+# 지금 compose 에 없는 프로세스를 걷는다 — `celery-scoring`(#582~#583 의 채점 워커)·`grader`(#584)·
+# `celery-beat`(#859 부터 beat 는 worker 안에서 `-B` 로 돈다). compose 파일에서 서비스가 사라져도 컨테이너는 남는다(고아):
 # - **첫 배포**(celery-scoring → grader): 옛 워커는 compose 에서 사라진 고아다.
 # - **롤백**(grader → 옛 compose): grader 가 고아가 돼 옛 워커와 함께 돈다 — 리허설에서 보니 grader 의
 #   임대 UPDATE 가 옛 워커의 행 잠금에 걸려 grader 가 통째로 멈췄다.
@@ -170,11 +170,15 @@ log() { echo "[deploy:${TARGET}] $*"; }
 # (리허설 실측: 마이그레이션 174초, 그동안 제출 요청이 타임아웃). 먼저 걷는 동안 backend 는 계속
 # 요청을 받고, 제출은 DB 큐(`scoring_queued_at`)에서 기다린다.
 # 옛 워커를 걷었으면 Redis 의 옛 큐 `classroom-scoring` 도 비운다(소비할 곳이 없다 — 시도는 DB 큐에 있다).
+# **beat 는 하나여야 한다**(#859): 옛 `celery-beat` 가 남은 채 새 worker 가 `-B` 로 뜨면 같은 주기 작업이
+# 두 번 쏘인다. 그래서 새 worker 를 올리기 전(이 함수를 부르는 자리)에 걷는다 — 그 사이 일정이 한두 분
+# 밀리는 것은 무해하다(ADR-0003). 롤백(옛 compose, beat 컨테이너가 있다)은 옛 worker 가 `-B` 없이
+# 다시 만들어지므로 따로 걷을 것이 없다.
 # 옛 deploy.sh 로 되돌릴 때는 이 함수가 없어 소용없다 — 되돌리기 전에 손으로 grader 를 내린다([배포] 문서).
-retire_orphan_scoring() {
+retire_orphan_services() {
   current=$($COMPOSE config --services 2>/dev/null || true)
   retired_worker=false
-  for svc in celery-scoring grader; do
+  for svc in celery-scoring grader celery-beat; do
     case "
 $current
 " in *"
@@ -183,7 +187,11 @@ $svc
     old=$(docker ps -aq --filter "label=com.docker.compose.service=$svc" \
       --filter "label=com.docker.compose.project=codemit-${TARGET}" 2>/dev/null || true)
     if [ -n "$old" ]; then
-      log "compose 에 없는 채점 프로세스($svc)를 걷는다 — 채점 중인 것을 마저 끝내느라 최대 4분 걸린다"
+      if [ "$svc" = celery-beat ]; then
+        log "compose 에 없는 beat 컨테이너($svc)를 걷는다 — beat 는 이제 celery-worker 안에서 돈다"
+      else
+        log "compose 에 없는 채점 프로세스($svc)를 걷는다 — 채점 중인 것을 마저 끝내느라 최대 4분 걸린다"
+      fi
       # shellcheck disable=SC2086
       docker stop -t 240 $old >/dev/null 2>&1 || true
       # shellcheck disable=SC2086
@@ -198,10 +206,10 @@ $svc
   fi
 }
 
-# 서비스 이름 → compose 서비스들. backend 는 다섯을 함께 받는다(채점 grader 포함, #584)(아래 build 의 주석).
+# 서비스 이름 → compose 서비스들. backend 는 넷을 함께 받는다(beat 는 worker 안이다, #859)(채점 grader 포함, #584)(아래 build 의 주석).
 compose_services() {
   case "$1" in
-    backend) echo "backend celery-worker celery-beat events grader" ;;
+    backend) echo "backend celery-worker events grader" ;;
     frontend|operator|classroom|search|pgbouncer) echo "$1" ;;
     *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search|pgbouncer)" >&2; return 2 ;;
   esac
@@ -457,7 +465,7 @@ cmd_plan() {
     [ -z "$($COMPOSE ps -q "$1" 2>/dev/null | head -1)" ]
   }
 
-  for svc in backend celery-worker celery-beat events grader; do
+  for svc in backend celery-worker events grader; do
     if missing "$svc"; then
       log "백엔드 계열 컨테이너 '$svc' 가 없다 — 굽는다."
       BUILD_BACKEND=true
@@ -628,7 +636,7 @@ cmd_plan() {
     if [ "$1" = true ]; then echo "바꿔 끼운다"; else echo "건너뛴다"; fi
   }
   echo "계획"
-  echo "  backend(+celery-worker,+celery-beat,+events,+grader) : $(plan_word "$BUILD_BACKEND")"
+  echo "  backend(+celery-worker,+events,+grader) : $(plan_word "$BUILD_BACKEND")"
   echo "  frontend                                      : $(plan_word "$BUILD_FRONTEND")"
   echo "  operator                                      : $(plan_word "$BUILD_OPERATOR")"
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
@@ -1000,12 +1008,12 @@ cmd_up() {
     #
     # backend 를 먼저 내리는 이유는 HTTP 를 받는 쪽이라 거기부터 새 요청을 멈춰야
     # 해서다. events 의 SSE 는 끊기면 화면이 폴링으로 물러난다(ADR-0046).
-    log "풀러를 바꾼다 — 그 전에 grader·backend·celery-worker·celery-beat·events 를 내린다"
-    retire_orphan_scoring
+    log "풀러를 바꾼다 — 그 전에 grader·backend·celery-worker·events 를 내린다"
+    retire_orphan_services
     # 채점 워커를 먼저 따로 내린다 — 따뜻한 종료가 채점 중인 것을 마저 끝내느라 최대
     # 4분(`stop_grace_period`) 걸릴 수 있고, 그동안 backend 는 아직 요청을 받는다.
     $COMPOSE stop grader
-    $COMPOSE stop backend celery-worker celery-beat events
+    $COMPOSE stop backend celery-worker events
     # shellcheck disable=SC2086
     $COMPOSE up -d --no-deps $UP_FLAGS pgbouncer
     # **풀러가 다시 들을 때까지 넷을 올리지 않는다.** 먼저 올리면 첫 요청들이 또
@@ -1017,12 +1025,12 @@ cmd_up() {
       # 이 배포가 backend 를 바꾸지 않으면 아래 블록이 넷을 올리지 않는다 —
       # 내린 그 컨테이너를 그대로 다시 켠다(`start` 는 다시 만들지 않으므로 이미지가
       # 바뀌지 않는다). 바꾸는 배포면 아래 블록이 새 이미지로 올린다.
-      $COMPOSE start backend celery-worker celery-beat events grader
+      $COMPOSE start backend celery-worker events grader
     fi
   fi
 
   if [ "$BUILD_SEARCH" = true ]; then
-    # backend·celery-worker·celery-beat·events보다 먼저 올린다 — 그 넷의
+    # backend·celery-worker·events·grader보다 먼저 올린다 — 그 넷의
     # compose depends_on이 search를 "시작 순서"로만 기다린다(헬스는 아니다,
     # compose.prod.yaml 주석 참고). 검색이 죽어도 backend는 뜬다
     # (DB 검색으로 물러난다) — 여기서 헬스를 기다리지 않는다.
@@ -1031,7 +1039,7 @@ cmd_up() {
   fi
 
   if [ "$BUILD_BACKEND" = true ]; then
-    # **다섯을 함께 바꾼다.** backend 만 갈면 워커·beat·events·채점 워커가 옛 코드로
+    # **넷을 함께 바꾼다.** backend 만 갈면 워커(beat 포함)·events·채점 워커가 옛 코드로
     # 남는다 — 앞의 둘은 스캔으로 상태를 진행시키는 주체고, events 는 강의실
     # 실시간 신호를 여는 주체다(ADR-0046, #380). grader 는 강의실 채점(ADR-0059).
     #
@@ -1044,19 +1052,19 @@ cmd_up() {
       # 호환되므로 옛 코드는 새 스키마 위에서 그대로 돈다(표식이 붙은 것은 plan 이
       # 이 길로 보내지 않는다). 실패하면 아무것도 내리지 않고 끝낸다.
       # 마이그레이션보다 **먼저** 고아 채점 프로세스를 걷는다 — 옛 워커의 장기 트랜잭션 뒤에
-      # ALTER TABLE 이 줄을 서면 API 가 멈춘다(`retire_orphan_scoring` 주석). backend 는 그동안
+      # ALTER TABLE 이 줄을 서면 API 가 멈춘다(`retire_orphan_services` 주석). backend 는 그동안
       # 요청을 계속 받고 제출은 DB 큐에서 기다린다.
-      retire_orphan_scoring
+      retire_orphan_services
       if ! run_migrations; then
-        echo "마이그레이션이 실패했다 — 옛 backend·worker·beat·events 는 그대로 요청을 받는다."
+        echo "마이그레이션이 실패했다 — 옛 backend·worker·events 는 그대로 요청을 받는다."
         echo "실패한 것 앞의 마이그레이션은 이미 적용됐을 수 있다(뒤로 호환되므로 옛 코드는 그대로 돈다)."
         exit 1
       fi
-      # 겹쳐 바꾼다(#485) — 아래 rolling_replace 주석. worker·beat 는 사용자 요청을
-      # 받지 않고(태스크는 Redis 에서 기다린다) beat 는 하나여야 하므로 지금처럼 바꾼다.
+      # 겹쳐 바꾼다(#485) — 아래 rolling_replace 주석. worker 는 사용자 요청을
+      # 받지 않고(태스크는 Redis 에서 기다린다) 품은 beat 는 하나여야 하므로 지금처럼 바꾼다.
       rolling_replace backend 8000 30
       # shellcheck disable=SC2086
-      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker
       rolling_replace events 8001 10
       # grader 는 맨 끝에 바꾼다(#584, ADR-0059) — 옛 grader 가 채점 중인 것을 마저
       # 끝내는 따뜻한 종료를 최대 4분(`stop_grace_period`) 기다리므로, 앞에 두면
@@ -1070,24 +1078,24 @@ cmd_up() {
       # 옛 코드가 새 스키마 위에서 한순간도 돌면 안 된다 — 예전 순서(backend 만 다시
       # 만들고 그 기동 command 가 migrate)는 그 사이 옛 worker·beat·events 를 새 스키마
       # 위에 남겼다. 풀러를 바꾸는 배포면 위에서 이미 내려가 있다(stop 은 그대로 지나간다).
-      log "grader·backend·celery-worker·celery-beat·events 를 내리고 마이그레이션을 돌린다 — 이 동안 backend 가 없다"
+      log "grader·backend·celery-worker·events 를 내리고 마이그레이션을 돌린다 — 이 동안 backend 가 없다"
       # grader 를 먼저 따로 내린다 — 따뜻한 종료가 최대 4분 걸리고(위 풀러 블록과 같은
       # 이유), 그동안 backend 는 아직 요청을 받는다. backend 가 없는 창을 늘리지 않는다.
-      retire_orphan_scoring
+      retire_orphan_services
       $COMPOSE stop grader
-      $COMPOSE stop backend celery-worker celery-beat events
+      $COMPOSE stop backend celery-worker events
       if ! run_migrations; then
         # 내린 그 컨테이너(옛 이미지)를 되살린다 — 서비스가 통째로 비는 것보다 낫다.
         # Postgres 의 DDL 은 트랜잭션이라 실패한 마이그레이션 자체는 되감겼지만, 그 앞의
         # 것은 적용됐을 수 있다. 사람이 `showmigrations` 로 보고 판단한다.
         echo "마이그레이션이 실패했다 — 내렸던 옛 컨테이너를 다시 켠다. 앞선 마이그레이션은 적용됐을 수 있다."
-        $COMPOSE start backend celery-worker celery-beat events grader || true
+        $COMPOSE start backend celery-worker events grader || true
         exit 1
       fi
       # shellcheck disable=SC2086
       $COMPOSE up -d --no-deps $UP_FLAGS backend
       # shellcheck disable=SC2086
-      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker celery-beat events grader
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker events grader
     fi
   fi
   # shellcheck disable=SC2086
@@ -1105,7 +1113,7 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker celery-beat events grader frontend operator classroom search pgbouncer; do
+  for svc in backend celery-worker events grader frontend operator classroom search pgbouncer; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
       echo "[$svc] 컨테이너가 없다"
