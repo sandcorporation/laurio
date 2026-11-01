@@ -209,7 +209,7 @@ def test_the_alert_is_a_warning_with_a_fingerprint_per_kind_and_a_name_triage_sk
     assert name in glitchtip_pick.DELIBERATE_EXCEPTION_TYPES
 
 
-def test_beat_runs_it_daily_at_0410_away_from_the_2am_backup():
+def test_beat_runs_it_daily_at_0410():
     entry = celery_app.conf.beat_schedule["classroom:price-drift"]
     assert entry["task"] == "classroom.check_price_drift"
     assert isinstance(entry["schedule"], crontab)

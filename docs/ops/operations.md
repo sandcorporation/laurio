@@ -17,18 +17,18 @@ cd backend && uv run python manage.py shell      # ORM 으로 조회
 docker compose -f docker/compose.dev.yaml exec db psql -U codemit -d codemit
 ```
 
-**DB 는 매일 새벽 2시(서울) 오브젝트 스토리지로 백업된다.** beat 의 `backup:database` 가
-워커에서 `pg_dump --format=custom` 을 돌려 비공개 버킷 `db-backups/YYYY/MM/DD/` 에 올리고,
-14일(`DB_BACKUP_RETENTION_DAYS`)이 지난 것은 지운다(`core/backups.py`). 스캔 등록부 밖에서
-**손으로 쓰는 beat 항목은 `config/celery.py` 의 `SCHEDULED_JOBS` 한 자리뿐이다.** DB 가
-`postgres:17` 이라 pg_dump 도 17 이어야 해서 backend 이미지가 PGDG 에서 `postgresql-client-17` 을
-설치한다 — 서버 메이저를 올리면 이 줄도 같이 올린다. **Celery 가 없는 dev 기본 스택에서는 돌지
-않는다.** 이와 별개로 **prod 배포는 적용할 마이그레이션이 있을 때 migrate 직전에 한 번 더 덤프한다** —
-oracle 의 배포 디렉터리 `.jenkins-prod-dumps/` 에 최근 3개(같은 custom 형식, 600)를 둔다([배포](deploy.md),
-#839). 복원은 이렇게 한다:
+**서버 DB 백업은 앱이 하지 않는다 — `sandcorp-backup` 컨테이너가 한다**(2026-11-01, #857). 저장소
+`sandcorporation/sandcorp-backup` 의 README 가 일정·보관 위치·**복원 절차**를 말한다(oracle 이 매일 04:30 에
+`codemit-prod-db-1` 을 `pg_dumpall` 해 OCI restic 과 sub `/data/backups/oracle` 두 곳에 둔다). 앱의
+옛 백업(celery beat `core.backup_database`, `DB_BACKUP_*`, `DatabaseBackup`)은 걷었고, 비공개 버킷
+`codemit-prod` 의 옛 `db-backups/` 객체는 지우지 않고 그대로 둔다(삭제는 대표가 따로 정한다). backend
+이미지에 `postgresql-client-17` 도 더는 없다. **손으로 쓰는 beat 항목은 `config/celery.py` 의
+`SCHEDULED_JOBS` 한 자리뿐이다.** 이와 별개로 **prod 배포는 적용할 마이그레이션이 있을 때 migrate 직전에
+한 번 더 덤프한다** — oracle 의 배포 디렉터리 `.jenkins-prod-dumps/` 에 최근 3개(custom 형식, 600)를
+둔다([배포](deploy.md), #839). 그 덤프의 복원은 이렇게 한다:
 
 ```bash
-pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit codemit-YYYYMMDD-HHMMSS.dump
+pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit <덤프 파일>
 ```
 
 첫 Operator 는 관리 명령으로 만든다 — `createsuperuser` 는 쓰지 않는다(ADR-0018·0019):

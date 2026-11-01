@@ -7,11 +7,10 @@ ADR-0003: 스캔 진입점은 내부 인증 HTTP 엔드포인트다 — 워커·
 「엔드포인트는 있는데 아무도 부르지 않는」 스캔(#23 코디네이터 리뷰가 잡았던 사고)은 표현
 자체가 불가능하다.
 
-**예외가 둘 있다 — 워커 안에서 직접 도는 태스크.** 내부 HTTP 를 거치면 그 일이 gunicorn
+**예외가 있다 — 워커 안에서 직접 도는 태스크.** 내부 HTTP 를 거치면 그 일이 gunicorn
 요청 하나(`call_internal` 30초 — 넘으면 부른 쪽이 끊는다) 안에 들어야 하고, 요청 경로의 DB
 한도(`core.db_timeouts`)도 받는다. 그럴 필요가 없거나 그보다 길 수 있는 일은 워커 안에서 직접 돈다:
 
-- `core.backup_database`(아래) — `pg_dump` 가 30초를 넘길 수 있다.
 - `contests.index_contest`(#450) — 공모전 하나를 검색 색인에 다시 싣는 멱등 갱신이라 HTTP
   경계를 하나 더 둘 이유가 없다.
 
@@ -69,12 +68,3 @@ def run_scan(name: str) -> dict:
     tag_error_scope("scan", scan=name)
     return call_internal(f"/api/internal/scans/{name}")
 
-
-@shared_task(name="core.backup_database", ignore_result=True)
-def backup_database() -> dict:
-    """매일 새벽 2시(서울) DB 를 오브젝트 스토리지로 백업한다 — `core.backups` 참고. 스캔과 달리
-    내부 HTTP 를 거치지 않고 워커 안에서 직접 돈다(30초 타임아웃을 넘길 수 있는 작업이다)."""
-
-    from core.backups import run_database_backup
-
-    return run_database_backup()

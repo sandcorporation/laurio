@@ -878,10 +878,10 @@ run_migrations() {
 # 덤프한다 — 덤프가 하나 더 생길 뿐 틀리지는 않는다.
 #
 # **pg_dump 는 db 컨테이너 안에서 돌리고 표준출력으로 받는다.** 서버와 같은 이미지라 버전이
-# 언제나 맞고(02:00 백업이 backend 이미지에 postgresql-client-17 을 따로 까는 이유가 이것이다),
+# 언제나 맞고(옛 앱 백업이 backend 이미지에 postgresql-client-17 을 따로 깔던 이유가 이것이다),
 # 소켓으로 붙으니 비밀번호가 필요 없다. 파일 마운트를 쓰지 않는 이유: oracle 의 에이전트는
 # 컨테이너라 워크스페이스 경로가 호스트(`/var/jenkins_home/workspace`)와 다르다(deploy.md).
-# 형식은 02:00 백업과 같은 `--format=custom --no-owner` — 복원도 같은 `pg_restore` 한 줄이다.
+# 형식은 `--format=custom --no-owner` — 복원은 `pg_restore` 한 줄이다.
 #
 # **자리는 이 배포 디렉터리의 `.jenkins-<대상>-dumps/`**(gitignore). `.env.<대상>`·배포 표식과
 # 같은 자리라 체크아웃에 살아남고, 디렉터리는 700·파일은 600 이다 — 개인정보가 통째로 든다.
