@@ -873,13 +873,6 @@ CLASSROOM_GRADER_METRICS_PORT = int(_env("CLASSROOM_GRADER_METRICS_PORT", "0"))
 # 본다. 배포·dev·e2e 는 항상 꺼져 있고 `grader` 서비스가 채점한다.
 CLASSROOM_GRADER_INLINE = _RUNNING_TESTS
 
-# --- DB 백업 (core.backups) ----------------------------------------------------------
-# 매일 새벽 2시 pg_dump 결과를 비공개 버킷 db-backups/ 에 올린다. pg_dump 는 서버와 같은
-# 메이저(17)여야 한다 — backend 이미지가 PGDG 에서 postgresql-client-17 을 설치한다.
-DB_BACKUP_PG_DUMP_COMMAND = _env("DB_BACKUP_PG_DUMP_COMMAND", "pg_dump")
-DB_BACKUP_RETENTION_DAYS = int(_env("DB_BACKUP_RETENTION_DAYS", "14"))
-DB_BACKUP_TIMEOUT_SECONDS = int(_env("DB_BACKUP_TIMEOUT_SECONDS", "1800"))
-
 # --- DB 연결 사용률 경고 (core.db_connection_scan, #455/#453) ------------------------
 # 2026-09-18 prod 장애("too many clients already")의 재발 방지 — 한도에 가까워지면
 # 사람이 500 을 보기 전에 오류 수집기로 먼저 알린다.

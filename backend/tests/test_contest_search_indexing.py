@@ -2,7 +2,7 @@
 스캔, 그리고 실물 어댑터 장애 시 DB 검색 물러나기 (#450, 부모 #444 스펙).
 
 **단건 색인 태스크의 효과는 그 함수를 직접 불러 확인한다**
-(`core.tasks.backup_database`·`contests/tasks.py` 모듈 docstring과 같은
+(`contests/tasks.py` 모듈 docstring과 같은
 관용구) — dev·CI는 이 태스크를 소비할 워커가 없으므로(#40) `.delay()`는 큐에
 쌓이기만 한다. 저장 시점에 그 태스크가 실제로 큐에 들어가는지는 `delay`를
 몽키패치해 별도로 확인한다(`tests/test_classroom_immediate_scoring.py`와 같은

@@ -5,7 +5,7 @@
 수신자가 `transaction.on_commit`으로 큐에 넣는다(`classroom.api`가 즉시 채점을
 큐에 넣는 것과 같은 규율).
 
-`core.tasks.backup_database`와 같은 모양이다 — 공유할 것이 없는 단순 멱등
+워커 안에서 직접 도는 태스크다 — 공유할 것이 없는 단순 멱등
 갱신(같은 공모전을 두 번 색인해도 결과가 같다)이라 HTTP 경계를 하나 더 두는
 비용을 낼 이유가 없다 — 워커 안에서 `contests.search.get_search_adapter()`를
 직접 부른다.
@@ -39,7 +39,7 @@ def index_contest(contest_id: int) -> None:
 
     fake 어댑터로는 `contests.search.FakeContestSearchAdapter._indexed`의
     상태로 이 태스크의 효과를 관찰한다(`tests/test_contest_search_indexing.py`)
-    — `core.tasks.backup_database`를 직접 불러 확인하는 것과 같은 관용구다.
+    — 태스크 함수를 직접 불러 확인하는 관용구다.
     """
 
     get_search_adapter().index_or_remove(contest_id)

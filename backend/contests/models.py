@@ -1068,7 +1068,7 @@ class ContestSearchReindexState(models.Model):
     "하루 주기"가 그 주입된 시계를 따라가면 검색과 무관한 테스트가 며칠을
     건너뛸 때마다 이 스캔이 덩달아 끼어들어 `rows` 개수를 흔든다. 실제
     OpenSearch 재색인 비용은 시뮬레이션 시간이 아니라 진짜 경과 시간에 매여
-    있으므로, `core.backup_database`(스캔 등록부 밖에서 실제 Celery beat
+    있으므로, `ops_metrics.flush_minutes`(스캔 등록부 밖에서 실제 Celery beat
     크론에 매인, 마찬가지로 주입된 시계를 보지 않는 작업)와 같은 원칙을 쓴다.
 
     사람이 즉시 전체를 다시 만들고 싶을 때는 이 마커를 보지 않는

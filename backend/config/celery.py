@@ -38,8 +38,6 @@ def sync_beat_schedule() -> dict:
 #: 60초마다 줍는다」라 주기(초)로 충분하지만, 이것들은 벽시계 시각이 요구사항이다. 테스트
 #: (`tests/test_scheduler_celery.py`)가 스케줄 = 등록부 + 이 목록을 정확히 요구한다.
 SCHEDULED_JOBS = {
-    # 매일 새벽 2시(CELERY_TIMEZONE = Asia/Seoul) DB 를 오브젝트 스토리지로 백업한다.
-    "backup:database": {"task": "core.backup_database", "schedule": crontab(hour=2, minute=0)},
     # 매일 04:10 모델 단가 표를 LiteLLM 파일과 대조해 다르면 GlitchTip 경고로 알린다(#798, 표는 안 고친다).
     "classroom:price-drift": {"task": "classroom.check_price_drift", "schedule": crontab(hour=4, minute=10)},
     # 매분 닫힌 분의 운영 지표(Redis 해시)를 DB 집계 행으로 옮긴다(#827).
