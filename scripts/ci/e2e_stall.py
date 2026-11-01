@@ -30,7 +30,7 @@ backend 를 부르지 않을 수 있어, 일꾼 하나인 `@exclusive` 패스나
 범인 하나의 최악은 log2(n)+1 회다(`train.py` 머리말, #721). 「실패 시험의 시작도 틈 안」은 넣지 않는다 —
 #1890 의 실패 넷 중 셋이 틈보다 0.07~0.36초 먼저 시작했다(#721).
 
-**이미지 굽기의 실패**(#729). 열차의 sub·macos 가 `scripts/ci/images.sh` 로 이미지를 굽다 붉으면
+**이미지 굽기의 실패**(#729). 열차의 home·macos 가 `scripts/ci/images.sh` 로 이미지를 굽다 붉으면
 `images <arch>` 가 같은 모양의 판정을 낸다.
 
     python3 scripts/ci/e2e_stall.py images arm64 > test-results/e2e-verdict.json
@@ -49,7 +49,7 @@ images.sh 는 서비스마다 `.images-<arch>.result` 에 `서비스=built|skipp
 종료코드는 images.sh 의 것(1 = 서비스 실패, 2 = 사용법)이 아니라 이 결과 파일과 로그로 가른다 — buildx 는
 어느 실패든 1 로 끝나 둘을 가르지 못한다.
 
-`train.py fail` 은 붉은 쪽(sub·macos)마다 판정이 있고 **전부** 인프라일 때만 같은 묶음을 다시 돈다 —
+`train.py fail` 은 붉은 쪽(home·macos)마다 판정이 있고 **전부** 인프라일 때만 같은 묶음을 다시 돈다 —
 붉은 쪽 하나라도 판정이 없으면(검사·가드·celery 가 붉다) 가른다.
 
 표준 라이브러리만 쓴다 — macos 노드의 시스템 python3 로 돈다.

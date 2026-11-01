@@ -7,7 +7,7 @@
 # SIGTERM 이 오는데, 그때 EXIT trap 이 돌지 않으면 쓰기 토큰이 담긴 임시 DOCKER_CONFIG 가 노드에 남는다(#709).
 #
 # **노드의 docker 설정을 건드리지 않는다.** 빌드마다 임시 DOCKER_CONFIG 를 만들어 거기에만 토큰을
-# 적는다 — sub 의 컨테이너에는 deploy.sh 가 쓰는 읽기 전용 ghcr 로그인이 이미 있고, macos 는 Docker
+# 적는다 — home 의 컨테이너에는 deploy.sh 가 쓰는 읽기 전용 ghcr 로그인이 이미 있고, macos 는 Docker
 # Desktop 의 키체인 자격증명을 쓴다. 원래 설정의 `cli-plugins`(buildx 가 여기 있는 노드가 있다)·
 # `buildx`(빌더 정의)·`contexts`(Docker Desktop 의 desktop-linux) 는 심볼릭 링크로 이어 붙이고,
 # config.json 은 자격증명 칸만 빼고 옮긴다.

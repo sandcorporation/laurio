@@ -1,5 +1,5 @@
 #!/bin/bash
-# PR CI 의 sub 쪽 — 백엔드 시험·단위 시험·생성물·문서 검사·타입 검사 (2026-10-02, Jenkinsfile.pr).
+# PR CI 의 home 쪽 — 백엔드 시험·단위 시험·생성물·문서 검사·타입 검사 (2026-10-02, Jenkinsfile.pr).
 #
 # 저장소를 담은 CI 이미지(docker/ci.Dockerfile)를 굽고, 사이드카 postgres 와 같은 망에서 그 안의
 # `scripts/ci/sub-checks-inside.sh` 를 돌린다. 끝나면(성공·실패·중단 모두) 컨테이너·망·이미지를

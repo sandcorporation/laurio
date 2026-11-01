@@ -132,7 +132,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 **커밋이 prod 까지 가는 길은 둘이다**(ADR-0068):
 
 1. **브랜치 → PR → `main`.** Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
-   sub 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit/ci-train`(`Jenkinsfile.train`)이 줄 선
+   home 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit/ci-train`(`Jenkinsfile.train`)이 줄 선
    PR 을 최신 `main` 위에 묶어 e2e 까지 한 번 시험한 뒤 차례로 **rebase 병합**한다(초안·`hold`
    라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
    push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 prod 까지 간다.
@@ -172,7 +172,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 멈춘다. **직접 커밋하지 않는다.** (GitHub 의 옛 `staging` 브랜치는 아무도 움직이지 않는다.)
 
 `Jenkinsfile` 의 「prod 배포」 단계(2026-10-23, #779 — 그 전에는 별도 잡 `codemit-deploy-prod` 의
-`Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **sub 의 Jenkins(같은 컨트롤러)에
+`Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **home 의 Jenkins(같은 컨트롤러)에
 붙은 에이전트 `oracle`** 에서 돈다(`agent { node { label 'oracle'; customWorkspace 'workspace/codemit-deploy-prod' } }`).
 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
 컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고, 이제 **이미지를 굽지
@@ -191,10 +191,10 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 `Jenkinsfile` 의 「이미지」
 단계가 macos 에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
 비공개)에 여섯 전부 `codemit-<서비스>:<sha>-arm64` 로 올린다 — backend·세 앱·search(#450/#451)·pgbouncer
-(#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 예전에는 sub 가 같은 여섯을 `-amd64` 로도 구웠다(2026-10-30 에 걷었다, #840·#841). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
+(#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 예전에는 home 가 같은 여섯을 `-amd64` 로도 구웠다(2026-10-30 에 걷었다, #840·#841). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
 를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
 내보내지 못한다)가 남아 제 캐시를 20GB 까지 둔다. 예전에는 GitHub 호스티드(그 전 셀프호스티드 mac, 그
-전 sub)가 커밋마다 열둘을 다 구웠다.
+전 home)가 커밋마다 열둘을 다 구웠다.
 
 - **바뀌지 않은 서비스는 굽지 않는다**(#705). `scripts/ci/image_context.py` 가 서비스마다 빌드
   문맥 해시를 낸다 — Dockerfile 이 읽는 경로 아래 파일 중 `.dockerignore` 가 문맥에서 빼지 않는 것의
@@ -234,7 +234,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 - **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — prod(arm64) 이미지를 열차의 macos 단계와 이 잡의 「이미지」 단계(macos)가 본다(#838·#840, 이미지와 노드의 아키텍처가 같아야 돈다) — 건너뛴 앱의 이미지는
   ctx 태그가 가드 뒤에만 붙으므로 이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
-  classic PAT). 두 컨테이너(sub 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
+  classic PAT). 두 컨테이너(home 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
   `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
   에 `jenkins_docker` 를 붙였다). 로그인이 없으면 `deploy.sh preflight` 가 멈추고, PAT 가
   만료되면 pull 에서 멈춘다. ghcr 는 git SSH 키로 인증할 수 없다.
@@ -290,7 +290,7 @@ prod 배포 뒤 `production` 앞당기기에서 붉으면 `· production 앞당�
 
 **배포 끝에 호스트의 도커 디스크를 비운다**(`deploy.sh <대상> prune`, 2026-09-17). 커밋마다
 ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle 에는 ghcr 이전에 굽던 빌드 캐시가
-남아 있었다(정리 전 sub 이미지 78GB·빌드 캐시 107GB·루트 86%, oracle 이미지 76GB·캐시 47GB).
+남아 있었다(정리 전 home 이미지 78GB·빌드 캐시 107GB·루트 86%, oracle 이미지 76GB·캐시 47GB).
 이 저장소의 ghcr 이미지 중 **이번 커밋 것이 아닌 것**과, 태그 잃은 이미지, 사흘 넘게 안 쓴
 빌드 캐시만 지운다 — 돌고 있는 컨테이너가 쓰는 이미지는 도커가 거절해 남고, 다른 프로젝트의
 이미지는 건드리지 않는다(`image prune -a` 를 쓰지 않는다). 정리는 무엇이 실패해도 0 으로
@@ -521,7 +521,7 @@ rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — �
 `events` 의 `/api/health` 확인도 같은 규약을 따른다(URLconf 가 `backend` 와
 완전히 같은 코드다).
 
-**Jenkins 는 sub 호스트에 있다 — 개발 머신이 아니다.** 아래 `docker exec
+**Jenkins 는 home 호스트에 있다 — 개발 머신이 아니다.** 아래 `docker exec
 jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개발 머신에서 치면
 컨테이너도 경로도 없다).
 

@@ -2,7 +2,7 @@
 """`scripts/ci/e2e_stall.py` 와 `train.py fail` 의 인프라 분기 — e2e 의 backend 요청 0건 틈(VM 정지와 워커 고갈을 가르지 못한다)을 인프라 고장으로 가른다(#716, #723).
 
 `python3 scripts/test_e2e_stall.py` 하나로 돈다 — 표준 라이브러리 `unittest` 와 임시 폴더만 쓴다
-(네트워크·도커 없음). PR CI 의 sub 검사가 돌린다(`scripts/ci/sub-checks-inside.sh`).
+(네트워크·도커 없음). PR CI 의 home 검사가 돌린다(`scripts/ci/sub-checks-inside.sh`).
 
 픽스처는 열차 #1890(2026-10-15, 강의실 e2e 넷이 3초 한도에 걸린 빌드)의 산출물에서 그대로 옮긴 줄이다
 — backend 접근 로그의 3.9초 틈 앞뒤와, 실패한 시험의 `test.trace` 첫 줄·`error-context.md` 의 오류.
@@ -430,7 +430,7 @@ class TrainFail(unittest.TestCase):
         return pathlib.Path("train.next").read_text()
 
     def test_every_red_side_infra_reruns(self) -> None:
-        # sub 의 이미지 굽기와 macos 의 e2e 가 둘 다 인프라로 붉었다(#729).
+        # home 의 이미지 굽기와 macos 의 e2e 가 둘 다 인프라로 붉었다(#729).
         images = {"infra": True, "reason": "이미지 굽기(amd64)의 인프라 실패: backend 502 Bad Gateway"}
         self.assertEqual(self.run_fail_many(4, [images, self.STALL]), "NEXT_MAX=4\nINFRA_RETRY=1\n")
 

@@ -1,16 +1,16 @@
 // 묶음 병합 큐 (2026-10-03) — 줄 선 PR 을 최신 main 위에 쌓아 한 번 시험하고, 초록이면 차례로 합친다.
 //
-// 잡 `codemit/ci-train`(#780 전에는 `codemit-ci-train`; Pipeline, main 의 이 파일). PR CI(`Jenkinsfile.pr`)가 sub 검사를 통과한 커밋을
+// 잡 `codemit/ci-train`(#780 전에는 `codemit-ci-train`; Pipeline, main 의 이 파일). PR CI(`Jenkinsfile.pr`)가 home 검사를 통과한 커밋을
 // 줄 세우고(`codemit/automerge` = pending) 이 잡을 부른다. 초안을 풀거나 `hold` 를 떼거나 다시 연 PR 은
 // push 가 없어 PR CI 가 부르지 않는다 — GitHub 의 `pull_request` 웹훅이 그때 이 잡을 깨운다(#709, 아래
 // `triggers`). 30분마다도 스스로 돈다(뒷받침). 고르기·쌓기·가르기 규칙은 `scripts/ci/train.py` 머리말에 있다.
 //
-// 노드: 쌓기·병합은 sub, 시험은 sub(검사 전체)와 macos(이미지·e2e·celery)가 함께. 묶음이 PR 마다의 시험을
-// 대신하는 것은 macos 쪽이다 — sub 검사는 PR 마다 한 번(줄 서기 전 거르개)과 묶음에서 한 번 돈다.
+// 노드: 쌓기·병합은 home, 시험은 home(검사 전체)와 macos(이미지·e2e·celery)가 함께. 묶음이 PR 마다의 시험을
+// 대신하는 것은 macos 쪽이다 — home 검사는 PR 마다 한 번(줄 서기 전 거르개)과 묶음에서 한 번 돈다.
 //
 // **배포 이미지도 여기서 굽는다**(#712). macos 가 arm64 여섯(+ 구운 앱의 부팅 가드, #838 — prod 에 가는
 // 이미지)을 `scripts/ci/images.sh` 로 굽고, macos 의 e2e·celery 는 그 arm64 이미지를 받아 돈다.
-// sub 는 amd64 를 굽지 않는다(#841, staging 제거 — 배포는 arm64 하나다).
+// home 는 amd64 를 굽지 않는다(#841, staging 제거 — 배포는 arm64 하나다).
 // 시험 둘이 초록이면 「병합」 단계가 **병합 전에** `images-ctx.sh` 로 ctx 태그를 붙이고(#729), 병합 뒤
 // `codemit/deploy`(`Jenkinsfile`)는 같은 문맥을 전부 「건너뛴다」로 두고 main 커밋 태그만 더한다 — 같은
 // 코드를 두 번 굽지 않고, 건너뛰기만 할 때는 macos 도 잡지 않는다.
@@ -89,7 +89,7 @@ pipeline {
       }
       failFast false
       parallel {
-        stage('sub — 백엔드·단위·검사') {
+        stage('home — 백엔드·단위·검사') {
           when {
             beforeAgent true
             expression { env.TRAIN_RUN_TESTS == '1' }
@@ -256,7 +256,7 @@ pipeline {
           node('built-in') {
             unstash 'plan'
             // 인프라 판정(#716, #729) — 앞 빌드가 이 작업 공간에 남긴 것을 지우고, 이번 빌드가 남긴 것만 읽는다.
-            // 붉은 쪽마다 판정이 있어야 넘긴다: sub 는 검사뿐이라 판정이 없다(붉으면 코드 실패), macos 는
+            // 붉은 쪽마다 판정이 있어야 넘긴다: home 는 검사뿐이라 판정이 없다(붉으면 코드 실패), macos 는
             // 이미지 굽기가 붉었거나 e2e 가 붉고 celery 까지 돌았을 때만(가드가 붉으면 판정이 없다).
             // 판정이 없는 붉은 쪽이 하나라도 있으면 아무것도 넘기지 않는다 — 가른다. 전부 인프라인지는 train.py 가 본다.
             sh 'rm -f test-results/e2e-verdict.json'

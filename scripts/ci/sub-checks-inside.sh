@@ -1,5 +1,5 @@
 #!/bin/bash
-# CI 이미지 안에서 도는 sub 쪽 검사 전부 — `scripts/ci/sub-checks.sh` 가 부른다.
+# CI 이미지 안에서 도는 home 쪽 검사 전부 — `scripts/ci/sub-checks.sh` 가 부른다.
 #
 # 하나가 실패해도 나머지는 끝까지 돈다(어디가 깨졌는지 한 번에 본다). 단계마다 결과와 걸린
 # 시간을 test-results/summary.txt 에 적고, 하나라도 실패하면 1 로 끝난다.

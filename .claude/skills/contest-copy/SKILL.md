@@ -128,10 +128,10 @@ AI 가 쓴 티는 문장력이 아니라 **분포**로 드러난다. 고친 글�
 
 **마감된 공모전의 설명을 고치는 API 는 여전히 없다.** 그 경우에만 이전처럼 prod DB 를
 직접 손대야 한다 — **되돌릴 수 없으므로 원문을 먼저 백업하고, 사람의 확인을 받은 뒤에
-한다.** 경로는 `sub` 를 거친다(이 머신에서 prod 로 가는 직접 ssh 는 없다):
+한다.** 경로는 `home` 를 거친다(이 머신에서 prod 로 가는 직접 ssh 는 없다):
 
 ```bash
-ssh sub "ssh oracle 'docker exec codemit-prod-backend-1 python manage.py shell -c \"...\"'"
+ssh home "ssh oracle 'docker exec codemit-prod-backend-1 python manage.py shell -c \"...\"'"
 ```
 
 prod 1번 공모전의 설명을 그렇게 한 번 바꿨다(2026-09-17, #473 이전이라 API 가 아예 없었다).

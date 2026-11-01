@@ -16,7 +16,7 @@
 # 「컨테이너가 실제로 죽는다」를 본다.
 #
 # 컨테이너 포트를 노드에 열지 않는다 — 띄운 컨테이너의 네트워크에 curl 컨테이너를 붙여
-# (`--network container:<이름>`) 친다. sub 의 Jenkins 는 컨테이너라 바인드 마운트도 쓰지 않는다.
+# (`--network container:<이름>`) 친다. home 의 Jenkins 는 컨테이너라 바인드 마운트도 쓰지 않는다.
 #
 # 환경변수: GHCR_TOKEN/GHCR_USER(읽기에 쓴다, 없으면 노드의 로그인), CODEMIT_IMAGE_REGISTRY,
 # CODEMIT_GUARD_ARCH(받을 태그의 아키텍처, 기본 arm64 — prod 이미지), CODEMIT_GUARD_IMAGE(받을 이미지를

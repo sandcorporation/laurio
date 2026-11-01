@@ -156,7 +156,7 @@ finish() {
 
 
 # ghcr 이미지 배포로 옮기기 전에 사람이 해야 하는 일(2026-09-17 설계).
-# 이 개발 머신(sub2)에서 돌린다 — gh CLI 와 `ssh sub`, sub 를 거친 `ssh oracle` 을 쓴다.
+# 이 개발 머신(work)에서 돌린다 — gh CLI 와 `ssh home`, home 을 거친 `ssh oracle` 을 쓴다.
 # 2026-10-15(#705) 이미지가 GitHub Actions 에서 Jenkins 로 옮겨 mac 러너·저장소 변수·Jenkins API 토큰 단계를 뺐다.
 # 2026-10-15(#711) 앱의 공개 값이 실행 env 로 옮겨 codemit-images-env 자격증명 단계를 뺐다 — 값은 서버의 .env.<target> 에만 있다.
 
@@ -172,8 +172,8 @@ ENV_FILE=""
 _ssh_noise='post-quantum|store now|upgraded'
 # on_sub / on_oracle: 표준입력의 bash 스크립트를 그 호스트에서 돈다. 값은 명령줄이
 # 아니라 스크립트 본문(표준입력)으로 넘어가 ps 에 드러나지 않는다.
-on_sub()    { ssh sub 'bash -s' 2> >(grep -vE "$_ssh_noise" >&2); }
-on_oracle() { ssh sub 'timeout 120 ssh -o BatchMode=yes oracle "bash -s"' 2> >(grep -vE "$_ssh_noise" >&2); }
+on_sub()    { ssh home 'bash -s' 2> >(grep -vE "$_ssh_noise" >&2); }
+on_oracle() { ssh home 'timeout 120 ssh -o BatchMode=yes oracle "bash -s"' 2> >(grep -vE "$_ssh_noise" >&2); }
 
 TOTAL_STAGES=4
 
@@ -203,7 +203,7 @@ ask_secret GHCR_READ_TOKEN "토큰을 붙여 넣으세요 (ghp_...):"
 
 # ── 3 ─────────────────────────────────────────────────────────────────────
 stage "두 배포 에이전트에 ghcr 로그인 저장"
-say "sub 의 jenkins, oracle 의 jenkins-desktop-agent 컨테이너 안에서 한 번 로그인해 둡니다."
+say "home 의 jenkins, oracle 의 jenkins-desktop-agent 컨테이너 안에서 한 번 로그인해 둡니다."
 note "두 컨테이너 모두 /root/.docker 가 named volume 이라 컨테이너를 다시 만들어도 로그인이 남습니다."
 note "deploy.sh 는 배포 때 이 로그인으로 받고, 없으면 preflight 에서 멈춥니다."
 if confirm "두 컨테이너에서 ${GHCR_USER} 로 ghcr.io 에 로그인할까요?"; then
@@ -212,7 +212,7 @@ if confirm "두 컨테이너에서 ${GHCR_USER} 로 ghcr.io 에 로그인할까�
     printf 'printf %%s %q | docker exec -i %q docker login ghcr.io -u %q --password-stdin >/dev/null && docker exec %q sh -c %q && echo %q\n' \
       "$GHCR_READ_TOKEN" "$1" "$GHCR_USER" "$1" 'grep -q "\"ghcr.io\"" /root/.docker/config.json' "  ✓ $1: ghcr 로그인이 /root/.docker 에 저장됐다"
   }
-  login_in jenkins | on_sub || { warn "sub jenkins 컨테이너에서 로그인하지 못했습니다"; SKIPPED+=("sub jenkins ghcr 로그인"); }
+  login_in jenkins | on_sub || { warn "home jenkins 컨테이너에서 로그인하지 못했습니다"; SKIPPED+=("home jenkins ghcr 로그인"); }
   login_in jenkins-desktop-agent | on_oracle || { warn "oracle 에이전트 컨테이너에서 로그인하지 못했습니다"; SKIPPED+=("oracle 에이전트 ghcr 로그인"); }
   warn "docker 가 토큰을 /root/.docker/config.json 에 평문(base64)으로 저장합니다 — 두 볼륨을 백업할 때 그 사실을 기억하세요."
 else
