@@ -39,7 +39,7 @@
 # 이미지 출처는 `DEPLOY_IMAGE_SOURCE` 가 고른다: `registry`(기본값, 파이프라인) 또는
 # `build`(CI·ghcr 가 막혔을 때 사람이 손으로 — 예전 방식 그대로 이 호스트에서 굽는다).
 # registry 는 이 에이전트에 **미리 저장해 둔 ghcr 로그인**(read:packages PAT)을 쓴다 —
-# 두 에이전트 컨테이너(sub 의 jenkins, oracle 의 jenkins-desktop-agent) 모두 /root/.docker 가
+# 두 에이전트 컨테이너(home 의 jenkins, oracle 의 jenkins-desktop-agent) 모두 /root/.docker 가
 # named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17 에 붙였다).
 # 로그인은 scripts/ghcr-setup-wizard.sh 가 한 번 해 둔다. 토큰은 저장소에도 env 에도 없다.
 #
@@ -1322,14 +1322,14 @@ cmd_mark() {
 
 # 배포가 끝나면 이 호스트의 도커 디스크를 비운다(2026-09-17). 커밋마다 ghcr 에서
 # 새 태그를 받으니 옛 커밋의 이미지가 그대로 쌓이고(서비스 다섯 × 배포 수), oracle 에는
-# ghcr 로 옮기기 전 이 호스트에서 굽던 빌드 캐시가 남아 있었다(정리 전 실측: sub 이미지
+# ghcr 로 옮기기 전 이 호스트에서 굽던 빌드 캐시가 남아 있었다(정리 전 실측: home 이미지
 # 78GB·빌드 캐시 107GB, oracle 이미지 76GB·빌드 캐시 47GB).
 #
 # - **이 저장소의 ghcr 이미지 중 이번 커밋 것이 아닌 것**을 지운다. 돌고 있는 컨테이너가
 #   쓰는 이미지(이번 배포에서 바뀌지 않아 옛 태그로 도는 서비스)는 도커가 거절하므로
 #   남는다 — 그 거절을 삼킨다. 되돌릴 때는 ghcr 에서 다시 받으면 된다.
 # - 태그를 잃은 이미지와 **사흘(72h) 넘게 안 쓴 빌드 캐시**를 지운다. registry 모드에서는
-#   이 호스트가 굽지 않지만, sub 는 CI 테스트 잡이 같은 데몬에서 굽고 비상구
+#   이 호스트가 굽지 않지만, home 는 CI 테스트 잡이 같은 데몬에서 굽고 비상구
 #   (`DEPLOY_IMAGE_SOURCE=build`)도 있어 최근 캐시는 남긴다.
 #
 # 정리는 배포의 일부가 아니다 — 무엇이 실패해도 배포를 실패로 만들지 않는다. 다른

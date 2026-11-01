@@ -1,12 +1,12 @@
 // 브랜치·PR 시험 (2026-10-02) — 배포하지 않고 시험만 돌린다. 결과는 GitHub 커밋 상태로 남는다.
 //
 // 잡 `codemit/ci-pr`(#780 전에는 `codemit-ci-pr`)은 Multibranch(GitHub 소스 sandcorporation/laurio, `main`·`production` 과 이제 움직이지 않는 옛 `staging` 을 뺀
-// 브랜치)다 — 브랜치마다 하위 잡이 따로 생긴다. 예전에는 GitHub Actions 가 sub 의 러너 셋에서 시험을
-// 돌렸는데, 러너들이 sub 의 모든 코어를 제한 없이 나눠 써 이미지 빌드와 시험이 겹치면 시험 하나
+// 브랜치)다 — 브랜치마다 하위 잡이 따로 생긴다. 예전에는 GitHub Actions 가 home 의 러너 셋에서 시험을
+// 돌렸는데, 러너들이 home 의 모든 코어를 제한 없이 나눠 써 이미지 빌드와 시험이 겹치면 시험 하나
 // 3초 한도를 경합만으로 넘었다(#499 의 첫 CI). Jenkins 노드는 실행기가 하나라 한 노드에서 두 일이
 // 겹치지 않는다 — 그래서 노드를 통째로 쓴다.
 //
-// 여기서는 sub 검사(백엔드·단위 시험·생성물·문서·타입 검사)만 돈다. 문서만 바뀌었으면 문서 검사만
+// 여기서는 home 검사(백엔드·단위 시험·생성물·문서·타입 검사)만 돈다. 문서만 바뀌었으면 문서 검사만
 // 한다(scripts/ci/changed.sh). 초록이면 그 커밋을 **줄 세우고**(`codemit/automerge` = pending) 묶음
 // 병합 큐 `codemit/ci-train`(Jenkinsfile.train)을 부른다 — e2e·celery 와 병합·GlitchTip 해결 표시는
 // 그 잡이 줄 선 PR 을 최신 main 위에 묶어 한 번에 한다(2026-10-03). 예전에는 PR 마다 macos 에서 e2e 를
@@ -48,7 +48,7 @@ pipeline {
     stage('시험') {
       failFast false
       parallel {
-        stage('sub — 백엔드·단위·검사') {
+        stage('home — 백엔드·단위·검사') {
           when {
             beforeAgent true
             expression { env.RUN_TESTS == '1' }

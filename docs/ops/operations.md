@@ -19,7 +19,7 @@ docker compose -f docker/compose.dev.yaml exec db psql -U codemit -d codemit
 
 **서버 DB 백업은 앱이 하지 않는다 — `sandcorp-backup` 컨테이너가 한다**(2026-11-01, #857). 저장소
 `sandcorporation/sandcorp-backup` 의 README 가 일정·보관 위치·**복원 절차**를 말한다(oracle 이 매일 04:30 에
-`codemit-prod-db-1` 을 `pg_dumpall` 해 OCI restic 과 sub `/data/backups/oracle` 두 곳에 둔다). 앱의
+`codemit-prod-db-1` 을 `pg_dumpall` 해 OCI restic 과 home `/data/backups/oracle` 두 곳에 둔다). 앱의
 옛 백업(celery beat `core.backup_database`, `DB_BACKUP_*`, `DatabaseBackup`)은 걷었고, 비공개 버킷
 `codemit-prod` 의 옛 `db-backups/` 객체는 지우지 않고 그대로 둔다(삭제는 대표가 따로 정한다). backend
 이미지에 `postgresql-client-17` 도 더는 없다. **손으로 쓰는 beat 항목은 `config/celery.py` 의
@@ -40,23 +40,23 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
 **살아 있는지는 oracle 의 Prometheus 가 본다**(2026-09-21). 그 전에는 **prod 가 죽어도
 아무도 몰랐다** — GlitchTip 은 오류가 **도착해야** 아는 장치라 프로세스가 죽거나 디스크가
 차서 응답을 못 하면 조용하다. 감시 스택은 **이 저장소 밖**이다: oracle 의
-`/server/prometheus`(별도 compose — Prometheus 30일·Grafana·node-exporter·cadvisor, sub2 같은
+`/server/prometheus`(별도 compose — Prometheus 30일·Grafana·node-exporter·cadvisor, work 같은
 다른 호스트도 같이 보는 공용 스택)에 사람이 손으로 둔다. Jenkins·GlitchTip 과 같은 취급이다.
 
 - **무엇을 보나**: blackbox 프로브 3개(prod 의 공개 앱 `/contests`·강의실 `/login`·
   운영자 앱) — `/contests` 는 서버 렌더링이 백엔드를 불러야 200 이라 **백엔드·DB 생존까지**
-  본다. 호스트 지표는 세 호스트(oracle·sub·sub2)의 node-exporter, 컨테이너 재시작은 oracle
-  의 cadvisor(**prod 만** — sub 는 CI 러너와 배포가 컨테이너를 늘 만들고 지워 재시작이
+  본다. 호스트 지표는 세 호스트(oracle·home·work)의 node-exporter, 컨테이너 재시작은 oracle
+  의 cadvisor(**prod 만** — home 는 CI 러너와 배포가 컨테이너를 늘 만들고 지워 재시작이
   정상이다).
-- **언제 울리나**(`prometheus/alerts.yml`, 12개): 응답 없음 2분 · sub 호스트 다운 2분 ·
+- **언제 울리나**(`prometheus/alerts.yml`, 12개): 응답 없음 2분 · home 호스트 다운 2분 ·
   루트 디스크 85%(경고)/95%(위험) · 가용 메모리 10% 미만 5분 · 스왑 90% 이상, 그리고 아래
   「LLM 채점」의 `codemit-llm` 그룹 6개. `codemit-containers` 그룹(컨테이너 재시작)은 지금 규칙이
   비어 있다. prod 는 `critical` 이다(예전에는 staging 이 `warning` 이었다).
 - **어디로**: Alertmanager 가 **빌드 알림과 같은 Discord 채널**로 보낸다(채널을 늘리면 안
   보는 채널이 생긴다). 웹훅은 `alertmanager/discord_webhook`(chmod 600)에만 있고 설정
   파일에는 없다 — 바꾸려면 그 파일 한 줄을 고친다(재시작 불필요, 보낼 때마다 읽는다).
-- **감시자가 prod 위에 있다는 사각지대**는 GlitchTip(sub) 의 uptime 모니터가 교차로 본다 —
-  oracle 이 통째로 죽으면 Prometheus 도 같이 죽기 때문이다. 반대로 sub 가 죽으면 위
+- **감시자가 prod 위에 있다는 사각지대**는 GlitchTip(home) 의 uptime 모니터가 교차로 본다 —
+  oracle 이 통째로 죽으면 Prometheus 도 같이 죽기 때문이다. 반대로 home 가 죽으면 위
   `HostDown` 이 잡는다. 서로가 서로를 본다.
 - **한 화면에서 본다** — Grafana 대시보드 **「Codemit prod」**(`/d/codemit-prod`, 저장소 밖
   `/server/prometheus/grafana/dashboards/codemit-prod.json` 을 프로비저닝이 30초마다 다시 읽는다).
@@ -71,7 +71,7 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
   해소 메시지가 한 번 더 온다). 2026-09-21 에 그렇게 확인했다 — 발송 1·실패 0.
 
 **컨테이너 로그는 무제한으로 쌓이지 않는다**(2026-09-21). 도커 기본 json-file 은 크기
-제한이 없어 sub 에는 이 저장소 밖의 컨테이너 로그가 319M·106M 쌓여 있었다. 두 배포
+제한이 없어 home 에는 이 저장소 밖의 컨테이너 로그가 319M·106M 쌓여 있었다. 두 배포
 compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 — **다음 배포의 컨테이너
 교체부터** 적용된다. 두 호스트의 `/etc/docker/daemon.json` 에도 같은 기본값을 써 두었지만
 **데몬이 다시 떠야 읽힌다** — 두 호스트 모두 `live-restore` 가 꺼져 있어 데몬 재시작이 곧
@@ -81,7 +81,7 @@ compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 —
 스택에 **Loki**(30일, 메모리 상한 1GB)와 수집기 **Alloy**(도커 소켓으로 `codemit-prod-*`
 컨테이너만 따라간다)가 있어, 로그가 나오는 대로 Loki 로 간다. Grafana 의 Loki 데이터소스에서
 `{service="backend"}`·`{container="codemit-prod-events-1"}` 처럼 찾는다(라벨은 `container`·
-`service`·`env`). sub 는 CI 러너가 컨테이너를 늘 만들고 지워 모으지 않는다.
+`service`·`env`). home 는 CI 러너가 컨테이너를 늘 만들고 지워 모으지 않는다.
 
 **배포 환경에서 Django 가 찍는 로그는 한 줄 JSON 이고, 요청마다 id 가 붙는다**(2026-09-21).
 gunicorn 자신의 줄(워커 기동 등)과 Celery 자신의 줄은 각자 포맷 그대로다 — 그 둘은 Django 의
@@ -416,7 +416,7 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   기본 실패 모양이라, 배포 뒤 한 번 쏴 보고 GlitchTip 에서 눈으로 본다.
 
 ```bash
-# sub 안에서 ssh oracle
+# home 안에서 ssh oracle
 ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
 ```
 
@@ -493,7 +493,7 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   `PriceDriftAlert`(#798, 아래 「모델 단가 표 대조」)도 같은 목록에 있다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
   `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Jenkins
-  `codemit/ci-pr` 가 sub 검사로 줄 세우고 열차 `codemit/ci-train` 이 초록 묶음을 `main` 에 병합하고, **곧바로 그 PR 범위**
+  `codemit/ci-pr` 가 home 검사로 줄 세우고 열차 `codemit/ci-train` 이 초록 묶음을 `main` 에 병합하고, **곧바로 그 PR 범위**
   (`merge-base..HEAD`)의 줄을 읽어 이슈를 resolved 로 돌린다(`Jenkinsfile.train` 의 병합 단계,
   자격증명 `glitchtip-automation-token`) — 「고친 것 같다」와 「고쳤다」를 가르는 자리다.
   범위가 PR 하나로 정확히 닫히므로 옛 방식의 두 문제가 없다: push 와 표시 사이의 5~10분

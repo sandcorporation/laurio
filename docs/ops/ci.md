@@ -7,13 +7,13 @@
 생기고, 5분마다 훑어 새 push 를 찾는다. 결과는 GitHub 커밋 상태로 남는다. 같은 브랜치에 새로
 push 하면 옛 빌드를 끊는다.
 
-**PR 마다** — sub 검사만 돌고, 초록이면 그 커밋을 줄 세운다:
+**PR 마다** — home 검사만 돌고, 초록이면 그 커밋을 줄 세운다:
 
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
-| 변경 | sub(`built-in`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
-| 시험(병렬) | sub | `scripts/ci/sub-checks.sh` — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어·시험의 고정 대기(`check_test_waits.py`) 검사, 단위 시험 여섯, 세 앱 typecheck |
-| 줄 서기 | sub | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit/ci-train` 을 부른다 |
+| 변경 | home(`built-in`) | `scripts/ci/changed.sh` — 문서(`.md`·`docs/`)만 바뀌었으면 시험을 건너뛰고 문서 검사만 |
+| 시험(병렬) | home | `scripts/ci/sub-checks.sh`(파일 이름의 sub 는 옛 호스트 이름이라 그대로 둔다) — Django `check`·`check --deploy`, pytest 전체(junit), 생성물 최신성 둘, ADR·화면 언어·시험의 고정 대기(`check_test_waits.py`) 검사, 단위 시험 여섯, 세 앱 typecheck |
+| 줄 서기 | home | 초록이면 머리 커밋의 상태 `codemit/automerge` 를 `pending`(「다음 묶음을 기다린다」)으로 두고 `codemit/ci-train` 을 부른다 |
 
 **묶음마다** — Jenkins `codemit/ci-train`(Pipeline, `Jenkinsfile.train`, 2026-10-03)이 줄 선 PR 을
 최신 `main` 위에 차례로 쌓아 **한 번** 시험하고 초록이면 차례로 합친다. PR CI 가 부르고, GitHub 의
@@ -41,7 +41,7 @@ prune 된 서비스는 열차가 같은 문맥을 다시 구워 digest 만 바�
 다시 굽기도 했다. ctx 는 내용 기준의 사실이라 병합이 거절돼도 무해하다(main 의 트리가 다르면 해시가 다르다).
 병합 뒤 `codemit/deploy` 는 「대상 확인」(built-in)에서 `images.sh` 의 **retag**(굽지 않고 커밋 태그만 더한다,
 빌더도 띄우지 않는다)를 먼저 해 보고, 한 아키텍처가 전부 「건너뛴다」면 그 이미지 가지를 돌지 않는다 —
-macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문맥 태그 단계도 할 일이 없어 건너뛴다.
+macos·home 실행기를 다음 열차와 다투지 않는다(#729). 가드·문맥 태그 단계도 할 일이 없어 건너뛴다.
 
 - **왜 배포 잡이 건너뛰나 — sha 가 아니라 트리다.** 쌓기는 cherry-pick 이라 노드마다 머리 커밋 sha 가 다르고
   GitHub 의 rebase 병합도 새 커밋을 만든다. 같은 것은 트리다: `train.py merge` 는 마지막 PR 까지 합친 뒤 main 의
@@ -55,16 +55,16 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   Dockerfile 을 못 읽었다)가 없고 **인프라 문구**(레지스트리 5xx·429, 연결 끊김·시간 초과·이름 풀이, BuildKit
   `rpc error: code = Unavailable`, 디스크가 찼다)가 있어야 인프라다. 결과 파일이 없으면(preflight — buildx 가 없다)
   판정하지 않는다. 종료코드로는 가르지 못한다 — buildx 는 어느 실패든 1 이다. RUN 안의 `pnpm install` 이 네트워크로
-  죽어도 코드 탓으로 센다(좁게). 판정은 `post failure` 가 **붉은 쪽(sub·macos)마다** 모은다 — 붉은 쪽 하나라도
+  죽어도 코드 탓으로 센다(좁게). 판정은 `post failure` 가 **붉은 쪽(home·macos)마다** 모은다 — 붉은 쪽 하나라도
   판정이 없으면(검사·가드·celery 가 붉다) 넘기지 않고, `train.py fail` 은 넘어온 판정이 **전부** 인프라일 때만
   같은 묶음을 다시 돈다.
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |
-| 묶기 | sub | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
-| 시험(병렬) | sub | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh`. 이미지는 굽지 않는다(amd64 는 #841 에서 걷었다) |
+| 묶기 | home | 열린 main PR 중 머리 커밋이 줄에 선 것(초안·`hold` 는 빼고, 8개까지)을 번호 순으로 cherry-pick 해 쌓는다. 얹히지 않는 PR 은 `failure` 로 돌려보낸다 |
+| 시험(병렬) | home | 같은 계획으로 다시 쌓고(트리 해시 확인) `scripts/ci/sub-checks.sh`. 이미지는 굽지 않는다(amd64 는 #841 에서 걷었다) |
 | | macos | 같은 계획으로 다시 쌓고 `scripts/ci/macos-sweep.sh`(중단된 앞 빌드가 남긴 `jenkins-codemit-ci-pr-*`·`jenkins-codemit-ci-train-*` 스택(#708 전 이름 `jenkins-codemit-pr-*`·`jenkins-codemit-train-*` 도 한동안 — 「잡 이름」)·볼륨·이미지와, 받아 둔 배포 이미지 중 저장소마다 가장 새것 하나만 남기고 걷는다. 기본 빌더 캐시는 10GB 로 자른다 — 중단은 trap 을 건너뛰어, 남은 볼륨이 Docker VM 을 채우자 MinIO 가 `XMinioStorageFull` 로 업로드를 거절했다, 2026-10-03) → `scripts/ci/images.sh arm64`(prod 여섯, #712) → 이번에 구운 앱만 부팅 가드(`CODEMIT_GUARD_ARCH=arm64 scripts/ci/deploy-guard.sh`, #838 — prod 에 가는 이미지를 네이티브로, 붉으면 판정 없이 가른다) → **그 이미지를 받아** `scripts/ci/e2e.sh`(세 프로젝트) → `scripts/ci/celery-broker.sh` |
-| 병합 | sub | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) — 그 **앞에** 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712·#729) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
-| 붉으면 | sub | 붉은 쪽마다 「인프라 고장」 판정이 있으면(macos 의 e2e 정지·이미지 굽기, sub 의 이미지 굽기 — sub 는 검사가 초록일 때만) **같은 묶음을 한 번 더**(아래 「backend 요청 0건 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
+| 병합 | home | 초록이면 차례로 rebase 병합(`sha` 로 머리를 고정 — 그 사이 push 된 PR 에서 멈춘다) — 그 **앞에** 이 묶음이 구운 이미지에 ctx 태그(`scripts/ci/images-ctx.sh`, #712·#729) → 합친 범위의 `GlitchTip:` 줄 해결 표시 → 남은 줄이 있으면 다음 묶음 |
+| 붉으면 | home | 붉은 쪽마다 「인프라 고장」 판정이 있으면(macos 의 e2e 정지·이미지 굽기, home 의 이미지 굽기 — home 는 검사가 초록일 때만) **같은 묶음을 한 번 더**(아래 「backend 요청 0건 틈은 묶음을 한 번 더 돈다」). 아니면 둘 이상일 때 앞의 절반으로 다시 돈다. 하나만 묶은 시험이 붉으면 그 PR 에 `failure` |
 
 - **왜 묶나**(2026-10-03). PR 마다 macos e2e 를 따로 돌리면 이미지 셋 굽기 포함 약 8분이 노드
   실행기 하나에 줄을 서(PR 넷이면 32분), 각 PR 은 자기가 갈라진 **옛 main** 위에서만 시험됐다 —
@@ -93,9 +93,9 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   로컬 굽기 길만 쓴다)는 나이가 아니라 크기(10GB, 오래 안 쓴 것부터)로 자른다. 사고 둘: 2026-10-03 중단된
   스택의 볼륨 400여 개(30GB), 2026-10-14 지워지지 않은 이미지 1,283개(51GB)와 캐시 48GB.
 - **노드는 실행기가 하나라 통째로 쓴다.** 예전에는 GitHub Actions 의 셀프호스티드 러너
-  셋(sub)이 sub 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
+  셋(home)이 home 의 코어를 제한 없이 나눠 써, 이미지 빌드와 겹친 시험이 경합만으로 한도를
   넘었다(#499 의 첫 CI — 공개 e2e 10건·단위 2건 타임아웃). 오래 걸리는 e2e 를 성능이 좋은
-  macos 에, 짧은 것을 배포 잡의 built-in 단계와 실행기를 나눠 쓰는 sub 에 둔다(#840 전에는 staging 배포 전체와 나눠 썼다).
+  macos 에, 짧은 것을 배포 잡의 built-in 단계와 실행기를 나눠 쓰는 home 에 둔다(#840 전에는 staging 배포 전체와 나눠 썼다).
 - **e2e 가 흔들리면 무엇을 보나**(#699). 열차 빌드의 산출물(`test-results/**`, macos 단계가 거둔다)에
   셋이 있다. ① `test-results/playwright/<프로젝트>[-exclusive]/<시험>/` — 실패한 시험의 `trace.zip`
   (`pnpm --dir frontend exec playwright show-trace <파일>` 로 연다)과 `error-context.md`. 성공한 시험의
@@ -147,7 +147,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   `status: failed` 인데 `failedTests` 가 빈 프로젝트(「No tests found」·globalSetup 오류)가 있으면 판정하지
   않는다(#719). 한도는 trace 첫 줄의 `testTimeout`(설정의 한도)이라 **스펙에서 `test.setTimeout`·`test.slow`·
   `test.describe.configure({ timeout })` 로 시험 한도를 바꾸면 마감이 어긋난다** — 지금 스펙은 아무도 쓰지
-  않는다(2026-10-15 `git grep`). celery-broker 가 초록이고, sub 단계가 초록이거나 sub 의 이미지 굽기도
+  않는다(2026-10-15 `git grep`). celery-broker 가 초록이고, home 단계가 초록이거나 home 의 이미지 굽기도
   인프라 판정이면(위 「이미지가 붉은 것도 묶음이 붉은 것이다」, #729) `train.py fail --verdict` 가 PR 에
   `failure` 를 주지 않고 같은 묶음을 다시 부르며
   콘솔에 `인프라 고장으로 분류: backend 요청 0건 3.9초 틈 @…` 한 줄을 남긴다. **재실행은 가르기 사슬
@@ -186,13 +186,13 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   | Resource Saver | (적을 자리) | |
   | Docker Desktop 버전 · macOS 버전 · 호스트 RAM | (적을 자리) | |
 
-- **sub 의 Jenkins 는 컨테이너라 node·pnpm·uv 가 없다** — 그래서 sub 쪽은 저장소를 담은
+- **home 의 Jenkins 는 컨테이너라 node·pnpm·uv 가 없다** — 그래서 home 쪽은 저장소를 담은
   시험 이미지(`docker/ci.Dockerfile`)를 굽고 사이드카 postgres(tmpfs·fsync 끔)와 같은 망에서
   `scripts/ci/sub-checks-inside.sh` 를 돈다. 바인드 마운트는 쓰지 않는다(컨테이너와 호스트의
-  경로가 다르다, 아래 「Jenkins 는 sub 호스트에 있다」). 그 이미지는 루트
+  경로가 다르다, 아래 「Jenkins 는 home 호스트에 있다」). 그 이미지는 루트
   `.dockerignore` 대신 `docker/ci.Dockerfile.dockerignore` 를 읽어 **문서를 들인다** — 문서 검사와
   다이어그램 최신성 시험이 그것을 읽는다(빼먹었을 때 넷이 「파일이 없다」로 빨갰다).
-- **실측**(2026-10-02, 첫 초록): sub 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
+- **실측**(2026-10-02, 첫 초록): home 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
   운영자 4초 · 강의실 4초(이미지 굽기 제외).
 - **잡 설정은 저장소 밖이다** — Multibranch 잡·묶음 잡 `codemit/ci-train`(Pipeline, `*/main` 의 `Jenkinsfile.train`)·자격증명(`github-sandcorporation-token` 은
   fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`)은 사람이
@@ -207,7 +207,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
 
   | 잡 | 옛 이름 | 파일 | 워크스페이스·이름에 묶인 것 |
   | --- | --- | --- | --- |
-  | `codemit/ci-pr`(Multibranch) | `codemit-ci-pr` | `Jenkinsfile.pr` | sub 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
+  | `codemit/ci-pr`(Multibranch) | `codemit-ci-pr` | `Jenkinsfile.pr` | home 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`) `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) — e2e·celery 는 열차만 돈다 |
   | `codemit/ci-train` | `codemit-ci-train` | `Jenkinsfile.train` | 스택 `jenkins-codemit-ci-train-*`, 다음 묶음은 `env.JOB_NAME` 으로 부른다 |
   | `codemit/deploy` | `codemit-deploy-staging` | `Jenkinsfile` | built-in 단계(대상 확인·`production` 앞당기기·알림)는 잡의 기본 워크스페이스 `workspace/codemit/deploy`(`.env` 가 필요 없다 — #840 전에는 staging 의 `workspace/codemit-deploy-staging` 을 붙잡았다), 이미지·가드는 macos 의 기본 워크스페이스, prod 단계(에이전트 `oracle`) `customWorkspace 'workspace/codemit-deploy-prod'` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`의 `docker/.env.prod`·배포 표식 |
   | `codemit/ghcr-prune` | `codemit-ghcr-prune` | 저장소 밖 | |
@@ -225,7 +225,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
 - **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit/deploy` 잡(`Jenkinsfile`)의 앞 단계가 됐다
-  (「배포」 절, `staging` 앞당기기는 #840 에서 걷었다). 이미지는 macos 가 arm64 여섯을 굽고(`scripts/ci/images.sh`; #840 전에는 sub 가 amd64 여섯도 구웠고 #841 에서 걷었다),
+  (「배포」 절, `staging` 앞당기기는 #840 에서 걷었다). 이미지는 macos 가 arm64 여섯을 굽고(`scripts/ci/images.sh`; #840 전에는 home 가 amd64 여섯도 구웠고 #841 에서 걷었다),
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
   (`ctx-<해시>`)는 굽기와 부팅 가드가 **모두 초록인 뒤에** 「문맥 태그」 단계(`scripts/ci/images-ctx.sh`,
   macos)가 붙인다(#709) — 그래서 「건너뛴다」는 언제나 앞 빌드가 끝까지 초록으로 본 이미지이고, 가드가 빨갛거나
@@ -236,7 +236,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
   `window.__CODEMIT_PUBLIC__` 에 실리는지(시크릿은 실리지 않는지)로, `.dockerignore` 는 가짜 시크릿을 심은 **빌드 컨텍스트**(`COPY . /ctx`
   만 하는 이미지)로 본다 — 표식에 빌드마다 다른 값을 섞는다(스크립트 자신이 문맥에 들어 고정 문자열이면
   늘 걸린다). 컨테이너 포트를 노드에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
-  붙여(`--network container:<이름>`) 친다(sub 의 Jenkins 가 컨테이너라 바인드 마운트도 쓰지 않는다).
+  붙여(`--network container:<이름>`) 친다(home 의 Jenkins 가 컨테이너라 바인드 마운트도 쓰지 않는다).
 - **`Jenkinsfile` 은 PR CI 가 보지 못한다**(`Jenkinsfile.train` 도 — 그 PR 을 실은 열차는 아직 main 의 것으로 돈다) — 그 파일을 바꾼 PR 은 병합 전에 그 브랜치를 가리키는 임시
   잡으로 `IMAGES_ONLY=true` 를 돌려 본다(이미지·가드까지만). 스크립트 쪽은 로컬에서 돈다: `CODEMIT_IMAGES_MODE=plan`
   (해시와 판단만), `CODEMIT_IMAGE_REGISTRY=localhost:<포트>`(로컬 `registry:2` 에 실제로 굽고 건너뛰기),
@@ -266,7 +266,7 @@ macos·sub 실행기를 다음 열차와 다투지 않는다(#729). 가드·문�
 식별자(`CODEMIT_CI_RUN_ID` — 빌드 태그 + 시작 시각)에서 나오고, 포트는 compose 가 비어 있는 것을
 고른다. 끝나면(성공·실패·중단 모두) `down -v` 로 지운다.
 
-**화면 언어 검사**(#267, #268 — PR CI 의 sub 단계)는 스텝 둘로 두 표면을 막는다. 첫 스텝
+**화면 언어 검사**(#267, #268 — PR CI 의 home 단계)는 스텝 둘로 두 표면을 막는다. 첫 스텝
 (`scripts/check_screen_language.py`)은 공개 앱(`frontend/`)의 화면 문자열에
 `CONTEXT.md` 가 정한 영어 도메인 용어(`Sponsor`·`Contest`·`Escrow` 등)나
 `ADR-숫자`·`#숫자` 참조가 있으면 막는다. 둘째 스텝(`scripts/

@@ -26,7 +26,7 @@
 //   production 앞당기기       prod 배포가 초록으로 끝난 **뒤** `production` 을 같은 커밋으로 — 「prod 에 배포된 커밋」의
 //                            기록이자 `ghcr_prune.py` 의 보호 대상, 그리고 다음 빌드의 「문서만」 기준이다
 //
-// 2026-10-30(#840) 전에는 이미지 사이에 amd64 가지(sub)가, 그 뒤에 `staging` 앞당기기·staging 배포(built-in)가
+// 2026-10-30(#840) 전에는 이미지 사이에 amd64 가지(home)가, 그 뒤에 `staging` 앞당기기·staging 배포(built-in)가
 // 있었고, prod 는 파라미터 `PROMOTE_PRODUCTION`(기본 꺼짐)을 켠 빌드만 갔다. 무엇을 옮기고 버렸는지는 ADR-0068.
 //
 // **prod 를 멈추려면** Jenkins 에서 이 잡을 「Disable」한다 — 이미지는 열차가 계속 굽는다. prod 만 다시 돌리려면
@@ -265,7 +265,7 @@ pipeline {
     // 배포 표식이 있다(`deploy.sh` 의 `ENV_FILE="docker/.env.${TARGET}"`). 경로가 바뀌면 preflight 가 멈춘다.
     // **상대 경로는 노드의 Remote root 기준이지 그 아래 `workspace/` 가 아니다** — `'codemit-deploy-prod'` 로 뒀더니
     // `/home/jenkins/agent/codemit-deploy-prod` 에 새로 clone 해 「docker/.env.prod 이 없다」로 멈췄다(2026-10-23 #520).
-    // 서버의 파일은 옮기지 않는다. 컨트롤러에서 돌면 prod 가 아니라 sub 호스트에 스택을 띄우므로 `built-in` 을
+    // 서버의 파일은 옮기지 않는다. 컨트롤러에서 돌면 prod 가 아니라 home 호스트에 스택을 띄우므로 `built-in` 을
     // 쓰지 않는다.
     stage('prod 배포') {
       when {

@@ -2,7 +2,7 @@
 """`scripts/ci/image_context.py` — 이미지 건너뛰기의 문맥 해시를 고정한다(#705).
 
 `python3 scripts/test_image_context.py` 하나로 돈다 — 표준 라이브러리 `unittest` 와 임시 git 저장소만
-쓴다(네트워크·도커 없음). PR CI 의 sub 검사가 돌린다(`scripts/ci/sub-checks-inside.sh`).
+쓴다(네트워크·도커 없음). PR CI 의 home 검사가 돌린다(`scripts/ci/sub-checks-inside.sh`).
 
 가장 무거운 시험은 맨 위의 것이다: 저장소의 Dockerfile 이 문맥에서 읽는 경로가 전부 해시 표 안에
 있어야 한다. 빠지면 그 경로를 고친 커밋이 옛 이미지로 배포된다.

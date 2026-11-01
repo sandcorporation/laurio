@@ -1,4 +1,4 @@
-# PR CI 가 sub(Jenkins 내장 노드)에서 백엔드·단위 시험·생성물·문서 검사를 돌리는 이미지
+# PR CI 가 home(Jenkins 내장 노드)에서 백엔드·단위 시험·생성물·문서 검사를 돌리는 이미지
 # (2026-10-02, `Jenkinsfile.pr`·`scripts/ci/sub-checks.sh`).
 #
 # Jenkins 는 컨테이너 안에서 돌고 호스트 docker 를 쓴다 — 워크스페이스 경로가 호스트와

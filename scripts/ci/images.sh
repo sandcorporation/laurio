@@ -76,7 +76,7 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 
 # ── preflight ───────────────────────────────────────────────────────────────
-# sub 의 Jenkins 는 컨테이너다 — 그 안의 docker CLI 에 buildx 가 없으면 Dockerfile 의
+# home 의 Jenkins 는 컨테이너다 — 그 안의 docker CLI 에 buildx 가 없으면 Dockerfile 의
 # `RUN --mount`(BuildKit 전용)에서 전부 죽는다(2026-09-14 deploy.sh 빌드 #4~#6). 여기서 먼저 멈춘다.
 if ! docker buildx version >/dev/null 2>&1; then
   echo "이 노드의 docker CLI 에 buildx 플러그인이 없다 — 에이전트에 docker-buildx 를 넣어라." >&2
