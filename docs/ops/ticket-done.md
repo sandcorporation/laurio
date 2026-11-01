@@ -31,6 +31,29 @@
 건수, 그리고 `docs/features/` 의 엔드포인트·스캔·화면 목록. 그것을 바꾸는 티켓이면 그 표를
 같이 고친다.
 
+## 워크트리에서 티켓을 처리하는 작업자가 지킬 것
+
+작업자는 전역 에이전트 `issue-worker` 다(옛 저장소 에이전트 `ticket-worker` 는 #861 에서 지웠다).
+일반 절차는 그쪽이 들고 있고, 이 저장소에만 해당하는 것은 여기 있다.
+
+- **워크트리와 포트.** `git worktree add ../laurio-<이름> -b <브랜치> origin/main` 으로 만들고,
+  `sh docker/dev-env.sh | head -1` 이 지시서가 준 오프셋과 같은지 본다. 새 오프셋의 DB 는 `migrate` 부터.
+- **compose 는 언제나 `-p codemit-dev-<오프셋>`, 필요한 컨테이너만.** 공유 스택 `codemit-dev`(오프셋 0)와 남의
+  오프셋은 내리지 않는다. 사용자 슬라이스 메모리 한도가 빠듯하니 호스트 `next dev` 는 `scripts/dev-server.sh` 로만
+  띄우고(출력은 파일로, `| tail` 하면 안 돌아온다) 끝나면 `stop-all` 한다.
+- **`.env` 의 OpenAI 키는 잔고가 0원이다.** `live_vendor` 시험과 실제 OpenAI 를 부르는 확인은 하지 않는다 — 흉내
+  어댑터나 로컬 흉내 서버로 한다. 풀러·Redis·OpenSearch 실물 시험(`live_infra`)은 dev 프로필을 띄워 돌려도 된다.
+- **시임은 마운트된 HTTP API** (`backend/tests/classroom_scenarios.py` 빌더 — ORM 으로 상태를 만들지 않는다)와 앱별
+  e2e 다. 시험 한도는 `testing.md`(CPU 1초)·`frontend.md`(e2e 3초) — 넘으면 한도를 늘리지 말고 원인을 줄인다.
+- **화면을 바꾸면** 1440px·390px 스크린샷을 검토 Artifact 「Codemit 화면 검토」
+  (https://claude.ai/artifact/8Xc8xeV9duZJdZhzpxFEcH) 맨 위에 그 PR 절로 더한다(read 후 publish, 새 아티팩트를
+  만들지 않는다).
+- **병합 = prod 배포다**(ADR-0068). 문서만 바뀐 병합은 `codemit/deploy` 가 건너뛴다. 배포가 돌았다면 prod
+  `/api/health` 200 과 콘솔의 「디스코드 알림 실패」 0건을 확인한다(읽기만 — Jenkins 자격증명은 셸 env 의
+  `JENKINS_URL`·`JENKINS_USER`·`JENKINS_API_TOKEN`, 값은 출력하지 않는다).
+- **끝나면** 이슈가 닫혔는지 보고, 띄운 `-p codemit-dev-<오프셋>` 스택을 내리고 dev 서버를 멈춘 뒤 워크트리·로컬
+  브랜치·원격 브랜치를 지운다.
+
 | 언제 | 무엇 | 실측 (이 머신, 2026-09-04) |
 | --- | --- | --- |
 | red→green 반복 | 백엔드 테스트 파일 하나 | **12초** |
