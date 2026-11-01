@@ -553,7 +553,7 @@ def test_deployed_compose_runs_the_grader_and_no_scoring_worker(target):
 
 def test_deploy_script_replaces_the_grader_with_the_backend_image():
     deploy = (REPO_ROOT / "deploy.sh").read_text(encoding="utf-8")
-    assert 'backend) echo "backend celery-worker celery-beat events grader" ;;' in deploy
+    assert 'backend) echo "backend celery-worker events grader" ;;' in deploy
     assert "events celery-scoring" not in deploy  # 서비스 목록에서 빠졌다(고아는 `retire_scoring_worker` 가 걷는다)
 
 
@@ -786,15 +786,15 @@ def test_orphan_scoring_processes_are_retired_before_every_migration_run():
     calls = [m.start() for m in re.finditer(r"if ! run_migrations; then", deploy)]
     assert len(calls) == 2
     for call in calls:
-        assert "retire_orphan_scoring" in deploy[max(0, call - 900) : call]
+        assert "retire_orphan_services" in deploy[max(0, call - 900) : call]
     # 풀러를 바꾸는 길도 내리기 전에 걷는다.
     pooler = deploy.index("풀러를 바꾼다 — 그 전에")
-    assert "retire_orphan_scoring" in deploy[pooler : pooler + 200]
+    assert "retire_orphan_services" in deploy[pooler : pooler + 200]
 
 
 def test_retiring_covers_both_scoring_processes_and_clears_the_old_queue():
     deploy = _deploy_text()
-    body = deploy[deploy.index("retire_orphan_scoring() {") : deploy.index("# 서비스 이름 → compose 서비스들.")]
+    body = deploy[deploy.index("retire_orphan_services() {") : deploy.index("# 서비스 이름 → compose 서비스들.")]
     assert "celery-scoring grader" in body  # 둘 다 — 롤백 때는 grader 가 고아다
     assert "config --services" in body  # 지금 compose 에 있는 것은 건드리지 않는다
     assert "docker stop -t 240" in body

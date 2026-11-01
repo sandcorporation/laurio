@@ -1,5 +1,6 @@
 #!/bin/bash
 # PR CI 의 macos 쪽 — Celery 가 실제 Redis 브로커로 beat → worker 까지 도는지 본다
+# (beat 는 worker 컨테이너 안에서 `-B` 로 돈다, #859 — 그래도 태스크는 브로커를 왕복한다)
 # (옛 GitHub Actions `celery-broker` 잡을 그대로 옮겼다, 2026-10-02).
 set -uo pipefail
 cd "$(dirname "$0")/../.."
@@ -62,6 +63,5 @@ for _ in $(seq 1 40); do
   sleep 3
 done
 echo "beat 가 쏜 태스크를 worker 가 실행하지 못했다"
-"${C[@]}" logs celery-beat | tail -50
 "${C[@]}" logs celery-worker | tail -50
 exit 1

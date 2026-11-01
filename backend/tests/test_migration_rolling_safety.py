@@ -217,7 +217,7 @@ def test_deployed_backend_does_not_migrate_on_boot():
     """
     for target in ("prod",):
         compose = yaml.safe_load((REPO_ROOT / "docker" / f"compose.{target}.yaml").read_text(encoding="utf-8"))
-        for service in ("backend", "celery-worker", "celery-beat", "events"):
+        for service in ("backend", "celery-worker", "events"):
             command = compose["services"][service].get("command", "")
             command = " ".join(command) if isinstance(command, list) else command
             assert "migrate" not in command, f"compose.{target}.yaml 의 {service} 가 기동 때 migrate 를 돌린다"

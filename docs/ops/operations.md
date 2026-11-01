@@ -140,8 +140,8 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   | 쓰는 쪽 | prod | 근거 |
   | --- | --- | --- |
   | backend(워커 × 스레드) | 4 × 4 = 16 | 예전 sync 는 4 |
-  | celery-worker(prefork) | 4 | `--concurrency` 미지정 → 호스트 코어 수 |
-  | celery-beat · grader DB 스레드 | 1 · 1 | |
+  | celery-worker(prefork) | 2 | `--concurrency 2`(#859, 전에는 미지정 → 코어 수 4). beat 는 이 안에서 `-B` 로 돈다 |
+  | grader DB 스레드 | 1 | |
   | events(ASGI) | 따로 세지 않았다 | 스트림을 여는 요청만 DB 를 쓴다 |
   | **풀러 클라이언트 상한** | `max_client_conn` 200 | `docker/pgbouncer/docker-entrypoint.sh` |
   | **풀러 → DB 서버 연결** | `default_pool_size` 20 | PostgreSQL `max_connections` 기본 100 안 |

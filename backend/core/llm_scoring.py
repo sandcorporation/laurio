@@ -296,7 +296,7 @@ def _endpoint(base_url: str | None, path: str) -> str:
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 _OPENAI_DEFAULT_TEMPERATURE = 0
 
-# celery-beat가 30초 타임아웃으로 이 앱의 internal 엔드포인트를 호출한다
+# celery worker(beat 가 쏜 스캔)가 30초 타임아웃으로 이 앱의 internal 엔드포인트를 호출한다
 # (core.tasks.call_internal). 그때는 gunicorn sync 워커도 30초 만에 워커를
 # SIGKILL했다(#88 코드리뷰 지적 1 — gthread 로 바꾼 #725 뒤로는 요청이 길다고
 # 죽이지 않는다, config/gunicorn.conf.py). 이전 값(60초)은 단 하나의
