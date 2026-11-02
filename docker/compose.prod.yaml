@@ -294,9 +294,11 @@ services:
           "CMD-SHELL",
           "pg_isready -h 127.0.0.1 -p 5432 -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
         ]
-      interval: 3s
+      interval: 60s
       timeout: 3s
       retries: 20
+      start_period: 60s
+      start_interval: 2s
     restart: unless-stopped
 
   redis: # Celery 브로커 + 결과 백엔드(ADR-0003). beat/worker 전용 — 호스트에 공개하지 않는다.
@@ -309,9 +311,11 @@ services:
       - codemit-prod-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 3s
+      interval: 60s
       timeout: 3s
       retries: 20
+      start_period: 60s
+      start_interval: 2s
     restart: unless-stopped
 
   # 공모전 검색 실물 어댑터(#450/#451, 부모 #444 스펙)가 붙는 OpenSearch.
@@ -341,9 +345,11 @@ services:
       - codemit-prod-search:/usr/share/opensearch/data
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:9200/_cluster/health || exit 1"]
-      interval: 5s
+      interval: 60s
       timeout: 5s
       retries: 30
+      start_period: 60s
+      start_interval: 2s
 
   # Postgres 앞 연결 풀러(pgbouncer, #453/#457/#458). arm64 태그(이 호스트=oracle의
   # 아키텍처), 호스트 포트를 내지 않는다. **이 서비스의 POSTGRES_HOST/PORT가
@@ -371,9 +377,11 @@ services:
       PGBOUNCER_POOL_MODE: transaction
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "6432"]
-      interval: 3s
+      interval: 60s
       timeout: 3s
       retries: 20
+      start_period: 60s
+      start_interval: 2s
 
   backend:
     logging: *default-logging
