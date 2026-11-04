@@ -535,7 +535,7 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   병합된 자동 진단 분기가 하나도 걷히지 않았다. 지금은 `git cherry` 로 분기 커밋이 전부 같은
   변경으로 `main` 에 들어갔는지 본다(`scripts/test_glitchtip_pick.py` 가 고정한다).
 - **precheck 는 주 체크아웃의 스크립트를 돈다 — 그 체크아웃은 저절로 앞서 나가지 않는다.**
-  automation 의 precheck 가 `/home/sandring/workspace/laurio/scripts/glitchtip_pick.py` 를 절대
+  automation 의 precheck 가 `/home/sandring/workspace/codemit/scripts/glitchtip_pick.py` 를 절대
   경로로 부르고 토큰도 그 체크아웃의 `.env` 에서 읽는다. 2026-10-02 부터 `main` 은 PR 로만
   들어가 주 체크아웃에서 커밋하는 사람이 없으므로, 이 스크립트를 고친 PR 이 병합돼도 **주
   체크아웃을 `git pull` 하기 전까지 스케줄러는 옛 스크립트를 돈다.** (세션 쪽 스킬은 실행마다
