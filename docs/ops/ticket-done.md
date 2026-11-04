@@ -36,7 +36,7 @@
 작업자는 전역 에이전트 `issue-worker` 다.
 일반 절차는 그쪽이 들고 있고, 이 저장소에만 해당하는 것은 여기 있다.
 
-- **워크트리와 포트.** `git worktree add ../laurio-<이름> -b <브랜치> origin/main` 으로 만들고,
+- **워크트리와 포트.** `git worktree add ../codemit-<이름> -b <브랜치> origin/main` 으로 만들고,
   `sh docker/dev-env.sh | head -1` 이 지시서가 준 오프셋과 같은지 본다. 새 오프셋의 DB 는 `migrate` 부터.
 - **compose 는 언제나 `-p codemit-dev-<오프셋>`, 필요한 컨테이너만.** 공유 스택 `codemit-dev`(오프셋 0)와 남의
   오프셋은 내리지 않는다. 사용자 슬라이스 메모리 한도가 빠듯하니 호스트 `next dev` 는 `scripts/dev-server.sh` 로만
