@@ -83,7 +83,7 @@ function unknownKindAssetsOf(assets: SubmissionOut["assets"]): SubmissionOut["as
 // 순서(위/아래로 버튼이 바꾼 순서) 그대로 인덱스로 다시 매긴다.
 //
 // **모듈 스코프에 둔다** — 컴포넌트 상태에 기대지 않는 순수 함수라, 저장
-// 시점(handleSubmit)과 완성도 계산(completion useMemo) 둘 다 이 함수를
+// 시점(handleSubmit)과 채움률 계산(completion useMemo) 둘 다 이 함수를
 // 불러써야 "실제로 보낼 자산"과 "화면이 채워졌다고 말하는 것"이 갈리지
 // 않는다 — 갈리면 참가자가 테스트 계정만 채우고 데모 URL을 비웠을 때
 // 화면은 "채워졌다"고 말하지만 저장은 그 행을 통째로 버리는 사고가 난다.
@@ -372,7 +372,7 @@ export default function SubmitPage() {
     ).length;
     const checklistRatio = total > 0 ? linked / total : 1;
     // `rowsToAssetsIn`으로 계산한다 — 값이 빈 행(예: 데모 URL은 비우고
-    // 테스트 계정만 채운 행)은 저장 시 통째로 버려지므로, 완성도가 "채워짐"
+    // 테스트 계정만 채운 행)은 저장 시 통째로 버려지므로, 채움률이 "채워짐"
     // 이라 말하면서 저장은 그 행을 버리는 모순을 막는다.
     const demoVideoToSave = rowsToAssetsIn(demoVideoAssets, "demo_video");
     const demoUrlToSave = rowsToAssetsIn(demoUrlAssets, "demo_url");
@@ -764,8 +764,8 @@ export default function SubmitPage() {
 
       <section className="flex flex-col gap-2" data-testid="completion-indicator" data-percent={completion.percent}>
         <p className="text-sm">
-          완성도 {completion.percent}% — 체크리스트 증거 연결 {completion.linked}/{completion.total},
-          권장 항목 {completion.optionalFilled}/3
+          채움률 {completion.percent}% — 근거 연결 {completion.linked}/{completion.total},
+          권장 자료 {completion.optionalFilled}/3
         </p>
         <div className="h-2 w-full border border-rule">
           <div className="h-full bg-verified" style={{ width: `${completion.percent}%` }} />

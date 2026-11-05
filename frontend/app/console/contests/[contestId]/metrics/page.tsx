@@ -6,7 +6,7 @@
 // 것뿐이었다 — 참가가 언제부터 들어오는지, 어느 Requirement 가 사람들을
 // 걸러내는지 알 수 없어 "참가가 없다"를 마감 직전에야 알았다. 이 화면이 그
 // 자리다: 일자별 누적 참가작 수(#107)에 이어 Requirement 별 충족 분포와 제출
-// 완성도 분포(#108)를 섹션으로 얹는다. 뒤 티켓(#109: 조회수·전환율)도 같은
+// 채움률 분포(#108)를 섹션으로 얹는다. 뒤 티켓(#109: 조회수·전환율)도 같은
 // 모양으로 섹션을 하나 더 얹는다 — 그래서 지표마다 독립된 `<section>` 하나로
 // 짓는다.
 //
@@ -17,7 +17,7 @@
 // **Score 도 개별 Submission·Developer 도 이 화면 어디에도 없다** — 백엔드
 // 응답 스키마(`submissions.schemas.ContestMetricsOut`) 자체에 그 필드가
 // 없으므로, 이 객체를 그대로 렌더링해도 새어나갈 값이 없다(judge/page.tsx 와
-// 같은 원칙). Requirement 충족 분포·완성도 분포는 **일에 대한 정보**다 —
+// 같은 원칙). Requirement 충족 분포·채움률 분포는 **일에 대한 정보**다 —
 // 누가 냈는지는 여기 없다.
 //
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015) — 다른 `/console/**` 화면과 같은
@@ -239,7 +239,7 @@ function CompletionDistributionSection({ metrics }: { metrics: ContestMetricsOut
 
   return (
     <section className="flex flex-col gap-3" data-testid="metrics-completion-distribution">
-      <SectionHeading title="제출 완성도 분포" />
+      <SectionHeading title="제출 채움률 분포" />
 
       {total === 0 ? (
         <EmptyState>
@@ -288,7 +288,7 @@ function ViewMetricsSection({ metrics }: { metrics: ContestMetricsOut }) {
           <span className="text-xs text-ink/60">전환율</span>
           {/* 0 으로 나누지 않는다 — 조회가 없으면 전환율은 "0%" 가 아니라
               "아직 알 수 없음" 이다. 숫자와 문구가 다른 층에서 결정된다는 것이
-              완성도 분포·참가 추이 섹션과 같은 원칙이다. */}
+              채움률 분포·참가 추이 섹션과 같은 원칙이다. */}
           {hasViews ? (
             <span className="font-mono text-2xl font-medium" data-testid="metrics-conversion-rate">
               {(view.conversion_rate! * 100).toFixed(1)}%

@@ -813,7 +813,7 @@ def _public_asset_summaries(
 def _completion_of(
     assets, *, total_requirements: int, linked_count: int
 ) -> CompletionOut:
-    """자료 목록에서 완성도 지표를 만든다 (#190).
+    """자료 목록에서 채움률 지표를 만든다 (#190).
 
     `assets`는 **가시성으로 거르기 전의 전체 목록**이어야 한다 — 이 지표는
     "제출작이 얼마나 채워졌는가"이지 "당신에게 몇 개가 보이는가"가 아니다.
@@ -1436,7 +1436,7 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
     것뿐이었다 — 참가가 언제부터 들어오는지, 어느 Requirement가 사람들을
     걸러내는지 알 수 없어 "참가가 없다"를 마감 직전에야 알았다. 이
     엔드포인트가 일자별 누적 Submission 수(#107)에 이어 Requirement별 충족
-    분포와 제출 완성도 분포(#108)를 낸다.
+    분포와 제출 채움률 분포(#108)를 낸다.
 
     `compare_submissions`와 같은 소유권 검사를 그대로 쓴다 — 새 예외를 만들지
     않는다. **그 엔드포인트와 달리 마감 전에도 열린다** — Sponsor는 마감 전에도
@@ -1508,7 +1508,7 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
         for requirement in requirements
     ]
 
-    # #108 — 제출 완성도 분포. 세 boolean을 한 집계 질의로 센다(`Count` +
+    # #108 — 제출 채움률 분포. 세 boolean을 한 집계 질의로 센다(`Count` +
     # `filter=~Q(...)`) — Submission마다 훑지 않는다.
     # 세는 것은 여전히 "그 자료를 **하나라도** 가진 Submission 수"다(자료 수가
     # 아니다) — `Count(distinct=True)`가 그것이다. 다중화 이후 자료 수를 그대로

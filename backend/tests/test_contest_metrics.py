@@ -1,5 +1,5 @@
 """Sponsor 지표 화면 — 일자별 누적 참가작 수(#107), Requirement 충족 분포·제출
-완성도 분포(#108), 부모 #105.
+채움률 분포(#108), 부모 #105.
 
 지금까지 Sponsor 가 자기 Contest 상태를 아는 수단은 제출을 하나씩 열어보는
 것뿐이었다. `GET /api/contests/{id}/metrics` 가 그 자리에 세 지표를 낸다:
@@ -7,7 +7,7 @@
 - 일자별 누적 Submission 수 (#107)
 - Requirement 별로 몇 명이 충족했는가 — 필수·선택 구별, 분모는 전체 Submission
   수 (#108)
-- 제출 완성도 분포 — 데모·영상·테스트 계정이 붙은 비율 (#108)
+- 제출 채움률 분포 — 데모·영상·테스트 계정이 붙은 비율 (#108)
 
 시임은 언제나 HTTP 다(CLAUDE.md).
 """
@@ -47,7 +47,7 @@ def _submit_full(
     test_account: str = "",
 ) -> dict:
     """`_submit`(test_source_readings)보다 유연한 버전 — 여러 Requirement 응답과
-    완성도 필드(데모 영상·URL·테스트 계정)를 함께 제어한다. #108 의 분포
+    채움률 필드(데모 영상·URL·테스트 계정)를 함께 제어한다. #108 의 분포
     테스트는 응답이 갈리는 Submission 을 여러 건 심어야 한다."""
 
     source_key = f"{source_target_ref(contest_id, dev['user_id'])}/{uuid.uuid4().hex}"
@@ -351,7 +351,7 @@ def test_a_contest_with_no_requirements_reports_an_empty_fulfillment_list(
     assert response.json()["requirement_fulfillment"] == []
 
 
-# --- #108: 제출 완성도 분포 -----------------------------------------------------
+# --- #108: 제출 채움률 분포 -----------------------------------------------------
 
 
 @pytest.mark.django_db

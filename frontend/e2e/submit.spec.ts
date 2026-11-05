@@ -119,7 +119,7 @@ async function createContestAsSponsor(
   return createContestAsCurrentUser(page, options);
 }
 
-test.describe("@exclusive 소스 필수 · Evidence 연결 · 완성도", () => {
+test.describe("@exclusive 소스 필수 · Evidence 연결 · 채움률", () => {
   test("본인확인을 마치지 않으면 제출이 막히고 이유와 다음 행동이 안내된다", async ({ page }) => {
     const runId = `unverified-${Date.now()}`;
     const contestId = await createContestAsSponsor(page, runId, {

@@ -142,7 +142,7 @@ class SubmissionAssetOut(Schema):
 
 
 class CompletionOut(Schema):
-    """시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 완성도 지표.
+    """시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 채움률 지표.
 
     강제 항목은 아무 것도 없다 — 소스만 필수다. 이 지표는 신호일 뿐이다.
 
