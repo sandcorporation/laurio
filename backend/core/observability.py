@@ -34,6 +34,12 @@ SDK 가 꺼진 채로 돈다 — 테스트가 네트워크를 치지 않는다�
   잃으면 재시도마다 ERROR 로그를 남기고 스스로 다시 붙는다 — 그 첫 몇 번은
   보내지 않고, 재시도가 쌓이면(진짜 장애) 그대로 보낸다
   (`_is_transient_broker_reconnect`, GlitchTip 오류 66).
+- **`manage.py shell` 에서 손으로 친 명령의 예외는 앱 결함이 아니다**(#893·#889,
+  GlitchTip 오류 107). 이벤트의 예외 스택에 Django 의 `shell` 명령 프레임
+  (`django/core/management/commands/shell.py`)이 있으면 버린다
+  (`_is_manage_shell_error`). SDK 초기화를 shell 에서 건너뛰지 않는 것은 일부러다 —
+  진입점에서 명령 이름을 풀어야 하고 shell 안에서 부른 앱 코드의 로깅 통합까지
+  갈라진다. **범위는 shell 만**: 다른 관리 명령·웹 요청·celery 오류는 그대로 보낸다.
 """
 
 from __future__ import annotations
@@ -88,7 +94,31 @@ def _is_transient_broker_reconnect(hint: dict[str, Any]) -> bool:
     return match is not None and int(match.group(1)) < _TRANSIENT_BROKER_RETRIES
 
 
-def drop_expected_error(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+_SHELL_COMMAND_MODULE = "django.core.management.commands.shell"
+_SHELL_COMMAND_PATH = "django/core/management/commands/shell.py"
+
+
+def _is_manage_shell_error(event: dict[str, Any]) -> bool:
+    """예외 스택 프레임에 `manage.py shell` 명령(Django)이 있으면 True.
+
+    `module`·`abs_path`·`filename` 어느 쪽이 와도 맞게 본다(경로 구분자는 `/` 로 통일).
+    """
+
+    values = (event.get("exception") or {}).get("values") or []
+    for value in values:
+        for frame in (value.get("stacktrace") or {}).get("frames") or []:
+            if frame.get("module") == _SHELL_COMMAND_MODULE:
+                return True
+            for key in ("abs_path", "filename"):
+                path = str(frame.get(key) or "").replace("\\", "/")
+                if path.endswith(_SHELL_COMMAND_PATH):
+                    return True
+    return False
+
+
+def drop_expected_error(
+    event: dict[str, Any], hint: dict[str, Any]
+) -> dict[str, Any] | None:
     """`before_send` — 의도한 4xx 응답이면 버리고(None), 그 밖이면 그대로 보낸다.
 
     판정 근거는 예외 객체다: django-ninja 의 `HttpError` 와 Django 의 `Http404`·
@@ -98,6 +128,9 @@ def drop_expected_error(event: dict[str, Any], hint: dict[str, Any]) -> dict[str
     """
 
     if _is_transient_broker_reconnect(hint):
+        return None
+
+    if _is_manage_shell_error(event):
         return None
 
     exc_info = hint.get("exc_info")
