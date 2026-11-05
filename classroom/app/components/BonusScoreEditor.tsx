@@ -5,6 +5,9 @@ import { useState } from "react";
 
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 
+// INPUT_CLASS 의 w-full 이 한 줄 배치를 깨므로 뺀다 — 점수·메모·저장이 한 줄에 선다.
+const INLINE_INPUT_CLASS = INPUT_CLASS.replace("w-full ", "");
+
 export const BONUS_SCORE_OPTIONS = [0, 1, 2, 3, 4, 5] as const;
 export const BONUS_MEMO_MAX_LENGTH = 200;
 
@@ -46,7 +49,7 @@ export function BonusScoreEditor({
           value={score}
           disabled={disabled || saving}
           onChange={(event) => setScore(Number(event.target.value))}
-          className={`${INPUT_CLASS} w-[72px] shrink-0`}
+          className={`${INLINE_INPUT_CLASS} w-[72px] shrink-0`}
         >
           {BONUS_SCORE_OPTIONS.map((value) => (
             <option key={value} value={value}>
@@ -62,7 +65,7 @@ export function BonusScoreEditor({
           disabled={disabled || saving}
           onChange={(event) => setMemo(event.target.value)}
           placeholder="메모"
-          className={`${INPUT_CLASS} min-w-0 flex-1`}
+          className={`${INLINE_INPUT_CLASS} min-w-[160px] flex-1`}
         />
         <button
           type="button"

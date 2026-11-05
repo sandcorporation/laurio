@@ -41,12 +41,14 @@ export function GradeToggle({
       data-grade={grade}
       aria-pressed={grade === "required"}
       aria-label={`${ariaPrefix} ${GRADE_LABEL[grade]}`}
+      title={grade === "bonus" ? BONUS_RATER_LABEL : undefined}
       disabled={disabled}
       onClick={() => onChange(nextGrade(grade))}
       className="flex shrink-0 items-center gap-1.5 disabled:cursor-not-allowed"
     >
       <Badge tone={grade === "required" ? "verified" : "neutral"}>{GRADE_LABEL[grade]}</Badge>
-      {grade === "bonus" ? <span className="text-xs text-ink/60">{BONUS_RATER_LABEL}</span> : null}
+      {/* 좁은 화면에서는 항목 칸을 지키려고 배지만 둔다(#905). */}
+      {grade === "bonus" ? <span className="hidden text-xs text-ink/60 sm:inline">{BONUS_RATER_LABEL}</span> : null}
     </button>
   );
 }
