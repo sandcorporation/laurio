@@ -41,7 +41,7 @@ class Score(AppendOnlyModel):
     # "claude-sonnet-4-5-20250929" 같은 값). 나중에 어떤 모델이 이 판정을 내렸는지
     # 감사할 수 있어야 한다(ADR-0006).
     model_version = models.CharField(max_length=200)
-    # LLM에 실제로 보낸 프롬프트 전문 — 소스 발췌·Evidence·자가 응답을 포함한다.
+    # LLM에 실제로 보낸 프롬프트 전문 — 소스 발췌·자가 응답을 포함한다(Evidence 는 #909 부터 싣지 않는다).
     # 이의제기(#21) 절차에서 운영자가 "무엇을 근거로 이 판정이 나왔는지"를 그대로
     # 재현해 볼 수 있어야 한다.
     prompt = models.TextField()

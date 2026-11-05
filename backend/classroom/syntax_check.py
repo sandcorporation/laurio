@@ -467,7 +467,6 @@ class SyntaxCheckPass:
             text=SYNTAX_CHECK_AI_REQUIREMENT_TEXT,
             grade="필수",
             self_reported_met=False,
-            evidence=[],
         )
 
     def extra_source_files(self, *, asset_id: int, asset_label: str) -> list[SourceFile]:

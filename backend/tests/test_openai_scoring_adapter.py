@@ -56,7 +56,6 @@ def _scoring_input(*, submission_id: int = 1, requirement_ids: list[int] | None 
             text=f"requirement {rid}",
             grade="required",
             self_reported_met=True,
-            evidence=[{"kind": "source", "value": "app.py:1"}],
         )
         for rid in requirement_ids
     ]

@@ -32,7 +32,7 @@ from contests.models import Category, Contest, DeliverableType
 from core.models import ClockOverride
 from ledger.models import AppendOnlyError
 from scoring.adapters import LLMAdapterPermanentError, RequirementVerdict, ScoringOutput
-from scoring.models import Score, ScoringAttempt
+from scoring.models import SubmissionQualityReview, Score, ScoringAttempt
 from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission
 
@@ -290,9 +290,12 @@ def landing_type(db):
 
 
 @pytest.mark.django_db
-def test_evidence_grounded_in_source_scores_required_requirement_as_met(
+def test_requirement_found_in_source_is_met_without_any_check_location(
     client, category, landing_type
 ):
+    """확인 위치(Evidence)는 판정 입력이 아니다(#909, ADR-0074) — 확인 위치를 하나도 붙이지
+    않은 필수 항목도 소스에 그 기능이 있으면 충족이다. 자동 미달이 아니다."""
+
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(
         client,
@@ -307,19 +310,13 @@ def test_evidence_grounded_in_source_scores_required_requirement_as_met(
     source_key = _source_object_key(contest["id"], dev["user_id"])
     FakeStorageAdapter().write_object(
         source_key,
-        _zip_bytes({"app.py": "def login():\n    # MAGIC_MARKER_LOGIN\n    pass\n"}),
+        _zip_bytes({"app.py": "def login():\n    # 로그인 기능이 있다\n    pass\n"}),
     )
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
         data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
-                {
-                    "requirement_id": requirement_id,
-                    "is_met": True,
-                    "evidence": [
-                        {"kind": "source_location", "value": "MAGIC_MARKER_LOGIN"}
-                    ],
-                }
+                {"requirement_id": requirement_id, "is_met": True, "evidence": []}
             ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
@@ -335,14 +332,13 @@ def test_evidence_grounded_in_source_scores_required_requirement_as_met(
     score = Score.objects.get(submission_id=submission_id)
     assert score.percentage == Decimal("100.00")
     assert score.model_version == "fake-llm-v1"
-    assert "MAGIC_MARKER_LOGIN" in score.prompt
     # 근거는 참가자·심사 화면에 그대로 나간다 — 영어 소스를 읽은 모델이 영어로 쓰지 않게 지시한다.
     assert "한국어" in score.prompt
     assert score.reasoning == [
         {
             "requirement_id": requirement_id,
             "is_met": True,
-            "reasoning": "Evidence가 소스에서 확인되어 충족으로 판정했다.",
+            "reasoning": "Requirement 문구가 소스에서 확인되어 충족으로 판정했다.",
         }
     ]
 
@@ -393,7 +389,7 @@ def test_self_report_all_met_with_no_evidence_converges_to_zero(client, category
 
 
 @pytest.mark.django_db
-def test_evidence_present_but_not_grounded_in_source_is_unmet(client, category, landing_type):
+def test_check_location_without_the_feature_in_source_is_unmet(client, category, landing_type):
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(
         client,
@@ -451,7 +447,7 @@ def test_running_pending_scan_twice_scores_only_once(client, category, landing_t
 
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
@@ -499,7 +495,7 @@ def test_score_cannot_be_modified_after_creation(client, category, landing_type)
 
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
@@ -563,7 +559,7 @@ def test_deleting_a_submission_with_a_score_is_blocked_not_cascaded(client, cate
 
     dev = _verified_user(client, "dev-240-1", "dev-ci-240-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
@@ -615,7 +611,7 @@ def test_deleting_a_contest_with_a_scored_submission_is_blocked_not_cascaded(
 
     dev = _verified_user(client, "dev-240-2", "dev-ci-240-2")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
@@ -685,7 +681,7 @@ def test_llm_failure_is_logged_and_retried_on_next_scan(client, category, landin
 
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
@@ -766,13 +762,13 @@ def test_never_attempted_submission_is_scored_before_one_stuck_in_retries(
     # stuck: 낮은 id, 이미 여러 번 실패했다(이전 스캔 회차들의 이력).
     dev1 = _verified_user(client, "dev-1", "dev-ci-1")
     key1 = _source_object_key(contest["id"], dev1["user_id"])
-    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     stuck_id = _submit(dev1, key1)
 
     # fresh: 높은 id, 아직 한 번도 시도되지 않았다.
     dev2 = _verified_user(client, "dev-2", "dev-ci-2")
     key2 = _source_object_key(contest["id"], dev2["user_id"])
-    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     fresh_id = _submit(dev2, key2)
 
     assert stuck_id < fresh_id
@@ -832,12 +828,12 @@ def test_candidates_with_equal_attempt_counts_are_ordered_by_id(
 
     dev1 = _verified_user(client, "dev-1", "dev-ci-1")
     key1 = _source_object_key(contest["id"], dev1["user_id"])
-    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     lower_id = _submit(dev1, key1)
 
     dev2 = _verified_user(client, "dev-2", "dev-ci-2")
     key2 = _source_object_key(contest["id"], dev2["user_id"])
-    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     higher_id = _submit(dev2, key2)
 
     assert lower_id < higher_id
@@ -865,7 +861,7 @@ def test_incomplete_contests_endpoint_lists_unscored_closed_contest(
 
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
         data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
@@ -919,7 +915,7 @@ def test_run_pending_never_scores_submissions_of_a_still_open_contest(
 
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
         data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
@@ -960,7 +956,7 @@ def test_excluded_vendor_directories_are_never_sent_to_the_llm(client, category,
         source_key,
         _zip_bytes(
             {
-                "app.py": "def login():\n    # REAL_MARKER\n    pass\n",
+                "app.py": "def login():\n    # REAL_MARKER 로그인 기능이 있다\n    pass\n",
                 "node_modules/some-lib/index.js": "VENDOR_TRAP_MARKER",
                 "dist/bundle.js": "BUILD_TRAP_MARKER",
                 "README.md": "not code",
@@ -1072,7 +1068,7 @@ def test_two_source_assets_are_both_scored_via_round_robin_budget(
         source_a_key,
         _zip_bytes(
             {
-                "big1.py": f"# WEB_MARKER\n{'a' * big_chunk}",
+                "big1.py": f"# WEB_MARKER 웹 서비스가 있다\n{'a' * big_chunk}",
                 "big2.py": "b" * big_chunk,
                 "big3.py": "c" * big_chunk,
             }
@@ -1081,7 +1077,7 @@ def test_two_source_assets_are_both_scored_via_round_robin_budget(
     # B: 작은 파일 하나뿐 — 라운드로빈이 아니면 예산에서 밀려난다.
     source_b_key = _source_object_key(contest["id"], dev["user_id"])
     FakeStorageAdapter().write_object(
-        source_b_key, _zip_bytes({"app.py": "# APP_MARKER\nprint('mobile')\n"})
+        source_b_key, _zip_bytes({"app.py": "# APP_MARKER 모바일 앱이 있다\nprint('mobile')\n"})
     )
 
     submit_resp = client.post(
@@ -1152,7 +1148,7 @@ def test_one_unreadable_source_asset_does_not_block_scoring_with_the_rest(
     # 읽을 수 있는 소스 — 실제로 write_object 된다.
     readable_key = _source_object_key(contest["id"], dev["user_id"])
     FakeStorageAdapter().write_object(
-        readable_key, _zip_bytes({"app.py": "def login():\n    # MARKER\n    pass\n"})
+        readable_key, _zip_bytes({"app.py": "def login():\n    # MARKER 로그인 기능이 있다\n    pass\n"})
     )
     # 읽을 수 없는 소스 — 의도적으로 write_object를 부르지 않는다(스토리지 지연 재현).
     missing_key = _source_object_key(contest["id"], dev["user_id"])
@@ -1219,7 +1215,7 @@ def test_readable_but_wholly_filtered_source_asset_is_not_recorded_as_scored(
 
     scored_key = _source_object_key(contest["id"], dev["user_id"])
     FakeStorageAdapter().write_object(
-        scored_key, _zip_bytes({"app.py": "def login():\n    # MARKER\n    pass\n"})
+        scored_key, _zip_bytes({"app.py": "def login():\n    # MARKER 로그인 기능이 있다\n    pass\n"})
     )
     # 선별 대상 확장자가 아닌 파일뿐인 zip — 스토리지에서는 잘 읽히지만
     # `select_source_files`가 하나도 고르지 않는다.
@@ -1280,7 +1276,7 @@ def test_scored_assets_are_attributed_by_id_not_label(client, category, landing_
 
     contributing_key = _source_object_key(contest["id"], dev["user_id"])
     FakeStorageAdapter().write_object(
-        contributing_key, _zip_bytes({"app.py": "def login():\n    # MARKER\n    pass\n"})
+        contributing_key, _zip_bytes({"app.py": "def login():\n    # MARKER 로그인 기능이 있다\n    pass\n"})
     )
     # 같은 라벨("웹 서비스")을 붙이지만 선별 대상 확장자가 아닌 파일뿐이라 이
     # 자산은 프롬프트에 아무것도 남기지 못한다.
@@ -1348,7 +1344,7 @@ def test_contest_scoring_passes_unreadable_files_through_the_registered_converte
     key = _source_object_key(contest["id"], dev["user_id"])
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("app.py", "def login():\n    # MARKER\n    pass\n")
+        zf.writestr("app.py", "def login():\n    # MARKER 로그인 기능이 있다\n    pass\n")
         zf.writestr("lab/topology.bin", fakebin("CONTEST_CONVERTED_MARKER"))
     FakeStorageAdapter().write_object(key, buf.getvalue())
 
@@ -1426,7 +1422,7 @@ def test_missing_source_object_leaves_submission_unscored_for_next_scan(
 
     # 소스가 뒤늦게 나타나면 다음 스캔이 "아직 성공하지 못한 첫 시도"를 자동으로
     # 반복한다 — 재채점이 아니라 여전히 최초 시도다.
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     retried = _run_pending(client)
     assert retried["count"] == 1
     assert retried["rows"][0]["status"] == "scored"
@@ -1459,8 +1455,8 @@ def test_one_poisoned_submission_does_not_block_the_rest_of_the_batch(
 
     key1 = _source_object_key(contest["id"], dev1["user_id"])
     key2 = _source_object_key(contest["id"], dev2["user_id"])
-    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
-    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     def _submit(dev, key):
         resp = client.post(
@@ -1528,8 +1524,8 @@ def test_permanent_failure_is_finalized_as_zero_on_the_next_scan(client, categor
     dev2 = _verified_user(client, "dev-2", "dev-ci-2")
     key1 = _source_object_key(contest["id"], dev1["user_id"])
     key2 = _source_object_key(contest["id"], dev2["user_id"])
-    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER\n"}))
-    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key1, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
+    FakeStorageAdapter().write_object(key2, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     def _submit(dev, key):
         resp = client.post(
@@ -1592,7 +1588,7 @@ def test_permanent_failure_is_finalized_as_zero_on_the_next_scan(client, categor
 
 def _submit_with_marker(client, contest, requirement_id, dev):
     key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
         data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
@@ -2020,7 +2016,7 @@ def test_scan_stops_early_once_it_exceeds_its_time_budget(
     for i in range(3):
         dev = _verified_user(client, f"dev-{i}", f"dev-ci-{i}")
         key = _source_object_key(contest["id"], dev["user_id"])
-        FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER\n"}))
+        FakeStorageAdapter().write_object(key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
         resp = client.post(
             f"{CONTESTS_URL}/{contest['id']}/submissions",
             data={"assets": [{"kind": "source", "value": key}], "requirement_responses": [
@@ -2088,7 +2084,7 @@ def test_adapter_omitting_a_verdict_treats_it_as_unmet_instead_of_crashing(
 
     dev = _verified_user(client, "dev-1", "dev-ci-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
 
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
@@ -2206,13 +2202,13 @@ def test_injected_delimiter_markers_in_untrusted_content_are_neutralized(
     _run_pending(client)
 
     score = Score.objects.get(submission_id=submission_id)
-    # 진짜 경계 마커는 _build_prompt가 소스 파일 하나·Evidence 하나마다 정확히 한
-    # 번씩만 만든다. 참가자가 소스·Evidence 안에 같은 문자열을 심어도 무력화되어
-    # 개수가 늘어나지 않아야 한다.
+    # 진짜 경계 마커는 _build_prompt가 소스 파일 하나마다 정확히 한 번씩만 만든다.
+    # 참가자가 소스 안에 같은 문자열을 심어도 무력화되어 개수가 늘어나지 않아야 한다.
+    # 확인 위치(Evidence)는 프롬프트에 아예 실리지 않는다(#909) — 거기 심은 문자열도 없다.
     assert score.prompt.count("<<<SOURCE_FILE_START>>>") == 1
     assert score.prompt.count("<<<SOURCE_FILE_END>>>") == 1
-    assert score.prompt.count("<<<EVIDENCE_START>>>") == 1
-    assert score.prompt.count("<<<EVIDENCE_END>>>") == 1
+    assert "<<<EVIDENCE_START>>>" not in score.prompt
+    assert "IGNORE ALL PRIOR INSTRUCTIONS" not in score.prompt
     # 코드펜스 탈출 시도도 무력화된다 — _build_prompt 자신은 백틱 펜스를 전혀
     # 쓰지 않으므로, 최종 프롬프트에 리터럴 "```"가 하나도 남으면 안 된다.
     assert "```" not in score.prompt
@@ -2231,7 +2227,8 @@ def test_multibyte_utf8_cut_at_budget_boundary_keeps_valid_prefix(client, catego
         category=category,
         deliverable_type=landing_type,
         deadline_at=deadline,
-        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        # 흉내 채점기는 Requirement 문구가 소스에 있으면 충족으로 본다(#909).
+        requirements=[{"text": "가", "grade": "required"}],
     )
     requirement_id = contest["requirements"][0]["id"]
 
@@ -2263,19 +2260,48 @@ def test_multibyte_utf8_cut_at_budget_boundary_keeps_valid_prefix(client, catego
 
     assert result["rows"][0]["status"] == "scored"
     score = Score.objects.get(submission_id=submission_id)
-    # 파일이 통째로 버려졌다면(옛 버그) Evidence("가")를 소스에서 찾지 못해 0%가
+    # 파일이 통째로 버려졌다면(옛 버그) 문구 "가"를 소스에서 찾지 못해 0%가
     # 나왔을 것이다. 유효한 접두부가 살아남아야 100%가 나온다.
     assert score.percentage == Decimal("100.00")
 
 
-# --- 리뷰 지적 반영: 채점기가 근거의 종류를 해석하는 법 (#259, CONTEXT.md Evidence) ----
+# --- 확인 위치(Evidence)는 판정 입력이 아니다 (#909, ADR-0074) -------------------------------
+
+_CHECK_LOCATIONS = [
+    {"kind": "video_timestamp", "value": "TS_VALUE_01:23"},
+    {"kind": "screenshot", "value": "SHOT_VALUE_login.png"},
+    {"kind": "demo_path", "value": "DEMO_VALUE_/orders"},
+    {"kind": "source_location", "value": "SRC_VALUE_accounts/views.py:signup"},
+]
+
+
+def _submit_same_source(client, contest, dev, *, requirement_id: int, evidence: list[dict]) -> int:
+    source_key = _source_object_key(contest["id"], dev["user_id"])
+    FakeStorageAdapter().write_object(
+        source_key, _zip_bytes({"accounts/views.py": "def signup():\n    pass\n"})
+    )
+    response = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            # 라벨이 없으면 자산 id 가 라벨 자리에 들어가 두 제출의 프롬프트가 갈린다.
+            "assets": [{"kind": "source", "value": source_key, "label": "웹 소스"}],
+            "requirement_responses": [
+                {"requirement_id": requirement_id, "is_met": True, "evidence": evidence}
+            ],
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+    assert response.status_code == 201, response.content
+    return response.json()["id"]
 
 
 @pytest.mark.django_db
-def test_prompt_explains_how_to_verify_each_evidence_kind(client, category, landing_type):
-    """프롬프트가 Evidence 네 종류 각각을 "그 매체에서 어떻게 확인하는가"로 설명한다
-    (#259 AC). 소스 위치는 특히 "경로와 이름을 찾아 확인하고, 줄 번호만으로는 위치를
-    특정하지 않는다"는 취지를 담아야 한다(CONTEXT.md의 Evidence 정의)."""
+def test_check_locations_do_not_change_score_or_quality_prompt_by_a_single_byte(
+    client, category, landing_type
+):
+    """같은 제출에 확인 위치를 붙였을 때와 뗐을 때 Score 프롬프트와 완성도 프롬프트가 바이트
+    단위로 같다. 확인 위치는 제출자가 개최자에게 「여기서 보세요」라고 알려 주는 안내일 뿐이다."""
 
     deadline = timezone.now() + timedelta(hours=1)
     _sponsor, contest = _publish_contest(
@@ -2287,44 +2313,43 @@ def test_prompt_explains_how_to_verify_each_evidence_kind(client, category, land
     )
     requirement_id = contest["requirements"][0]["id"]
 
-    dev = _verified_user(client, "dev-1", "dev-ci-1")
-    source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(
-        source_key, _zip_bytes({"accounts/views.py": "def signup():\n    pass\n"})
+    with_locations = _submit_same_source(
+        client,
+        contest,
+        _verified_user(client, "dev-1", "dev-ci-1"),
+        requirement_id=requirement_id,
+        evidence=_CHECK_LOCATIONS,
     )
-
-    submit_resp = client.post(
-        f"{CONTESTS_URL}/{contest['id']}/submissions",
-        data={
-            "assets": [{"kind": "source", "value": source_key}],
-            "requirement_responses": [
-                {
-                    "requirement_id": requirement_id,
-                    "is_met": True,
-                    "evidence": [{"kind": "source_location", "value": "accounts/views.py:8-45"}],
-                }
-            ],
-        },
-        content_type="application/json",
-        **_auth_header(dev["access"]),
+    without_locations = _submit_same_source(
+        client,
+        contest,
+        _verified_user(client, "dev-2", "dev-ci-2"),
+        requirement_id=requirement_id,
+        evidence=[],
     )
-    submission_id = submit_resp.json()["id"]
 
     _close_contest(client, contest, deadline=deadline)
     _run_pending(client)
+    quality = client.post(
+        "/api/internal/scans/submission-quality-review", **_internal_headers()
+    )
+    assert quality.status_code == 200, quality.content
 
-    score = Score.objects.get(submission_id=submission_id)
-    # 네 종류 전부 프롬프트 안에 등장한다 — 종류를 골라 가리기만 하지 않았는지 확인.
-    for kind in ("video_timestamp", "screenshot", "demo_path", "source_location"):
-        assert kind in score.prompt
-    # 소스 위치는 "경로와 이름"으로 확인하라는 지침이 있어야 한다.
-    assert "경로" in score.prompt
-    # 줄 번호만으로는 위치를 특정하지 않는다는 취지가 지침에 있어야 한다.
-    assert "줄 번호" in score.prompt
-    # 소스 덤프 자체에는 줄 번호를 붙이지 않는다(#259가 고정한 선택) — 소스 파일
-    # 섹션 안에 "1:" 같은 줄 번호 접두어가 없어야 한다.
-    source_section = score.prompt.split("<<<SOURCE_FILE_START>>>")[1].split(
-        "<<<SOURCE_FILE_END>>>"
-    )[0]
-    assert "1:def signup" not in source_section
-    assert "1| def signup" not in source_section
+    score_with = Score.objects.get(submission_id=with_locations)
+    score_without = Score.objects.get(submission_id=without_locations)
+    assert score_with.prompt.encode() == score_without.prompt.encode()
+    # 확인 위치가 없다고 미달이 되지도 않고, 있다고 충족이 되지도 않는다 — 둘 다 소스로만 갈린다.
+    assert score_with.percentage == score_without.percentage == Decimal("0.00")
+
+    review_with = SubmissionQualityReview.objects.get(submission_id=with_locations)
+    review_without = SubmissionQualityReview.objects.get(submission_id=without_locations)
+    assert review_with.prompt.encode() == review_without.prompt.encode()
+
+    for prompt in (score_with.prompt, review_with.prompt):
+        assert "Evidence" not in prompt
+        assert "<<<EVIDENCE_START>>>" not in prompt
+        for location in _CHECK_LOCATIONS:
+            assert location["kind"] not in prompt
+            assert location["value"] not in prompt
+        # 소스 덤프에는 줄 번호를 붙이지 않는다(#259가 고정한 선택).
+        assert "1:def signup" not in prompt

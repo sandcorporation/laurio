@@ -133,7 +133,7 @@ def sample_input(prompt: str) -> ScoringInput:
         prompt=prompt,
         source_files=[],
         requirements=[
-            RequirementInput(requirement_id=index, text=label, grade="required", self_reported_met=False, evidence=[])
+            RequirementInput(requirement_id=index, text=label, grade="required", self_reported_met=False)
             for index, (_, label) in enumerate(SAMPLE_ITEMS, 1)
         ],
     )

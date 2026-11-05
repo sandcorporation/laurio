@@ -51,7 +51,7 @@ INPUT = ScoringInput(
     contest_id=3,
     prompt=SECRET_PROMPT,
     source_files=[],
-    requirements=[RequirementInput(requirement_id=11, text="README 가 있다", grade="required", self_reported_met=False, evidence=[])],
+    requirements=[RequirementInput(requirement_id=11, text="README 가 있다", grade="required", self_reported_met=False)],
 )
 VERDICTS = [{"requirement_id": 11, "is_met": True, "reasoning": SECRET_REASONING}]
 

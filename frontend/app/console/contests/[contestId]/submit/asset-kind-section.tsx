@@ -77,7 +77,7 @@ function DemoVideoRetentionNote({
   if (retentionExpired) {
     return (
       <p className="text-xs text-attention" data-testid="demo-video-retention-expired">
-        보관 기간이 지나 파일이 삭제되었습니다. 자료와 근거는 그대로 남아 있습니다.
+        보관 기간이 지나 파일이 삭제되었습니다. 자료와 확인 위치는 그대로 남아 있습니다.
       </p>
     );
   }
@@ -90,7 +90,7 @@ function DemoVideoRetentionNote({
   }
   return (
     <p className="text-xs text-ink/60" data-testid="demo-video-retention-pending">
-      마감·심사가 끝나고 일정 기간이 지나면 파일이 삭제됩니다. 자료와 근거는 남습니다.
+      마감·심사가 끝나고 일정 기간이 지나면 파일이 삭제됩니다. 자료와 확인 위치는 남습니다.
     </p>
   );
 }

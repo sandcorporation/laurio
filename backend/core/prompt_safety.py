@@ -21,7 +21,7 @@ UNTRUSTED_BLOCK_MARKERS = (
     "<<<SOURCE_FILE_START>>>",
     "<<<SOURCE_FILE_END>>>",
     "<<<EVIDENCE_START>>>",
-    "<<<EVIDENCE_END>>>",
+    "<<<EVIDENCE_END>>>",  # #909 부터 채점 프롬프트가 쓰지 않지만, 옛 Score 프롬프트에 남은 구분자라 계속 무력화한다
     "<<<SPONSOR_MESSAGE_START>>>",
     "<<<SPONSOR_MESSAGE_END>>>",
 )

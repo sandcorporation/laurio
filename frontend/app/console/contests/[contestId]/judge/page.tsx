@@ -224,7 +224,7 @@ export default function JudgeComparisonPage() {
       <p className="text-sm text-ink" data-testid="source-hidden-notice">
         소스코드와 필수 요구사항 달성률은 이 화면 어디에도 표시되지 않습니다 — 소스는 선정
         전까지 공개되지 않고, 달성률은 무응답 배분 대상을 가릴 때만
-        쓰입니다. 선정은 아래 근거와 완성도를 보고 판단해주세요.
+        쓰입니다.
       </p>
 
       {comparison.submissions.length === 0 ? (
@@ -340,38 +340,34 @@ export default function JudgeComparisonPage() {
                         (e) => e.submission_id === submission.submission_id,
                       );
                       const isLinked = entry?.is_linked ?? false;
+                      // 확인 위치는 판정과 무관한 안내다(#909, ADR-0074) — 충족 여부와 묶지 않고,
+                      // 있으면 목록만 그린다. 비어 있다고 경고하지 않는다.
                       return (
                         <td
                           key={submission.submission_id}
-                          className={`border p-3 align-top text-sm ${
-                            isLinked ? "border-rule" : "border-attention bg-paper"
-                          }`}
+                          className="border border-rule p-3 align-top text-sm"
                           data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}`}
                           data-linked={isLinked ? "true" : "false"}
                           data-met={entry?.is_met ? "true" : "false"}
                         >
-                          {!isLinked ? (
-                            <p
-                              className="text-attention"
-                              data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}-empty`}
-                            >
-                              근거 없음{isRequired ? " — 미달로 채점됩니다" : ""}
+                          <div className="flex flex-col gap-1">
+                            <p className={entry?.is_met ? "text-verified" : "text-ink"}>
+                              {entry?.is_met ? "충족" : "미충족"}
                             </p>
-                          ) : (
-                            <div className="flex flex-col gap-1">
-                              <p className={entry!.is_met ? "text-verified" : "text-ink"}>
-                                {entry!.is_met ? "충족" : "미충족(근거는 연결됨)"}
-                              </p>
-                              <ul className="flex flex-col gap-1">
+                            {isLinked && (
+                              <ul
+                                className="flex flex-col gap-1"
+                                data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}-locations`}
+                              >
                                 {entry!.evidence.map((item, index) => (
                                   <li key={index} className="font-mono text-xs text-ink">
                                     [{evidenceKindLabel(item.kind)}] {item.value}
                                   </li>
                                 ))}
                               </ul>
-                              {entry!.note && <p className="text-xs text-ink">{entry!.note}</p>}
-                            </div>
-                          )}
+                            )}
+                            {entry?.note && <p className="text-xs text-ink">{entry.note}</p>}
+                          </div>
                           {qualityItem ? (
                             <div
                               className="mt-2 border-t border-rule pt-2"
@@ -478,7 +474,7 @@ function SubmissionColumnHeader({
         {submission.developer_display_name}
       </a>
       <p className="font-mono text-xs text-ink">
-        근거 연결 {submission.completion.linked_requirement_count}/
+        확인 위치 {submission.completion.linked_requirement_count}/
         {submission.completion.total_requirement_count} · 권장 항목{" "}
         {[
           submission.completion.has_demo_video,

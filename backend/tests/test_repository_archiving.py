@@ -120,7 +120,7 @@ def test_repository_only_submission_is_archived_as_source_at_scoring_time(
     repo_url = _repository_url("public-org")
     repo_marker = f"REPO_MARKER_{uuid.uuid4().hex}"
 
-    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker}\n"}}):
+    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker} 로그인 기능이 있다\n"}}):
         submission = _submit_repository_only(client, dev, contest["id"], repo_url=repo_url)
 
         _run_visibility_scan(client)

@@ -404,7 +404,7 @@ def test_contest_adapter_default_construction_still_sends_temperature(monkeypatc
             source_files=[],
             requirements=[
                 RequirementInput(
-                    requirement_id=1, text="req", grade="필수", self_reported_met=False, evidence=[]
+                    requirement_id=1, text="req", grade="필수", self_reported_met=False
                 )
             ],
         )

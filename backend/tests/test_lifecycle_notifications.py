@@ -197,7 +197,7 @@ def _submit(client, dev: dict, contest_id: int, *, requirement_id: int, grounded
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("app.py", f"# {marker}\n" if grounded else "print('x')\n")
+        zf.writestr("app.py", f"# {marker} 로그인 기능이 있다\n" if grounded else "print('x')\n")
     FakeStorageAdapter().write_object(source_key, buf.getvalue())
 
     response = client.post(

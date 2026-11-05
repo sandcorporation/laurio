@@ -90,7 +90,7 @@ def _real_scored_submission(client) -> int:
     requirement_id = contest["requirements"][0]["id"]
     dev = _verified_user(client, "dev-254-1", "dev-ci-254-1")
     source_key = _source_object_key(contest["id"], dev["user_id"])
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": "MARKER 로그인 기능이 있다\n"}))
     submit_resp = client.post(
         f"{CONTESTS_URL}/{contest['id']}/submissions",
         data={

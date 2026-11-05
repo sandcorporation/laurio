@@ -35,7 +35,7 @@ INPUT = ScoringInput(
     contest_id=1,
     prompt="채점 프롬프트",
     source_files=[],
-    requirements=[RequirementInput(requirement_id=11, text="README 가 있다", grade="required", self_reported_met=False, evidence=[])],
+    requirements=[RequirementInput(requirement_id=11, text="README 가 있다", grade="required", self_reported_met=False)],
 )
 VERDICTS = [{"requirement_id": 11, "is_met": True, "reasoning": "있다"}]
 

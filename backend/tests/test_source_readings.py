@@ -182,9 +182,16 @@ def _zip_bytes(files: dict[str, str]) -> bytes:
 
 
 def _submit(client, dev: dict, contest_id: int, *, requirement_id: int) -> dict:
+    """충족으로 채점될 제출 하나 — 흉내 채점기는 Requirement 문구가 소스에 있으면 충족으로
+    보므로(#909) 그 문구를 공모전 API 에서 읽어 소스에 싣는다. 확인 위치(Evidence)는 판정과
+    무관하지만 화면·API 시험이 읽으므로 하나 붙여 둔다."""
+
+    detail = client.get(f"{CONTESTS_URL}/{contest_id}")
+    assert detail.status_code == 200, detail.content
+    text = next(r["text"] for r in detail.json()["requirements"] if r["id"] == requirement_id)
     source_key = _source_object_key(contest_id, dev["user_id"])
     marker = f"MARKER_{uuid.uuid4().hex}"
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": f"# {marker}\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": f"# {marker} {text}\n"}))
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",

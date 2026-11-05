@@ -39,8 +39,8 @@ INPUT = ScoringInput(
     prompt=f"채점 프롬프트 — {SECRET}",
     source_files=[],
     requirements=[
-        RequirementInput(requirement_id=11, text="README", grade="required", self_reported_met=False, evidence=[]),
-        RequirementInput(requirement_id=12, text="테스트", grade="optional", self_reported_met=False, evidence=[]),
+        RequirementInput(requirement_id=11, text="README", grade="required", self_reported_met=False),
+        RequirementInput(requirement_id=12, text="테스트", grade="optional", self_reported_met=False),
     ],
 )
 VERDICTS = [

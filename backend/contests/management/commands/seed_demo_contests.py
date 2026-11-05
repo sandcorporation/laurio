@@ -105,15 +105,12 @@ def _requirement_symbol(requirement) -> str:
 
 
 def _evidence_value(requirement) -> str:
-    """근거가 가리키는 소스 위치 — **소스에 문자 그대로 있어야 한다**.
+    """확인 위치가 가리키는 소스 위치 — **소스에 문자 그대로 있어야 한다**.
 
-    채점은 근거가 소스에서 실제로 확인되는지를 본다(ADR-0014). dev/test 의 fake
-    어댑터는 그것을 「근거 문자열이 소스 텍스트에 등장하는가」로 결정적으로
-    흉내내므로, 여기서 지어낸 문구를 쓰면 데모의 모든 요구사항이 「근거를 소스에서
-    찾지 못했다」로 미달이 된다 — 실측했다: 채점은 도달하는데 12건 전부 0.00% 였다.
-
-    그래서 값을 소스가 실제로 담는 줄과 **같은 문자열**로 만든다. 시드가 소스와
-    근거를 둘 다 만드는 이상, 둘이 어긋나면 그건 데이터가 스스로 모순인 것이다.
+    확인 위치(Evidence)는 채점 입력이 아니다(#909, ADR-0074) — 개최자가 심사 화면에서
+    「여기서 보면 된다」고 따라가는 안내다. 그래서 소스가 실제로 담는 줄과 **같은
+    문자열**로 만든다. 시드가 소스와 확인 위치를 둘 다 만드는 이상, 둘이 어긋나면
+    그건 데이터가 스스로 모순인 것이다.
     """
 
     return f"def {_requirement_symbol(requirement)}():"
@@ -128,14 +125,16 @@ def _demo_source_bytes(contest, rank: int, met_requirements) -> bytes:
     된다.
 
     **참가자가 미달이라고 적은 요구사항의 구현은 넣지 않는다.** 넣으면 소스가
-    참가자 자신의 응답과 모순된다 — dev 의 fake 어댑터는 근거 문자열만 보므로
-    그 모순을 못 보지만, staging 의 실제 LLM 은 소스를 읽고 「구현되어 있다」고
+    참가자 자신의 응답과 모순된다 — dev 의 fake 어댑터는 Requirement 문구가 소스에
+    있는지만 보므로(#909) 미달 항목의 자리에는 그 문구를 적지 않는다. 그 모순을 fake 는
+    못 보지만, staging 의 실제 LLM 은 소스를 읽고 「구현되어 있다」고
     판정할 수 있다. 그러면 심사·이의 화면에서 참가자의 「미달」 메모와 채점 결과가
     서로 다른 말을 하고, 그 화면들의 존재 이유(같은 것을 보고 이야기한다)가
     무너진다.
 
     충족이라고 적은 것에는 함수 하나를 두고 이름을 `_requirement_symbol` 로
-    맞춘다 — 근거(Evidence)가 가리키는 위치와 소스가 실제로 일치해야 한다.
+    맞추고 독스트링에 문구를 적는다 — 확인 위치(Evidence)가 가리키는 위치와 소스가
+    실제로 일치하고, fake 어댑터가 그 문구로 충족을 판정한다.
     """
 
     met_ids = {r.id for r in met_requirements}
@@ -147,7 +146,8 @@ def _demo_source_bytes(contest, rank: int, met_requirements) -> bytes:
     for requirement in contest.requirements.all().order_by("order", "id"):
         if requirement.id not in met_ids:
             lines += [
-                f"# TODO: {requirement.text} — 아직 구현하지 못했습니다.",
+                # 문구를 적지 않는다 — fake 어댑터가 문구로 충족을 판정한다(#909).
+                f"# TODO: {_requirement_symbol(requirement)} — 아직 구현하지 못했습니다.",
                 "",
             ]
             continue
@@ -634,10 +634,8 @@ class Command(BaseCommand):
                 is_met=is_met,
                 note=_RESPONSE_NOTES[note_index],
             )
-            # **충족 주장에는 근거를 붙인다**(#253). 근거 없는 주장은 미달로
-            # 채점된다(CONTEXT.md 의 Evidence) — 소스를 제대로 심어 놓고 근거를
-            # 빼면 데모의 점수가 전부 0% 로 남는다. 「플랫폼이 채점하지 못했다」가
-            # 「참가자가 근거를 안 냈다」로 바뀔 뿐 보이는 것은 똑같다.
+            # **충족 주장에는 확인 위치를 붙인다**(#253) — 심사 화면에서 개최자가 따라갈
+            # 자리를 보여 주는 데모다. 채점에는 쓰이지 않는다(#909, ADR-0074).
             if is_met:
                 Evidence.objects.create(
                     response=response,

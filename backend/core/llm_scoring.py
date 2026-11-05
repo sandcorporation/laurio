@@ -77,9 +77,7 @@ class RequirementInput:
     text: str
     grade: str
     self_reported_met: bool
-    # [{"kind": str, "value": str, "asset_label": str | None}, ...] — asset_label은
-    # 이 Evidence가 가리키는 자산의 라벨이다(#191). 참조가 없으면(null) None이다.
-    evidence: list[dict]
+    # Evidence(화면 이름 「확인 위치」)는 싣지 않는다 — 판정 입력이 아니다(#909, ADR-0074).
 
 
 @dataclass(frozen=True)
@@ -223,13 +221,11 @@ class LLMScoringAdapter(Protocol):
 class FakeLLMScoringAdapter:
     """dev/test 전용. 네트워크 없이 결정적으로 채점한다.
 
-    실제 LLM이 "Evidence가 주장을 뒷받침하는지"와 "소스에 그 기능이 실재하는지"를
-    함께 읽고 판단하는 것을, 결정적인 규칙으로 흉내낸다(ADR-0014):
-
-    1. Evidence가 하나도 연결되지 않은 자가 응답은 무조건 미달이다.
-    2. Evidence가 있으면, 그 값(소스 위치·데모 경로·타임스탬프 등)이 채점 대상으로
-       선별된 소스 텍스트 안에 실제로 등장하는지 본다. 등장하지 않으면 "근거를
-       찾지 못했다"로 미달 처리한다.
+    실제 LLM이 "소스에 그 기능이 실재하는지"를 읽고 판단하는 것을, 결정적인 규칙으로
+    흉내낸다: Requirement 문구가 채점 대상으로 선별된 소스 텍스트 안에 그대로 등장하면
+    충족, 아니면 미달이다. Evidence(확인 위치)는 판정 입력이 아니다(#909, ADR-0074) —
+    연결이 없다고 자동 미달이 되지 않는다. `prompt` 가 아니라 `source_files` 에서 찾는다 —
+    프롬프트에는 Requirement 문구가 이미 나열돼 있어 거기서 찾으면 늘 참이 된다.
 
     자가 응답(self_reported_met)은 절대 참조하지 않는다 — 이게 이 어댑터가
     증명해야 하는 핵심이다: 자가 응답만으로는 점수가 나오지 않는다.
@@ -250,18 +246,13 @@ class FakeLLMScoringAdapter:
         haystack = "\n".join(f.content for f in scoring_input.source_files)
         verdicts: list[RequirementVerdict] = []
         for requirement in scoring_input.requirements:
-            grounded = any(
-                evidence.get("value", "").strip()
-                and evidence["value"].strip() in haystack
-                for evidence in requirement.evidence
+            needle = requirement.text.strip()
+            is_met = bool(needle) and needle in haystack
+            reasoning = (
+                "Requirement 문구가 소스에서 확인되어 충족으로 판정했다."
+                if is_met
+                else "Requirement 문구를 소스에서 찾지 못해 미달로 판정했다."
             )
-            is_met = bool(requirement.evidence) and grounded
-            if not requirement.evidence:
-                reasoning = "Evidence가 연결되지 않아 미달로 판정했다."
-            elif not grounded:
-                reasoning = "연결된 Evidence의 근거를 소스에서 찾지 못해 미달로 판정했다."
-            else:
-                reasoning = "Evidence가 소스에서 확인되어 충족으로 판정했다."
             verdicts.append(
                 RequirementVerdict(
                     requirement_id=requirement.requirement_id,
