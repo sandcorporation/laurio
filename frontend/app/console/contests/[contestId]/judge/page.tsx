@@ -195,7 +195,7 @@ export default function JudgeComparisonPage() {
       <p className="text-sm text-ink" data-testid="source-hidden-notice">
         소스코드와 필수 요구사항 달성률은 이 화면 어디에도 표시되지 않습니다 — 소스는 선정
         전까지 공개되지 않고, 달성률은 무응답 배분 대상을 가릴 때만
-        쓰입니다. 선정은 아래 증거와 완성도를 보고 판단해주세요.
+        쓰입니다. 선정은 아래 근거와 완성도를 보고 판단해주세요.
       </p>
 
       {comparison.submissions.length === 0 ? (
@@ -308,12 +308,12 @@ export default function JudgeComparisonPage() {
                               className="text-attention"
                               data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}-empty`}
                             >
-                              증거 없음{isRequired ? " — 미달로 채점됩니다" : ""}
+                              근거 없음{isRequired ? " — 미달로 채점됩니다" : ""}
                             </p>
                           ) : (
                             <div className="flex flex-col gap-1">
                               <p className={entry!.is_met ? "text-verified" : "text-ink"}>
-                                {entry!.is_met ? "충족" : "미충족(증거는 연결됨)"}
+                                {entry!.is_met ? "충족" : "미충족(근거는 연결됨)"}
                               </p>
                               <ul className="flex flex-col gap-1">
                                 {entry!.evidence.map((item, index) => (
@@ -423,7 +423,7 @@ function SubmissionColumnHeader({
         {submission.developer_display_name}
       </a>
       <p className="font-mono text-xs text-ink">
-        증거 연결 {submission.completion.linked_requirement_count}/
+        근거 연결 {submission.completion.linked_requirement_count}/
         {submission.completion.total_requirement_count} · 권장 항목{" "}
         {[
           submission.completion.has_demo_video,

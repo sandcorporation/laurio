@@ -943,8 +943,8 @@ export default function SubmitPage() {
               남으므로 경고(attention)가 아니라 알림이다. */}
           {saveState.status === "done" && unlinkedEvidenceCount > 0 && (
             <p data-testid="evidence-unlinked-notice" className="text-sm text-ink/70">
-              지운 자료를 가리키던 증거 {unlinkedEvidenceCount}건의 연결이 해제되었습니다.
-              증거 자체는 그대로 남아 있으니 다른 자료에 다시 연결할 수 있습니다.
+              지운 자료를 가리키던 근거 {unlinkedEvidenceCount}건의 연결이 해제되었습니다.
+              근거 자체는 그대로 남아 있으니 다른 자료에 다시 연결할 수 있습니다.
             </p>
           )}
         </div>
