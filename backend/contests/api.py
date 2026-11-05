@@ -392,6 +392,12 @@ def create_free_contest(request: HttpRequest, payload: FreeContestCreateIn):
 
     require_contest_product_enabled()
     _require_hosting_permission(request.auth_user)
+    return create_free_contest_draft(request.auth_user, payload)
+
+
+def create_free_contest_draft(user, payload: FreeContestCreateIn) -> ContestOut:
+    """무료 공모전 초안을 그 사용자 명의로 만든다 — 웹(`create_free_contest`)과 공모전 MCP 가 같이 부른다(#870).
+    호출부가 공모전 스위치와 개최 권한을 이미 확인했다."""
 
     if not payload.deliverable_type_ids:
         raise HttpError(422, "산출물 종류를 하나 이상 선택해야 합니다.")
@@ -419,7 +425,7 @@ def create_free_contest(request: HttpRequest, payload: FreeContestCreateIn):
     _reject_if_banned_public_text(sanitized_title, "제목")
     _reject_if_banned_public_text(sanitized_description, "설명")
 
-    sponsor_profile, _created = SponsorProfile.objects.get_or_create(user=request.auth_user)
+    sponsor_profile, _created = SponsorProfile.objects.get_or_create(user=user)
 
     with transaction.atomic():
         contest = Contest.objects.create(
@@ -471,11 +477,17 @@ def publish_free_contest(request: HttpRequest, contest_id: int):
     """
 
     contest = _get_owned_draft_contest(request, contest_id)
+    return publish_free_contest_draft(contest, request.auth_user)
+
+
+def publish_free_contest_draft(contest: Contest, actor) -> ContestOut:
+    """무료 공모전 초안을 공개한다 — 개최 권한은 부르는 사람(`actor`)의 것을 본다. 웹과 공모전 MCP 가
+    같이 부른다(#870). 호출부가 DRAFT·소유(또는 운영자) 게이트를 이미 지났다."""
 
     if not contest.is_free:
         raise HttpError(409, "무료 공모전만 이 방법으로 공개할 수 있습니다.")
 
-    _require_hosting_permission(request.auth_user)
+    _require_hosting_permission(actor)
 
     # 체크리스트가 없으면 채점이 볼 기준이 없다 — 유료 경로는 결제 전에 요구사항
     # 단계를 거치지만 이 경로는 버튼 하나라 여기서 막는다.
@@ -577,7 +589,8 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     else:
         visible_statuses = Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN)
 
-    queryset = Contest.objects.filter(status__in=visible_statuses)
+    # 보관한 공모전(#870)은 공개 목록에서 빠진다.
+    queryset = Contest.objects.filter(status__in=visible_statuses, archived_at__isnull=True)
 
     if filters.category is not None:
         queryset = queryset.filter(category_id=filters.category)
@@ -793,8 +806,8 @@ def get_contest(request: HttpRequest, contest_id: int):
     auth_user = getattr(request, "auth_user", None)
 
     # PUBLISHED·CLOSED·AWARDED·JUDGING_ENDED 모두 공개다 — list_contests와 같은
-    # 기준(Contest.Status.PUBLICLY_VISIBLE).
-    if not Contest.Status.PUBLICLY_VISIBLE(contest.status):
+    # 기준(Contest.Status.PUBLICLY_VISIBLE). 보관한 공모전(#870)도 소유자만 본다.
+    if contest.archived_at is not None or not Contest.Status.PUBLICLY_VISIBLE(contest.status):
         is_owner = auth_user is not None and contest.sponsor.user_id == auth_user.id
         if not is_owner:
             raise HttpError(404, "공모전을 찾을 수 없습니다.")
@@ -846,6 +859,12 @@ def update_contest(request: HttpRequest, contest_id: int, payload: ContestUpdate
     """
 
     contest = _get_owned_content_editable_contest(request, contest_id)
+    return apply_contest_update(contest, payload)
+
+
+def apply_contest_update(contest: Contest, payload: ContestUpdateIn) -> ContestOut:
+    """`update_contest` 의 몸 — 웹과 공모전 MCP 가 같이 부른다(#870). 호출부가 소유(또는 운영자)·
+    CONTENT_EDITABLE 게이트를 이미 지났다."""
 
     if contest.status != Contest.Status.DRAFT and payload.prize is not None:
         raise HttpError(
@@ -1559,6 +1578,11 @@ def add_requirement(request: HttpRequest, contest_id: int, payload: RequirementC
     """
 
     contest = _get_owned_content_editable_contest(request, contest_id)
+    return add_contest_requirement(contest, payload)
+
+
+def add_contest_requirement(contest: Contest, payload: RequirementCreateIn):
+    """`add_requirement` 의 몸 — 웹과 공모전 MCP 가 같이 부른다(#870)."""
 
     if payload.grade not in _VALID_GRADES:
         raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
@@ -1600,6 +1624,11 @@ def update_requirement(
     (#473, ADR-0051)."""
 
     contest = _get_owned_content_editable_contest(request, contest_id)
+    return update_contest_requirement(contest, requirement_id, payload)
+
+
+def update_contest_requirement(contest: Contest, requirement_id: int, payload: RequirementUpdateIn):
+    """`update_requirement` 의 몸 — 웹과 공모전 MCP 가 같이 부른다(#870)."""
 
     try:
         requirement = contest.requirements.get(id=requirement_id)
@@ -1644,6 +1673,11 @@ def delete_requirement(request: HttpRequest, contest_id: int, requirement_id: in
     (#473, ADR-0051)."""
 
     contest = _get_owned_content_editable_contest(request, contest_id)
+    return delete_contest_requirement(contest, requirement_id)
+
+
+def delete_contest_requirement(contest: Contest, requirement_id: int):
+    """`delete_requirement` 의 몸 — 웹과 공모전 MCP 가 같이 부른다(#870)."""
 
     try:
         requirement = contest.requirements.get(id=requirement_id)

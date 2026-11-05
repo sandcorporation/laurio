@@ -51,9 +51,15 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
 
     if contest.sponsor.user_id != request.auth_user.id:
         raise HttpError(403, "본인이 개최한 공모전만 선정할 수 있습니다.")
+    return award_contest_submission(contest, payload.submission_id)
+
+
+def award_contest_submission(contest: Contest, submission_id: int):
+    """수상자 선정의 몸 — 결과 알림까지. 웹(`award_submission`)과 공모전 MCP 가 같이 부른다(#870).
+    호출부가 소유(또는 운영자) 게이트를 이미 지났다."""
 
     try:
-        submission = ContestSubmission.objects.get(id=payload.submission_id, contest=contest)
+        submission = ContestSubmission.objects.get(id=submission_id, contest=contest)
     except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "이 공모전에 속한 제출물을 찾을 수 없습니다.") from exc
 
@@ -119,3 +125,5 @@ def award_submission(request: HttpRequest, contest_id: int, payload: AwardIn):
     return 200, AwardOut(
         contest_id=contest.id, submission_id=submission.id, awarded_at=award.awarded_at
     )
+
+

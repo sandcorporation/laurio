@@ -283,6 +283,12 @@ class Contest(models.Model):
     # db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     allows_classroom_import = models.BooleanField(default=False, db_default=False)
 
+    # 보관 (#870) — 무료 공모전의 소프트 삭제. 영구 삭제는 없다. 보관하면 공개 목록·상세(소유자
+    # 말고는 404)·강의실 들여오기 목록에서 빠지고, 해제하면 돌아온다. 보관할 수 있는 때는 초안,
+    # 끝난 공모전(CLOSED·AWARDED·JUDGING_ENDED), 제출 0건인 PUBLISHED 다(`contests.archiving`).
+    # 상태(`status`)와는 따로 간다 — 보관이 상태 흐름의 간선이 아니라서다.
+    archived_at = models.DateTimeField(null=True, blank=True)
+
     # 데모 시드가 만든 행이라는 표지 (#254, ADR-0064). **쓰는 곳은 `seed_demo_contests`
     # 하나뿐이다** — 어떤 API 스키마에도 없고(tests/test_seed_demo_contests_reseed.py 가
     # 소스를 훑어 고정한다), 그래서 「표지가 True 다 = 시드가 심었다」가 성립한다. 이 표지가
@@ -1081,3 +1087,26 @@ class ContestSearchReindexState(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ContestSearchReindexState(last_reindexed_at={self.last_reindexed_at})"
+
+
+class ContestConnectedAppWrite(models.Model):
+    """연결된 앱(공모전 범위, #870)이 개최자 대신 한 쓰기 하나 — 강의실의
+    `classroom.ConnectedAppWrite` 와 같은 규율이다(ADR-0052 「쓰기만 기록한다」).
+
+    MCP 디스패치(`core.mcp_server`)가 쓰기 도구를 이 기록과 한 트랜잭션 안에서 부르고, 도구가
+    거절하면 기록도 되돌린다. 읽기는 남기지 않는다. 대상은 외래 키가 아니라 번호로 적는다."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="contest_connected_app_writes", on_delete=models.CASCADE
+    )
+    connected_app = models.ForeignKey(
+        "core.ConnectedApp", related_name="contest_writes", on_delete=models.CASCADE
+    )
+    tool = models.CharField(max_length=64)
+    target_contest_id = models.BigIntegerField(null=True, blank=True)
+    summary = models.CharField(max_length=300, blank=True, default="")
+    created_at = models.DateTimeField()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["user", "-created_at"], name="contests_capw_user_idx")]

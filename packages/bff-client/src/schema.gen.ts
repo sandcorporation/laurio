@@ -1837,6 +1837,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/connected-apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Contest Connected Apps
+         * @description 지금 살아 있는 공모전 범위의 연결만 — 끊긴 것은 목록에서 사라진다.
+         */
+        get: operations["contests_connected_app_api_list_contest_connected_apps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/connected-apps/{connected_app_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect Contest Connected App */
+        delete: operations["contests_connected_app_api_disconnect_contest_connected_app"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/deliverable-types": {
         parameters: {
             query?: never;
@@ -1989,6 +2026,24 @@ export interface paths {
         get: operations["contests_api_list_my_sponsored_contests"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/oauth/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Contest Authorization */
+        get: operations["contests_connected_app_api_preview_contest_authorization"];
+        put?: never;
+        /** Decide Contest Authorization */
+        post: operations["contests_connected_app_api_decide_contest_authorization"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5813,6 +5868,51 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** ContestAuthorizationDecisionIn */
+        ContestAuthorizationDecisionIn: {
+            /** Approve */
+            approve: boolean;
+            /** Client Id */
+            client_id: string;
+            /** Code Challenge */
+            code_challenge: string;
+            /** Code Challenge Method */
+            code_challenge_method: string;
+            /** Redirect Uri */
+            redirect_uri: string;
+            /**
+             * Resource
+             * @default
+             */
+            resource: string;
+            /**
+             * Response Type
+             * @default code
+             */
+            response_type: string;
+            /**
+             * Scope
+             * @default
+             */
+            scope: string;
+            /**
+             * State
+             * @default
+             */
+            state: string;
+        };
+        /** ContestAuthorizationPreviewOut */
+        ContestAuthorizationPreviewOut: {
+            /** Client Name */
+            client_name: string;
+            /** Redirect Host */
+            redirect_host: string;
+        };
+        /** ContestAuthorizationRedirectOut */
+        ContestAuthorizationRedirectOut: {
+            /** Redirect To */
+            redirect_to: string;
+        };
         /** ContestBalanceOut */
         ContestBalanceOut: {
             /** Balance */
@@ -5833,6 +5933,20 @@ export interface components {
             requirements: components["schemas"]["RequirementComparisonOut"][];
             /** Submissions */
             submissions: components["schemas"]["ComparisonSubmissionOut"][];
+        };
+        /** ContestConnectedAppOut */
+        ContestConnectedAppOut: {
+            /**
+             * Connected At
+             * Format: date-time
+             */
+            connected_at: string;
+            /** Id */
+            id: number;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /** Name */
+            name: string;
         };
         /** ContestCreateIn */
         ContestCreateIn: {
@@ -12227,6 +12341,55 @@ export interface operations {
             };
         };
     };
+    contests_connected_app_api_list_contest_connected_apps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestConnectedAppOut"][];
+                };
+            };
+        };
+    };
+    contests_connected_app_api_disconnect_contest_connected_app: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connected_app_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     contests_api_list_deliverable_types: {
         parameters: {
             query?: never;
@@ -12329,6 +12492,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MySponsoredContestPageOut"];
+                };
+            };
+        };
+    };
+    contests_connected_app_api_preview_contest_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestAuthorizationPreviewOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_connected_app_api_decide_contest_authorization: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContestAuthorizationDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestAuthorizationRedirectOut"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

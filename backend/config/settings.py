@@ -417,6 +417,14 @@ OPERATOR_WEB_ORIGIN = _env("CODEMIT_OPERATOR_ORIGIN", "")
 # 그것도 없으면 요청이 도착한 주소를 쓴다(`core.oauth.OAuthResource.public_origin`).
 CLASSROOM_WEB_ORIGIN = _env("CODEMIT_CLASSROOM_ORIGIN", "").rstrip("/")
 
+# 공개 앱의 공개 오리진(#870) — 공모전 MCP 의 OAuth·MCP 메타데이터가 issuer·resource 로 내보내는
+# 주소다. 비어 있으면(dev·테스트) 공개 앱 BFF 가 실어 보낸 자기 오리진을, 그것도 없으면 요청이
+# 도착한 주소를 쓴다(`core.oauth.OAuthResource.public_origin`).
+PUBLIC_WEB_ORIGIN = _env("CODEMIT_WEB_ORIGIN", "").rstrip("/")
+
+# 공모전 MCP(#870) — 계정 한 명당 1분에 부를 수 있는 요청 수.
+CONTESTS_MCP_CALLS_PER_MINUTE = int(_env("CODEMIT_CONTESTS_MCP_CALLS_PER_MINUTE", "120"))
+
 # 연결된 앱이 강사 한 명당 1분에 부를 수 있는 MCP 요청 수(ADR-0052).
 CLASSROOM_MCP_CALLS_PER_MINUTE = int(_env("CODEMIT_CLASSROOM_MCP_CALLS_PER_MINUTE", "120"))
 # 그 위에 「제출 소스 열기」 도구 하나가 따로 받는 분당 상한(#518) — 응답 하나가 소스를
