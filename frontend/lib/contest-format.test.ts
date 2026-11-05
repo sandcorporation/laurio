@@ -6,6 +6,7 @@ import {
   remainingTime,
   remainingTimeIsImminent,
   remainingTimeLabel,
+  sponsorLine,
 } from "./contest-format";
 
 describe("remainingTime", () => {
@@ -126,5 +127,16 @@ describe("formatDeadlineSeoul", () => {
     const formatted = formatDeadlineSeoul("2026-09-17T00:00:00.000Z");
     expect(formatted).toContain("9:00");
     expect(formatted).not.toContain("12:00");
+  });
+});
+
+describe("sponsorLine", () => {
+  it("이름이 있으면 「개최 · 이름」", () => {
+    expect(sponsorLine("코드밋 스튜디오")).toBe("개최 · 코드밋 스튜디오");
+  });
+  it("null·빈 값·공백이면 조각을 그리지 않는다", () => {
+    expect(sponsorLine(null)).toBeNull();
+    expect(sponsorLine(undefined)).toBeNull();
+    expect(sponsorLine("  ")).toBeNull();
   });
 });

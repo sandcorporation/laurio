@@ -133,3 +133,10 @@ export function formatSubmissionCount(count: number): string {
   if (count === 0) return "아직 참가작이 없습니다";
   return `참가작 ${count}건`;
 }
+
+// 공개 상세 머리의 개최자 조각(#908). 이름이 비어 있으면(null·공백) 조각 자체를 그리지
+// 않는다 — 빈 「개최 ·」 이 남지 않게 하는 경계가 이 함수다.
+export function sponsorLine(displayName: string | null | undefined): string | null {
+  const name = displayName?.trim();
+  return name ? `개최 · ${name}` : null;
+}
