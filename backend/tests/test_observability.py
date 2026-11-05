@@ -21,7 +21,9 @@ def _hint(exc: BaseException) -> dict:
 def test_expected_rejections_are_not_errors():
     event = {"event_id": "x"}
 
-    assert drop_expected_error(event, _hint(HttpError(422, "입력이 틀렸습니다."))) is None
+    assert (
+        drop_expected_error(event, _hint(HttpError(422, "입력이 틀렸습니다."))) is None
+    )
     assert drop_expected_error(event, _hint(HttpError(404, "없습니다."))) is None
     assert drop_expected_error(event, _hint(HttpError(403, "권한이 없습니다."))) is None
     assert drop_expected_error(event, _hint(Http404())) is None
@@ -34,7 +36,10 @@ def test_server_errors_and_unhandled_exceptions_are_sent():
 
     assert drop_expected_error(event, _hint(HttpError(500, "서버 오류"))) is event
     assert drop_expected_error(event, _hint(HttpError(503, "잠시 후"))) is event
-    assert drop_expected_error(event, _hint(ZeroDivisionError("division by zero"))) is event
+    assert (
+        drop_expected_error(event, _hint(ZeroDivisionError("division by zero")))
+        is event
+    )
     assert drop_expected_error(event, _hint(KeyError("missing"))) is event
 
 
@@ -65,7 +70,9 @@ def _celery_reconnect_hint(retries: int) -> dict:
         args=(
             "redis://redis:6379/0",
             ConnectionError("Error 111 connecting to redis:6379. Connection refused."),
-            CONNECTION_RETRY_STEP.format(when="in 2.00 seconds", retries=retries, max_retries=100),
+            CONNECTION_RETRY_STEP.format(
+                when="in 2.00 seconds", retries=retries, max_retries=100
+            ),
         ),
         exc_info=None,
     )
@@ -93,3 +100,67 @@ def test_broker_outage_that_lasts_is_still_sent():
 
     assert drop_expected_error(event, _celery_reconnect_hint(5)) is event
     assert drop_expected_error(event, _celery_reconnect_hint(100)) is event
+
+
+def _event_with_frames(*frames: dict) -> dict:
+    return {
+        "event_id": "x",
+        "exception": {
+            "values": [{"type": "ImportError", "stacktrace": {"frames": list(frames)}}]
+        },
+    }
+
+
+_SHELL_FRAME = {
+    "module": "django.core.management.commands.shell",
+    "abs_path": "/usr/local/lib/python3.12/site-packages/django/core/management/commands/shell.py",
+    "filename": "django/core/management/commands/shell.py",
+}
+
+
+def test_manage_shell_exception_is_not_sent():
+    exc = ImportError("cannot import name 'X'")
+    app = {"module": "billing.models", "abs_path": "/app/billing/models.py"}
+
+    assert (
+        drop_expected_error(_event_with_frames(_SHELL_FRAME, app), _hint(exc)) is None
+    )
+    # module·abs_path·filename 중 하나만 와도 맞는다
+    for only in (
+        {"module": _SHELL_FRAME["module"]},
+        {"abs_path": _SHELL_FRAME["abs_path"]},
+        {"filename": _SHELL_FRAME["filename"]},
+    ):
+        assert drop_expected_error(_event_with_frames(only), _hint(exc)) is None
+
+
+def test_other_management_commands_are_still_sent():
+    exc = ImportError("cannot import name 'X'")
+    migrate = {
+        "module": "django.core.management.commands.migrate",
+        "abs_path": "/usr/local/lib/python3.12/site-packages/django/core/management/commands/migrate.py",
+    }
+    app_command = {
+        "module": "classes.management.commands.sync",
+        "abs_path": "/app/classes/management/commands/sync.py",
+    }
+
+    for frame in (migrate, app_command):
+        event = _event_with_frames(frame)
+        assert drop_expected_error(event, _hint(exc)) is event
+
+
+def test_web_and_worker_exceptions_are_still_sent():
+    exc = ValueError("boom")
+    web = {
+        "module": "django.core.handlers.base",
+        "abs_path": "/site-packages/django/core/handlers/base.py",
+    }
+    worker = {
+        "module": "celery.app.trace",
+        "abs_path": "/site-packages/celery/app/trace.py",
+    }
+
+    for frame in (web, worker):
+        event = _event_with_frames(frame)
+        assert drop_expected_error(event, _hint(exc)) is event

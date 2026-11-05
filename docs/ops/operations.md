@@ -393,7 +393,10 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   지역 변수를 기본으로 싣지 않는다(`includeLocalVariables` 기본 꺼짐). **의도한 4xx 도 보내지 않는다** — 422·404·
   403 은 우리가 일부러 내는 응답이라, 그걸 다 보내면 진짜 5xx 가 소음에 묻힌다
   (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
-  그 규칙을 고정한다). **남의 코드가 던진 것도 보내지 않는다**(#471, 2026-09-20) —
+  그 규칙을 고정한다). **`manage.py shell` 로 손으로 친 명령의 예외도 보내지 않는다**
+  (#893, GlitchTip 오류 107) — 이벤트 스택에 Django `shell` 명령 프레임이 있으면
+  `drop_expected_error` 가 버린다. 다른 관리 명령·웹·celery 는 그대로 보낸다.
+  **남의 코드가 던진 것도 보내지 않는다**(#471, 2026-09-20) —
   브라우저 확장의 콘텐츠 스크립트가 던진 예외를 전역 핸들러가 잡아 강의실 프로젝트로
   보냈고, 하루 만에 prod 미해결 목록이 그 예외 하나로 통째로 찼다(GlitchTip 오류
   62·63, 합쳐 14건). 그 프레임은 `app:///` 로 시작하지만 `/_next/` 아래가 아니다 —
