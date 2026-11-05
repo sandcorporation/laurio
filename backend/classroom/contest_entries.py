@@ -1,9 +1,9 @@
 """「공모전에도 내기」의 강의실 쪽 (#549, 스펙 #546, ADR-0054, CONTEXT.md 「공모전에도 내기」).
 
-참여자가 공모전 문제에 시도를 내면서 스위치를 켜면, 그 시도가 그 공모전의 내 제출이 된다.
+참여자·강사가 공모전 문제에 시도를 내면서 스위치를 켜면, 그 시도가 그 공모전의 내 제출이 된다.
 강의실은 공모전 앱을 임포트하지 못하므로(ADR-0037) 공유층 `core.contest_catalog` 로만 건넌다.
 
-1. **시도를 만들기 전** — `prepare_contest_entry` 가 거른다: 강사 자신의 시도·공모전 문제가
+1. **시도를 만들기 전** — `prepare_contest_entry` 가 거른다: 공모전 문제가
    아님·받지 않는 공모전은 여기서, 동의·근거 모양·선택 자료는 카탈로그의 `check_entry`
    로(직접 제출과 같은 문장) 422. 이미 낸 제출이 있는데 「이 시도로 바뀝니다」를 확인하지 않았으면 409.
 2. **시도가 커밋된 뒤** — `contest_entry_requested` 를 보낸다. 시도는 「내는 중」으로 남는다.
@@ -47,7 +47,6 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTOR_ENTRY_MESSAGE = "강사 자신의 시도는 공모전에 낼 수 없습니다."
 NOT_CONTEST_PROBLEM_MESSAGE = "공모전 문제가 아니라 공모전에 낼 수 없습니다."
 NOT_ACCEPTING_MESSAGE = "이 공모전은 지금 출품을 받지 않습니다 — 마감됐거나 개최자가 허용을 거뒀습니다."
 REPLACE_CONFIRM_MESSAGE = (
@@ -118,15 +117,12 @@ def prepare_contest_entry(
     user_id: int,
     entry_in: ContestEntryIn | None,
     scoring_asset: EntryAsset,
-    as_instructor: bool,
 ) -> ContestEntry | None:
     """시도를 만들기 전에 내기를 거른다. 끄고 낸 시도면 None. `attempt_id` 는 아직 0 이다 —
     시도가 생긴 뒤 `request_contest_entry` 가 채운다."""
 
     if entry_in is None:
         return None
-    if as_instructor:
-        raise HttpError(422, INSTRUCTOR_ENTRY_MESSAGE)
     if not is_contest_problem(problem):
         raise HttpError(422, NOT_CONTEST_PROBLEM_MESSAGE)
     source = contest_catalog().get_source(problem.contest_id)

@@ -1063,7 +1063,8 @@ export interface paths {
         /**
          * Get Contest Entry Form
          * @description 참여자의 「공모전에도 내기」 칸(#549) — 직전 공모전 제출로 미리 채운다. 공모전 문제가
-         *     아니면 404. 강사 자신의 시도는 낼 수 없으므로 강사에게는 403이다.
+         *     아니면 404. 그 클래스의 강사도 본인 명의로 낼 수 있다(#878) — 강사는 자기 문제를
+         *     상태와 무관하게 찾는다(`create_classroom_submission` 과 같은 문).
          */
         get: operations["classroom_api_get_contest_entry_form"];
         put?: never;

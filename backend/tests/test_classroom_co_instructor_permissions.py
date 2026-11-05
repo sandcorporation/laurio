@@ -261,7 +261,7 @@ ROUTES: list[Route] = [
         lambda w: {"value": "https://github.com/octocat/hello-world", "submission_format": "repository"},
         201,
     ),
-    Route("get_contest_entry_form", "get", lambda w: f"{_p(w)}/contest-entry", None, 403),
+    Route("get_contest_entry_form", "get", lambda w: f"{_p(w)}/contest-entry", None, 404),
 ]
 
 

@@ -61,6 +61,12 @@ export type ContestEntryState = {
 
 /** 칸의 첫 상태 — 직전 공모전 제출로 미리 채운다. 스위치와 동의·바꾸기 확인은 언제나 꺼진
  *  채로 시작한다: 시도마다 참여자가 직접 고른다. */
+/** 「공모전에도 내기」 칸을 여는가 — 공모전이 지금 받는 공모전 문제면 참여자도 강사도 연다(#878).
+ *  강사가 학생 화면으로 보는 중(`viewing_as_instructor`)이어도 시도는 강사 본인 것이라 닫지 않는다. */
+export function offersContestEntry(problem: { contest?: { accepts_entries?: boolean } | null }): boolean {
+  return problem.contest?.accepts_entries === true;
+}
+
 export function initialEntryState(form: ContestEntryForm): ContestEntryState {
   const responses: Record<number, EntryResponseState> = {};
   for (const requirement of form.requirements) {

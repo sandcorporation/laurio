@@ -65,7 +65,6 @@ from .models import (
     ProblemTemplate,
 )
 from .contest_entries import (
-    INSTRUCTOR_ENTRY_MESSAGE,
     EntryMarks,
     entry_marks,
     contest_entry_form,
@@ -2386,12 +2385,15 @@ def _instructor_submit_blocked_reason(class_obj: Class, problem: Problem) -> str
 )
 def get_contest_entry_form(request: HttpRequest, class_id: int, problem_id: int):
     """참여자의 「공모전에도 내기」 칸(#549) — 직전 공모전 제출로 미리 채운다. 공모전 문제가
-    아니면 404. 강사 자신의 시도는 낼 수 없으므로 강사에게는 403이다."""
+    아니면 404. 그 클래스의 강사도 본인 명의로 낼 수 있다(#878) — 강사는 자기 문제를
+    상태와 무관하게 찾는다(`create_classroom_submission` 과 같은 문)."""
 
-    if classes_taught_by(request.auth_user.id).filter(id=class_id).exists():
-        raise HttpError(403, INSTRUCTOR_ENTRY_MESSAGE)
-    member = _get_member_or_404(class_id, request.auth_user.id)
-    problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
+    instructor_class = classes_taught_by(request.auth_user.id).filter(id=class_id).first()
+    if instructor_class is not None:
+        problem = owned_problem_or_404(instructor_class, problem_id)
+    else:
+        member = _get_member_or_404(class_id, request.auth_user.id)
+        problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
     if problem.contest_id is None:
         raise HttpError(404, "공모전 문제가 아닙니다.")
     return 200, contest_entry_form(problem, request.auth_user.id)
@@ -2520,7 +2522,7 @@ def create_classroom_submission(
         if blocked_reason == SUBMIT_BLOCKED_ARCHIVED:
             raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
         member = _get_submitting_member_or_404(class_id, request.auth_user.id)
-        return _create_submission_row(request, problem, member, payload, as_instructor=True)
+        return _create_submission_row(request, problem, member, payload)
 
     member = _get_member_or_404(class_id, request.auth_user.id)
     problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
@@ -2549,10 +2551,10 @@ def create_classroom_submission(
         # 함께 막힌다. 강사가 마감을 뒤로 옮기면 이 분기를 벗어난다.
         raise HttpError(403, "마감이 지나 새로 낼 수 없습니다.")
 
-    return _create_submission_row(request, problem, member, payload, as_instructor=False)
+    return _create_submission_row(request, problem, member, payload)
 
 
-def _create_submission_row(request: HttpRequest, problem, member, payload, *, as_instructor: bool):
+def _create_submission_row(request: HttpRequest, problem, member, payload):
     """값을 검증하고 시도 하나를 만든다 — 참여자와 강사(2026-09-17)가 같은
     코드를 지난다. 「낼 수 있는가」는 호출부가 이미 서로 다른 기준으로
     판정했다(참여자는 보관·내보냄·숨김, 강사는 보관 하나)."""
@@ -2589,7 +2591,6 @@ def _create_submission_row(request: HttpRequest, problem, member, payload, *, as
         user_id=request.auth_user.id,
         entry_in=payload.contest_entry,
         scoring_asset=EntryAsset(kind=asset_kind, value=value, content_type=content_type),
-        as_instructor=as_instructor,
     )
     asset_fields = (
         {

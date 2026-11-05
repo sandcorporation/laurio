@@ -323,21 +323,47 @@ def test_source_or_repository_cannot_ride_along_as_optional_material(
     assert "선택 자료" in response.json()["detail"]
 
 
-def test_the_instructors_own_attempt_cannot_be_entered(client, world, django_capture_on_commit_callbacks):
+def test_the_instructors_own_attempt_with_the_switch_on_becomes_their_contest_submission(
+    client, world, django_capture_on_commit_callbacks
+):
     instructor = world["instructor"]
-    assert _form(client, world, access=instructor["access"]).status_code == 403
+    instructor_id = user_id("ce-instructor")
+    form = _form(client, world, access=instructor["access"])
+    assert form.status_code == 200, form.content
+    assert form.json()["accepts_entries"] is True
+    requirement_ids = [r["requirement_id"] for r in form.json()["requirements"]]
 
     response = _submit(
         client,
         world,
-        entry=_entry(_requirement_ids(client, world)),
+        entry=_entry(requirement_ids),
+        access=instructor["access"],
+        uploader_id=instructor_id,
+        capture=django_capture_on_commit_callbacks,
+    )
+
+    assert response.status_code == 201, response.content
+    submission = ContestSubmission.objects.get(contest_id=world["contest"]["id"])
+    assert submission.user_id == instructor_id
+    attempt = mine(client, instructor["access"], world["class_id"], world["problem"]["id"])["submissions"][0]
+    assert attempt["contest_entry"] == {"status": "entered", "reason": ""}
+
+
+def test_the_instructors_own_attempt_with_the_switch_off_sends_nothing(
+    client, world, django_capture_on_commit_callbacks
+):
+    instructor = world["instructor"]
+
+    response = _submit(
+        client,
+        world,
         access=instructor["access"],
         uploader_id=user_id("ce-instructor"),
         capture=django_capture_on_commit_callbacks,
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"] == "강사 자신의 시도는 공모전에 낼 수 없습니다."
+    assert response.status_code == 201, response.content
+    assert not ContestSubmission.objects.filter(contest_id=world["contest"]["id"]).exists()
 
 
 def test_the_switch_disappears_when_the_host_withdraws_the_allowance(
