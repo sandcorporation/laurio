@@ -26,4 +26,13 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       '"별도 제품 기능이 아니라... 검증할 수 있는 최소 표면"이라고 명시한다 — ' +
       "실제 제출 폼은 이 페이지가 아니라 components/upload/upload-field.tsx를 직접 쓴다.",
   },
+  {
+    route: "/oauth/authorize",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지
+      // 사용자에게 렌더링되는 화면 문자열이 아니다 — 이슈 번호가 바로 그 근거다.
+      "공모전 MCP 의 동의 화면(#870, ADR-0070)은 외부 AI 앱이 사용자의 브라우저를 " +
+      "보내는 OAuth 인가 주소다 — 인가 서버 메타데이터가 이 주소를 알리고, " +
+      "이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
+  },
 ];

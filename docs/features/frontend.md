@@ -243,6 +243,22 @@ CTA 가 상태에 따라 갈린다 — 아직 안 낸 사람에게는 「제출�
 사람 작업으로 아직 끝나지 않았다. 두 화면 소스에 `BUSINESS-INFO-PLACEHOLDER`
 주석으로 그 자리를 표시해 두었다 — 유료 스위치를 켜는 작업이 채운다.
 
+**「연결된 앱」 구역**(#870) — 공모전 MCP 에 허락한 앱(claude.ai·Claude Code 등)의 이름·연결한
+날·마지막으로 쓴 날을 보이고 「연결 끊기」로 끊는다. 끊으면 그 앱의 토큰이 곧바로 막힌다. 없으면
+「연결된 앱 없음」.
+
+## `/oauth/authorize` 공모전 앱 연결 동의 (#870, ADR-0070)
+
+외부 AI 앱이 사용자의 브라우저를 보내는 OAuth 인가 화면. 로그인하지 않았으면 미들웨어가
+`/login?next=…` 로 보냈다가 쿼리째 돌려보낸다. 앱 이름·허락하는 계정·할 수 있는 일(무료 공모전을
+만들고 관리, 제출물은 표시 이름만, 유료·상금 불가, 「내 정보」에서 끊기)·돌아갈 호스트를 보이고
+「허락」·「거절」을 받는다. **개최 권한이 없으면 「연결할 수 없습니다」와 그 이유만 보인다.**
+
+같은 앱이 `/mcp`·`/.well-known/oauth-authorization-server`·`/.well-known/oauth-protected-resource[/mcp]`·
+`/oauth/{register,token,revoke}` 를 백엔드 `/api/contests/*` 로 그대로 넘긴다
+(`lib/connected-apps/gateway.ts`) — 로그인 쿠키는 싣지 않는다. claude.ai 커넥터·Claude Code 에는
+공개 앱 주소 뒤에 `/mcp` 를 붙여 넣는다.
+
 ## `/dev-tokens` 디자인 토큰 배선 증명
 
 색·간격 토큰이 실제로 배선되었는지 보이는 진단 화면. 어디에서도 링크되지 않고,

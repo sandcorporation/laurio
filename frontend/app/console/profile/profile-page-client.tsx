@@ -37,6 +37,8 @@ import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { checkDisplayNameForBannedWords } from "@/lib/profile/display-name-check";
 
+import { ConnectedAppsSection } from "./connected-apps-section";
+
 type ProfileOut = { display_name: string; bio: string };
 
 type LoadState =
@@ -102,6 +104,7 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
 
       <RoleSection role="sponsor" />
       <RoleSection role="developer" />
+      <ConnectedAppsSection />
 
       {/* 탈퇴 진입점은 여기 하나다(#100, ADR-0025). 예전에는 콘솔 현관과 강의실
           「내 계정」 메뉴에도 있었는데, 매번 여는 메뉴 안에 되돌릴 수 없는 행위가

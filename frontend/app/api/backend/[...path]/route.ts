@@ -11,6 +11,8 @@ import { assertSameOrigin } from "@/lib/auth/origin";
 import { isAllowedBackendPath } from "@/lib/proxy/allowlist";
 import { forwardToBackend } from "@/lib/proxy/forward";
 
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
 export const dynamic = "force-dynamic";
 
 const NOT_ALLOWED_RESPONSE = { detail: "허용되지 않은 경로입니다." } as const;
@@ -34,7 +36,9 @@ async function handle(request: NextRequest, path: string[]): Promise<NextRespons
 
   // 상태 코드와 본문을 그대로 전달한다 — 화면이 실패 이유를 보여줄 수 있어야
   // 한다(FE-08 인수조건). 본문을 굳이 파싱하지 않고 바이트 그대로 넘긴다.
-  const responseBody = await result.response.arrayBuffer();
+  // 204·205·304 는 본문을 가질 수 없다 — `NextResponse` 생성자가 본문(빈 버퍼라도)과 함께 받으면
+  // 던져 500 이 된다. 공개 앱에서 처음 204 를 내는 것이 공모전 연결 끊기다(#870, 강의실 프록시는 #283).
+  const responseBody = NULL_BODY_STATUSES.has(result.response.status) ? null : await result.response.arrayBuffer();
   const response = new NextResponse(responseBody, {
     status: result.response.status,
     headers: {
