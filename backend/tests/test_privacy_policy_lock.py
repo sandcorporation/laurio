@@ -67,12 +67,22 @@ def test_the_openai_key_is_never_locked(client, db):
     set_key(client, owner["access"], class_id, "sk-test-bbbb2222")
 
 
-def test_the_policy_page_and_the_lock_read_the_same_date():
-    """방침 화면의 시행일과 잠금이 보는 설정은 한 값이다 — 한쪽만 고치면 여기서 깨진다."""
+def test_the_policy_page_names_the_anthropic_transfer_date_the_lock_reads():
+    """방침 화면이 「Anthropic 이전을 더한 개정(#803)의 시행일」로 적은 날과 잠금 설정은 한 값이다.
+
+    화면의 현재 판 시행일(`EFFECTIVE_ISO`)은 이제 이 날과 다르다(#897 — 완성도 채점 개정은 병합일+7일).
+    그래서 잠금의 기준일은 별도 상수 `ANTHROPIC_TRANSFER_EFFECTIVE_ISO` 가 들고, 한쪽만 고치면 여기서 깨진다.
+    """
 
     page = (Path(django_settings.BASE_DIR).parent / "frontend/app/privacy/page.tsx").read_text(encoding="utf-8")
-    match = re.search(r'const EFFECTIVE_DATE = "(\d+)년 (\d+)월 (\d+)일";', page)
-    assert match, "privacy/page.tsx 의 EFFECTIVE_DATE 를 찾지 못했다"
+    match = re.search(r'const ANTHROPIC_TRANSFER_EFFECTIVE_ISO = "(\d+)-(\d+)-(\d+)";', page)
+    assert match, "privacy/page.tsx 의 ANTHROPIC_TRANSFER_EFFECTIVE_ISO 를 찾지 못했다"
     on_page = date(*(int(g) for g in match.groups()))
     # settings.py 가 정한 값(이 파일의 fixture 가 덮어쓴 값이 아니다)
-    assert on_page == config_settings.PRIVACY_POLICY_EFFECTIVE_DATE
+    assert on_page == config_settings.PRIVACY_POLICY_EFFECTIVE_DATE == EFFECTIVE
+
+
+def test_the_lock_date_stays_nov_6_2026():
+    """잠금 기준일은 방침 화면의 현재 판 시행일을 따라 옮기지 않는다 — 옮기면 열린 키 저장이 다시 잠긴다."""
+
+    assert config_settings.PRIVACY_POLICY_EFFECTIVE_DATE == date(2026, 11, 6)
