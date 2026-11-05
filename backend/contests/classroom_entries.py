@@ -2,7 +2,7 @@
 
 참여자가 공모전 문제의 시도를 「공모전에도 내기」로 내면, 강의실이 시도를 커밋한 뒤 공유층
 `core.contest_catalog.contest_entry_requested` 신호로 `ContestEntry` 하나를 보낸다. 여기서
-받아 **직접 제출과 같은 검증**(마감 전·허용 켜짐·동의·근거 모양·필수 자료)을 거쳐
+받아 **직접 제출과 같은 검증**(마감 전·허용 켜짐·동의·확인 위치 모양·필수 자료)을 거쳐
 ContestSubmission 을 만들거나 고치고, `contest_entry_resolved` 로 결과를 돌려준다.
 
 - **직접 낸 제출과 구별되지 않는다.** 공모전 제출에는 클래스를 가리키는 칸이 없고,
@@ -12,8 +12,9 @@ ContestSubmission 을 만들거나 고치고, `contest_entry_resolved` 로 결�
   문제가 지워지면 공모전 제출의 필수 자료가 함께 사라진다.
 - **기존 제출은 통째로 바뀐다** — 직접 제출의 수정(`PUT .../submissions/me`)과 같다: 자료는
   이번 내기에 실린 것만 남고, 자가 응답은 새로 쓴다. 바꾸기 전 확인은 강의실 화면이 받는다.
-- **근거는 자료를 가리키지 않는다**(`EntryEvidence` 에 asset_id 가 없다) — 강의실에서 낸
-  자료는 아직 공모전 쪽 id 가 없다.
+- **확인 위치는 이번 내기의 선택 자료를 순번으로 가리킨다**(`EntryEvidence.asset_index`) —
+  강의실에서 낸 자료는 아직 공모전 쪽 id 가 없으므로, 받아서 자료를 저장한 뒤 새 asset id 로
+  잇는다(직접 제출의 `asset_id` 와 같은 결과).
 
 미리 거르기(`check_entry`)와 받을 때의 검증은 같은 함수(`_validate`)다 — 마감·허용 철회
 경합은 그 사이에 생기므로 받을 때 한 번 더 본다.
@@ -62,8 +63,9 @@ from .submission_target_refs import (
 logger = logging.getLogger(__name__)
 
 NOT_ACCEPTING_MESSAGE = "이 공모전은 지금 출품을 받지 않습니다 — 마감됐거나 개최자가 허용을 거뒀습니다."
-OPTIONAL_KIND_MESSAGE = "선택 자료는 데모 주소·시연 영상·스크린샷만 받습니다."
-EVIDENCE_SHAPE_MESSAGE = "근거의 모양이 맞지 않습니다 — 길이와 종류를 확인해 주세요."
+OPTIONAL_KIND_MESSAGE = "선택 자료는 데모 URL·시연 영상·시연 영상 링크·스크린샷만 받습니다."
+EVIDENCE_SHAPE_MESSAGE = "확인 위치의 모양이 맞지 않습니다 — 길이와 종류를 확인해 주세요."
+EVIDENCE_ASSET_MESSAGE = "이 제출물에 속하지 않은 자료를 확인 위치로 지정했습니다."
 SOURCE_COPY_FAILED_MESSAGE = "시도의 소스를 공모전에 옮기지 못했습니다 — 잠시 뒤 다시 내 주세요."
 UNEXPECTED_FAILURE_MESSAGE = "공모전에 내지 못했습니다 — 잠시 뒤 다시 내 주세요."
 
@@ -72,6 +74,7 @@ OPTIONAL_ASSET_KINDS = frozenset(
     {
         SubmissionAsset.Kind.DEMO_URL,
         SubmissionAsset.Kind.DEMO_VIDEO,
+        SubmissionAsset.Kind.VIDEO_LINK,
         SubmissionAsset.Kind.SCREENSHOT,
     }
 )
@@ -116,6 +119,29 @@ def _assets_in(scoring_asset: EntryAsset, optional_assets) -> list[SubmissionAss
     ]
 
 
+def _responses_in(
+    entry: ContestEntry, asset_ids_by_index: dict[int, int] | None = None
+) -> list[RequirementResponseIn]:
+    """자가 응답을 직접 제출의 입력 모양으로 바꾼다. 확인 위치의 `asset_index` 는 자료가 저장된
+    뒤(`asset_ids_by_index`)에야 id 로 이을 수 있다 — 그 전(미리 거르기)에는 범위만 본다."""
+
+    count = len(entry.optional_assets)
+    responses = []
+    for r in entry.responses:
+        evidence = []
+        for e in r.evidence:
+            if e.asset_index is not None and not 0 <= e.asset_index < count:
+                raise _Rejected(EVIDENCE_ASSET_MESSAGE)
+            asset_id = (asset_ids_by_index or {}).get(e.asset_index) if e.asset_index is not None else None
+            evidence.append(EvidenceIn(kind=e.kind, value=e.value, asset_id=asset_id))
+        responses.append(
+            RequirementResponseIn(
+                requirement_id=r.requirement_id, is_met=r.is_met, note=r.note, evidence=evidence
+            )
+        )
+    return responses
+
+
 def _validate(entry: ContestEntry, *, scoring_asset: EntryAsset) -> _Validated:
     """받을 수 있는 내기인지 본다 — 아무것도 쓰지 않는다. `scoring_asset` 은 공모전 쪽 모양의
     필수 자료다(소스면 공모전 업로드 대상의 키)."""
@@ -134,15 +160,7 @@ def _validate(entry: ContestEntry, *, scoring_asset: EntryAsset) -> _Validated:
     )
     try:
         assets_in = _assets_in(scoring_asset, entry.optional_assets)
-        responses = [
-            RequirementResponseIn(
-                requirement_id=r.requirement_id,
-                is_met=r.is_met,
-                note=r.note,
-                evidence=[EvidenceIn(kind=e.kind, value=e.value) for e in r.evidence],
-            )
-            for r in entry.responses
-        ]
+        responses = _responses_in(entry)
     except ValidationError as exc:
         raise _Rejected(EVIDENCE_SHAPE_MESSAGE) from exc
     try:
@@ -189,18 +207,27 @@ def entry_context(contest_id: int, user_id: int) -> ContestEntryContext | None:
     existing = _existing_submission(contest_id, user_id)
     if existing is None:
         return ContestEntryContext(has_entry=False, upload_target_refs=upload_target_refs)
+    optional_rows = list(
+        existing.assets.filter(kind__in=OPTIONAL_ASSET_KINDS).order_by("order", "id")
+    )
+    index_by_asset_id = {a.pk: index for index, a in enumerate(optional_rows)}
     responses = tuple(
         EntryResponse(
             requirement_id=r.requirement_id,
             is_met=r.is_met,
             note=r.note,
-            evidence=tuple(EntryEvidence(kind=e.kind, value=e.value) for e in r.evidence_items.all()),
+            evidence=tuple(
+                EntryEvidence(
+                    kind=e.kind, value=e.value, asset_index=index_by_asset_id.get(e.asset_id)
+                )
+                for e in r.evidence_items.all()
+            ),
         )
         for r in existing.requirement_responses.prefetch_related("evidence_items").all()
     )
     optional_assets = tuple(
         EntryAsset(kind=a.kind, value=a.value, label=a.label, content_type=a.content_type)
-        for a in existing.assets.filter(kind__in=OPTIONAL_ASSET_KINDS).order_by("order", "id")
+        for a in optional_rows
     )
     return ContestEntryContext(
         has_entry=True,
@@ -275,8 +302,21 @@ def _apply(entry: ContestEntry) -> None:
             existing_asset_values=set(submission.assets.values_list("kind", "value")),
         )
         removed = _merge_assets(submission, cleaned)
+        # 확인 위치가 가리키는 선택 자료는 방금 저장됐다 — 순번을 새 asset id 로 잇는다.
+        id_by_value = {
+            (kind, value): pk for pk, kind, value in submission.assets.values_list("id", "kind", "value")
+        }
+        # cleaned 는 [시도의 필수 자료, *선택 자료] 순서 그대로다 — 값은 정리된(공백·금칙) 최종 값.
+        asset_ids_by_index = {
+            index: id_by_value[(item.kind, item.value)]
+            for index, item in enumerate(cleaned[1:])
+            if (item.kind, item.value) in id_by_value
+        }
         _replace_requirement_responses(
-            submission, contest, validated.responses, removed_asset_ids=removed
+            submission,
+            contest,
+            _responses_in(entry, asset_ids_by_index),
+            removed_asset_ids=removed,
         )
 
 

@@ -271,7 +271,9 @@ def test_the_form_prefills_the_previous_entry_and_leaves_new_requirements_blank(
 
     assert form["has_entry"] is True
     previous = {r["text"]: r["previous"] for r in form["requirements"]}
-    assert previous["할 일을 추가할 수 있다"]["evidence"] == [{"kind": "video_timestamp", "value": "01:00"}]
+    assert previous["할 일을 추가할 수 있다"]["evidence"] == [
+        {"kind": "video_timestamp", "value": "01:00", "asset_index": None}
+    ]
     assert previous["할 일을 지울 수 있다"] is None
     assert set(form["upload_target_refs"]) == {"demo_video", "screenshot"}
 
@@ -417,3 +419,120 @@ def test_a_contest_that_closes_in_between_rejects_and_the_attempt_stays_with_a_n
         notification_type=NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED,
     )
     assert notice.context["submission_id"] == attempt["id"]
+
+
+# --- 직접 제출과 같은 항목 (#921) ---------------------------------------------------
+
+YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
+def test_a_video_link_is_accepted_and_shows_up_like_a_direct_submission(
+    client, world, django_capture_on_commit_callbacks
+):
+    entry = _entry(
+        _requirement_ids(client, world),
+        optional_assets=[{"kind": "video_link", "value": YOUTUBE, "label": "시연"}],
+    )
+
+    response = _submit(client, world, entry=entry, capture=django_capture_on_commit_callbacks)
+
+    assert response.status_code == 201, response.content
+    body = _my_contest_submission(client, world).json()
+    links = [a for a in body["assets"] if a["kind"] == "video_link"]
+    assert [a["value"] for a in links] == [YOUTUBE]
+    assert links[0]["label"] == "시연"
+    # 같은 SubmissionAsset 이라 직접 제출과 같은 직렬화 키로 나온다.
+    assert set(links[0]) == set(next(a for a in body["assets"] if a["kind"] == "source"))
+    assert ContestSubmission.objects.get().assets.filter(kind="video_link").count() == 1
+
+
+@pytest.mark.parametrize(
+    "url", ["javascript:alert(1)", "https://user:pass@example.com/v", "ftp://example.com/v.mp4"]
+)
+def test_an_unsafe_video_link_is_refused_with_the_direct_submission_message(
+    client, world, django_capture_on_commit_callbacks, url
+):
+    from submissions.video_link import VIDEO_LINK_SHAPE_MESSAGE
+
+    entry = _entry(_requirement_ids(client, world), optional_assets=[{"kind": "video_link", "value": url}])
+
+    response = _submit(client, world, entry=entry, capture=django_capture_on_commit_callbacks)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == VIDEO_LINK_SHAPE_MESSAGE
+    assert ClassroomSubmission.objects.count() == 0
+
+
+def test_video_files_and_links_share_the_demo_video_limit(
+    client, world, django_capture_on_commit_callbacks
+):
+    from policies.services import get_current_policy
+
+    policy = get_current_policy()
+    policy.max_demo_video_assets = 1
+    policy.save(update_fields=["max_demo_video_assets"])
+    video_ref = _form(client, world).json()["upload_target_refs"]["demo_video"]
+    entry = _entry(
+        _requirement_ids(client, world),
+        optional_assets=[
+            {"kind": "demo_video", "value": f"{video_ref}/v", "content_type": "video/mp4"},
+            {"kind": "video_link", "value": YOUTUBE},
+        ],
+    )
+
+    response = _submit(client, world, entry=entry, capture=django_capture_on_commit_callbacks)
+
+    assert response.status_code == 422
+    assert "합쳐 최대" in response.json()["detail"]
+
+
+def test_the_form_prefills_the_video_link_so_re_entering_keeps_it(
+    client, world, django_capture_on_commit_callbacks
+):
+    requirement_ids = _requirement_ids(client, world)
+    entry = _entry(requirement_ids, optional_assets=[{"kind": "video_link", "value": YOUTUBE}])
+    _submit(client, world, entry=entry, capture=django_capture_on_commit_callbacks)
+
+    form = _form(client, world).json()
+
+    assert [(a["kind"], a["value"]) for a in form["optional_assets"]] == [("video_link", YOUTUBE)]
+
+
+def test_an_evidence_pointing_at_an_optional_asset_is_linked_to_the_new_asset(
+    client, world, django_capture_on_commit_callbacks
+):
+    requirement_ids = _requirement_ids(client, world)
+    entry = _entry(
+        requirement_ids,
+        optional_assets=[
+            {"kind": "demo_url", "value": "https://todo.example.com"},
+            {"kind": "video_link", "value": YOUTUBE},
+        ],
+    )
+    entry["requirement_responses"][0]["evidence"][0]["asset_index"] = 1
+
+    response = _submit(client, world, entry=entry, capture=django_capture_on_commit_callbacks)
+
+    assert response.status_code == 201, response.content
+    body = _my_contest_submission(client, world).json()
+    link = next(a for a in body["assets"] if a["kind"] == "video_link")
+    by_req = {r["requirement_id"]: r for r in body["requirement_responses"]}
+    assert by_req[requirement_ids[0]]["evidence"][0]["asset_id"] == link["id"]
+    if len(requirement_ids) > 1:
+        assert by_req[requirement_ids[1]]["evidence"][0]["asset_id"] is None
+    # 다시 열면 순번으로 미리 채워진다.
+    previous = {r["requirement_id"]: r["previous"] for r in _form(client, world).json()["requirements"]}
+    assert previous[requirement_ids[0]]["evidence"][0]["asset_index"] == 1
+
+
+def test_an_evidence_pointing_outside_the_entry_assets_is_refused(
+    client, world, django_capture_on_commit_callbacks
+):
+    entry = _entry(_requirement_ids(client, world))
+    entry["requirement_responses"][0]["evidence"][0]["asset_index"] = 0
+
+    response = _submit(client, world, entry=entry, capture=django_capture_on_commit_callbacks)
+
+    assert response.status_code == 422
+    assert "확인 위치" in response.json()["detail"]
+    assert ClassroomSubmission.objects.count() == 0
