@@ -227,6 +227,14 @@ ROUTES: list[Route] = [
     Route("get_problem_quality", "get", lambda w: f"{_p(w)}/quality", None, 200),
     Route("estimate_problem_quality", "get", lambda w: f"{_p(w)}/quality/estimate", None, 200),
     Route("run_problem_quality", "post", lambda w: f"{_p(w)}/quality/run", None, 200),
+    # 가산(#905) — 이 세계에는 완성도 대상 시도가 없어 문을 지난 뒤 409 다(남이면 그 전에 막힌다).
+    Route(
+        "rate_problem_bonus",
+        "put",
+        lambda w: f"{_p(w)}/quality/bonus/0/{w.draft_item_id}",
+        lambda w: {"score": 3, "memo": ""},
+        409,
+    ),
     Route("copy_problem", "post", lambda w: f"{_p(w)}/copy", lambda w: {"target_class_id": w.class_id}, 201),
     # 이미 공개된 문제라(세계를 만들 때 공개했다) 살아 있는 템플릿을 그대로 돌려준다 — 200.
     Route("publish_template", "post", lambda w: f"{_p(w)}/publish-template", lambda w: {"publisher_display_name": "강사"}, 200),

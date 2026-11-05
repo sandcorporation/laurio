@@ -1103,6 +1103,38 @@ class ClassroomQualityReview(models.Model):
         return f"ClassroomQualityReview(submission={self.submission_id}, weighted={self.weighted_score})"
 
 
+#: 가산 사람 점수의 메모 길이 — 한 줄(#905). 공모전 `scoring.SubmissionBonusScore` 와 같은 값.
+BONUS_MEMO_MAX_LENGTH = 200
+
+
+class ClassroomBonusScore(models.Model):
+    """시도 하나 × 가산 항목 하나의 강사 점수(#905, ADR-0073) — 0~5 와 한 줄 메모(선택).
+
+    AI 는 가산을 매기지 않는다. 강사·공동 강사가 그 참여자의 **지금 완성도 대상 시도**에만 매긴다
+    (`classroom.quality.save_bonus_score`). 점수는 시도에 붙으므로 대상 시도가 바뀌면 새 시도에는 점수가 없어
+    0점이 되고, 순위표는 「가산 다시 매김 필요」를 띄운다. 고치기는 덮어쓰기다 — 이력은 남기지 않는다(완성도는
+    비공개 보조 지표이고 상금·통과와 무관하다)."""
+
+    #: related_name 이 `classroom_` 로 시작한다 — 부모 `Submission` 을 공모전 `SubmissionBonusScore` 도 가리킨다(E304).
+    submission = models.ForeignKey(ClassroomSubmission, related_name="classroom_bonus_scores", on_delete=models.CASCADE)
+    item = models.ForeignKey(ChecklistItem, related_name="bonus_scores", on_delete=models.CASCADE)
+    score = models.PositiveSmallIntegerField()
+    memo = models.CharField(max_length=BONUS_MEMO_MAX_LENGTH, blank=True, default="")
+    rated_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="+", null=True, on_delete=models.SET_NULL)
+    rated_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["submission", "item"], name="classroom_bonus_score_unique"),
+            models.CheckConstraint(
+                condition=models.Q(score__gte=0, score__lte=5), name="classroom_bonus_score_range"
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomBonusScore(submission={self.submission_id}, item={self.item_id}, score={self.score})"
+
+
 class ClassroomQualityJob(models.Model):
     """완성도 채점 큐의 한 줄(#883, ADR-0072) — 시도 하나에 하나. 판정 큐(`ClassroomSubmission` 의
     `scoring_*` 칸)와 같은 임대 방식이되 **칸을 따로 둔다**: 판정 큐의 칸에 얹으면 「채점됐는가」 조건과

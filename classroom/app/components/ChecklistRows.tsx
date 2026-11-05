@@ -1,6 +1,6 @@
 "use client";
 
-// 체크리스트 항목 줄 — 끌기 손잡이·번호·라벨·필수/선택 배지·배점(1~10, #904)·삭제 (#637).
+// 체크리스트 항목 줄 — 끌기 손잡이·번호·라벨·필수/선택/가산 배지·배점(1~10, #904)·삭제 (#637).
 //
 // 문제 편집(항목마다 즉시 저장)과 새 문제(초안, 만들 때 함께 저장)가 이 줄 하나를 쓴다.
 // 두 화면은 저장 시점만 다르고 줄의 모양과 순서 바꾸기는 같다.
@@ -16,8 +16,42 @@ import type { ReactNode } from "react";
 
 import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { type ChecklistReorderSave, createChecklistMover } from "@/lib/problems/checklist-reorder";
+import { BONUS_RATER_LABEL, type ChecklistGrade, GRADE_LABEL, nextGrade } from "@/lib/problems/grade";
 
-export type ChecklistRowItem = { key: string | number; label: string; required: boolean; points: number };
+export type ChecklistRowItem = { key: string | number; label: string; grade: ChecklistGrade; points: number };
+
+/** 등급 배지 버튼 — 누를 때마다 필수 → 선택 → 가산(#905). 가산이면 「강사가 매김」이 붙는다. */
+export function GradeToggle({
+  grade,
+  onChange,
+  testId,
+  ariaPrefix,
+  disabled = false,
+}: {
+  grade: ChecklistGrade;
+  onChange: (grade: ChecklistGrade) => void;
+  testId: string;
+  ariaPrefix: string;
+  disabled?: boolean;
+}): ReactNode {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      data-grade={grade}
+      aria-pressed={grade === "required"}
+      aria-label={`${ariaPrefix} ${GRADE_LABEL[grade]}`}
+      title={grade === "bonus" ? BONUS_RATER_LABEL : undefined}
+      disabled={disabled}
+      onClick={() => onChange(nextGrade(grade))}
+      className="flex shrink-0 items-center gap-1.5 disabled:cursor-not-allowed"
+    >
+      <Badge tone={grade === "required" ? "verified" : "neutral"}>{GRADE_LABEL[grade]}</Badge>
+      {/* 좁은 화면에서는 항목 칸을 지키려고 배지만 둔다(#905). */}
+      {grade === "bonus" ? <span className="hidden text-xs text-ink/60 sm:inline">{BONUS_RATER_LABEL}</span> : null}
+    </button>
+  );
+}
 
 /** 배점 선택지 — 1~10 정수(#904). 완성도에만 쓴다. */
 export const POINTS_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
@@ -30,7 +64,7 @@ export function ChecklistRows({
   lockedStructure = false,
   labelMode,
   onReorder,
-  onRequiredChange,
+  onGradeChange,
   onPointsChange,
   onDelete,
 }: {
@@ -48,7 +82,7 @@ export function ChecklistRows({
     onChange: (key: ChecklistRowItem["key"], label: string) => void;
   };
   onReorder: ChecklistReorderSave<ChecklistRowItem["key"]>;
-  onRequiredChange: (key: ChecklistRowItem["key"], required: boolean) => void;
+  onGradeChange: (key: ChecklistRowItem["key"], grade: ChecklistGrade) => void;
   onPointsChange: (key: ChecklistRowItem["key"], points: number) => void;
   onDelete: (key: ChecklistRowItem["key"]) => void;
 }): ReactNode {
@@ -56,7 +90,7 @@ export function ChecklistRows({
   // 부모는 렌더마다 새 배열을 내려주므로 identity 가 아니라 내용(순서·라벨·필수)이 바뀔 때만 맞춘다 —
   // 아니면 끌어 놓은 순서가 저장이 끝나기도 전에 되돌아간다.
   const signature = items
-    .map((item) => `${item.key}\u0000${item.label}\u0000${item.required}\u0000${item.points}`)
+    .map((item) => `${item.key}\u0000${item.label}\u0000${item.grade}\u0000${item.points}`)
     .join("\u0001");
   useEffect(() => setRows(items), [signature]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -182,17 +216,13 @@ export function ChecklistRows({
                 className={`${INPUT_CLASS} min-w-0 flex-1`}
               />
             )}
-            <button
-              type="button"
-              data-testid={`${testId}-required-input`}
-              aria-pressed={item.required}
-              aria-label={`${index + 1}번 항목 ${item.required ? "필수" : "선택"}`}
+            <GradeToggle
+              grade={item.grade}
+              onChange={(grade) => onGradeChange(item.key, grade)}
+              testId={`${testId}-required-input`}
+              ariaPrefix={`${index + 1}번 항목`}
               disabled={locked}
-              onClick={() => onRequiredChange(item.key, !item.required)}
-              className="shrink-0 disabled:cursor-not-allowed"
-            >
-              <Badge tone={item.required ? "verified" : "neutral"}>{item.required ? "필수" : "선택"}</Badge>
-            </button>
+            />
             <select
               data-testid={`${testId}-points-input`}
               aria-label={`${index + 1}번 항목 배점`}

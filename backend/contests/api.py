@@ -123,7 +123,7 @@ logger = logging.getLogger(__name__)
 
 # Requirement.grade / RequirementIn.grade와 같은 값 집합. create_contest의 인라인
 # 체크와 아래 requirement CRUD·chat 제안이 같은 기준을 쓰도록 한 곳에 둔다.
-_VALID_GRADES = {"required", "optional"}
+_VALID_GRADES = {"required", "optional", "bonus"}
 
 # 한 Sponsor가 한 Contest에 쌓을 수 있는 대화 턴 수 상한. 무제한으로 두면 한 Contest가
 # 프롬프트에 실리는 대화 이력을 무한정 늘려 이후 매 턴의 LLM 호출 비용·지연을 키운다.
@@ -298,7 +298,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
 
     for requirement in payload.requirements:
         if requirement.grade not in _VALID_GRADES:
-            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+            raise HttpError(422, "요구사항 등급은 필수·선택·가산 중 하나여야 합니다.")
         # 공모전 상세에서 참가자 전부가 로그인 없이 보는 공개 본문이다 —
         # 제목·설명과 같은 노출(빠뜨렸던 것을 #480 구조 검사가 잡았다).
         _reject_if_banned_public_text(requirement.text, "요구사항")
@@ -418,7 +418,7 @@ def create_free_contest_draft(user, payload: FreeContestCreateIn) -> ContestOut:
 
     for requirement in payload.requirements:
         if requirement.grade not in _VALID_GRADES:
-            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+            raise HttpError(422, "요구사항 등급은 필수·선택·가산 중 하나여야 합니다.")
         # 공모전 상세에서 참가자 전부가 로그인 없이 보는 공개 본문이다 —
         # 제목·설명과 같은 노출(빠뜨렸던 것을 #480 구조 검사가 잡았다).
         _reject_if_banned_public_text(requirement.text, "요구사항")
@@ -1590,7 +1590,7 @@ def add_contest_requirement(contest: Contest, payload: RequirementCreateIn):
     """`add_requirement` 의 몸 — 웹과 공모전 MCP 가 같이 부른다(#870)."""
 
     if payload.grade not in _VALID_GRADES:
-        raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+        raise HttpError(422, "요구사항 등급은 필수·선택·가산 중 하나여야 합니다.")
 
     sanitized_text = sanitize_free_text(payload.text)
     if not sanitized_text:
@@ -1643,7 +1643,7 @@ def update_contest_requirement(contest: Contest, requirement_id: int, payload: R
 
     if payload.grade is not None:
         if payload.grade not in _VALID_GRADES:
-            raise HttpError(422, "요구사항 등급은 필수 또는 선택 중 하나여야 합니다.")
+            raise HttpError(422, "요구사항 등급은 필수·선택·가산 중 하나여야 합니다.")
         requirement.grade = payload.grade
     if payload.text is not None:
         sanitized = sanitize_free_text(payload.text)

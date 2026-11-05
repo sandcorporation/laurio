@@ -5,6 +5,7 @@
 // AI는 제안만 하고 Sponsor가 결정한다: 이번 턴의 제안(`proposals`)은 그 자체로
 // 체크리스트에 들어가지 않는다. Sponsor가 "추가" 버튼을 눌러야 비로소
 // requirement-draft-panel의 체크리스트로 넘어간다.
+import { requirementGradeLabel } from "@/lib/contests/grill-types";
 import { useState } from "react";
 
 import { ErrorNote, PageHeader, buttonClass } from "@/app/components/ui";
@@ -105,7 +106,7 @@ export function GrillChatPanel({
                       proposal.grade === "required" ? "text-attention" : "text-ink/60"
                     }`}
                   >
-                    {proposal.grade === "required" ? "필수" : "선택"}
+                    {requirementGradeLabel(proposal.grade)}
                   </span>
                   <span className="text-sm">{proposal.text}</span>
                 </div>

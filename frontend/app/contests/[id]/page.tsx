@@ -7,6 +7,7 @@
 // 공개되는 시점이다, ADR-0014). 존재하지 않거나 draft 인 Contest 는 백엔드가 이미
 // 404 로 답하므로(contests.api.get_contest) `fetchContest` 가 null 을 돌려주는 자리에서
 // `notFound()` 를 부른다 — draft 존재 여부를 응답 형태로 드러내지 않는다.
+import { requirementGradeLabel } from "@/lib/contests/grill-types";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
@@ -307,7 +308,7 @@ function RequirementRow({ requirement }: { requirement: Requirement }) {
       data-requirement-grade={requirement.grade}
       className="flex items-center gap-3 border-b border-rule py-3"
     >
-      <Badge tone={isRequired ? "attention" : "neutral"}>{isRequired ? "필수" : "선택"}</Badge>
+      <Badge tone={isRequired ? "attention" : "neutral"}>{requirementGradeLabel(requirement.grade)}</Badge>
       <span className="text-sm">{requirement.text}</span>
     </li>
   );

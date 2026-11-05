@@ -26,6 +26,8 @@ import { useParams } from "next/navigation";
 
 import { ErrorNote, EmptyState, PageHeader, buttonClass } from "@/app/components/ui";
 import { VideoLinkView } from "@/components/submissions/video-link-view";
+import { requirementGradeLabel } from "@/lib/contests/grill-types";
+import { BonusScoreEditor } from "./bonus-score-editor";
 import { timestampSeconds, youtubeVideoId } from "@/lib/submissions/video-link";
 import { badgeClass } from "@/lib/ui/classnames";
 import { remainingTime, remainingTimeLabel } from "@/lib/contest-format";
@@ -144,6 +146,22 @@ export default function JudgeComparisonPage() {
       return;
     }
     setLoad((prev) => (prev.status === "ready" ? { ...prev, comparison: comparison.data } : prev));
+  }
+
+  // 가산(#905) — 마감 뒤 개최자가 제출작마다 매긴다. 합·등수가 바뀌니 비교 응답을 다시 받는다.
+  async function rateBonus(submissionId: number, requirementId: number, score: number, memo: string) {
+    const saved = await bffClient.request<unknown>(
+      `/api/backend/contests/${contestId}/submissions/${submissionId}/bonus/${requirementId}`,
+      { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ score, memo }) },
+    );
+    if (!saved.ok) return saved.detail || "저장하지 못했습니다.";
+    const comparison = await bffClient.get<ContestComparisonOut>(
+      `/api/backend/contests/${contestId}/submissions/compare`,
+    );
+    if (comparison.ok) {
+      setLoad((prev) => (prev.status === "ready" ? { ...prev, comparison: comparison.data } : prev));
+    }
+    return null;
   }
 
   async function requestAward(submissionId: number) {
@@ -303,6 +321,7 @@ export default function JudgeComparisonPage() {
               </tr>
               {comparison.requirements.map((requirement) => {
                 const isRequired = requirement.grade === "required";
+                const isBonus = requirement.grade === "bonus";
                 return (
                   <tr key={requirement.requirement_id} data-testid={`requirement-row-${requirement.requirement_id}`}>
                     <th
@@ -314,7 +333,7 @@ export default function JudgeComparisonPage() {
                           className={badgeClass(isRequired ? "attention" : "neutral")}
                           data-testid={`requirement-${requirement.requirement_id}-grade`}
                         >
-                          {isRequired ? "필수" : "선택"}
+                          {requirementGradeLabel(requirement.grade)}
                         </span>
                         <span>{requirement.text}</span>
                       </div>
@@ -412,7 +431,24 @@ export default function JudgeComparisonPage() {
                             )}
                             {entry?.note && <p className="text-xs text-ink">{entry.note}</p>}
                           </div>
-                          {qualityItem ? (
+                          {isBonus ? (
+                            <div className="mt-2 border-t border-rule pt-2">
+                              <BonusScoreEditor
+                                testId={`bonus-${requirement.requirement_id}-${submission.submission_id}`}
+                                initialScore={
+                                  submission.bonus_scores?.find((b) => b.requirement_id === requirement.requirement_id)
+                                    ?.score ?? 0
+                                }
+                                initialMemo={
+                                  submission.bonus_scores?.find((b) => b.requirement_id === requirement.requirement_id)
+                                    ?.memo ?? ""
+                                }
+                                onSave={(score, memo) =>
+                                  rateBonus(submission.submission_id, requirement.requirement_id, score, memo)
+                                }
+                              />
+                            </div>
+                          ) : qualityItem ? (
                             <div
                               className="mt-2 border-t border-rule pt-2"
                               data-testid={`quality-item-${requirement.requirement_id}-${submission.submission_id}`}

@@ -109,6 +109,7 @@ from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
 from .models import (
+    ChecklistGrade,
     ChecklistItem,
     Class,
     ClassroomScore,
@@ -797,7 +798,9 @@ def _prepare_head(
 
     problem = submission.problem
     class_obj = problem.classroom
-    checklist_items = list(problem.checklist_items.all())
+    # 가산(#905, ADR-0073)은 강사가 사람 점수로 매긴다 — AI 판정·프롬프트·통과 판정에 들이지 않는다(통과는
+    # 필수만 세므로 결과가 같다).
+    checklist_items = list(problem.checklist_items.exclude(grade=ChecklistGrade.BONUS))
 
     if _scoring_cap_reached(submission):
 

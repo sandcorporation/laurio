@@ -72,6 +72,6 @@ test("강사가 다른 강사의 템플릿을 목록에서 찾아 자기 클래�
   await expect(page.getByTestId("edit-problem-title-input")).toHaveValue(title);
   // 편집 화면은 라벨을 편집 칸(`<input defaultValue>`)으로 그린다 — 텍스트가 아니라 값이라
   // `toContainText` 로는 안 보인다. 가져온 항목의 id 는 미리 알 수 없어 역할로 잡는다(같은
-  // 행의 「필수」는 체크박스라 textbox 에 섞이지 않는다).
+  // 행의 등급(필수·선택·가산)은 버튼이라 textbox 에 섞이지 않는다).
   await expect(page.getByTestId("checklist-items").getByRole("textbox")).toHaveValue("테스트가 통과한다");
 });

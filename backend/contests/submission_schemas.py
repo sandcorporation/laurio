@@ -197,6 +197,26 @@ class QualityItemOut(Schema):
     #: 지금 배점(1~10)과 항목 점수(0~5 ÷ 5 × 배점) — #904, ADR-0073.
     points: int
     item_points: float
+    #: 가산 항목(#905) — AI 가 아니라 개최자가 마감 뒤 매긴다. `reasoning` 자리에 개최자의 한 줄 메모가 온다.
+    bonus: bool = False
+    #: 가산을 아직 매기지 않았으면 거짓(0점). AI 항목은 늘 참.
+    rated: bool = True
+
+
+class BonusScoreOut(Schema):
+    """제출 하나 × 가산 Requirement 하나의 개최자 점수(#905) — 매기지 않았으면 `rated=False`·0점."""
+
+    requirement_id: int
+    score: int
+    memo: str
+    rated: bool
+
+
+class BonusScoreIn(Schema):
+    """개최자가 매기는 가산 점수 — 0~5 정수와 한 줄 메모(선택). 같은 칸에 다시 보내면 덮어쓴다."""
+
+    score: int = Field(ge=0, le=5)
+    memo: str = Field(default="", max_length=200)
 
 
 class SubmissionQualityOut(Schema):
@@ -231,6 +251,8 @@ class ComparisonSubmissionOut(Schema):
     completion: CompletionOut
     # 완성도(#884) — 아직 매기지 않았으면(Score 전·자동 0%·실패) null.
     quality: ComparisonQualityOut | None = None
+    # 가산 Requirement 마다의 개최자 점수(#905) — 완성도 기록이 없어도 매길 수 있게 따로 싣는다.
+    bonus_scores: list[BonusScoreOut] = []
 
 
 class ContestComparisonOut(Schema):
@@ -322,12 +344,14 @@ class OwnScoreOut(Schema):
     @staticmethod
     def resolve_quality(obj):
         from core.quality_review import quality_view
-        from scoring.quality import points_by_requirement
+        from scoring.quality import bonus_scores, points_by_requirement
 
         review = getattr(obj.submission, "quality_review", None)
         if review is None:
             return None
-        return quality_view(review.items, points_by_requirement(obj.submission.contest_id))
+        contest_id = obj.submission.contest_id
+        bonus = bonus_scores(contest_id, [obj.submission.id])[obj.submission.id]
+        return quality_view(review.items, points_by_requirement(contest_id), bonus)
 
     @staticmethod
     def resolve_scored_assets(obj) -> list[dict]:

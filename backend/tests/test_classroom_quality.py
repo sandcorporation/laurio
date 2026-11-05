@@ -359,17 +359,13 @@ def test_points_must_be_1_to_10(client, scored):
         assert response.status_code == 422
 
 
-def test_grade_input_wins_over_required_and_bonus_is_not_open_yet(client, scored):
+def test_grade_input_wins_over_required_and_bonus_is_open(client, scored):
     _required_id, optional_id = scored["item_ids"]
     assert _patch_item(client, scored, optional_id, {"grade": "required"})["required"] is True
     assert _patch_item(client, scored, optional_id, {"required": False})["grade"] == "optional"
-    response = client.patch(
-        _url(scored, f"/checklist-items/{optional_id}"),
-        data={"grade": "bonus"},
-        content_type="application/json",
-        **auth_header(scored["instructor"]["access"]),
-    )
-    assert response.status_code == 422
+    # 가산은 #905 부터 연다 — 강사가 사람 점수로 매긴다(`test_classroom_bonus`).
+    saved = _patch_item(client, scored, optional_id, {"grade": "bonus"})
+    assert (saved["grade"], saved["required"]) == ("bonus", False)
 
 
 def test_migration_rekeys_existing_reviews_so_they_are_reused_without_rescoring(client, scored):

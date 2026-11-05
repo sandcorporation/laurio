@@ -11,6 +11,7 @@ import json
 import pytest
 
 from core.quality_review import (
+    BonusScore,
     QualityItemInput,
     QualityItemRecord,
     QualityResponseError,
@@ -57,6 +58,25 @@ def test_unscored_item_counts_zero_but_stays_in_the_maximum():
     # 3번은 기록에 없는 항목(가산 등) — 0점, 만점에는 든다.
     total = quality_total(_records(5, 5), {1: 2, 2: 1, 3: 4})
     assert (total.total, total.maximum) == (3.0, 7)
+
+
+def test_bonus_scores_are_human_points_added_after_the_ai_items():
+    """가산(#905) — 사람이 매긴 0~5 를 같은 식으로 더한다. 기록에 같은 id 의 AI 점수가 남아 있어도(가산으로 바뀌기
+    전 기록) 세지 않는다. 매기지 않은 가산은 0점·`rated=False` 로 항목 끝에 나온다."""
+
+    points = {1: 2, 2: 1, 3: 4}
+    bonus = [BonusScore(item_id=3, label="가산", score=5, memo="좋다", rated=True)]
+    # 5×2 + 5×1 + 5×4 = 35, 만점 7.
+    assert quality_total(_records(5, 5), points, bonus).raw == 35
+    stale = [*_records(5, 5), {"item_id": 3, "label": "옛 AI", "required": False, "score": 1, "reasoning": "r"}]
+    assert quality_total(stale, points, bonus).raw == 35
+    view = quality_view(stale, points, [BonusScore(item_id=3, label="가산")])
+    assert [(i["item_id"], i["bonus"], i["rated"], i["score"]) for i in view["items"]] == [
+        (1, False, True, 5),
+        (2, False, True, 5),
+        (3, True, False, 0),
+    ]
+    assert (view["raw_total"], view["max_total"]) == (15, 7)
 
 
 def test_default_points_keep_the_old_weighted_score_so_ranks_do_not_move():

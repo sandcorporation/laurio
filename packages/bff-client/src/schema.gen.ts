@@ -1237,6 +1237,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/quality/bonus/{submission_id}/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rate Problem Bonus
+         * @description 강사·공동 강사가 가산 하나에 0~5 와 한 줄 메모를 매긴다(#905, ADR-0073) — 그 참여자의 **지금 완성도
+         *     대상 시도**에만(아니면 409). 보관된 클래스에서는 403(쓰기). 문제 마감은 막지 않는다.
+         */
+        put: operations["classroom_api_rate_problem_bonus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/quality/estimate": {
         parameters: {
             query?: never;
@@ -2738,6 +2759,29 @@ export interface paths {
         get: operations["contests_submission_api_get_my_submission"];
         /** Update Submission */
         put: operations["contests_submission_api_update_submission"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/submissions/{submission_id}/bonus/{requirement_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rate Bonus
+         * @description 개최자가 제출 하나의 가산 항목에 0~5 와 한 줄 메모를 매긴다(#905, ADR-0073). 덮어쓰기다.
+         *
+         *     **마감 뒤에만** — 비교 화면(`compare_submissions`)과 같은 기준(`deadline_at`)이다. 마감 전에는 제출물을
+         *     볼 수 없으니 매길 것도 없다. Score·달성률·Distribution 과 무관하고 완성도 합계에만 든다.
+         */
+        put: operations["contests_submission_api_rate_bonus"];
         post?: never;
         delete?: never;
         options?: never;
@@ -4937,6 +4981,33 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
+        /**
+         * BonusScoreIn
+         * @description 개최자가 매기는 가산 점수 — 0~5 정수와 한 줄 메모(선택). 같은 칸에 다시 보내면 덮어쓴다.
+         */
+        BonusScoreIn: {
+            /**
+             * Memo
+             * @default
+             */
+            memo: string;
+            /** Score */
+            score: number;
+        };
+        /**
+         * BonusScoreOut
+         * @description 제출 하나 × 가산 Requirement 하나의 개최자 점수(#905) — 매기지 않았으면 `rated=False`·0점.
+         */
+        BonusScoreOut: {
+            /** Memo */
+            memo: string;
+            /** Rated */
+            rated: boolean;
+            /** Requirement Id */
+            requirement_id: number;
+            /** Score */
+            score: number;
+        };
         /** BuildAssetIn */
         BuildAssetIn: {
             /**
@@ -5026,7 +5097,7 @@ export interface components {
          */
         ChecklistItemIn: {
             /** Grade */
-            grade?: ("required" | "optional") | null;
+            grade?: ("required" | "optional" | "bonus") | null;
             /** Label */
             label: string;
             /** Points */
@@ -5055,7 +5126,7 @@ export interface components {
         /** ChecklistItemPatchIn */
         ChecklistItemPatchIn: {
             /** Grade */
-            grade?: ("required" | "optional") | null;
+            grade?: ("required" | "optional" | "bonus") | null;
             /** Label */
             label?: string | null;
             /** Points */
@@ -5367,6 +5438,30 @@ export interface components {
             submissions: number;
             /** Submitting Students */
             submitting_students: number;
+        };
+        /**
+         * ClassroomBonusScoreIn
+         * @description 강사가 매기는 가산 점수 — 0~5 정수와 한 줄 메모(선택). 같은 칸에 다시 보내면 덮어쓴다.
+         */
+        ClassroomBonusScoreIn: {
+            /**
+             * Memo
+             * @default
+             */
+            memo: string;
+            /** Score */
+            score: number;
+        };
+        /** ClassroomBonusScoreOut */
+        ClassroomBonusScoreOut: {
+            /** Item Id */
+            item_id: number;
+            /** Memo */
+            memo: string;
+            /** Score */
+            score: number;
+            /** Submission Id */
+            submission_id: number;
         };
         /** ClassroomChecklistVerdictOut */
         ClassroomChecklistVerdictOut: {
@@ -5889,6 +5984,11 @@ export interface components {
         ComparisonSubmissionOut: {
             /** Assets */
             assets: components["schemas"]["AssetSummaryOut"][];
+            /**
+             * Bonus Scores
+             * @default []
+             */
+            bonus_scores: components["schemas"]["BonusScoreOut"][];
             completion: components["schemas"]["CompletionOut"];
             /** Developer Display Name */
             developer_display_name: string;
@@ -8399,6 +8499,11 @@ export interface components {
         };
         /** QualityItemOut */
         QualityItemOut: {
+            /**
+             * Bonus
+             * @default false
+             */
+            bonus: boolean;
             /** Item Id */
             item_id: number;
             /** Item Points */
@@ -8407,6 +8512,11 @@ export interface components {
             label: string;
             /** Points */
             points: number;
+            /**
+             * Rated
+             * @default true
+             */
+            rated: boolean;
             /** Reasoning */
             reasoning: string;
             /** Required */
@@ -8418,6 +8528,11 @@ export interface components {
         QualityRankRowOut: {
             /** Attempt Number */
             attempt_number: number;
+            /**
+             * Bonus Needs Rerate
+             * @default false
+             */
+            bonus_needs_rerate: boolean;
             /** Completeness */
             completeness: number;
             /** Display Name */
@@ -11763,6 +11878,62 @@ export interface operations {
             };
         };
     };
+    classroom_api_rate_problem_bonus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+                submission_id: number;
+                item_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassroomBonusScoreIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomBonusScoreOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_estimate_problem_quality: {
         parameters: {
             query?: never;
@@ -13743,6 +13914,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmissionOut"];
+                };
+            };
+        };
+    };
+    contests_submission_api_rate_bonus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                submission_id: number;
+                requirement_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BonusScoreIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BonusScoreOut"];
                 };
             };
         };

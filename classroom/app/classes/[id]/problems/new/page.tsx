@@ -22,7 +22,8 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
-import { ChecklistRows } from "@/app/components/ChecklistRows";
+import { ChecklistRows, GradeToggle } from "@/app/components/ChecklistRows";
+import { type ChecklistGrade, defaultPoints } from "@/lib/problems/grade";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
@@ -46,14 +47,10 @@ import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 type DraftChecklistItem = {
   key: number;
   label: string;
-  required: boolean;
-  /** 배점 1~10(#904). 등급을 바꿨을 때 기본값(필수 2·선택 1) 그대로면 새 등급의 기본값을 따른다. */
+  grade: ChecklistGrade;
+  /** 배점 1~10(#904). 등급을 바꿨을 때 기본값(필수 2·선택 1·가산 1) 그대로면 새 등급의 기본값을 따른다. */
   points: number;
 };
-
-function defaultPoints(required: boolean): number {
-  return required ? 2 : 1;
-}
 
 export default function NewProblemPage() {
   const params = useParams<{ id: string }>();
@@ -106,11 +103,11 @@ export default function NewProblemPage() {
   const nextKeyRef = useRef(0);
   const [items, setItems] = useState<DraftChecklistItem[]>([]);
   const [newItemLabel, setNewItemLabel] = useState("");
-  const [newItemRequired, setNewItemRequired] = useState(true);
+  const [newItemGrade, setNewItemGrade] = useState<ChecklistGrade>("required");
   // 문법 검사 기본 항목의 켜짐 여부(#410) — 기본은 켜짐이다.
   const [syntaxCheckEnabled, setSyntaxCheckEnabled] = useState(true);
 
-  const hasRequiredItem = items.some((item) => item.required);
+  const hasRequiredItem = items.some((item) => item.grade === "required");
 
   function toggleSubmissionFormat(format: SubmissionFormat, checked: boolean) {
     setSubmissionFormats((prev) =>
@@ -122,23 +119,23 @@ export default function NewProblemPage() {
     event.preventDefault();
     const label = newItemLabel.trim();
     if (label === "") return;
-    setItems((prev) => [...prev, { key: nextKeyRef.current++, label, required: newItemRequired, points: defaultPoints(newItemRequired) }]);
+    setItems((prev) => [...prev, { key: nextKeyRef.current++, label, grade: newItemGrade, points: defaultPoints(newItemGrade) }]);
     setNewItemLabel("");
-    setNewItemRequired(true);
+    setNewItemGrade("required");
   }
 
   function handleItemLabelChange(key: number, label: string) {
     setItems((prev) => prev.map((item) => (item.key === key ? { ...item, label } : item)));
   }
 
-  function handleItemRequiredChange(key: number, required: boolean) {
+  function handleItemGradeChange(key: number, grade: ChecklistGrade) {
     setItems((prev) =>
       prev.map((item) =>
         item.key === key
           ? {
               ...item,
-              required,
-              points: item.points === defaultPoints(item.required) ? defaultPoints(required) : item.points,
+              grade,
+              points: item.points === defaultPoints(item.grade) ? defaultPoints(grade) : item.points,
             }
           : item,
       ),
@@ -203,7 +200,7 @@ export default function NewProblemPage() {
       model_is_reasoning: model !== "" && modelIsReasoning,
       grading_strictness: gradingGuideline.grading_strictness,
       grading_guideline_text: gradingGuideline.grading_guideline_text,
-      checklist_items: items.map((item) => ({ label: item.label, required: item.required, points: item.points })),
+      checklist_items: items.map((item) => ({ label: item.label, grade: item.grade, points: item.points })),
       syntax_check_enabled: syntaxCheckEnabled,
       open,
     });
@@ -384,14 +381,14 @@ export default function NewProblemPage() {
                       items={items.map((item) => ({
                         key: item.key,
                         label: item.label,
-                        required: item.required,
+                        grade: item.grade,
                         points: item.points,
                       }))}
                       listTestId="new-problem-checklist-items"
                       rowTestId={(_item, index) => `new-problem-checklist-item-${index}`}
                       labelMode={{ kind: "change", onChange: (key, label) => handleItemLabelChange(key as number, label) }}
                       onReorder={handleReorder}
-                      onRequiredChange={(key, required) => handleItemRequiredChange(key as number, required)}
+                      onGradeChange={(key, grade) => handleItemGradeChange(key as number, grade)}
                       onPointsChange={(key, points) => handleItemPointsChange(key as number, points)}
                       onDelete={(key) => handleItemDelete(key as number)}
                     />
@@ -409,16 +406,12 @@ export default function NewProblemPage() {
                       placeholder="새 항목"
                       className={`${INPUT_CLASS} min-w-0 flex-1`}
                     />
-                    <button
-                      type="button"
-                      data-testid="new-problem-new-checklist-item-required-input"
-                      aria-pressed={newItemRequired}
-                      aria-label={`새 항목 ${newItemRequired ? "필수" : "선택"}`}
-                      onClick={() => setNewItemRequired((prev) => !prev)}
-                      className="shrink-0"
-                    >
-                      <Badge tone={newItemRequired ? "verified" : "neutral"}>{newItemRequired ? "필수" : "선택"}</Badge>
-                    </button>
+                    <GradeToggle
+                      grade={newItemGrade}
+                      onChange={setNewItemGrade}
+                      testId="new-problem-new-checklist-item-required-input"
+                      ariaPrefix="새 항목"
+                    />
                     <button
                       type="submit"
                       data-testid="new-problem-new-checklist-item-submit"
@@ -503,7 +496,7 @@ export default function NewProblemPage() {
               checklistItems={items.map((item) => ({
                 id: item.key,
                 label: item.label,
-                required: item.required,
+                required: item.grade === "required",
               }))}
               syntaxCheckEnabled={syntaxCheckEnabled}
               gradingStrictness={gradingGuideline.grading_strictness}

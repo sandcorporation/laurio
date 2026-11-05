@@ -12,7 +12,7 @@ export type DeliverableType = components["schemas"]["DeliverableTypeOut"];
 export type RequirementOut = components["schemas"]["RequirementOut"];
 export type RequirementChatTurnOut = components["schemas"]["RequirementChatTurnOut"];
 
-export type RequirementGrade = "required" | "optional";
+export type RequirementGrade = "required" | "optional" | "bonus";
 
 /** 요건 행 고치기 — 문구·등급은 `PATCH …/requirements/{id}`, 배점(1~10)은 `PATCH …/requirements/{id}/points`(#904). */
 export type RequirementPatch = { text?: string; grade?: RequirementGrade; points?: number };
@@ -22,7 +22,21 @@ export type RequirementPatch = { text?: string; grade?: RequirementGrade; points
 export const REQUIREMENT_GRADES: { value: RequirementGrade; label: string }[] = [
   { value: "required", label: "필수" },
   { value: "optional", label: "선택" },
+  // 가산(#905) — AI 가 매기지 않고 마감 뒤 개최자가 0~5 로 매긴다.
+  { value: "bonus", label: "가산 · 마감 뒤 개최자가 매김" },
 ];
+
+/** 등급 문자열 → 배지 글자. 모르는 값은 「선택」(필수가 아니다). */
+export function requirementGradeLabel(grade: string): string {
+  return REQUIREMENT_GRADE_LABEL[grade as RequirementGrade] ?? "선택";
+}
+
+/** 등급 배지 글자 — 필수·선택·가산. */
+export const REQUIREMENT_GRADE_LABEL: Record<RequirementGrade, string> = {
+  required: "필수",
+  optional: "선택",
+  bonus: "가산",
+};
 
 // contests/schemas.py RequirementIn/RequirementCreateIn/RequirementUpdateIn의
 // text: Field(max_length=500)과 같다 — 서버가 어차피 자르거나 422로 거부할

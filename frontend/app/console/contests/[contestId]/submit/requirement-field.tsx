@@ -11,6 +11,7 @@
 // 않으면 데모가 둘일 때 개최자가 어느 것의 경로인지 알 수 없다. 이 화면이
 // 고를 수 있게 해 주는 목록은 **이미 저장된** 자료뿐이다(`assets` prop) — 이
 // 폼에서 방금 추가한 자료는 저장 전까지 id 가 없어 가리킬 대상 자체가 없다.
+import { requirementGradeLabel } from "@/lib/contests/grill-types";
 import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { ASSET_KIND_LABELS, EVIDENCE_KINDS, type EvidenceIn, type RequirementOut } from "@/lib/submissions/types";
 
@@ -70,7 +71,7 @@ export function RequirementField({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-2">
-          <Badge tone={isRequired ? "attention" : "neutral"}>{isRequired ? "필수" : "선택"}</Badge>
+          <Badge tone={isRequired ? "attention" : "neutral"}>{requirementGradeLabel(requirement.grade)}</Badge>
           <p className="text-sm">{requirement.text}</p>
         </div>
         <label className="flex shrink-0 items-center gap-1 text-sm">

@@ -22,6 +22,7 @@
 //
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015) — 다른 `/console/**` 화면과 같은
 // 경계다.
+import { requirementGradeLabel } from "@/lib/contests/grill-types";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
@@ -211,7 +212,7 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
                     className={badgeClass(isRequired ? "attention" : "neutral")}
                     data-testid={`metrics-requirement-${row.requirement_id}-grade`}
                   >
-                    {isRequired ? "필수" : "선택"}
+                    {requirementGradeLabel(row.grade)}
                   </span>
                   <span>{row.text}</span>
                 </div>

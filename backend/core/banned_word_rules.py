@@ -194,6 +194,18 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
             '"uphold"|"reject" 중 하나로 고정된 값이다 — 자유 텍스트가 아니다.'
         ),
     ),
+    #: 가산 메모(#905) — 개최자·강사가 매긴 점수에 붙이는 한 줄. 그 제출자 본인과 매긴 쪽에게만 보이는
+    #: 비공개 글이라 공개 본문이 아니다(심판 사유와 같은 이유).
+    ("contests", "BonusScoreIn", "memo"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="가산 메모 — 매긴 개최자와 그 제출자 본인에게만 보이는 비공개 한 줄이다(#905).",
+    ),
+    ("classroom", "ClassroomBonusScoreIn", "memo"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="가산 메모 — 매긴 강사들과 그 참여자 본인에게만 보이는 비공개 한 줄이다(#905).",
+    ),
     ("appeals", "AppealRulingIn", "ruling_note"): BannedWordRule(
         checks_impersonation=False,
         checks_profanity=False,

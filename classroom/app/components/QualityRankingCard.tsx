@@ -7,7 +7,16 @@ import { useState } from "react";
 import { Badge, Card, CardHeader, EmptyState, ErrorNote, Num, buttonClass } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { updateProblem } from "@/lib/problems/api";
-import { fetchQualityEstimate, runQuality, type QualityEstimate, type QualityRankRow } from "@/lib/quality/api";
+import { BonusScoreEditor } from "@/app/components/BonusScoreEditor";
+import { GRADE_LABEL } from "@/lib/problems/grade";
+import {
+  fetchQualityEstimate,
+  rateBonus,
+  runQuality,
+  type QualityEstimate,
+  type QualityItem,
+  type QualityRankRow,
+} from "@/lib/quality/api";
 import { estimateLine, formatPoints, formatQualityTotal } from "@/lib/quality/format";
 import { useProblemQuality } from "@/lib/quality/use-quality";
 
@@ -18,7 +27,21 @@ type Confirm =
   | { step: "running" }
   | { step: "error"; message: string };
 
-function QualityRow({ row, open, onToggle }: { row: QualityRankRow; open: boolean; onToggle: () => void }) {
+function itemGradeLabel(item: QualityItem): string {
+  return GRADE_LABEL[item.bonus ? "bonus" : item.required ? "required" : "optional"];
+}
+
+function QualityRow({
+  row,
+  open,
+  onToggle,
+  onRateBonus,
+}: {
+  row: QualityRankRow;
+  open: boolean;
+  onToggle: () => void;
+  onRateBonus: (submissionId: number, itemId: number, score: number, memo: string) => Promise<string | null>;
+}) {
   const testId = `quality-row-${row.submission_id}`;
   return (
     <li data-testid={testId} className="px-4 py-3">
@@ -29,6 +52,11 @@ function QualityRow({ row, open, onToggle }: { row: QualityRankRow; open: boolea
         <span data-testid={`${testId}-member`} className="w-[90px] shrink-0 truncate text-[13.5px]">
           {row.display_name}
         </span>
+        {row.bonus_needs_rerate ? (
+          <span data-testid={`${testId}-bonus-rerate`} className="shrink-0">
+            <Badge tone="attention">가산 다시 매김 필요</Badge>
+          </span>
+        ) : null}
         <span data-testid={`${testId}-completeness`} className="w-[96px] shrink-0 text-[13.5px]">
           <Num>{formatQualityTotal(row.total, row.max_total)}</Num>
         </span>
@@ -39,7 +67,8 @@ function QualityRow({ row, open, onToggle }: { row: QualityRankRow; open: boolea
               data-testid={`${testId}-item-${item.item_id}`}
               className="max-w-full truncate border border-rule px-1.5 py-0.5 text-[12px] text-ink/70"
             >
-              {item.label} <Num className="font-semibold text-ink">{item.score}</Num>
+              {item.bonus ? `${GRADE_LABEL.bonus} · ` : ""}
+              {item.label} <Num className="font-semibold text-ink">{item.bonus && !item.rated ? "–" : item.score}</Num>
             </span>
           ))}
         </span>
@@ -58,13 +87,23 @@ function QualityRow({ row, open, onToggle }: { row: QualityRankRow; open: boolea
           {row.items.map((item) => (
             <li key={item.item_id} className="flex flex-col gap-0.5 text-[12.5px]">
               <span className="flex flex-wrap items-center gap-2">
-                <Badge tone={item.required ? "verified" : "neutral"}>{item.required ? "필수" : "선택"}</Badge>
+                <Badge tone={item.required ? "verified" : "neutral"}>{itemGradeLabel(item)}</Badge>
                 <span className="font-medium">{item.label}</span>
                 <Num className="text-ink/60">
                   {item.score}/5 · {formatPoints(item.item_points)} / {item.points}점
                 </Num>
               </span>
-              <span className="text-ink/70">{item.reasoning}</span>
+              {item.bonus ? (
+                <BonusScoreEditor
+                  testId={`${testId}-bonus-${item.item_id}`}
+                  label={item.label}
+                  initialScore={item.score}
+                  initialMemo={item.reasoning}
+                  onSave={(score, memo) => onRateBonus(row.submission_id, item.item_id, score, memo)}
+                />
+              ) : (
+                <span className="text-ink/70">{item.reasoning}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -118,6 +157,14 @@ export function QualityRankingCard({
       setPublicOverride(null);
     }
     reload();
+  };
+
+  // 가산(#905) — 저장하면 순위·합계가 바뀌니 다시 읽는다. 대상 시도가 아니면 서버 문구(409)를 그대로 보인다.
+  const rateRowBonus = async (submissionId: number, itemId: number, score: number, memo: string) => {
+    const result = await rateBonus(classId, problemId, submissionId, itemId, { score, memo });
+    if (!result.ok) return result.detail || "저장하지 못했습니다.";
+    reload();
+    return null;
   };
 
   const toggleRow = (id: number) =>
@@ -258,6 +305,7 @@ export function QualityRankingCard({
               row={row}
               open={openIds.has(row.submission_id)}
               onToggle={() => toggleRow(row.submission_id)}
+              onRateBonus={rateRowBonus}
             />
           ))}
         </ol>

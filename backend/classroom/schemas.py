@@ -264,8 +264,8 @@ class JoinLinkOut(Schema):
     join_code: str
 
 
-#: 입력이 받는 등급 — 가산(`bonus`)은 AI 제외·사람 점수와 함께 다음 티켓(#905)에서 연다(ADR-0073).
-ChecklistGradeIn = Literal["required", "optional"]
+#: 입력이 받는 등급 — 가산(`bonus`)은 AI 가 매기지 않고 강사가 사람 점수로 매긴다(#905, ADR-0073).
+ChecklistGradeIn = Literal["required", "optional", "bonus"]
 #: 배점 1~10(완성도에만 쓴다, ADR-0073).
 ChecklistPointsIn = Annotated[int, Field(ge=1, le=10)]
 
@@ -1270,6 +1270,24 @@ class QualityItemOut(Schema):
     #: 지금 배점(1~10)과 항목 점수(0~5 ÷ 5 × 배점) — #904, ADR-0073.
     points: int
     item_points: float
+    #: 가산 항목(#905) — AI 가 아니라 강사가 매긴다. `reasoning` 자리에 강사의 한 줄 메모가 온다.
+    bonus: bool = False
+    #: 가산을 아직 매기지 않았으면 거짓(0점). AI 항목은 늘 참.
+    rated: bool = True
+
+
+class ClassroomBonusScoreIn(Schema):
+    """강사가 매기는 가산 점수 — 0~5 정수와 한 줄 메모(선택). 같은 칸에 다시 보내면 덮어쓴다."""
+
+    score: int = Field(ge=0, le=5)
+    memo: str = Field(default="", max_length=200)
+
+
+class ClassroomBonusScoreOut(Schema):
+    submission_id: int
+    item_id: int
+    score: int
+    memo: str
 
 
 class QualityRankRowOut(Schema):
@@ -1287,6 +1305,8 @@ class QualityRankRowOut(Schema):
     max_weighted_score: int
     completeness: float
     items: list[QualityItemOut]
+    #: 「가산 다시 매김 필요」(#905) — 지난 대상 시도에 가산이 있었는데 지금 대상 시도에는 없다.
+    bonus_needs_rerate: bool = False
 
 
 class QualityBoardOut(Schema):
