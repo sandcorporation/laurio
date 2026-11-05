@@ -102,6 +102,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `POST .../reopen` | 재개최 |
 | `POST .../extend-judging-period[/{order}/confirm]` | 심사기간 연장(유료) |
 | `GET .../submissions/compare` | 제출작 비교 — 요구사항마다 배점, 제출마다 완성도(#884·#904, ADR-0072·0073: 지금 배점으로 계산한 합·만점 「total / max_total」·정수 합 `raw_total`·「완성도 순위」 등수·요구사항별 0~5·항목 점수·근거, 아직 없으면 null) |
+| `PUT .../submissions/{sid}/bonus/{rid}` | 가산 점수(#905, ADR-0073) — 개최자만(남이면 403), 마감 뒤에만(전이면 409), 가산 요구사항만. 0~5·메모(200자). 다시 매기면 덮어쓴다. Score·Distribution 은 바뀌지 않고 완성도 합에만 든다. 비교 응답에 `bonus_scores` |
 | `POST .../award` | 선정 |
 | `GET`·`POST .../handover[/accept]` | 인수 |
 | `GET`·`POST .../payout` | 지급 |
@@ -284,7 +285,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open`·`.../hide`·`.../reopen` | 초안→열림→숨김→열림 전이(#440, `classroom.problem_transitions`) — 표에 없는 상태에서 부르면 400, 열림·숨김으로 가는 전이는 필수 체크리스트 항목이 없으면 400 |
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |
-| `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외). 등급은 `grade`(필수·선택 — 가산은 아직 받지 않는다), `grade` 없이 `required` 만 오면 옛 모양으로 읽는다. 배점 `points`(1~10)는 완성도에만 쓰고 고쳐도 다시 채점하지 않는다(#904, ADR-0073) |
+| `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외). 등급은 `grade`(필수·선택·가산, #905), `grade` 없이 `required` 만 오면 옛 모양으로 읽는다. 배점 `points`(1~10)는 완성도에만 쓰고 고쳐도 다시 채점하지 않는다(#904, ADR-0073) |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
 | `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·상태·시도 수·마지막 시도 시각(#288, #639), 그리고 눈썹의 강사 이름들(`instructor_display_names`, 가입 미리보기와 같은 함수, #671) |
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286), 소스 업로드 상한(`max_source_asset_bytes`, 운영자 정책 값 그대로, #671) |
@@ -292,6 +293,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET .../problems/{id}/quality` | 강사의 「완성도 순위」(#883, ADR-0072) — 참여자(강사·내보낸 사람 제외)별 가장 최근 통과 시도 가운데 지금의 기록(같은 시도 + 같은 체크리스트 지문)이 있는 사람만, 가중 점수로 등수(동점 같은 등수), 완성도(0~100)·항목별 0~5·근거, 큐에 있는 수·실패한 사람. 공개 스위치(`quality_public`)는 문제 PATCH 로 바꾼다 |
 | `GET .../problems/{id}/quality/estimate` | 「완성도 채점」 확인 단계 — 새로 채점할 사람 수·재사용할 수·예상 비용(원, 단가 모름이면 null)·채점을 막는 사유(`no_api_key`·`model_rejected`) |
 | `POST .../problems/{id}/quality/run` | 새로 채점할 시도를 큐에 넣는다(grader 가 판정과 같은 연결당 상한 아래에서 집는다) — 막는 사유가 있으면 409, 보관된 클래스면 403. 비용·사용량은 그 클래스의 채점 연결(강사 키) |
+| `PUT .../problems/{id}/quality/bonus/{submission_id}/{item_id}` | 가산 점수(#905, ADR-0073) — 강사·공동 강사, 지금 완성도 대상 시도의 가산 항목만(아니면 409), 보관된 클래스면 403. 0~5·메모(200자), 덮어쓴다. 순위 행에 항목별 `bonus`·`rated`, 대상 시도가 바뀌어 다시 매겨야 하면 `bonus_needs_rerate` |
 | `GET .../problems/{id}/quality/mine` | 참여자 본인의 「완성도 순위 k등 / N명」·완성도·항목별 — 공개가 꺼졌거나 본인 기록이 없으면 404. 다른 참여자의 이름·점수는 없다 |
 | `POST .../problems/{id}/copy` | 문제를 자기 다른 클래스로 복사한다 — 체크리스트·채점 설정은 따라오고 제출물·시도·Score는 없다, 복사본은 언제나 초안이다(#292) |
 | `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·채점 연결(OpenAI 키·Claude 키·호환 서버 주소와 인증 값)은 따라오지 않는다(#293, #605) |
