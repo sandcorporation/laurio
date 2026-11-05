@@ -374,6 +374,13 @@ class Contest(models.Model):
     def is_published(self) -> bool:
         return self.Status.SUBMITTABLE(self.status)
 
+    @property
+    def is_content_editable(self) -> bool:
+        """소유자가 브리프·요구사항을 고칠 수 있는가 — 수정 게이트
+        (`contests.api._get_owned_content_editable_contest`)와 내 공모전 목록의 `can_edit` 이
+        **같은 판정**을 쓴다(#881). 소유는 호출부가 이미 가렸다."""
+        return self.Status.CONTENT_EDITABLE(self.status)
+
     # --- 시간 창 (#143, #124) — Contest 가 자기 시간 창을 안다 ---------------------------------
     #
     # 「이 사람이 지금 무엇을 해야 하는가」를 판정하는 번역기(sponsorship·participation)와 그 행위

@@ -1403,7 +1403,7 @@ def _get_owned_content_editable_contest(request: HttpRequest, contest_id: int) -
 
     contest = _get_owned_contest(request, contest_id)
 
-    if not Contest.Status.CONTENT_EDITABLE(contest.status):
+    if not contest.is_content_editable:
         raise HttpError(
             409,
             "마감된 공모전은 더 이상 수정할 수 없습니다 — 채점이 이미 지금의 요구사항을 "

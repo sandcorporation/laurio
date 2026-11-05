@@ -531,11 +531,18 @@ class MySponsoredContestOut(Schema):
     # 몇 명이 냈는지가 그 자리에서 보여야 심사하러 갈지 판단할 수 있다.
     submission_count: int
     next_action: SponsorNextAction
+    # 「수정하기」를 보일지 — 수정 게이트와 같은 판정(`Contest.is_content_editable`, #881).
+    # 화면이 `status` 를 직접 비교하지 않는다.
+    can_edit: bool
     created_at: datetime
 
     @staticmethod
     def resolve_contest_id(obj) -> int:
         return obj.id
+
+    @staticmethod
+    def resolve_can_edit(obj) -> bool:
+        return obj.is_content_editable
 
     @staticmethod
     def resolve_submission_count(obj) -> int:
