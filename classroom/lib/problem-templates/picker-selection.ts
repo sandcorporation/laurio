@@ -7,7 +7,8 @@ import type { ImportableProblemRow } from "@/lib/problems/api";
 
 import type { ProblemTemplateListItem, ProblemTemplateRow } from "./api";
 
-export type PickerTab = "public" | "mine" | "other-classes";
+// `contest` 탭(#548·#876)은 목록 모양이 달라(검색·더 보기) 시트가 직접 다루고, 이 함수의 미리보기는 없다.
+export type PickerTab = "public" | "mine" | "other-classes" | "contest";
 
 export type PickerCandidatePreview = {
   key: string;
@@ -34,7 +35,7 @@ export function selectPickerCandidate(input: {
   otherItems: ImportableProblemRow[] | null;
 }): PickerCandidatePreview | null {
   const { tab, selectedKey, publicItems, publicDetail, mineItems, otherItems } = input;
-  if (!selectedKey) return null;
+  if (!selectedKey || tab === "contest") return null;
 
   if (tab === "public") {
     if (!publicItems) return null;
