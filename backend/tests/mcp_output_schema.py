@@ -12,6 +12,12 @@ enum·additionalProperties·minimum·maximum·minLength·maxLength·minItems)만
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.mcp_tool import Tool
+
 _KNOWN = {
     "type",
     "properties",
@@ -73,9 +79,12 @@ def schema_errors(value, schema: dict, path: str = "$") -> list[str]:
     return errors
 
 
-def assert_matches_output_schema(tool_name: str, structured: dict) -> None:
-    from classroom.mcp import TOOLS
+def assert_matches_output_schema(tool_name: str, structured: dict, tools: Mapping[str, Tool] | None = None) -> None:
+    """`tools` 를 주지 않으면 강의실 등록부를 본다 — 공모전 MCP 시험은 `contests.mcp.TOOLS` 를 넘긴다."""
 
-    schema = TOOLS[tool_name].describe()["outputSchema"]
+    if tools is None:
+        from classroom.mcp import TOOLS as tools
+
+    schema = tools[tool_name].describe()["outputSchema"]
     errors = schema_errors(structured, schema)
     assert not errors, f"{tool_name} 의 응답이 outputSchema 와 어긋난다: {errors}"

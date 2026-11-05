@@ -35,6 +35,9 @@ api = NinjaAPI(title="Codemit API", version="0.1.0")
 
 api.add_router("", accounts_router)
 api.add_router("", verification_router)
+# 공모전 연결된 앱(#870)은 공모전 라우터보다 먼저 — 아니면 `/contests/{contest_id}` 가
+# `/contests/connected-apps` 를 먼저 잡아 422 를 낸다.
+api.add_router("/contests", contests_connected_app_router)
 api.add_router("", contests_router)
 api.add_router("", payments_router)
 api.add_router("", submissions_router)
@@ -47,7 +50,6 @@ api.add_router("/ledger", ledger_router)
 api.add_router("/classroom", classroom_router)
 api.add_router("/classroom", classroom_template_router)
 api.add_router("/classroom", classroom_connected_app_router)
-api.add_router("/contests", contests_connected_app_router)
 
 
 @api.get("/health")
