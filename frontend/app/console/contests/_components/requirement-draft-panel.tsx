@@ -104,17 +104,17 @@ function PointsSelect({
   testId: string;
 }) {
   return (
-    <label className="flex items-center gap-1.5 text-xs text-ink/60">
+    <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-ink/60">
       배점
       <select
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         data-testid={testId}
-        className={INPUT_CLASS}
+        className="w-[64px] border border-rule bg-surface px-1.5 py-2 text-sm text-ink focus:border-ink focus:outline-none"
       >
         {POINTS_OPTIONS.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {option}점
           </option>
         ))}
       </select>

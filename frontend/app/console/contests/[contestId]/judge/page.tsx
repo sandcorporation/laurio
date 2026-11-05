@@ -326,7 +326,7 @@ export default function JudgeComparisonPage() {
                         >
                           {POINTS_OPTIONS.map((value) => (
                             <option key={value} value={value}>
-                              {value}
+                              {value}점
                             </option>
                           ))}
                         </select>

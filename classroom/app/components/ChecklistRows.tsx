@@ -200,7 +200,7 @@ export function ChecklistRows({
               value={item.points}
               disabled={locked}
               onChange={(event) => onPointsChange(item.key, Number(event.target.value))}
-              className={`${INPUT_CLASS} w-[64px] shrink-0 px-1.5`}
+              className="w-[64px] shrink-0 border border-rule bg-surface px-1.5 py-2 text-[13.5px] text-ink focus:border-ink focus:outline-none disabled:cursor-not-allowed disabled:bg-paper disabled:text-ink/50"
             >
               {POINTS_OPTIONS.map((value) => (
                 <option key={value} value={value}>
