@@ -21,7 +21,7 @@
 #                       적용할 마이그레이션이 있으면 그 전에 DB 를 덤프한다(실패하면 멈춘다, #839)
 #   predeploy-dump      그 덤프만 — 적용할 마이그레이션이 있을 때만 뜬다(prod, 아래 dump_before_migrate)
 #   verify              컨테이너가 running 인지 본다
-#   e2e-digest          떠 있는 앱·backend 가 열차의 e2e 가 본 이미지인지 견준다(prod, 관측만 — #729)
+#   e2e-digest          떠 있는 앱·backend 가 PR 검사의 e2e 가 본 이미지인지 견준다(prod, 관측만 — #729)
 #   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   recreate-infra      db·redis 를 compose 의 이미지(digest)대로 다시 만든다 — 사람이 손으로만(#790)
@@ -267,10 +267,10 @@ cmd_preflight() {
 # **prod 에이전트에는 python3 가 없다**(#849). `jenkins-desktop-agent` 는 docker CLI·git 만 든 Debian
 # 컨테이너라 이 머리에서 python3 를 부르면 늘 실패했고, `2>/dev/null` 이 그 이유를 삼켜 매 배포가 경로 비교로
 # 떨어졌다(#554·#559·#563 — `backend/tests/` 만 바뀌어도 backend 다섯을 다시 띄웠다). 그래서 python3 가 있는
-# 컨트롤러가 「대상 확인」 단계에서 같은 명령을 GitHub 의 `production`(= 직전 성공 배포) 기준으로 돌려
-# `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·`CODEMIT_CTX_CHANGED` 로 넘긴다(Jenkinsfile). 여기서는 python3 가 있으면
-# 손수 내고, 없으면 그 값을 **기준과 대상 커밋이 둘 다 같을 때만** 쓴다 — 배포 표식이 `production` 과 어긋났으면
-# 그 답은 다른 질문의 답이다. `CODEMIT_DEPLOY_PYTHON` 은 시험이 「python3 없는 에이전트」를 흉내 내는 자리다.
+# 빌드 노드의 `scripts/ci/build-images.sh` 가 같은 명령을 직전 성공 배포(jenkins-shared 의 `SANDCORP_PREVIOUS_SHA`) 기준으로
+# 돌려 `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·`CODEMIT_CTX_CHANGED` 로 넘긴다(라이브러리 buildScript → deployScript, #873 —
+# 그 전에는 컨트롤러의 「대상 확인」이 GitHub 의 `production` 기준으로 냈다). 여기서는 python3 가 있으면 손수 내고, 없으면
+# 그 값을 **기준과 대상 커밋이 둘 다 같을 때만** 쓴다 — 배포 표식이 그 기준과 어긋났으면 그 답은 다른 질문의 답이다. `CODEMIT_DEPLOY_PYTHON` 은 시험이 「python3 없는 에이전트」를 흉내 내는 자리다.
 context_changed() {
   CTX_CHANGED=""; CTX_FROM=""; CTX_WHY=""
   ctx_head=$($GIT rev-parse "$2" 2>/dev/null) || { CTX_WHY="$2 을 모른다"; return 1; }
@@ -1131,16 +1131,16 @@ cmd_verify() {
 
 # ------------------------------------------------------- e2e 가 본 이미지인가
 
-# 끝 조건 「e2e 가 돈 이미지 = prod 이미지」를 사람이 아니라 잡이 본다(#729). 열차는 시험 둘이 초록인
-# 묶음에서 e2e 가 받은 arm64 이미지(`test-results/images.txt` 의 RepoDigests)에 **병합 전에**
-# `e2e-<묶음 트리>-arm64` 태그를 붙인다(`scripts/ci/images-e2e.sh`). 병합이 다 끝나면 main 의 트리가 그
-# 트리와 같으므로, 여기서 이 커밋의 트리로 그 태그를 받아 떠 있는 컨테이너의 이미지 ID 와 견준다 — 같은
-# ID 면 같은 이미지다(이미 있는 층이라 받기는 매니페스트 한 번이다). 열차 산출물을 Jenkins API 로 읽지 않는
+# 끝 조건 「e2e 가 돈 이미지 = prod 이미지」를 사람이 아니라 잡이 본다(#729). PR 검사(`scripts/ci/pr-check.sh`)는
+# e2e·celery 가 초록이면 e2e 가 받은 arm64 이미지(`test-results/images.txt` 의 RepoDigests)에 **병합 전에**
+# `e2e-<트리>-arm64` 태그를 붙인다(`scripts/ci/images-e2e.sh`; #873 전에는 열차가 묶음 트리로). PR 이 main 위에 있던
+# 채 squash 병합되면 main 의 트리가 그 트리와 같으므로, 여기서 이 커밋의 트리로 그 태그를 받아 떠 있는 컨테이너의 이미지 ID 와 견준다 — 같은
+# ID 면 같은 이미지다(이미 있는 층이라 받기는 매니페스트 한 번이다). PR 검사 산출물을 Jenkins API 로 읽지 않는
 # 이유: oracle 에이전트에는 Jenkins 자격증명이 없고(copyartifact 플러그인도 없다), 레지스트리 로그인은 이미
-# 있다. 태그가 없으면 열차를 거치지 않은 트리(직접 push·병합 사이에 main 이 움직였다)라고 적는다.
+# 있다. 태그가 없으면 PR 검사가 보지 않은 트리(직접 push·뒤처진 PR 의 병합·한 push 에 묶인 병합)라고 적는다.
 # **관측만 한다 — 다르거나 대조하지 못해도 0 으로 끝난다.** 콘솔의 「e2e 대조:」 줄이 결과다.
 #
-# **다르다고 다 다른 코드는 아니다**(#738). ctx 태그가 prune 으로 지워진 서비스는 열차가 같은 문맥을 다시
+# **다르다고 다 다른 코드는 아니다**(#738). ctx 태그가 prune 으로 지워진 서비스는 PR 검사가 같은 문맥을 다시
 # 굽는데 buildx 는 digest 가 같다는 보장이 없고, `plan` 은 문맥이 같으니 그 서비스를 바꿔 끼우지 않는다. 그래서
 # 다르면 떠 있는 컨테이너를 만든 커밋(이미지 이름의 `<sha>-<arch>` 태그 — 배포가 `CODEMIT_IMAGE_TAG` 로 쓴
 # 것)과 이 커밋의 문맥을 `plan` 과 같은 `image_context.py changed` 로 견준다: 같으면 「다르다(문맥 같음 — 다시
@@ -1161,7 +1161,7 @@ cmd_e2e_digest() {
     running=$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null)
     ref="$repo/codemit-$svc:e2e-$tree-$arch"
     if ! docker pull -q "$ref" >/dev/null 2>&1; then
-      echo "e2e 대조: $svc — $ref 가 없다(열차가 이 트리를 e2e 로 보지 않았다)"; missing=$((missing + 1)); continue
+      echo "e2e 대조: $svc — $ref 가 없다(PR 검사가 이 트리를 e2e 로 보지 않았다)"; missing=$((missing + 1)); continue
     fi
     tested=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)
     # 대조용 태그는 남기지 않는다 — 떠 있는 이미지에 붙은 태그 하나를 떼는 것뿐이다.

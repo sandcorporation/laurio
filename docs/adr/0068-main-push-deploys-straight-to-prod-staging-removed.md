@@ -1,6 +1,6 @@
 # main push 가 곧 prod 배포다 — staging 배포·amd64 이미지·PROMOTE_PRODUCTION 을 걷는다
 
-Status: Accepted (2026-10-30 결정)
+Status: Amended by ADR-0071 (2026-10-30 결정)
 
 ## 맥락 (#836, #840)
 

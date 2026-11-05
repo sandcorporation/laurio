@@ -250,10 +250,18 @@ git push -u origin "$(git rev-parse --abbrev-ref HEAD)"
 gh pr create --base main --fill
 ```
 
-Jenkins `codemit/ci-pr` 가 그 분기의 home 검사를 돌려 줄 세우고, 묶음 병합 큐 `codemit/ci-train` 이
-최신 `main` 위에서 e2e 까지 시험해 초록이면 PR 을 `main` 에 rebase 병합한 뒤 그 범위의 `GlitchTip:`
-줄을 읽어 해결 표시한다(`Jenkinsfile.train` 의 병합 단계). 초안으로 열거나
-`hold` 라벨을 붙이면 병합하지 않는다 — 6단계처럼 사람에게 넘길 분기는 PR 을 열지 않는다.
+Jenkins `codemit/ci-pr` 가 그 분기를 시험한다(home 검사 묶음·e2e — `docs/ops/ci.md`). **초록이면 병합까지
+당신이 한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 병합했다):
+
+```bash
+python3 ~/.claude/skills/issue-track/scripts/wait-ci.py <PR>      # 0 = SUCCESS 일 때만 다음 줄
+gh pr merge <PR> --squash
+```
+
+붉으면 병합하지 않는다 — 고칠 수 있으면 고쳐 push 하고 다시 기다리고, 아니면 PR 을 열어 둔 채 보고서에 적는다.
+병합이 곧 prod 배포이고, 배포 잡이 이미지 굽기 끝에 그 범위의 `GlitchTip:` 줄을 읽어 해결 표시한다
+(`scripts/ci/build-images.sh`) — 그래서 그 줄이 squash 커밋 메시지(= `--fill` 이 채운 PR 본문)에 남아 있어야 한다.
+6단계처럼 사람에게 넘길 분기는 PR 을 열지 않는다.
 
 ### 8. 보고서에 셋을 적는다
 
@@ -278,7 +286,7 @@ rm -f ~/.codemit/glitchtip-lock
 ## 하지 않는 것
 
 - **오류를 손으로 해결 표시하지 않는다.** PR 시험이 초록이고 수정이 `main` 에 들어갈 때만
-  표시한다 — 그 판정은 Jenkins 의 병합 단계가 한다. 「고친 것 같다」와 「고쳤다」는 다르다.
+  표시한다 — 그 판정은 Jenkins 배포 잡의 이미지 굽기가 한다. 「고친 것 같다」와 「고쳤다」는 다르다.
 - **오류 여러 건을 한 번에 다루지 않는다.** 집힌 하나만이다. 같은 원인이 보여도 다른
   오류는 건드리지 않는다 — 각자 자기 차례에 집힌다.
 - **ADR 을 쓰지 않는다.** 새 결정이 필요하다고 판단했다면 그것이 곧 사람을 부르는

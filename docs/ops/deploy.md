@@ -129,51 +129,44 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 반드시 다른 서브도메인을 쓴다 — 같은 오리진을 공유하면 공개 앱이 뚫렸을 때
 운영자 세션 쿠키까지 노출될 길이 생긴다.
 
-**커밋이 prod 까지 가는 길은 둘이다**(ADR-0068):
+**커밋이 prod 까지 가는 길은 둘이다**(ADR-0068, ADR-0071 — portfolio·foresight 와 같은 jenkins-shared 흐름):
 
-1. **브랜치 → PR → `main`.** Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 브랜치마다
-   home 검사를 돌려 초록이면 줄 세우고, 묶음 병합 큐 `codemit/ci-train`(`Jenkinsfile.train`)이 줄 선
-   PR 을 최신 `main` 위에 묶어 e2e 까지 한 번 시험한 뒤 차례로 **rebase 병합**한다(초안·`hold`
-   라벨은 빼고, `scripts/ci/train.py` — 「CI 는 Jenkins 에서 돈다」). **`main` 에 직접
-   push 하지 않는다** — 그러면 시험 없이 이미지가 구워져 prod 까지 간다.
-2. **`main` → prod → `production`.** **`main` 의 push 가 곧 prod 배포다.** 웹훅이 Jenkins `codemit/deploy`
-   잡(`Jenkinsfile`)을 부르고, 그 잡이 한 빌드에서 차례로 돈다:
-   - **대상 확인**(built-in) — `main` 인지, **마지막 prod 배포(GitHub 의 `production`, `ls-remote` 로 지금 읽는다)
-     뒤로** 문서(`.md`·`docs/`)만 바뀌었는지(`scripts/ci/changed.sh`). 문서만이면 여기서 초록으로 끝난다.
-     `production` 은 prod 배포가 초록인 **뒤에만** 앞당기므로 배포가 실패한 커밋 뒤에 문서 커밋이 와도 그 배포를
-     다시 시도한다(#709). 못 읽으면 전부 돈다.
-   - **이미지**(macos) — 바뀐 서비스만 arm64 로 굽고(아래), 이번에 구운 앱의 **부팅 가드**를 같은 노드에서
-     돌고(`CODEMIT_GUARD_ARCH=arm64`, #838 — prod 로 가는 바로 그 이미지다), 다 초록이면 **문맥 태그**를
-     붙인다. **열차를 거쳐 온 커밋은 이 단계를 돌지 않는다**(#712) — 열차가 묶음의 트리로 굽고(구운 앱은
-     부팅 가드까지) e2e 를 그 arm64 이미지로 돌린 뒤 **병합 전에** ctx 태그를 붙여 두므로(#729), 같은 트리의
-     해시를 내는 이 잡은 「대상 확인」에서 `images.sh` 의 retag(굽지 않고 커밋 태그만 더한다)로 끝내고
-     「이미지」 단계는 노드를 잡지 않는다 — macos 실행기를 다음 열차와 다투지 않는다. 구울 것이 하나라도
-     있으면 평소대로 돈다. 열차를 거치지 않은 `main` push(직접 push·트리가 달라진 경우)는 여기서 굽고
-     가드한다 — 판단은 sha 가 아니라 서비스마다의 문맥 해시다.
-   - **prod 배포**(에이전트 `oracle`) — 같은 커밋(`DEPLOY_SHA`)을 `deploy.sh prod <명령>` 으로 Preflight →
-     변경 계획 → 이미지 받기 → 교체(마이그레이션이 있으면 migrate 전에 덤프, #839) → 확인(+e2e 대조) →
-     배포 표식 → 정리.
-   - **production 앞당기기**(built-in) — prod 배포가 초록이면 **그 뒤에** `production` 을 그 커밋으로
-     fast-forward 한다(`scripts/ci/fast_forward.py production <sha>`, Jenkins 자격증명 `github-sandcorporation-token`)
-     — 「prod 에 배포된 커밋」의 기록이자 다음 빌드의 「문서만」 기준이고, 이 push 는 아무 잡도 깨우지 않는다.
+1. **브랜치 → PR → `main`.** Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr` = `sandcorpPrCheck`)가 브랜치마다
+   `scripts/ci/pr-check.sh` 를 돈다 — home 검사 묶음, prod(arm64) 이미지·부팅 가드, 그 이미지로 e2e·celery(「CI 는 Jenkins
+   에서 돈다」). 초록(`wait-ci.py <PR>` 가 SUCCESS)이면 **작업자가 squash 로 병합한다**(`gh pr merge <N> --squash`). 열차
+   (`codemit/ci-train`)·`codemit/automerge` 는 2026-11-05(#873)에 걷었다. **`main` 에 직접 push 하지 않는다** — 그러면
+   시험 없이 이미지가 구워져 prod 까지 간다.
+2. **`main` → prod.** **병합 하나(= `main` push 하나)가 곧 prod 배포 하나다.** 웹훅이 Jenkins `codemit/deploy`
+   잡(`Jenkinsfile` = jenkins-shared `sandcorpDeploy`)을 부르고, 한 빌드에서 차례로 돈다(라이브러리 README 가 원문):
+   - **배포할 커밋 확인**(built-in) — main sha 가 직전 성공 빌드의 sha 와 같으면 `NOT_BUILT`(작업 브랜치 push 가 깨운
+     빌드), 배포하기로 하면 그 커밋에 GitHub 상태 `sandcorp/deploy` = pending.
+   - **이미지 굽기**(macos 먼저, 180초 안에 못 잡으면 home — QEMU 라 느리다) — `scripts/ci/build-images.sh`: 바뀐 서비스만
+     arm64 로 굽고(아래), 이번에 구운 앱의 **부팅 가드**(#838), 다 초록이면 **문맥 태그**. PR 검사가 같은 트리로 이미 굽고
+     ctx 를 붙였으면 전부 「건너뛴다」(커밋 태그만, 수 초)다 — 판단은 sha 가 아니라 서비스마다의 문맥 해시다. 끝에 직전
+     성공 배포 → 이 커밋의 문맥 해시를 oracle 로 넘기고(#849 — oracle 에는 python3 가 없다), 그 범위의 `GlitchTip:` 줄을
+     해결 표시한다(열차의 병합 단계가 하던 일).
+   - **배포**(에이전트 `oracle`) — `scripts/ci/deploy-prod.sh` 가 `deploy.sh prod <명령>` 을 Preflight → 변경 계획 → 이미지
+     받기 → 교체(마이그레이션이 있으면 migrate 전에 덤프, #839; backend·events 는 겹쳐 바꾸기) → 확인(+e2e 대조) → 배포
+     표식 → 정리 순으로 부른다. **「문서만」 병합**은 변경 계획이 배포 표식(`.jenkins-prod-deployed` = 마지막 성공 배포)
+     기준으로 비워 교체 없이 표식만 옮긴다.
+   - **끝**(built-in) — 커밋 상태 `sandcorp/deploy` 를 success/failure 로, 실패면 그 커밋을 만든 PR 에 「배포 실패 — …」
+     댓글, 디스코드 한 줄. 작업자는 `wait-deploy.py --job codemit/deploy --pr <N>` 로 이 상태를 기다린다.
 
-   **prod 를 멈추려면 Jenkins 에서 `codemit/deploy` 를 「Disable」한다** — 이미지는 열차가 계속 굽는다.
-   **prod 만 다시 돌리려면 「Build Now」** — 이미 배포된 커밋이면 `deploy.sh plan` 이 비운다. 파라미터는
-   `IMAGES_ONLY` 하나다(아래).
+   **자동 롤백은 없다**(`autoRollback: false`) — `deploy.sh` 는 배포 표식 기준으로 바꿀 서비스를 정해서, 같은 스크립트를 옛
+   sha 로 다시 부르면 아무것도 되돌리지 않는다. 교체 뒤 실패(종료 2)는 운영을 사람이 봐야 한다는 뜻이다.
+   **prod 를 멈추려면 Jenkins 에서 `codemit/deploy` 를 「Disable」한다.** 옛 커밋으로 되돌리거나 같은 커밋을 다시 배포하려면
+   「Build with Parameters」의 `ROLLBACK_SHA=<sha 40자>` — 빌드 없이 그 커밋의 이미지로 같은 절차를 돈다(`deploy-prod.sh` 가
+   그 커밋을 체크아웃한다). 파라미터는 라이브러리 것(`BUILDER`·`MAC_WAIT_SECONDS`·`ROLLBACK_SHA`)이다.
 
    예전 흐름: 2026-10-02 ~ 10-15 에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging` 을
    앞당겼고 그 push 가 이 잡을 불렀다(조직의 Actions 분량이 바닥나 떠났다 — ADR-0061). 10-15 ~ 10-30 에는
    한 빌드가 amd64·arm64 둘을 굽고 staging 에 배포했으며 prod 는 파라미터를 켠 빌드만 갔다(2026-10-30 에 staging 과 함께 걷었다, ADR-0068). 2026-10-23(#779) 전에는 `production` 을 배포 **전**에
    앞당기고 웹훅이 별도 잡 `codemit-deploy-prod`(`Jenkinsfile.production`, `Jenkinsfile` 의 배포 단계를 복제한
-   것)를 깨웠다.
+   것)를 깨웠다. 10-30 ~ 11-05 에는 열차가 rebase 병합하고, 배포 잡이 「대상 확인」에서 GitHub 의 `production` 과 견줘
+   「문서만」을 가르고 배포가 초록이면 `production` 을 앞당겼다. `production` 브랜치는 이제 움직이지 않는다(지우는 것은 대장 몫).
 
-`production` 은 머지 커밋을 만들지 않으므로 언제나 `main` 의 어느 커밋 그 자체다.
-늦게 끝난 옛 커밋은 건너뛰고, 브랜치가 `main` 에서 갈라져 있으면 밀어붙이지 않고 빨갛게
-멈춘다. **직접 커밋하지 않는다.** (GitHub 의 옛 `staging` 브랜치는 아무도 움직이지 않는다.)
-
-`Jenkinsfile` 의 「prod 배포」 단계(2026-10-23, #779 — 그 전에는 별도 잡 `codemit-deploy-prod` 의
-`Jenkinsfile.production`)는 `deploy.sh prod <명령>` 을 단계별로 부르는 얇은 껍데기이고, **home 의 Jenkins(같은 컨트롤러)에
-붙은 에이전트 `oracle`** 에서 돈다(`agent { node { label 'oracle'; customWorkspace 'workspace/codemit-deploy-prod' } }`).
+배포 단계(`scripts/ci/deploy-prod.sh`)는 `deploy.sh prod <명령>` 을 차례로 부르는 얇은 껍데기이고, **home 의 Jenkins(같은 컨트롤러)에
+붙은 에이전트 `oracle`** 에서 돈다(라이브러리의 `deployDir` = `ws('/home/jenkins/agent/workspace/codemit-deploy-prod')`).
 에이전트는 Oracle A1 호스트의 `jenkins-desktop-agent`
 컨테이너(root·호스트 docker 소켓, 이미지 정의는 호스트 `/server/jenkins`)이고, 이제 **이미지를 굽지
 않고 ghcr 에서 받기만 한다**(아래). 비상용 로컬 빌드(`DEPLOY_IMAGE_SOURCE=build`)를 쓸 때만 그 이미지에
@@ -188,8 +181,8 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 
 **이미지는 Jenkins `codemit/deploy` 잡이 굽는다 — prod 서버는 받기만 한다**(2026-09-17 ghcr,
 2026-10-15 Jenkins — #705, ADR-0061). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
-배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 `Jenkinsfile` 의 「이미지」
-단계가 macos 에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
+배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 PR 검사와 `main` 에 들어온 커밋마다 배포 잡의 「이미지 굽기」
+(`build-images.sh`)가 macos 에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`,
 비공개)에 여섯 전부 `codemit-<서비스>:<sha>-arm64` 로 올린다 — backend·세 앱·search(#450/#451)·pgbouncer
 (#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 예전에는 home 가 같은 여섯을 `-amd64` 로도 구웠다(2026-10-30 에 걷었다, #840·#841). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
 를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
@@ -209,9 +202,10 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   견준다, #729·#738) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
   아무것도 다시 띄우지 않는다(예전의 경로 패턴은 `frontend/playwright.config.ts` 주석 하나에
-  frontend 를 다시 띄웠다, #474). **prod 에이전트(`jenkins-desktop-agent`)에는 python3 가 없다**(#849) — 그래서 컨트롤러가 「대상 확인」
-  단계에서 같은 명령을 `production` 기준으로 돌려 `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·`CODEMIT_CTX_CHANGED` 로
-  넘기고, `plan` 은 그 기준·대상이 배포 표식·HEAD 와 둘 다 같을 때만 쓴다(콘솔 「문맥 해시로 고른다(컨트롤러가
+  frontend 를 다시 띄웠다, #474). **prod 에이전트(`jenkins-desktop-agent`)에는 python3 가 없다**(#849) — 그래서 빌드 노드의 `build-images.sh` 가
+  같은 명령을 직전 성공 배포(라이브러리의 `SANDCORP_PREVIOUS_SHA`) 기준으로 돌려 `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·
+  `CODEMIT_CTX_CHANGED` 를 라이브러리 `buildScript` 의 `$SANDCORP_DEPLOY_ENV` 로 넘기고(#873 전에는 컨트롤러의 「대상 확인」이
+  GitHub 의 `production` 기준으로 냈다), `plan` 은 그 기준·대상이 배포 표식·HEAD 와 둘 다 같을 때만 쓴다(콘솔 「문맥 해시로 고른다(컨트롤러가
   낸 값)」). 해시를 내지 못하면 「이유:」 한 줄을 찍고 경로 패턴으로 떨어진다. compose
   파일·없는 컨테이너·앱 실행 env 의 규칙은 그대로다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
@@ -231,7 +225,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   `docker/prod.env.example` 과 compose 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Jenkins 자격증명 `ghcr-push-token`**(Secret text, classic PAT `write:packages`)이다. 스크립트가
   빌드마다 임시 `DOCKER_CONFIG` 에만 적어(`scripts/ci/ghcr-login.sh`) 노드의 docker 로그인을 건드리지 않는다.
-- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — prod(arm64) 이미지를 열차의 macos 단계와 이 잡의 「이미지」 단계(macos)가 본다(#838·#840, 이미지와 노드의 아키텍처가 같아야 돈다) — 건너뛴 앱의 이미지는
+- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — prod(arm64) 이미지를 PR 검사(macos)와 이 잡의 「이미지 굽기」가 본다(#838·#840, 이미지와 노드의 아키텍처가 같아야 돈다 — 그래서 배포 잡은 macos 를 20분 기다리고(`macWaitSeconds: 1200`), home 으로 넘어간 빌드는 앱을 새로 구워야 하면 가드에서 멈춘다) — 건너뛴 앱의 이미지는
   ctx 태그가 가드 뒤에만 붙으므로 이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(home 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
@@ -240,41 +234,35 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   만료되면 pull 에서 멈춘다. ghcr 는 git SSH 키로 인증할 수 없다.
 - 사람 작업(PAT·두 자격증명)은 `scripts/ghcr-setup-wizard.sh` 가 단계별로 안내한다. ghcr·Jenkins 이미지
   단계가 막혔을 때의 비상구는 서버에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그
-  자리에서 굽는다. 병합 전에 `Jenkinsfile` 을 바꾼 PR 을 돌려 보려면 그 브랜치를 가리키는 임시 잡으로
-  파라미터 `IMAGES_ONLY=true`(이미지·가드까지만, prod·`production` 은 건드리지 않는다) — PR CI 는 이 파일을
-  보지 못한다.
+  자리에서 굽는다. `Jenkinsfile`(배포)은 PR 검사가 보지 못한다 — 바꾼 PR 의 첫 실행이 곧 그 병합의 배포다.
 - **GitHub 쪽에는 CI·배포를 위한 것을 두지 않는다**(#752). `.github/workflows/` 가 없고, 저장소
   변수·시크릿(옛 `PROD_*`·`JENKINS_*` 등, `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN`·
   `GLITCHTIP_TOKEN_FOR_AUTOMATION`)과 Deploy key `promote-production` 은 지웠다 — 공개 값은 서버의
   `.env.<target>`(#711), Jenkins 의 GitHub 쓰기는 자격증명 `github-sandcorporation-token`, GlitchTip 쓰기
   토큰은 Jenkins 자격증명 `glitchtip-automation-token` 이다. 조직 셀프호스티드 러너는 0대다(2026-10-15).
 
-**prod 배포는 `main` 의 push 가 부른다**(2026-10-30, #840). Jenkins 잡 `codemit/deploy`(`/var/jenkins_home/jobs/codemit/jobs/deploy`)는
-**Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`), 브랜치 지정은 `*/main`,
-트리거는 GitHub 웹훅(`GitHubPushTrigger`)이다. 같은 빌드가 이미지 → 부팅 가드 → prod 배포 → `production`
-앞당기기를 차례로 돌므로 배포 단계에 닿는 순간 이미지는 ghcr 에 있다. 단계마다 노드가 달라 다시
-체크아웃하므로, 첫 단계가 적은 커밋(`DEPLOY_SHA`)으로 각 노드를 되돌려 놓는다 — 그 사이 `main` 이
-움직여도 한 빌드는 한 커밋이다. 늦게 도착한 옛 커밋은 `deploy.sh plan` 이 「더 새 커밋이 이미 배포돼
-있다」로 건너뛰고, 배포 표식도 뒤로 옮기지 않는다. 예전에는 main 의 CI 가 `buildWithParameters` 로
-`DEPLOY_SHA` 를 채워 불렀다.
+**prod 배포는 `main` 의 push 가 부른다**(2026-10-30 #840, 2026-11-05 #873 부터 jenkins-shared). Jenkins 잡
+`codemit/deploy`(`/var/jenkins_home/jobs/codemit/jobs/deploy`)는 **Pipeline** 이고(`<flow-definition>`, `scriptPath: Jenkinsfile`),
+브랜치 지정은 `*/main`, 트리거는 GitHub 웹훅(`githubPush()`)이다. 같은 빌드가 확인 → 이미지 굽기 → 배포를 차례로 돌므로
+배포 단계에 닿는 순간 이미지는 ghcr 에 있다. 노드마다 첫 단계가 고른 커밋(`DEPLOY_SHA`)을 체크아웃하므로 그 사이 `main` 이
+움직여도 한 빌드는 한 커밋이다. 한 push 에 병합이 여럿 묶이면 끝 커밋만 배포되고 그 앞 병합 커밋에는 상태가 없다
+(`wait-deploy.py` 는 그 뒤 첫 `sandcorp/deploy` 커밋을 본다). 늦게 도착한 옛 커밋은 `deploy.sh plan` 이 「더 새 커밋이
+이미 배포돼 있다」로 건너뛰고, 배포 표식도 뒤로 옮기지 않는다.
 
-**배포는 `Jenkinsfile` 이 단계마다 부르는 `deploy.sh` 의 명령이다.** prod 배포
-단계가 「Preflight → 변경 계획 → 이미지 받기(서비스별 병렬 pull) →
-교체 → 확인(끝에 「e2e 대조」 — `deploy.sh prod e2e-digest`, 떠 있는 이미지가 열차의 e2e 가 본
-그것인지 콘솔에 적기만 한다, #729) → 배포 표식 → 정리」를
-한 단계씩 보여주고, 단계 본문은 `sh ./deploy.sh <대상> <명령>` 한 줄이다 — `plan` 이
-`.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 파이프라인이 읽어 이미지 단계의 `when` 을
-정한다. 논리는 여전히 `deploy.sh` 에만 있고, 사람이 손으로 돌릴 때는 `deploy.sh <대상>`
-(= `all`) 한 번이면 전부 돈다. 예전에는 한 단계로 통째로 불러 Jenkins 화면에 「배포」 하나만
-보였다. 더 예전에는 잡이 freestyle 이라 `Jenkinsfile` 이 읽히지 않았고, 그걸 모르고
-Jenkinsfile 만 고쳤다가 빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
+**배포는 `deploy-prod.sh` 가 차례로 부르는 `deploy.sh` 의 명령이다** — 「Preflight → 변경 계획 → 이미지 받기(서비스별 병렬
+pull) → 교체 → 확인(끝에 「e2e 대조」 — `deploy.sh prod e2e-digest`, 떠 있는 이미지가 PR 검사의 e2e 가 본 그것인지 콘솔에
+적기만 한다, #729) → 배포 표식 → 정리」. `plan` 이 `.jenkins-<대상>-plan` 에 `KEY=value` 로 적은 계획을 그 스크립트가 읽어
+받을 이미지를 정한다. 논리는 여전히 `deploy.sh` 에만 있고, 사람이 손으로 돌릴 때는 `deploy.sh <대상>`(= `all`) 한 번이면
+전부 돈다. 종료 코드는 라이브러리 약속이다: 1 = 교체 전 실패(옛 서비스 그대로), 2 = 교체 뒤 실패. 2026-11-05 전에는
+`Jenkinsfile` 이 단계마다 한 줄씩 불러 Jenkins 화면에 단계가 보였다 — 지금은 「배포」 단계 하나의 콘솔에 `== deploy.sh prod
+<명령>` 줄로 남는다. 더 예전에는 잡이 freestyle 이라 `Jenkinsfile` 이 읽히지 않았고, 그걸 모르고 Jenkinsfile 만 고쳤다가
+빌드가 `cannot open ./deploy.sh` 로 통째로 실패한 적이 있다.
 
-**빌드가 끝나면 디스코드로 결과가 간다**(2026-09-18). `Jenkinsfile` 의 `post { always }`
-가 성공·실패·중단을 가리지 않고 한 줄을 보낸다 — prod 배포 결과(예: `✅ [Codemit] prod 배포 SUCCESS — #N (sha)`,
-prod 배포 뒤 `production` 앞당기기에서 붉으면 `· production 앞당기기 FAILURE` 를 덧붙이고, `IMAGES_ONLY` 빌드는
-「이미지」), 빌드 번호·커밋 12자·소요 시간·빌드 주소다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는
-사실이 사람에게 닿는 자리가 없었고, 실패는 더 그랬다(2026-09-17 배포가 정리
-단계에서 빨갛게 끝난 것을 한참 뒤에 알았다).
+**빌드가 끝나면 디스코드로 결과가 간다**(2026-09-18, 지금은 라이브러리) — ✅ 성공 · ❌ 실패 · ⚪ 중단, 커밋 12자·빌드 번호·
+빌드 노드·소요 시간·빌드 주소 한 줄(`[Codemit] 배포 SUCCESS — <sha> · #N · 빌드 macos · …`). 건너뛴 빌드(`NOT_BUILT`)는
+보내지 않는다. 배포는 사람이 화면을 보고 있지 않을 때 도는 일이라 끝났다는 사실이 사람에게 닿는 자리가 없었고, 실패는 더
+그랬다(2026-09-17 배포가 정리 단계에서 빨갛게 끝난 것을 한참 뒤에 알았다). 같은 결과가 GitHub 커밋 상태 `sandcorp/deploy`
+로도 남는다 — work 의 작업자에게는 Jenkins 자격이 없어 이것을 읽는다.
 
 **웹훅 주소는 저장소에 없다** — Jenkins 자격증명(Secret text) `discord-deploy-webhook`
 이 들고 있고 파이프라인은 이름으로만 부른다. 그 값을 아는 사람은 그 채널에 아무 말이나
@@ -303,17 +291,17 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 멈췄다**. 그때 실측이 이미지 여섯 99 버전 · 빌드 캐시(`codemit-buildcache`) **176 버전**이다 —
 캐시 쪽은 대부분 태그 없는 블롭이라 화면에서 보이지도 않는다. **읽기는 그대로 됐다** — 쓰기만
 막히는 것이 용량 초과의 모양이다. 지금은 매일 새벽 4시(서울)와 손으로 도는 잡이 패키지마다
-최근 것만 남기고 지운다(이미지 24·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다 — 이미지는 2026-10-15 에 12 에서 24 로 올렸다: 하루에 열 번 넘게 배포하는 날은 12 로는 되돌리기 창이 하루가 안 됐다). **지금 `main`·
-`production` 끝 커밋의 태그를 가진 버전은 몇 번째든 남긴다**(#705 — 셋은 지울 때마다 GitHub 에서 다시 읽고,
-하나라도 못 읽으면 지우지 않고 멈춘다, #709) — 바뀌지 않은 서비스는 옛 버전에 커밋
+최근 것만 남기고 지운다(이미지 24·캐시 10, 파라미터로 바꾼다, `DRY_RUN` 도 있다 — 이미지는 2026-10-15 에 12 에서 24 로 올렸다: 하루에 열 번 넘게 배포하는 날은 12 로는 되돌리기 창이 하루가 안 됐다). **지금 `main` 끝 커밋의
+태그를 가진 버전은 몇 번째든 남긴다**(#705 — 지울 때마다 GitHub 에서 다시 읽고, 못 읽으면 지우지 않고 멈춘다, #709. 옛
+`production` 브랜치가 남아 있으면 그 끝도 남긴다 — #873 뒤로 움직이지 않는다) — 바뀌지 않은 서비스는 옛 버전에 커밋
 태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
 센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **빌드 캐시는
 이름으로 가른다**(#727): 지금 이름(`<서비스>-arm64`, 여섯)은 늘 남기고, 옛 이름(`<앱>-prod`·`<서비스>-amd64` 등)은 늘 지우고,
 캐시 10 은 태그 없는 버전에만 센다 — 순서로만 자르면 (당시 amd64 까지) 살아 있는 태그 열둘이 10 을 넘어 드물게 굽는 search·pgbouncer 의
-캐시가 지워졌다. **병합되지 않은 묶음의 이미지는 순서보다 먼저 지운다**(#729): 열차는 쌓은 커밋 sha 로
-이미지를 올리는데(붉은 묶음·가른 재실행 포함) 그 sha 는 main 에 오지 않아, 순서로만 자르면 이것들이 12 를 채워
+캐시가 지워졌다. **병합되지 않은 커밋의 이미지는 순서보다 먼저 지운다**(#729): PR 검사는 브랜치 커밋 sha 로
+이미지를 올리는데(열차 시절에는 쌓은 묶음 sha) squash 병합이라 그 sha 는 main 에 오지 않아, 순서로만 자르면 이것들이 12 를 채워
 main 커밋의 되돌리기 창이 줄었다. 잡이 main 의 커밋 목록(`--main-shas`, 얕은 체크아웃이면 쓰지 않는다)을 넘기면
-커밋 태그가 전부 main 에 없고 `ctx-` 도 없는 버전을 먼저 지우고 12 는 나머지로 센다 — 지금 도는 열차의 것은
+커밋 태그가 전부 main 에 없고 `ctx-` 도 없는 버전을 먼저 지우고 12 는 나머지로 센다 — 지금 도는 PR 검사의 것은
 6시간 유예로 남긴다(2026-10-15 실측: classroom 26 버전 중 4개가 그런 버전이었다). **레지스트리
 쓰기가 막혀도 이 삭제는 된다.** 토큰은 Jenkins 자격증명 `ghcr-prune-token`(Secret text·Secret file·아이디/비밀번호 어느 종류든) — **classic PAT**
 (`read:packages`·`delete:packages`)여야 한다(fine-grained 토큰은 패키지 API 에 닿지 못한다).
@@ -527,7 +515,7 @@ jenkins` 와 `/server/jenkins/...` 는 그 호스트에서만 유효하다(개�
 
 Jenkins 컨테이너는 호스트 docker 소켓을 물고 root 로 돈다. 빌드 로그는
 `docker exec jenkins sh -c 'tail /var/jenkins_home/jobs/codemit/jobs/deploy/builds/<N>/log'`.
-컨트롤러에서 도는 단계(대상 확인·`production` 앞당기기·알림)의 워크스페이스는 잡의 기본 자리인 컨테이너의
+컨트롤러에서 도는 단계(배포할 커밋 확인·알림)의 워크스페이스는 잡의 기본 자리인 컨테이너의
 `/var/jenkins_home/workspace/codemit/deploy` 이자 호스트의 `/server/jenkins/workspace/codemit/deploy` 다(예전에는 staging 의 `workspace/codemit-deploy-staging` 을 붙잡았다) — **경로가 다르므로** compose 에 상대경로
 바인드 마운트를 넣으면 호스트 데몬이 엉뚱한 곳을 본다. 지금은 named volume 뿐이다.
 

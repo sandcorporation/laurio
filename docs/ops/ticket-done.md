@@ -5,11 +5,13 @@
 로컬 게이트는 셋이다 — **바꾼 자리의 백엔드 시험**(`scripts/test.sh backend <파일…>`,
 400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. Jenkins
-`codemit/ci-pr` 가 home 검사를 통과한 커밋을 줄 세우고, 묶음 병합 큐 `codemit/ci-train` 이 줄 선 PR 을
-최신 `main` 위에 묶어 e2e 까지 시험한 뒤 **스스로 `main` 에 rebase 병합한다**(2026-10-03) — 사람이 머지 버튼을
-누르지 않고, `main` 에 직접 push 하지 않는다(시험 없이 이미지가 구워져 곧바로 prod 에 배포된다).
-병합을 막으려면 초안으로 열거나 `hold` 라벨을 붙인다. 다음 티켓을 시작하기 전에 PR 의 결과
-(빌드·`codemit/automerge` 상태)와 이어지는 `main` push 의 prod 배포(`codemit/deploy`, 문서만이면 건너뜀)를 확인해 보고한다.
+`codemit/ci-pr`(`Jenkinsfile.pr`)가 home 검사 묶음과 arm64 이미지·부팅 가드·e2e·celery 를 돌린다(「CI 는 Jenkins 에서 돈다」).
+**`python3 ~/.claude/skills/issue-track/scripts/wait-ci.py <PR>` 가 SUCCESS 면 작업자가 `gh pr merge <PR> --squash` 로
+병합한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합이 곧 prod 배포다** — 병합하면
+`python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡(`codemit/deploy`)의
+GitHub 상태 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록). `main` 에 직접 push 하지 않는다
+(시험 없이 이미지가 구워져 곧바로 prod 에 배포된다). work 에는 Jenkins 키가 없다 — PR 검사의 실패 줄은 home Jenkins 홈의
+빌드 로그(`/var/jenkins_home/jobs/codemit/jobs/ci-pr/branches/<브랜치>/builds/<N>/log`)를 읽기만 해서 본다.
 
 **push 를 빠뜨리면 CI 는 아무것도 보지 않는다.** 실제로 그런 적이 있다 — 하루 작업 20커밋이
 푸시되지 않은 채 쌓였고, 그 사이 CI 잡 하나가 21시간 빨간 것도 아무도 몰랐다. e2e 를 CI 에
@@ -75,6 +77,6 @@ scripts/test.sh e2e --project=public e2e/payout.spec.ts -g "상금 그대로가"
 안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 4초가 아니라 7분**이 된다. 슬라이스
 하나에 그 왕복이 여러 번 있으니 티켓 하나가 통째로 테스트 대기에 잠긴다.
 
-**CI 가 돌리는 것.** 열차(`codemit/ci-train`)의 macos 가지가 `scripts/ci/e2e.sh` 로 세 프로젝트를
+**CI 가 돌리는 것.** PR 검사(`codemit/ci-pr`, macos)가 `scripts/ci/e2e.sh` 로 세 프로젝트를
 `frontend/scripts/e2e-two-pass.sh` 의 두 패스씩 돈다(#702). 로컬에서 같은 것을 한 프로젝트만 돌리면
 `scripts/test.sh e2e --project=<public|operator|classroom>` 이고, 한 번에 400개까지다.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# macos 노드의 열차 단계 첫머리 — 앞 빌드가 남긴 스택과 디스크를 걷는다(2026-10-03).
+# macos 노드의 PR 검사 첫머리(scripts/ci/pr-check.sh, #873 전에는 열차 단계) — 앞 빌드가 남긴 스택과 디스크를 걷는다(2026-10-03).
 #
 # e2e.sh·celery-broker.sh 는 끝날 때 trap 으로 스택을 지우지만, Jenkins 가 빌드를 중단하면
 # 프로세스 나무를 곧장 죽여 trap 이 돌지 못한다. 그렇게 남은 스택 둘(볼륨 400여 개·30GB)이
@@ -39,7 +39,7 @@ docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -E "$PAT" | while rea
   grep -qxF "${img%:latest}" <<<"$in_use" && continue
   docker image rm "$img" >/dev/null 2>&1
 done
-# 열차가 받아 띄운 배포 이미지(#712, `compose.ci-images.yaml`) — `ghcr.io/sandcorporation/codemit-<서비스>:<sha>-<arch>`.
+# PR 검사가 받아 띄운 배포 이미지(#712, `compose.ci-images.yaml`) — `ghcr.io/sandcorporation/codemit-<서비스>:<sha>-<arch>`.
 # 커밋마다 태그가 새로 생기므로 저장소마다 **가장 새것 하나**만 남긴다 — 다음 실행이 받을 때 바뀌지 않은
 # 층(의존성·기반 이미지)을 다시 받지 않게 하는 층 캐시다. 컨테이너가 쓰는 것은 건드리지 않는다.
 # `docker image ls` 는 새것부터 나온다.

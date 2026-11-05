@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """`main` 에 들어온 커밋이 고친 GlitchTip 이슈를 해결 표시한다 (2026-09-18).
 
-Jenkins 열차 `codemit/ci-train` 의 병합 단계(Jenkinsfile.train)가 PR 을 main 에 합친 직후 그 PR 범위로
-부른다(2026-10-02 — 그 전에는 main 의 Actions 잡이 `auto` 범위로 불렀다). 읽는 것은 **커밋 메시지의 마지막 줄 형식**
+Jenkins 배포 잡 `codemit/deploy` 의 이미지 굽기(`scripts/ci/build-images.sh`)가 직전 성공 배포 → 배포할 커밋 범위로
+부른다(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 의 병합 단계가 PR 범위로(2026-10-02 — 그 전에는 main 의 Actions 잡이 `auto` 범위로 불렀다). 읽는 것은 **커밋 메시지의 마지막 줄 형식**
 하나다:
 
     GlitchTip: 42

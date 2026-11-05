@@ -57,7 +57,7 @@ step "화면 언어 검사기 자체" python3 scripts/test_check_screen_language
 step "GlitchTip precheck 청소 판정" python3 scripts/test_glitchtip_pick.py
 step "이미지 문맥 해시(건너뛰기)" python3 scripts/test_image_context.py
 step "ghcr 정리가 살아 있는 커밋을 남긴다" python3 scripts/test_ghcr_prune.py
-step "e2e 정지의 인프라 판정" python3 scripts/test_e2e_stall.py
+step "배포 이미지 스크립트(건너뛰기·e2e 태그)" python3 scripts/test_ci_images.py
 step "백엔드 오류 문구 언어" python3 scripts/check_backend_error_language.py
 step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
 step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py

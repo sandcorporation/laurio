@@ -1,6 +1,6 @@
-"""`deploy.sh prod e2e-digest` — 떠 있는 앱·backend 가 열차의 e2e 가 본 이미지인지 견준다(#729). 진짜 스크립트를 돌린다.
+"""`deploy.sh prod e2e-digest` — 떠 있는 앱·backend 가 PR 검사의 e2e 가 본 이미지인지 견준다(#729). 진짜 스크립트를 돌린다.
 
-열차는 e2e 가 받은 arm64 이미지에 `e2e-<묶음 트리>-arm64` 태그를 붙이고(`scripts/ci/images-e2e.sh`), prod 는
+PR 검사는 e2e 가 받은 arm64 이미지에 `e2e-<트리>-arm64` 태그를 붙이고(`scripts/ci/images-e2e.sh`), prod 는
 이 커밋의 트리로 그 태그를 받아 컨테이너의 이미지 ID 와 견준다. 여기서 고정하는 셋:
 - 같으면 「같다」, 다르면 「다르다」, 태그가 없거나 컨테이너가 없으면 「대조 못 함」으로 적는다.
 - 「다르다」는 떠 있는 이미지를 띄운 커밋(컨테이너의 `<sha>-arm64` 태그)과 이 커밋의 **문맥**을 견줘 가른다(#738):
@@ -118,7 +118,7 @@ def test_each_service_is_reported_and_the_run_stays_green(prod) -> None:
     out = done.stdout
     assert "e2e 대조: backend — 같다" in out
     assert "e2e 대조: frontend — 다르다!(문맥 다름)" in out  # 옛 커밋에서 떠 있고 문맥이 다르다
-    assert "e2e 대조: operator — " in out and "열차가 이 트리를 e2e 로 보지 않았다" in out
+    assert "e2e 대조: operator — " in out and "PR 검사가 이 트리를 e2e 로 보지 않았다" in out
     assert "e2e 대조: classroom — 떠 있는 컨테이너가 없다" in out
     assert "같다 1 · 다시 구움 0 · 다르다 1 · 대조 못 함 2" in out
     assert f"ghcr.io/sandcorporation/codemit-backend:e2e-{tree}-arm64" in (state / "pulled").read_text()
@@ -137,7 +137,7 @@ def test_unknown_or_missing_target_is_refused(prod, target) -> None:
 
 
 def test_a_rebuilt_image_of_the_same_context_is_told_apart(prod) -> None:
-    # #738 — ctx 가 prune 된 서비스는 열차가 같은 문맥을 다시 굽고 digest 가 바뀐다. plan 은 문맥이 같아
+    # #738 — ctx 가 prune 된 서비스는 PR 검사가 같은 문맥을 다시 굽고 digest 가 바뀐다. plan 은 문맥이 같아
     # 바꿔 끼우지 않으니 떠 있는 것(옛 커밋의 이미지)과 e2e 가 본 것이 다르지만 같은 코드다.
     repo, env, state, _ = prod
     for svc in ("backend", "frontend", "operator", "classroom"):

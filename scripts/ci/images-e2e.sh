@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 열차의 e2e 가 받은 arm64 이미지에 `e2e-<묶음 트리>-arm64` 태그를 붙인다(#729, Jenkinsfile.train 「병합」).
+# PR 검사의 e2e 가 받은 arm64 이미지에 `e2e-<트리>-arm64` 태그를 붙인다(#729 — 지금은 scripts/ci/pr-check.sh 끝, #873 전에는 열차 「병합」).
 #
 #   scripts/ci/images-e2e.sh test-results/images.txt <트리 해시>
 #

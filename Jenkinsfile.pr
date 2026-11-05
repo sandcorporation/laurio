@@ -1,97 +1,21 @@
-// 브랜치·PR 시험 (2026-10-02) — 배포하지 않고 시험만 돌린다. 결과는 GitHub 커밋 상태로 남는다.
+// PR 검사 — 잡 `codemit/ci-pr`(멀티브랜치). jenkins-shared `sandcorpPrCheck`(2026-11-05 #873, ADR-0071 — portfolio·foresight
+// 와 같다). 잡은 지금 **브랜치 발견**이라 결과는 브랜치 머리 커밋 상태 `continuous-integration/jenkins/branch` 이고, 라이브러리의
+// 「PR 검사 실패 — …」 PR 댓글은 PR 빌드에서만 달려 아직 달리지 않는다(PR 발견으로 바꾸는 것은 잡 설정 — docs/ops/ci.md). 작업자는 `wait-ci.py <PR>` 가 SUCCESS 일 때 squash 로
+// 병합한다 — 병합이 곧 prod 배포다(Jenkinsfile). 열차(`codemit/ci-train`)·`codemit/automerge` 상태는 없다.
 //
-// 잡 `codemit/ci-pr`(#780 전에는 `codemit-ci-pr`)은 Multibranch(GitHub 소스 sandcorporation/laurio, `main`·`production` 과 이제 움직이지 않는 옛 `staging` 을 뺀
-// 브랜치)다 — 브랜치마다 하위 잡이 따로 생긴다. 예전에는 GitHub Actions 가 home 의 러너 셋에서 시험을
-// 돌렸는데, 러너들이 home 의 모든 코어를 제한 없이 나눠 써 이미지 빌드와 시험이 겹치면 시험 하나
-// 3초 한도를 경합만으로 넘었다(#499 의 첫 CI). Jenkins 노드는 실행기가 하나라 한 노드에서 두 일이
-// 겹치지 않는다 — 그래서 노드를 통째로 쓴다.
-//
-// 여기서는 home 검사(백엔드·단위 시험·생성물·문서·타입 검사)만 돈다. 문서만 바뀌었으면 문서 검사만
-// 한다(scripts/ci/changed.sh). 초록이면 그 커밋을 **줄 세우고**(`codemit/automerge` = pending) 묶음
-// 병합 큐 `codemit/ci-train`(Jenkinsfile.train)을 부른다 — e2e·celery 와 병합·GlitchTip 해결 표시는
-// 그 잡이 줄 선 PR 을 최신 main 위에 묶어 한 번에 한다(2026-10-03). 예전에는 PR 마다 macos 에서 e2e 를
-// 따로 돌리고 스스로 합쳤는데, PR 넷이면 줄 서서 32분이었고 서로 충돌하는 PR 이 둘 다 초록이었다.
-pipeline {
-  agent none
+// 검사 내용은 `scripts/ci/pr-check.sh`: 문서만이면 ADR 검사, 아니면 home 검사 묶음 + arm64 이미지·부팅 가드·e2e·celery
+// (열차가 하던 것). e2e 가 macos 에서만 돌아 **macos 먼저**, 25분 안에 못 잡을 때만 home(그러면 검사가 붉게 끝난다).
+// 파괴적 migrate 검사는 끈다 — codemit 은 겹쳐 바꾸기 안전을 `ROLLING-DEPLOY-UNSAFE` 표식과
+// `backend/tests/test_migration_rolling_safety.py` 로 따로 지킨다(ADR-0053).
+@Library('sandcorp') _
 
-  environment {
-    // 시험 자원 이름 — 브랜치를 지웠다 다시 만들어 빌드 번호가 되풀이돼도 겹치지 않게 시작 시각을 붙인다.
-    CODEMIT_CI_RUN_ID = "${env.BUILD_TAG}-${currentBuild.startTimeInMillis}"
-  }
-
-  options {
-    timestamps()
-    // 같은 브랜치에 새로 push 하면 그 브랜치의 옛 빌드만 끊는다.
-    disableConcurrentBuilds(abortPrevious: true)
-    timeout(time: 45, unit: 'MINUTES')
-    buildDiscarder(logRotator(numToKeepStr: '20'))
-  }
-
-  stages {
-    stage('변경') {
-      agent { label 'built-in' }
-      steps {
-        script {
-          def plan = sh(
-            returnStdout: true,
-            // origin/main 은 잡 설정의 refspec 이 체크아웃 때 함께 받아 둔다.
-            script: 'scripts/ci/changed.sh "$(git merge-base origin/main HEAD 2>/dev/null)"',
-          ).trim()
-          env.RUN_TESTS = plan.tokenize('=')[1]
-          echo "돌릴 것: ${plan}"
-          def subject = sh(returnStdout: true, script: 'git log -1 --format=%s').trim()
-          currentBuild.description = subject.length() > 90 ? subject.substring(0, 90) + '…' : subject
-        }
-      }
-    }
-
-    stage('시험') {
-      failFast false
-      parallel {
-        stage('home — 백엔드·단위·검사') {
-          when {
-            beforeAgent true
-            expression { env.RUN_TESTS == '1' }
-          }
-          agent { label 'built-in' }
-          steps {
-            sh 'bash scripts/ci/sub-checks.sh'
-          }
-          post {
-            always {
-              junit keepProperties: true, testResults: 'test-results/backend-junit.xml', allowEmptyResults: true
-              archiveArtifacts artifacts: 'test-results/summary.txt', allowEmptyArchive: true
-            }
-          }
-        }
-        stage('문서만') {
-          when {
-            beforeAgent true
-            expression { env.RUN_TESTS == '0' }
-          }
-          agent { label 'built-in' }
-          steps {
-            sh 'python3 scripts/check_adr_status.py'
-          }
-        }
-      }
-    }
-
-    stage('줄 서기') {
-      when {
-        beforeAgent true
-        expression { currentBuild.currentResult == 'SUCCESS' }
-      }
-      agent { label 'built-in' }
-      steps {
-        withCredentials([usernamePassword(credentialsId: 'github-sandcorporation-token', usernameVariable: 'GH_USER', passwordVariable: 'GH_TOKEN')]) {
-          sh 'python3 scripts/ci/train.py enqueue "$(git rev-parse HEAD)"'
-        }
-        // 묶음 잡을 깨운다. 이미 돌고 있으면 줄에 하나로 합쳐지고, 없더라도 30분 cron(`H/30`)이 데려간다.
-        catchError(buildResult: null, stageResult: null, message: '묶음 잡을 부르지 못했다 — 30분 안에 스스로 돈다') {
-          build job: '/codemit/ci-train', wait: false
-        }
-      }
-    }
-  }
-}
+sandcorpPrCheck(
+  name: 'Codemit',
+  check: 'bash scripts/ci/pr-check.sh',
+  // 이미지를 굽고 ghcr 에 올려 e2e 가 그 digest 를 받는다.
+  credentials: [[id: 'ghcr-push-token', variable: 'GHCR_TOKEN']],
+  prefer: 'macos',
+  waitSeconds: 1500,
+  migrationGuard: false,
+  timeoutMinutes: 75,
+)

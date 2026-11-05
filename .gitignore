@@ -53,7 +53,6 @@ node_modules/
 .jenkins-prod-deployed
 .jenkins-prod-plan
 .jenkins-prod-config-hash.err
-.jenkins-production-base
 .jenkins-prod-dumps/
 .images-amd64.result
 .images-arm64.result

@@ -1,9 +1,9 @@
 #!/bin/bash
-# 열차의 macos 쪽 e2e — 세 앱의 프로덕션 이미지 스택을 띄워 세 프로젝트를 돌린다
-# (2026-10-02 Jenkinsfile.pr 에서 시작, 지금은 Jenkinsfile.train 이 부른다).
+# PR 검사의 e2e — 세 앱의 프로덕션 이미지 스택을 띄워 세 프로젝트를 돌린다
+# (2026-10-02 Jenkinsfile.pr 에서 시작, 10-03~11-05 열차, 지금은 `scripts/ci/pr-check.sh` 가 macos 에서 부른다).
 #
 # **이미지는 두 길이다**(#712).
-#   CODEMIT_IMAGE_TAG=<sha>-<arch>   열차의 길 — `images.sh <arch>` 가 레지스트리에 올린 그 이미지를 받아
+#   CODEMIT_IMAGE_TAG=<sha>-<arch>   PR 검사의 길 — `images.sh <arch>` 가 레지스트리에 올린 그 이미지를 받아
 #                                    띄운다(`compose.ci-images.yaml`). 시험한 digest = 배포되는 digest.
 #                                    받을 때 GHCR_TOKEN 이 있으면 그것으로 로그인한다(ghcr-login.sh).
 #                                    받은 이미지는 지우지 않는다 — 다음 실행의 층 캐시다(macos-sweep.sh 가
