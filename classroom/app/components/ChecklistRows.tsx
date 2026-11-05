@@ -153,7 +153,7 @@ export function ChecklistRows({
               setDragKey(null);
               setOverIndex(null);
             }}
-            className={`flex items-center gap-2.5 px-4 py-2.5 ${
+            className={`flex flex-wrap items-center gap-2.5 px-4 py-2.5 ${
               dragKey !== null && overIndex === index && dragKey !== item.key ? "bg-paper" : ""
             } ${dragKey === item.key ? "opacity-40" : ""}`}
           >
@@ -242,7 +242,7 @@ export function ChecklistRows({
               ))}
             </select>
             {onHiddenChange ? (
-              <label className="flex shrink-0 items-center gap-1 text-xs text-ink/70">
+              <label className="flex shrink-0 basis-full items-center gap-1 pl-[30px] text-xs text-ink/70 sm:basis-auto sm:pl-0">
                 <input
                   type="checkbox"
                   data-testid={`${testId}-hidden-input`}
