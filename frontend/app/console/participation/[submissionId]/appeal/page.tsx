@@ -143,7 +143,7 @@ function QualitySection({ quality }: { quality: SubmissionQuality }) {
           <li key={item.item_id} className="border border-rule bg-surface p-3 text-sm">
             <div className="flex flex-wrap items-center gap-2">
               <span className={badgeClass(item.required ? "attention" : "neutral")}>
-                {item.required ? "필수" : "선택"}
+                {item.bonus ? "가산" : item.required ? "필수" : "선택"}
               </span>
               <span>{item.label}</span>
               <span className="ml-auto font-mono" data-testid={`own-quality-item-${item.item_id}`}>

@@ -18,7 +18,8 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
-import { ChecklistRows } from "@/app/components/ChecklistRows";
+import { ChecklistRows, GradeToggle } from "@/app/components/ChecklistRows";
+import type { ChecklistGrade } from "@/lib/problems/grade";
 import {
   GRADABILITY_FORM_NOTE,
   gradabilityWarningLine,
@@ -121,7 +122,7 @@ export default function EditProblemPage() {
   const retryModelMutation = useMutationRequest();
 
   const [newItemLabel, setNewItemLabel] = useState("");
-  const [newItemRequired, setNewItemRequired] = useState(true);
+  const [newItemGrade, setNewItemGrade] = useState<ChecklistGrade>("required");
   // 체크리스트 조작(추가·항목 저장·필수 토글·삭제·순서 바꾸기·문법 검사
   // 켬끔)은 오류 표시 자리(`checklist-error`)를 공유해 한 훅으로 묶는다.
   const checklistMutation = useMutationRequest();
@@ -288,14 +289,14 @@ export default function EditProblemPage() {
       return;
     }
     void checklistMutation.run(
-      () => createChecklistItem(classId, problemId, { label: newItemLabel.trim(), required: newItemRequired }),
+      () => createChecklistItem(classId, problemId, { label: newItemLabel.trim(), grade: newItemGrade }),
       {
         fallbackMessage: "항목을 추가하지 못했습니다. 잠시 후 다시 시도해주세요.",
         reload,
         onSuccess: (item) => {
           noteGradability(item.id, item.gradability_warnings);
           setNewItemLabel("");
-          setNewItemRequired(true);
+          setNewItemGrade("required");
         },
       },
     );
@@ -316,10 +317,10 @@ export default function EditProblemPage() {
     });
   }
 
-  function handleItemRequiredToggle(itemId: number, required: boolean) {
+  function handleItemGradeChange(itemId: number, grade: ChecklistGrade) {
     // 열린·숨긴 문제의 마지막 필수 항목을 필수 해제하면 422가 온다(#440) —
     // 그 문구를 그대로 보여준다, 화면이 다시 판단하지 않는다.
-    void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { required }), {
+    void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { grade }), {
       fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
     });
@@ -596,7 +597,7 @@ export default function EditProblemPage() {
                                   type="button"
                                   data-testid={`zip-git-history-make-optional-${item.id}`}
                                   disabled={isArchived || checklistMutation.pending}
-                                  onClick={() => handleItemRequiredToggle(item.id, false)}
+                                  onClick={() => handleItemGradeChange(item.id, "optional")}
                                   className={buttonClass("secondary", "sm")}
                                 >
                                   이 항목을 선택으로
@@ -648,7 +649,7 @@ export default function EditProblemPage() {
                       items={problem.checklist_items.map((item) => ({
                         key: item.id,
                         label: item.label,
-                        required: item.required,
+                        grade: item.grade,
                         points: item.points,
                       }))}
                       listTestId="checklist-items"
@@ -657,7 +658,7 @@ export default function EditProblemPage() {
                       lockedStructure={followsContest}
                       labelMode={{ kind: "commit", onCommit: (key, label) => handleItemLabelSave(key as number, label) }}
                       onReorder={handleReorder}
-                      onRequiredChange={(key, required) => handleItemRequiredToggle(key as number, required)}
+                      onGradeChange={(key, grade) => handleItemGradeChange(key as number, grade)}
                       onPointsChange={(key, points) => handleItemPointsChange(key as number, points)}
                       onDelete={(key) => handleItemDelete(key as number)}
                     />
@@ -682,17 +683,13 @@ export default function EditProblemPage() {
                         placeholder="새 항목"
                         className={`${INPUT_CLASS} min-w-0 flex-1`}
                       />
-                      <button
-                        type="button"
-                        data-testid="new-checklist-item-required-input"
-                        aria-pressed={newItemRequired}
-                        aria-label={`새 항목 ${newItemRequired ? "필수" : "선택"}`}
+                      <GradeToggle
+                        grade={newItemGrade}
+                        onChange={setNewItemGrade}
+                        testId="new-checklist-item-required-input"
+                        ariaPrefix="새 항목"
                         disabled={isArchived}
-                        onClick={() => setNewItemRequired((prev) => !prev)}
-                        className="shrink-0"
-                      >
-                        <Badge tone={newItemRequired ? "verified" : "neutral"}>{newItemRequired ? "필수" : "선택"}</Badge>
-                      </button>
+                      />
                       <button
                         type="submit"
                         data-testid="new-checklist-item-submit"

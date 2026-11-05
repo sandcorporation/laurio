@@ -1,7 +1,7 @@
 // 완성도(#883, ADR-0072) 백엔드 호출 — 강사의 순위·비용 확인·실행, 참여자 본인의 완성도.
 import type { ApiResult } from "@codemit/bff-client";
 
-import { bffClient } from "@/lib/bff/client";
+import { apiRequest, bffClient } from "@/lib/bff/client";
 
 export type QualityItem = {
   item_id: number;
@@ -13,6 +13,10 @@ export type QualityItem = {
   /** 지금 배점(1~10)과 항목 점수(0~5 ÷ 5 × 배점) — #904. */
   points: number;
   item_points: number;
+  /** 가산 항목(#905) — 강사가 매긴다. `reasoning` 자리에 강사의 한 줄 메모가 온다. */
+  bonus: boolean;
+  /** 가산을 아직 매기지 않았으면 거짓(0점). */
+  rated: boolean;
 };
 
 export type QualityRankRow = {
@@ -26,6 +30,8 @@ export type QualityRankRow = {
   max_total: number;
   raw_total: number;
   items: QualityItem[];
+  /** 「가산 다시 매김 필요」 — 지난 대상 시도에 가산이 있었는데 지금 대상 시도에는 없다(#905). */
+  bonus_needs_rerate: boolean;
 };
 
 export type QualityBoard = {
@@ -67,4 +73,15 @@ export function fetchQualityEstimate(classId: number, problemId: number): Promis
 
 export function runQuality(classId: number, problemId: number): Promise<ApiResult<{ queued_count: number }>> {
   return bffClient.post<{ queued_count: number }>(qualityPath(classId, problemId, "/run"), {});
+}
+
+/** 강사가 가산 하나를 매긴다(#905) — 그 참여자의 지금 완성도 대상 시도에만. */
+export function rateBonus(
+  classId: number,
+  problemId: number,
+  submissionId: number,
+  itemId: number,
+  input: { score: number; memo: string },
+): Promise<ApiResult<{ submission_id: number; item_id: number; score: number; memo: string }>> {
+  return apiRequest(qualityPath(classId, problemId, `/bonus/${submissionId}/${itemId}`), "PUT", input);
 }

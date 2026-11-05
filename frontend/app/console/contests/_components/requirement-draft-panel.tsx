@@ -14,7 +14,7 @@ import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
 import type { ContestDetail, RequirementGrade, RequirementOut, RequirementPatch } from "@/lib/contests/grill-types";
 import { POINTS_OPTIONS } from "@/lib/submissions/quality";
-import { REQUIREMENT_GRADES, REQUIREMENT_TEXT_MAX_LENGTH } from "@/lib/contests/grill-types";
+import { REQUIREMENT_GRADES, REQUIREMENT_TEXT_MAX_LENGTH, requirementGradeLabel } from "@/lib/contests/grill-types";
 
 export interface RequirementDraftPanelProps {
   contest: ContestDetail;
@@ -217,7 +217,7 @@ function RequirementRow({
           isRequired ? "text-attention" : "text-ink/60"
         }`}
       >
-        {isRequired ? "필수" : "선택"}
+        {requirementGradeLabel(requirement.grade)}
       </span>
       <span className="flex-1 text-sm leading-relaxed" data-testid={`requirement-row-${requirement.id}-text`}>
         {requirement.text}
@@ -274,7 +274,8 @@ export function RequirementDraftPanel({
   const effectiveManualPoints = manualPoints ?? (manualGrade === "required" ? 2 : 1);
 
   const requiredCount = requirements.filter((r) => r.grade === "required").length;
-  const optionalCount = requirements.length - requiredCount;
+  const bonusCount = requirements.filter((r) => r.grade === "bonus").length;
+  const optionalCount = requirements.length - requiredCount - bonusCount;
 
   async function submitManual() {
     const trimmed = manualText.trim();
@@ -368,6 +369,7 @@ export function RequirementDraftPanel({
           <p className="text-[11px] tracking-wide text-ink/50">요구사항 체크리스트</p>
           <p className="font-mono text-xs text-ink/60" data-testid="grill-requirement-counts">
             필수 {requiredCount} · 선택 {optionalCount}
+            {bonusCount > 0 ? ` · 가산 ${bonusCount}` : ""}
           </p>
         </div>
 
