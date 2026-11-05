@@ -39,6 +39,8 @@ class ContestClassroomCatalog:
             Contest.objects.filter(
                 is_free=True,
                 allows_classroom_import=True,
+                # 보관한 공모전(#870)은 새로 들여올 수 없다 — 이미 들여온 문제(`get_source`)는 그대로다.
+                archived_at__isnull=True,
                 status=Contest.Status.PUBLISHED,
                 deadline_at__gt=Clock.now(),
             )

@@ -127,7 +127,7 @@ class FakeContestSearchAdapter:
             return []
 
         queryset = Contest.objects.filter(
-            status__in=Contest.Status.PUBLICLY_VISIBLE.statuses
+            status__in=Contest.Status.PUBLICLY_VISIBLE.statuses, archived_at__isnull=True
         )
         if category is not None:
             queryset = queryset.filter(category_id=category)
@@ -148,7 +148,7 @@ class FakeContestSearchAdapter:
 
     def index_or_remove(self, contest_id: int) -> None:
         visible = Contest.objects.filter(
-            id=contest_id, status__in=Contest.Status.PUBLICLY_VISIBLE.statuses
+            id=contest_id, status__in=Contest.Status.PUBLICLY_VISIBLE.statuses, archived_at__isnull=True
         ).exists()
         if visible:
             FakeContestSearchAdapter._indexed[contest_id] = True
@@ -157,7 +157,7 @@ class FakeContestSearchAdapter:
 
     def rebuild(self) -> None:
         visible_ids = Contest.objects.filter(
-            status__in=Contest.Status.PUBLICLY_VISIBLE.statuses
+            status__in=Contest.Status.PUBLICLY_VISIBLE.statuses, archived_at__isnull=True
         ).values_list("id", flat=True)
         # 클래스 레벨 dict 자체를 다른 객체로 바꿔치지 않고 제자리에서 비우고
         # 채운다 — `tests/conftest.py`가 들고 있는 것과 같은 참조를 계속 가리킨다.
@@ -200,7 +200,7 @@ def _db_fallback_search(
     if not needle:
         return []
 
-    queryset = Contest.objects.filter(status__in=Contest.Status.PUBLICLY_VISIBLE.statuses)
+    queryset = Contest.objects.filter(status__in=Contest.Status.PUBLICLY_VISIBLE.statuses, archived_at__isnull=True)
     if category is not None:
         queryset = queryset.filter(category_id=category)
     if deliverable_type is not None:

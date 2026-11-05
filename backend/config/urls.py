@@ -8,8 +8,13 @@
 from django.urls import path
 
 from classroom import mcp, oauth_views
+from contests import mcp as contests_mcp
+from core.oauth_views import oauth_views as _oauth_views
+from contests.oauth import CONTESTS
 from config.api import api
 from core.metrics import metrics_view
+
+_CONTEST_OAUTH = _oauth_views(CONTESTS)
 
 urlpatterns = [
     # 연결된 앱의 MCP·OAuth(ADR-0052, #512) — 규격이 응답 모양을 정해 ninja 밖에 둔다
@@ -27,6 +32,14 @@ urlpatterns = [
     path("api/classroom/oauth/register", oauth_views.register),
     path("api/classroom/oauth/token", oauth_views.token),
     path("api/classroom/oauth/revoke", oauth_views.revoke),
+    # 공모전 MCP(#870) — 바깥 주소는 공개 앱 도메인의 `/mcp`·`/.well-known/oauth-*`·`/oauth/*` 이고
+    # 공개 앱이 이리로 넘긴다. 강의실 `/api/classroom/*` 와 겹치지 않는다.
+    path("api/contests/mcp", contests_mcp.mcp_endpoint),
+    path("api/contests/oauth/metadata/protected-resource", _CONTEST_OAUTH.protected_resource_metadata),
+    path("api/contests/oauth/metadata/authorization-server", _CONTEST_OAUTH.authorization_server_metadata),
+    path("api/contests/oauth/register", _CONTEST_OAUTH.register),
+    path("api/contests/oauth/token", _CONTEST_OAUTH.token),
+    path("api/contests/oauth/revoke", _CONTEST_OAUTH.revoke),
     path("api/", api.urls),
     # 감시 스택이 긁는 자리(2026-09-21) — 내부 이름으로 온 요청에만 답한다(core/metrics.py).
     path("metrics", metrics_view),

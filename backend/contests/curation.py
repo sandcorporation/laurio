@@ -133,7 +133,7 @@ def home_bucket_queryset(base, bucket, *, now):
 
     if bucket == HomeCurationBucket.ONGOING:
         return base.filter(
-            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN),
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN), archived_at__isnull=True,
             deadline_at__gt=imminent_cutoff,
         ).order_by("deadline_at", "id")
 
@@ -144,15 +144,15 @@ def home_bucket_queryset(base, bucket, *, now):
         # 2). `home_bucket_for`가 그 구간을 IN_JUDGING으로 보내는 것과
         # 같은 경계다.
         return base.filter(
-            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN),
+            status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN), archived_at__isnull=True,
             deadline_at__gte=now,
             deadline_at__lte=imminent_cutoff,
         ).order_by("deadline_at", "id")
 
     if bucket == HomeCurationBucket.IN_JUDGING:
         return base.filter(
-            Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING))
-            | Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN), deadline_at__lt=now)
+            Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.IN_JUDGING), archived_at__isnull=True)
+            | Q(status__in=Contest.Status.HOME_AXIS.where(HomeStatusAxis.OPEN), archived_at__isnull=True, deadline_at__lt=now)
         ).order_by("-deadline_at", "-id")
 
     if bucket == HomeCurationBucket.COMPLETED:
