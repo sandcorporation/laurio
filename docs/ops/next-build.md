@@ -32,6 +32,6 @@ DSN·환경·release, 토스 클라이언트 키, 포트원 둘, 문의 주소, 
 **빌드는 외부 네트워크를 쓰지 않는다 — 글꼴은 저장소 안이다**(#743). 세 앱의 서체(Pretendard,
 IBM Plex Mono latin 400·500·600)는 `<앱>/app/fonts/` 의 woff2 를 `next/font/local` 로 읽는다.
 `next/font/google` 은 빌드 때마다 fonts.gstatic.com 을 불러, 그 연결이 한 번 끊기자 이미지 굽기가
-죽고 열차가 붉었다(#1945). 다시 들어오면 `backend/tests/test_next_font_stays_local.py` 가 막고, 세
+죽고 열차(지금은 PR 검사)가 붉었다(#1945). 다시 들어오면 `backend/tests/test_next_font_stays_local.py` 가 막고, 세
 사본이 갈리면 `<앱>/lib/design/tokens.test.ts` 가 막는다. 새 굵기·서체가 필요하면 파일을 받아 세
 앱에 같이 넣는다.

@@ -493,10 +493,11 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   `PriceDriftAlert`(#798, 아래 「모델 단가 표 대조」)도 같은 목록에 있다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
   `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Jenkins
-  `codemit/ci-pr` 가 home 검사로 줄 세우고 열차 `codemit/ci-train` 이 초록 묶음을 `main` 에 병합하고, **곧바로 그 PR 범위**
-  (`merge-base..HEAD`)의 줄을 읽어 이슈를 resolved 로 돌린다(`Jenkinsfile.train` 의 병합 단계,
-  자격증명 `glitchtip-automation-token`) — 「고친 것 같다」와 「고쳤다」를 가르는 자리다.
-  범위가 PR 하나로 정확히 닫히므로 옛 방식의 두 문제가 없다: push 와 표시 사이의 5~10분
+  `codemit/ci-pr` 가 시험하고, 초록이면 세션이 squash 로 병합한다(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train`
+  이 병합하며 표시했다). 병합 push 가 깨운 배포 잡이 이미지 굽기 끝에 **직전 성공 배포 → 이 커밋 범위**의 줄을 읽어 이슈를
+  resolved 로 돌린다(`scripts/ci/build-images.sh`, 자격증명 `glitchtip-automation-token` 을 라이브러리 `buildCredentials` 로)
+  — 「고친 것 같다」와 「고쳤다」를 가르는 자리다. squash 병합 커밋의 메시지에 그 줄이 있어야 하므로 PR 본문(`--fill`)에
+  남긴다. 범위가 배포 하나로 닫히므로 옛 방식의 두 문제가 없다: push 와 표시 사이의 5~10분
   공백(그래서 두던 `glitchtip-ack` 예고 코멘트)과, 연달아 push 할 때 취소된 실행이 범위를
   놓치던 것(오류 75 — 그래서 범위를 「직전에 그 잡이 성공한 실행 이후」로 잡았다,
   `glitchtip_resolve.py` 의 `auto` 모드가 그 흔적이다).
@@ -530,7 +531,7 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   **분기 이름은 마지막 경로 조각으로 본다**(2026-10-19) — Orca 가 `farrar142/auto-…` 처럼 사용자
   접두어를 붙인 뒤로 전체 이름이 `auto-` 로 시작하는지만 보던 판정이 하나도 맞지 않아 다섯 개가
   쌓여 있었다.
-  **「머지됨」은 sha 가 아니라 변경으로 본다**(2026-10-03, `_branch_state`) — Jenkins 가 PR 을
+  **「머지됨」은 sha 가 아니라 변경으로 본다**(2026-10-03, `_branch_state`) — 열차가 PR 을
   rebase 병합해 `main` 의 커밋 sha 가 분기와 달라서, 옛 `merge-base --is-ancestor` 판정으로는
   병합된 자동 진단 분기가 하나도 걷히지 않았다. 지금은 `git cherry` 로 분기 커밋이 전부 같은
   변경으로 `main` 에 들어갔는지 본다(`scripts/test_glitchtip_pick.py` 가 고정한다).

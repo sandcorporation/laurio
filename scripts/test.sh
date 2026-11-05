@@ -11,7 +11,7 @@
 # - 한 번에 400개를 넘게 돌리지 않는다 — pytest 는 conftest 가, e2e 는 이 스크립트가 미리 세어 거절한다.
 # - e2e 는 CI 와 같은 프로덕션 이미지 스택(compose.dev + compose.ci)을 이 워크트리 전용 이름으로 띄우고,
 #   끝나면 지운다. 되풀이할 때는 CODEMIT_E2E_KEEP=1 로 남겨 두고, 다 쓰면 `scripts/test.sh e2e-down`.
-#   CODEMIT_IMAGE_TAG=<sha>-<arch> 를 주면 굽지 않고 `images.sh` 가 올린 이미지를 받아 띄운다 — 열차와 같은 길
+#   CODEMIT_IMAGE_TAG=<sha>-<arch> 를 주면 굽지 않고 `images.sh` 가 올린 이미지를 받아 띄운다 — PR 검사와 같은 길
 #   (`compose.ci-images.yaml`, 레지스트리는 CODEMIT_IMAGE_REGISTRY).
 set -euo pipefail
 

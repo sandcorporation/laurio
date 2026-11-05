@@ -185,8 +185,8 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 프로세스 하나)를 끄고, 「처음 세는 상태」·저장소·클래스 준비를 픽스처로 옮겼다. 새 시험이
 그 근처면 같은 방법을 먼저 본다.
 
-**시험별 CPU 는 junit 의 `cpu_seconds` 로 본다** — 열차의 테스트 보고서(`junit
-keepProperties`)에 시험마다 남고, 로컬은 `--junitxml=<경로>` 를 붙여 돌린 파일에서 본다.
+**시험별 CPU 는 junit 의 `cpu_seconds` 로 본다** — PR 검사가 `test-results/backend-junit.xml` 에
+남기고(Jenkins 화면에 junit 보고서를 붙이지는 않는다 — #873 전에는 열차가 붙였다), 로컬은 `--junitxml=<경로>` 를 붙여 돌린 파일에서 본다.
 **junit 의 `time` 은 setup·teardown 을 포함하고 `cpu_seconds` 는 시험 본문만이다** — 둘이 크게
 다르면 느린 것은 시험이 아니라 픽스처다.
 

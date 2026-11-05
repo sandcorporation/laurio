@@ -41,13 +41,18 @@ pipeline {
               ls-remote https://github.com/sandcorporation/laurio.git \
               refs/heads/main refs/heads/production > .prune-heads
             : > .prune-protect
+            # main 은 반드시 풀려야 한다. production 은 #873 뒤로 움직이지 않는 옛 브랜치라 남아 있을 때만 보호한다
+            # (지우는 것은 대장 몫 — 지워져도 이 잡이 멈추지 않게).
             for b in main production; do
               s=$(awk -v r="refs/heads/$b" '$2 == r { print $1 }' .prune-heads)
-              if [ -z "$s" ]; then echo "GitHub 의 $b 를 못 풀었다 — 보호 없이 지우지 않는다"; exit 1; fi
+              if [ -z "$s" ]; then
+                if [ "$b" = production ]; then echo "GitHub 에 production 이 없다 — main 만 보호한다"; continue; fi
+                echo "GitHub 의 $b 를 못 풀었다 — 보호 없이 지우지 않는다"; exit 1
+              fi
               echo "--protect-sha $s" >> .prune-protect
             done
             cat .prune-protect
-            # main 의 커밋 목록 — 병합되지 않은 묶음(열차가 쌓은 sha)의 이미지를 먼저 지운다(#729). 이 체크아웃은
+            # main 의 커밋 목록 — 병합되지 않은 커밋(PR 검사가 구운 브랜치 sha — #873 전에는 열차가 쌓은 sha)의 이미지를 먼저 지운다(#729). 이 체크아웃은
             # main 이라 HEAD 의 역사가 곧 main 이다. 체크아웃 뒤 병합된 커밋은 목록에 없지만 유예 시간이 지킨다.
             git -c safe.directory="$PWD" rev-list --max-count=5000 HEAD > .prune-main || : > .prune-main
             echo "main 커밋 $(wc -l < .prune-main)개"
