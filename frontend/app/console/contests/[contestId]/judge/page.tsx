@@ -48,7 +48,7 @@ import {
   type JudgeSortOrder,
 } from "@/lib/submissions/quality";
 
-type ContestMeta = { id: number; title: string; deadline_at: string; judging_ends_at: string | null };
+type ContestMeta = { id: number; title: string; deadline_at: string; judging_ends_at: string | null; is_free?: boolean };
 
 type LoadState =
   | { status: "loading" }
@@ -225,29 +225,17 @@ export default function JudgeComparisonPage() {
       <div>
         <PageHeader title={`${contest.title} — 심사 비교`} titleTestId="compare-contest-title" />
         {judgingEndsAt ? (
-          <div className="mt-2 flex flex-col gap-1">
-            <p className="font-mono text-sm" data-testid="judging-deadline">
-              심사 마감까지 {remainingTimeLabel(judgingEndsAt, now)}
-              {judgingEnded ? " (심사기간 종료)" : ""}
-            </p>
-            <p className="text-sm text-ink" data-testid="judging-consequence-notice">
-              심사기간 안에 선정하지 않으면, 그 이후 14일이 지나는 시점에 필수
-              요구사항 달성률이 기준을 넘는 제출작들에게 상금 전액이 자동으로 1/N
-              배분됩니다. 방치해도 상금이 개최자에게 돌아오지 않습니다.
-            </p>
-          </div>
+          <p className="mt-2 font-mono text-sm" data-testid="judging-deadline">
+            심사 마감까지 {remainingTimeLabel(judgingEndsAt, now)}
+            {judgingEnded ? " (심사기간 종료)" : ""}
+            {contest.is_free ? "" : " · 미선정 시 마감 14일 뒤 자동 1/N 배분"}
+          </p>
         ) : (
           <p className="mt-2 text-sm text-attention" data-testid="judging-not-started-notice">
             아직 심사기간이 시작되지 않았습니다 — 마감 후에 비교할 수 있습니다.
           </p>
         )}
       </div>
-
-      <p className="text-sm text-ink" data-testid="source-hidden-notice">
-        소스코드와 필수 요구사항 달성률은 이 화면 어디에도 표시되지 않습니다 — 소스는 선정
-        전까지 공개되지 않고, 달성률은 무응답 배분 대상을 가릴 때만
-        쓰입니다.
-      </p>
 
       {comparison.submissions.length === 0 ? (
         <EmptyState>
