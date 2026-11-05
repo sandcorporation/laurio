@@ -47,6 +47,12 @@ declare -A plan=()
 while IFS='=' read -r key value; do
   case "$key" in DEPLOY_ANY|BUILD_[A-Z]*) plan[$key]=$value ;; esac
 done < .jenkins-prod-plan
+pulls=""
+for svc in backend frontend operator classroom search; do
+  flag="BUILD_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')"
+  [ "${plan[$flag]:-false}" = true ] && pulls="$pulls $svc"
+done
+echo "계획: 교체 ${plan[DEPLOY_ANY]:-false} · 받을 이미지:${pulls:- 없음}"
 
 replaced=1
 if [ "${plan[DEPLOY_ANY]:-false}" = true ]; then
