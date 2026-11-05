@@ -36,6 +36,19 @@ test.describe("이의 큐 — 기본은 심판 대기, 필터로 그 외도 본�
 });
 
 test.describe("이의 상세 — 사유와 Score 스냅샷", () => {
+  test("숨은 항목 행의 배지가 체크리스트 칸 안에 보인다(#919)", async ({ page }) => {
+    const [operator, seeded] = await Promise.all([seedE2eOperator(), seedE2eOperatorAppeal()]);
+    await establishOperatorSession(page, operator.username, E2E_OPERATOR_PASSWORD, `/appeals/${seeded.appeal_id}`);
+
+    const badge = page.locator('[data-testid^="appeal-score-reasoning-item-"][data-testid$="-hidden"]');
+    await expect(badge).toHaveCount(1);
+    await expect(badge).toBeVisible();
+    const cell = page.locator('[data-testid$="-requirement"]').filter({ has: badge });
+    const [b, c] = [await badge.boundingBox(), await cell.boundingBox()];
+    expect(b && c).toBeTruthy();
+    expect(b!.x).toBeGreaterThanOrEqual(c!.x);
+    expect(b!.x + b!.width).toBeLessThanOrEqual(c!.x + c!.width + 0.5);
+  });
 });
 
 test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {

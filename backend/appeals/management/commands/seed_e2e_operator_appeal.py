@@ -87,7 +87,11 @@ def seed_appeal_for_detail(*, rule: str | None) -> dict:
         client,
         sponsor_uid=f"e2e-appealdetail-sponsor-{uid}",
         deadline_at=deadline,
-        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        requirements=[
+            {"text": "로그인 기능이 있다", "grade": "required"},
+            # 숨은 항목 — 문구가 길어도 「숨은 항목」 배지가 칸 안에 보이는지(#919).
+            {"text": "관리자 화면에서 회원 목록을 검색할 수 있다", "grade": "optional", "hidden": True},
+        ],
     )
     requirement_id = contest["requirements"][0]["id"]
     dev = _verified_user(client, f"e2e-appealdetail-dev-{uid}")
