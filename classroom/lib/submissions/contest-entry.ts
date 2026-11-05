@@ -84,14 +84,6 @@ export function initialEntryState(form: ContestEntryForm): ContestEntryState {
   };
 }
 
-/** 근거가 하나도 없는 필수 요구사항 — 그대로 내면 공모전에서 미달로 채점된다(막지는 않는다). */
-export function requiredWithoutEvidence(form: ContestEntryForm, state: ContestEntryState): EntryRequirement[] {
-  return form.requirements.filter(
-    (requirement) =>
-      requirement.required && (state.responses[requirement.requirement_id]?.evidence ?? []).length === 0,
-  );
-}
-
 /** 낼 수 있는가 — 동의는 필수, 이미 낸 제출이 있으면 바꾸기 확인도 필수다. */
 export function entryBlockedReason(form: ContestEntryForm, state: ContestEntryState): string | null {
   if (!state.consent) return "소스 열람에 동의해야 공모전에도 낼 수 있습니다.";

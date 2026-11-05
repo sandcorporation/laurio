@@ -8,7 +8,7 @@
 - **무엇을 건너뛰나**: Score 가 「입력 없음」·「채점 실패」 자동 0%(`submissions.scoring_basis` 의 두
   model_version)면 매기지 않는다 — AI 가 소스를 읽지 않은 제출이다. Requirement 가 없는 공모전도 건너뛴다.
 - **무엇을 읽나**: 소스를 다시 읽거나 저장소를 다시 clone 하지 않는다. Score 프롬프트의 「## Requirements」
-  절부터 끝까지(Requirement·자가 응답·Evidence·선별된 소스)가 곧 이 제출의 채점 근거라 그것을 제출물로
+  절부터 끝까지(Requirement·자가 응답·선별된 소스 — Evidence 는 #909 부터 싣지 않는다)가 곧 이 제출의 채점 근거라 그것을 제출물로
   싣는다 — Score 와 같은 것을 보고 매기고, 스토리지·GitHub 를 한 번 더 치지 않는다. 그 글은 참가자가 낸
   데이터라 `core.quality_review.build_prompt` 가 `neutralize_untrusted` 로 무력화해 경계 안에 넣는다.
 - **키**: `core.llm_scoring.get_adapter()` — Score 와 같은 플랫폼 어댑터다.
@@ -55,7 +55,7 @@ SKIPPED_SCORE_MODEL_VERSIONS = (NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE
 #: 공모전엔 채점 지침 입력이 없다 — 지침 자리에 이 고정 문장을 둔다.
 _CONTEST_GUIDELINE = "별도 지침 없음 — 체크리스트 문구 그대로 판단한다."
 
-#: Score 프롬프트에서 제출물(Requirement·자가 응답·Evidence·소스)이 시작되는 머리 — `scoring.services._build_prompt`.
+#: Score 프롬프트에서 제출물(Requirement·자가 응답·소스)이 시작되는 머리 — `scoring.services._build_prompt`.
 _SUBMISSION_SECTION_HEADER = "## Requirements"
 
 

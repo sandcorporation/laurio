@@ -288,7 +288,7 @@ def test_repository_only_submission_scores_normally_once_repository_becomes_publ
     repo_url = _repository_url("public-org")
     repo_marker = f"REPO_MARKER_{uuid.uuid4().hex}"
 
-    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker}\n"}}):
+    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker} 로그인 기능이 있다\n"}}):
         response = client.post(
             f"{CONTESTS_URL}/{contest['id']}/submissions",
             data={

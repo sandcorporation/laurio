@@ -764,7 +764,7 @@ export default function SubmitPage() {
 
       <section className="flex flex-col gap-2" data-testid="completion-indicator" data-percent={completion.percent}>
         <p className="text-sm">
-          채움률 {completion.percent}% — 근거 연결 {completion.linked}/{completion.total},
+          채움률 {completion.percent}% — 확인 위치 {completion.linked}/{completion.total},
           권장 자료 {completion.optionalFilled}/3
         </p>
         <div className="h-2 w-full border border-rule">
@@ -874,8 +874,8 @@ export default function SubmitPage() {
       <section className="flex flex-col gap-3">
         <SectionHeading title="요구사항 체크리스트" />
         <p className="text-xs text-ink/60" data-testid="evidence-asset-picker-notice">
-          근거가 가리킬 수 있는 자료 목록은 마지막으로 저장된 자료 기준입니다 — 방금
-          추가한 자료는 한 번 저장한 뒤에 근거로 연결할 수 있습니다. 소스코드를
+          확인 위치가 가리킬 수 있는 자료 목록은 마지막으로 저장된 자료 기준입니다 — 방금
+          추가한 자료는 한 번 저장한 뒤에 확인 위치로 연결할 수 있습니다. 소스코드를
           둘 이상 냈다면, 그 중 어느 것을 가리키는지 반드시 골라야 합니다 —
           아니면 채점하는 쪽도 어느 소스의 어디를 봐야 하는지 알 수 없습니다.
         </p>
@@ -943,8 +943,8 @@ export default function SubmitPage() {
               남으므로 경고(attention)가 아니라 알림이다. */}
           {saveState.status === "done" && unlinkedEvidenceCount > 0 && (
             <p data-testid="evidence-unlinked-notice" className="text-sm text-ink/70">
-              지운 자료를 가리키던 근거 {unlinkedEvidenceCount}건의 연결이 해제되었습니다.
-              근거 자체는 그대로 남아 있으니 다른 자료에 다시 연결할 수 있습니다.
+              지운 자료를 가리키던 확인 위치 {unlinkedEvidenceCount}건의 연결이 해제되었습니다.
+              확인 위치 자체는 그대로 남아 있으니 다른 자료에 다시 연결할 수 있습니다.
             </p>
           )}
         </div>

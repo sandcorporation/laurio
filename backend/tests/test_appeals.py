@@ -227,7 +227,7 @@ def _submit(
     source_key = _source_object_key(contest_id, dev["user_id"])
     marker = f"MARKER_{uuid.uuid4().hex}"
     FakeStorageAdapter().write_object(
-        source_key, _zip_bytes({"app.py": f"# {marker}\n" if grounded else "print('x')\n"})
+        source_key, _zip_bytes({"app.py": f"# {marker} 로그인 기능이 있다\n" if grounded else "print('x')\n"})
     )
 
     response = client.post(

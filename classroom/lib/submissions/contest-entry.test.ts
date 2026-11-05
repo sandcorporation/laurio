@@ -8,7 +8,6 @@ import {
   entryBlockedReason,
   initialEntryState,
   offersContestEntry,
-  requiredWithoutEvidence,
   type ContestEntryForm,
 } from "./contest-entry";
 
@@ -44,7 +43,7 @@ describe("buildEntryPayload", () => {
     expect(buildEntryPayload(form(), initialEntryState(form()))).toBeNull();
   });
 
-  it("빈 근거와 빈 선택 자료는 빼고 싣는다", () => {
+  it("빈 확인 위치와 빈 선택 자료는 빼고 싣는다", () => {
     const state = { ...initialEntryState(form()), on: true, consent: true };
     state.responses[2] = { isMet: false, note: "", evidence: [{ kind: "screenshot", value: "  " }] };
     state.optionalAssets.push({ kind: "demo_url", value: " ", label: "", content_type: "" });
@@ -68,13 +67,6 @@ describe("entryBlockedReason", () => {
     expect(entryBlockedReason(f, state)).toContain("동의");
     expect(entryBlockedReason(f, { ...state, consent: true })).toContain("바뀐다");
     expect(entryBlockedReason(f, { ...state, consent: true, replaceConfirmed: true })).toBeNull();
-  });
-});
-
-describe("requiredWithoutEvidence", () => {
-  it("근거 없는 필수 요구사항을 고른다", () => {
-    const f = form();
-    expect(requiredWithoutEvidence(f, initialEntryState(f)).map((r) => r.requirement_id)).toEqual([2]);
   });
 });
 

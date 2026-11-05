@@ -86,8 +86,11 @@ def _submit_with_repository(
     """
 
     source_key = _source_object_key(contest_id, dev["user_id"])
+    # 흉내 채점기는 Requirement 문구가 소스에 있으면 충족으로 본다(#909) — 저장소만이 근거를
+    # 담는 시나리오(`evidence_value` 를 준 경우)에서는 소스에 문구를 싣지 않는다.
+    grounded_line = "" if evidence_value else " 로그인 기능이 있다"
     FakeStorageAdapter().write_object(
-        source_key, _zip_bytes({"app.py": f"# {source_marker}\n"})
+        source_key, _zip_bytes({"app.py": f"# {source_marker}{grounded_line}\n"})
     )
 
     response = client.post(
@@ -213,7 +216,7 @@ def test_public_repository_is_cloned_and_its_content_scores_the_submission(
     repo_url = _repository_url("public-org")
     repo_marker = f"REPO_MARKER_{uuid.uuid4().hex}"
 
-    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker}\n"}}):
+    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker} 로그인 기능이 있다\n"}}):
         # Evidence는 소스가 아니라 저장소 clone 내용에만 있는 마커를 가리킨다.
         submission = _submit_with_repository(
             client,

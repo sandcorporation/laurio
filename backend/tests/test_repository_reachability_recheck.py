@@ -125,7 +125,7 @@ def test_recheck_revives_a_repository_that_was_made_public_again_since_the_last_
     repo_url = _repository_url("public-org")
     repo_marker = f"REPO_MARKER_{uuid.uuid4().hex}"
 
-    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker}\n"}}):
+    with override_settings(GITHUB_FAKE_REPO_FILES={repo_url: {"main.py": f"# {repo_marker} 로그인 기능이 있다\n"}}):
         submission = _submit_repository_only(
             client,
             dev,
@@ -352,7 +352,7 @@ def test_recheck_does_not_run_when_source_is_present(client, category, landing_t
 
     source_key = _source_object_key(contest["id"], dev["user_id"])
     marker = f"MARKER_{uuid.uuid4().hex}"
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": f"# {marker}\n"}))
+    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": f"# {marker} 로그인 기능이 있다\n"}))
 
     repo_url = _repository_url("private-cloneerror-org")
     response = client.post(

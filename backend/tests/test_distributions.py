@@ -175,29 +175,35 @@ def _zip_bytes(files: dict[str, str]) -> bytes:
     return buf.getvalue()
 
 
+#: 이 파일 공모전들의 체크리스트 문구 — 흉내 채점기는 이 문구가 소스에 있으면 충족으로 본다.
+LOGIN_REQUIREMENT = "로그인 기능이 있다"
+PAYMENT_REQUIREMENT = "결제 기능이 있다"
+
+
 def _submit(
-    client, dev: dict, contest_id: int, *, requirement_id: int, grounded: bool
+    client,
+    dev: dict,
+    contest_id: int,
+    *,
+    requirement_id: int,
+    grounded: bool,
+    requirement_text: str = LOGIN_REQUIREMENT,
 ) -> dict:
-    """Evidence가 소스에서 실제로 확인되는지(grounded)로 결정적으로 충족/미달을
-    만든다(FakeLLMScoringAdapter, ADR-0014).
+    """Requirement 문구가 소스에 실제로 있는지(grounded)로 결정적으로 충족/미달을 만든다
+    (FakeLLMScoringAdapter). 확인 위치(Evidence)는 판정 입력이 아니라 싣지 않는다(#909).
     """
 
     source_key = _source_object_key(contest_id, dev["user_id"])
     marker = f"MARKER_{uuid.uuid4().hex}"
     FakeStorageAdapter().write_object(
-        source_key, _zip_bytes({"app.py": f"# {marker}\n" if grounded else "print('x')\n"})
+        source_key,
+        _zip_bytes({"app.py": f"# {marker} {requirement_text}\n" if grounded else "print('x')\n"}),
     )
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
         data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
-                {
-                    "requirement_id": requirement_id,
-                    "is_met": True,
-                    "evidence": (
-                        [{"kind": "source_location", "value": marker}] if grounded else []
-                    ),
-                }
+                {"requirement_id": requirement_id, "is_met": True, "evidence": []}
             ]},
         content_type="application/json",
         **_auth_header(dev["access"]),
@@ -207,28 +213,31 @@ def _submit(
 
 
 def _submit_multi(
-    client, dev: dict, contest_id: int, *, requirement_ids: list[int], grounded_flags: list[bool]
+    client,
+    dev: dict,
+    contest_id: int,
+    *,
+    requirement_ids: list[int],
+    grounded_flags: list[bool],
+    requirement_texts: tuple[str, ...] = (LOGIN_REQUIREMENT, PAYMENT_REQUIREMENT),
 ) -> dict:
     """여러 Requirement에 대해 각각 grounded 여부를 따로 지정해 제출한다 — 0%나
     100%가 아닌 중간 백분율(예: 2개 중 1개만 grounded = 50%)이 필요한 테스트에
-    쓴다(`_submit`을 여러 Requirement로 일반화한 것, test_scoring.py의
-    `_PartialVerdictAdapter` 테스트가 확인한 것과 같은 산식 — met/total * 100).
+    쓴다(`_submit`을 여러 Requirement로 일반화한 것 — met/total * 100). grounded 인
+    Requirement 의 문구만 소스에 싣는다.
     """
 
     assert len(requirement_ids) == len(grounded_flags)
     source_key = _source_object_key(contest_id, dev["user_id"])
-    marker = f"MARKER_{uuid.uuid4().hex}"
-    FakeStorageAdapter().write_object(source_key, _zip_bytes({"app.py": f"# {marker}\n"}))
+    lines = [f"# {text}" for text, grounded in zip(requirement_texts, grounded_flags) if grounded]
+    FakeStorageAdapter().write_object(
+        source_key, _zip_bytes({"app.py": "\n".join(["print('x')", *lines]) + "\n"})
+    )
 
     response = client.post(
         f"{CONTESTS_URL}/{contest_id}/submissions",
         data={"assets": [{"kind": "source", "value": source_key}], "requirement_responses": [
-                {
-                    "requirement_id": rid,
-                    "is_met": True,
-                    "evidence": [{"kind": "source_location", "value": marker}] if grounded else [],
-                }
-                for rid, grounded in zip(requirement_ids, grounded_flags)
+                {"requirement_id": rid, "is_met": True, "evidence": []} for rid in requirement_ids
             ]},
         content_type="application/json",
         **_auth_header(dev["access"]),

@@ -13,7 +13,6 @@ import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/
 import {
   EVIDENCE_KINDS,
   OPTIONAL_ASSET_LABELS,
-  requiredWithoutEvidence,
   type ContestEntryForm,
   type ContestEntryState,
   type EntryResponseState,
@@ -36,8 +35,6 @@ export function ContestEntryFields({
   onChange: (next: ContestEntryState) => void;
   disabled: boolean;
 }) {
-  const unmet = state.on ? requiredWithoutEvidence(form, state) : [];
-
   function setResponse(requirementId: number, next: EntryResponseState) {
     onChange({ ...state, responses: { ...state.responses, [requirementId]: next } });
   }
@@ -77,7 +74,7 @@ export function ContestEntryFields({
                   className="mt-1"
                 />
                 <span className="text-[12.5px] leading-relaxed">
-                  이미 이 공모전에 낸 제출이 있습니다. 이 시도로 바뀝니다 — 지금 공모전에 있는 소스·근거·선택
+                  이미 이 공모전에 낸 제출이 있습니다. 이 시도로 바뀝니다 — 지금 공모전에 있는 소스·확인 위치·선택
                   자료는 남지 않습니다.
                 </span>
               </label>
@@ -85,7 +82,7 @@ export function ContestEntryFields({
           ) : null}
 
           <div className="flex flex-col gap-2">
-            <FieldLabel>요구사항마다 근거</FieldLabel>
+            <FieldLabel>요구사항마다 확인 위치(선택)</FieldLabel>
             {form.requirements.map((requirement) => (
               <RequirementEntry
                 key={requirement.requirement_id}
@@ -99,11 +96,6 @@ export function ContestEntryFields({
                 disabled={disabled}
               />
             ))}
-            {unmet.length > 0 ? (
-              <p data-testid="contest-entry-unmet-note" className="text-[12px] leading-relaxed text-attention">
-                근거가 없는 필수 요구사항 {unmet.length}개는 공모전에서 미달로 채점됩니다.
-              </p>
-            ) : null}
           </div>
 
           <OptionalAssets form={form} state={state} onChange={onChange} disabled={disabled} />
@@ -142,12 +134,8 @@ function RequirementEntry({
   onChange: (next: EntryResponseState) => void;
   disabled: boolean;
 }) {
-  const unlinked = required && state.evidence.length === 0;
   return (
-    <div
-      data-testid={testId}
-      className={`flex flex-col gap-2 border bg-surface p-3 ${unlinked ? "border-attention" : "border-rule"}`}
-    >
+    <div data-testid={testId} className="flex flex-col gap-2 border border-rule bg-surface p-3">
       <div className="flex items-start justify-between gap-3">
         <span className="flex items-start gap-2 text-[13px] leading-relaxed">
           <Badge tone={required ? "attention" : "neutral"}>{required ? "필수" : "선택"}</Badge>
@@ -222,7 +210,7 @@ function RequirementEntry({
         data-testid={`${testId}-add-evidence`}
         className={`${buttonClass("secondary", "sm")} self-start`}
       >
-        + 근거 추가
+        + 확인 위치 추가
       </button>
     </div>
   );

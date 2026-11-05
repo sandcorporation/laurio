@@ -170,13 +170,10 @@ _PLATFORM_FAILURE_REASONING = (
 class FakeClassroomScoringAdapter:
     """dev/CI 전용, 네트워크 없이 결정적으로 강의실 채점을 흉내낸다(#340, ADR-0043).
 
-    `core.llm_scoring.FakeLLMScoringAdapter`를 그대로 재사용하지 않는 이유는
-    그 어댑터의 결정성이 "Evidence가 소스에서 확인되는가"에 있기 때문이다 —
-    강의실 `RequirementInput`은 `evidence`가 항상 빈 리스트다(`_requirement_inputs`
-    — 강의실에는 자가 응답도 근거 연결도 없다, ADR-0042). 그 어댑터로 그대로
-    돌리면 모든 체크리스트 항목이 언제나 미달로 나온다.
+    공모전의 `core.llm_scoring.FakeLLMScoringAdapter`와 같은 규칙이지만(#909 부터 그쪽도
+    문구로 판정한다) 강의실 몫의 model_version·판정 근거 문장을 따로 둔다.
 
-    대신 체크리스트 항목의 문구(`RequirementInput.text`, 곧 `ChecklistItem.
+    체크리스트 항목의 문구(`RequirementInput.text`, 곧 `ChecklistItem.
     label`)가 제출된 소스에 그대로 등장하는지를 본다 — "소스 자체가 유일한
     근거"라는 모듈 docstring의 원칙과 같은 모양을, 강의실이 실제로 가진 텍스트
     (자가 응답이 아니라 체크리스트 문구)로 흉내낸 것이다. `ScoringInput.
@@ -331,8 +328,8 @@ def check_scoring_key(*, api_key: str, kind: str = Class.ScoringConnectionKind.O
 
 def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[RequirementInput]:
     """`core.llm_scoring.RequirementInput`을 재사용한다 — 필드 이름(`requirement_id`
-    등)은 공모전 것이지만 형태만 빌린다. `self_reported_met`·`evidence`는 강의실에
-    없는 개념이라 항상 빈 값이다(CONTEXT.md 「Problem」 "근거 연결도 자가 체크도
+    등)은 공모전 것이지만 형태만 빌린다. `self_reported_met`는 강의실에
+    없는 개념이라 항상 거짓이다(CONTEXT.md 「Problem」 "근거 연결도 자가 체크도
     없다") — 실제로 프롬프트에 실리는 것은 `_build_prompt`가 별도로 쓴다."""
 
     return [
@@ -341,7 +338,6 @@ def _requirement_inputs(checklist_items: list[ChecklistItem]) -> list[Requiremen
             text=item.label,
             grade="필수" if item.required else "선택",
             self_reported_met=False,
-            evidence=[],
         )
         for item in checklist_items
     ]

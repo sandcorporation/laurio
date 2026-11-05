@@ -35,14 +35,12 @@ def test_openai_scoring_adapter_returns_a_verdict_for_every_requirement():
             text="로그인 화면에 이메일/비밀번호 입력 필드가 있어야 한다",
             grade="required",
             self_reported_met=True,
-            evidence=[{"kind": "source", "value": "login.py"}],
         ),
         RequirementInput(
             requirement_id=2,
             text="다크 모드를 지원해야 한다",
             grade="required",
             self_reported_met=True,
-            evidence=[{"kind": "source", "value": "dark_mode.py"}],
         ),
     ]
     scoring_input = ScoringInput(

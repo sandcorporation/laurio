@@ -1,17 +1,17 @@
 "use client";
 
-// Requirement 하나에 대한 자가 응답 + Evidence 연결 (FE-10, #35).
+// Requirement 하나에 대한 자가 응답 + 확인 위치(Evidence) (FE-10, #35).
 //
-// 핵심 인수조건: **Evidence가 비어 있는 필수 항목은 시각적으로 구분되고, 그대로
-// 내면 미달로 채점된다는 것이 그 자리에 표시된다**(ADR-0014) — 강제로 막지는
-// 않는다. 그 신호를 이 컴포넌트 하나가 책임진다.
+// 확인 위치는 제출자가 개최자에게 「이 항목은 여기서 보세요」라고 알려 주는 선택
+// 안내다 — AI 판정·완성도의 입력이 아니다(#909, ADR-0074). 그래서 비어 있어도
+// 경고하지 않는다.
 //
-// 자료가 여럿이 된 뒤(#190, ADR-0027)로는 "데모 내 경로" 같은 근거가 어느
-// 자료를 가리키는지도 골라야 한다(`EvidenceIn.asset_id`, #192) — 그러지
-// 않으면 데모가 둘일 때 AI 도 사람도 어느 것의 경로인지 알 수 없다. 이 화면이
+// 자료가 여럿이 된 뒤(#190, ADR-0027)로는 "데모 내 경로" 같은 확인 위치가 어느
+// 자료를 가리키는지도 고를 수 있다(`EvidenceIn.asset_id`, #192) — 그러지
+// 않으면 데모가 둘일 때 개최자가 어느 것의 경로인지 알 수 없다. 이 화면이
 // 고를 수 있게 해 주는 목록은 **이미 저장된** 자료뿐이다(`assets` prop) — 이
 // 폼에서 방금 추가한 자료는 저장 전까지 id 가 없어 가리킬 대상 자체가 없다.
-import { Badge, ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
+import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { ASSET_KIND_LABELS, EVIDENCE_KINDS, type EvidenceIn, type RequirementOut } from "@/lib/submissions/types";
 
 export interface RequirementFieldState {
@@ -33,7 +33,7 @@ export interface RequirementFieldProps {
   onChange: (next: RequirementFieldState) => void;
   disabled: boolean;
   testId: string;
-  /** 근거가 가리킬 수 있는, 이미 저장된 자료 목록. */
+  /** 확인 위치가 가리킬 수 있는, 이미 저장된 자료 목록. */
   assets: RequirementFieldAssetOption[];
 }
 
@@ -46,8 +46,6 @@ export function RequirementField({
   assets,
 }: RequirementFieldProps) {
   const isRequired = requirement.grade === "required";
-  const isUnlinked = state.evidence.length === 0;
-  const showUnmetWarning = isRequired && isUnlinked;
 
   function addEvidence() {
     onChange({
@@ -68,10 +66,7 @@ export function RequirementField({
   return (
     <div
       data-testid={testId}
-      data-unmet-warning={showUnmetWarning ? "true" : "false"}
-      className={`flex flex-col gap-3 border p-4 ${
-        showUnmetWarning ? "border-attention" : "border-rule"
-      }`}
+      className="flex flex-col gap-3 border border-rule p-4"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-2">
@@ -90,14 +85,6 @@ export function RequirementField({
         </label>
       </div>
 
-      {showUnmetWarning && (
-        <ErrorNote>
-          <span data-testid={`${testId}-unmet-warning`}>
-            근거가 연결되지 않았습니다 — 이대로 제출하면 이 필수 항목은 미달로 채점됩니다.
-          </span>
-        </ErrorNote>
-      )}
-
       <textarea
         className={INPUT_CLASS}
         placeholder="설명(선택)"
@@ -108,6 +95,7 @@ export function RequirementField({
       />
 
       <div className="flex flex-col gap-2">
+        <p className="text-xs font-semibold">확인 위치(선택)</p>
         {state.evidence.map((item, index) => (
           <div key={index} className="flex flex-wrap items-center gap-2">
             <select
@@ -134,7 +122,7 @@ export function RequirementField({
               data-testid={`${testId}-evidence-${index}-asset`}
               className={INPUT_CLASS}
             >
-              <option value="">어느 자료의 근거인지 (선택 안 함)</option>
+              <option value="">어느 자료에서 볼 수 있는지 (선택 안 함)</option>
               {assets.map((asset) => (
                 <option key={asset.id} value={asset.id}>
                   {ASSET_KIND_LABELS[asset.kind] ?? asset.kind}: {asset.label || asset.value}
@@ -167,7 +155,7 @@ export function RequirementField({
           data-testid={`${testId}-add-evidence`}
           className={buttonClass("secondary", "sm")}
         >
-          + 근거 추가
+          + 확인 위치 추가
         </button>
       </div>
     </div>

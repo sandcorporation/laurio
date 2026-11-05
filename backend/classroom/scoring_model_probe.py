@@ -110,7 +110,6 @@ def _probe_input() -> ScoringInput:
                 text="hello",
                 grade="필수",
                 self_reported_met=False,
-                evidence=[],
             )
         ],
     )
