@@ -20,6 +20,7 @@ from django.db.models import (
     Count,
     DateTimeField,
     F,
+    Prefetch,
     Q,
     QuerySet,
     Sum,
@@ -125,6 +126,16 @@ logger = logging.getLogger(__name__)
 # 체크와 아래 requirement CRUD·chat 제안이 같은 기준을 쓰도록 한 곳에 둔다.
 _VALID_GRADES = {"required", "optional", "bonus"}
 
+_PAID_HIDDEN_REQUIRED_MESSAGE = "유료 공모전에서는 필수 항목을 제출자에게 숨길 수 없습니다."
+
+
+def _reject_paid_hidden_required(*, is_free: bool, grade: str, hidden: bool) -> None:
+    """유료 공모전은 숨은 필수를 만들 수 없다(#906, 스펙 #903 고정 6) — 상금을 가르는 Score·통과는 필수만 세므로,
+    제출자가 볼 수 없는 조건으로 상금이 갈리지 않게 한다. 숨김은 선택·가산에만. 클래스·무료 공모전은 허용한다."""
+
+    if hidden and not is_free and grade == Requirement.Grade.REQUIRED:
+        raise HttpError(422, _PAID_HIDDEN_REQUIRED_MESSAGE)
+
 # 한 Sponsor가 한 Contest에 쌓을 수 있는 대화 턴 수 상한. 무제한으로 두면 한 Contest가
 # 프롬프트에 실리는 대화 이력을 무한정 늘려 이후 매 턴의 LLM 호출 비용·지연을 키운다.
 _MAX_CHAT_HISTORY_TURNS = 200
@@ -153,7 +164,9 @@ def _minimum_total(deliverable_type_ids: list[int]) -> int:
     return total or 0
 
 
-def _serialize_contest(contest: Contest, auth_user: object | None = None) -> ContestOut:
+def _serialize_contest(
+    contest: Contest, auth_user: object | None = None, *, owner_view: bool = False
+) -> ContestOut:
     # `contest.submission_count`는 annotate로 미리 실려 있어야 한다
     # (list_contests/get_contest/get_home_curation) — 새로 만든 Contest는
     # 호출부가 0을 직접 채워 넣는다(create_contest/reopen_contest, 둘 다 방금
@@ -174,6 +187,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
     has_own_submission = auth_user is not None and ContestSubmission.objects.filter(
         contest=contest, developer__user_id=getattr(auth_user, "id", None)
     ).exists()
+    all_requirements = list(contest.requirements.all())
     return ContestOut(
         id=contest.id,
         title=contest.title,
@@ -190,10 +204,12 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         is_underfunded=contest.is_underfunded,
         is_free=contest.is_free,
         allows_classroom_import=contest.allows_classroom_import,
+        # 숨은 항목(#906): 개최자 본인(또는 개최자가 부른 만들기·고치기 응답)에게만 내용을 싣는다. 그 밖에는 빼고
+        # 개수만 — 공개 상세·목록·홈 큐레이션 모두 이 길이다.
         requirements=[
-            RequirementOut(id=r.id, text=r.text, grade=r.grade, points=r.points, order=r.order)
-            for r in contest.requirements.all()
+            _requirement_out(r) for r in all_requirements if owner_view or is_owner or not r.hidden
         ],
+        hidden_requirement_count=sum(1 for r in all_requirements if r.hidden),
         images=[
             ContestImageOut(id=img.id, url=img.url, thumbnail_url=img.thumbnail_url, order=img.order)
             for img in contest.images.all()
@@ -299,6 +315,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     for requirement in payload.requirements:
         if requirement.grade not in _VALID_GRADES:
             raise HttpError(422, "요구사항 등급은 필수·선택·가산 중 하나여야 합니다.")
+        _reject_paid_hidden_required(is_free=False, grade=requirement.grade, hidden=requirement.hidden)
         # 공모전 상세에서 참가자 전부가 로그인 없이 보는 공개 본문이다 —
         # 제목·설명과 같은 노출(빠뜨렸던 것을 #480 구조 검사가 잡았다).
         _reject_if_banned_public_text(requirement.text, "요구사항")
@@ -336,6 +353,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
                     text=sanitize_free_text(r.text),
                     grade=r.grade,
                     points=r.points or default_points(r.grade),
+                    hidden=r.hidden,
                     order=index,
                 )
                 for index, r in enumerate(payload.requirements)
@@ -346,7 +364,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
     # 방금 만든 행이라 Submission이 있을 수 없다 — annotate 대신 직접 0을 채운다
     # (_serialize_contest 참고).
     contest.submission_count = 0
-    return _serialize_contest(contest)
+    return _serialize_contest(contest, owner_view=True)
 
 
 # --- 무료 공모전 개최 (#415, ADR-0048) ---------------------------------------
@@ -453,6 +471,7 @@ def create_free_contest_draft(user, payload: FreeContestCreateIn) -> ContestOut:
                     text=sanitize_free_text(r.text),
                     grade=r.grade,
                     points=r.points or default_points(r.grade),
+                    hidden=r.hidden,
                     order=index,
                 )
                 for index, r in enumerate(payload.requirements)
@@ -461,7 +480,7 @@ def create_free_contest_draft(user, payload: FreeContestCreateIn) -> ContestOut:
 
     contest.refresh_from_db()
     contest.submission_count = 0
-    return _serialize_contest(contest)
+    return _serialize_contest(contest, owner_view=True)
 
 
 @router.post("/contests/{contest_id}/publish", response=ContestOut, auth=jwt_auth)
@@ -510,7 +529,7 @@ def publish_free_contest_draft(contest: Contest, actor) -> ContestOut:
 
     contest.refresh_from_db()
     contest.submission_count = 0
-    return _serialize_contest(contest)
+    return _serialize_contest(contest, owner_view=True)
 
 
 @router.get("/contests", response=list[ContestOut], auth=None)
@@ -631,7 +650,13 @@ def list_contests(request: HttpRequest, filters: Query[ContestListFilters]):
     return (
         queryset.order_by(*ordering)
         .select_related("category")
-        .prefetch_related("deliverable_types", "requirements", "images")
+        # 숨은 항목(#906)은 목록에 싣지 않는다 — 공개 목록이라 개최자 본인도 개수만 본다.
+        .prefetch_related(
+            "deliverable_types", Prefetch("requirements", queryset=Requirement.objects.filter(hidden=False)), "images"
+        )
+        .annotate(
+            hidden_requirement_count=Count("requirements", filter=Q(requirements__hidden=True), distinct=True)
+        )
         # 참가작 수(#106, spec #105) — 목록은 행이 가장 많은 화면이라 행마다
         # 세면 N+1이 정확히 여기서 터진다. `distinct=True`는 `deliverable_type`
         # 필터가 M2M을 조인할 때(위 `deliverable_types__id` 필터) Count가 그
@@ -1011,7 +1036,7 @@ def apply_contest_update(contest: Contest, payload: ContestUpdateIn) -> ContestO
     # 이미 참가작이 있을 수 있다 — create_contest/reopen_contest(둘 다 방금
     # 만든 draft라 0이 맞다)와 달리 여기서는 실제로 세야 한다.
     contest.submission_count = contest.submissions.count()
-    return _serialize_contest(contest)
+    return _serialize_contest(contest, owner_view=True)
 
 
 @router.post("/contests/{contest_id}/views", auth=None)
@@ -1167,6 +1192,7 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
                     text=requirement.text,
                     grade=requirement.grade,
                     points=requirement.points,
+                    hidden=requirement.hidden,
                     order=requirement.order,
                 )
                 for requirement in original.requirements.all()
@@ -1192,7 +1218,7 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
     # 방금 만든 행이라 Submission이 있을 수 없다 — annotate 대신 직접 0을 채운다
     # (_serialize_contest 참고).
     new_contest.submission_count = 0
-    return _serialize_contest(new_contest)
+    return _serialize_contest(new_contest, owner_view=True)
 
 
 _ACTIVE_EXTENSION_PAYMENT_STATUSES = [JudgingExtensionPayment.Status.REQUESTED]
@@ -1591,6 +1617,7 @@ def add_contest_requirement(contest: Contest, payload: RequirementCreateIn):
 
     if payload.grade not in _VALID_GRADES:
         raise HttpError(422, "요구사항 등급은 필수·선택·가산 중 하나여야 합니다.")
+    _reject_paid_hidden_required(is_free=contest.is_free, grade=payload.grade, hidden=payload.hidden)
 
     sanitized_text = sanitize_free_text(payload.text)
     if not sanitized_text:
@@ -1603,6 +1630,7 @@ def add_contest_requirement(contest: Contest, payload: RequirementCreateIn):
         text=sanitized_text,
         grade=payload.grade,
         points=payload.points or default_points(payload.grade),
+        hidden=payload.hidden,
         order=next_order,
     )
     _record_contest_change(
@@ -1639,7 +1667,7 @@ def update_contest_requirement(contest: Contest, requirement_id: int, payload: R
     except Requirement.DoesNotExist as exc:
         raise HttpError(404, "요구사항을 찾을 수 없습니다.") from exc
 
-    before = {"text": requirement.text, "grade": requirement.grade}
+    before = {"text": requirement.text, "grade": requirement.grade, "hidden": requirement.hidden}
 
     if payload.grade is not None:
         if payload.grade not in _VALID_GRADES:
@@ -1653,10 +1681,14 @@ def update_contest_requirement(contest: Contest, requirement_id: int, payload: R
         requirement.text = sanitized
     if payload.order is not None:
         requirement.order = payload.order
+    if payload.hidden is not None:
+        requirement.hidden = payload.hidden
+    # 숨긴 항목을 필수로 바꾸는 것도, 필수를 숨기는 것도 같은 거절이다(#906).
+    _reject_paid_hidden_required(is_free=contest.is_free, grade=requirement.grade, hidden=requirement.hidden)
 
-    requirement.save(update_fields=["text", "grade", "order"])
+    requirement.save(update_fields=["text", "grade", "order", "hidden"])
 
-    after = {"text": requirement.text, "grade": requirement.grade}
+    after = {"text": requirement.text, "grade": requirement.grade, "hidden": requirement.hidden}
     if after != before:
         _record_contest_change(
             contest,
@@ -1674,6 +1706,7 @@ def _requirement_out(requirement: Requirement) -> RequirementOut:
         grade=requirement.grade,
         points=requirement.points,
         order=requirement.order,
+        hidden=requirement.hidden,
     )
 
 

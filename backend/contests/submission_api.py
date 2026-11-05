@@ -685,8 +685,10 @@ def validate_requirement_responses(
     """자가 응답의 모양을 본다 — 아무것도 쓰지 않는다. 강의실의 「공모전에도 내기」(#549)가
     시도를 만들기 전에 같은 검사로 미리 거른다(`contests.classroom_entries`)."""
 
+    # 숨은 항목(#906)은 자가 응답·확인 위치 대상이 아니다 — 그 id 로 온 응답은 남의 공모전 항목처럼 거절한다
+    # (응답이 받아지면 그 id 가 숨은 항목인지 떠보는 길이 된다).
     valid_requirement_ids = set(
-        Requirement.objects.filter(contest=contest).values_list("id", flat=True)
+        Requirement.objects.filter(contest=contest, hidden=False).values_list("id", flat=True)
     )
     seen_ids: set[int] = set()
     for item in responses_in:
@@ -872,7 +874,8 @@ def _serialize(
     is_sponsor: bool,
     past_deadline: bool,
 ) -> SubmissionOut:
-    requirements = list(Requirement.objects.filter(contest=contest).order_by("order", "id"))
+    # 숨은 항목(#906)은 응답 칸도 채움률 분모에도 없다 — 응답을 받지 않으니 개최자에게도 빈 줄일 뿐이다.
+    requirements = list(Requirement.objects.filter(contest=contest, hidden=False).order_by("order", "id"))
     responses_by_requirement = {
         r.requirement_id: r
         for r in submission.requirement_responses.all().prefetch_related("evidence_items")
@@ -1412,7 +1415,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 )
             )
 
-        total = len(requirements)
+        total = sum(1 for r in requirements if not r.hidden)  # 숨은 항목은 채움률 대상이 아니다(#906)
         submission_outs.append(
             ComparisonSubmissionOut(
                 submission_id=submission.id,

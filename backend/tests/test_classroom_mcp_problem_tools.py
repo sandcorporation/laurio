@@ -289,7 +289,7 @@ def test_editing_reordering_and_copying(client, db):
     assert (updated["title"], updated["grading_strictness"], updated["status"]) == ("첫째 고침", "strict", "open")
 
     item = _ok(client, token, "update_checklist_item", {**ref, "item_id": first.item_ids[1], "label": "나 고침"})["item"]
-    assert item == {"id": first.item_ids[1], "label": "나 고침", "grade": "required", "required": True, "points": 2, "order": 1}
+    assert item == {"id": first.item_ids[1], "label": "나 고침", "grade": "required", "required": True, "points": 2, "hidden": False, "order": 1}
 
     reordered = _ok(client, token, "reorder_checklist_items", {**ref, "item_ids": list(reversed(first.item_ids))})
     assert [i["label"] for i in reordered["checklist_items"]] == ["나 고침", "가"]
@@ -416,10 +416,10 @@ def test_each_write_answers_in_the_size_of_its_task(client, db):
     added, added_bytes = _text_bytes(client, token, "add_checklist_item", {**ref, "label": "테스트가 있다", "required": False})
     item_id = added["item"]["id"]
     assert added == {
-        "item": {"id": item_id, "label": "테스트가 있다", "grade": "optional", "required": False, "points": 1, "order": 1},
+        "item": {"id": item_id, "label": "테스트가 있다", "grade": "optional", "required": False, "points": 1, "hidden": False, "order": 1},
         "problem_id": problem["id"],
         "checklist_items": [
-            {"id": problem["checklist_items"][0]["id"], "label": "합을 출력한다", "grade": "required", "required": True, "points": 2, "order": 0},
+            {"id": problem["checklist_items"][0]["id"], "label": "합을 출력한다", "grade": "required", "required": True, "points": 2, "hidden": False, "order": 0},
             added["item"],
         ],
     }
@@ -434,7 +434,7 @@ def test_each_write_answers_in_the_size_of_its_task(client, db):
     assert deleted == {
         "deleted_item_id": item_id,
         "problem_id": problem["id"],
-        "checklist_items": [{"id": first_id, "label": "합을 출력한다", "grade": "required", "required": True, "points": 2, "order": 1}],
+        "checklist_items": [{"id": first_id, "label": "합을 출력한다", "grade": "required", "required": True, "points": 2, "hidden": False, "order": 1}],
     }  # 지워도 남은 항목의 순서 값은 그대로다(화면과 같다)
 
     # 만들기·고치기·복사 — 원문을 뺀 요약.

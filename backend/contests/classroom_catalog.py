@@ -84,7 +84,7 @@ class ContestClassroomCatalog:
             accepts_classroom_entries=accepts,
             requirements=tuple(
                 ContestRequirementSource(
-                    requirement_id=r.pk, text=r.text, grade=r.grade, order=r.order, points=r.points
+                    requirement_id=r.pk, text=r.text, grade=r.grade, order=r.order, points=r.points, hidden=r.hidden
                 )
                 for r in contest.requirements.all()
             ),

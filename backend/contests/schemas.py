@@ -229,6 +229,8 @@ class RequirementIn(Schema):
     grade: str  # "required" | "optional" | "bonus"(가산, #905)
     #: 배점 1~10(완성도에만 쓴다, #904 ADR-0073). 없으면 등급별 기본값(필수 2·선택 1).
     points: int | None = Field(default=None, ge=1, le=10)
+    #: 「제출자에게 숨기기」(#906). 유료 공모전은 필수와 함께 켤 수 없다(422).
+    hidden: bool = False
 
 
 class RequirementOut(Schema):
@@ -237,6 +239,8 @@ class RequirementOut(Schema):
     grade: str
     points: int
     order: int
+    #: 「제출자에게 숨기기」(#906) — 개최자에게만 나가는 응답에서 참일 수 있다(제출자 쪽 응답에는 숨은 항목이 아예 없다).
+    hidden: bool = False
 
 
 class ContestImageOut(Schema):
@@ -350,6 +354,8 @@ class ContestOut(Schema):
     # 「클래스에서 들여오기」 허용 (#547, ADR-0054) — 무료 공모전에서만 참일 수 있다.
     allows_classroom_import: bool = False
     requirements: list[RequirementOut]
+    #: 숨은 항목 수(#906) — 개최자 본인이 아니면 `requirements` 에 빠져 있고 이 개수만 보인다.
+    hidden_requirement_count: int = 0
     # Sponsor가 붙인 참고 이미지 (#234, ADR-0032) — 순서대로 온다. 빈 목록이면
     # 화면이 "이미지가 없는 게 의도됐다"로 그린다(spec #225 user story 15).
     images: list[ContestImageOut] = []
@@ -467,6 +473,8 @@ class RequirementCreateIn(Schema):
     grade: str  # "required" | "optional" | "bonus"(가산, #905)
     #: 배점 1~10(#904). 없으면 등급별 기본값(필수 2·선택 1).
     points: int | None = Field(default=None, ge=1, le=10)
+    #: 「제출자에게 숨기기」(#906). 유료 공모전은 필수와 함께 켤 수 없다(422).
+    hidden: bool = False
 
 
 class RequirementPointsIn(Schema):
@@ -482,6 +490,8 @@ class RequirementUpdateIn(Schema):
     # 이다. ContestCreateIn.prize(위 Field(gt=0))와 같은 이유로 여기서 막지 않으면
     # 음수 order가 422가 아니라 IntegrityError -> 500으로 샌다.
     order: int | None = Field(default=None, ge=0)
+    #: 「제출자에게 숨기기」(#906) — 등급과 같은 수정 규칙을 따른다. 유료 공모전의 숨은 필수는 422.
+    hidden: bool | None = None
 
 
 class RequirementChatMessageIn(Schema):

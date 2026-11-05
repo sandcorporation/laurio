@@ -201,6 +201,16 @@ class QualityItemOut(Schema):
     bonus: bool = False
     #: 가산을 아직 매기지 않았으면 거짓(0점). AI 항목은 늘 참.
     rated: bool = True
+    #: 제출자에게 가린 숨은 항목(#906) — 라벨이 「숨은 항목 k」, 근거가 비고 id 가 음수다.
+    hidden: bool = False
+
+
+class HiddenSummaryOut(Schema):
+    """제출자 결과의 숨은 항목 요약(#906) — 「숨은 항목 2개 중 1개 충족」. 내용·id 는 없다.
+    `total` 은 AI 가 충족을 판정하는 숨은 항목(가산 제외) 수, `met` 은 그중 충족으로 판정된 수다."""
+
+    total: int
+    met: int
 
 
 class BonusScoreOut(Schema):
@@ -340,10 +350,12 @@ class OwnScoreOut(Schema):
     # 본인 제출의 완성도(#884, ADR-0072) — 아직 매기지 않았으면 null. **등수는 없다** — 등수는 남의
     # 제출과 견준 값이라 제출자에게 나가지 않는다. 이의 대상이 아니다(`can_appeal` 은 Score 만 본다).
     quality: SubmissionQualityOut | None = None
+    # 숨은 항목 요약(#906) — `reasoning` 에서 숨은 항목은 빠지고 개수·충족 수만 여기 남는다. 숨은 항목이 없으면 total 0.
+    hidden_summary: HiddenSummaryOut
 
     @staticmethod
     def resolve_quality(obj):
-        from core.quality_review import quality_view
+        from core.quality_review import mask_hidden_items, quality_view
         from scoring.quality import bonus_scores, points_by_requirement
 
         review = getattr(obj.submission, "quality_review", None)
@@ -351,7 +363,22 @@ class OwnScoreOut(Schema):
             return None
         contest_id = obj.submission.contest_id
         bonus = bonus_scores(contest_id, [obj.submission.id])[obj.submission.id]
-        return quality_view(review.items, points_by_requirement(contest_id), bonus)
+        view = quality_view(review.items, points_by_requirement(contest_id), bonus)
+        return mask_hidden_items(view, _hidden_requirement_grades(contest_id))
+
+    @staticmethod
+    def resolve_hidden_summary(obj) -> dict[str, int]:
+        from contests.models import Requirement
+
+        judged = {
+            rid
+            for rid, grade in _hidden_requirement_grades(obj.submission.contest_id).items()
+            if grade != Requirement.Grade.BONUS
+        }
+        met = sum(
+            1 for r in obj.reasoning or () if r.get("requirement_id") in judged and r.get("is_met") is True
+        )
+        return {"total": len(judged), "met": met}
 
     @staticmethod
     def resolve_scored_assets(obj) -> list[dict]:
@@ -398,9 +425,20 @@ class OwnScoreOut(Schema):
     def resolve_reasoning(obj) -> list[dict]:
         from submissions.scoring_basis import participant_facing_reasoning
 
-        return participant_facing_reasoning(
-            model_version=obj.model_version, reasoning=obj.reasoning
-        )
+        hidden = _hidden_requirement_grades(obj.submission.contest_id)
+        return [
+            r
+            for r in participant_facing_reasoning(model_version=obj.model_version, reasoning=obj.reasoning)
+            if r.get("requirement_id") not in hidden
+        ]
+
+
+def _hidden_requirement_grades(contest_id: int) -> dict[int, str]:
+    """공모전의 숨은 항목 id → 등급(#906) — 제출자 응답에서 거를 때 쓴다."""
+
+    from contests.models import Requirement
+
+    return dict(Requirement.objects.filter(contest_id=contest_id, hidden=True).values_list("id", "grade"))
 
 
 # --- Sponsor 지표 화면 (#107, 부모 #105) ---------------------------------------

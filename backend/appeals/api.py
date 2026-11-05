@@ -42,7 +42,7 @@ from ninja.errors import HttpError
 from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
-from contests.models import ContestSubmission
+from contests.models import ContestSubmission, Requirement
 from core.clock import Clock
 from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
@@ -53,6 +53,7 @@ from .models import Appeal, SourceReading
 from .schemas import (
     AppealCreateIn,
     AppealDetailOut,
+    AppealRequirementOut,
     AppealOut,
     AppealRulingIn,
     ErrorOut,
@@ -238,6 +239,10 @@ def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
             scoring_basis=scoring_basis_for(score.model_version),
         ),
         ruling=_serialize_ruling(ruling),
+        requirements=[
+            AppealRequirementOut(id=r.id, text=r.text, grade=r.grade, hidden=r.hidden)
+            for r in Requirement.objects.filter(contest__submissions=appeal.submission_id).order_by("order", "id")
+        ],
     )
 
 

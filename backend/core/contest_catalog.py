@@ -46,6 +46,8 @@ class ContestRequirementSource:
     order: int
     #: 배점 1~10(#904) — 공모전 문제의 항목이 그대로 따른다.
     points: int = 1
+    #: 숨은 항목(#906) — 공모전 문제의 항목도 참여자에게 숨는다.
+    hidden: bool = False
 
 
 @dataclass(frozen=True)

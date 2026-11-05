@@ -681,6 +681,8 @@ class GradedChecklistFields(models.Model):
     )
     #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     points = models.PositiveSmallIntegerField(db_default=1)
+    #: 숨은 항목(#906) — 「제출자에게 숨기기」. 참여자 경로(문제·시도 결과·본인 완성도)에는 내용 대신 개수·충족 수만.
+    hidden = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         abstract = True

@@ -278,6 +278,8 @@ class ChecklistItemIn(Schema):
     grade: ChecklistGradeIn | None = None
     required: bool = True
     points: ChecklistPointsIn | None = None
+    #: 「제출자에게 숨기기」(#906) — 참여자에게는 내용 대신 개수·충족 수만 보인다. 클래스는 숨은 필수도 허용한다.
+    hidden: bool = False
 
     def resolved_grade(self) -> str:
         if self.grade is not None:
@@ -290,6 +292,7 @@ class ChecklistItemPatchIn(Schema):
     grade: ChecklistGradeIn | None = None
     required: bool | None = None
     points: ChecklistPointsIn | None = None
+    hidden: bool | None = None
 
     def resolved_grade(self) -> str | None:
         if self.grade is not None:
@@ -307,6 +310,8 @@ class ChecklistItemOut(Schema):
     required: bool
     points: int
     order: int
+    #: 「제출자에게 숨기기」(#906) — 강사 응답에서만 참일 수 있다(참여자 응답에는 숨은 항목이 아예 없다).
+    hidden: bool = False
 
 
 class GradabilityWarningOut(Schema):
@@ -714,7 +719,9 @@ class ClassroomProblemMineOut(Schema):
     #: 문법 검사 기본 항목의 켜짐 여부(#408) — 참이면 참여자 화면이 체크리스트
     #: 맨 앞에 「소스에 문법 오류가 없다」와 「기본」 표시를 둔다.
     syntax_check_enabled: bool = True
+    #: 숨은 항목(#906)은 빠져 있다 — 개수는 `hidden_checklist_item_count`.
     checklist_items: list[ChecklistItemOut] = []
+    hidden_checklist_item_count: int = 0
     #: 이 문제를 한 번이라도 통과한 적이 있는가(#288, CONTEXT.md 「통과」) —
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
     #: 내서 미통과가 나와도 계속 참이다.
@@ -858,6 +865,14 @@ class ClassroomSyntaxCheckOut(Schema):
     findings: list[ClassroomSyntaxCheckFindingOut] = []
 
 
+class ClassroomHiddenSummaryOut(Schema):
+    """참여자에게 가린 숨은 항목의 요약(#906) — 「숨은 항목 2개 중 1개 충족」. 내용·id 는 없다.
+    `total` 은 AI 가 충족을 판정하는 숨은 항목(가산 제외) 수, `met` 은 그중 충족 판정 수다."""
+
+    total: int
+    met: int
+
+
 class ClassroomScoreOut(Schema):
     """채점 스냅샷 하나(#287) — `classroom.models.ClassroomScore`를 그대로
     비춘다. append-only라 이 값은 한 번 나오면 바뀌지 않는다."""
@@ -872,6 +887,8 @@ class ClassroomScoreOut(Schema):
     #: 꺼져 있었으면 `None`이다.
     syntax_check: ClassroomSyntaxCheckOut | None = None
     created_at: datetime
+    #: 참여자 응답에서만 채운다(#906) — `reasoning` 에서 숨은 항목은 빠지고 이 요약만 남는다. 강사 응답은 None.
+    hidden_summary: ClassroomHiddenSummaryOut | None = None
 
 
 class ClassroomSubmissionOut(Schema):
@@ -1138,13 +1155,19 @@ class ProblemTemplateChecklistItemOut(Schema):
     required: bool
     points: int
     order: int
+    hidden: bool = False
 
 
 def template_checklist_item_out(item) -> ProblemTemplateChecklistItemOut:
     """템플릿·들여오기 목록의 항목 한 줄 — 세 체크리스트 모델 어느 것이든(`GradedChecklistFields`)."""
 
     return ProblemTemplateChecklistItemOut(
-        label=item.label, grade=item.grade, required=item.required, points=item.points, order=item.order
+        label=item.label,
+        grade=item.grade,
+        required=item.required,
+        points=item.points,
+        order=item.order,
+        hidden=item.hidden,
     )
 
 
@@ -1274,6 +1297,8 @@ class QualityItemOut(Schema):
     bonus: bool = False
     #: 가산을 아직 매기지 않았으면 거짓(0점). AI 항목은 늘 참.
     rated: bool = True
+    #: 참여자에게 가린 숨은 항목(#906) — 라벨이 「숨은 항목 k」, 근거가 비고 id 가 음수다.
+    hidden: bool = False
 
 
 class ClassroomBonusScoreIn(Schema):
