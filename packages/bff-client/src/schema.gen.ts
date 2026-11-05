@@ -7165,6 +7165,8 @@ export interface components {
          *     되고, 그 조합은 다시 화면의 파생 로직이다.
          */
         MySponsoredContestOut: {
+            /** Can Edit */
+            can_edit: boolean;
             /** Contest Id */
             contest_id: number;
             /**

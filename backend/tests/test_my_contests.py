@@ -655,3 +655,46 @@ def test_my_contests_rejects_a_cursor_it_cannot_read(client, category, landing_t
     )
 
     assert response.status_code == 422, response.content
+
+
+# --- 「수정하기」 — can_edit 은 수정 게이트와 같은 판정이다 (#881) -------------------
+
+
+@pytest.mark.django_db
+def test_can_edit_is_true_for_draft_and_published_and_false_after_close(
+    client, category, landing_type
+):
+    """초안·공개 중에는 수정하기가 보이고, 마감 뒤에는 보이지 않는다 — 같은 행이
+    PUT 게이트(409)와 어긋나지 않는다."""
+
+    from tests.test_source_readings import CONTESTS_URL
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-edit", sponsor_ci="ci-edit", deadline_at=deadline,
+    )
+    draft = client.post(
+        CONTESTS_URL,
+        data={
+            "title": "초안 공모전",
+            "category_id": category.id,
+            "deliverable_type_ids": [landing_type.id],
+            "prize": 900_000,
+            "deadline_at": (timezone.now() + timedelta(days=3)).isoformat(),
+            "requirements": [],
+        },
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert draft.status_code == 200, draft.content
+
+    by_id = {row["contest_id"]: row for row in _mine(client, sponsor["access"])}
+    assert by_id[draft.json()["id"]]["can_edit"] is True
+    assert by_id[contest["id"]]["can_edit"] is True
+
+    _close_contest(client, contest, deadline=deadline)
+
+    by_id = {row["contest_id"]: row for row in _mine(client, sponsor["access"])}
+    assert by_id[contest["id"]]["can_edit"] is False
+    assert by_id[draft.json()["id"]]["can_edit"] is True

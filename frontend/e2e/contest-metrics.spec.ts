@@ -50,3 +50,16 @@ test("지표 화면 어디에도 Score 도 개별 참가자 신원도 없다 —
   expect(body).not.toContain(seeded.judging.sensitive_source_object_key_a);
   expect(body).not.toContain(seeded.judging.sensitive_source_object_key_b);
 });
+
+// #881 — 내 공모전 목록의 「수정하기」는 백엔드의 `can_edit` 만 따른다. 마감된 행에는 없고
+// 지표 보기는 그대로 있다(보이는 쪽은 backend/tests/test_my_contests.py 가 상태별로 못 박는다).
+test("마감된 공모전 행에는 수정하기가 없다 — 있는지가 아니라 없는지를 본다", async ({ page }) => {
+  const seeded = await seedE2eContests();
+  await login(page, seeded.judging.sponsor_login_seed);
+
+  await page.goto("/console/contests");
+
+  const id = seeded.judging.id;
+  await expect(page.getByTestId(`my-contest-row-${id}-metrics`)).toBeVisible();
+  await expect(page.getByTestId(`my-contest-row-${id}-edit`)).toHaveCount(0);
+});

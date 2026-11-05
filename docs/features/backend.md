@@ -92,7 +92,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만. `allows_classroom_import` 로 「클래스에서 들여오기」를 허용한다(#547) |
 | `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없거나 개최자 표시 이름이 없으면 422(#447) |
-| `GET /api/contests/mine` | 내가 연 것 |
+| `GET /api/contests/mine` | 내가 연 것 — 행마다 `can_edit`(수정 게이트와 같은 `Contest.is_content_editable`, DRAFT·PUBLISHED 참, #881) |
 | `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473). 문구(`text`)는 공개 제목·설명과 같은 노출이라 욕설이면 422다(spec #474, #480) — 상세 화면에서 로그인 없이 보인다 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 — 새 턴 보내기는 DRAFT뿐, 대화 이력 읽기는 상태 무관 |
 | `POST .../images/upload-url` · `images` · `PATCH`·`DELETE .../images/{id}` | 이미지 — DRAFT뿐(#473 이후에도 넓히지 않았다) |
