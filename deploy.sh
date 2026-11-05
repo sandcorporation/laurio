@@ -842,11 +842,23 @@ run_migrations() {
   # 풀러(pgbouncer, 트랜잭션 모드)는 `PGOPTIONS`(시작 매개변수 `options`)를 거부하므로 이 일회성
   # 컨테이너만 풀러가 붙는 **실제 DB 주소**로 직접 붙는다(풀러 컨테이너가 쓰는 값을 그대로 읽는다).
   # 풀러가 없는 compose 면 값이 없어 이전처럼 돌린다.
+  #
+  # **값은 마지막 줄만, 그리고 호스트 이름 모양일 때만 쓴다**(GlitchTip 106, 2026-11-05). 풀러 이미지 태그가
+  # 이 호스트에 없고 받지도 못하면(ghcr 자격이 없는 root 로 돈 경우) compose 가 `build:` 로 굽는데, 그 진행
+  # 로그는 **표준출력**으로 나와 `2>/dev/null` 이 걸러 주지 않는다. 예전에는 출력 전체를 한 줄로 이어 붙여
+  # 호스트 이름으로 넘겨 migrate 가 `UnicodeEncodeError: 'idna' … label empty` 로 죽었다. 모양이 아니면
+  # 덮어쓰지 않고 풀러를 거치는 예전 경로로 돈다(잠금 대기 상한만 빠진다).
   set --
-  dbhost=$($COMPOSE run --rm --no-deps -T --entrypoint printenv pgbouncer POSTGRES_HOST 2>/dev/null | tr -d '\r\n' || true)
+  dbhost=$($COMPOSE run --rm --no-deps -T --entrypoint printenv pgbouncer POSTGRES_HOST 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+  case "$dbhost" in
+    *[!A-Za-z0-9.:_-]*|.*|*..*)
+      log "풀러의 DB 주소를 읽지 못했다(호스트 이름이 아닌 출력) — 풀러를 거쳐 migrate 한다"
+      dbhost="" ;;
+  esac
   if [ -n "$dbhost" ]; then
-    dbport=$($COMPOSE run --rm --no-deps -T --entrypoint printenv pgbouncer POSTGRES_PORT 2>/dev/null | tr -d '\r\n' || true)
-    set -- -e "POSTGRES_HOST=$dbhost" -e "POSTGRES_PORT=${dbport:-5432}" -e "PGOPTIONS=-c lock_timeout=${MIGRATE_LOCK_TIMEOUT:-5s}"
+    dbport=$($COMPOSE run --rm --no-deps -T --entrypoint printenv pgbouncer POSTGRES_PORT 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+    case "$dbport" in ""|*[!0-9]*) dbport=5432 ;; esac
+    set -- -e "POSTGRES_HOST=$dbhost" -e "POSTGRES_PORT=$dbport" -e "PGOPTIONS=-c lock_timeout=${MIGRATE_LOCK_TIMEOUT:-5s}"
   fi
   attempt=1
   while :; do
