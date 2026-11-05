@@ -255,6 +255,9 @@ x-backend-env: &backend-env
   # issuer·resource 로 내보내는 주소다. 강의실 서비스와 **같은 `.env` 줄**이다. 비어도
   # 부팅은 막지 않는다 — 그때는 강의실 앱이 실어 보낸 자기 오리진을 쓴다.
   CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-}
+  # 공개 앱의 공개 오리진(#870) — 공모전 MCP 의 OAuth·MCP 메타데이터가 내보내는 주소다. 공개 앱
+  # 서비스와 같은 `.env` 줄. 비어도 부팅은 막지 않는다 — 그때는 공개 앱이 실어 보낸 오리진을 쓴다.
+  CODEMIT_WEB_ORIGIN: ${CODEMIT_WEB_ORIGIN:-}
   SESSION_REDIS_URL: redis://redis:6379/1
   CELERY_BROKER_URL: redis://redis:6379/0
   CELERY_RESULT_BACKEND: redis://redis:6379/0

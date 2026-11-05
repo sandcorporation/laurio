@@ -23,6 +23,10 @@
 // 인수조건). 리프레시까지 실패하면 그 호출이 401을 내고, 클라이언트 쪽 fetch
 // 래퍼가 그때 /login으로 보낸다 — 미들웨어의 몫은 "쿠키가 아예 없는 사람을
 // 렌더링 전에 막는 것"까지다.
+//
+// 공모전 MCP 의 동의 화면 `/oauth/authorize`(#870)도 같은 가드를 받는다 — 로그인하지 않은 사람은
+// `/login?next=/oauth/authorize?…` 로 갔다가 쿼리까지 그대로 돌아온다. `/mcp`·`/.well-known/*`·
+// `/oauth/{register,token,revoke}` 는 앱이 자기 토큰으로 부르는 경로라 여기 걸지 않는다.
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
@@ -53,5 +57,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/console/:path*"],
+  matcher: ["/console/:path*", "/oauth/authorize"],
 };

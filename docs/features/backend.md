@@ -16,6 +16,7 @@ Django + django-ninja. 하나의 `NinjaAPI` 에 라우터를 붙여 `/api` 아�
 | 내부 | `/api/internal/…` | Celery beat·운영자의 수동 tick | `X-Internal-Token` |
 | 스토리지 | `/api/storage/…` | 브라우저(업로드·다운로드 URL 발급) | JWT |
 | 연결된 앱 | `/api/classroom/mcp` · `/api/classroom/oauth/{metadata/*,register,token,revoke}` | 외부 AI 앱(강의실 앱이 `/mcp`·`/.well-known/oauth-*`·`/oauth/*` 를 넘긴다) | MCP 는 OAuth 접근 토큰(Bearer), 메타데이터·등록은 없음, 토큰·회수는 OAuth 클라이언트 인증 |
+| 공모전 MCP | `/api/contests/mcp` · `/api/contests/oauth/{metadata/*,register,token,revoke}` | 외부 AI 앱(공개 앱이 `/mcp`·`/.well-known/oauth-*`·`/oauth/*` 를 넘긴다, #870) | 강의실 연결된 앱과 같다. 범위 `contests`, 개최 권한이 있어야 한다 |
 | 지표 | `/metrics` | oracle 의 감시 스택(Prometheus, compose 네트워크 안에서 `backend:8000`) | 없음 — Host 가 내부 서비스 이름일 때만 답하고 나머지는 404 |
 
 **운영자 표면은 기본 거부다.** 라우터 자체가 거부로 시작하고 Origin 검증이 경로 접두어로
@@ -700,6 +701,45 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 트랜잭션에 남는다. 거절된 시도는 남지 않는다. 대상은 번호로 적어 문제를 지운 뒤에도 남는다.
 **읽기는 기록하지 않는다**(ADR-0040) — 리포트를 받고 소스를 연 것도 마찬가지다. 「마지막으로 쓴 날」만 허락에 남는다. 이 기록을 보여 주는
 화면은 아직 없다.
+
+### 공모전 MCP — 무료 공모전 만들기·관리(#870, ADR-0070)
+
+위 연결된 앱과 **같은 엔진**(`core.oauth`·`core.mcp_server`, ADR-0069)에 자원 하나를 더 얹었다 —
+범위 `contests`, 공개 앱의 `/mcp`. 엔드포인트는 강의실 것과 같은 모양으로 `/api/contests/` 아래에
+있고, 공개 앱이 바깥 주소(`/mcp`·`/.well-known/oauth-authorization-server`·
+`/.well-known/oauth-protected-resource[/mcp]`·`/oauth/{register,token,revoke}`)를 그대로 넘긴다.
+메타데이터의 오리진은 `CODEMIT_WEB_ORIGIN`(비면 공개 앱이 실어 보낸 `X-Codemit-Public-Origin`).
+
+| 엔드포인트 | 하는 일 |
+| --- | --- |
+| `GET`·`POST /api/contests/oauth/authorize` | 동의 화면의 확인과 허락·거절. 공개 앱 로그인(JWT). **개최 권한이 없으면 403** |
+| `GET /api/contests/connected-apps` · `DELETE …/{id}` | 공모전 범위의 연결 목록과 끊기(「내 정보」). 공개 앱 로그인(JWT) |
+| `POST /api/contests/mcp` | MCP(상태 없음). 분당 120번(`CODEMIT_CONTESTS_MCP_CALLS_PER_MINUTE`) |
+
+**입장**: 개최 권한(`HostingPermission.is_granted`)을 동의 단계와 **MCP 호출마다** 다시 본다 —
+꺼지면 모든 메서드가 403 이다. 운영자(`is_staff`)도 같은 검사를 받는다. 강의실 범위의 토큰은
+여기서, 공모전 범위의 토큰은 강의실 `/mcp` 에서 401 이다.
+
+**범위**: 개최자는 자기 sponsor 의 무료 공모전만, 운영자는 모든 무료 공모전. 남의 것·유료·없는
+것은 같은 404 문구다. 만들기는 늘 부른 사람 명의다. `prize`·`is_free` 인자는 이름만으로 거절한다.
+웹과 MCP 는 같은 서비스 함수를 부른다(`contests.api.create_free_contest_draft`·
+`publish_free_contest_draft`·`apply_contest_update`·`add/update/delete_contest_requirement`,
+`awards.api.award_contest_submission`) — 규칙(마감 뒤 409, 공개 조건 등)이 하나다.
+
+**도구 15개**(`contests.mcp`): 읽기 `list_free_contests`(상태·보관 필터)·`get_free_contest`·
+`list_contest_options`·`list_submissions`·`get_submission`, 쓰기 `create_free_contest`·
+`update_free_contest`·`add_requirement`·`update_requirement`·`delete_requirement`·
+`publish_free_contest`, 두 단계 `close_free_contest_now`·`award_submission`·`archive_free_contest`·
+`unarchive_free_contest`. 사용 안내는 서버 `instructions` 에 있다. 제출물은 표시 이름·낸 시각·수상
+여부만 돌려준다. 쓰기는 `ContestConnectedAppWrite` 에 한 줄씩 남는다.
+
+**지금 마감**은 마감 시각을 지금으로 당기고 마감 스캔과 같은 간선(`contest-close`)·같은 심사 종료
+시각으로 넘긴다. 마감 스캔도 알림을 보내지 않으므로 빠지는 알림은 없다.
+
+**보관**(`Contest.archived_at`, `contests.archiving`): 초안·끝난 공모전·제출 0건인 공개 공모전만.
+보관하면 공개 목록(`GET /api/contests`)·상세(소유자 말고는 404)·검색·홈 큐레이션·강의실 들여오기
+목록에서 빠진다. 상태는 바뀌지 않는다. 「내 공모전」과 운영자 무료 목록은 그대로 보인다.
+시험은 `tests/test_contest_mcp.py`.
 
 ### 스토리지와 알림
 
