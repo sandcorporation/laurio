@@ -40,6 +40,8 @@ class Command(BaseCommand):
         category = Category.objects.create(name=f"[E2E] 가져오기 {tag}")
         deliverable_type = DeliverableType.objects.create(name=f"[E2E] 가져오기 {tag}", minimum_prize=0)
         title = f"[E2E-IMPORT] 가져올 공모전 {run_id}-{uuid.uuid4().hex[:6]}"
+        # 시드는 변수로 넘긴다 — 개최 흐름을 걷지 않고 공개 상태로 바로 만드는 자리라 `CREATION_STATES` 에 싣지 않는다.
+        status = Contest.Status.PUBLISHED
         contest = Contest.objects.create(
             sponsor=sponsor,
             title=title,
@@ -47,7 +49,7 @@ class Command(BaseCommand):
             description="강의실 가져오기 e2e 용 무료 공모전입니다.",
             prize=0,
             deadline_at=timezone.now() + timedelta(days=7),
-            status=Contest.Status.PUBLISHED,
+            status=status,
             is_free=True,
             allows_classroom_import=True,
         )
