@@ -95,11 +95,22 @@ class RulingOut(Schema):
     correction_journal_entry_id: int | None = None
 
 
+class AppealRequirementOut(Schema):
+    """심판이 근거(`reasoning` 의 requirement_id)를 읽을 수 있게 붙이는 요구사항 내용(#906) — 숨은 항목도 싣는다
+    (Operator 이의 심판은 숨은 항목의 내용을 보는 쪽이다, 스펙 #903)."""
+
+    id: int
+    text: str
+    grade: str
+    hidden: bool
+
+
 class AppealDetailOut(AppealOut):
     """운영자 전용 상세 — 이의제기 자체에 Score 스냅샷과 심판 기록을 얹는다."""
 
     score: ScoreSnapshotOut
     ruling: RulingOut | None = None
+    requirements: list[AppealRequirementOut] = []
 
 
 class AppealRulingIn(Schema):

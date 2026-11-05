@@ -74,7 +74,9 @@ def contest_entry_form(problem: Problem, user_id: int) -> ContestEntryFormOut:
 
     previous = {r.requirement_id: r for r in context.responses}
     requirements = []
-    for requirement in sorted(source.requirements, key=lambda r: (r.order, r.requirement_id)):
+    # 숨은 항목(#906)은 칸이 없다 — 공모전 쪽 검증이 그 id 로 온 응답을 거절한다.
+    visible = (r for r in source.requirements if not r.hidden)
+    for requirement in sorted(visible, key=lambda r: (r.order, r.requirement_id)):
         response = previous.get(requirement.requirement_id)
         requirements.append(
             ContestEntryRequirementOut(

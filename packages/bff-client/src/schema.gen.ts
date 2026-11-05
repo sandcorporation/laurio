@@ -4832,6 +4832,11 @@ export interface components {
             is_holding_distribution: boolean;
             /** Reason */
             reason: string;
+            /**
+             * Requirements
+             * @default []
+             */
+            requirements: components["schemas"]["AppealRequirementOut"][];
             /** Ruled At */
             ruled_at?: string | null;
             ruling?: components["schemas"]["RulingOut"] | null;
@@ -4877,6 +4882,21 @@ export interface components {
             status: string;
             /** Submission Id */
             submission_id: number;
+        };
+        /**
+         * AppealRequirementOut
+         * @description 심판이 근거(`reasoning` 의 requirement_id)를 읽을 수 있게 붙이는 요구사항 내용(#906) — 숨은 항목도 싣는다
+         *     (Operator 이의 심판은 숨은 항목의 내용을 보는 쪽이다, 스펙 #903).
+         */
+        AppealRequirementOut: {
+            /** Grade */
+            grade: string;
+            /** Hidden */
+            hidden: boolean;
+            /** Id */
+            id: number;
+            /** Text */
+            text: string;
         };
         /** AppealRulingIn */
         AppealRulingIn: {
@@ -5098,6 +5118,11 @@ export interface components {
         ChecklistItemIn: {
             /** Grade */
             grade?: ("required" | "optional" | "bonus") | null;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Label */
             label: string;
             /** Points */
@@ -5112,6 +5137,11 @@ export interface components {
         ChecklistItemOut: {
             /** Grade */
             grade: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Id */
             id: number;
             /** Label */
@@ -5127,6 +5157,8 @@ export interface components {
         ChecklistItemPatchIn: {
             /** Grade */
             grade?: ("required" | "optional" | "bonus") | null;
+            /** Hidden */
+            hidden?: boolean | null;
             /** Label */
             label?: string | null;
             /** Points */
@@ -5146,6 +5178,11 @@ export interface components {
             gradability_warnings: components["schemas"]["GradabilityWarningOut"][];
             /** Grade */
             grade: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Id */
             id: number;
             /** Label */
@@ -5516,6 +5553,17 @@ export interface components {
             last_submitted_at?: string | null;
         };
         /**
+         * ClassroomHiddenSummaryOut
+         * @description 참여자에게 가린 숨은 항목의 요약(#906) — 「숨은 항목 2개 중 1개 충족」. 내용·id 는 없다.
+         *     `total` 은 AI 가 충족을 판정하는 숨은 항목(가산 제외) 수, `met` 은 그중 충족 판정 수다.
+         */
+        ClassroomHiddenSummaryOut: {
+            /** Met */
+            met: number;
+            /** Total */
+            total: number;
+        };
+        /**
          * ClassroomInstructorSubmissionOut
          * @description 강사가 보는 시도 하나(#291) — 참여자용 `ClassroomSubmissionOut`과 같은
          *     모양에 `member_id`·`member_display_name`을 더한다. 강사는 자기 시도가
@@ -5664,6 +5712,11 @@ export interface components {
             grading_guideline_text: string;
             /** Grading Strictness */
             grading_strictness: string;
+            /**
+             * Hidden Checklist Item Count
+             * @default 0
+             */
+            hidden_checklist_item_count: number;
             /** Id */
             id: number;
             /**
@@ -5782,6 +5835,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            hidden_summary?: components["schemas"]["ClassroomHiddenSummaryOut"] | null;
             /**
              * Is Platform Failure
              * @default false
@@ -6511,6 +6565,11 @@ export interface components {
              * @default false
              */
             has_own_submission: boolean;
+            /**
+             * Hidden Requirement Count
+             * @default 0
+             */
+            hidden_requirement_count: number;
             /** Id */
             id: number;
             /**
@@ -6850,6 +6909,17 @@ export interface components {
             status: string;
             /** Submission Id */
             submission_id: number;
+        };
+        /**
+         * HiddenSummaryOut
+         * @description 제출자 결과의 숨은 항목 요약(#906) — 「숨은 항목 2개 중 1개 충족」. 내용·id 는 없다.
+         *     `total` 은 AI 가 충족을 판정하는 숨은 항목(가산 제외) 수, `met` 은 그중 충족으로 판정된 수다.
+         */
+        HiddenSummaryOut: {
+            /** Met */
+            met: number;
+            /** Total */
+            total: number;
         };
         /**
          * HomeCurationBucket
@@ -7828,6 +7898,7 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            hidden_summary: components["schemas"]["HiddenSummaryOut"];
             /**
              * Is Free
              * @default false
@@ -8331,6 +8402,11 @@ export interface components {
         ProblemTemplateChecklistItemOut: {
             /** Grade */
             grade: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Label */
             label: string;
             /** Order */
@@ -8504,6 +8580,11 @@ export interface components {
              * @default false
              */
             bonus: boolean;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Item Id */
             item_id: number;
             /** Item Points */
@@ -8712,6 +8793,11 @@ export interface components {
         RequirementCreateIn: {
             /** Grade */
             grade: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Points */
             points?: number | null;
             /** Text */
@@ -8751,6 +8837,11 @@ export interface components {
         RequirementIn: {
             /** Grade */
             grade: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Points */
             points?: number | null;
             /** Text */
@@ -8760,6 +8851,11 @@ export interface components {
         RequirementOut: {
             /** Grade */
             grade: string;
+            /**
+             * Hidden
+             * @default false
+             */
+            hidden: boolean;
             /** Id */
             id: number;
             /** Order */
@@ -8821,6 +8917,8 @@ export interface components {
         RequirementUpdateIn: {
             /** Grade */
             grade?: string | null;
+            /** Hidden */
+            hidden?: boolean | null;
             /** Order */
             order?: number | null;
             /** Text */

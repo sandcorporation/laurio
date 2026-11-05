@@ -365,6 +365,10 @@ def test_create_update_publish_close_archive_and_unarchive(client, category, lan
     assert changed["contest"]["requirements"][-1]["text"] == "완료로 표시할 수 있다"
     removed = _ok(client, token, "delete_requirement", contest_id=contest_id, requirement_id=second["id"])
     assert len(removed["contest"]["requirements"]) == 1
+    # 무료 공모전은 숨은 필수도 된다(#906) — 유료 제한은 MCP 가 닿지 않는 유료 공모전 몫이다.
+    hidden = _ok(client, token, "add_requirement", contest_id=contest_id, text="숨은 필수", grade="required", hidden=True)
+    assert (hidden["contest"]["requirements"][-1]["hidden"], hidden["contest"]["hidden_requirement_count"]) == (True, 1)
+    _ok(client, token, "delete_requirement", contest_id=contest_id, requirement_id=hidden["contest"]["requirements"][-1]["id"])
 
     assert _ok(client, token, "publish_free_contest", contest_id=contest_id)["contest"]["status"] == "published"
     assert client.get(f"{CONTESTS_URL}/{contest_id}").status_code == 200
@@ -391,6 +395,8 @@ def test_create_update_publish_close_archive_and_unarchive(client, category, lan
         "update_free_contest",
         "add_requirement",
         "update_requirement",
+        "delete_requirement",
+        "add_requirement",
         "delete_requirement",
         "publish_free_contest",
         "close_free_contest_now",

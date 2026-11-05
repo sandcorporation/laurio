@@ -208,6 +208,7 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
             label=item.label,
             grade=item.grade,
             points=item.points,
+            hidden=item.hidden,
             order=item.order,
             # 공모전 문제의 항목은 복사본에서도 같은 Requirement 를 따라간다(#548).
             contest_requirement_id=item.contest_requirement_id,
@@ -291,7 +292,7 @@ def publish_problem_as_template(
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
-                    template=template, label=item.label, grade=item.grade, points=item.points, order=item.order
+                    template=template, label=item.label, grade=item.grade, points=item.points, hidden=item.hidden, order=item.order
                 )
                 for item in problem.checklist_items.all()
             )
@@ -317,7 +318,7 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(
-            problem=problem, label=item.label, grade=item.grade, points=item.points, order=item.order
+            problem=problem, label=item.label, grade=item.grade, points=item.points, hidden=item.hidden, order=item.order
         )
         for item in template.checklist_items.all()
     )
@@ -364,6 +365,7 @@ def publish_class_as_template(
                         label=item.label,
                         grade=item.grade,
                         points=item.points,
+                        hidden=item.hidden,
                         order=item.order,
                     )
                     for item in problem.checklist_items.all()
@@ -394,7 +396,7 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
         )
         ChecklistItem.objects.bulk_create(
             ChecklistItem(
-            problem=problem, label=item.label, grade=item.grade, points=item.points, order=item.order
+            problem=problem, label=item.label, grade=item.grade, points=item.points, hidden=item.hidden, order=item.order
         )
             for item in template_problem.checklist_items.all()
         )

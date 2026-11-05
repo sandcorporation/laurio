@@ -22,6 +22,7 @@ import json
 import logging
 import time
 
+from collections.abc import Mapping
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
@@ -43,6 +44,7 @@ from core import privacy_policy
 from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
 from core.observability import tag_error_scope
+from core.quality_review import mask_hidden_quality_items
 from policies.services import get_current_policy
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
@@ -55,6 +57,7 @@ from submissions.models import (
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
 from .models import (
+    ChecklistGrade,
     ChecklistItem,
     Class,
     ClassMember,
@@ -96,6 +99,7 @@ from .schemas import (
     ClassOut,
     ClassPatchIn,
     ClassroomChecklistVerdictOut,
+    ClassroomHiddenSummaryOut,
     ClassroomGridCellOut,
     ClassroomGridMemberOut,
     ClassroomInstructorSubmissionOut,
@@ -311,7 +315,13 @@ def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> Pending
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
     return ChecklistItemOut(
-        id=item.id, label=item.label, grade=item.grade, required=item.required, points=item.points, order=item.order
+        id=item.id,
+        label=item.label,
+        grade=item.grade,
+        required=item.required,
+        points=item.points,
+        order=item.order,
+        hidden=item.hidden,
     )
 
 
@@ -326,6 +336,7 @@ def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool =
         required=item.required,
         points=item.points,
         order=item.order,
+        hidden=item.hidden,
         gradability_warnings=gradability_warnings([item]) if text_changed else [],
     )
 
@@ -626,7 +637,9 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
-        checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
+        # 숨은 항목(#906)은 참여자(「참여자로 보기」의 강사 포함)에게 내용 없이 개수만.
+        checklist_items=[_serialize_checklist_item(i) for i in checklist_items if not i.hidden],
+        hidden_checklist_item_count=sum(1 for i in checklist_items if i.hidden),
         passed=passed,
         zip_git_history_warning=_zip_git_history_warning(problem, checklist_items),
         recommended_due_at=problem.recommended_due_at,
@@ -665,7 +678,13 @@ def _serialize_syntax_check(result: dict | None) -> ClassroomSyntaxCheckOut | No
     )
 
 
-def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
+def _serialize_score(
+    score: ClassroomScore, *, hidden_items: Mapping[int, str] | None = None
+) -> ClassroomScoreOut:
+    """`hidden_items`(숨은 항목 id → 등급)를 주면 참여자 응답이다(#906) — 그 항목의 근거를 빼고 개수·충족 수만 남긴다."""
+
+    hidden = hidden_items or {}
+    judged = {item_id for item_id, grade in hidden.items() if grade != ChecklistGrade.BONUS}
     return ClassroomScoreOut(
         model_version=score.model_version,
         is_platform_failure=score.model_version == PLATFORM_FAILURE_MODEL_VERSION,
@@ -677,10 +696,25 @@ def _serialize_score(score: ClassroomScore) -> ClassroomScoreOut:
                 reasoning=r["reasoning"],
             )
             for r in score.reasoning
+            if r["checklist_item_id"] not in hidden
         ],
         syntax_check=_serialize_syntax_check(score.syntax_check_result),
         created_at=score.created_at,
+        hidden_summary=(
+            None
+            if hidden_items is None
+            else ClassroomHiddenSummaryOut(
+                total=len(judged),
+                met=sum(1 for r in score.reasoning if r["checklist_item_id"] in judged and r["is_met"] is True),
+            )
+        ),
     )
+
+
+def _hidden_items_of(checklist_items) -> dict[int, str]:
+    """체크리스트의 숨은 항목 id → 등급(#906)."""
+
+    return {i.id: i.grade for i in checklist_items if i.hidden}
 
 
 def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
@@ -712,6 +746,10 @@ def _serialize_classroom_submission(
     )
     score = getattr(submission, "classroom_score", None)
     pending_reason = _pending_reason(score, class_obj, problem)
+    if checklist_items is None:
+        checklist_items = list(problem.checklist_items.all())
+    # 참여자(그리고 「참여자로 보기」의 강사) 응답 — 숨은 항목은 근거 없이 개수·충족 수만(#906).
+    hidden_items = _hidden_items_of(checklist_items)
     return ClassroomSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -722,7 +760,7 @@ def _serialize_classroom_submission(
         download_url=download_url,
         created_at=submission.created_at,
         status="scored" if score is not None else "pending",
-        score=_serialize_score(score) if score is not None else None,
+        score=_serialize_score(score, hidden_items=hidden_items) if score is not None else None,
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=pending_reason,
         contest_entry=contest_entry_out(submission),
@@ -2827,7 +2865,10 @@ def get_my_problem_quality(request: HttpRequest, class_id: int, problem_id: int)
         score_total=row["total"],
         max_total=row["max_total"],
         completeness=row["completeness"],
-        items=_quality_item_outs(row["items"]),
+        # 숨은 항목(#906)은 「숨은 항목 k」와 점수만.
+        items=_quality_item_outs(
+            mask_hidden_quality_items(row["items"], set(problem.checklist_items.filter(hidden=True).values_list("id", flat=True)))
+        ),
     )
 
 

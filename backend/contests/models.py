@@ -708,6 +708,9 @@ class Requirement(models.Model):
     #: 배점 1~10 — 완성도에만 쓴다(ADR-0073). 지정하지 않고 `save()` 하면 등급별 기본값(필수 2·선택 1·가산 1).
     #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     points = models.PositiveSmallIntegerField(db_default=1)
+    #: 숨은 항목(#906, 스펙 #903) — 「제출자에게 숨기기」. 제출자 경로(공개 상세·제출 폼·결과)에는 내용이 나가지 않고
+    #: 개수·충족 수만 나간다. AI 판정·완성도에는 보통 항목처럼 들어간다. 유료 공모전은 필수와 함께 켤 수 없다.
+    hidden = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         ordering = ["order", "id"]

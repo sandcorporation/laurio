@@ -120,12 +120,14 @@ def _iso(value: datetime | None) -> str:
 
 
 def contest_view(contest: Contest, grant: ConnectedApp) -> dict:
+    mine = contest.sponsor.user_id == grant.instructor_id
+    requirements = list(contest.requirements.order_by("order", "id"))
     return {
         "id": contest.id,
         "title": contest.title,
         "status": contest.status,
         "archived": contest.archived_at is not None,
-        "mine": contest.sponsor.user_id == grant.instructor_id,
+        "mine": mine,
         "category_id": contest.category_id,
         "deliverable_type_ids": sorted(contest.deliverable_types.values_list("id", flat=True)),
         "description": contest.description,
@@ -133,10 +135,13 @@ def contest_view(contest: Contest, grant: ConnectedApp) -> dict:
         "judging_ends_at": _iso(contest.judging_ends_at),
         "allows_classroom_import": contest.allows_classroom_import,
         "submission_count": contest.submissions.count(),
+        # 숨은 항목(#906)은 개최자 본인에게만 — 남의 공모전을 보면 개수만.
         "requirements": [
-            {"id": r.id, "text": r.text, "grade": r.grade, "points": r.points, "order": r.order}
-            for r in contest.requirements.order_by("order", "id")
+            {"id": r.id, "text": r.text, "grade": r.grade, "points": r.points, "hidden": r.hidden, "order": r.order}
+            for r in requirements
+            if mine or not r.hidden
         ],
+        "hidden_requirement_count": sum(1 for r in requirements if r.hidden),
     }
 
 
@@ -256,7 +261,7 @@ def _require_content_editable(contest: Contest) -> None:
 
 
 def _add_requirement(grant: ConnectedApp, arguments: dict) -> WriteResult:
-    _reject_unknown(arguments, {"contest_id", "text", "grade", "points"})
+    _reject_unknown(arguments, {"contest_id", "text", "grade", "points", "hidden"})
     contest = _contest(grant, arguments, lock=True)
     _require_content_editable(contest)
     contest_api.add_contest_requirement(contest, _parse(RequirementCreateIn, {k: v for k, v in arguments.items() if k != "contest_id"}))
@@ -264,7 +269,7 @@ def _add_requirement(grant: ConnectedApp, arguments: dict) -> WriteResult:
 
 
 def _update_requirement(grant: ConnectedApp, arguments: dict) -> WriteResult:
-    _reject_unknown(arguments, {"contest_id", "requirement_id", "text", "grade", "order"})
+    _reject_unknown(arguments, {"contest_id", "requirement_id", "text", "grade", "order", "hidden"})
     contest = _contest(grant, arguments, lock=True)
     _require_content_editable(contest)
     fields = {k: v for k, v in arguments.items() if k not in {"contest_id", "requirement_id"}}
@@ -370,8 +375,8 @@ _POINTS = {"type": "integer", "minimum": 1, "maximum": 10}
 
 _REQUIREMENT = {
     "type": "object",
-    "properties": {"id": _ID, "text": _STR, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _INT, "order": _INT},
-    "required": ["id", "text", "grade", "points", "order"],
+    "properties": {"id": _ID, "text": _STR, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _INT, "hidden": _BOOL, "order": _INT},
+    "required": ["id", "text", "grade", "points", "hidden", "order"],
 }
 _CONTEST = {
     "type": "object",
@@ -389,8 +394,9 @@ _CONTEST = {
         "allows_classroom_import": _BOOL,
         "submission_count": _INT,
         "requirements": {"type": "array", "items": _REQUIREMENT},
+        "hidden_requirement_count": _INT,
     },
-    "required": ["id", "title", "status", "archived", "mine", "category_id", "deliverable_type_ids", "description", "deadline_at", "judging_ends_at", "allows_classroom_import", "submission_count", "requirements"],
+    "required": ["id", "title", "status", "archived", "mine", "category_id", "deliverable_type_ids", "description", "deadline_at", "judging_ends_at", "allows_classroom_import", "submission_count", "requirements", "hidden_requirement_count"],
 }
 _CONTEST_OUT = {"type": "object", "properties": {"contest": _CONTEST}, "required": ["contest"]}
 _PREVIEW_OUT = {
@@ -500,7 +506,7 @@ TOOLS: dict[str, Tool] = {
                     **_BRIEF,
                     "requirements": {
                         "type": "array",
-                        "items": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _POINTS}, "required": ["text", "grade"]},
+                        "items": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _POINTS, "hidden": _BOOL}, "required": ["text", "grade"]},
                     },
                 },
                 "required": ["title", "category_id", "deliverable_type_ids", "deadline_at"],
@@ -519,14 +525,14 @@ TOOLS: dict[str, Tool] = {
             "add_requirement",
             "요구사항 더하기",
             "요구사항 하나를 끝에 더한다. 마감 전까지만.",
-            {"type": "object", "properties": {"contest_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _POINTS}, "required": ["contest_id", "text", "grade"], "additionalProperties": False},
+            {"type": "object", "properties": {"contest_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _POINTS, "hidden": _BOOL}, "required": ["contest_id", "text", "grade"], "additionalProperties": False},
             _add_requirement,
         ),
         _write(
             "update_requirement",
             "요구사항 고치기",
             "요구사항 하나의 문장·등급·순서를 고친다. 마감 전까지만.",
-            {"type": "object", "properties": {"contest_id": _ID, "requirement_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "order": _INT}, "required": ["contest_id", "requirement_id"], "additionalProperties": False},
+            {"type": "object", "properties": {"contest_id": _ID, "requirement_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "order": _INT, "hidden": _BOOL}, "required": ["contest_id", "requirement_id"], "additionalProperties": False},
             _update_requirement,
         ),
         _write(

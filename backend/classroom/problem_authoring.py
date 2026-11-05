@@ -219,6 +219,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
                 label=item_in.label,
                 grade=grade,
                 points=item_in.points or default_points(grade),
+                hidden=item_in.hidden,
                 order=index,
             )
     return problem
@@ -373,6 +374,7 @@ def add_checklist_item(problem: Problem, payload: ChecklistItemIn) -> ChecklistI
         label=payload.label,
         grade=payload.resolved_grade(),
         points=payload.points or default_points(payload.resolved_grade()),
+        hidden=payload.hidden,
         order=problem.checklist_items.count(),
     )
 
@@ -402,6 +404,9 @@ def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItem
         # 배점은 완성도에만 쓴다 — 고치면 AI 를 다시 부르지 않고 읽을 때 다시 계산된다(ADR-0073).
         item.points = payload.points
         update_fields.append("points")
+    if payload.hidden is not None:
+        item.hidden = payload.hidden
+        update_fields.append("hidden")
     if update_fields:
         item.save(update_fields=update_fields)
     return item

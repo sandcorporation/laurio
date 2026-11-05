@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypedDict, runtime_checkable
 
@@ -178,6 +178,8 @@ class QualityItemView(TypedDict):
     bonus: bool
     #: 가산을 아직 매기지 않았으면 거짓(0점). AI 항목은 늘 참.
     rated: bool
+    #: 제출자(참여자)에게 가린 숨은 항목이면 참(#906) — 라벨이 「숨은 항목 k」이고 근거·id 가 없다.
+    hidden: bool
 
 
 class QualityView(TypedDict):
@@ -220,6 +222,7 @@ def quality_view(
                 item_points=item_points(item["score"], points[item["item_id"]]),
                 bonus=False,
                 rated=True,
+                hidden=False,
             )
             for item in items
             if item["item_id"] in points and item["item_id"] not in bonus_ids
@@ -235,11 +238,46 @@ def quality_view(
                 item_points=item_points(b.score, points[b.item_id]),
                 bonus=True,
                 rated=b.rated,
+                hidden=False,
             )
             for b in bonus
             if b.item_id in points
         ],
     )
+
+
+HIDDEN_ITEM_LABEL = "숨은 항목"
+
+
+def hidden_item_label(k: int) -> str:
+    """제출자에게 보이는 숨은 항목의 이름(#906) — 「숨은 항목 1」처럼 순서만 말한다."""
+
+    return f"{HIDDEN_ITEM_LABEL} {k}"
+
+
+def mask_hidden_quality_items(items: Sequence[QualityItemView], hidden_ids: Collection[int]) -> list[QualityItemView]:
+    """제출자(참여자)에게 나가는 완성도 항목에서 숨은 항목의 내용을 지운다(#906, 스펙 #903) — 라벨은 「숨은 항목 k」,
+    근거(AI 근거·가산 메모)는 빈 문자열, id 는 -k 로 바꾸고 점수·배점만 남긴다(id 로 숨은 항목을 떠보지 못하게).
+    합계는 건드리지 않는다 — 숨은 항목도 완성도에 보통 항목처럼 들어간다."""
+
+    k = 0
+    masked: list[QualityItemView] = []
+    for item in items:
+        if item["item_id"] in hidden_ids:
+            k += 1
+            item = QualityItemView(
+                **{**item, "item_id": -k, "label": hidden_item_label(k), "reasoning": "", "hidden": True}
+            )
+        masked.append(item)
+    return masked
+
+
+def mask_hidden_items(view: QualityView, hidden_ids: Collection[int]) -> QualityView:
+    """`mask_hidden_quality_items` 를 완성도 하나에."""
+
+    if not hidden_ids:
+        return view
+    return QualityView(**{**view, "items": mask_hidden_quality_items(view["items"], hidden_ids)})
 
 
 def historical_columns(total: QualityTotal) -> dict[str, int | float]:

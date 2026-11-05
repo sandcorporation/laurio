@@ -91,6 +91,7 @@ def _item_out(item: ChecklistItem) -> dict:
         "grade": item.grade,
         "required": item.required,
         "points": item.points,
+        "hidden": item.hidden,
         "order": item.order,
     }
 
@@ -196,9 +197,13 @@ _POINTS = {
     "maximum": 10,
     "description": "배점(1~10). 완성도에만 쓴다 — Score·통과와 무관하다. 없으면 필수 2·선택 1.",
 }
+_HIDDEN = {
+    "type": "boolean",
+    "description": "제출자에게 숨기기 — 참여자에게는 내용 없이 개수·충족 수만 보인다. AI 판정·완성도에는 보통 항목처럼 들어간다.",
+}
 _CHECKLIST_ITEM_IN = {
     "type": "object",
-    "properties": {"label": _LABEL, "required": {**_REQUIRED, "default": True}, "points": _POINTS},
+    "properties": {"label": _LABEL, "required": {**_REQUIRED, "default": True}, "points": _POINTS, "hidden": _HIDDEN},
     "required": ["label"],
     "additionalProperties": False,
 }
@@ -242,9 +247,10 @@ _ITEM_OUT = {
         "grade": {"type": "string", "enum": ["required", "optional", "bonus"]},
         "required": {"type": "boolean"},
         "points": {"type": "integer"},
+        "hidden": {"type": "boolean"},
         "order": {"type": "integer"},
     },
-    "required": ["id", "label", "grade", "required", "points", "order"],
+    "required": ["id", "label", "grade", "required", "points", "hidden", "order"],
 }
 _STATUS_OUT = {
     "type": "string",
@@ -531,6 +537,7 @@ _ADD_ITEM_INPUT = _object(
         "label": _LABEL,
         "required": {**_REQUIRED, "default": True},
         "points": _POINTS,
+        "hidden": _HIDDEN,
     },
     ["class_id", "problem_id", "label"],
 )
@@ -559,6 +566,7 @@ _UPDATE_ITEM_INPUT = _object(
         "label": _LABEL,
         "required": _REQUIRED,
         "points": _POINTS,
+        "hidden": _HIDDEN,
     },
     ["class_id", "problem_id", "item_id"],
 )
