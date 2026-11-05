@@ -213,13 +213,14 @@ export default function ContestDraftPage() {
     grade: RequirementGrade,
     fromProposal?: ChatProposal,
     points?: number,
+    hidden = false,
   ) {
     setRequirementError(null);
     setRequirementBusy(true);
     try {
       const response = await bffClient.post<unknown>(
         `/api/backend/contests/${contestId}/requirements`,
-        points === undefined ? { text, grade } : { text, grade, points },
+        { text, grade, ...(points === undefined ? {} : { points }), ...(hidden ? { hidden } : {}) },
       );
 
       if (!response.ok) {
@@ -527,7 +528,7 @@ export default function ContestDraftPage() {
           requirements={requirements}
           requirementError={requirementError}
           requirementBusy={requirementBusy}
-          onAdd={(text, grade, points) => handleAddRequirement(text, grade, undefined, points)}
+          onAdd={(text, grade, points, hidden) => handleAddRequirement(text, grade, undefined, points, hidden)}
           onUpdate={handleUpdateRequirement}
           onDelete={handleDeleteRequirement}
           onPublish={handlePublish}
