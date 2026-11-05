@@ -27,7 +27,7 @@ test("방금 연 클래스는 시작하기 카드와 빈 목록의 입구를 보
   // 시작하기 1단계와 채점 카드는 같은 행동을 같은 말로 부른다(#669).
   await expect(page.getByTestId("classroom-missing-api-key-settings-link")).toHaveText("채점 연결 넣기");
   await expect(page.getByTestId("problems-empty-state")).toBeVisible();
-  await expect(page.getByTestId("problems-empty-copy")).toBeVisible();
+  await expect(page.getByTestId("problems-empty-import")).toBeVisible();
   // 방금 연 클래스에는 「채점」 카드가 아직 없다 — 시작하기가 그 자리다.
   await expect(page.getByTestId("scoring-card-status")).toHaveCount(0);
 

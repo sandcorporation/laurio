@@ -12,7 +12,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
 import { ErrorNote, PageShell } from "@/app/components/ui";
-import { TemplatePickerSheet } from "@/app/components/TemplatePickerSheet";
+import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
 import { useClass } from "@/lib/classes/use-class";
@@ -161,7 +161,7 @@ function ClassDetail() {
       </div>
 
       {pickerTab !== null ? (
-        <TemplatePickerSheet
+        <ProblemImportSheet
           classId={classId}
           initialTab={pickerTab}
           onClose={() => setPickerTab(null)}

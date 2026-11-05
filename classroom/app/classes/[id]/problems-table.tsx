@@ -2,7 +2,7 @@
 
 // 클래스 상세 · 문제 탭의 표(#633, 시안 v2). 번호·제목(+숨김·초안 배지)·필수 항목 수·달성률 막대·
 // 통과 n/N·최근 제출, 행 끝에 「편집」「제출 현황」 글자 링크와 ⋮(위로·아래로). 아래에 「새 문제」·
-// 「템플릿에서 가져오기」. 문제가 없으면 빈 목록 안에 입구 셋(새 문제·템플릿·다른 클래스에서 복사).
+// 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 목록 안에 입구 둘(새 문제·문제 가져오기).
 // 달성률·통과 수는 목록 응답의 값이고, 위쪽 통계 바의 평균은 클래스 응답의 값이다 — 다시 세지 않는다.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -190,8 +190,7 @@ export function ProblemsTable({
           <span>—</span>
           <div className="flex flex-wrap justify-center gap-2">
             {newProblem}
-            {pickerButton("public", "템플릿에서 가져오기", "problems-empty-template")}
-            {pickerButton("other-classes", "다른 클래스에서 복사", "problems-empty-copy")}
+            {pickerButton("public", "문제 가져오기", "problems-empty-import")}
           </div>
         </div>
       </Card>
@@ -281,7 +280,7 @@ export function ProblemsTable({
       </table>
       <div className="flex flex-wrap items-center gap-2.5 border-t border-rule px-4 py-3">
         {newProblem}
-        {pickerButton("public", "템플릿에서 가져오기", "problems-template-import")}
+        {pickerButton("public", "문제 가져오기", "problems-import")}
       </div>
     </Card>
   );

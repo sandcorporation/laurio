@@ -225,3 +225,14 @@ def test_two_callers_seeding_at_once_both_succeed(transactional_db):
         thread.join(timeout=60)
 
     assert results == [200, 200], f"동시 시드가 죽었다: {results}"
+
+
+@pytest.mark.django_db
+def test_importable_contest_seed_is_listed_by_the_classroom_catalog(client):
+    """강의실 가져오기 e2e(#876)가 심는 공모전이 실제로 「들여올 수 있는」 목록에 든다."""
+    from core.contest_catalog import contest_catalog
+
+    response = _post(client, "importable-contest", {"run_id": "t876"})
+    assert response.status_code == 200, response.content
+    seeded = response.json()
+    assert seeded["contest_id"] in {c.contest_id for c in contest_catalog().list_importable()}

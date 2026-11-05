@@ -46,6 +46,12 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         command="seed_e2e_contests",
         options=frozenset({"namespace", "bulk", "prune_all_namespaces"}),
     ),
+    # 강의실 「문제 가져오기」의 공모전 탭 e2e(#876) — 호출마다 새 공모전 하나, 이름이 갈려 줄 세울 일 없다.
+    "importable-contest": SeedEntry(
+        command="seed_e2e_importable_contest",
+        options=frozenset({"run_id"}),
+        serialized=False,
+    ),
     "operator": SeedEntry(
         command="seed_e2e_operator",
         # `superuser` 는 연다 — 운영자 앱의 일부 화면이 superuser 만 볼 수 있어
