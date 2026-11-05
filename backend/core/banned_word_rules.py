@@ -724,4 +724,45 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
     ),
+    # 공모전 MCP 의 동의 화면(#870) — 강의실의 같은 자리와 같다.
+    ("contests", "ContestAuthorizationDecisionIn", "client_id"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "redirect_uri"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "response_type"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "code_challenge"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "code_challenge_method"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "state"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "scope"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("contests", "ContestAuthorizationDecisionIn", "resource"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
+    ),
 }
