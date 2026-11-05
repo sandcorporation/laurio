@@ -1011,6 +1011,29 @@ id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 | 자료 업로드 용량 상한(#263, presigned POST 로 강제된다 — #261) | 소스 50MB · 시연 영상 500MB · 스크린샷 10MB · 인수 산출물 20MB |
 | 시연 영상 보존 유예일수(#263, ADR-0035, `demo-video-retention-purge` 스캔이 읽는다 — #262) | 30일 |
 
+## 운영 설정
+
+**공모전 AI 의 키·모델 값은 DB 가 env 를 이긴다**(#922, ADR-0075). `policies.RuntimeSetting`(키→값)에 행이
+있으면 그 값, 없으면 지금까지의 환경변수다. 저장은 커밋 뒤 Redis 의 버전 번호(`codemit:runtime-settings:version`)를
+올리고, 프로세스마다 쥔 값은 그 번호가 바뀌면 DB 에서 다시 읽는다 — 재시작 없이 다음 호출부터 새 값이다.
+Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비밀은 `core.crypto` 로 암호화하고 응답·이력에는
+끝 4자리만 나간다. 강의실 채점은 읽지 않는다(강사 키).
+
+| 설정 | 종류 | 쓰는 곳 | 출처가 없을 때 |
+| --- | --- | --- | --- |
+| `OPEN_AI_API_KEY` | 비밀 | 공모전 채점·완성도·요구사항 대화 | (어댑터가 만들어지지 않는다) |
+| `LLM_OPENAI_MODEL` | 모델 이름 | 같은 셋 | `gpt-4o-mini` |
+| `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
+| `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
+
+| 엔드포인트 | 하는 일 |
+| --- | --- |
+| `GET /api/operator/runtime-settings` | 설정마다 출처(db·env·none)·설정됨·끝 4자리·기본값·변경 시각·변경자. 일반 등급도 |
+| `GET /api/operator/runtime-settings/changes` | 변경 이력(최근 200건, 비밀은 `••••abcd` 표시만). 일반 등급도 |
+| `POST /api/operator/runtime-settings/{key}` | 저장(`{"value": …}`). 빈 값은 기존 값 유지(`changed: false`). 상위 등급만 |
+| `POST /api/operator/runtime-settings/{key}/clear` | DB 값을 지운다 — env 로 돌아간다. 상위 등급만 |
+| `POST /api/operator/runtime-settings/{key}/test` | 연결 시험(키만) — 입력값, 없으면 지금 값으로 `/v1/models` 한 번. `ok`·`invalid_key`·`unavailable` 만. `LLM_ADAPTER_MODE` 가 fake 면 흉내. 상위 등급만 |
+
 ## 바깥 세계
 
 **모든 외부 의존은 어댑터 뒤에 있다**(ADR-0007). 열세 값이 바인딩을 고르고, **배포 환경에서

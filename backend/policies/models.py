@@ -443,3 +443,58 @@ class PolicyChange(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"PolicyChange(operator_id={self.operator_id}, at={self.changed_at})"
+
+
+class RuntimeSetting(models.Model):
+    """운영 설정(Runtime setting) 한 값 — Operator 화면에서 넣고 바꾸는 키→값 (#922, ADR-0075).
+
+    행이 없으면 그 설정은 지금처럼 환경변수에서 읽는다(DB 우선, 없으면 env). 그래서 배포
+    직후 이 표가 비어 있는 동안 운영 동작은 그대로다.
+
+    비밀(`policies.runtime_settings.SPECS` 의 `secret`)은 `core.crypto` 로 암호화한 토큰만
+    `stored` 에 둔다 — 평문으로 남기지 않는다. 화면에 보일 끝 4자리는 `last4` 에 따로 둔다.
+    """
+
+    key = models.CharField(max_length=100, primary_key=True)
+    stored = models.TextField()
+    last4 = models.CharField(max_length=4, blank=True, default="")
+    updated_at = models.DateTimeField()
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="runtime_settings_updated", on_delete=models.PROTECT
+    )
+
+    class Meta:
+        verbose_name = "운영 설정"
+        verbose_name_plural = "운영 설정"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"RuntimeSetting(key={self.key})"
+
+
+class RuntimeSettingChange(models.Model):
+    """운영 설정 한 번의 변경 — 누가·언제·어느 설정·무엇에서 무엇으로 (#922).
+
+    비밀이면 `before`·`after` 에 끝 4자리 표시(`••••abcd`)만 남는다 — 원문은 이력에 오지
+    않는다. `PolicyChange` 와 같이 append-only 로 다룬다(수정·삭제 엔드포인트가 없다).
+    """
+
+    class Action(models.TextChoices):
+        SET = "set", "저장"
+        CLEAR = "clear", "지우기"
+
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="runtime_setting_changes", on_delete=models.PROTECT
+    )
+    key = models.CharField(max_length=100)
+    action = models.CharField(max_length=10, choices=Action.choices)
+    before = models.CharField(max_length=200, blank=True, default="")
+    after = models.CharField(max_length=200, blank=True, default="")
+    changed_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "운영 설정 변경 이력"
+        verbose_name_plural = "운영 설정 변경 이력"
+        ordering = ["-changed_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"RuntimeSettingChange(key={self.key}, at={self.changed_at})"

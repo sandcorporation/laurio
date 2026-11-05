@@ -398,6 +398,14 @@ CACHES = {
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_CACHE_ALIAS = "sessions"
+
+# 운영 설정(#922, ADR-0075) — Operator 화면에서 바꾼 값을 재시작 없이 모든 프로세스에 반영한다.
+# 프로세스마다 값을 메모리에 쥐고, 공용 Redis 의 버전 번호 하나만 읽어 바뀌었는지 본다(저장이
+# 커밋되면 버전을 올린다). `memory` 는 프로세스 안 흉내로 pytest 만 쓴다 — 시험에는 Redis 가 없다.
+RUNTIME_SETTINGS_VERSION_STORE = _env(
+    "RUNTIME_SETTINGS_VERSION_STORE", "memory" if _RUNNING_TESTS else "redis"
+)
+RUNTIME_SETTINGS_REDIS_URL = _env("RUNTIME_SETTINGS_REDIS_URL", SESSION_REDIS_URL)
 # Operator 세션 전용 이름 — 참가자 세션이라는 개념 자체가 없으므로(참가자는 JWT 를
 # 쿠키에 담아 BFF 가 들고 있다, ADR-0016) 이 쿠키는 언제나 Operator 의 것이다.
 SESSION_COOKIE_NAME = "codemit_operator_session"

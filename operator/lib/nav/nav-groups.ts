@@ -47,6 +47,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     title: "기준",
     items: [
       { label: "플랫폼 정책", href: "/policy", testId: "nav-policy" },
+      { label: "운영 설정", href: "/settings", testId: "nav-runtime-settings" },
       { label: "카테고리", href: "/categories", testId: "nav-categories" },
       { label: "산출물 종류", href: "/deliverable-types", testId: "nav-deliverable-types" },
     ],

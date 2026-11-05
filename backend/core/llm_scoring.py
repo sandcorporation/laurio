@@ -39,7 +39,7 @@ import os
 from dataclasses import dataclass
 from enum import Enum
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 import aiohttp
 import requests
@@ -835,18 +835,22 @@ class OpenAIScoringAdapter:
         #: 스키마·파서가 지금 그대로(`is_met`)다.
         allow_unverifiable: bool = False,
     ) -> None:
-        api_key = api_key if api_key is not None else (os.environ.get("OPEN_AI_API_KEY") or "")
+        # 공모전은 운영 설정(#922, ADR-0075 — DB 가 있으면 DB, 없으면 env)을 거친다. 어댑터는
+        # 호출마다 새로 만들어지므로(`get_adapter`) 키·모델을 바꾸면 다음 호출부터 새 값이다.
+        # 강의실(`product="classroom"`)은 강사 키·모델을 인자로 받고 나머지는 지금처럼 env 다.
+        read = _runtime_setting if product == "contest" else _env_setting
+        api_key = api_key if api_key is not None else (read("OPEN_AI_API_KEY") or "")
         if not api_key and transport is None:
             raise LLMAdapterError(
                 "OPEN_AI_API_KEY가 비어 있다 — 실물 OpenAI 채점 어댑터는 자격증명 없이 "
                 "생성할 수 없다."
             )
         self._api_key = api_key
-        self._model = model or os.environ.get("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
+        self._model = model or read("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
         if temperature is not None:
             self._temperature = temperature
         else:
-            raw_temperature = os.environ.get("LLM_OPENAI_TEMPERATURE")
+            raw_temperature = read("LLM_OPENAI_TEMPERATURE")
             self._temperature = float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
         self._reasoning_effort = reasoning_effort
         self._timeout = timeout
@@ -1116,6 +1120,39 @@ def list_openai_models(
         return None
 
     return [item["id"] for item in data if isinstance(item, dict) and isinstance(item.get("id"), str)]
+
+
+def _env_setting(key: str) -> str | None:
+    return os.environ.get(key) or None
+
+
+def _runtime_setting(key: str) -> str | None:
+    # 늦은 임포트 — policies 가 core 를 임포트한다(순환을 피한다). 둘 다 공유층이다.
+    from policies.runtime_settings import setting_value
+
+    return setting_value(key)
+
+
+def probe_openai_key(api_key: str) -> Literal["ok", "invalid_key", "unavailable"]:
+    """운영 설정의 연결 시험(#922) — 강의실 키 확인(`check_key`, 모델 목록 조회)과 같은 왕복이다.
+
+    결과 낱말만 돌려준다. 응답 본문·예외 문구는 넘기지 않는다(키가 섞일 수 있다). 모델·temperature 는
+    이 호출에 쓰이지 않으므로 운영 설정을 읽지 않게 직접 준다.
+    """
+
+    status = OpenAIScoringAdapter(
+        api_key=api_key, model=_OPENAI_DEFAULT_MODEL, temperature=_OPENAI_DEFAULT_TEMPERATURE
+    ).check_key()
+    return {
+        LLMKeyCheckStatus.VALID: "ok",
+        LLMKeyCheckStatus.REJECTED: "invalid_key",
+    }.get(status, "unavailable")
+
+
+def fake_probe_openai_key(api_key: str) -> Literal["ok", "invalid_key", "unavailable"]:
+    """흉내 — 실물처럼 모양이 틀린 키는 거절한다(`sk-` 로 시작하고 20자 이상이어야 통과)."""
+
+    return "ok" if api_key.startswith("sk-") and len(api_key) >= 20 else "invalid_key"
 
 
 def get_adapter() -> LLMScoringAdapter:
