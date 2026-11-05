@@ -12,6 +12,8 @@
 // 입력은 눌러도 아무 일도 하지 않고(`disabled`), 시도 목록은 항상 빈 채로
 // 그려진다(미리보기에는 참여자 신원이 없어 「내 시도」가 애초에 존재하지
 // 않는다 — 실제로 제출된 적 없는 초안이므로 빈 목록이 사실과도 맞는다).
+import { MyQualityCard } from "@/app/components/MyQualityCard";
+import type { MyQuality } from "@/lib/quality/api";
 import Link from "next/link";
 import { createElement, useEffect, useState } from "react";
 import type { ChangeEvent, FormEvent, ReactNode } from "react";
@@ -126,6 +128,8 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   /** `viewingAsInstructor`가 참일 때만 뜻이 있다 — 띠가 몇 줄을 더 말할지
    *  상태 배지를 정한다(초안·숨김이면 배지 하나 더, 열림이면 「강사로 보는 중」뿐). */
   instructorProblemStatus?: "draft" | "open" | "hidden" | null;
+  /** 본인 완성도(#883) — 강사가 공개를 켰고 본인 기록이 있을 때만. */
+  quality?: MyQuality | null;
 };
 
 /** 강사가 학생 화면을 열었을 때의 띠(#429) — 배지 둘(#660): 「강사로 보는 중」과 문제 상태
@@ -323,6 +327,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           total={judgedSummary?.total ?? requiredCount}
         />
       ) : null}
+      {props.interactive && props.quality ? <MyQualityCard quality={props.quality} /> : null}
     </>
   );
 
