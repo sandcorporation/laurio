@@ -679,7 +679,7 @@ def test_submission_is_rejected_when_sponsor_verified_but_ci_hash_is_empty(
     assert error_records, "빈 ci_hash인 VERIFIED Sponsor도 ERROR 로그를 남겨야 한다"
 
 
-# --- Evidence 연결 · 완성도 지표 -----------------------------------------------
+# --- Evidence 연결 · 채움률 지표 -----------------------------------------------
 
 
 @pytest.mark.django_db

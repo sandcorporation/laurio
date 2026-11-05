@@ -1,8 +1,8 @@
 // Sponsor 지표 화면 (#107·#108, 부모 #105) — 「참가작을 하나씩 열어보는 것뿐」이던
-// Sponsor 가 자기 Contest 의 참가 추이·Requirement 충족 분포·제출 완성도 분포를
+// Sponsor 가 자기 Contest 의 참가 추이·Requirement 충족 분포·제출 채움률 분포를
 // 본다.
 //
-// 값 자체(일자별 누적 참가작 수·충족 분포·완성도 분포가 실제 Submission 수와
+// 값 자체(일자별 누적 참가작 수·충족 분포·채움률 분포가 실제 Submission 수와
 // 일치하는지, 0 과 「없음」이 다른 층에서 결정되는지, 소유권 경계, Score·developer
 // 식별자가 응답 어디에도 없는지)는 backend/tests/test_contest_metrics.py 가 실물로
 // 검증한다 — 여기서 확인할 것은 화면이 콘솔에서 클릭으로 닿고, 백엔드가 준 값을

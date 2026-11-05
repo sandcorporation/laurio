@@ -2431,7 +2431,7 @@ export interface paths {
          *     것뿐이었다 — 참가가 언제부터 들어오는지, 어느 Requirement가 사람들을
          *     걸러내는지 알 수 없어 "참가가 없다"를 마감 직전에야 알았다. 이
          *     엔드포인트가 일자별 누적 Submission 수(#107)에 이어 Requirement별 충족
-         *     분포와 제출 완성도 분포(#108)를 낸다.
+         *     분포와 제출 채움률 분포(#108)를 낸다.
          *
          *     `compare_submissions`와 같은 소유권 검사를 그대로 쓴다 — 새 예외를 만들지
          *     않는다. **그 엔드포인트와 달리 마감 전에도 열린다** — Sponsor는 마감 전에도
@@ -5864,7 +5864,7 @@ export interface components {
         };
         /**
          * CompletionDistributionOut
-         * @description 제출 완성도 분포 — 데모·시연 영상·테스트 계정이 붙은 Submission 비율 (#108).
+         * @description 제출 채움률 분포 — 데모·시연 영상·테스트 계정이 붙은 Submission 비율 (#108).
          *
          *     `submissions.schemas.CompletionOut` 이 Submission 한 건에 대해 매기는 세
          *     boolean(has_demo_video·has_demo_url·has_test_account)을 Contest 전체로
@@ -5888,7 +5888,7 @@ export interface components {
         };
         /**
          * CompletionOut
-         * @description 시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 완성도 지표.
+         * @description 시연 영상·데모 URL·테스트 계정·Evidence 연결 상태를 요약한 채움률 지표.
          *
          *     강제 항목은 아무 것도 없다 — 소스만 필수다. 이 지표는 신호일 뿐이다.
          *

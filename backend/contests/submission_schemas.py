@@ -367,7 +367,7 @@ class OwnScoreOut(Schema):
 #
 # 「제출을 하나씩 열어보는 것뿐」이던 Sponsor 에게 자기 Contest 의 건강을
 # 보여준다. **이 화면이 뒤 티켓들의 자리이기도 하다** — #107 은 일자별 누적
-# 참가작 수만 세우고, 이어지는 티켓들(#108: Requirement 충족 분포·제출 완성도
+# 참가작 수만 세우고, 이어지는 티켓들(#108: Requirement 충족 분포·제출 채움률
 # 분포, #109: 조회수·전환율)이 `ContestMetricsOut` 에 필드를 하나씩 더 얹는다.
 # 그래서 지표마다 새 스키마 클래스 하나 + `ContestMetricsOut` 필드 하나가 느는
 # 모양을 유지한다 — 기존 필드를 바꾸지 않는다.
@@ -417,7 +417,7 @@ class RequirementFulfillmentOut(Schema):
 
 
 class CompletionDistributionOut(Schema):
-    """제출 완성도 분포 — 데모·시연 영상·테스트 계정이 붙은 Submission 비율 (#108).
+    """제출 채움률 분포 — 데모·시연 영상·테스트 계정이 붙은 Submission 비율 (#108).
 
     `submissions.schemas.CompletionOut` 이 Submission 한 건에 대해 매기는 세
     boolean(has_demo_video·has_demo_url·has_test_account)을 Contest 전체로

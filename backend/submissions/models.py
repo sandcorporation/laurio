@@ -29,7 +29,7 @@ Award·DistributionShare·Handover·Appeal)가 전부 이 테이블을 그대로
 하나**다. 그 강제는 API 레이어(`contests.submission_api`, 공모전 전용)에서 하고,
 여기 모델은 그 결과를 담는 그릇이다.
 
-시연 영상·데모 URL·테스트 계정은 선택이며 완성도 지표로만 쓰인다. 각 `Requirement`
+시연 영상·데모 URL·테스트 계정은 선택이며 채움률 지표로만 쓰인다. 각 `Requirement`
 자가 응답(`RequirementResponse`)에는 `Evidence`를 연결할 수 있다 — 연결되지 않아도
 제출 자체는 거부되지 않고, "미연결"로 표시될 뿐이다(#12가 채점에서 미달로 본다).
 """
