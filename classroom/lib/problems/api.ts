@@ -24,7 +24,11 @@ export function formatSubmissionFormats(formats: SubmissionFormat[]): string {
 export type ChecklistItemRow = {
   id: number;
   label: string;
+  /** 필수·선택·가산(#904). `required` 는 `grade === "required"` 에서 계산한 호환 칸이다. */
+  grade: "required" | "optional" | "bonus";
   required: boolean;
+  /** 배점 1~10 — 완성도에만 쓴다(#904). */
+  points: number;
   order: number;
 };
 
@@ -169,7 +173,7 @@ export function createProblem(
     submission_formats: SubmissionFormat[];
     // 만들기 화면에서 함께 적는 체크리스트 항목(#315). 순서가 그대로
     // 서버의 order가 된다.
-    checklist_items?: { label: string; required: boolean }[];
+    checklist_items?: { label: string; required: boolean; points?: number }[];
     // 이 문제만의 채점 모델(#327). 빈 문자열이면 클래스 기본값을 따른다 —
     // 화면의 "클래스 기본값을 따릅니다"가 보내는 값이다.
     model?: string;
@@ -329,7 +333,7 @@ export function updateChecklistItem(
   classId: number,
   problemId: number,
   itemId: number,
-  patch: Partial<{ label: string; required: boolean }>,
+  patch: Partial<{ label: string; required: boolean; points: number }>,
 ): Promise<ApiResult<SavedChecklistItemRow>> {
   return apiRequest<SavedChecklistItemRow>(
     `${checklistItemsPath(classId, problemId)}/${itemId}`,

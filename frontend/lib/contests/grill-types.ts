@@ -14,6 +14,9 @@ export type RequirementChatTurnOut = components["schemas"]["RequirementChatTurnO
 
 export type RequirementGrade = "required" | "optional";
 
+/** 요건 행 고치기 — 문구·등급은 `PATCH …/requirements/{id}`, 배점(1~10)은 `PATCH …/requirements/{id}/points`(#904). */
+export type RequirementPatch = { text?: string; grade?: RequirementGrade; points?: number };
+
 // contests/schemas.py `_VALID_GRADES`와 같은 값 집합 — 백엔드가 등급 문자열을
 // 검증하는 기준을 프론트 셀렉트 옵션에도 그대로 옮겨 적는다.
 export const REQUIREMENT_GRADES: { value: RequirementGrade; label: string }[] = [

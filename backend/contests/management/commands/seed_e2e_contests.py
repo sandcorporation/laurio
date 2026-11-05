@@ -42,10 +42,9 @@ from ledger.models import hard_delete_e2e_fixture_rows
 from core.quality_review import (
     QualityItemScore,
     checklist_fingerprint,
-    completeness,
-    max_weighted_score,
+    historical_columns,
+    quality_total,
     records,
-    weighted_score,
 )
 from scoring.models import Score, SubmissionQualityReview
 from scoring.quality import requirement_inputs
@@ -352,7 +351,7 @@ class Command(BaseCommand):
             ],
         )
 
-        # 완성도(#884) — 심사 화면의 「완성도」 열·「완성도순」 정렬을 e2e 가 본다. 서버 순서(id)와
+        # 완성도(#884·#904) — 심사 화면의 「완성도」 열(A 1.2 / 3점, B 2.6 / 3점)·「완성도순」 정렬을 e2e 가 본다. 서버 순서(id)와
         # 완성도 순서가 거꾸로 되게 A 를 낮게, B 를 높게 심는다(B 에도 Score 를 둔다 — 완성도는 Score 가
         # 있는 제출에만 생긴다).
         Score.objects.create(
@@ -380,17 +379,15 @@ class Command(BaseCommand):
                 )
                 for item, value in zip(quality_items, (required_score, optional_score), strict=True)
             ]
-            weighted = weighted_score(scores)
-            maximum = max_weighted_score(quality_items)
+            scored = records(scores)
+            total = quality_total(scored, {item.item_id: item.points for item in quality_items})
             SubmissionQualityReview.objects.create(
                 submission=submission,
                 checklist_fingerprint=checklist_fingerprint(quality_items),
                 model_version="e2e-quality-fake",
                 prompt=f"{self.prefix}fake quality prompt",
-                items=records(scores),
-                weighted_score=weighted,
-                max_weighted_score=maximum,
-                completeness=completeness(weighted, maximum),
+                items=scored,
+                **historical_columns(total),
             )
 
         # FE-06(#31) — 개발자 공개 프로필(GET /api/developers/{id}/profile)이

@@ -1,21 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCompleteness, orderSubmissions, sortByQuality } from "./quality";
+import { formatQualityTotal, orderSubmissions, sortByQuality } from "./quality";
 
-function q(weighted: number) {
-  return { completeness: (weighted / 15) * 100, weighted_score: weighted, max_weighted_score: 15, items: [], rank: 1 };
+function q(raw: number, maxTotal = 3) {
+  return {
+    total: raw / 5,
+    max_total: maxTotal,
+    raw_total: raw,
+    completeness: (raw / (5 * maxTotal)) * 100,
+    weighted_score: raw,
+    max_weighted_score: 5 * maxTotal,
+    items: [],
+    rank: 1,
+  };
 }
 
-describe("formatCompleteness", () => {
-  it("소수 첫째 자리까지 보인다", () => {
-    expect(formatCompleteness((13 / 15) * 100)).toBe("86.7");
-    expect(formatCompleteness(40)).toBe("40.0");
-    expect(formatCompleteness(100)).toBe("100.0");
+describe("formatQualityTotal", () => {
+  it("합은 소수 첫째 자리, 만점은 배점 합으로 「n / 만점점」", () => {
+    expect(formatQualityTotal(187 / 5, 45)).toBe("37.4 / 45점");
+    expect(formatQualityTotal(3, 3)).toBe("3.0 / 3점");
+    expect(formatQualityTotal(0, 12)).toBe("0.0 / 12점");
   });
 });
 
 describe("sortByQuality", () => {
-  it("가중 점수 높은 순, 같으면 제출 순서, 매기지 않은 제출은 뒤", () => {
+  it("정수 합(raw_total) 높은 순, 같으면 제출 순서, 매기지 않은 제출은 뒤", () => {
     const rows = [
       { submission_id: 1, quality: q(6) },
       { submission_id: 2, quality: null },
@@ -25,11 +34,11 @@ describe("sortByQuality", () => {
     expect(sortByQuality(rows).map((r) => r.submission_id)).toEqual([3, 1, 4, 2]);
   });
 
-  it("반올림한 완성도가 아니라 가중 점수로 가른다", () => {
-    // 14/15 와 28/30 은 둘 다 93.3 으로 보이지만 가중 점수가 다르다.
+  it("반올림한 표시값이 아니라 정수 합으로 가른다", () => {
+    // 표시값(total)이 같아도 정수 합이 다르면 갈린다.
     const rows = [
-      { submission_id: 1, quality: { ...q(14), completeness: 93.33 } },
-      { submission_id: 2, quality: { ...q(28), completeness: 93.33, max_weighted_score: 30 } },
+      { submission_id: 1, quality: { ...q(186, 45), total: 37.4 } },
+      { submission_id: 2, quality: { ...q(187, 45), total: 37.4 } },
     ];
     expect(sortByQuality(rows).map((r) => r.submission_id)).toEqual([2, 1]);
   });

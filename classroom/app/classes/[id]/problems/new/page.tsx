@@ -47,7 +47,13 @@ type DraftChecklistItem = {
   key: number;
   label: string;
   required: boolean;
+  /** 배점 1~10(#904). 등급을 바꿨을 때 기본값(필수 2·선택 1) 그대로면 새 등급의 기본값을 따른다. */
+  points: number;
 };
+
+function defaultPoints(required: boolean): number {
+  return required ? 2 : 1;
+}
 
 export default function NewProblemPage() {
   const params = useParams<{ id: string }>();
@@ -116,7 +122,7 @@ export default function NewProblemPage() {
     event.preventDefault();
     const label = newItemLabel.trim();
     if (label === "") return;
-    setItems((prev) => [...prev, { key: nextKeyRef.current++, label, required: newItemRequired }]);
+    setItems((prev) => [...prev, { key: nextKeyRef.current++, label, required: newItemRequired, points: defaultPoints(newItemRequired) }]);
     setNewItemLabel("");
     setNewItemRequired(true);
   }
@@ -126,7 +132,21 @@ export default function NewProblemPage() {
   }
 
   function handleItemRequiredChange(key: number, required: boolean) {
-    setItems((prev) => prev.map((item) => (item.key === key ? { ...item, required } : item)));
+    setItems((prev) =>
+      prev.map((item) =>
+        item.key === key
+          ? {
+              ...item,
+              required,
+              points: item.points === defaultPoints(item.required) ? defaultPoints(required) : item.points,
+            }
+          : item,
+      ),
+    );
+  }
+
+  function handleItemPointsChange(key: number, points: number) {
+    setItems((prev) => prev.map((item) => (item.key === key ? { ...item, points } : item)));
   }
 
   function handleItemDelete(key: number) {
@@ -183,7 +203,7 @@ export default function NewProblemPage() {
       model_is_reasoning: model !== "" && modelIsReasoning,
       grading_strictness: gradingGuideline.grading_strictness,
       grading_guideline_text: gradingGuideline.grading_guideline_text,
-      checklist_items: items.map((item) => ({ label: item.label, required: item.required })),
+      checklist_items: items.map((item) => ({ label: item.label, required: item.required, points: item.points })),
       syntax_check_enabled: syntaxCheckEnabled,
       open,
     });
@@ -361,12 +381,18 @@ export default function NewProblemPage() {
                     </EmptyState>
                   ) : (
                     <ChecklistRows
-                      items={items.map((item) => ({ key: item.key, label: item.label, required: item.required }))}
+                      items={items.map((item) => ({
+                        key: item.key,
+                        label: item.label,
+                        required: item.required,
+                        points: item.points,
+                      }))}
                       listTestId="new-problem-checklist-items"
                       rowTestId={(_item, index) => `new-problem-checklist-item-${index}`}
                       labelMode={{ kind: "change", onChange: (key, label) => handleItemLabelChange(key as number, label) }}
                       onReorder={handleReorder}
                       onRequiredChange={(key, required) => handleItemRequiredChange(key as number, required)}
+                      onPointsChange={(key, points) => handleItemPointsChange(key as number, points)}
                       onDelete={(key) => handleItemDelete(key as number)}
                     />
                   )}
