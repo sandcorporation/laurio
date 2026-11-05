@@ -107,7 +107,7 @@ function renderBody(contest: ContestDetail) {
   // DRAFT·PUBLISHED(아직 마감 전) — 지금 무엇을 기다리는지 말하고 링크는 주지 않는다.
   return (
     <p data-testid="judging-entry-message" className="text-sm text-ink/60">
-      공모전이 마감되면 이 자리에서 심사를 시작할 수 있습니다.
+      공모전이 마감되면 심사를 시작할 수 있습니다.
     </p>
   );
 }

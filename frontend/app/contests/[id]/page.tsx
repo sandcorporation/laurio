@@ -20,6 +20,7 @@ import {
   formatSubmissionCount,
   remainingTimeIsImminent,
   remainingTimeLabel,
+  sponsorLine,
 } from "@/lib/contest-format";
 
 import { SponsorJudgingEntry } from "./judging-entry";
@@ -89,7 +90,11 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
       <ContestViewBeacon contestId={contest.id} />
       <div className="flex flex-col gap-8">
         <PageHeader
-          eyebrow={contest.category.name}
+          eyebrow={
+            sponsorLine(contest.sponsor_display_name)
+              ? `${contest.category.name} · ${sponsorLine(contest.sponsor_display_name)}`
+              : contest.category.name
+          }
           title={contest.title}
           description={
             contest.deliverable_types.length > 0 ? (

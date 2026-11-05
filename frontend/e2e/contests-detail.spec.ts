@@ -39,6 +39,8 @@ test("@exclusive 요구사항과 Requirement 체크리스트가 서버 렌더링
   const html = await res.text();
 
   expect(html).toContain(seeded.funded.title);
+  // 개최자 표시 이름(#908) — 목록 카드와 같은 값이 상세 머리에도 있다.
+  expect(html).toContain("개최 · E2E 시드 스폰서");
   expect(html).toContain(seeded.funded.prize.toLocaleString("ko-KR"));
   for (const requirement of seeded.funded.requirements) {
     expect(html).toContain(requirement.text);
