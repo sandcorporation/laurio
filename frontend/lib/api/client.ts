@@ -64,5 +64,5 @@ function backendBaseUrl(): string {
 export const backendClient = createClient<paths>({
   baseUrl: backendBaseUrl(),
   fetch: (request) =>
-    retryWhileConnectionRefused(() => fetch(request.clone()), { signal: request.signal }),
+    retryWhileConnectionRefused(() => fetch(request.clone()), { signal: request.signal, method: request.method }),
 });

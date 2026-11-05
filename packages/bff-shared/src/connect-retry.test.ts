@@ -163,6 +163,60 @@ describe("retryWhileConnectionRefused", () => {
     expect(calls).toBe(1);
   });
 
+  // GlitchTip 64 (2026-11-05) — 겹쳐 바꾸기(#485) 뒤에도 같은 제목으로 다시 올라왔다:
+  // 강의실 채점 비용(GET), 원인 `SocketError: other side closed`. 배포가 옛 backend 를
+  // 멈추는 순간 undici 가 그 컨테이너로 쥐고 있던 keep-alive 연결에 요청을 실었고, 옛
+  // gunicorn 이 응답 없이 그 연결을 닫았다. 재사용된 연결이 응답 전에 닫힌 것은 진짜
+  // 서버로 그대로 만든다 — 두 번째 요청이 오면 소켓을 끊는다(예외 모양이 이벤트와 같다).
+  function closesSecondRequest(): Promise<string> {
+    let requests = 0;
+    server = createServer((req, res) => {
+      requests += 1;
+      if (requests === 2) {
+        req.socket.destroy();
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end('{"cost":0}');
+    });
+    return new Promise((resolve) =>
+      server!.listen(0, "127.0.0.1", () => {
+        const { port } = server!.address() as AddressInfo;
+        resolve(`http://127.0.0.1:${port}/api/classroom/classes/3/scoring-cost`);
+      }),
+    );
+  }
+
+  it("GET 은 응답 전에 닫힌 재사용 연결을 한 번 더 보낸다 — 배포가 옛 backend 를 멈추는 순간", async () => {
+    const url = await closesSecondRequest();
+    await (await fetch(url)).text(); // keep-alive 연결 하나를 남긴다
+
+    const response = await retryWhileConnectionRefused(() => fetch(url), {
+      delaysMs: [10, 10],
+      method: "GET",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cost: 0 });
+  });
+
+  it("POST 는 응답 전에 닫힌 연결을 다시 보내지 않는다 — 이미 처리됐을 수 있다", async () => {
+    const url = await closesSecondRequest();
+    await (await fetch(url)).text();
+    let calls = 0;
+
+    await expect(
+      retryWhileConnectionRefused(
+        () => {
+          calls += 1;
+          return fetch(url, { method: "POST", body: "{}" });
+        },
+        { delaysMs: [10, 10], method: "POST" },
+      ),
+    ).rejects.toThrow("fetch failed");
+    expect(calls).toBe(1);
+  });
+
   it("브라우저가 이미 떠났으면 다시 보내지 않는다", async () => {
     const port = await freePort();
     const controller = new AbortController();

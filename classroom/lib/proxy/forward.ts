@@ -62,7 +62,7 @@ export async function forwardToBackend(
   const send = () =>
     retryWhileConnectionRefused(
       () => forwardRequest(request.method, url, headers, body, request.signal),
-      { signal: request.signal },
+      { signal: request.signal, method: request.method },
     );
   let response = await send();
 
