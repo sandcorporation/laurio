@@ -93,7 +93,7 @@ export function RequirementField({
       {showUnmetWarning && (
         <ErrorNote>
           <span data-testid={`${testId}-unmet-warning`}>
-            증거가 연결되지 않았습니다 — 이대로 제출하면 이 필수 항목은 미달로 채점됩니다.
+            근거가 연결되지 않았습니다 — 이대로 제출하면 이 필수 항목은 미달로 채점됩니다.
           </span>
         </ErrorNote>
       )}
@@ -167,7 +167,7 @@ export function RequirementField({
           data-testid={`${testId}-add-evidence`}
           className={buttonClass("secondary", "sm")}
         >
-          + 증거 추가
+          + 근거 추가
         </button>
       </div>
     </div>
