@@ -14,14 +14,19 @@ import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
 import type { ContestDetail, RequirementGrade, RequirementOut, RequirementPatch } from "@/lib/contests/grill-types";
 import { POINTS_OPTIONS } from "@/lib/submissions/quality";
-import { REQUIREMENT_GRADES, REQUIREMENT_TEXT_MAX_LENGTH, requirementGradeLabel } from "@/lib/contests/grill-types";
+import {
+  REQUIREMENT_GRADES,
+  REQUIREMENT_TEXT_MAX_LENGTH,
+  hiddenLocked,
+  requirementGradeLabel,
+} from "@/lib/contests/grill-types";
 
 export interface RequirementDraftPanelProps {
   contest: ContestDetail;
   requirements: RequirementOut[];
   requirementError: string | null;
   requirementBusy: boolean;
-  onAdd: (text: string, grade: RequirementGrade, points: number) => Promise<void>;
+  onAdd: (text: string, grade: RequirementGrade, points: number, hidden: boolean) => Promise<void>;
   onUpdate: (id: number, patch: RequirementPatch) => Promise<boolean>;
   onDelete: (id: number) => Promise<void>;
   // 무료 공모전(#415, ADR-0048) 전용 — `contest.is_free`가 true일 때만 쓰인다.
@@ -122,13 +127,46 @@ function PointsSelect({
   );
 }
 
+/** 「제출자에게 숨기기」 스위치(#906) — 유료 공모전의 필수 항목에서는 막힌다. */
+function HiddenToggle({
+  checked,
+  disabled,
+  onChange,
+  testId,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+  testId: string;
+}) {
+  return (
+    <label
+      className={`flex shrink-0 items-center gap-1.5 text-xs ${disabled ? "text-ink/35" : "text-ink/70"}`}
+      title={disabled ? "유료 공모전의 필수 항목은 숨길 수 없습니다" : undefined}
+    >
+      <input
+        type="checkbox"
+        role="switch"
+        checked={checked && !disabled}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+        data-testid={testId}
+        className="h-3.5 w-3.5 accent-ink"
+      />
+      제출자에게 숨기기
+    </label>
+  );
+}
+
 function RequirementRow({
   requirement,
+  isFree,
   busy,
   onUpdate,
   onDelete,
 }: {
   requirement: RequirementOut;
+  isFree: boolean;
   busy: boolean;
   onUpdate: (id: number, patch: RequirementPatch) => Promise<boolean>;
   onDelete: (id: number) => Promise<void>;
@@ -137,11 +175,13 @@ function RequirementRow({
   const [text, setText] = useState(requirement.text);
   const [grade, setGrade] = useState<RequirementGrade>(requirement.grade as RequirementGrade);
   const [points, setPoints] = useState(requirement.points);
+  const [hidden, setHidden] = useState(requirement.hidden ?? false);
+  const locked = hiddenLocked(isFree, grade);
 
   async function save() {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const patch: RequirementPatch = { text: trimmed, grade };
+    const patch: RequirementPatch = { text: trimmed, grade, hidden: hidden && !locked };
     if (points !== requirement.points) patch.points = points;
     const ok = await onUpdate(requirement.id, patch);
     if (ok) setEditing(false);
@@ -161,7 +201,7 @@ function RequirementRow({
           data-testid={`requirement-row-${requirement.id}-edit-text`}
           className={`resize-none ${INPUT_CLASS}`}
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={grade}
             onChange={(event) => setGrade(event.target.value as RequirementGrade)}
@@ -179,6 +219,12 @@ function RequirementRow({
             onChange={setPoints}
             testId={`requirement-row-${requirement.id}-edit-points`}
           />
+          <HiddenToggle
+            checked={hidden}
+            disabled={locked}
+            onChange={setHidden}
+            testId={`requirement-row-${requirement.id}-edit-hidden`}
+          />
           <button
             type="button"
             disabled={busy || !text.trim()}
@@ -194,6 +240,7 @@ function RequirementRow({
               setText(requirement.text);
               setGrade(requirement.grade as RequirementGrade);
               setPoints(requirement.points);
+              setHidden(requirement.hidden ?? false);
               setEditing(false);
             }}
             data-testid={`requirement-row-${requirement.id}-cancel`}
@@ -221,6 +268,14 @@ function RequirementRow({
       </span>
       <span className="flex-1 text-sm leading-relaxed" data-testid={`requirement-row-${requirement.id}-text`}>
         {requirement.text}
+        {requirement.hidden && (
+          <span
+            className="ml-2 whitespace-nowrap rounded-sm border border-rule px-1 py-px text-[10.5px] text-ink/60"
+            data-testid={`requirement-row-${requirement.id}-hidden`}
+          >
+            숨은 항목
+          </span>
+        )}
       </span>
       <span
         className="shrink-0 pt-0.5 font-mono text-xs text-ink/60"
@@ -272,6 +327,8 @@ export function RequirementDraftPanel({
   // 배점 기본값은 등급을 따른다(필수 2·선택 1) — 손으로 고치면 그 값을 쓴다.
   const [manualPoints, setManualPoints] = useState<number | null>(null);
   const effectiveManualPoints = manualPoints ?? (manualGrade === "required" ? 2 : 1);
+  const [manualHidden, setManualHidden] = useState(false);
+  const manualHiddenLocked = hiddenLocked(contest.is_free ?? false, manualGrade);
 
   const requiredCount = requirements.filter((r) => r.grade === "required").length;
   const bonusCount = requirements.filter((r) => r.grade === "bonus").length;
@@ -280,10 +337,11 @@ export function RequirementDraftPanel({
   async function submitManual() {
     const trimmed = manualText.trim();
     if (!trimmed) return;
-    await onAdd(trimmed, manualGrade, effectiveManualPoints);
+    await onAdd(trimmed, manualGrade, effectiveManualPoints, manualHidden && !manualHiddenLocked);
     setManualText("");
     setManualGrade("required");
     setManualPoints(null);
+    setManualHidden(false);
     setManualOpen(false);
   }
 
@@ -393,6 +451,7 @@ export function RequirementDraftPanel({
             <RequirementRow
               key={requirement.id}
               requirement={requirement}
+              isFree={contest.is_free ?? false}
               busy={requirementBusy}
               onUpdate={onUpdate}
               onDelete={onDelete}
@@ -412,7 +471,7 @@ export function RequirementDraftPanel({
                 data-testid="grill-manual-add-text"
                 className={`resize-none ${INPUT_CLASS}`}
               />
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select
                   value={manualGrade}
                   onChange={(event) => setManualGrade(event.target.value as RequirementGrade)}
@@ -429,6 +488,12 @@ export function RequirementDraftPanel({
                   value={effectiveManualPoints}
                   onChange={setManualPoints}
                   testId="grill-manual-add-points"
+                />
+                <HiddenToggle
+                  checked={manualHidden}
+                  disabled={manualHiddenLocked}
+                  onChange={setManualHidden}
+                  testId="grill-manual-add-hidden"
                 />
                 <button
                   type="button"

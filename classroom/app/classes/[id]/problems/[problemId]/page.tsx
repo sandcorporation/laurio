@@ -326,6 +326,14 @@ export default function EditProblemPage() {
     });
   }
 
+  function handleItemHiddenChange(itemId: number, hidden: boolean) {
+    // 숨은 항목은 제출자(참여자)에게 문구·판정 근거가 가지 않는다(#906).
+    void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { hidden }), {
+      fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
+  }
+
   function handleItemPointsChange(itemId: number, points: number) {
     // 배점은 완성도에만 쓴다(#904) — 서버가 AI 를 다시 부르지 않고 지금 배점으로 다시 계산한다.
     void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { points }), {
@@ -651,6 +659,7 @@ export default function EditProblemPage() {
                         label: item.label,
                         grade: item.grade,
                         points: item.points,
+                        hidden: item.hidden,
                       }))}
                       listTestId="checklist-items"
                       rowTestId={(item) => `checklist-item-${item.key}`}
@@ -660,6 +669,7 @@ export default function EditProblemPage() {
                       onReorder={handleReorder}
                       onGradeChange={(key, grade) => handleItemGradeChange(key as number, grade)}
                       onPointsChange={(key, points) => handleItemPointsChange(key as number, points)}
+                      onHiddenChange={(key, hidden) => handleItemHiddenChange(key as number, hidden)}
                       onDelete={(key) => handleItemDelete(key as number)}
                     />
                   )}
@@ -899,7 +909,8 @@ export default function EditProblemPage() {
               dueAt={problem.due_at}
               description={description}
               instructorNote={followsContest ? instructorNote : ""}
-              checklistItems={problem.checklist_items}
+              checklistItems={problem.checklist_items.filter((item) => !item.hidden)}
+              hiddenChecklistItemCount={problem.checklist_items.filter((item) => item.hidden).length}
               syntaxCheckEnabled={problem.syntax_check_enabled}
               gradingStrictness={gradingGuideline.grading_strictness}
               gradingGuidelineCustomText={gradingGuideline.grading_guideline_text}

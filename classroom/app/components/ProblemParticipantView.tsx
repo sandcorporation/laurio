@@ -109,6 +109,8 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   // 공모전 문제의 수업용 안내(#548) — 설명 위에 보인다. 공모전 문제가 아니면 빈 문자열.
   instructorNote?: string;
   checklistItems: ParticipantChecklistItem[];
+  /** 제출자에게 숨긴 항목 수(#906) — 항목 문구는 오지 않고 개수만 체크리스트 끝에 보인다. */
+  hiddenChecklistItemCount?: number;
   /** 문법 검사 기본 항목의 켜짐 여부(#408) — 참이면 체크리스트 맨 앞에
    *  「소스에 문법 오류가 없다」와 「기본」 표시를 둔다. */
   syntaxCheckEnabled: boolean;
@@ -174,6 +176,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     description,
     instructorNote = "",
     checklistItems,
+    hiddenChecklistItemCount = 0,
     syntaxCheckEnabled,
     gradingStrictness,
     gradingGuidelineCustomText,
@@ -232,6 +235,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
       <ChecklistWithVerdict
         items={checklistItems}
+        hiddenCount={hiddenChecklistItemCount}
         syntaxCheckEnabled={syntaxCheckEnabled}
         strictnessLabel={gradingStrictnessLabel(gradingStrictness)}
         customGuideline={gradingStrictness === "custom" ? gradingGuidelineCustomText : ""}
@@ -392,6 +396,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 // 항목마다 충족/미충족 표식과 AI 의 사유. 판정이 아직 없으면 항목만.
 function ChecklistWithVerdict({
   items,
+  hiddenCount,
   syntaxCheckEnabled,
   strictnessLabel,
   customGuideline,
@@ -399,6 +404,7 @@ function ChecklistWithVerdict({
   judgedSummary,
 }: {
   items: ParticipantChecklistItem[];
+  hiddenCount: number;
   syntaxCheckEnabled: boolean;
   strictnessLabel: string;
   /** 지침이 「직접 작성」일 때의 강사 문장 — 그 밖의 단계는 빈 문자열. */
@@ -502,6 +508,11 @@ function ChecklistWithVerdict({
             </ChecklistLine>
           );
         })}
+        {hiddenCount > 0 ? (
+          <li data-testid="my-problem-checklist-hidden" className="px-4 py-2.5 text-[13px] text-ink/60">
+            숨은 항목 {hiddenCount}개
+          </li>
+        ) : null}
       </ul>
       {score ? (
         <div

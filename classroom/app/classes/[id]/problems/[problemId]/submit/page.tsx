@@ -228,6 +228,7 @@ export default function ProblemSubmitPage() {
         description={problem.description}
         instructorNote={problem.instructor_note}
         checklistItems={problem.checklist_items}
+        hiddenChecklistItemCount={problem.hidden_checklist_item_count}
         syntaxCheckEnabled={problem.syntax_check_enabled}
         gradingStrictness={problem.grading_strictness}
         gradingGuidelineCustomText={problem.grading_guideline_text}

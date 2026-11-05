@@ -14,8 +14,13 @@ export type RequirementChatTurnOut = components["schemas"]["RequirementChatTurnO
 
 export type RequirementGrade = "required" | "optional" | "bonus";
 
-/** 요건 행 고치기 — 문구·등급은 `PATCH …/requirements/{id}`, 배점(1~10)은 `PATCH …/requirements/{id}/points`(#904). */
-export type RequirementPatch = { text?: string; grade?: RequirementGrade; points?: number };
+/** 요건 행 고치기 — 문구·등급·숨김은 `PATCH …/requirements/{id}`, 배점(1~10)은 `PATCH …/requirements/{id}/points`(#904). */
+export type RequirementPatch = { text?: string; grade?: RequirementGrade; points?: number; hidden?: boolean };
+
+/** 숨은 항목 스위치(#906)를 켤 수 없는가 — 유료 공모전은 필수 항목을 숨길 수 없다(서버도 422). */
+export function hiddenLocked(isFree: boolean, grade: RequirementGrade): boolean {
+  return !isFree && grade === "required";
+}
 
 // contests/schemas.py `_VALID_GRADES`와 같은 값 집합 — 백엔드가 등급 문자열을
 // 검증하는 기준을 프론트 셀렉트 옵션에도 그대로 옮겨 적는다.

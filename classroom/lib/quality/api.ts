@@ -17,6 +17,8 @@ export type QualityItem = {
   bonus: boolean;
   /** 가산을 아직 매기지 않았으면 거짓(0점). */
   rated: boolean;
+  /** 제출자에게 숨긴 항목(#906) — 문구 대신 「숨은 항목 k」, 근거 줄 없음. */
+  hidden?: boolean;
 };
 
 export type QualityRankRow = {

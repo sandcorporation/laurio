@@ -63,6 +63,11 @@ export function SubmissionVerdictList({
           </li>
         );
       })}
+      {score.hidden_summary && score.hidden_summary.total > 0 ? (
+        <li data-testid={`${testIdPrefix}-hidden-summary`} className="text-[13px] leading-relaxed">
+          숨은 항목 {score.hidden_summary.total}개 중 {score.hidden_summary.met}개 충족
+        </li>
+      ) : null}
     </ul>
   );
 }

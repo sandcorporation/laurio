@@ -50,6 +50,7 @@ type DraftChecklistItem = {
   grade: ChecklistGrade;
   /** 배점 1~10(#904). 등급을 바꿨을 때 기본값(필수 2·선택 1·가산 1) 그대로면 새 등급의 기본값을 따른다. */
   points: number;
+  hidden: boolean;
 };
 
 export default function NewProblemPage() {
@@ -119,7 +120,7 @@ export default function NewProblemPage() {
     event.preventDefault();
     const label = newItemLabel.trim();
     if (label === "") return;
-    setItems((prev) => [...prev, { key: nextKeyRef.current++, label, grade: newItemGrade, points: defaultPoints(newItemGrade) }]);
+    setItems((prev) => [...prev, { key: nextKeyRef.current++, label, grade: newItemGrade, points: defaultPoints(newItemGrade), hidden: false }]);
     setNewItemLabel("");
     setNewItemGrade("required");
   }
@@ -140,6 +141,10 @@ export default function NewProblemPage() {
           : item,
       ),
     );
+  }
+
+  function handleItemHiddenChange(key: number, hidden: boolean) {
+    setItems((prev) => prev.map((item) => (item.key === key ? { ...item, hidden } : item)));
   }
 
   function handleItemPointsChange(key: number, points: number) {
@@ -200,7 +205,7 @@ export default function NewProblemPage() {
       model_is_reasoning: model !== "" && modelIsReasoning,
       grading_strictness: gradingGuideline.grading_strictness,
       grading_guideline_text: gradingGuideline.grading_guideline_text,
-      checklist_items: items.map((item) => ({ label: item.label, grade: item.grade, points: item.points })),
+      checklist_items: items.map((item) => ({ label: item.label, grade: item.grade, points: item.points, hidden: item.hidden })),
       syntax_check_enabled: syntaxCheckEnabled,
       open,
     });
@@ -383,6 +388,7 @@ export default function NewProblemPage() {
                         label: item.label,
                         grade: item.grade,
                         points: item.points,
+                        hidden: item.hidden,
                       }))}
                       listTestId="new-problem-checklist-items"
                       rowTestId={(_item, index) => `new-problem-checklist-item-${index}`}
@@ -390,6 +396,7 @@ export default function NewProblemPage() {
                       onReorder={handleReorder}
                       onGradeChange={(key, grade) => handleItemGradeChange(key as number, grade)}
                       onPointsChange={(key, points) => handleItemPointsChange(key as number, points)}
+                      onHiddenChange={(key, hidden) => handleItemHiddenChange(key as number, hidden)}
                       onDelete={(key) => handleItemDelete(key as number)}
                     />
                   )}
@@ -493,7 +500,8 @@ export default function NewProblemPage() {
               eyebrow={previewEyebrow}
               title={title.trim() === "" ? "(제목 없음)" : title}
               description={description}
-              checklistItems={items.map((item) => ({
+              hiddenChecklistItemCount={items.filter((item) => item.hidden).length}
+              checklistItems={items.filter((item) => !item.hidden).map((item) => ({
                 id: item.key,
                 label: item.label,
                 required: item.grade === "required",

@@ -187,12 +187,13 @@ export default function AppealDetailPage() {
                 가리킨다. */}
             <div data-testid="appeal-detail-score-reasoning" className="flex flex-col">
               <div className="flex gap-3.5 border-b border-rule px-4 py-2 text-[11px] tracking-[0.06em] text-ink/30">
-                <div className="w-[110px] shrink-0">체크리스트</div>
+                <div className="w-[170px] shrink-0">체크리스트</div>
                 <div className="w-[70px] shrink-0">AI 판정</div>
                 <div className="min-w-0 flex-1">AI가 적은 사유</div>
               </div>
               {appeal.score.reasoning.map((raw, index) => {
                 const item = parseReasoningItem(raw);
+                const requirement = appeal.requirements.find((r) => r.id === item.requirementId);
                 return (
                   <div
                     key={index}
@@ -201,8 +202,9 @@ export default function AppealDetailPage() {
                       index % 2 === 1 ? "bg-ink/[2%]" : ""
                     }`}
                   >
-                    <div className="w-[110px] shrink-0 truncate">
-                      요건 {item.requirementId !== null ? `#${item.requirementId}` : "?"}
+                    <div className="w-[170px] shrink-0 truncate" title={requirement?.text}>
+                      {requirement ? requirement.text : `요건 ${item.requirementId !== null ? `#${item.requirementId}` : "?"}`}
+                      {requirement?.hidden ? <Badge tone="neutral">숨은 항목</Badge> : null}
                     </div>
                     <div className="w-[70px] shrink-0">
                       {item.isMet === null ? (

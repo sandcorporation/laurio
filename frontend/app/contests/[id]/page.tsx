@@ -257,6 +257,11 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
               ))}
             </ul>
           )}
+          {contest.hidden_requirement_count > 0 && (
+            <p className="text-sm text-ink/60" data-testid="contest-hidden-requirement-count">
+              숨은 항목 {contest.hidden_requirement_count}개
+            </p>
+          )}
         </section>
 
         {/* 무료 공모전의 단서를 **페이지 맨 아래**에 작은 글씨로 둔다(2026-09-20).
