@@ -41,9 +41,11 @@ class ContestRequirementSource:
 
     requirement_id: int
     text: str
-    #: "required" | "optional" — 공모전의 등급 값 그대로다.
+    #: "required" | "optional" | "bonus" — 공모전의 등급 값 그대로다.
     grade: str
     order: int
+    #: 배점 1~10(#904) — 공모전 문제의 항목이 그대로 따른다.
+    points: int = 1
 
 
 @dataclass(frozen=True)

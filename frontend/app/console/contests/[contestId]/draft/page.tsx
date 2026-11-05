@@ -42,6 +42,7 @@ import {
   type ContestDetail,
   type DeliverableType,
   type RequirementGrade,
+  type RequirementPatch,
   type RequirementOut,
 } from "@/lib/contests/grill-types";
 
@@ -207,13 +208,18 @@ export default function ContestDraftPage() {
     }
   }
 
-  async function handleAddRequirement(text: string, grade: RequirementGrade, fromProposal?: ChatProposal) {
+  async function handleAddRequirement(
+    text: string,
+    grade: RequirementGrade,
+    fromProposal?: ChatProposal,
+    points?: number,
+  ) {
     setRequirementError(null);
     setRequirementBusy(true);
     try {
       const response = await bffClient.post<unknown>(
         `/api/backend/contests/${contestId}/requirements`,
-        { text, grade },
+        points === undefined ? { text, grade } : { text, grade, points },
       );
 
       if (!response.ok) {
@@ -239,16 +245,28 @@ export default function ContestDraftPage() {
 
   async function handleUpdateRequirement(
     id: number,
-    patch: { text?: string; grade?: RequirementGrade },
+    patch: RequirementPatch,
   ): Promise<boolean> {
     setRequirementError(null);
     try {
+      const { points, ...rest } = patch;
+      // 배점은 따로 된 엔드포인트다(#904) — 변경 이력·참가자 알림을 남기지 않는다.
+      if (points !== undefined) {
+        const saved = await bffClient.request<unknown>(
+          `/api/backend/contests/${contestId}/requirements/${id}/points`,
+          { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ points }) },
+        );
+        if (!saved.ok) {
+          setRequirementError(saved.detail);
+          return false;
+        }
+      }
       const response = await bffClient.request<unknown>(
         `/api/backend/contests/${contestId}/requirements/${id}`,
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(patch),
+          body: JSON.stringify(rest),
         },
       );
 
@@ -509,7 +527,7 @@ export default function ContestDraftPage() {
           requirements={requirements}
           requirementError={requirementError}
           requirementBusy={requirementBusy}
-          onAdd={(text, grade) => handleAddRequirement(text, grade)}
+          onAdd={(text, grade, points) => handleAddRequirement(text, grade, undefined, points)}
           onUpdate={handleUpdateRequirement}
           onDelete={handleDeleteRequirement}
           onPublish={handlePublish}

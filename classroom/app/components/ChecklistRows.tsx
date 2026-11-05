@@ -1,6 +1,6 @@
 "use client";
 
-// 체크리스트 항목 줄 — 끌기 손잡이·번호·라벨·필수/선택 배지·삭제 (#637).
+// 체크리스트 항목 줄 — 끌기 손잡이·번호·라벨·필수/선택 배지·배점(1~10, #904)·삭제 (#637).
 //
 // 문제 편집(항목마다 즉시 저장)과 새 문제(초안, 만들 때 함께 저장)가 이 줄 하나를 쓴다.
 // 두 화면은 저장 시점만 다르고 줄의 모양과 순서 바꾸기는 같다.
@@ -17,7 +17,10 @@ import type { ReactNode } from "react";
 import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { type ChecklistReorderSave, createChecklistMover } from "@/lib/problems/checklist-reorder";
 
-export type ChecklistRowItem = { key: string | number; label: string; required: boolean };
+export type ChecklistRowItem = { key: string | number; label: string; required: boolean; points: number };
+
+/** 배점 선택지 — 1~10 정수(#904). 완성도에만 쓴다. */
+export const POINTS_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 export function ChecklistRows({
   items,
@@ -28,6 +31,7 @@ export function ChecklistRows({
   labelMode,
   onReorder,
   onRequiredChange,
+  onPointsChange,
   onDelete,
 }: {
   items: ChecklistRowItem[];
@@ -45,12 +49,15 @@ export function ChecklistRows({
   };
   onReorder: ChecklistReorderSave<ChecklistRowItem["key"]>;
   onRequiredChange: (key: ChecklistRowItem["key"], required: boolean) => void;
+  onPointsChange: (key: ChecklistRowItem["key"], points: number) => void;
   onDelete: (key: ChecklistRowItem["key"]) => void;
 }): ReactNode {
   const [rows, setRows] = useState(items);
   // 부모는 렌더마다 새 배열을 내려주므로 identity 가 아니라 내용(순서·라벨·필수)이 바뀔 때만 맞춘다 —
   // 아니면 끌어 놓은 순서가 저장이 끝나기도 전에 되돌아간다.
-  const signature = items.map((item) => `${item.key}\u0000${item.label}\u0000${item.required}`).join("\u0001");
+  const signature = items
+    .map((item) => `${item.key}\u0000${item.label}\u0000${item.required}\u0000${item.points}`)
+    .join("\u0001");
   useEffect(() => setRows(items), [signature]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 옮기기는 렌더 사이에도 지금 값을 읽어야 해서(연타·저장 완료 콜백) ref 로 들고 있다.
@@ -186,6 +193,21 @@ export function ChecklistRows({
             >
               <Badge tone={item.required ? "verified" : "neutral"}>{item.required ? "필수" : "선택"}</Badge>
             </button>
+            <select
+              data-testid={`${testId}-points-input`}
+              aria-label={`${index + 1}번 항목 배점`}
+              title="배점"
+              value={item.points}
+              disabled={locked}
+              onChange={(event) => onPointsChange(item.key, Number(event.target.value))}
+              className="w-[64px] shrink-0 border border-rule bg-surface px-1.5 py-2 text-[13.5px] text-ink focus:border-ink focus:outline-none disabled:cursor-not-allowed disabled:bg-paper disabled:text-ink/50"
+            >
+              {POINTS_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value}점
+                </option>
+              ))}
+            </select>
             {lockedStructure ? null : (
               <button
                 type="button"

@@ -10,6 +10,9 @@ export type QualityItem = {
   /** 항목 완성도 0~5. */
   score: number;
   reasoning: string;
+  /** 지금 배점(1~10)과 항목 점수(0~5 ÷ 5 × 배점) — #904. */
+  points: number;
+  item_points: number;
 };
 
 export type QualityRankRow = {
@@ -18,10 +21,10 @@ export type QualityRankRow = {
   display_name: string;
   submission_id: number;
   attempt_number: number;
-  weighted_score: number;
-  max_weighted_score: number;
-  /** 0~100 — 화면은 소수 첫째 자리까지. */
-  completeness: number;
+  /** 「total / max_total점」 — 지금 배점으로 계산(#904). 등수는 raw_total(정수). */
+  total: number;
+  max_total: number;
+  raw_total: number;
   items: QualityItem[];
 };
 
@@ -46,8 +49,11 @@ export type QualityEstimate = {
 
 export type MyQuality = {
   rank: number;
+  /** 순위에 든 사람 수(「k등 / N명」의 N). */
   total: number;
-  completeness: number;
+  /** 「score_total / max_total점」(#904). */
+  score_total: number;
+  max_total: number;
   items: QualityItem[];
 };
 

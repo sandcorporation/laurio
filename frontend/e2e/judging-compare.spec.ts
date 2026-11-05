@@ -98,7 +98,8 @@ test("개발자 이름을 클릭하면 그 개발자의 공개 프로필이 새 
   await expect(profilePage.getByText(submission.developer_display_name).first()).toBeVisible();
 });
 
-// #884 — 완성도 열과 「완성도순」. 시드는 A(먼저 낸 제출)를 40.0, B 를 86.7 로 심는다.
+// #884·#904 — 완성도 열(「n / 만점점」)과 「완성도순」. 시드는 A(먼저 낸 제출)를 필수 2·선택 2, B 를 필수 5·선택 3 으로
+// 심는다 — 기본 배점(필수 2·선택 1)이면 A 1.2 / 3점, B 2.6 / 3점.
 test("「완성도순」을 누르면 완성도가 높은 제출작이 앞 열로 온다", async ({ page }) => {
   await loginAsJudgingSponsor(page);
   await page.goto(`/console/contests/${seeded.judging.id}/judge`);
@@ -108,8 +109,8 @@ test("「완성도순」을 누르면 완성도가 높은 제출작이 앞 열�
   const headers = page.locator('[data-testid^="submission-header-"]');
   await expect(headers.nth(0)).toHaveAttribute("data-testid", `submission-header-${a.id}`);
   await expect(headers.nth(1)).toHaveAttribute("data-testid", `submission-header-${b.id}`);
-  await expect(page.getByTestId(`quality-${a.id}`)).toContainText("40.0");
-  await expect(page.getByTestId(`quality-${b.id}`)).toContainText("86.7");
+  await expect(page.getByTestId(`quality-${a.id}`)).toContainText("1.2 / 3점");
+  await expect(page.getByTestId(`quality-${b.id}`)).toContainText("2.6 / 3점");
   await expect(page.getByTestId(`quality-${b.id}`)).toContainText("1등");
 
   await page.getByTestId("judge-sort-quality").click();
@@ -119,6 +120,32 @@ test("「완성도순」을 누르면 완성도가 높은 제출작이 앞 열�
   // 항목별 근거가 그 요구사항 칸에 함께 있다.
   const requirementId = seeded.judging.requirements[0].id;
   await expect(page.getByTestId(`quality-item-${requirementId}-${b.id}`)).toContainText("항목 완성도 5/5");
+});
+
+// #904 — 배점은 마감 뒤에도 요구사항 행에서 고치고, 합·만점·순서가 곧바로 지금 배점으로 바뀐다.
+test("배점을 고치면 「n / 만점점」과 「완성도순」이 곧바로 다시 계산된다", async ({ page }) => {
+  await loginAsJudgingSponsor(page);
+  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
+  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
+
+  const [a, b] = seeded.judging.submissions;
+  const optionalId = seeded.judging.requirements[1].id;
+  const select = page.getByTestId(`requirement-${optionalId}-points`);
+  await expect(select).toHaveValue("1");
+  try {
+    await select.selectOption("10");
+    // A 2×2 + 2×10 = 24 → 4.8 / 12점, B 5×2 + 3×10 = 40 → 8.0 / 12점.
+    await expect(page.getByTestId(`quality-${a.id}`)).toContainText("4.8 / 12점");
+    await expect(page.getByTestId(`quality-${b.id}`)).toContainText("8.0 / 12점");
+    await expect(page.getByTestId(`quality-item-${optionalId}-${b.id}`)).toContainText("6.0 / 10점");
+    await page.reload();
+    await expect(page.getByTestId(`requirement-${optionalId}-points`)).toHaveValue("10");
+    await expect(page.getByTestId(`quality-${a.id}`)).toContainText("4.8 / 12점");
+  } finally {
+    // 다른 시험이 기본 배점을 본다 — 되돌린다.
+    await page.getByTestId(`requirement-${optionalId}-points`).selectOption("1");
+    await expect(page.getByTestId(`quality-${a.id}`)).toContainText("1.2 / 3점");
+  }
 });
 
 // #179 — Award 직후 Sponsor가 「내 차례 · 인수를 확인하세요」를 보고도 갈 곳이

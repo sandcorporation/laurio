@@ -15,6 +15,9 @@ import secrets
 
 from django.conf import settings
 from django.db import models
+from django.db.models.expressions import DatabaseDefault
+
+from core.quality_review import GRADE_BONUS, GRADE_OPTIONAL, GRADE_REQUIRED, POINTS_MAX, POINTS_MIN, default_points
 
 from submissions.models import Submission
 
@@ -405,7 +408,8 @@ class Problem(models.Model):
         if score is None:
             return False
         items = self.checklist_items.all() if checklist_items is None else checklist_items
-        required_item_ids = {item.id for item in items if item.required}
+        # 통과는 필수만 센다 — 선택·가산은 들어가지 않는다(ADR-0073).
+        required_item_ids = {item.id for item in items if item.grade == GRADE_REQUIRED}
         if not required_item_ids:
             return False
         if self.syntax_check_enabled:
@@ -654,7 +658,57 @@ class ClassroomSubmission(Submission):
         return f"ClassroomSubmission(problem={self.problem_id}, member={self.member_id}, attempt={self.attempt_number})"
 
 
-class ChecklistItem(models.Model):
+class ChecklistGrade(models.TextChoices):
+    """체크리스트 항목의 등급(#904, ADR-0073) — 공모전 `Requirement.Grade` 와 같은 값이다. 통과는 필수만 센다."""
+
+    REQUIRED = GRADE_REQUIRED, "필수"
+    OPTIONAL = GRADE_OPTIONAL, "선택"
+    BONUS = GRADE_BONUS, "가산"
+
+
+class GradedChecklistFields(models.Model):
+    """세 체크리스트 모델(문제·문제 템플릿·클래스 템플릿)이 함께 갖는 등급·배점(#904, ADR-0073).
+
+    진실은 `grade` 하나다 — 옛 `required` bool 칸은 이 배포에서 상태에서만 지웠고(DB 칸은 겹쳐 바꾸는 몇 초
+    동안 옛 코드가 읽어 남겨 두었다), `required` 는 `grade == "required"` 를 읽고 쓰는 **속성**이다
+    (`ChecklistItem(required=False)` 처럼 옛 모양으로 만들어도 `grade` 가 정해진다).
+
+    `points` 는 완성도에만 쓰는 배점(1~10)이다. 지정하지 않고 `save()` 하면 등급별 기본값(필수 2·선택 1·가산 1)이
+    들어간다 — `bulk_create` 는 `save()` 를 거치지 않으니 부르는 쪽이 넣는다."""
+
+    grade = models.CharField(
+        max_length=16, choices=ChecklistGrade.choices, default=GRADE_REQUIRED, db_default=GRADE_REQUIRED
+    )
+    #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    points = models.PositiveSmallIntegerField(db_default=1)
+
+    class Meta:
+        abstract = True
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(points__gte=POINTS_MIN, points__lte=POINTS_MAX),
+                name="%(app_label)s_%(class)s_points_range",
+            )
+        ]
+
+    @property
+    def required(self) -> bool:
+        return self.grade == GRADE_REQUIRED
+
+    @required.setter
+    def required(self, value: bool) -> None:
+        if value:
+            self.grade = GRADE_REQUIRED
+        elif self.grade == GRADE_REQUIRED:
+            self.grade = GRADE_OPTIONAL
+
+    def save(self, *args, **kwargs):
+        if isinstance(self.points, DatabaseDefault) or self.points is None:
+            self.points = default_points(self.grade)
+        super().save(*args, **kwargs)
+
+
+class ChecklistItem(GradedChecklistFields):
     """채점이 보는 항목 하나(#283). `required=True`를 전부 충족하면 **통과**다
     — 문제마다 합격선을 따로 두지 않는다(CONTEXT.md 「통과」). 필수 항목이
     하나도 없으면 통과가 정의되지 않으므로, 그런 문제는 열 수 없다(API에서
@@ -670,13 +724,12 @@ class ChecklistItem(models.Model):
     problem = models.ForeignKey(Problem, related_name="checklist_items", on_delete=models.CASCADE)
     #: 500 — 공모전 문제의 항목은 공모전 Requirement 문구(최대 500자)를 그대로 옮긴다(#548).
     label = models.CharField(max_length=500)
-    required = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
     #: 공모전 문제의 항목이면 따라가는 Requirement 의 번호(#548) — 원본이 바뀔 때 어느 항목을
     #: 고칠지 이 번호로 찾는다. 강사가 직접 만든 항목은 비어 있다.
     contest_requirement_id = models.PositiveBigIntegerField(null=True, blank=True)
 
-    class Meta:
+    class Meta(GradedChecklistFields.Meta):
         ordering = ["order", "id"]
 
     def __str__(self) -> str:  # pragma: no cover
@@ -832,7 +885,7 @@ class ProblemTemplate(models.Model):
         return f"ProblemTemplate(id={self.pk}, title={self.title!r})"
 
 
-class ProblemTemplateChecklistItem(models.Model):
+class ProblemTemplateChecklistItem(GradedChecklistFields):
     """공개 시점 체크리스트 사본 한 줄 — `ChecklistItem`과 같은 모양이지만
     독립 테이블이다(`ProblemTemplate`이 `Problem`을 가리키지 않는 것과 같은
     이유)."""
@@ -841,10 +894,9 @@ class ProblemTemplateChecklistItem(models.Model):
         ProblemTemplate, related_name="checklist_items", on_delete=models.CASCADE
     )
     label = models.CharField(max_length=200)
-    required = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
 
-    class Meta:
+    class Meta(GradedChecklistFields.Meta):
         ordering = ["order", "id"]
 
     def __str__(self) -> str:  # pragma: no cover
@@ -997,7 +1049,7 @@ class ClassTemplateProblem(models.Model):
         return f"ClassTemplateProblem(id={self.pk}, title={self.title!r})"
 
 
-class ClassTemplateProblemChecklistItem(models.Model):
+class ClassTemplateProblemChecklistItem(GradedChecklistFields):
     """`ClassTemplateProblem` 하나의 체크리스트 사본 한 줄 —
     `ProblemTemplateChecklistItem`과 같은 모양이지만 독립 테이블이다."""
 
@@ -1005,10 +1057,9 @@ class ClassTemplateProblemChecklistItem(models.Model):
         ClassTemplateProblem, related_name="checklist_items", on_delete=models.CASCADE
     )
     label = models.CharField(max_length=200)
-    required = models.BooleanField(default=True)
     order = models.PositiveIntegerField(default=0)
 
-    class Meta:
+    class Meta(GradedChecklistFields.Meta):
         ordering = ["order", "id"]
 
     def __str__(self) -> str:  # pragma: no cover

@@ -206,7 +206,8 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
         ChecklistItem(
             problem=copy,
             label=item.label,
-            required=item.required,
+            grade=item.grade,
+            points=item.points,
             order=item.order,
             # 공모전 문제의 항목은 복사본에서도 같은 Requirement 를 따라간다(#548).
             contest_requirement_id=item.contest_requirement_id,
@@ -290,7 +291,7 @@ def publish_problem_as_template(
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
-                    template=template, label=item.label, required=item.required, order=item.order
+                    template=template, label=item.label, grade=item.grade, points=item.points, order=item.order
                 )
                 for item in problem.checklist_items.all()
             )
@@ -315,7 +316,9 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
         **_problem_template_fields(template),
     )
     ChecklistItem.objects.bulk_create(
-        ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
+        ChecklistItem(
+            problem=problem, label=item.label, grade=item.grade, points=item.points, order=item.order
+        )
         for item in template.checklist_items.all()
     )
     return problem
@@ -359,7 +362,8 @@ def publish_class_as_template(
                     ClassTemplateProblemChecklistItem(
                         problem=template_problem,
                         label=item.label,
-                        required=item.required,
+                        grade=item.grade,
+                        points=item.points,
                         order=item.order,
                     )
                     for item in problem.checklist_items.all()
@@ -389,7 +393,9 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
             **_problem_template_fields(template_problem),
         )
         ChecklistItem.objects.bulk_create(
-            ChecklistItem(problem=problem, label=item.label, required=item.required, order=item.order)
+            ChecklistItem(
+            problem=problem, label=item.label, grade=item.grade, points=item.points, order=item.order
+        )
             for item in template_problem.checklist_items.all()
         )
     return new_class

@@ -17,10 +17,12 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.db.models.expressions import DatabaseDefault
 from django.utils import timezone
 
 from core.classification import Classification
 from core.clock import Clock
+from core.quality_review import GRADE_BONUS, GRADE_OPTIONAL, GRADE_REQUIRED, POINTS_MAX, POINTS_MIN, default_points
 
 from payments.charges import ChargeBase
 from submissions.models import Submission
@@ -694,16 +696,32 @@ class Requirement(models.Model):
     """Contest의 심사 체크리스트를 이루는 검증 가능한 한 항목."""
 
     class Grade(models.TextChoices):
-        REQUIRED = "required", "필수"
-        OPTIONAL = "optional", "선택"
+        REQUIRED = GRADE_REQUIRED, "필수"
+        OPTIONAL = GRADE_OPTIONAL, "선택"
+        #: 가산(#903·#904, ADR-0073) — 필수가 아니라 Score·통과에 들어가지 않고, AI 가 매기지 않는다.
+        BONUS = GRADE_BONUS, "가산"
 
     contest = models.ForeignKey(Contest, related_name="requirements", on_delete=models.CASCADE)
     text = models.CharField(max_length=500)
     grade = models.CharField(max_length=16, choices=Grade.choices)
     order = models.PositiveIntegerField(default=0)
+    #: 배점 1~10 — 완성도에만 쓴다(ADR-0073). 지정하지 않고 `save()` 하면 등급별 기본값(필수 2·선택 1·가산 1).
+    #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    points = models.PositiveSmallIntegerField(db_default=1)
 
     class Meta:
         ordering = ["order", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(points__gte=POINTS_MIN, points__lte=POINTS_MAX),
+                name="contests_requirement_points_range",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        if isinstance(self.points, DatabaseDefault) or self.points is None:
+            self.points = default_points(self.grade)
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:  # pragma: no cover
         return self.text

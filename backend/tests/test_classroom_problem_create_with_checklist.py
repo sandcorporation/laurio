@@ -63,9 +63,9 @@ def test_creating_a_problem_with_checklist_items_creates_both_in_one_request(cli
     assert labels_and_required == [("테스트가 통과한다", True), ("README가 있다", False)]
 
     stored = Problem.objects.get(id=body["id"])
-    assert list(stored.checklist_items.values_list("label", "required")) == [
-        ("테스트가 통과한다", True),
-        ("README가 있다", False),
+    assert list(stored.checklist_items.values_list("label", "grade", "points")) == [
+        ("테스트가 통과한다", "required", 2),
+        ("README가 있다", "optional", 1),
     ]
 
 

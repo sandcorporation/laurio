@@ -8,7 +8,7 @@ import { Badge, Card, CardHeader, EmptyState, ErrorNote, Num, buttonClass } from
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { updateProblem } from "@/lib/problems/api";
 import { fetchQualityEstimate, runQuality, type QualityEstimate, type QualityRankRow } from "@/lib/quality/api";
-import { estimateLine, formatCompleteness } from "@/lib/quality/format";
+import { estimateLine, formatPoints, formatQualityTotal } from "@/lib/quality/format";
 import { useProblemQuality } from "@/lib/quality/use-quality";
 
 type Confirm =
@@ -29,8 +29,8 @@ function QualityRow({ row, open, onToggle }: { row: QualityRankRow; open: boolea
         <span data-testid={`${testId}-member`} className="w-[90px] shrink-0 truncate text-[13.5px]">
           {row.display_name}
         </span>
-        <span data-testid={`${testId}-completeness`} className="w-[52px] shrink-0 text-[13.5px]">
-          <Num>{formatCompleteness(row.completeness)}</Num>
+        <span data-testid={`${testId}-completeness`} className="w-[96px] shrink-0 text-[13.5px]">
+          <Num>{formatQualityTotal(row.total, row.max_total)}</Num>
         </span>
         <span className="order-5 flex w-full basis-full flex-wrap gap-1.5 sm:order-none sm:w-auto sm:min-w-0 sm:flex-1 sm:basis-0">
           {row.items.map((item) => (
@@ -60,7 +60,9 @@ function QualityRow({ row, open, onToggle }: { row: QualityRankRow; open: boolea
               <span className="flex flex-wrap items-center gap-2">
                 <Badge tone={item.required ? "verified" : "neutral"}>{item.required ? "필수" : "선택"}</Badge>
                 <span className="font-medium">{item.label}</span>
-                <Num className="text-ink/60">{item.score}/5</Num>
+                <Num className="text-ink/60">
+                  {item.score}/5 · {formatPoints(item.item_points)} / {item.points}점
+                </Num>
               </span>
               <span className="text-ink/70">{item.reasoning}</span>
             </li>

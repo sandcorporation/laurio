@@ -181,6 +181,8 @@ class RequirementComparisonOut(Schema):
     requirement_id: int
     text: str
     grade: str
+    #: 배점 1~10 — 완성도에만 쓴다(#904). 마감 뒤에도 `PATCH …/requirements/{id}/points` 로 고친다.
+    points: int
     entries: list[ComparisonEntryOut]
 
 
@@ -192,12 +194,20 @@ class QualityItemOut(Schema):
     required: bool
     score: int
     reasoning: str
+    #: 지금 배점(1~10)과 항목 점수(0~5 ÷ 5 × 배점) — #904, ADR-0073.
+    points: int
+    item_points: float
 
 
 class SubmissionQualityOut(Schema):
-    """제출 하나의 완성도(#884). 상금·Score 와 무관한 AI 의 참고 의견이고 이의 대상이 아니다.
-    `completeness` 는 0~100(화면은 소수 첫째 자리), 등수는 `weighted_score`(정수)로 매긴다."""
+    """제출 하나의 완성도(#884·#904). 상금·Score 와 무관한 AI 의 참고 의견이고 이의 대상이 아니다.
+    화면은 「`total` / `max_total`점」(소수 첫째 자리), 등수는 `raw_total`(정수 Σ 0~5 × 배점)로 매긴다 —
+    읽을 때 지금 배점으로 계산한다(ADR-0073). `completeness`·`weighted_score`·`max_weighted_score` 는 옛 화면
+    호환 칸이다."""
 
+    total: float
+    max_total: int
+    raw_total: int
     completeness: float
     weighted_score: int
     max_weighted_score: int
@@ -311,7 +321,13 @@ class OwnScoreOut(Schema):
 
     @staticmethod
     def resolve_quality(obj):
-        return getattr(obj.submission, "quality_review", None)
+        from core.quality_review import quality_view
+        from scoring.quality import points_by_requirement
+
+        review = getattr(obj.submission, "quality_review", None)
+        if review is None:
+            return None
+        return quality_view(review.items, points_by_requirement(obj.submission.contest_id))
 
     @staticmethod
     def resolve_scored_assets(obj) -> list[dict]:

@@ -264,20 +264,48 @@ class JoinLinkOut(Schema):
     join_code: str
 
 
+#: 입력이 받는 등급 — 가산(`bonus`)은 AI 제외·사람 점수와 함께 다음 티켓(#905)에서 연다(ADR-0073).
+ChecklistGradeIn = Literal["required", "optional"]
+#: 배점 1~10(완성도에만 쓴다, ADR-0073).
+ChecklistPointsIn = Annotated[int, Field(ge=1, le=10)]
+
+
 class ChecklistItemIn(Schema):
+    """`grade` 가 진실이다. `grade` 없이 `required` 만 오면 옛 모양으로 읽는다(True → 필수, False → 선택).
+    `points` 가 없으면 등급별 기본값(필수 2·선택 1)."""
+
     label: str = Field(min_length=1, max_length=200)
+    grade: ChecklistGradeIn | None = None
     required: bool = True
+    points: ChecklistPointsIn | None = None
+
+    def resolved_grade(self) -> str:
+        if self.grade is not None:
+            return self.grade
+        return "required" if self.required else "optional"
 
 
 class ChecklistItemPatchIn(Schema):
     label: str | None = Field(default=None, min_length=1, max_length=200)
+    grade: ChecklistGradeIn | None = None
     required: bool | None = None
+    points: ChecklistPointsIn | None = None
+
+    def resolved_grade(self) -> str | None:
+        if self.grade is not None:
+            return self.grade
+        if self.required is None:
+            return None
+        return "required" if self.required else "optional"
 
 
 class ChecklistItemOut(Schema):
     id: int
     label: str
+    #: 필수·선택·가산(#904). `required` 는 `grade == "required"` 에서 계산한 호환 칸이다.
+    grade: str
     required: bool
+    points: int
     order: int
 
 
@@ -1105,8 +1133,19 @@ class PublishTemplateIn(Schema):
 
 class ProblemTemplateChecklistItemOut(Schema):
     label: str
+    grade: str
+    #: `grade == "required"` 에서 계산한 호환 칸.
     required: bool
+    points: int
     order: int
+
+
+def template_checklist_item_out(item) -> ProblemTemplateChecklistItemOut:
+    """템플릿·들여오기 목록의 항목 한 줄 — 세 체크리스트 모델 어느 것이든(`GradedChecklistFields`)."""
+
+    return ProblemTemplateChecklistItemOut(
+        label=item.label, grade=item.grade, required=item.required, points=item.points, order=item.order
+    )
 
 
 class ProblemTemplateOut(Schema):
@@ -1228,6 +1267,9 @@ class QualityItemOut(Schema):
     #: 항목 완성도 0~5.
     score: int
     reasoning: str
+    #: 지금 배점(1~10)과 항목 점수(0~5 ÷ 5 × 배점) — #904, ADR-0073.
+    points: int
+    item_points: float
 
 
 class QualityRankRowOut(Schema):
@@ -1236,9 +1278,13 @@ class QualityRankRowOut(Schema):
     display_name: str
     submission_id: int
     attempt_number: int
+    #: 「`total` / `max_total`점」 — 지금 배점으로 읽을 때 계산한다(ADR-0073). 등수는 `raw_total`(정수).
+    total: float
+    max_total: int
+    raw_total: int
+    #: 옛 화면 호환 칸 — 지금 배점으로 다시 센 값(0~100 과 5배 정수).
     weighted_score: int
     max_weighted_score: int
-    #: 0~100 — 화면은 소수 첫째 자리까지.
     completeness: float
     items: list[QualityItemOut]
 
@@ -1274,6 +1320,11 @@ class MyQualityOut(Schema):
     """참여자 본인의 완성도 — 공개가 켜졌고 본인 기록이 있을 때만. 다른 참여자의 이름·점수는 없다."""
 
     rank: int
+    #: 순위에 든 사람 수(「k등 / N명」의 N).
     total: int
+    #: 「`score_total` / `max_total`점」 — 지금 배점으로 계산한다(#904, ADR-0073).
+    score_total: float
+    max_total: int
+    #: 옛 화면 호환 칸(0~100).
     completeness: float
     items: list[QualityItemOut]

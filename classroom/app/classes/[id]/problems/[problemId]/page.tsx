@@ -325,6 +325,14 @@ export default function EditProblemPage() {
     });
   }
 
+  function handleItemPointsChange(itemId: number, points: number) {
+    // 배점은 완성도에만 쓴다(#904) — 서버가 AI 를 다시 부르지 않고 지금 배점으로 다시 계산한다.
+    void checklistMutation.run(() => updateChecklistItem(classId, problemId, itemId, { points }), {
+      fallbackMessage: "항목을 저장하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      reload,
+    });
+  }
+
   function handleItemDelete(itemId: number) {
     // 열린·숨긴 문제의 마지막 필수 항목 삭제도 422다(#440) — 그 문구를
     // 그대로 보여준다.
@@ -641,6 +649,7 @@ export default function EditProblemPage() {
                         key: item.id,
                         label: item.label,
                         required: item.required,
+                        points: item.points,
                       }))}
                       listTestId="checklist-items"
                       rowTestId={(item) => `checklist-item-${item.key}`}
@@ -649,6 +658,7 @@ export default function EditProblemPage() {
                       labelMode={{ kind: "commit", onCommit: (key, label) => handleItemLabelSave(key as number, label) }}
                       onReorder={handleReorder}
                       onRequiredChange={(key, required) => handleItemRequiredToggle(key as number, required)}
+                      onPointsChange={(key, points) => handleItemPointsChange(key as number, points)}
                       onDelete={(key) => handleItemDelete(key as number)}
                     />
                   )}

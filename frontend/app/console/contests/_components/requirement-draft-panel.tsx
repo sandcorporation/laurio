@@ -12,7 +12,8 @@ import Link from "next/link";
 
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { formatPrize } from "@/lib/contest-format";
-import type { ContestDetail, RequirementGrade, RequirementOut } from "@/lib/contests/grill-types";
+import type { ContestDetail, RequirementGrade, RequirementOut, RequirementPatch } from "@/lib/contests/grill-types";
+import { POINTS_OPTIONS } from "@/lib/submissions/quality";
 import { REQUIREMENT_GRADES, REQUIREMENT_TEXT_MAX_LENGTH } from "@/lib/contests/grill-types";
 
 export interface RequirementDraftPanelProps {
@@ -20,8 +21,8 @@ export interface RequirementDraftPanelProps {
   requirements: RequirementOut[];
   requirementError: string | null;
   requirementBusy: boolean;
-  onAdd: (text: string, grade: RequirementGrade) => Promise<void>;
-  onUpdate: (id: number, patch: { text?: string; grade?: RequirementGrade }) => Promise<boolean>;
+  onAdd: (text: string, grade: RequirementGrade, points: number) => Promise<void>;
+  onUpdate: (id: number, patch: RequirementPatch) => Promise<boolean>;
   onDelete: (id: number) => Promise<void>;
   // 무료 공모전(#415, ADR-0048) 전용 — `contest.is_free`가 true일 때만 쓰인다.
   // 결제 안내·링크 대신 이 자리에 공개 버튼을 그린다(본인확인·결제 없이
@@ -92,6 +93,35 @@ function SponsorDisplayNameGate({
   );
 }
 
+/** 배점 1~10(#904) — 완성도에만 쓴다. */
+function PointsSelect({
+  value,
+  onChange,
+  testId,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  testId: string;
+}) {
+  return (
+    <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-ink/60">
+      배점
+      <select
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        data-testid={testId}
+        className="w-[64px] border border-rule bg-surface px-1.5 py-2 text-sm text-ink focus:border-ink focus:outline-none"
+      >
+        {POINTS_OPTIONS.map((option) => (
+          <option key={option} value={option}>
+            {option}점
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function RequirementRow({
   requirement,
   busy,
@@ -100,17 +130,20 @@ function RequirementRow({
 }: {
   requirement: RequirementOut;
   busy: boolean;
-  onUpdate: (id: number, patch: { text?: string; grade?: RequirementGrade }) => Promise<boolean>;
+  onUpdate: (id: number, patch: RequirementPatch) => Promise<boolean>;
   onDelete: (id: number) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(requirement.text);
   const [grade, setGrade] = useState<RequirementGrade>(requirement.grade as RequirementGrade);
+  const [points, setPoints] = useState(requirement.points);
 
   async function save() {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const ok = await onUpdate(requirement.id, { text: trimmed, grade });
+    const patch: RequirementPatch = { text: trimmed, grade };
+    if (points !== requirement.points) patch.points = points;
+    const ok = await onUpdate(requirement.id, patch);
     if (ok) setEditing(false);
   }
 
@@ -141,6 +174,11 @@ function RequirementRow({
               </option>
             ))}
           </select>
+          <PointsSelect
+            value={points}
+            onChange={setPoints}
+            testId={`requirement-row-${requirement.id}-edit-points`}
+          />
           <button
             type="button"
             disabled={busy || !text.trim()}
@@ -155,6 +193,7 @@ function RequirementRow({
             onClick={() => {
               setText(requirement.text);
               setGrade(requirement.grade as RequirementGrade);
+              setPoints(requirement.points);
               setEditing(false);
             }}
             data-testid={`requirement-row-${requirement.id}-cancel`}
@@ -182,6 +221,12 @@ function RequirementRow({
       </span>
       <span className="flex-1 text-sm leading-relaxed" data-testid={`requirement-row-${requirement.id}-text`}>
         {requirement.text}
+      </span>
+      <span
+        className="shrink-0 pt-0.5 font-mono text-xs text-ink/60"
+        data-testid={`requirement-row-${requirement.id}-points`}
+      >
+        {requirement.points}점
       </span>
       <div className="flex shrink-0 gap-2">
         <button
@@ -224,6 +269,9 @@ export function RequirementDraftPanel({
   const [manualOpen, setManualOpen] = useState(false);
   const [manualText, setManualText] = useState("");
   const [manualGrade, setManualGrade] = useState<RequirementGrade>("required");
+  // 배점 기본값은 등급을 따른다(필수 2·선택 1) — 손으로 고치면 그 값을 쓴다.
+  const [manualPoints, setManualPoints] = useState<number | null>(null);
+  const effectiveManualPoints = manualPoints ?? (manualGrade === "required" ? 2 : 1);
 
   const requiredCount = requirements.filter((r) => r.grade === "required").length;
   const optionalCount = requirements.length - requiredCount;
@@ -231,9 +279,10 @@ export function RequirementDraftPanel({
   async function submitManual() {
     const trimmed = manualText.trim();
     if (!trimmed) return;
-    await onAdd(trimmed, manualGrade);
+    await onAdd(trimmed, manualGrade, effectiveManualPoints);
     setManualText("");
     setManualGrade("required");
+    setManualPoints(null);
     setManualOpen(false);
   }
 
@@ -374,6 +423,11 @@ export function RequirementDraftPanel({
                     </option>
                   ))}
                 </select>
+                <PointsSelect
+                  value={effectiveManualPoints}
+                  onChange={setManualPoints}
+                  testId="grill-manual-add-points"
+                />
                 <button
                   type="button"
                   disabled={requirementBusy || !manualText.trim()}

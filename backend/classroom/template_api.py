@@ -41,6 +41,7 @@ from .schemas import (
     ImportTemplateIn,
     ProblemOut,
     ProblemTemplateChecklistItemOut,
+    template_checklist_item_out,
     ProblemTemplateListItemOut,
     ProblemTemplateOut,
     PublishTemplateIn,
@@ -99,7 +100,7 @@ def _serialize_template(template: ProblemTemplate, *, viewer_id: int | None = No
         created_at=template.created_at,
         taken_down=template.taken_down_at is not None,
         checklist_items=[
-            ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
+            template_checklist_item_out(i)
             for i in template.checklist_items.all()
         ],
         is_mine=viewer_id is not None and template.published_by_id == viewer_id,
@@ -291,7 +292,7 @@ def _serialize_class_template(template: ClassTemplate, *, viewer_id: int | None 
                 syntax_check_enabled=p.syntax_check_enabled,
                 order=p.order,
                 checklist_items=[
-                    ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
+                    template_checklist_item_out(i)
                     for i in p.checklist_items.all()
                 ],
             )

@@ -135,6 +135,7 @@ from .schemas import (
     ProblemPatchIn,
     ProblemReorderIn,
     ProblemTemplateChecklistItemOut,
+    template_checklist_item_out,
     ProblemTransitionOut,
     PublishedTemplateSummaryOut,
     ScoringCostAttemptOut,
@@ -307,7 +308,9 @@ def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> Pending
 
 
 def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
-    return ChecklistItemOut(id=item.id, label=item.label, required=item.required, order=item.order)
+    return ChecklistItemOut(
+        id=item.id, label=item.label, grade=item.grade, required=item.required, points=item.points, order=item.order
+    )
 
 
 def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool = True) -> ChecklistItemSavedOut:
@@ -317,7 +320,9 @@ def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool =
     return ChecklistItemSavedOut(
         id=item.id,
         label=item.label,
+        grade=item.grade,
         required=item.required,
+        points=item.points,
         order=item.order,
         gradability_warnings=gradability_warnings([item]) if text_changed else [],
     )
@@ -2068,7 +2073,7 @@ def list_importable_problems(request: HttpRequest, class_id: int):
             submission_formats=p.submission_formats,
             syntax_check_enabled=p.syntax_check_enabled,
             checklist_items=[
-                ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
+                template_checklist_item_out(i)
                 for i in p.checklist_items.all()
             ],
         )
@@ -2781,7 +2786,12 @@ def get_my_problem_quality(request: HttpRequest, class_id: int, problem_id: int)
         return 404, ErrorOut(detail="공개된 완성도가 없습니다.")
     row, total = mine
     return 200, MyQualityOut(
-        rank=row["rank"], total=total, completeness=row["completeness"], items=_quality_item_outs(row["items"])
+        rank=row["rank"],
+        total=total,
+        score_total=row["total"],
+        max_total=row["max_total"],
+        completeness=row["completeness"],
+        items=_quality_item_outs(row["items"]),
     )
 
 

@@ -93,14 +93,15 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만. `allows_classroom_import` 로 「클래스에서 들여오기」를 허용한다(#547) |
 | `POST /api/contests/{id}/publish` | 무료 공모전 공개(#415) — 결제 대신 개최 권한이 연다, 요구사항이 없거나 개최자 표시 이름이 없으면 422(#447) |
 | `GET /api/contests/mine` | 내가 연 것 — 행마다 `can_edit`(수정 게이트와 같은 `Contest.is_content_editable`, DRAFT·PUBLISHED 참, #881) |
-| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473). 문구(`text`)는 공개 제목·설명과 같은 노출이라 욕설이면 422다(spec #474, #480) — 상세 화면에서 로그인 없이 보인다 |
+| `POST`·`PATCH`·`DELETE .../requirements[/{id}]` | 요구사항 — `PATCH /contests/{id}`와 같은 문(DRAFT·PUBLISHED, #473). 문구(`text`)는 공개 제목·설명과 같은 노출이라 욕설이면 422다(spec #474, #480) — 상세 화면에서 로그인 없이 보인다. 더할 때 배점(`points` 1~10, 없으면 필수 2·선택 1, #904)을 받는다 |
+| `PATCH .../requirements/{id}/points` | 배점(1~10)만 고친다(#904, ADR-0073) — 소유자면 **마감 뒤에도** 열리고 변경 이력·참가자 알림(ContestChange)을 남기지 않는다. 완성도는 읽을 때 지금 배점으로 다시 계산되고 AI 를 다시 부르지 않는다. 들여온 공모전 문제가 따라간다 |
 | `.../requirement-chat/messages` | 요구사항을 LLM 과 함께 다듬는다 — 새 턴 보내기는 DRAFT뿐, 대화 이력 읽기는 상태 무관 |
 | `POST .../images/upload-url` · `images` · `PATCH`·`DELETE .../images/{id}` | 이미지 — DRAFT뿐(#473 이후에도 넓히지 않았다) |
 | `POST .../views` | 조회 기록 |
 | `GET .../metrics` | 개최자용 지표 |
 | `POST .../reopen` | 재개최 |
 | `POST .../extend-judging-period[/{order}/confirm]` | 심사기간 연장(유료) |
-| `GET .../submissions/compare` | 제출작 비교 — 제출마다 완성도(#884, ADR-0072: 완성도·가중 점수·「완성도 순위」 등수·요구사항별 0~5·근거, 아직 없으면 null) |
+| `GET .../submissions/compare` | 제출작 비교 — 요구사항마다 배점, 제출마다 완성도(#884·#904, ADR-0072·0073: 지금 배점으로 계산한 합·만점 「total / max_total」·정수 합 `raw_total`·「완성도 순위」 등수·요구사항별 0~5·항목 점수·근거, 아직 없으면 null) |
 | `POST .../award` | 선정 |
 | `GET`·`POST .../handover[/accept]` | 인수 |
 | `GET`·`POST .../payout` | 지급 |
@@ -144,7 +145,7 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 | `GET`·`PUT /api/contests/{id}/submissions/me` | 내 제출 조회·수정 |
 | `GET /api/submissions/mine` | 내 참가 현황 |
 | `GET /api/submissions/{id}` | 제출물 하나 |
-| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884, 등수 없이 완성도·요구사항별 0~5·근거, 아직 없으면 null). 이의 대상은 Score 뿐이다 |
+| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884·#904, 등수 없이 「total / max_total」·요구사항별 0~5·항목 점수·근거, 아직 없으면 null). 이의 대상은 Score 뿐이다 |
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
@@ -274,7 +275,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open`·`.../hide`·`.../reopen` | 초안→열림→숨김→열림 전이(#440, `classroom.problem_transitions`) — 표에 없는 상태에서 부르면 400, 열림·숨김으로 가는 전이는 필수 체크리스트 항목이 없으면 400 |
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |
-| `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외) |
+| `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외). 등급은 `grade`(필수·선택 — 가산은 아직 받지 않는다), `grade` 없이 `required` 만 오면 옛 모양으로 읽는다. 배점 `points`(1~10)는 완성도에만 쓰고 고쳐도 다시 채점하지 않는다(#904, ADR-0073) |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
 | `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·상태·시도 수·마지막 시도 시각(#288, #639), 그리고 눈썹의 강사 이름들(`instructor_display_names`, 가입 미리보기와 같은 함수, #671) |
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286), 소스 업로드 상한(`max_source_asset_bytes`, 운영자 정책 값 그대로, #671) |

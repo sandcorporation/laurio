@@ -86,8 +86,9 @@ test.describe.serial("완성도", () => {
     const first = list.locator(":scope > li").first();
     await expect(first).toContainText("1등");
     await expect(first).toContainText("가람");
-    await expect(first).toContainText("100.0");
-    await expect(list.locator(":scope > li").nth(1)).toContainText("73.3");
+    // 기본 배점(필수 2·선택 1, #904) — 5·5 는 3.0 / 3점, 5·1 은 2.2 / 3점.
+    await expect(first).toContainText("3.0 / 3점");
+    await expect(list.locator(":scope > li").nth(1)).toContainText("2.2 / 3점");
 
     await first.getByRole("button", { name: "근거" }).click();
     await expect(first.locator('[data-testid$="-reasons"]')).toContainText("5/5");

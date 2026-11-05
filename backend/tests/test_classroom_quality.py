@@ -286,3 +286,120 @@ def test_the_grader_picks_quality_jobs_sharing_the_per_connection_limit(settings
     assert peak == 1
     board = _board(client, world)
     assert (board["queued_count"], len(board["rows"])) == (0, 2)
+
+
+def _patch_item(client, world: dict, item_id: int, payload: dict) -> dict:
+    response = client.patch(
+        _url(world, f"/checklist-items/{item_id}"),
+        data=payload,
+        content_type="application/json",
+        **auth_header(world["instructor"]["access"]),
+    )
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+def _passing_members(world: dict) -> set[int]:
+    from classroom.models import ClassroomSubmission, Problem
+
+    problem = Problem.objects.get(id=world["problem_id"])
+    return {
+        s.member_id
+        for s in ClassroomSubmission.objects.filter(problem=problem).select_related("classroom_score")
+        if problem.is_score_passed(getattr(s, "classroom_score", None))
+    }
+
+
+def test_default_points_keep_the_old_ranking(client, scored):
+    """기존 데이터(필수 2·선택 1)는 옛 가중 점수 그대로라 순위가 바뀌지 않는다(#904, ADR-0073)."""
+
+    _run(client, scored)
+    rows = _board(client, scored)["rows"]
+    assert [(r["rank"], r["display_name"], r["raw_total"], r["max_total"]) for r in rows] == [
+        (1, "가람", 15, 3),
+        (2, "나래", 11, 3),
+    ]
+    assert [r["total"] for r in rows] == [pytest.approx(3.0), pytest.approx(2.2)]
+    assert [(i["points"], i["item_points"]) for i in rows[1]["items"]] == [(2, 2.0), (1, pytest.approx(0.2))]
+
+
+def test_points_change_recomputes_rank_without_rescoring_and_keeps_pass(client, scored):
+    """배점을 고치면 AI 를 다시 부르지 않고(새 기록·새 대상 없음) 지금 배점으로 다시 계산한다. 통과는 그대로다."""
+
+    from classroom.models import ClassroomQualityReview
+
+    _run(client, scored)
+    reviews_before = ClassroomQualityReview.objects.count()
+    passing_before = _passing_members(scored)
+    required_id, optional_id = scored["item_ids"]
+
+    saved = _patch_item(client, scored, optional_id, {"points": 10})
+    assert (saved["grade"], saved["required"], saved["points"]) == ("optional", False, 10)
+    _patch_item(client, scored, required_id, {"points": 1})
+
+    assert _estimate(client, scored)["new_count"] == 0
+    assert _run(client, scored) == {"queued_count": 0}
+    assert ClassroomQualityReview.objects.count() == reviews_before
+    rows = _board(client, scored)["rows"]
+    # 가람 5×1 + 5×10 = 55, 나래 5×1 + 1×10 = 15 — 만점 11.
+    assert [(r["display_name"], r["raw_total"], r["max_total"]) for r in rows] == [("가람", 55, 11), ("나래", 15, 11)]
+    assert rows[1]["total"] == pytest.approx(3.0)
+    assert _passing_members(scored) == passing_before
+
+
+def test_points_must_be_1_to_10(client, scored):
+    _required_id, optional_id = scored["item_ids"]
+    for bad in (0, 11):
+        response = client.patch(
+            _url(scored, f"/checklist-items/{optional_id}"),
+            data={"points": bad},
+            content_type="application/json",
+            **auth_header(scored["instructor"]["access"]),
+        )
+        assert response.status_code == 422
+
+
+def test_grade_input_wins_over_required_and_bonus_is_not_open_yet(client, scored):
+    _required_id, optional_id = scored["item_ids"]
+    assert _patch_item(client, scored, optional_id, {"grade": "required"})["required"] is True
+    assert _patch_item(client, scored, optional_id, {"required": False})["grade"] == "optional"
+    response = client.patch(
+        _url(scored, f"/checklist-items/{optional_id}"),
+        data={"grade": "bonus"},
+        content_type="application/json",
+        **auth_header(scored["instructor"]["access"]),
+    )
+    assert response.status_code == 422
+
+
+def test_migration_rekeys_existing_reviews_so_they_are_reused_without_rescoring(client, scored):
+    """0037 이 옛 지문(id·라벨·필수 여부)의 기록을 새 지문(AI 대상 항목의 id·라벨)으로 다시 센다 — 그대로 두면
+    배포 뒤 강사가 다시 돈을 내고 채점해야 한다(#904, ADR-0073)."""
+
+    import hashlib
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    from classroom.models import ClassroomQualityReview
+
+    _run(client, scored)
+    old = [
+        hashlib.sha256(
+            json.dumps(
+                sorted([i["item_id"], i["label"], i["required"]] for i in r.items),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        for r in ClassroomQualityReview.objects.order_by("id")
+    ]
+    for review, fingerprint in zip(ClassroomQualityReview.objects.order_by("id"), old, strict=True):
+        ClassroomQualityReview.objects.filter(id=review.id).update(checklist_fingerprint=fingerprint)
+    assert _estimate(client, scored)["new_count"] == 2  # 옛 지문이면 지금의 기록을 못 찾는다.
+
+    migration = importlib.import_module("classroom.migrations.0037_checklist_grade_and_points")
+    migration.refingerprint_quality_reviews(django_apps, None)
+
+    assert _estimate(client, scored)["new_count"] == 0
+    assert [r["raw_total"] for r in _board(client, scored)["rows"]] == [15, 11]

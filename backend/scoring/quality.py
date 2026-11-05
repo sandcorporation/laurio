@@ -31,13 +31,13 @@ from core.quality_review import (
     QualityInput,
     QualityItemInput,
     QualityReviewAdapter,
+    QualityTotal,
     build_prompt,
     checklist_fingerprint,
     competition_ranks,
-    completeness,
-    max_weighted_score,
+    historical_columns,
+    quality_total,
     records,
-    weighted_score,
 )
 from core.scans import ScanSpec
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
@@ -60,10 +60,21 @@ _SUBMISSION_SECTION_HEADER = "## Requirements"
 
 
 def requirement_inputs(requirements: list[Requirement]) -> list[QualityItemInput]:
+    """AI 가 매기는 항목 — 가산은 사람이 매기므로 뺀다(ADR-0073)."""
+
     return [
-        QualityItemInput(item_id=r.id, label=r.text, required=r.grade == Requirement.Grade.REQUIRED)
+        QualityItemInput(
+            item_id=r.id, label=r.text, required=r.grade == Requirement.Grade.REQUIRED, points=r.points
+        )
         for r in requirements
+        if r.grade != Requirement.Grade.BONUS
     ]
+
+
+def points_by_requirement(contest_id: int) -> dict[int, int]:
+    """지금 체크리스트의 Requirement id → 배점(가산 포함) — 완성도는 읽을 때 이것으로 합한다(ADR-0073)."""
+
+    return dict(Requirement.objects.filter(contest_id=contest_id).values_list("id", "points"))
 
 
 def _submission_text(score: Score) -> str:
@@ -85,7 +96,9 @@ def _pending_quality(as_of, ctx):
         )
         .exclude(score__model_version__in=SKIPPED_SCORE_MODEL_VERSIONS)
         .annotate(
-            _has_requirement=Exists(Requirement.objects.filter(contest=OuterRef("contest_id"))),
+            _has_requirement=Exists(
+                Requirement.objects.filter(contest=OuterRef("contest_id")).exclude(grade=Requirement.Grade.BONUS)
+            ),
             _permanent_failure=Exists(attempts.filter(permanent=True)),
             attempt_count=Coalesce(Subquery(attempt_count), 0),
         )
@@ -111,8 +124,8 @@ def review_submission_once(submission: ContestSubmission) -> dict:
     output = adapter.review_quality(
         QualityInput(submission_id=submission.id, prompt=prompt, items=tuple(items), source_text=source)
     )
-    weighted = weighted_score(output.scores)
-    maximum = max_weighted_score(items)
+    scored = records(output.scores)
+    total = quality_total(scored, points_by_requirement(contest.id))
     try:
         with transaction.atomic():
             SubmissionQualityReview.objects.create(
@@ -120,15 +133,13 @@ def review_submission_once(submission: ContestSubmission) -> dict:
                 checklist_fingerprint=checklist_fingerprint(items),
                 model_version=output.model_version,
                 prompt=prompt,
-                items=records(output.scores),
-                weighted_score=weighted,
-                max_weighted_score=maximum,
-                completeness=completeness(weighted, maximum),
+                items=scored,
+                **historical_columns(total),
             )
     except IntegrityError:
         # 겹친 스캔이 먼저 썼다 — 하나만 남는다(OneToOne).
         return {"submission_id": submission.id, "status": "already_reviewed"}
-    return {"submission_id": submission.id, "status": "reviewed", "weighted_score": weighted}
+    return {"submission_id": submission.id, "status": "reviewed", "raw_total": total.raw}
 
 
 def _review_one(submission, as_of, ctx):
@@ -159,19 +170,31 @@ SUBMISSION_QUALITY_SCAN = ScanSpec(
 )
 
 
-def ranked_reviews(submission_ids: list[int]) -> dict[int, tuple[SubmissionQualityReview, int]]:
-    """개최자 비교 화면 몫 — 제출 id → (완성도 기록, 완성도 순위). 등수는 가중 점수(정수)로, 같으면 같은
-    등수(`core.quality_review.competition_ranks`). 기록이 없는 제출은 결과에 없다."""
+def review_total(review: SubmissionQualityReview, points: dict[int, int]) -> QualityTotal:
+    """기록의 0~5 를 지금 배점으로 합한다 — 저장 칸(`weighted_score` 등)은 역사값이라 읽지 않는다(ADR-0073)."""
 
+    return quality_total(review.items, points)
+
+
+def ranked_reviews(
+    contest_id: int, submission_ids: list[int]
+) -> dict[int, tuple[SubmissionQualityReview, QualityTotal, int]]:
+    """개최자 비교 화면 몫 — 제출 id → (완성도 기록, 지금 배점으로 합한 완성도, 완성도 순위). 등수는 정수
+    Σ(0~5 × 배점)으로, 같으면 같은 등수(`core.quality_review.competition_ranks`). 기록이 없는 제출은 결과에 없다."""
+
+    points = points_by_requirement(contest_id)
     reviews = list(SubmissionQualityReview.objects.filter(submission_id__in=submission_ids))
-    ranks = competition_ranks([r.weighted_score for r in reviews])
-    return {r.submission_id: (r, rank) for r, rank in zip(reviews, ranks, strict=True)}
+    totals = [review_total(r, points) for r in reviews]
+    ranks = competition_ranks([t.raw for t in totals])
+    return {r.submission_id: (r, t, rank) for r, t, rank in zip(reviews, totals, ranks, strict=True)}
 
 
 __all__ = [
     "QUALITY_FAILURE_LIMIT",
     "SUBMISSION_QUALITY_SCAN",
+    "points_by_requirement",
     "ranked_reviews",
+    "review_total",
     "requirement_inputs",
     "review_submission_once",
 ]

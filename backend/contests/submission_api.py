@@ -62,6 +62,7 @@ from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
 from policies.scope import current_policy
 from policies.services import get_current_policy
+from core.quality_review import quality_view
 from scoring.quality import ranked_reviews
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
@@ -1290,17 +1291,11 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
     )
 
 
-def _comparison_quality(found) -> ComparisonQualityOut | None:
+def _comparison_quality(found, points: dict[int, int]) -> ComparisonQualityOut | None:
     if found is None:
         return None
-    review, rank = found
-    return ComparisonQualityOut(
-        completeness=review.completeness,
-        weighted_score=review.weighted_score,
-        max_weighted_score=review.max_weighted_score,
-        items=review.items,
-        rank=rank,
-    )
+    review, _total, rank = found
+    return ComparisonQualityOut(**quality_view(review.items, points), rank=rank)
 
 
 @router.get(
@@ -1342,7 +1337,8 @@ def compare_submissions(request: HttpRequest, contest_id: int):
     submission_outs: list[ComparisonSubmissionOut] = []
     entries_by_requirement: dict[int, list[ComparisonEntryOut]] = {r.id: [] for r in requirements}
     # 완성도(#884) — 개최자는 모든 제출작의 완성도·등수·근거를 본다.
-    quality_by_submission = ranked_reviews([s.id for s in submissions])
+    quality_by_submission = ranked_reviews(contest.id, [s.id for s in submissions])
+    quality_points = {r.id: r.points for r in requirements}
 
     for submission in submissions:
         developer_name = (
@@ -1405,7 +1401,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 completion=_completion_of(
                     assets, total_requirements=total, linked_count=linked_count
                 ),
-                quality=_comparison_quality(quality_by_submission.get(submission.id)),
+                quality=_comparison_quality(quality_by_submission.get(submission.id), quality_points),
             )
         )
 
@@ -1417,6 +1413,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 requirement_id=r.id,
                 text=r.text,
                 grade=r.grade,
+                points=r.points,
                 entries=entries_by_requirement[r.id],
             )
             for r in requirements

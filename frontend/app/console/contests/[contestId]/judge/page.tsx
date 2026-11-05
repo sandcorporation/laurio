@@ -13,8 +13,9 @@
 //   2. AI 채점 점수(Score — 필수 요구사항 달성률)는 이 화면 어디에도 없다 — 선정은 Sponsor의
 //      판단이고 Score는 무응답 배분 대상을 가릴 때만 쓰인다(ADR-0006).
 //
-// 완성도(#884, ADR-0072)는 Score 가 아니다 — 요구사항마다 AI 가 매긴 0~5 와 근거, 그 가중 합계(0~100)다.
-// 상금 배분에 쓰지 않는 참고 의견이라 개최자에게 보이고, 「완성도순」으로 열을 줄 세울 수 있다.
+// 완성도(#884 ADR-0072, #904 ADR-0073)는 Score 가 아니다 — 요구사항마다 AI 가 매긴 0~5 와 근거, 배점으로 합한
+// 「37.4 / 45점」이다. 상금 배분에 쓰지 않는 참고 의견이라 개최자에게 보이고, 「완성도순」으로 열을 줄 세울 수 있다.
+// 배점(1~10)은 마감 뒤에도 요구사항 행에서 고친다 — 서버가 AI 를 다시 부르지 않고 지금 배점으로 다시 계산한다.
 //
 // 두 값 모두 백엔드 comparison 스키마(submissions.schemas.ContestComparisonOut)
 // 자체에 필드가 없다 — "존재하지만 안 보임"이 아니라 애초에 없다. 이 파일은 그
@@ -35,7 +36,9 @@ import {
   type ContestComparisonOut,
 } from "@/lib/submissions/types";
 import {
-  formatCompleteness,
+  POINTS_OPTIONS,
+  formatPoints,
+  formatQualityTotal,
   orderSubmissions,
   type ComparisonQuality,
   type JudgeSortOrder,
@@ -69,6 +72,8 @@ export default function JudgeComparisonPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [award, setAward] = useState<AwardState>({ status: "idle" });
   const [sortOrder, setSortOrder] = useState<JudgeSortOrder>("submitted");
+  const [pointsError, setPointsError] = useState<string | null>(null);
+  const [savingPointsId, setSavingPointsId] = useState<number | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -112,6 +117,30 @@ export default function JudgeComparisonPage() {
     () => (judgingEndsAt ? remainingTime(judgingEndsAt, now).status === "closed" : null),
     [judgingEndsAt, now],
   );
+
+  async function changePoints(requirementId: number, points: number) {
+    setPointsError(null);
+    setSavingPointsId(requirementId);
+    const saved = await bffClient.request<unknown>(
+      `/api/backend/contests/${contestId}/requirements/${requirementId}/points`,
+      { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ points }) },
+    );
+    if (!saved.ok) {
+      setSavingPointsId(null);
+      setPointsError(saved.detail);
+      return;
+    }
+    // 합·만점·등수는 서버가 지금 배점으로 다시 계산한다 — 비교 응답을 다시 받는다.
+    const comparison = await bffClient.get<ContestComparisonOut>(
+      `/api/backend/contests/${contestId}/submissions/compare`,
+    );
+    setSavingPointsId(null);
+    if (!comparison.ok) {
+      setPointsError(comparison.detail);
+      return;
+    }
+    setLoad((prev) => (prev.status === "ready" ? { ...prev, comparison: comparison.data } : prev));
+  }
 
   async function requestAward(submissionId: number) {
     setAward({ status: "saving", submissionId });
@@ -284,6 +313,24 @@ export default function JudgeComparisonPage() {
                         </span>
                         <span>{requirement.text}</span>
                       </div>
+                      <label className="mt-2 flex items-center gap-2 text-xs text-ink/70">
+                        배점
+                        <select
+                          className="border border-rule bg-surface px-1 py-0.5 font-mono text-xs text-ink"
+                          value={requirement.points}
+                          disabled={savingPointsId === requirement.requirement_id}
+                          onChange={(event) =>
+                            void changePoints(requirement.requirement_id, Number(event.target.value))
+                          }
+                          data-testid={`requirement-${requirement.requirement_id}-points`}
+                        >
+                          {POINTS_OPTIONS.map((value) => (
+                            <option key={value} value={value}>
+                              {value}점
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </th>
                     {columns.map((submission) => {
                       const qualityItem = submission.quality?.items.find(
@@ -330,7 +377,10 @@ export default function JudgeComparisonPage() {
                               className="mt-2 border-t border-rule pt-2"
                               data-testid={`quality-item-${requirement.requirement_id}-${submission.submission_id}`}
                             >
-                              <p className="text-xs font-semibold">항목 완성도 {qualityItem.score}/5</p>
+                              <p className="text-xs font-semibold">
+                                항목 완성도 {qualityItem.score}/5 · {formatPoints(qualityItem.item_points)} /{" "}
+                                {qualityItem.points}점
+                              </p>
                               <p className="text-xs text-ink/70">{qualityItem.reasoning}</p>
                             </div>
                           ) : null}
@@ -352,6 +402,11 @@ export default function JudgeComparisonPage() {
           소스코드에 접근할 수 있습니다.
         </p>
       )}
+      {pointsError && (
+        <ErrorNote>
+          <span data-testid="points-error">{pointsError}</span>
+        </ErrorNote>
+      )}
       {award.status === "error" && (
         <ErrorNote>
           <span data-testid="award-error">{award.message}</span>
@@ -366,7 +421,7 @@ function QualitySummary({ quality }: { quality: ComparisonQuality | null }) {
   return (
     <p>
       <strong className="font-mono text-base" data-testid="quality-completeness">
-        {formatCompleteness(quality.completeness)}
+        {formatQualityTotal(quality.total, quality.max_total)}
       </strong>{" "}
       <span className="text-xs text-ink/70" data-testid="quality-rank">
         {quality.rank}등

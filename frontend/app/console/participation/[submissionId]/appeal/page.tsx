@@ -24,7 +24,7 @@ import {
   type SourceReading,
 } from "@/lib/appeals/use-appeal-page";
 import { modelLineOf } from "@/lib/submissions/score-summary";
-import { formatCompleteness, type SubmissionQuality } from "@/lib/submissions/quality";
+import { formatPoints, formatQualityTotal, type SubmissionQuality } from "@/lib/submissions/quality";
 import { badgeClass } from "@/lib/ui/classnames";
 
 const APPEAL_STATUS_LABELS: Record<string, string> = {
@@ -136,7 +136,7 @@ function QualitySection({ quality }: { quality: SubmissionQuality }) {
   return (
     <section className="mt-6" data-testid="own-quality">
       <p className="text-lg">
-        완성도 <strong data-testid="own-quality-completeness">{formatCompleteness(quality.completeness)}</strong>
+        완성도 <strong data-testid="own-quality-completeness">{formatQualityTotal(quality.total, quality.max_total)}</strong>
       </p>
       <ul className="mt-3 flex flex-col gap-2" data-testid="own-quality-items">
         {quality.items.map((item) => (
@@ -147,7 +147,7 @@ function QualitySection({ quality }: { quality: SubmissionQuality }) {
               </span>
               <span>{item.label}</span>
               <span className="ml-auto font-mono" data-testid={`own-quality-item-${item.item_id}`}>
-                {item.score}/5
+                {item.score}/5 · {formatPoints(item.item_points)} / {item.points}점
               </span>
             </div>
             <p className="mt-1 text-ink/70">{item.reasoning}</p>

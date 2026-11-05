@@ -19,10 +19,11 @@ from __future__ import annotations
 from django.db import transaction
 from ninja.errors import HttpError
 
+from core.quality_review import default_points
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
 from .contest_problems import is_contest_problem, reject_if_locked
-from .models import ChecklistItem, Class, Problem
+from .models import ChecklistGrade, ChecklistItem, Class, Problem
 from .problem_transitions import NO_REQUIRED_ITEM_MESSAGE, assert_required_item_floor
 from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn
 from .scoring_model_catalog import get_scoring_model_catalog
@@ -190,7 +191,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
     # #480 구조 검사가 잡았다).
     reject_banned_public_text(grading_guideline_text, "채점 지침")
 
-    if payload.open and not any(item.required for item in payload.checklist_items):
+    if payload.open and not any(item.resolved_grade() == "required" for item in payload.checklist_items):
         raise HttpError(400, NO_REQUIRED_ITEM_MESSAGE)
 
     with transaction.atomic():
@@ -212,8 +213,13 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
             status=Problem.Status.OPEN if payload.open else Problem.Status.DRAFT,
         )
         for index, item_in in enumerate(payload.checklist_items):
+            grade = item_in.resolved_grade()
             ChecklistItem.objects.create(
-                problem=problem, label=item_in.label, required=item_in.required, order=index
+                problem=problem,
+                label=item_in.label,
+                grade=grade,
+                points=item_in.points or default_points(grade),
+                order=index,
             )
     return problem
 
@@ -365,7 +371,8 @@ def add_checklist_item(problem: Problem, payload: ChecklistItemIn) -> ChecklistI
     return ChecklistItem.objects.create(
         problem=problem,
         label=payload.label,
-        required=payload.required,
+        grade=payload.resolved_grade(),
+        points=payload.points or default_points(payload.resolved_grade()),
         order=problem.checklist_items.count(),
     )
 
@@ -378,8 +385,9 @@ def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItem
     item = owned_checklist_item_or_404(problem, item_id)
     reject_if_locked(problem)
 
-    if payload.required is False and item.required:
-        remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
+    grade = payload.resolved_grade()
+    if grade is not None and grade != ChecklistGrade.REQUIRED and item.required:
+        remaining = problem.checklist_items.filter(grade=ChecklistGrade.REQUIRED).exclude(id=item.id).count()
         assert_required_item_floor(problem, remaining_required_count=remaining)
 
     update_fields = []
@@ -387,9 +395,13 @@ def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItem
         reject_banned_public_text(payload.label, "체크리스트 항목")
         item.label = payload.label
         update_fields.append("label")
-    if payload.required is not None:
-        item.required = payload.required
-        update_fields.append("required")
+    if grade is not None:
+        item.grade = grade
+        update_fields.append("grade")
+    if payload.points is not None:
+        # 배점은 완성도에만 쓴다 — 고치면 AI 를 다시 부르지 않고 읽을 때 다시 계산된다(ADR-0073).
+        item.points = payload.points
+        update_fields.append("points")
     if update_fields:
         item.save(update_fields=update_fields)
     return item
@@ -405,7 +417,7 @@ def delete_checklist_item(problem: Problem, item_id: int) -> ChecklistItem:
     reject_if_locked(problem)
 
     if item.required:
-        remaining = problem.checklist_items.filter(required=True).exclude(id=item.id).count()
+        remaining = problem.checklist_items.filter(grade=ChecklistGrade.REQUIRED).exclude(id=item.id).count()
         assert_required_item_floor(problem, remaining_required_count=remaining)
 
     deleted_id = item.id

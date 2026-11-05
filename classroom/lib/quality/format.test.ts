@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { estimateLine, formatCompleteness, formatQualityCost, myRankLine } from "./format";
+import { estimateLine, formatQualityCost, formatQualityTotal, myRankLine } from "./format";
 
-describe("formatCompleteness", () => {
-  it("소수 첫째 자리까지 보인다", () => {
-    expect(formatCompleteness(11 / 15 * 100)).toBe("73.3");
-    expect(formatCompleteness(100)).toBe("100.0");
-    expect(formatCompleteness(0)).toBe("0.0");
+describe("formatQualityTotal", () => {
+  it("합은 소수 첫째 자리, 만점은 배점 합으로 「n / 만점점」", () => {
+    expect(formatQualityTotal(187 / 5, 45)).toBe("37.4 / 45점");
+    expect(formatQualityTotal(11 / 5, 3)).toBe("2.2 / 3점");
+    expect(formatQualityTotal(0, 3)).toBe("0.0 / 3점");
   });
 });
 
