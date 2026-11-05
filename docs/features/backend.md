@@ -146,7 +146,7 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 | `GET`·`PUT /api/contests/{id}/submissions/me` | 내 제출 조회·수정 |
 | `GET /api/submissions/mine` | 내 참가 현황 |
 | `GET /api/submissions/{id}` | 제출물 하나 |
-| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884·#904, 등수 없이 「total / max_total」·요구사항별 0~5·항목 점수·근거, 아직 없으면 null). 이의 대상은 Score 뿐이다 |
+| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884·#904, 등수 없이 「total / max_total」·요구사항별 0~5·항목 점수·근거, 아직 없으면 null). 숨은 항목(#906)은 reasoning 에서 빠지고 `hidden_summary {total, met}`, 완성도 항목은 「숨은 항목 k」·점수만. 이의 대상은 Score 뿐이다 |
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
