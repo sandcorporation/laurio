@@ -107,6 +107,12 @@ PROBLEM_FIELD_TRANSFER_TABLE: tuple[ProblemFieldTransferRule, ...] = (
     ProblemFieldTransferRule("grading_guideline_text", copies=True, templates=True),
     ProblemFieldTransferRule("syntax_check_enabled", copies=True, templates=True),
     ProblemFieldTransferRule(
+        "quality_public",
+        copies=False,
+        templates=False,
+        note="완성도 공개(#883) — 새 문제의 참여자에게 공개할지는 그 문제에서 강사가 다시 정한다",
+    ),
+    ProblemFieldTransferRule(
         "contest_id",
         copies=True,
         templates=False,

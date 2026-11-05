@@ -46,6 +46,7 @@ import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
+from core import quality_review
 from core.llm_metrics import observe_call, observe_call_async
 from core.safe_outbound import AsyncResponse, OutboundRefused, read_limited_async
 
@@ -937,6 +938,98 @@ class OpenAIScoringAdapter:
                 transport=self._async_transport,
             )
             output = self._scoring_output(response, scoring_input)
+            call.succeed(output)
+            return output
+
+    # --- 완성도(#883, ADR-0072) — 판정과 같은 왕복·같은 오류 분류, 스키마·검증만 다르다 ---------------
+
+    def _quality_payload(self, quality_input: quality_review.QualityInput) -> dict:
+        payload: dict[str, object] = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": quality_review.QUALITY_SYSTEM_PROMPT},
+                {"role": "user", "content": quality_input.prompt},
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": quality_review.QUALITY_SCHEMA_NAME,
+                    "strict": True,
+                    "schema": quality_review.response_schema(),
+                },
+            },
+        }
+        if self._reasoning_effort is not None:
+            payload["reasoning_effort"] = self._reasoning_effort
+        else:
+            payload["temperature"] = self._temperature
+        return payload
+
+    def _quality_output(self, response: Any, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        sid = quality_input.submission_id
+        try:
+            body = response.json()
+        except ValueError:
+            raise LLMAdapterError(f"OpenAI 응답이 JSON이 아니다(submission={sid}).") from None
+        choices = body.get("choices") if isinstance(body, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else None
+        if choice is None:
+            raise LLMAdapterError(f"OpenAI 응답에 choices가 없다(submission={sid}).")
+        if choice.get("finish_reason") != "stop":
+            raise LLMAdapterPermanentError(
+                f"OpenAI 응답이 정상 종료되지 않았다(finish_reason={choice.get('finish_reason')!r}, submission={sid})."
+            )
+        message = choice.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        try:
+            scores = quality_review.parse_content(content, items=quality_input.items, submission_id=sid)
+        except quality_review.QualityResponseError as exc:
+            raise LLMAdapterError(str(exc)) from None
+        usage = body.get("usage") or {}
+        return quality_review.QualityOutput(
+            scores=tuple(scores),
+            model_version=str(body.get("model") or "unknown"),
+            total_tokens=_usage_count(usage, "total_tokens"),
+            input_tokens=_usage_count(usage, "prompt_tokens"),
+            output_tokens=_usage_count(usage, "completion_tokens"),
+        )
+
+    def _quality_observe_args(self, quality_input: quality_review.QualityInput) -> dict:
+        return {
+            "product": self._product,
+            "model": self._model,
+            "custom": self._base_url is not None,
+            "reasoning_effort": self._reasoning_effort,
+            "context": {"submission_id": quality_input.submission_id, "kind": "quality", **self._log_context},
+        }
+
+    def review_quality(self, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        with observe_call(**self._quality_observe_args(quality_input)) as call:
+            response = _openai_round_trip(
+                "POST",
+                _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
+                api_key=self._api_key,
+                timeout=self._timeout,
+                json_body=self._quality_payload(quality_input),
+                context=f"submission={quality_input.submission_id}",
+                transport=self._transport,
+            )
+            output = self._quality_output(response, quality_input)
+            call.succeed(output)
+            return output
+
+    async def review_quality_async(self, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        async with observe_call_async(**self._quality_observe_args(quality_input)) as call:
+            response = await _openai_round_trip_async(
+                "POST",
+                _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
+                api_key=self._api_key,
+                timeout=self._timeout,
+                json_body=self._quality_payload(quality_input),
+                context=f"submission={quality_input.submission_id}",
+                transport=self._async_transport,
+            )
+            output = self._quality_output(response, quality_input)
             call.succeed(output)
             return output
 

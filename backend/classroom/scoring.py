@@ -93,6 +93,7 @@ from core.llm_scoring import (
     SourceFile,
 )
 from core.observability import tag_error_scope
+from core.quality_review import QualityInput, QualityItemScore, QualityOutput
 from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
 from core.source_selection import select_source_files
@@ -205,6 +206,29 @@ class FakeClassroomScoringAdapter:
 
     async def score_async(self, scoring_input: ScoringInput) -> ScoringOutput:
         return self.score(scoring_input)
+
+    def review_quality(self, quality_input: QualityInput) -> QualityOutput:
+        """완성도(#883) 흉내 — 판정과 같은 결: 항목 문구가 소스에 그대로 있으면 5, 없으면 1.
+        소스에 문구가 여러 번 나오면 더 잘 했다고 보지 않는다(결정적이면 된다)."""
+
+        scores = tuple(
+            QualityItemScore(
+                item_id=item.item_id,
+                label=item.label,
+                required=item.required,
+                score=5 if item.label.strip() and item.label.strip() in quality_input.source_text else 1,
+                reasoning=(
+                    "체크리스트 문구가 제출된 소스에서 그대로 확인되어 5점으로 매겼다."
+                    if item.label.strip() in quality_input.source_text
+                    else "체크리스트 문구를 제출된 소스에서 찾지 못해 1점으로 매겼다."
+                ),
+            )
+            for item in quality_input.items
+        )
+        return QualityOutput(scores=scores, model_version=self.model_version)
+
+    async def review_quality_async(self, quality_input: QualityInput) -> QualityOutput:
+        return self.review_quality(quality_input)
 
     def check_key(self) -> LLMKeyCheckStatus:
         """dev·CI에서는 저장하는 키가 무엇이든 항상 유효하다(#354 AC) — 그래야

@@ -44,7 +44,7 @@ from typing import Any
 import aiohttp
 import requests
 
-from core import llm_scoring
+from core import llm_scoring, quality_review
 from core.llm_metrics import observe_call, observe_call_async
 from core.llm_scoring import (
     LLMAdapterAuthError,
@@ -345,6 +345,95 @@ class AnthropicScoringAdapter:
                 transport=self._async_transport,
             )
             output = self._output(response, scoring_input)
+            call.succeed(output)
+            return output
+
+    # --- 완성도(#883, ADR-0072) ------------------------------------------------------------
+
+    def _quality_payload(self, quality_input: quality_review.QualityInput) -> dict:
+        output_config: dict[str, Any] = {"format": {"type": "json_schema", "schema": quality_review.response_schema()}}
+        if self._reasoning_effort is not None:
+            output_config["effort"] = self._reasoning_effort
+        return {
+            "model": self._model,
+            "max_tokens": SCORING_MAX_TOKENS,
+            "system": quality_review.QUALITY_SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": quality_input.prompt}],
+            "output_config": output_config,
+        }
+
+    def _quality_output(self, response: Any, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        sid = quality_input.submission_id
+        try:
+            body = response.json()
+        except ValueError:
+            raise LLMAdapterError(f"Anthropic 응답이 JSON이 아니다(submission={sid}).") from None
+        if not isinstance(body, dict):
+            raise LLMAdapterError(f"Anthropic 응답이 객체가 아니다(submission={sid}).")
+        if body.get("stop_reason") != "end_turn":
+            raise LLMAdapterPermanentError(
+                f"Anthropic 응답이 정상 종료되지 않았다(stop_reason={body.get('stop_reason')!r}, submission={sid})."
+            )
+        blocks = body.get("content")
+        texts = [
+            block.get("text")
+            for block in (blocks if isinstance(blocks, list) else [])
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        if not texts:
+            raise LLMAdapterError(f"Anthropic 응답에 text 블록이 없다(submission={sid}).")
+        try:
+            scores = quality_review.parse_content(texts[0], items=quality_input.items, submission_id=sid)
+        except quality_review.QualityResponseError as exc:
+            raise LLMAdapterError(str(exc)) from None
+        usage = body.get("usage") or {}
+        input_tokens = sum(
+            _usage_int(usage, key) for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
+        )
+        output_tokens = _usage_int(usage, "output_tokens")
+        return quality_review.QualityOutput(
+            scores=tuple(scores),
+            model_version=str(body.get("model") or "unknown"),
+            total_tokens=input_tokens + output_tokens,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    def _quality_observe_args(self, quality_input: quality_review.QualityInput) -> dict:
+        return {
+            "product": self._product,
+            "model": self._model,
+            "custom": False,
+            "reasoning_effort": self._reasoning_effort,
+            "context": {"submission_id": quality_input.submission_id, "kind": "quality", **self._log_context},
+        }
+
+    def review_quality(self, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        with observe_call(**self._quality_observe_args(quality_input)) as call:
+            response = _round_trip(
+                "POST",
+                ANTHROPIC_API_BASE_URL + _MESSAGES_PATH,
+                api_key=self._api_key,
+                timeout=self._timeout,
+                json_body=self._quality_payload(quality_input),
+                context=f"submission={quality_input.submission_id}",
+            )
+            output = self._quality_output(response, quality_input)
+            call.succeed(output)
+            return output
+
+    async def review_quality_async(self, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        async with observe_call_async(**self._quality_observe_args(quality_input)) as call:
+            response = await _round_trip_async(
+                "POST",
+                ANTHROPIC_API_BASE_URL + _MESSAGES_PATH,
+                api_key=self._api_key,
+                timeout=self._timeout,
+                json_body=self._quality_payload(quality_input),
+                context=f"submission={quality_input.submission_id}",
+                transport=self._async_transport,
+            )
+            output = self._quality_output(response, quality_input)
             call.succeed(output)
             return output
 
