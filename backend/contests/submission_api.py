@@ -62,6 +62,7 @@ from core.clock import Clock
 from core.keyset import decode_cursor, keyset_page
 from policies.scope import current_policy
 from policies.services import get_current_policy
+from scoring.quality import ranked_reviews
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from storage.policy import get_download_ttl_resolver
@@ -88,6 +89,7 @@ from .submission_participation import next_action_for
 from .submission_retention import demo_video_destroy_at
 from .submission_schemas import (
     ComparisonEntryOut,
+    ComparisonQualityOut,
     ComparisonSubmissionOut,
     CompletionDistributionOut,
     ContestComparisonOut,
@@ -1177,7 +1179,7 @@ def _get_owned_submission(request: HttpRequest, submission_id: int) -> ContestSu
         # `score.submission.contest` 와 `.appeal` 을 이 조회에서 함께 끌어온다 —
         # `OwnScoreOut` 의 이의 창 판정이 그것을 본다.
         submission = ContestSubmission.objects.select_related(
-            "developer", "score", "contest", "appeal"
+            "developer", "score", "contest", "appeal", "quality_review"
         ).get(id=submission_id)
     except ContestSubmission.DoesNotExist as exc:
         raise HttpError(404, "제출물을 찾을 수 없습니다.") from exc
@@ -1288,6 +1290,19 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
     )
 
 
+def _comparison_quality(found) -> ComparisonQualityOut | None:
+    if found is None:
+        return None
+    review, rank = found
+    return ComparisonQualityOut(
+        completeness=review.completeness,
+        weighted_score=review.weighted_score,
+        max_weighted_score=review.max_weighted_score,
+        items=review.items,
+        rank=rank,
+    )
+
+
 @router.get(
     "/contests/{contest_id}/submissions/compare",
     response={200: ContestComparisonOut},
@@ -1326,6 +1341,8 @@ def compare_submissions(request: HttpRequest, contest_id: int):
 
     submission_outs: list[ComparisonSubmissionOut] = []
     entries_by_requirement: dict[int, list[ComparisonEntryOut]] = {r.id: [] for r in requirements}
+    # 완성도(#884) — 개최자는 모든 제출작의 완성도·등수·근거를 본다.
+    quality_by_submission = ranked_reviews([s.id for s in submissions])
 
     for submission in submissions:
         developer_name = (
@@ -1388,6 +1405,7 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 completion=_completion_of(
                     assets, total_requirements=total, linked_count=linked_count
                 ),
+                quality=_comparison_quality(quality_by_submission.get(submission.id)),
             )
         )
 

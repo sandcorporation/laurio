@@ -98,6 +98,29 @@ test("개발자 이름을 클릭하면 그 개발자의 공개 프로필이 새 
   await expect(profilePage.getByText(submission.developer_display_name).first()).toBeVisible();
 });
 
+// #884 — 완성도 열과 「완성도순」. 시드는 A(먼저 낸 제출)를 40.0, B 를 86.7 로 심는다.
+test("「완성도순」을 누르면 완성도가 높은 제출작이 앞 열로 온다", async ({ page }) => {
+  await loginAsJudgingSponsor(page);
+  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
+  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
+
+  const [a, b] = seeded.judging.submissions;
+  const headers = page.locator('[data-testid^="submission-header-"]');
+  await expect(headers.nth(0)).toHaveAttribute("data-testid", `submission-header-${a.id}`);
+  await expect(headers.nth(1)).toHaveAttribute("data-testid", `submission-header-${b.id}`);
+  await expect(page.getByTestId(`quality-${a.id}`)).toContainText("40.0");
+  await expect(page.getByTestId(`quality-${b.id}`)).toContainText("86.7");
+  await expect(page.getByTestId(`quality-${b.id}`)).toContainText("1등");
+
+  await page.getByTestId("judge-sort-quality").click();
+  await expect(headers.nth(0)).toHaveAttribute("data-testid", `submission-header-${b.id}`);
+  await expect(headers.nth(1)).toHaveAttribute("data-testid", `submission-header-${a.id}`);
+
+  // 항목별 근거가 그 요구사항 칸에 함께 있다.
+  const requirementId = seeded.judging.requirements[0].id;
+  await expect(page.getByTestId(`quality-item-${requirementId}-${b.id}`)).toContainText("항목 완성도 5/5");
+});
+
 // #179 — Award 직후 Sponsor가 「내 차례 · 인수를 확인하세요」를 보고도 갈 곳이
 // 없던 자리. Escrow 해제는 돈이 움직이는 곳이라(CLAUDE.md 「남길 것」) 스펙을
 // 하나 남긴다 — 새 스펙 파일을 만들지 않고, Award를 실제로 수행하는 이 파일에

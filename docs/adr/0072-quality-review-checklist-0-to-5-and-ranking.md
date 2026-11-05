@@ -96,8 +96,36 @@ Status: Accepted (2026-11-05 결정)
 
 ### 공모전 (#884)
 
-같은 `core.quality_review` 를 쓴다. 마감 뒤 Score 가 생긴 제출에 플랫폼 키로 한 번 매기고, 개최자는 전부·제출자는
-자기 것만 본다. 그 티켓이 이 절을 채운다.
+같은 `core.quality_review` 를 쓴다(계산·프롬프트·응답 규율). 공모전 몫은 `scoring.quality` 에 있다.
+
+- **언제**: 새 스캔 `submission-quality-review` 가 `submission-scoring` 과 나란히 60초마다 돈다. 「Score 는 있고 완성도는
+  없는」 제출(같은 `Contest.Status.SCOREABLE` — 마감·심사기간 종료·선정 뒤)을 집는다. Score 흐름은 한 줄도 바꾸지
+  않았다 — 완성도가 실패해도 Score·Distribution·Award 는 그대로다. 무료·유료 모두 대상이라 제품 스위치를 걸지 않는다
+  (`submission-scoring` 과 같은 공용 스캔).
+- **건너뛴다**: Score 가 「입력 없음」·「채점 실패」 자동 0%(`submissions.scoring_basis` 의 두 model_version)인 제출 —
+  AI 가 소스를 읽지 않았다. Requirement 가 없는 공모전.
+- **무엇을 읽나**: 소스를 다시 읽거나 저장소를 다시 clone 하지 않는다. **Score 프롬프트의 「## Requirements」 절부터
+  끝까지**(Requirement·자가 응답·Evidence·선별된 소스)를 제출물로 싣는다 — Score 와 같은 것을 보고 매기고, 스토리지·
+  GitHub 를 한 번 더 치지 않는다(마감 뒤 저장소가 비공개로 바뀌어도 같은 근거다). 그 글은 참가자 데이터라
+  `build_prompt` 가 `neutralize_untrusted` 로 무력화해 경계 안에 넣는다. 공모전엔 채점 지침 입력이 없어 지침 자리에
+  고정 문장(「별도 지침 없음 — 체크리스트 문구 그대로 판단한다」)을 둔다.
+- **키**: `core.llm_scoring.get_adapter()` — Score 와 같은 플랫폼 어댑터. 흉내 어댑터(`FakeLLMScoringAdapter`)는
+  제출·항목 번호로 정한 1~5 를 낸다(공모전 입력엔 Requirement 문구가 함께 실려 「문구가 소스에 있나」로는 갈리지 않는다).
+- **기록**: `SubmissionQualityReview`(append-only, `AppendOnlyModel`) — 제출당 하나(`OneToOneField`, 마감 뒤엔
+  Requirement 를 고칠 수 없다; 겹친 스캔의 삽입도 막는다). 남기는 것은 강의실과 같다. **`on_delete=CASCADE`** 다
+  (Score 는 PROTECT): 이 행은 Score 가 있는 제출에만 생기고 Score 의 PROTECT 가 이미 제출·공모전 삭제를 막는다. 그
+  막음을 넘는 길은 시드 정리(`hard_delete_demo_seed_scores`·`hard_delete_e2e_fixture_rows`)뿐이라, 그때 함께
+  지워지게 했다.
+- **실패**: `QualityReviewAttempt`(`ScoringAttempt` 와 같은 운영 로그). 영구 실패(`LLMAdapterPermanentError`)가
+  하나라도 있거나 5번 실패하면 더 집지 않는다. Score 와 달리 0% 같은 대체값을 만들지 않는다 — 상금과 무관하니
+  「없음」으로 남겨도 아무것도 막지 않는다. 사용량 기록(`_record_token_usage`)은 강의실 채점 연결 몫이라 타지 않는다 —
+  공모전 Score 채점도 사용량을 따로 남기지 않는다.
+- **개최자**: 비교 목록(`GET /contests/{id}/submissions/compare`)의 제출마다 `quality` — 완성도·가중 점수·최대·
+  항목별 0~5·근거·**등수**(완성도가 매겨진 제출끼리, `competition_ranks`). 아직 없으면 null. 화면은 「완성도」 줄,
+  요구사항 칸의 「항목 완성도 n/5」·근거, 「제출순」·「완성도순」 정렬(가중 점수 → 제출 순서, 없는 것은 뒤).
+- **제출자**: `GET /submissions/{id}/score` 의 `quality` — 본인 것뿐이고 **등수가 없다**(등수는 남의 제출과 견준
+  값이다). 남의 제출은 이 API 가 403 이고, 공개 단건·비교 목록 등 다른 응답에는 완성도 필드가 없다.
+- **이의**: 지금처럼 Score 에만 건다. `can_appeal`·이의 접수는 완성도와 무관하다.
 
 ## 고려한 대안
 

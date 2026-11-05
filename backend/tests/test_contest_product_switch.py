@@ -278,6 +278,7 @@ CONTEST_ONLY_SCAN_NAMES = (
 
 SHARED_SCAN_NAMES = (
     "submission-scoring",
+    "submission-quality-review",
     "repository-visibility",
     "identity-dormancy-purge",
     "retained-identity-purge",

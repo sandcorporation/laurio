@@ -14,6 +14,9 @@ class ScoringConfig(AppConfig):
         # 채점 스캔(#12, #139) — 등록부에 올라 beat 가 주기적으로 돌린다.
         from core.scans import register_scan
 
+        from .quality import SUBMISSION_QUALITY_SCAN
         from .services import SUBMISSION_SCORING_SCAN
 
         register_scan(SUBMISSION_SCORING_SCAN)
+        # 완성도 스캔(#884, ADR-0072) — Score 가 생긴 제출을 뒤따라 집는다. Score 흐름과 따로 돈다.
+        register_scan(SUBMISSION_QUALITY_SCAN)

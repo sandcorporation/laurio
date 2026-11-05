@@ -271,6 +271,26 @@ class FakeLLMScoringAdapter:
             )
         return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
 
+    def review_quality(self, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        """공모전 완성도(#884) 흉내 — 네트워크 없이 결정적으로 0~5 를 낸다. 공모전의 완성도 입력에는
+        Requirement 문구가 함께 실려 「문구가 소스에 있나」로는 갈리지 않으므로, 제출·항목 id 로 정한
+        1~5 를 준다 — 같은 입력이면 늘 같은 값이고, 제출마다 값이 달라 정렬을 시험할 수 있다."""
+
+        scores = tuple(
+            quality_review.QualityItemScore(
+                item_id=item.item_id,
+                label=item.label,
+                required=item.required,
+                score=1 + (quality_input.submission_id * 7 + item.item_id * 3) % 5,
+                reasoning="흉내 어댑터가 제출·항목 번호로 정한 점수다.",
+            )
+            for item in quality_input.items
+        )
+        return quality_review.QualityOutput(scores=scores, model_version=self.model_version)
+
+    async def review_quality_async(self, quality_input: quality_review.QualityInput) -> quality_review.QualityOutput:
+        return self.review_quality(quality_input)
+
 
 #: OpenAI API 의 base URL. 공모전 채점은 언제나 이 주소를 쓴다. 강의실 채점은 클래스의
 #: 채점 연결(`classroom.scoring_connection`, #599)이 주소를 넘긴다 — 「OpenAI 키」 연결은

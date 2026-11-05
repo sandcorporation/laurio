@@ -132,3 +132,59 @@ class ScoringAttempt(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ScoringAttempt(submission={self.submission_id}, at={self.attempted_at})"
+
+
+class SubmissionQualityReview(AppendOnlyModel):
+    """공모전 제출 하나의 완성도 기록(#884, ADR-0072) — `Requirement` 마다 0~5 와 근거, 가중 점수, 완성도.
+
+    `Score` 와 같은 append-only 스냅샷이고 **Score 와 무관하다**: 달성률·Distribution·Award 의 뜻과
+    계산을 바꾸지 않고, 상금 배분에 쓰지 않는다. 마감 뒤 Score 가 생긴 제출(「입력 없음」·「채점 실패」
+    자동 0% 제외)에 플랫폼 키로 **한 번** 매긴다 — 마감 뒤엔 Requirement 를 고칠 수 없으니 제출당 하나다
+    (`OneToOneField` 가 두 스캔의 겹친 삽입도 막는다).
+
+    **`on_delete=CASCADE` 다(Score 는 PROTECT).** 이 행은 Score 가 있는 제출에만 생기고, Score 의
+    PROTECT 가 이미 그 제출·공모전의 삭제를 막는다. 그 막음을 넘는 길은 시드 정리
+    (`hard_delete_demo_seed_scores`·`hard_delete_e2e_fixture_rows`)뿐이고, 그때 이 행도 함께 지워져야
+    재시드가 돈다 — PROTECT 로 두면 두 정리 경로가 모두 이 모델을 따로 알아야 한다."""
+
+    submission = models.OneToOneField(
+        "submissions.Submission", related_name="quality_review", on_delete=models.CASCADE
+    )
+    #: Requirement id·문구·필수 여부의 해시(`core.quality_review.checklist_fingerprint`).
+    checklist_fingerprint = models.CharField(max_length=64)
+    model_version = models.CharField(max_length=200)
+    prompt = models.TextField()
+    #: [{"item_id", "label"(Requirement 문구 스냅샷), "required", "score"(0~5), "reasoning"}, ...]
+    items = models.JSONField()
+    weighted_score = models.PositiveIntegerField()
+    max_weighted_score = models.PositiveIntegerField()
+    #: 0~100 — 화면은 소수 첫째 자리까지. 등수는 이 값이 아니라 `weighted_score` 로 매긴다.
+    completeness = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "완성도"
+        verbose_name_plural = "완성도"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"SubmissionQualityReview(submission={self.submission_id}, weighted={self.weighted_score})"
+
+
+class QualityReviewAttempt(models.Model):
+    """실패한 완성도 채점의 이력(#884) — `ScoringAttempt` 와 같은 운영 로그. 스캔은 영구 실패가
+    하나라도 있거나 `QUALITY_FAILURE_LIMIT` 번 실패한 제출을 더 집지 않는다(`scoring.quality`)."""
+
+    submission = models.ForeignKey(
+        "submissions.Submission", related_name="quality_review_attempts", on_delete=models.CASCADE
+    )
+    attempted_at = models.DateTimeField(auto_now_add=True)
+    error = models.TextField()
+    permanent = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-attempted_at"]
+        verbose_name = "완성도 채점 실패 이력"
+        verbose_name_plural = "완성도 채점 실패 이력"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"QualityReviewAttempt(submission={self.submission_id}, at={self.attempted_at})"

@@ -24,6 +24,8 @@ import {
   type SourceReading,
 } from "@/lib/appeals/use-appeal-page";
 import { modelLineOf } from "@/lib/submissions/score-summary";
+import { formatCompleteness, type SubmissionQuality } from "@/lib/submissions/quality";
+import { badgeClass } from "@/lib/ui/classnames";
 
 const APPEAL_STATUS_LABELS: Record<string, string> = {
   pending: "심판을 기다리는 중입니다",
@@ -66,6 +68,8 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
       ) : (
         <>
           <ScoreSection score={state.score} />
+          {/* 완성도(#884, ADR-0072) — 본인 것만 온다. 등수는 남의 제출과 견준 값이라 없다. 이의 대상이 아니다. */}
+          {state.score.quality ? <QualitySection quality={state.score.quality} /> : null}
           {state.appeal ? (
             <ExistingAppeal appeal={state.appeal} />
           ) : state.score.is_free ? (
@@ -121,6 +125,32 @@ function ScoreSection({ score }: { score: OwnScore }) {
         {score.reasoning.map((item, index) => (
           <li key={index} className="border border-rule bg-surface p-3 text-sm">
             {String(item.reasoning ?? "")}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function QualitySection({ quality }: { quality: SubmissionQuality }) {
+  return (
+    <section className="mt-6" data-testid="own-quality">
+      <p className="text-lg">
+        완성도 <strong data-testid="own-quality-completeness">{formatCompleteness(quality.completeness)}</strong>
+      </p>
+      <ul className="mt-3 flex flex-col gap-2" data-testid="own-quality-items">
+        {quality.items.map((item) => (
+          <li key={item.item_id} className="border border-rule bg-surface p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={badgeClass(item.required ? "attention" : "neutral")}>
+                {item.required ? "필수" : "선택"}
+              </span>
+              <span>{item.label}</span>
+              <span className="ml-auto font-mono" data-testid={`own-quality-item-${item.item_id}`}>
+                {item.score}/5
+              </span>
+            </div>
+            <p className="mt-1 text-ink/70">{item.reasoning}</p>
           </li>
         ))}
       </ul>

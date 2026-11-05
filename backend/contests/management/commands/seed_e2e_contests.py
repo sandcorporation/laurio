@@ -39,7 +39,16 @@ from awards.models import Award
 from contests.models import Category, Contest, ContestSubmission, DeliverableType, Requirement
 from core.management.stdout_utf8 import write_stdout_utf8
 from ledger.models import hard_delete_e2e_fixture_rows
-from scoring.models import Score
+from core.quality_review import (
+    QualityItemScore,
+    checklist_fingerprint,
+    completeness,
+    max_weighted_score,
+    records,
+    weighted_score,
+)
+from scoring.models import Score, SubmissionQualityReview
+from scoring.quality import requirement_inputs
 from submissions.models import (
     Evidence,
     RequirementResponse,
@@ -342,6 +351,47 @@ class Command(BaseCommand):
                 }
             ],
         )
+
+        # 완성도(#884) — 심사 화면의 「완성도」 열·「완성도순」 정렬을 e2e 가 본다. 서버 순서(id)와
+        # 완성도 순서가 거꾸로 되게 A 를 낮게, B 를 높게 심는다(B 에도 Score 를 둔다 — 완성도는 Score 가
+        # 있는 제출에만 생긴다).
+        Score.objects.create(
+            submission=submission_b,
+            percentage=Decimal("0.00"),
+            model_version=JUDGING_SCORE_MODEL_SENTINEL,
+            prompt=f"{self.prefix}fake prompt",
+            reasoning=[
+                {
+                    "requirement_id": judging_required_req.id,
+                    "is_met": False,
+                    "reasoning": f"{self.prefix}fake reasoning",
+                }
+            ],
+        )
+        quality_items = requirement_inputs([judging_required_req, judging_optional_req])
+        for submission, (required_score, optional_score) in ((submission_a, (2, 2)), (submission_b, (5, 3))):
+            scores = [
+                QualityItemScore(
+                    item_id=item.item_id,
+                    label=item.label,
+                    required=item.required,
+                    score=value,
+                    reasoning=f"{self.prefix}{item.label} 완성도 근거",
+                )
+                for item, value in zip(quality_items, (required_score, optional_score), strict=True)
+            ]
+            weighted = weighted_score(scores)
+            maximum = max_weighted_score(quality_items)
+            SubmissionQualityReview.objects.create(
+                submission=submission,
+                checklist_fingerprint=checklist_fingerprint(quality_items),
+                model_version="e2e-quality-fake",
+                prompt=f"{self.prefix}fake quality prompt",
+                items=records(scores),
+                weighted_score=weighted,
+                max_weighted_score=maximum,
+                completeness=completeness(weighted, maximum),
+            )
 
         # FE-06(#31) — 개발자 공개 프로필(GET /api/developers/{id}/profile)이
         # 아카이브하는 것은 "마감된 Contest 의 Submission" 뿐이다(ADR-0014,

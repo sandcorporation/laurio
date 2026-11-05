@@ -5819,6 +5819,22 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
+        /**
+         * ComparisonQualityOut
+         * @description 개최자 비교 화면 몫 — 완성도가 매겨진 제출들 사이의 「완성도 순위」(같은 가중 점수는 같은 등수).
+         */
+        ComparisonQualityOut: {
+            /** Completeness */
+            completeness: number;
+            /** Items */
+            items: components["schemas"]["QualityItemOut"][];
+            /** Max Weighted Score */
+            max_weighted_score: number;
+            /** Rank */
+            rank: number;
+            /** Weighted Score */
+            weighted_score: number;
+        };
         /** ComparisonSubmissionOut */
         ComparisonSubmissionOut: {
             /** Assets */
@@ -5828,6 +5844,7 @@ export interface components {
             developer_display_name: string;
             /** Developer Id */
             developer_id: number;
+            quality?: components["schemas"]["ComparisonQualityOut"] | null;
             /** Submission Id */
             submission_id: number;
         };
@@ -7666,6 +7683,7 @@ export interface components {
             model_version: string;
             /** Percentage */
             percentage: string;
+            quality?: components["schemas"]["SubmissionQualityOut"] | null;
             /** Reasoning */
             reasoning: {
                 [key: string]: unknown;
@@ -9110,6 +9128,21 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * SubmissionQualityOut
+         * @description 제출 하나의 완성도(#884). 상금·Score 와 무관한 AI 의 참고 의견이고 이의 대상이 아니다.
+         *     `completeness` 는 0~100(화면은 소수 첫째 자리), 등수는 `weighted_score`(정수)로 매긴다.
+         */
+        SubmissionQualityOut: {
+            /** Completeness */
+            completeness: number;
+            /** Items */
+            items: components["schemas"]["QualityItemOut"][];
+            /** Max Weighted Score */
+            max_weighted_score: number;
+            /** Weighted Score */
+            weighted_score: number;
         };
         /** TokenPairOut */
         TokenPairOut: {
