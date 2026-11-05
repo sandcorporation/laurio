@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -39,6 +38,7 @@ import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
+from policies.runtime_settings import setting_value as _runtime_setting
 from core.prompt_safety import neutralize_untrusted
 
 logger = logging.getLogger(__name__)
@@ -599,20 +599,20 @@ class OpenAIRequirementChatAdapter:
         temperature: float | None = None,
         timeout: float = _OPENAI_REQUEST_TIMEOUT_SECONDS,
     ) -> None:
-        api_key = os.environ.get("OPEN_AI_API_KEY") or ""
+        api_key = _runtime_setting("OPEN_AI_API_KEY") or ""
         if not api_key:
             raise RequirementChatAdapterError(
                 "OPEN_AI_API_KEY가 비어 있다 — 실물 OpenAI AI grill 어댑터는 자격증명 "
                 "없이 생성할 수 없다."
             )
         self._api_key = api_key
-        self._model = model or os.environ.get("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
+        self._model = model or _runtime_setting("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
         if temperature is not None:
             self._temperature = temperature
         else:
             # scoring과 공유하는 LLM_OPENAI_TEMPERATURE가 아니라 전용 키를 읽는다
             # (#55 코드리뷰 지적 4) — 클래스 독스트링 참고.
-            raw_temperature = os.environ.get("LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE")
+            raw_temperature = _runtime_setting("LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE")
             self._temperature = (
                 float(raw_temperature) if raw_temperature else _OPENAI_DEFAULT_TEMPERATURE
             )

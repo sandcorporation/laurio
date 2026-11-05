@@ -273,6 +273,18 @@ def _reset_fake_storage_adapter():
 
 
 @pytest.fixture(autouse=True)
+def _reset_runtime_settings():
+    """운영 설정(#922)의 프로세스 캐시와 흉내 버전 저장소는 모듈 전역이다 — DB 는 시험마다
+    되감기는데 캐시가 남으면 앞 시험이 저장한 값이 다음 시험의 어댑터에 보인다."""
+
+    from policies.runtime_settings import reset_for_tests
+
+    reset_for_tests()
+    yield
+    reset_for_tests()
+
+
+@pytest.fixture(autouse=True)
 def _reset_fake_pg_adapter():
     FakePGAdapter._final_refund_status.clear()
     yield

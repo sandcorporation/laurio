@@ -297,6 +297,16 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="정책 변경 사유 — 운영자 표면(spec #474).",
     ),
+    ("policies", "RuntimeSettingValueIn", "value"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="운영 설정 값(API 키·모델 이름·숫자) — 상위 운영자 표면, 사람에게 보이는 글이 아니다(#922).",
+    ),
+    ("policies", "RuntimeSettingProbeIn", "value"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="연결 시험에 쓰는 API 키 — 저장하지 않고 화면에도 보이지 않는다(#922).",
+    ),
     ("ledger", "JournalEntryIn", "memo"): BannedWordRule(
         checks_impersonation=False,
         checks_profanity=False,

@@ -4219,6 +4219,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/runtime-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runtime Settings */
+        get: operations["policies_runtime_settings_api_list_runtime_settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/runtime-settings/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runtime Setting Changes */
+        get: operations["policies_runtime_settings_api_list_runtime_setting_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/runtime-settings/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Runtime Setting */
+        post: operations["policies_runtime_settings_api_save_runtime_setting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/runtime-settings/{key}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Runtime Setting */
+        post: operations["policies_runtime_settings_api_clear_runtime_setting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/runtime-settings/{key}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Probe Runtime Setting */
+        post: operations["policies_runtime_settings_api_probe_runtime_setting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/payments": {
         parameters: {
             query?: never;
@@ -8993,6 +9078,83 @@ export interface components {
             ruled_by_id: number;
             /** Ruled By Username */
             ruled_by_username: string;
+        };
+        /** RuntimeSettingChangeOut */
+        RuntimeSettingChangeOut: {
+            /** Action */
+            action: string;
+            /** After */
+            after: string;
+            /** Before */
+            before: string;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Operator Username */
+            operator_username: string;
+        };
+        /** RuntimeSettingOut */
+        RuntimeSettingOut: {
+            /** Configured */
+            configured: boolean;
+            /** Default */
+            default: string | null;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Last4 */
+            last4: string | null;
+            /** Source */
+            source: string;
+            /** Updated At */
+            updated_at: string | null;
+            /** Updated By */
+            updated_by: string | null;
+            /** Value */
+            value: string | null;
+        };
+        /** RuntimeSettingProbeIn */
+        RuntimeSettingProbeIn: {
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+        };
+        /** RuntimeSettingProbeOut */
+        RuntimeSettingProbeOut: {
+            /** Result */
+            result: string;
+        };
+        /** RuntimeSettingSaveOut */
+        RuntimeSettingSaveOut: {
+            /** Changed */
+            changed: boolean;
+            setting: components["schemas"]["RuntimeSettingOut"];
+        };
+        /** RuntimeSettingValueIn */
+        RuntimeSettingValueIn: {
+            /**
+             * Value
+             * @default
+             */
+            value: string;
+        };
+        /** RuntimeSettingsOut */
+        RuntimeSettingsOut: {
+            /** Settings */
+            settings: components["schemas"]["RuntimeSettingOut"][];
         };
         /**
          * ScoreSnapshotOut
@@ -15903,6 +16065,174 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    policies_runtime_settings_api_list_runtime_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSettingsOut"];
+                };
+            };
+        };
+    };
+    policies_runtime_settings_api_list_runtime_setting_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSettingChangeOut"][];
+                };
+            };
+        };
+    };
+    policies_runtime_settings_api_save_runtime_setting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeSettingValueIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSettingSaveOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    policies_runtime_settings_api_clear_runtime_setting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSettingSaveOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    policies_runtime_settings_api_probe_runtime_setting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeSettingProbeIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSettingProbeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
                 };
             };
         };

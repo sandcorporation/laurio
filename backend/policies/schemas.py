@@ -85,3 +85,57 @@ class ErrorOut(Schema):
     # 화면이 문구가 아니라 안정적인 식별자로 분기할 수 있게 한다
     # (accounts.operator_api.ErrorOut과 같은 관용구, #47).
     code: str = "error"
+
+
+# --- 운영 설정(#922, ADR-0075) -------------------------------------------------
+# 비밀 값은 어느 응답 스키마에도 자리가 없다 — `configured`·`last4`·출처·변경 시각·변경자만.
+
+
+class RuntimeSettingOut(Schema):
+    key: str
+    label: str
+    kind: str
+    source: str
+    configured: bool
+    # 비밀이 아닌 설정의 지금 값. 비밀이면 언제나 null 이다.
+    value: str | None
+    # 출처가 없을 때 어댑터가 쓰는 기본값(비밀은 null).
+    default: str | None
+    # 비밀의 끝 4자리(짧은 키면 빈 문자열). 비밀이 아니면 null.
+    last4: str | None
+    updated_at: datetime | None
+    updated_by: str | None
+
+
+class RuntimeSettingsOut(Schema):
+    settings: list[RuntimeSettingOut]
+
+
+class RuntimeSettingChangeOut(Schema):
+    id: int
+    key: str
+    label: str
+    action: str
+    before: str
+    after: str
+    operator_username: str
+    changed_at: datetime
+
+
+# 입력은 제약 없는 문자열로 받는다 — 검증 실패 응답(422)이 입력 원문을 되돌려 싣지 않도록
+# 길이·모양 검사는 서비스(`policies.runtime_settings`)가 원문 없는 문구로 한다.
+class RuntimeSettingValueIn(Schema):
+    value: str = ""
+
+
+class RuntimeSettingProbeIn(Schema):
+    value: str = ""
+
+
+class RuntimeSettingSaveOut(Schema):
+    changed: bool
+    setting: RuntimeSettingOut
+
+
+class RuntimeSettingProbeOut(Schema):
+    result: str
