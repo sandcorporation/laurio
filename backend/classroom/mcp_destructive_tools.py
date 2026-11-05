@@ -2,7 +2,7 @@
 
 문제 삭제·클래스 삭제·참여자 내보내기·템플릿 공개(문제 하나·클래스 통째). 도구마다 MCP
 `destructiveHint` 를 붙이고, **확인 표 없이 불리면 실행하지 않는다** — 무엇이 사라지거나
-나가는지의 미리보기와 확인 표만 돌려준다(`classroom.mcp_confirmation`). 같은 인자에 그 표를
+나가는지의 미리보기와 확인 표만 돌려준다(`core.mcp_confirmation`). 같은 인자에 그 표를
 더해 다시 불러야 실행되고, 그때 다른 쓰기처럼 `ConnectedAppWrite` 한 줄이 남는다. 미리보기만
 받은 호출은 남지 않는다 — 바뀐 것이 없다.
 
@@ -24,6 +24,9 @@ from collections import Counter
 
 from django.db.models import Count
 
+from core.mcp_confirmation import CONFIRMATION_ARGUMENT, CONFIRMATION_SCHEMA, needs_confirmation, presented, redeem
+from core.models import ConnectedApp
+
 from .api import (
     _reject_if_banned_name,
     assert_member_expellable,
@@ -36,7 +39,6 @@ from .api import (
 )
 from .instructor_scope import class_scope, problem_scope
 from .instructors import active_participant_q, instructor_user_ids, is_instructor, is_instructor_q
-from .mcp_confirmation import CONFIRMATION_ARGUMENT, CONFIRMATION_SCHEMA, needs_confirmation, presented, redeem
 from .mcp_problem_tools import _check_arguments, _id, _object, _parse
 from .mcp_tool import Preview, Tool, WriteResult
 from .models import (
@@ -44,7 +46,6 @@ from .models import (
     ClassMember,
     ClassroomSubmission,
     ClassTemplate,
-    ConnectedApp,
     Problem,
     ProblemTemplate,
 )

@@ -17,7 +17,7 @@
 클래스도 값 조각 없이 「연결이 있는가」·종류·호스트만 싣는다(`mcp_read_tools.class_view`).
 
 **전부 쓰기 도구다**(`read_only=False`) — 디스패치가 성공한 호출마다 `ConnectedAppWrite`
-한 줄을 남긴다(`classroom.mcp_tool` docstring). 클래스 삭제·템플릿 공개는 두 단계 확인과
+한 줄을 남긴다(`core.mcp_tool` docstring). 클래스 삭제·템플릿 공개는 두 단계 확인과
 함께 #515 가 연다 — 여기는 되돌릴 수 있는 쓰기만 있다.
 """
 
@@ -37,7 +37,7 @@ from .mcp_problem_tools import (
 )
 from .mcp_read_tools import CLASS_OUTPUT_SCHEMA, class_view
 from .mcp_tool import Tool, ToolInputError, WriteResult
-from .models import ConnectedApp
+from core.models import ConnectedApp
 from .schemas import ClassIn, ClassPatchIn, ImportClassTemplateIn, InstructorNameIn
 from .scoring_models import REASONING_EFFORT_CHOICES
 from .services import copy_class, import_problem_template

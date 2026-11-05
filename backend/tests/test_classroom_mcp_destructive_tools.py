@@ -15,11 +15,11 @@ from django.core.cache import caches
 from classroom.models import (
     ClassMember,
     ClassroomSubmission,
-    ConnectedAppConfirmation,
     ConnectedAppWrite,
     ProblemTemplate,
 )
 from core.clock import Clock
+from core.models import ConnectedAppConfirmation
 from tests.classroom_scenarios import (
     CLASSES_URL,
     archive_class,
