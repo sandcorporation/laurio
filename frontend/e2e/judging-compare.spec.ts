@@ -73,6 +73,11 @@ test("소스코드와 AI 채점 점수가 HTML 응답 본문 어디에도 없다
   await expect(
     page.getByTestId(`award-source-notice-${seeded.judging.submissions[0].id}`),
   ).toBeVisible();
+
+  // #926 — 심사 마감 줄 하나로 말한다(유료 공모전). 「어디에도 표시되지 않습니다」 문단은 없다.
+  await expect(page.getByTestId("judging-deadline")).toContainText("미선정 시 마감 14일 뒤 자동 1/N 배분");
+  await expect(page.getByTestId("source-hidden-notice")).toHaveCount(0);
+  await expect(page.getByTestId("judging-consequence-notice")).toHaveCount(0);
 });
 
 // #165 — 공개 개발자 프로필(/developers/{id})로 가는 링크가 실제로 클릭 가능한지.
