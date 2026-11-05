@@ -54,6 +54,7 @@ export const EVIDENCE_KINDS: { value: EvidenceIn["kind"]; label: string }[] = [
 export const ASSET_KIND_LABELS: Record<string, string> = {
   source: "소스코드",
   demo_video: "시연 영상",
+  video_link: "시연 영상 링크",
   screenshot: "스크린샷",
   demo_url: "데모 URL",
   repository: "GitHub 저장소",

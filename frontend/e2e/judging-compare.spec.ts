@@ -179,3 +179,32 @@ test("Award 뒤 Sponsor가 인수를 확인하면 Escrow가 해제된다", async
   await expect(page.getByTestId("handover-released")).toBeVisible();
   await expect(page.getByTestId("handover-accept-button")).toHaveCount(0);
 });
+
+// #910 — 시연 영상 링크. 유튜브는 nocookie 임베드, 그 밖은 새 창 링크이고, 확인 위치(영상 타임스탬프)를
+// 누르면 유튜브 임베드가 그 시각부터 다시 재생된다.
+test("시연 영상 링크 — 유튜브는 nocookie 임베드·확인 위치는 start= , 다른 호스트는 새 창", async ({ page }) => {
+  await loginAsJudgingSponsor(page);
+  await page.goto(`/console/contests/${seeded.judging.id}/judge`);
+  await expect(page.getByTestId("comparison-matrix")).toBeVisible();
+
+  const a = seeded.judging.submissions[0];
+  const embed = page.locator(`[data-testid^="submission-${a.id}-video-link-"][data-embed="youtube"]`);
+  await expect(embed).toHaveAttribute(
+    "src",
+    "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+  );
+  const other = page.locator(`[data-testid^="submission-${a.id}-video-link-"][data-embed="link"]`);
+  await expect(other).toHaveAttribute("href", "https://videos.example.invalid/e2e-demo");
+  await expect(other).toHaveAttribute("target", "_blank");
+  await expect(other).toHaveAttribute("rel", "noopener noreferrer");
+
+  await page.locator('[data-testid^="evidence-play-"]').first().click();
+  await expect(embed).toHaveAttribute(
+    "src",
+    "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?start=83",
+  );
+  await expect(page.locator('[data-testid^="evidence-open-"]').first()).toHaveAttribute(
+    "target",
+    "_blank",
+  );
+});

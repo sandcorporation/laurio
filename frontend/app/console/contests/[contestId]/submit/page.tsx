@@ -45,6 +45,7 @@ import { RequirementField, type RequirementFieldState } from "./requirement-fiel
 const KNOWN_ASSET_KINDS = new Set([
   "source",
   "demo_video",
+  "video_link",
   "screenshot",
   "demo_url",
   "repository",
@@ -146,6 +147,7 @@ export default function SubmitPage() {
   const [sourceAssets, setSourceAssets] = useState<EditableAsset[]>([createEmptyAsset()]);
   const [demoVideoAssets, setDemoVideoAssets] = useState<EditableAsset[]>([]);
   const [screenshotAssets, setScreenshotAssets] = useState<EditableAsset[]>([]);
+  const [videoLinkAssets, setVideoLinkAssets] = useState<EditableAsset[]>([]);
   const [demoUrlAssets, setDemoUrlAssets] = useState<EditableAsset[]>([]);
   const [repositoryAssets, setRepositoryAssets] = useState<EditableAsset[]>([]);
   // 이 폼이 편집하지 않는(모르는) 종류의 자료 — 통과 버킷. 오늘은 항상
@@ -178,6 +180,7 @@ export default function SubmitPage() {
     const nextSourceAssets = assetsOfKind(assets, "source");
     setSourceAssets(nextSourceAssets.length > 0 ? nextSourceAssets : [createEmptyAsset()]);
     setDemoVideoAssets(assetsOfKind(assets, "demo_video"));
+    setVideoLinkAssets(assetsOfKind(assets, "video_link"));
     setScreenshotAssets(assetsOfKind(assets, "screenshot"));
     setDemoUrlAssets(assetsOfKind(assets, "demo_url"));
     setRepositoryAssets(assetsOfKind(assets, "repository"));
@@ -374,7 +377,11 @@ export default function SubmitPage() {
     // `rowsToAssetsIn`으로 계산한다 — 값이 빈 행(예: 데모 URL은 비우고
     // 테스트 계정만 채운 행)은 저장 시 통째로 버려지므로, 채움률이 "채워짐"
     // 이라 말하면서 저장은 그 행을 버리는 모순을 막는다.
-    const demoVideoToSave = rowsToAssetsIn(demoVideoAssets, "demo_video");
+    // 시연 영상은 파일이든 링크든 한 칸이다(#910).
+    const demoVideoToSave = [
+      ...rowsToAssetsIn(demoVideoAssets, "demo_video"),
+      ...rowsToAssetsIn(videoLinkAssets, "video_link"),
+    ];
     const demoUrlToSave = rowsToAssetsIn(demoUrlAssets, "demo_url");
     const optionalSignals = [
       demoVideoToSave.length > 0,
@@ -384,7 +391,7 @@ export default function SubmitPage() {
     const optionalRatio = optionalSignals.filter(Boolean).length / optionalSignals.length;
     const percent = Math.round((checklistRatio * 0.7 + optionalRatio * 0.3) * 100);
     return { percent, linked, total, optionalFilled: optionalSignals.filter(Boolean).length };
-  }, [requirements, requirementStates, demoVideoAssets, demoUrlAssets]);
+  }, [requirements, requirementStates, demoVideoAssets, videoLinkAssets, demoUrlAssets]);
 
   async function handleVerifyDev() {
     if (session.status !== "authenticated") return;
@@ -526,6 +533,7 @@ export default function SubmitPage() {
     const assets: SubmissionIn["assets"] = [
       ...rowsToAssetsIn(sourceAssets, "source"),
       ...rowsToAssetsIn(demoVideoAssets, "demo_video"),
+      ...rowsToAssetsIn(videoLinkAssets, "video_link"),
       ...rowsToAssetsIn(screenshotAssets, "screenshot"),
       ...rowsToAssetsIn(demoUrlAssets, "demo_url"),
       ...rowsToAssetsIn(repositoryAssets, "repository"),
@@ -842,6 +850,16 @@ export default function SubmitPage() {
         onChange={setDemoVideoAssets}
         disabled={!canEdit}
         targetRefPrefix={demoVideoTargetRef ?? undefined}
+      />
+
+      <AssetKindSection
+        kind="video_link"
+        title={ASSET_KIND_LABELS.video_link}
+        addLabel="+ 시연 영상 링크 추가"
+        testIdPrefix="video-link-asset"
+        rows={videoLinkAssets}
+        onChange={setVideoLinkAssets}
+        disabled={!canEdit}
       />
 
       <AssetKindSection

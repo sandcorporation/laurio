@@ -13,9 +13,16 @@
 import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 
 import { ErrorNote, INPUT_CLASS, buttonClass } from "@/app/components/ui";
+import { VIDEO_LINK_SHAPE_MESSAGE, isSafeVideoLink } from "@/lib/submissions/video-link";
 import { UploadField } from "@/components/upload/upload-field";
 
-export type AssetKind = "source" | "demo_video" | "screenshot" | "demo_url" | "repository";
+export type AssetKind =
+  | "source"
+  | "demo_video"
+  | "video_link"
+  | "screenshot"
+  | "demo_url"
+  | "repository";
 
 // 스크린샷 업로드가 받는 파일 형식(ADR-0036) — 서버 검증(submissions.api.
 // ALLOWED_SCREENSHOT_CONTENT_TYPES)을 대신하지 않는다, 저장 전에 같은 실수를
@@ -344,13 +351,13 @@ export function AssetKindSection({
                 </>
               ) : (
                 <label className="flex flex-col gap-1 text-sm">
-                  {kind === "repository" ? "저장소 URL" : "데모 URL"}
+                  {kind === "repository" ? "저장소 URL" : kind === "video_link" ? "영상 주소" : "데모 URL"}
                   <input
                     className={INPUT_CLASS}
                     value={row.value}
                     disabled={disabled}
                     placeholder={
-                      kind === "repository" ? "https://github.com/owner/repo" : "https://"
+                      kind === "repository" ? "https://github.com/owner/repo" : kind === "video_link" ? "https://youtu.be/…" : "https://"
                     }
                     onChange={(event) =>
                       // 저장소 URL이 바뀌면 이전 URL에 대한 공개 여부 확인은
@@ -365,6 +372,15 @@ export function AssetKindSection({
                     data-testid={`${testIdPrefix}-${index}-value`}
                   />
                 </label>
+              )}
+
+              {kind === "video_link" && row.value.trim() !== "" && !isSafeVideoLink(row.value) && (
+                <p
+                  className="text-xs text-attention"
+                  data-testid={`${testIdPrefix}-${index}-invalid`}
+                >
+                  {VIDEO_LINK_SHAPE_MESSAGE}
+                </p>
               )}
 
               {repoInvalid && (
