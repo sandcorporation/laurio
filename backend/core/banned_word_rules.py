@@ -461,16 +461,6 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="MIME 타입 — 식별자.",
     ),
-    ("classroom", "ChecklistItemIn", "grade"): BannedWordRule(
-        checks_impersonation=False,
-        checks_profanity=False,
-        exempt_reason='"required"|"optional" 중 하나로 고정된 값이다(Literal).',
-    ),
-    ("classroom", "ChecklistItemPatchIn", "grade"): BannedWordRule(
-        checks_impersonation=False,
-        checks_profanity=False,
-        exempt_reason='"required"|"optional" 중 하나로 고정된 값이다(Literal).',
-    ),
     ("contests", "RequirementIn", "grade"): BannedWordRule(
         checks_impersonation=False,
         checks_profanity=False,
