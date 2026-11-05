@@ -100,7 +100,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `GET .../metrics` | 개최자용 지표 |
 | `POST .../reopen` | 재개최 |
 | `POST .../extend-judging-period[/{order}/confirm]` | 심사기간 연장(유료) |
-| `GET .../submissions/compare` | 제출작 비교 |
+| `GET .../submissions/compare` | 제출작 비교 — 제출마다 완성도(#884, ADR-0072: 완성도·가중 점수·「완성도 순위」 등수·요구사항별 0~5·근거, 아직 없으면 null) |
 | `POST .../award` | 선정 |
 | `GET`·`POST .../handover[/accept]` | 인수 |
 | `GET`·`POST .../payout` | 지급 |
@@ -144,7 +144,7 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 | `GET`·`PUT /api/contests/{id}/submissions/me` | 내 제출 조회·수정 |
 | `GET /api/submissions/mine` | 내 참가 현황 |
 | `GET /api/submissions/{id}` | 제출물 하나 |
-| `GET /api/submissions/{id}/score` | 내 점수 |
+| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884, 등수 없이 완성도·요구사항별 0~5·근거, 아직 없으면 null). 이의 대상은 Score 뿐이다 |
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
@@ -764,7 +764,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 29개
+## 스스로 도는 일 — 스캔 30개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고(beat 는 따로 뜨지 않고 celery-worker 안에서 `-B` 로 돈다, #859), 대부분 60초
@@ -773,7 +773,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) |
+| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |

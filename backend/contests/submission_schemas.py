@@ -184,6 +184,32 @@ class RequirementComparisonOut(Schema):
     entries: list[ComparisonEntryOut]
 
 
+class QualityItemOut(Schema):
+    """완성도 항목 한 줄(#884, ADR-0072) — Requirement 하나의 0~5 와 근거. 라벨은 매긴 때의 스냅샷이다."""
+
+    item_id: int
+    label: str
+    required: bool
+    score: int
+    reasoning: str
+
+
+class SubmissionQualityOut(Schema):
+    """제출 하나의 완성도(#884). 상금·Score 와 무관한 AI 의 참고 의견이고 이의 대상이 아니다.
+    `completeness` 는 0~100(화면은 소수 첫째 자리), 등수는 `weighted_score`(정수)로 매긴다."""
+
+    completeness: float
+    weighted_score: int
+    max_weighted_score: int
+    items: list[QualityItemOut]
+
+
+class ComparisonQualityOut(SubmissionQualityOut):
+    """개최자 비교 화면 몫 — 완성도가 매겨진 제출들 사이의 「완성도 순위」(같은 가중 점수는 같은 등수)."""
+
+    rank: int
+
+
 class ComparisonSubmissionOut(Schema):
     submission_id: int
     developer_id: int
@@ -193,6 +219,8 @@ class ComparisonSubmissionOut(Schema):
     # 보는 자리는 단건 조회(`SubmissionOut`)다.
     assets: list[AssetSummaryOut]
     completion: CompletionOut
+    # 완성도(#884) — 아직 매기지 않았으면(Score 전·자동 0%·실패) null.
+    quality: ComparisonQualityOut | None = None
 
 
 class ContestComparisonOut(Schema):
@@ -277,6 +305,13 @@ class OwnScoreOut(Schema):
     # 한다 — `SubmissionAsset.is_public_checked_at`은 그 뒤 스캔이 계속 덮어쓰지만
     # 이 필드는 Score와 함께 불변으로 고정된다.
     repository_reachability_check: list[dict] = []
+    # 본인 제출의 완성도(#884, ADR-0072) — 아직 매기지 않았으면 null. **등수는 없다** — 등수는 남의
+    # 제출과 견준 값이라 제출자에게 나가지 않는다. 이의 대상이 아니다(`can_appeal` 은 Score 만 본다).
+    quality: SubmissionQualityOut | None = None
+
+    @staticmethod
+    def resolve_quality(obj):
+        return getattr(obj.submission, "quality_review", None)
 
     @staticmethod
     def resolve_scored_assets(obj) -> list[dict]:

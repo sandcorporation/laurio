@@ -56,6 +56,7 @@ def test_every_scan_that_used_to_have_its_own_endpoint_is_registered():
         "notification-dispatch-deferred",
         "notification-reclaim-stuck",
         "submission-scoring",
+        "submission-quality-review",
         "payment-refund-request",
         "payment-refund-reconcile",
         "distribution-create",

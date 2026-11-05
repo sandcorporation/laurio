@@ -10,8 +10,11 @@
 //
 //   1. 소스코드는 이 화면 어디에도 없다(선정 전이라 ADR-0014). 대신 "선정하면
 //      소스가 열린다"는 것을 누르기 전에 알 수 있어야 한다.
-//   2. AI 채점 점수(Score)는 이 화면 어디에도 없다 — 선정은 Sponsor의 판단이고
-//      Score는 무응답 배분 대상을 가릴 때만 쓰인다(ADR-0006).
+//   2. AI 채점 점수(Score — 필수 요구사항 달성률)는 이 화면 어디에도 없다 — 선정은 Sponsor의
+//      판단이고 Score는 무응답 배분 대상을 가릴 때만 쓰인다(ADR-0006).
+//
+// 완성도(#884, ADR-0072)는 Score 가 아니다 — 요구사항마다 AI 가 매긴 0~5 와 근거, 그 가중 합계(0~100)다.
+// 상금 배분에 쓰지 않는 참고 의견이라 개최자에게 보이고, 「완성도순」으로 열을 줄 세울 수 있다.
 //
 // 두 값 모두 백엔드 comparison 스키마(submissions.schemas.ContestComparisonOut)
 // 자체에 필드가 없다 — "존재하지만 안 보임"이 아니라 애초에 없다. 이 파일은 그
@@ -31,6 +34,12 @@ import {
   type ComparisonSubmissionOut,
   type ContestComparisonOut,
 } from "@/lib/submissions/types";
+import {
+  formatCompleteness,
+  orderSubmissions,
+  type ComparisonQuality,
+  type JudgeSortOrder,
+} from "@/lib/submissions/quality";
 
 type ContestMeta = { id: number; title: string; deadline_at: string; judging_ends_at: string | null };
 
@@ -59,6 +68,7 @@ export default function JudgeComparisonPage() {
 
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [award, setAward] = useState<AwardState>({ status: "idle" });
+  const [sortOrder, setSortOrder] = useState<JudgeSortOrder>("submitted");
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -156,6 +166,7 @@ export default function JudgeComparisonPage() {
   }
 
   const { contest, comparison } = load;
+  const columns = orderSubmissions(comparison.submissions, sortOrder);
   const awardedSubmissionId = award.status === "done" ? award.result.submission_id : null;
 
   return (
@@ -182,9 +193,9 @@ export default function JudgeComparisonPage() {
       </div>
 
       <p className="text-sm text-ink" data-testid="source-hidden-notice">
-        소스코드와 AI 채점 점수는 이 화면 어디에도 표시되지 않습니다 — 소스는 선정
-        전까지 공개되지 않고, 채점 점수는 무응답 배분 대상을 가릴 때만
-        쓰입니다. 선정은 아래 증거만으로 판단해주세요.
+        소스코드와 필수 요구사항 달성률은 이 화면 어디에도 표시되지 않습니다 — 소스는 선정
+        전까지 공개되지 않고, 달성률은 무응답 배분 대상을 가릴 때만
+        쓰입니다. 선정은 아래 증거와 완성도를 보고 판단해주세요.
       </p>
 
       {comparison.submissions.length === 0 ? (
@@ -192,6 +203,27 @@ export default function JudgeComparisonPage() {
           <span data-testid="compare-empty">아직 제출물이 없습니다.</span>
         </EmptyState>
       ) : (
+        <div className="flex flex-col gap-3">
+          <div className="flex gap-2" role="group" aria-label="정렬" data-testid="judge-sort">
+            <button
+              type="button"
+              className={buttonClass(sortOrder === "submitted" ? "primary" : "secondary", "sm")}
+              aria-pressed={sortOrder === "submitted"}
+              onClick={() => setSortOrder("submitted")}
+              data-testid="judge-sort-submitted"
+            >
+              제출순
+            </button>
+            <button
+              type="button"
+              className={buttonClass(sortOrder === "quality" ? "primary" : "secondary", "sm")}
+              aria-pressed={sortOrder === "quality"}
+              onClick={() => setSortOrder("quality")}
+              data-testid="judge-sort-quality"
+            >
+              완성도순
+            </button>
+          </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] border-collapse" data-testid="comparison-matrix">
             <thead>
@@ -199,7 +231,7 @@ export default function JudgeComparisonPage() {
                 <th className="border border-rule bg-surface p-3 text-left text-sm">
                   요구사항
                 </th>
-                {comparison.submissions.map((submission) => (
+                {columns.map((submission) => (
                   <th
                     key={submission.submission_id}
                     className="border border-rule bg-surface p-3 text-left text-sm"
@@ -221,6 +253,20 @@ export default function JudgeComparisonPage() {
               </tr>
             </thead>
             <tbody>
+              <tr data-testid="quality-row">
+                <th scope="row" className="border border-rule p-3 text-left align-top text-sm font-normal">
+                  완성도
+                </th>
+                {columns.map((submission) => (
+                  <td
+                    key={submission.submission_id}
+                    className="border border-rule p-3 align-top text-sm"
+                    data-testid={`quality-${submission.submission_id}`}
+                  >
+                    <QualitySummary quality={submission.quality ?? null} />
+                  </td>
+                ))}
+              </tr>
               {comparison.requirements.map((requirement) => {
                 const isRequired = requirement.grade === "required";
                 return (
@@ -239,7 +285,10 @@ export default function JudgeComparisonPage() {
                         <span>{requirement.text}</span>
                       </div>
                     </th>
-                    {comparison.submissions.map((submission) => {
+                    {columns.map((submission) => {
+                      const qualityItem = submission.quality?.items.find(
+                        (item) => item.item_id === requirement.requirement_id,
+                      );
                       const entry = requirement.entries.find(
                         (e) => e.submission_id === submission.submission_id,
                       );
@@ -276,6 +325,15 @@ export default function JudgeComparisonPage() {
                               {entry!.note && <p className="text-xs text-ink">{entry!.note}</p>}
                             </div>
                           )}
+                          {qualityItem ? (
+                            <div
+                              className="mt-2 border-t border-rule pt-2"
+                              data-testid={`quality-item-${requirement.requirement_id}-${submission.submission_id}`}
+                            >
+                              <p className="text-xs font-semibold">항목 완성도 {qualityItem.score}/5</p>
+                              <p className="text-xs text-ink/70">{qualityItem.reasoning}</p>
+                            </div>
+                          ) : null}
                         </td>
                       );
                     })}
@@ -284,6 +342,7 @@ export default function JudgeComparisonPage() {
               })}
             </tbody>
           </table>
+        </div>
         </div>
       )}
 
@@ -299,6 +358,20 @@ export default function JudgeComparisonPage() {
         </ErrorNote>
       )}
     </main>
+  );
+}
+
+function QualitySummary({ quality }: { quality: ComparisonQuality | null }) {
+  if (quality === null) return <p className="text-ink/60">—</p>;
+  return (
+    <p>
+      <strong className="font-mono text-base" data-testid="quality-completeness">
+        {formatCompleteness(quality.completeness)}
+      </strong>{" "}
+      <span className="text-xs text-ink/70" data-testid="quality-rank">
+        {quality.rank}등
+      </span>
+    </p>
   );
 }
 
