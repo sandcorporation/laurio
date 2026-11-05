@@ -49,7 +49,7 @@ from dataclasses import dataclass
 
 from ninja.errors import HttpError
 
-from .models import Class, Problem
+from .models import ChecklistGrade, Class, Problem
 
 #: 전이가 막혔을 때의 이유 — 강사용 문제 응답의 `available_transitions`와
 #: 참여 정책 모듈의 `SUBMIT_BLOCKED_ARCHIVED`가 같은 문자열("archived")을
@@ -113,7 +113,7 @@ if _renamed:
 
 
 def has_required_item(problem: Problem) -> bool:
-    return problem.checklist_items.filter(required=True).exists()
+    return problem.checklist_items.filter(grade=ChecklistGrade.REQUIRED).exists()
 
 
 @dataclass(frozen=True)

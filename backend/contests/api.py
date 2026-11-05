@@ -47,6 +47,7 @@ from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 from core.clock import Clock
+from core.quality_review import default_points
 from core.contest_catalog import contest_source_changed
 from core.contest_switch import (
     require_contest_product_enabled,
@@ -111,6 +112,7 @@ from .schemas import (
     RequirementChatResponseOut,
     RequirementChatTurnOut,
     RequirementCreateIn,
+    RequirementPointsIn,
     RequirementOut,
     RequirementProposalOut,
     RequirementUpdateIn,
@@ -189,7 +191,7 @@ def _serialize_contest(contest: Contest, auth_user: object | None = None) -> Con
         is_free=contest.is_free,
         allows_classroom_import=contest.allows_classroom_import,
         requirements=[
-            RequirementOut(id=r.id, text=r.text, grade=r.grade, order=r.order)
+            RequirementOut(id=r.id, text=r.text, grade=r.grade, points=r.points, order=r.order)
             for r in contest.requirements.all()
         ],
         images=[
@@ -333,6 +335,7 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
                     contest=contest,
                     text=sanitize_free_text(r.text),
                     grade=r.grade,
+                    points=r.points or default_points(r.grade),
                     order=index,
                 )
                 for index, r in enumerate(payload.requirements)
@@ -449,6 +452,7 @@ def create_free_contest_draft(user, payload: FreeContestCreateIn) -> ContestOut:
                     contest=contest,
                     text=sanitize_free_text(r.text),
                     grade=r.grade,
+                    points=r.points or default_points(r.grade),
                     order=index,
                 )
                 for index, r in enumerate(payload.requirements)
@@ -1162,6 +1166,7 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
                     contest=new_contest,
                     text=requirement.text,
                     grade=requirement.grade,
+                    points=requirement.points,
                     order=requirement.order,
                 )
                 for requirement in original.requirements.all()
@@ -1597,6 +1602,7 @@ def add_contest_requirement(contest: Contest, payload: RequirementCreateIn):
         contest=contest,
         text=sanitized_text,
         grade=payload.grade,
+        points=payload.points or default_points(payload.grade),
         order=next_order,
     )
     _record_contest_change(
@@ -1605,9 +1611,7 @@ def add_contest_requirement(contest: Contest, payload: RequirementCreateIn):
         before={},
         after={"id": requirement.id, "text": requirement.text, "grade": requirement.grade},
     )
-    return RequirementOut(
-        id=requirement.id, text=requirement.text, grade=requirement.grade, order=requirement.order
-    )
+    return _requirement_out(requirement)
 
 
 @router.patch(
@@ -1660,9 +1664,51 @@ def update_contest_requirement(contest: Contest, requirement_id: int, payload: R
             before={"id": requirement.id, **before},
             after={"id": requirement.id, **after},
         )
+    return _requirement_out(requirement)
+
+
+def _requirement_out(requirement: Requirement) -> RequirementOut:
     return RequirementOut(
-        id=requirement.id, text=requirement.text, grade=requirement.grade, order=requirement.order
+        id=requirement.id,
+        text=requirement.text,
+        grade=requirement.grade,
+        points=requirement.points,
+        order=requirement.order,
     )
+
+
+@router.patch(
+    "/contests/{contest_id}/requirements/{requirement_id}/points",
+    response=RequirementOut,
+    auth=jwt_auth,
+)
+def update_requirement_points(
+    request: HttpRequest, contest_id: int, requirement_id: int, payload: RequirementPointsIn
+):
+    """개최자가 배점(1~10)만 고친다(#904, ADR-0073).
+
+    다른 요건 수정과 달리 **마감 뒤에도** 열려 있다 — 배점은 완성도에만 쓰이고 완성도는 읽을 때 지금 배점으로
+    계산되므로 Score·통과·Distribution 과 이의의 근거(채점 스냅샷)를 건드리지 않는다. 공모전 변경 이력·참가자
+    알림(`ContestChange`)을 남기지 않는다. 들여온 공모전 문제는 이 배점을 따라간다(무료 공모전)."""
+
+    contest = _get_owned_contest(request, contest_id)
+    return update_contest_requirement_points(contest, requirement_id, payload)
+
+
+def update_contest_requirement_points(contest: Contest, requirement_id: int, payload: RequirementPointsIn):
+    """`update_requirement_points` 의 몸."""
+
+    try:
+        requirement = contest.requirements.get(id=requirement_id)
+    except Requirement.DoesNotExist as exc:
+        raise HttpError(404, "요구사항을 찾을 수 없습니다.") from exc
+    if requirement.points != payload.points:
+        requirement.points = payload.points
+        requirement.save(update_fields=["points"])
+        if contest.is_free and contest.status != Contest.Status.DRAFT:
+            contest_id = contest.pk
+            transaction.on_commit(lambda: contest_source_changed.send(sender=Contest, contest_id=contest_id))
+    return _requirement_out(requirement)
 
 
 @router.delete("/contests/{contest_id}/requirements/{requirement_id}", auth=jwt_auth)

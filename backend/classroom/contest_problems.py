@@ -104,19 +104,21 @@ def _apply_source(problem: Problem, source: ContestSource) -> None:
     }
     kept: set[int] = set()
     for index, requirement in enumerate(sorted(source.requirements, key=lambda r: (r.order, r.requirement_id))):
-        required = requirement.grade == "required"
+        # 등급·배점은 공모전 값 그대로다(#904) — 강사가 고칠 수 없다.
+        wanted = (requirement.text, requirement.grade, requirement.points, index)
         item = existing.get(requirement.requirement_id)
         if item is None:
             ChecklistItem.objects.create(
                 problem=problem,
                 label=requirement.text,
-                required=required,
+                grade=requirement.grade,
+                points=requirement.points,
                 order=index,
                 contest_requirement_id=requirement.requirement_id,
             )
-        elif (item.label, item.required, item.order) != (requirement.text, required, index):
-            item.label, item.required, item.order = requirement.text, required, index
-            item.save(update_fields=["label", "required", "order"])
+        elif (item.label, item.grade, item.points, item.order) != wanted:
+            item.label, item.grade, item.points, item.order = wanted
+            item.save(update_fields=["label", "grade", "points", "order"])
         kept.add(requirement.requirement_id)
     for requirement_id, item in existing.items():
         if requirement_id not in kept:

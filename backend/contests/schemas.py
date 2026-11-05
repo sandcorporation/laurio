@@ -227,12 +227,15 @@ class QuoteOut(Schema):
 class RequirementIn(Schema):
     text: str = Field(max_length=500)
     grade: str  # "required" | "optional"
+    #: 배점 1~10(완성도에만 쓴다, #904 ADR-0073). 없으면 등급별 기본값(필수 2·선택 1).
+    points: int | None = Field(default=None, ge=1, le=10)
 
 
 class RequirementOut(Schema):
     id: int
     text: str
     grade: str
+    points: int
     order: int
 
 
@@ -462,6 +465,14 @@ class JudgingExtensionPaymentOut(Schema):
 class RequirementCreateIn(Schema):
     text: str = Field(min_length=1, max_length=500)
     grade: str  # "required" | "optional"
+    #: 배점 1~10(#904). 없으면 등급별 기본값(필수 2·선택 1).
+    points: int | None = Field(default=None, ge=1, le=10)
+
+
+class RequirementPointsIn(Schema):
+    """배점만 고친다(#904, ADR-0073) — 마감 뒤에도 열려 있고 변경 이력·알림을 남기지 않는다."""
+
+    points: int = Field(ge=1, le=10)
 
 
 class RequirementUpdateIn(Schema):

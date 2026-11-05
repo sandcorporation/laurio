@@ -134,7 +134,7 @@ def contest_view(contest: Contest, grant: ConnectedApp) -> dict:
         "allows_classroom_import": contest.allows_classroom_import,
         "submission_count": contest.submissions.count(),
         "requirements": [
-            {"id": r.id, "text": r.text, "grade": r.grade, "order": r.order}
+            {"id": r.id, "text": r.text, "grade": r.grade, "points": r.points, "order": r.order}
             for r in contest.requirements.order_by("order", "id")
         ],
     }
@@ -256,7 +256,7 @@ def _require_content_editable(contest: Contest) -> None:
 
 
 def _add_requirement(grant: ConnectedApp, arguments: dict) -> WriteResult:
-    _reject_unknown(arguments, {"contest_id", "text", "grade"})
+    _reject_unknown(arguments, {"contest_id", "text", "grade", "points"})
     contest = _contest(grant, arguments, lock=True)
     _require_content_editable(contest)
     contest_api.add_contest_requirement(contest, _parse(RequirementCreateIn, {k: v for k, v in arguments.items() if k != "contest_id"}))
@@ -365,10 +365,13 @@ _ID = {"type": "integer", "minimum": 1}
 _STR = {"type": "string"}
 _BOOL = {"type": "boolean"}
 _INT = {"type": "integer", "minimum": 0}
+#: 배점 1~10(#904) — 없으면 등급별 기본값(필수 2·선택 1). 완성도에만 쓴다.
+_POINTS = {"type": "integer", "minimum": 1, "maximum": 10}
+
 _REQUIREMENT = {
     "type": "object",
-    "properties": {"id": _ID, "text": _STR, "grade": {"type": "string", "enum": ["required", "optional"]}, "order": _INT},
-    "required": ["id", "text", "grade", "order"],
+    "properties": {"id": _ID, "text": _STR, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _INT, "order": _INT},
+    "required": ["id", "text", "grade", "points", "order"],
 }
 _CONTEST = {
     "type": "object",
@@ -497,7 +500,7 @@ TOOLS: dict[str, Tool] = {
                     **_BRIEF,
                     "requirements": {
                         "type": "array",
-                        "items": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}}, "required": ["text", "grade"]},
+                        "items": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}, "points": _POINTS}, "required": ["text", "grade"]},
                     },
                 },
                 "required": ["title", "category_id", "deliverable_type_ids", "deadline_at"],
@@ -516,7 +519,7 @@ TOOLS: dict[str, Tool] = {
             "add_requirement",
             "요구사항 더하기",
             "요구사항 하나를 끝에 더한다. 마감 전까지만.",
-            {"type": "object", "properties": {"contest_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}}, "required": ["contest_id", "text", "grade"], "additionalProperties": False},
+            {"type": "object", "properties": {"contest_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}, "points": _POINTS}, "required": ["contest_id", "text", "grade"], "additionalProperties": False},
             _add_requirement,
         ),
         _write(

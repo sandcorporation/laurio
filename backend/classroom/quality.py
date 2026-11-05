@@ -34,16 +34,16 @@ from core.observability import tag_error_scope
 from core.quality_review import (
     QualityInput,
     QualityItemInput,
-    QualityItemRecord,
+    QualityItemView,
     QualityOutput,
     QualityReviewAdapter,
     build_prompt,
     checklist_fingerprint,
     competition_ranks,
-    completeness,
-    max_weighted_score,
+    historical_columns,
+    quality_total,
+    quality_view,
     records,
-    weighted_score,
 )
 from submissions.models import SubmissionAsset
 
@@ -51,6 +51,7 @@ from . import pending_scoring, scoring, scoring_cost
 from .grading_guidelines import effective_grading_guideline_text
 from .instructors import active_participant_q
 from .models import (
+    ChecklistGrade,
     ChecklistItem,
     Class,
     ClassMember,
@@ -77,7 +78,19 @@ BLOCKED_MESSAGES = {
 
 
 def checklist_inputs(items: list[ChecklistItem]) -> list[QualityItemInput]:
-    return [QualityItemInput(item_id=i.id, label=i.label, required=i.required) for i in items]
+    """AI 가 매기는 항목 — 가산은 강사가 매기므로 뺀다(ADR-0073). 지문도 이것으로 센다."""
+
+    return [
+        QualityItemInput(item_id=i.id, label=i.label, required=i.required, points=i.points)
+        for i in items
+        if i.grade != ChecklistGrade.BONUS
+    ]
+
+
+def points_of(items: list[ChecklistItem]) -> dict[int, int]:
+    """지금 체크리스트의 항목 id → 배점(가산 포함) — 완성도는 읽을 때 이것으로 합한다(ADR-0073)."""
+
+    return {i.id: i.points for i in items}
 
 
 @dataclass(frozen=True)
@@ -236,17 +249,22 @@ class RankRow(TypedDict):
     display_name: str
     submission_id: int
     attempt_number: int
+    total: float
+    max_total: int
+    raw_total: int
+    completeness: float
     weighted_score: int
     max_weighted_score: int
-    completeness: float
-    items: list[QualityItemRecord]
+    items: list[QualityItemView]
 
 
 def ranking(current: Board) -> list[RankRow]:
-    """지금의 기록이 있는 대상만 — 가중 점수(정수)로 줄 세우고 같으면 같은 등수(1, 2, 2, 4)."""
+    """지금의 기록이 있는 대상만 — 지금 배점으로 합한 정수 Σ(0~5 × 배점)으로 줄 세우고 같으면 같은
+    등수(1, 2, 2, 4). 저장 칸(`weighted_score` 등)은 역사값이라 읽지 않는다(ADR-0073)."""
 
-    reviewed = [(t.submission, t.review) for t in current.reviewed if t.review is not None]
-    ranks = competition_ranks([r.weighted_score for _, r in reviewed])
+    points = points_of(current.items)
+    reviewed = [(t.submission, quality_view(t.review.items, points)) for t in current.reviewed if t.review is not None]
+    ranks = competition_ranks([view["raw_total"] for _, view in reviewed])
     rows = [
         RankRow(
             rank=rank,
@@ -254,12 +272,9 @@ def ranking(current: Board) -> list[RankRow]:
             display_name=s.member.display_name,
             submission_id=s.id,
             attempt_number=s.attempt_number,
-            weighted_score=r.weighted_score,
-            max_weighted_score=r.max_weighted_score,
-            completeness=r.completeness,
-            items=list(r.items),
+            **view,
         )
-        for rank, (s, r) in zip(ranks, reviewed, strict=True)
+        for rank, (s, view) in zip(ranks, reviewed, strict=True)
     ]
     rows.sort(key=lambda row: (row["rank"], row["display_name"], row["submission_id"]))
     return rows
@@ -498,17 +513,15 @@ def _apply_outcome(prepared: PreparedQuality, outcome: QualityOutcome) -> dict:
         used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
     scoring._record_token_usage(class_obj, used_tokens, estimated=estimated)
     mark_verified(class_obj.pk, prepared.connection)
-    weighted = weighted_score(output.scores)
-    maximum = max_weighted_score(output.scores)
+    scored = records(output.scores)
+    points = dict(ChecklistItem.objects.filter(problem=prepared.problem).values_list("id", "points"))
     review = ClassroomQualityReview.objects.create(
         submission_id=sid,
         checklist_fingerprint=prepared.fingerprint,
         model_version=output.model_version,
         prompt=prepared.prompt,
-        items=records(output.scores),
-        weighted_score=weighted,
-        max_weighted_score=maximum,
-        completeness=completeness(weighted, maximum),
+        items=scored,
+        **historical_columns(quality_total(scored, points)),
     )
     ClassroomQualityJob.objects.filter(submission_id=sid).update(failed_at=None, error="")
     return {"submission_id": sid, "status": "quality_reviewed", "review_id": review.id}

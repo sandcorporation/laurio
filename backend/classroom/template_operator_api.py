@@ -28,6 +28,7 @@ from .schemas import (
     ErrorOut,
     ModerationDecisionIn,
     ProblemTemplateChecklistItemOut,
+    template_checklist_item_out,
     ProblemTemplateOut,
     ReportedTemplateOut,
 )
@@ -64,7 +65,7 @@ def _serialize_template(template: ProblemTemplate) -> ProblemTemplateOut:
         created_at=template.created_at,
         taken_down=template.taken_down_at is not None,
         checklist_items=[
-            ProblemTemplateChecklistItemOut(label=i.label, required=i.required, order=i.order)
+            template_checklist_item_out(i)
             for i in template.checklist_items.all()
         ],
     )

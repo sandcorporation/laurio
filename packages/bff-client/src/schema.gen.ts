@@ -2658,6 +2658,30 @@ export interface paths {
         patch: operations["contests_api_update_requirement"];
         trace?: never;
     };
+    "/api/contests/{contest_id}/requirements/{requirement_id}/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Requirement Points
+         * @description 개최자가 배점(1~10)만 고친다(#904, ADR-0073).
+         *
+         *     다른 요건 수정과 달리 **마감 뒤에도** 열려 있다 — 배점은 완성도에만 쓰이고 완성도는 읽을 때 지금 배점으로
+         *     계산되므로 Score·통과·Distribution 과 이의의 근거(채점 스냅샷)를 건드리지 않는다. 공모전 변경 이력·참가자
+         *     알림(`ContestChange`)을 남기지 않는다. 들여온 공모전 문제는 이 배점을 따라간다(무료 공모전).
+         */
+        patch: operations["contests_api_update_requirement_points"];
+        trace?: never;
+    };
     "/api/contests/{contest_id}/submissions": {
         parameters: {
             query?: never;
@@ -4995,10 +5019,18 @@ export interface components {
             /** Reason */
             reason: string;
         };
-        /** ChecklistItemIn */
+        /**
+         * ChecklistItemIn
+         * @description `grade` 가 진실이다. `grade` 없이 `required` 만 오면 옛 모양으로 읽는다(True → 필수, False → 선택).
+         *     `points` 가 없으면 등급별 기본값(필수 2·선택 1).
+         */
         ChecklistItemIn: {
+            /** Grade */
+            grade?: ("required" | "optional") | null;
             /** Label */
             label: string;
+            /** Points */
+            points?: number | null;
             /**
              * Required
              * @default true
@@ -5007,19 +5039,27 @@ export interface components {
         };
         /** ChecklistItemOut */
         ChecklistItemOut: {
+            /** Grade */
+            grade: string;
             /** Id */
             id: number;
             /** Label */
             label: string;
             /** Order */
             order: number;
+            /** Points */
+            points: number;
             /** Required */
             required: boolean;
         };
         /** ChecklistItemPatchIn */
         ChecklistItemPatchIn: {
+            /** Grade */
+            grade?: ("required" | "optional") | null;
             /** Label */
             label?: string | null;
+            /** Points */
+            points?: number | null;
             /** Required */
             required?: boolean | null;
         };
@@ -5033,12 +5073,16 @@ export interface components {
              * @default []
              */
             gradability_warnings: components["schemas"]["GradabilityWarningOut"][];
+            /** Grade */
+            grade: string;
             /** Id */
             id: number;
             /** Label */
             label: string;
             /** Order */
             order: number;
+            /** Points */
+            points: number;
             /** Required */
             required: boolean;
         };
@@ -5828,10 +5872,16 @@ export interface components {
             completeness: number;
             /** Items */
             items: components["schemas"]["QualityItemOut"][];
+            /** Max Total */
+            max_total: number;
             /** Max Weighted Score */
             max_weighted_score: number;
             /** Rank */
             rank: number;
+            /** Raw Total */
+            raw_total: number;
+            /** Total */
+            total: number;
             /** Weighted Score */
             weighted_score: number;
         };
@@ -7256,8 +7306,12 @@ export interface components {
             completeness: number;
             /** Items */
             items: components["schemas"]["QualityItemOut"][];
+            /** Max Total */
+            max_total: number;
             /** Rank */
             rank: number;
+            /** Score Total */
+            score_total: number;
             /** Total */
             total: number;
         };
@@ -8175,10 +8229,14 @@ export interface components {
         };
         /** ProblemTemplateChecklistItemOut */
         ProblemTemplateChecklistItemOut: {
+            /** Grade */
+            grade: string;
             /** Label */
             label: string;
             /** Order */
             order: number;
+            /** Points */
+            points: number;
             /** Required */
             required: boolean;
         };
@@ -8343,8 +8401,12 @@ export interface components {
         QualityItemOut: {
             /** Item Id */
             item_id: number;
+            /** Item Points */
+            item_points: number;
             /** Label */
             label: string;
+            /** Points */
+            points: number;
             /** Reasoning */
             reasoning: string;
             /** Required */
@@ -8362,14 +8424,20 @@ export interface components {
             display_name: string;
             /** Items */
             items: components["schemas"]["QualityItemOut"][];
+            /** Max Total */
+            max_total: number;
             /** Max Weighted Score */
             max_weighted_score: number;
             /** Member Id */
             member_id: number;
             /** Rank */
             rank: number;
+            /** Raw Total */
+            raw_total: number;
             /** Submission Id */
             submission_id: number;
+            /** Total */
+            total: number;
             /** Weighted Score */
             weighted_score: number;
         };
@@ -8518,6 +8586,8 @@ export interface components {
             entries: components["schemas"]["ComparisonEntryOut"][];
             /** Grade */
             grade: string;
+            /** Points */
+            points: number;
             /** Requirement Id */
             requirement_id: number;
             /** Text */
@@ -8527,6 +8597,8 @@ export interface components {
         RequirementCreateIn: {
             /** Grade */
             grade: string;
+            /** Points */
+            points?: number | null;
             /** Text */
             text: string;
         };
@@ -8564,6 +8636,8 @@ export interface components {
         RequirementIn: {
             /** Grade */
             grade: string;
+            /** Points */
+            points?: number | null;
             /** Text */
             text: string;
         };
@@ -8575,8 +8649,18 @@ export interface components {
             id: number;
             /** Order */
             order: number;
+            /** Points */
+            points: number;
             /** Text */
             text: string;
+        };
+        /**
+         * RequirementPointsIn
+         * @description 배점만 고친다(#904, ADR-0073) — 마감 뒤에도 열려 있고 변경 이력·알림을 남기지 않는다.
+         */
+        RequirementPointsIn: {
+            /** Points */
+            points: number;
         };
         /** RequirementProposalOut */
         RequirementProposalOut: {
@@ -9131,16 +9215,24 @@ export interface components {
         };
         /**
          * SubmissionQualityOut
-         * @description 제출 하나의 완성도(#884). 상금·Score 와 무관한 AI 의 참고 의견이고 이의 대상이 아니다.
-         *     `completeness` 는 0~100(화면은 소수 첫째 자리), 등수는 `weighted_score`(정수)로 매긴다.
+         * @description 제출 하나의 완성도(#884·#904). 상금·Score 와 무관한 AI 의 참고 의견이고 이의 대상이 아니다.
+         *     화면은 「`total` / `max_total`점」(소수 첫째 자리), 등수는 `raw_total`(정수 Σ 0~5 × 배점)로 매긴다 —
+         *     읽을 때 지금 배점으로 계산한다(ADR-0073). `completeness`·`weighted_score`·`max_weighted_score` 는 옛 화면
+         *     호환 칸이다.
          */
         SubmissionQualityOut: {
             /** Completeness */
             completeness: number;
             /** Items */
             items: components["schemas"]["QualityItemOut"][];
+            /** Max Total */
+            max_total: number;
             /** Max Weighted Score */
             max_weighted_score: number;
+            /** Raw Total */
+            raw_total: number;
+            /** Total */
+            total: number;
             /** Weighted Score */
             weighted_score: number;
         };
@@ -13518,6 +13610,33 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RequirementUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequirementOut"];
+                };
+            };
+        };
+    };
+    contests_api_update_requirement_points: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                requirement_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequirementPointsIn"];
             };
         };
         responses: {

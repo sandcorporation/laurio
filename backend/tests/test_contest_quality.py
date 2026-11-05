@@ -287,3 +287,127 @@ def test_award_is_the_sponsors_choice_regardless_of_quality(client, closed):
 
     assert {r["status"] for r in _run_quality(client)["rows"]} == {"reviewed"}
     assert Award.objects.get(contest_id=closed["contest"]["id"]).submission_id == closed["b"]
+
+
+class _CountingAdapter(FakeLLMScoringAdapter):
+    """완성도 호출 수를 센다 — 배점을 고쳐도 AI 를 다시 부르지 않음을 본다(#904)."""
+
+    quality_calls = 0
+    score_calls = 0
+
+    def review_quality(self, quality_input: QualityInput) -> QualityOutput:
+        type(self).quality_calls += 1
+        return super().review_quality(quality_input)
+
+    def score(self, scoring_input):
+        type(self).score_calls += 1
+        return super().score(scoring_input)
+
+
+def _points_url(contest_id: int, requirement_id: int) -> str:
+    return f"{CONTESTS_URL}/{contest_id}/requirements/{requirement_id}/points"
+
+
+def _patch_points(client, access: str, contest_id: int, requirement_id: int, points: int):
+    return client.patch(
+        _points_url(contest_id, requirement_id),
+        data={"points": points},
+        content_type="application/json",
+        **_auth(access),
+    )
+
+
+def _compare(client, closed) -> dict:
+    response = client.get(
+        f"{CONTESTS_URL}/{closed['contest']['id']}/submissions/compare", **_auth(closed["sponsor"]["access"])
+    )
+    assert response.status_code == 200, response.content
+    return response.json()
+
+
+@pytest.mark.django_db
+def test_new_requirements_default_to_two_points_for_required_and_one_for_optional(closed):
+    assert [(r["grade"], r["points"]) for r in closed["contest"]["requirements"]] == [("required", 2), ("optional", 1)]
+
+
+@pytest.mark.django_db
+def test_points_change_after_deadline_recomputes_quality_and_rank_without_calling_ai(client, closed):
+    """배점은 마감 뒤에도 고치고, 완성도·등수는 AI 호출 0회로 지금 배점으로 다시 계산된다(#904, ADR-0073).
+    공모전 변경 이력·알림을 남기지 않고 Score 는 그대로다."""
+
+    from contests.models import ContestChange
+
+    _run_quality(client)
+    contest_id = closed["contest"]["id"]
+    required_id, optional_id = (r["id"] for r in closed["contest"]["requirements"])
+    scores = {
+        r.submission_id: [i["score"] for i in r.items] for r in SubmissionQualityReview.objects.all()
+    }
+    before = {s["submission_id"]: s["quality"] for s in _compare(client, closed)["submissions"]}
+    for sid, quality in before.items():
+        req, opt = scores[sid]
+        # 기본 배점(2·1)이면 옛 가중 점수와 같다 — 순위가 그대로다.
+        assert quality["raw_total"] == quality["weighted_score"] == 2 * req + opt
+        assert quality["max_total"] == 3
+        assert quality["total"] == pytest.approx((2 * req + opt) / 5)
+    score_before = {s.submission_id: (s.percentage, s.reasoning) for s in Score.objects.all()}
+    changes_before = ContestChange.objects.count()
+
+    _CountingAdapter.quality_calls = _CountingAdapter.score_calls = 0
+    with override_settings(LLM_ADAPTER_MODE="tests.test_contest_quality._CountingAdapter"):
+        response = _patch_points(client, closed["sponsor"]["access"], contest_id, optional_id, 10)
+        assert response.status_code == 200, response.content
+        assert response.json()["points"] == 10
+        after = _compare(client, closed)
+        own = client.get(f"/api/submissions/{closed['a']}/score", **_auth(closed["dev_a"]["access"])).json()
+    assert (_CountingAdapter.quality_calls, _CountingAdapter.score_calls) == (0, 0)
+
+    by_id = {s["submission_id"]: s["quality"] for s in after["submissions"]}
+    raws = {}
+    for sid, quality in by_id.items():
+        req, opt = scores[sid]
+        raws[sid] = 2 * req + 10 * opt
+        assert quality["raw_total"] == raws[sid]
+        assert quality["max_total"] == 12
+        assert quality["total"] == pytest.approx(raws[sid] / 5)
+        assert [(i["points"], i["item_points"]) for i in quality["items"]] == [
+            (2, pytest.approx(req / 5 * 2)),
+            (10, pytest.approx(opt / 5 * 10)),
+        ]
+    a, b = closed["a"], closed["b"]
+    assert by_id[a]["rank"] == (1 if raws[a] >= raws[b] else 2)
+    assert by_id[b]["rank"] == (1 if raws[b] >= raws[a] else 2)
+    assert [r["points"] for r in after["requirements"]] == [2, 10]
+    assert own["quality"]["max_total"] == 12 and own["quality"]["raw_total"] == raws[a]
+
+    assert ContestChange.objects.count() == changes_before
+    assert {s.submission_id: (s.percentage, s.reasoning) for s in Score.objects.all()} == score_before
+
+
+@pytest.mark.django_db
+def test_points_must_be_1_to_10_and_only_the_sponsor_changes_them(client, closed):
+    contest_id = closed["contest"]["id"]
+    requirement_id = closed["contest"]["requirements"][0]["id"]
+    for bad in (0, 11):
+        assert _patch_points(client, closed["sponsor"]["access"], contest_id, requirement_id, bad).status_code == 422
+    assert _patch_points(client, closed["dev_a"]["access"], contest_id, requirement_id, 5).status_code in (403, 404)
+    assert _patch_points(client, closed["sponsor"]["access"], contest_id, 999_999, 5).status_code == 404
+    from contests.models import Requirement
+
+    assert Requirement.objects.get(id=requirement_id).points == 2
+
+
+@pytest.mark.django_db
+def test_migration_fills_existing_requirements_with_two_and_one(closed):
+    """0012 가 기존 항목을 필수 2·선택 1 로 채운다 — DB 기본값(1)으로 들어간 행도 같다(#904, ADR-0073)."""
+
+    import importlib
+
+    from django.apps import apps as django_apps
+
+    from contests.models import Requirement
+
+    Requirement.objects.update(points=1)  # AddField 직후(DB 기본값 1)의 모양.
+    migration = importlib.import_module("contests.migrations.0012_requirement_points_and_bonus_grade")
+    migration.fill_points(django_apps, None)
+    assert list(Requirement.objects.order_by("order").values_list("grade", "points")) == [("required", 2), ("optional", 1)]

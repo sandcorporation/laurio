@@ -85,7 +85,14 @@ def _without(arguments: dict, *keys: str) -> dict:
 
 
 def _item_out(item: ChecklistItem) -> dict:
-    return {"id": item.id, "label": item.label, "required": item.required, "order": item.order}
+    return {
+        "id": item.id,
+        "label": item.label,
+        "grade": item.grade,
+        "required": item.required,
+        "points": item.points,
+        "order": item.order,
+    }
 
 
 def _transitions_out(problem: Problem, class_obj: Class) -> list[dict]:
@@ -182,9 +189,16 @@ _REQUIRED = {
     "type": "boolean",
     "description": "필수 항목인가. 필수 항목을 모두 만족해야 통과다. 열린·숨긴 문제는 필수 항목이 하나 이상 있어야 한다.",
 }
+#: 배점 1~10(#904) — 완성도에만 쓴다. 없으면 필수 2·선택 1.
+_POINTS = {
+    "type": "integer",
+    "minimum": 1,
+    "maximum": 10,
+    "description": "배점(1~10). 완성도에만 쓴다 — Score·통과와 무관하다. 없으면 필수 2·선택 1.",
+}
 _CHECKLIST_ITEM_IN = {
     "type": "object",
-    "properties": {"label": _LABEL, "required": {**_REQUIRED, "default": True}},
+    "properties": {"label": _LABEL, "required": {**_REQUIRED, "default": True}, "points": _POINTS},
     "required": ["label"],
     "additionalProperties": False,
 }
@@ -225,10 +239,12 @@ _ITEM_OUT = {
     "properties": {
         "id": {"type": "integer"},
         "label": {"type": "string"},
+        "grade": {"type": "string", "enum": ["required", "optional", "bonus"]},
         "required": {"type": "boolean"},
+        "points": {"type": "integer"},
         "order": {"type": "integer"},
     },
-    "required": ["id", "label", "required", "order"],
+    "required": ["id", "label", "grade", "required", "points", "order"],
 }
 _STATUS_OUT = {
     "type": "string",
@@ -514,6 +530,7 @@ _ADD_ITEM_INPUT = _object(
         "problem_id": _PROBLEM_ID,
         "label": _LABEL,
         "required": {**_REQUIRED, "default": True},
+        "points": _POINTS,
     },
     ["class_id", "problem_id", "label"],
 )
@@ -541,6 +558,7 @@ _UPDATE_ITEM_INPUT = _object(
         "item_id": _ITEM_ID,
         "label": _LABEL,
         "required": _REQUIRED,
+        "points": _POINTS,
     },
     ["class_id", "problem_id", "item_id"],
 )
