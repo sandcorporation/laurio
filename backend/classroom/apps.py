@@ -37,17 +37,9 @@ class ClassroomConfig(AppConfig):
         contest_entry_resolved.connect(
             on_contest_entry_resolved, dispatch_uid="classroom.contest_entries.resolved"
         )
-        # 연결된 앱(ADR-0052, #512) — 90일 동안 쓰지 않은 허락을 끊고, 아무도 허락하지
-        # 않은 등록을 걷는다. 탈퇴·휴면이면 그 자리에서 끊는다(`accounts.signals`).
-        from accounts.signals import user_became_dormant, user_withdrawn
+        # 연결된 앱의 만료 스캔·탈퇴/휴면 끊기는 허락과 함께 `core` 로 올라갔다(#870, `core.apps`).
+        from accounts.signals import user_withdrawn
 
-        from .connected_app_signals import revoke_on_dormancy, revoke_on_withdrawal
-        from .oauth import CONNECTED_APP_EXPIRY_SCAN, UNUSED_CLIENT_SCAN
-
-        register_scan(CONNECTED_APP_EXPIRY_SCAN)
-        register_scan(UNUSED_CLIENT_SCAN)
-        user_withdrawn.connect(revoke_on_withdrawal, dispatch_uid="classroom-connected-app-withdrawal")
-        user_became_dormant.connect(revoke_on_dormancy, dispatch_uid="classroom-connected-app-dormancy")
         # 공동 강사(#563) — 탈퇴하면 공동 강사인 클래스에서 떠나기와 같은 정리로 빠진다.
         from .co_instructors import leave_all_on_withdrawal
 

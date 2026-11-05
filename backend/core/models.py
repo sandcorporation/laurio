@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -67,3 +68,146 @@ class DbConnectionAlertState(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"DbConnectionAlertState(last_alerted_at={self.last_alerted_at})"
+
+
+# --- 연결된 앱 (ADR-0052, #512, #870) ---------------------------------------------
+#
+# 사용자가 자기 계정으로 쓰도록 허락한 외부 AI 도구(CONTEXT.md 「연결된 앱」). 백엔드가
+# MCP 규격의 OAuth 2.1 인가 서버를 직접 연다(`core.oauth`) — 아래 다섯이 그 상태 전부다.
+# 강의실(`scope="classroom"`)과 공모전(`scope="contests"`)이 같은 표를 쓴다 — 처음에는
+# `classroom` 앱에 있었고(#512), 공모전 MCP(#870)가 생기며 테이블 이름은 그대로 둔 채
+# 여기로 올렸다. 토큰과 인가 코드는 **해시로만** 저장한다: DB 가 새도 그 값으로 닿을 수
+# 없다. 시각은 전부 `Clock.now()`로 채운다(`auto_now_add`를 쓰지 않는다) —
+# 90일 만료 스캔과 토큰 수명을 시험이 시계를 옮겨 확인한다(ADR-0003).
+
+
+class OAuthClient(models.Model):
+    """동적 클라이언트 등록(RFC 7591)으로 생긴 외부 앱 하나 — 아직 누구의 허락도
+    아니다. 허락은 `ConnectedApp`이다. 아무도 허락하지 않은 등록은 스캔이 걷는다
+    (`core.oauth.UNUSED_CLIENT_SCAN`) — 인증 없이 누구나 등록할 수 있어서다."""
+
+    client_id = models.CharField(max_length=64, unique=True)
+    #: 기밀 클라이언트(`client_secret_post`·`client_secret_basic`)만 갖는다. 해시다.
+    client_secret_hash = models.CharField(max_length=64, blank=True, default="")
+    token_endpoint_auth_method = models.CharField(max_length=32, default="none")
+    #: 앱이 스스로 밝힌 이름 — 동의 화면과 「연결된 앱」 목록에 그대로 나온다.
+    client_name = models.CharField(max_length=200, blank=True, default="")
+    redirect_uris = models.JSONField(default=list)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "classroom_oauthclient"
+        ordering = ["id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"OAuthClient(client_id={self.client_id!r})"
+
+
+class ConnectedApp(models.Model):
+    """사용자 한 명이 외부 앱 하나에 한 범위(`scope`)로 준 허락 — 화면의 「연결된 앱」
+    한 줄이다. 강의실 범위는 그 강사의 모든 Class(ADR-0052), 공모전 범위는 그 사람이
+    다룰 수 있는 무료 공모전이다(#870). 끊거나(`revoked_at`) 90일
+    동안 쓰이지 않으면 끝나고, 끝난 허락에서 나온 토큰은 전부 거절된다 — 토큰을
+    하나씩 지우지 않아도 이 행 하나가 문이다."""
+
+    class RevokeReason(models.TextChoices):
+        DISCONNECTED = "disconnected", "사용자가 끊음"
+        EXPIRED = "expired", "90일 동안 쓰지 않음"
+        WITHDRAWN = "withdrawn", "탈퇴"
+        DORMANT = "dormant", "휴면"
+
+    class Scope(models.TextChoices):
+        CLASSROOM = "classroom", "강의실"
+        CONTESTS = "contests", "공모전"
+
+    #: 허락한 계정 — 이름이 `instructor` 인 것은 강의실에서 시작한 역사다(#512). 공모전
+    #: 연결(`scope="contests"`)에서는 개최 자격자 본인이다. 클래스의 강사가 아니다.
+    instructor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="connected_apps", on_delete=models.CASCADE
+    )
+    #: 이 허락이 여는 MCP 자원 하나(#870). 같은 앱이라도 범위마다 따로 허락한다.
+    scope = models.CharField(
+        max_length=20, choices=Scope.choices, default=Scope.CLASSROOM, db_default=Scope.CLASSROOM
+    )
+    client = models.ForeignKey(OAuthClient, related_name="grants", on_delete=models.CASCADE)
+    #: 허락한 시점의 앱 이름 — 클라이언트가 나중에 다시 등록해도 목록이 흔들리지 않게.
+    name = models.CharField(max_length=200, blank=True, default="")
+    created_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoke_reason = models.CharField(max_length=20, choices=RevokeReason.choices, blank=True, default="")
+
+    class Meta:
+        db_table = "classroom_connectedapp"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ConnectedApp(id={self.pk}, instructor={self.instructor_id})"
+
+
+class OAuthAuthorizationCode(models.Model):
+    """동의 화면에서 허락한 직후 한 번 쓰는 코드(PKCE S256). 짧게 살고 한 번만 바뀐다."""
+
+    code_hash = models.CharField(max_length=64, unique=True)
+    connected_app = models.ForeignKey(ConnectedApp, related_name="codes", on_delete=models.CASCADE)
+    redirect_uri = models.TextField()
+    code_challenge = models.CharField(max_length=128)
+    resource = models.TextField()
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "classroom_oauthauthorizationcode"
+
+
+
+class OAuthToken(models.Model):
+    """접근 토큰(1시간)과 갱신 토큰(쓸 때마다 새것으로 바뀐다). 해시만 저장한다."""
+
+    class Kind(models.TextChoices):
+        ACCESS = "access", "접근"
+        REFRESH = "refresh", "갱신"
+
+    token_hash = models.CharField(max_length=64, unique=True)
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    connected_app = models.ForeignKey(ConnectedApp, related_name="tokens", on_delete=models.CASCADE)
+    resource = models.TextField()
+    created_at = models.DateTimeField()
+    #: 접근 토큰만 갖는다 — 갱신 토큰은 허락이 끝날 때까지 간다(90일 미사용 만료는
+    #: 허락 쪽의 일이다).
+    expires_at = models.DateTimeField(null=True, blank=True)
+    #: 갱신 토큰이 새것으로 바뀌었거나, 회수(RFC 7009)된 시각.
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "classroom_oauthtoken"
+
+
+
+class ConnectedAppConfirmation(models.Model):
+    """연결된 앱이 되돌릴 수 없는 도구(#515)를 실행하기 전에 받는 확인 표 한 장.
+
+    첫 호출이 미리보기와 함께 표를 내주고, 같은 도구를 **같은 인자로** 그 표와 함께 다시
+    부르면 실행된다(`core.mcp_confirmation`). 표 자체는 저장하지 않고 해시만 둔다 —
+    이 행을 읽을 수 있는 사람도 표를 다시 만들 수 없다.
+
+    **한 번만, 그 앱·그 도구·그 인자에만, 짧게.** 인자는 `arguments_digest`(표를 뺀 인자의
+    정규화 JSON 의 SHA-256)로 묶는다 — 대상 번호가 인자에 있으므로 다른 대상에는 쓰이지
+    않는다. 실행이 성공한 트랜잭션에서 `used_at` 이 찍힌다; 실행이 거절되면(그 사이 참여자가
+    냈다 등) 쓰기와 함께 되돌아가 표가 남지만, 같은 대상·같은 인자에만 쓰이고 시간이 지나면
+    끝난다."""
+
+    connected_app = models.ForeignKey(ConnectedApp, related_name="confirmations", on_delete=models.CASCADE)
+    tool = models.CharField(max_length=64)
+    arguments_digest = models.CharField(max_length=64)
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField()
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "classroom_connectedappconfirmation"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ConnectedAppConfirmation(id={self.pk}, tool={self.tool})"

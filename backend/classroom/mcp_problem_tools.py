@@ -9,7 +9,7 @@
 금칙어 등록표(`core.banned_word_rules.RULES`)가 덮는 칸도 화면과 같다.
 
 **전부 쓰기 도구다**(`read_only=False`) — 디스패치가 성공한 호출마다 `ConnectedAppWrite`
-한 줄을 남긴다(`classroom.mcp_tool` docstring). 되돌릴 수 있는 쓰기라 `destructiveHint`
+한 줄을 남긴다(`core.mcp_tool` docstring). 되돌릴 수 있는 쓰기라 `destructiveHint`
 는 붙이지 않는다. 문제 삭제는 두 단계 확인 도구라 `classroom.mcp_destructive_tools` 에 있다(#515).
 
 **결과는 할 일에 맞는 크기다**(#579). 상태 바꾸기는 번호·제목·새 상태·다음 전이만, 체크리스트
@@ -31,7 +31,9 @@ from .gradability_hint import (
 from .git_history_hint import zip_git_history_item_ids, zip_git_history_warning_text
 from .instructor_scope import class_scope, problem_scope
 from .mcp_tool import Tool, ToolInputError, WriteResult
-from .models import ChecklistItem, Class, ConnectedApp, Problem
+from core.models import ConnectedApp
+
+from .models import ChecklistItem, Class, Problem
 from .problem_transitions import PROBLEM_TRANSITIONS, available_transitions, execute_transition
 from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn
 from .scoring_models import REASONING_EFFORT_CHOICES

@@ -1,6 +1,6 @@
-"""되돌릴 수 없는 도구의 확인 표 (#515, spec #511 「두 단계 확인」, ADR-0052).
+"""되돌릴 수 없는 도구의 확인 표 (#515, spec #511 「두 단계 확인」, ADR-0052, #870).
 
-연결된 앱이 문제·클래스를 지우거나 참여자를 내보내거나 템플릿을 공개하려 하면, 첫 호출은
+강의실과 공모전 MCP 가 함께 쓴다. 연결된 앱이 문제·클래스를 지우거나 공모전을 보관하려 하면, 첫 호출은
 실행하지 않고 **무엇이 사라지거나 나가는가**의 미리보기와 확인 표를 돌려준다. 같은 도구를
 같은 인자에 `confirmation` 만 더해 다시 부르면 그때 실행된다 — AI 의 한 번 실수로 지워지지
 않게, 그리고 모델이 미리보기를 강사에게 보여 줄 틈을 두려고.
@@ -91,7 +91,7 @@ _AGAIN = "확인 표 없이 다시 불러 새 미리보기를 받으세요."
 
 def redeem(grant: ConnectedApp, tool: str, arguments: dict, token: str) -> None:
     """표를 쓴다 — 맞지 않으면 `ToolInputError`(도구 오류)로 거절한다. 호출부는 디스패치의
-    트랜잭션 안에 있다(`classroom.mcp._call_tool`)."""
+    트랜잭션 안에 있다(`core.mcp_server.McpServer.call_tool`)."""
 
     row = (
         ConnectedAppConfirmation.objects.select_for_update()
@@ -112,7 +112,7 @@ def redeem(grant: ConnectedApp, tool: str, arguments: dict, token: str) -> None:
 
 
 def needs_confirmation(grant: ConnectedApp, tool: str, arguments: dict, preview: dict) -> dict:
-    """미리보기 결과의 모양 — 도구 넷이 같은 봉투를 쓴다."""
+    """미리보기 결과의 모양 — 위험 도구가 모두 같은 봉투를 쓴다."""
 
     token, expires_at = issue(grant, tool, arguments)
     return {

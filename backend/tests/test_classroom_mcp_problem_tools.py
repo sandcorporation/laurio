@@ -10,7 +10,8 @@ from __future__ import annotations
 import pytest
 from django.core.cache import caches
 
-from classroom.models import ConnectedApp, ConnectedAppWrite
+from classroom.models import ConnectedAppWrite
+from core.models import ConnectedApp
 from tests.classroom_scenarios import (
     CLASSES_URL,
     archive_class,

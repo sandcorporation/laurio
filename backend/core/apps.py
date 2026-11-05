@@ -20,6 +20,19 @@ class CoreConfig(AppConfig):
 
         register_scan(DB_CONNECTION_USAGE_ALERT_SCAN)
 
+        # 연결된 앱(ADR-0052, #512, #870) — 90일 동안 쓰지 않은 허락을 끊고, 아무도 허락하지
+        # 않은 등록을 걷는다. 탈퇴·휴면이면 그 자리에서 끊는다(`accounts.signals`). 강의실과
+        # 공모전이 같은 허락 표를 쓰므로 공유층이 맡는다. 스캔 이름은 처음 생긴 그대로다.
+        from accounts.signals import user_became_dormant, user_withdrawn
+
+        from .connected_app_signals import revoke_on_dormancy, revoke_on_withdrawal
+        from .oauth import CONNECTED_APP_EXPIRY_SCAN, UNUSED_CLIENT_SCAN
+
+        register_scan(CONNECTED_APP_EXPIRY_SCAN)
+        register_scan(UNUSED_CLIENT_SCAN)
+        user_withdrawn.connect(revoke_on_withdrawal, dispatch_uid="classroom-connected-app-withdrawal")
+        user_became_dormant.connect(revoke_on_dormancy, dispatch_uid="classroom-connected-app-dormancy")
+
         # LLM 채점·GitHub 저장소 어댑터 부팅 가드(#83, #193, #274, #287) — 원래
         # scoring·repositories 앱이 각각 등록했다. core.llm_scoring·
         # core.repository_adapters로 어댑터가 공유층에 옮겨오면서 검사도 함께

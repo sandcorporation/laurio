@@ -368,14 +368,6 @@ DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
     Path("accounts/withdrawal.py"): {
         "_instructor_has_class_in_progress": "탈퇴 차단은 **소유한** 클래스만 센다(CONTEXT.md 「공동 강사」) — 공동 강사 자리는 탈퇴로 빠진다.",
     },
-    Path("classroom/oauth.py"): {
-        "issue_code": _CONNECTED_APP_OWNER,
-        "refresh": _CONNECTED_APP_OWNER,
-        "authenticate_access_token": _CONNECTED_APP_OWNER,
-        "disconnect": _CONNECTED_APP_OWNER,
-        "revoke_all_for_user": _CONNECTED_APP_OWNER,
-        "active_connected_apps": _CONNECTED_APP_OWNER,
-    },
     Path("classroom/connected_app_writes.py"): {
         "record_write": "쓰기 기록의 주인은 연결된 앱의 주인(계정)이다 — 어느 클래스의 강사인가와 무관하다.",
     },

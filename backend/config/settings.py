@@ -414,7 +414,7 @@ OPERATOR_WEB_ORIGIN = _env("CODEMIT_OPERATOR_ORIGIN", "")
 # 강의실 앱의 공개 오리진(ADR-0052, #512) — 연결된 앱의 OAuth·MCP 메타데이터가 issuer·
 # resource 로 내보내는 주소다. backend 는 배포에서 호스트 포트가 없어 바깥에서는 강의실
 # 도메인으로만 닿는다. 비어 있으면(dev·테스트) 강의실 BFF 가 실어 보낸 자기 오리진을,
-# 그것도 없으면 요청이 도착한 주소를 쓴다(`classroom.oauth.public_origin`).
+# 그것도 없으면 요청이 도착한 주소를 쓴다(`core.oauth.OAuthResource.public_origin`).
 CLASSROOM_WEB_ORIGIN = _env("CODEMIT_CLASSROOM_ORIGIN", "").rstrip("/")
 
 # 연결된 앱이 강사 한 명당 1분에 부를 수 있는 MCP 요청 수(ADR-0052).

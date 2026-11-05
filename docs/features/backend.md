@@ -669,7 +669,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 실행하지 않고 미리보기와 확인 표를 돌려준다(`status: "needs_confirmation"`) — 바뀐 것이 없으니
 기록도 없다. 같은 도구를 같은 인자에 `confirmation` 만 더해 다시 부르면 실행되고(`done`) 다른
 쓰기처럼 기록된다. 표는 **그 연결된 앱·그 도구·표를 뺀 인자 전부(곧 그 대상)·5분**에 묶이고
-한 번만 쓰인다 — 서버는 표의 SHA-256 만 둔다(`ConnectedAppConfirmation`, `classroom.mcp_confirmation`).
+한 번만 쓰인다 — 서버는 표의 SHA-256 만 둔다(`ConnectedAppConfirmation`, `core.mcp_confirmation`).
 틀린 대상·다른 앱·만료·이미 쓴 표는 도구 오류로 거절되고 새 미리보기를 받으라고 말한다. 판정은
 화면 라우트와 같은 함수(`api.ensure_problem_deletable`·`ensure_class_deletable`·`remove_*`·
 `expel_class_member`, `template_api.publish_*_template_checked`)를 미리보기와 실행 **양쪽에서**

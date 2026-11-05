@@ -39,7 +39,7 @@ from .api import (
     scoring_cost_estimate,
 )
 from .instructor_scope import class_scope, problem_scope
-from .models import ConnectedApp
+from core.models import ConnectedApp
 
 #: 화면 응답에는 있지만 연결된 앱에게는 주지 않는 클래스 필드.
 _CLASS_FIELDS_WITHHELD = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked"}

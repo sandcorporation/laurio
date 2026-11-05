@@ -57,7 +57,9 @@ from .contest_entries import entry_marks
 from .instructor_scope import class_scope, problem_scope
 from .instructors import classes_taught_by, is_instructor
 from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA
-from .models import ClassroomSubmission, ConnectedApp
+from core.models import ConnectedApp
+
+from .models import ClassroomSubmission
 from .verdicts import verdict_of
 
 #: 채점 근거 한 줄의 글자 상한 — 리포트는 클래스 전체를 한 번에 담으므로 근거가 길면
