@@ -36,14 +36,18 @@ import type { ReactNode } from "react";
 
 import { PageHeader, PageShell } from "@/app/components/ui";
 import { supportEmail } from "@/lib/legal/contact";
+import { effectiveNotice, koreanDate } from "@/lib/legal/effective-notice";
 
 export const metadata = {
   title: "이용약관",
   description: "Codemit 서비스의 이용 조건과 절차, 서비스와 회원의 권리·의무를 정한 약관입니다.",
 };
 
-const EFFECTIVE_DATE = "2026년 10월 3일";
-const PREVIOUS_EFFECTIVE_DATE = "2026년 9월 21일";
+// 시행일은 완성도 개정(#892)을 병합한 날(KST) + 7일이다(제3조 ② 의 7일 공지). 시행일 전에는 머리에
+// 「개정 예정」이 붙고 시행일부터 저절로 사라진다. 종전 약관은 시행일 전날까지 적용된다(부칙 ②).
+const EFFECTIVE_ISO = "2026-11-12";
+const EFFECTIVE_DATE = koreanDate(EFFECTIVE_ISO);
+const PREVIOUS_EFFECTIVE_DATE = "2026년 10월 3일";
 
 function Article({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -63,7 +67,7 @@ export default function TermsPage() {
         eyebrow="공개 문서"
         title="이용약관"
         titleTestId="terms-heading"
-        description={`시행일 ${EFFECTIVE_DATE}`}
+        description={effectiveNotice(EFFECTIVE_ISO, new Date())}
       />
 
       <div className="flex flex-col gap-7" data-testid="terms-body">
@@ -140,7 +144,8 @@ export default function TermsPage() {
             ① 공모전: 개최자가 요구사항과 기한을 정해 공모전을 열면 참가자가 제출물을 냅니다.
             제출물은 요구사항 충족 여부를 인공지능이 채점하며, 개최자는 그 결과를 참고해 선정작을
             고릅니다. 채점 결과에 이의가 있는 참가자는 서비스가 정한 절차에 따라 이의를 제기할 수
-            있습니다.
+            있습니다. 서비스는 마감 뒤 제출물의 완성도를 인공지능으로 매기며, 개최자는 모든
+            제출작의 완성도와 완성도 순위를, 제출자는 본인 제출물의 완성도를 볼 수 있습니다.
           </p>
           <p>
             ② 개최자는 공모전 마감 전까지 제목·설명·카테고리·요구형태·요구사항·마감을 고칠 수
@@ -151,7 +156,8 @@ export default function TermsPage() {
           <p>
             ③ 클래스: 강사가 문제와 채점 기준을 정해 클래스를 열면 참여자가 풀이를 제출합니다.
             클래스의 채점은 강사가 등록한 인공지능 서비스 키로 이루어지며, 그 이용 요금은 강사가
-            부담합니다.
+            부담합니다. 강사는 참여자의 완성도와 완성도 순위를 볼 수 있으며, 강사가 문제마다
+            공개를 켜면 참여자는 본인의 완성도와 「k등 / N명」 형태의 본인 순위를 볼 수 있습니다.
           </p>
           <p>
             ④ 강사는 연결된 앱을 통해 자신의 클래스에서 화면으로 할 수 있는 일, 즉 클래스와
@@ -240,7 +246,10 @@ export default function TermsPage() {
           </p>
           <p>
             ③ 인공지능 채점은 제출물이 요구사항을 충족했는지를 판정하는 것이며, 제출물의 품질이나
-            가치를 보증하는 것이 아닙니다.
+            가치를 보증하는 것이 아닙니다. 완성도(항목별 0~5점, 근거,
+            완성도 순위)도 인공지능의 참고 의견이며 제출물의 품질이나 가치를 보증하지 않고, 상금
+            배분과 선정의 근거가 아니며 이의 제기의 대상이 아닙니다. 이의 제기는 요구사항 충족
+            여부의 판정에 대해서만 할 수 있습니다.
           </p>
           <p>
             ④ 서비스는 천재지변, 정전, 기간통신사업자의 서비스 중단 등 불가항력으로 서비스를
