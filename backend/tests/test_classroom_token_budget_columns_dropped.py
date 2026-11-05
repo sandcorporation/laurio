@@ -34,31 +34,39 @@ def _threshold_default() -> str | None:
         return cursor.fetchone()[0]
 
 
-def _migrate(target: tuple[str, str]) -> None:
-    executor = MigrationExecutor(connection)
-    executor.loader.build_graph()
-    executor.migrate([target])
+_CONTRACT = ("classroom", "0032_drop_class_token_budget_columns")
+_BEFORE = ("classroom", "0031_class_scoring_connection_verified_at")
 
 
-def _migrate_to_latest() -> None:
-    """classroom 앱의 leaf 까지 올린다 — 0032 로 못 박으면 그 뒤에 온 마이그레이션(0033, #769)이
-    이 워커의 DB 에 안 돌아간 채로 남아, 같은 워커가 이어서 집는 시험이 「column … does not
-    exist」로 떨어진다(xdist 워커의 DB 는 세션 동안 하나다)."""
+def _run_contract_migration(*, backwards: bool) -> None:
+    """0032 하나만 되돌리거나 다시 적용한다 — 실행 기록(`django_migrations`)은 건드리지 않는다.
 
-    executor = MigrationExecutor(connection)
-    executor.loader.build_graph()
-    executor.migrate(executor.loader.graph.leaf_nodes("classroom"))
+    예전에는 executor 로 classroom 을 0030 까지 내렸다 올렸다. 연결된 앱을 core 로 옮긴
+    `core.0005`(classroom.0034 에 기댄다)와 그것에 기대는 `contests.0011` 이 생기자(#870) 그
+    둘까지 함께 내려가 모델 다섯을 다시 그리느라 CPU 한도를 넘었고, classroom 의 leaf 만 다시
+    올려 `contests.0011` 이 빠진 채로 남아 같은 워커의 공모전 시험이 `archived_at` 없음으로
+    떨어졌다. 이 시험이 보는 것은 0032 의 되돌리기뿐이므로 그것만 돌린다 — 0031 끝의 상태는
+    그 조상만 그린다."""
+
+    loader = MigrationExecutor(connection).loader
+    migration = loader.graph.nodes[_CONTRACT]
+    before = loader.project_state(_BEFORE, at_end=True)
+    with connection.schema_editor(atomic=migration.atomic) as editor:
+        if backwards:
+            migration.unapply(before, editor)
+        else:
+            migration.apply(before, editor)
 
 
 @pytest.mark.django_db(transaction=True)
 def test_contract_migration_drops_the_budget_columns_and_reverse_restores_them():
     assert _budget_columns() == set()
 
-    _migrate(("classroom", "0030_token_budget_threshold_db_default"))
+    _run_contract_migration(backwards=True)
     try:
         assert _budget_columns() == COLUMNS
         assert _threshold_default() == "80"
     finally:
-        _migrate_to_latest()
+        _run_contract_migration(backwards=False)
 
     assert _budget_columns() == set()
