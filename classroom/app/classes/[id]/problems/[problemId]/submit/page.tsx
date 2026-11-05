@@ -26,6 +26,7 @@ import {
   buildEntryPayload,
   entryBlockedReason,
   initialEntryState,
+  offersContestEntry as offersEntry,
   type ContestEntryForm,
   type ContestEntryState,
 } from "@/lib/submissions/contest-entry";
@@ -73,11 +74,8 @@ export default function ProblemSubmitPage() {
     me.status === "ready" ? sourceTargetRef(problemId, me.userId) : null;
   const { state: uploadState, upload } = useSourceUpload(targetRef);
 
-  // 「공모전에도 내기」(#549) — 공모전이 지금 받는 공모전 문제에서, 참여자에게만 연다.
-  const offersContestEntry =
-    state.status === "ready" &&
-    !state.data.viewing_as_instructor &&
-    state.data.problem.contest?.accepts_entries === true;
+  // 「공모전에도 내기」(#549) — 공모전이 지금 받는 공모전 문제에서 연다. 강사 본인도 낸다(#878).
+  const offersContestEntry = state.status === "ready" && offersEntry(state.data.problem);
   const [entryForm, setEntryForm] = useState<ContestEntryForm | null>(null);
   const [entryState, setEntryState] = useState<ContestEntryState | null>(null);
   const loadEntryForm = useCallback(async () => {

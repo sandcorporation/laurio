@@ -7,6 +7,7 @@ import {
   buildEntryPayload,
   entryBlockedReason,
   initialEntryState,
+  offersContestEntry,
   requiredWithoutEvidence,
   type ContestEntryForm,
 } from "./contest-entry";
@@ -104,5 +105,16 @@ describe("gridEntryLabel (#550)", () => {
     expect(gridEntryLabel("current")).toContain("지금 공모전 제출");
     expect(gridEntryLabel("entered")).toContain("냈었음");
     expect(gridEntryLabel(null)).toBeNull();
+  });
+});
+
+describe("offersContestEntry", () => {
+  it("공모전이 받는 문제면 연다 — 강사 본인이 보는 중이어도 닫지 않는다", () => {
+    expect(offersContestEntry({ contest: { accepts_entries: true } })).toBe(true);
+  });
+  it("받지 않는 공모전·공모전 문제가 아니면 닫는다", () => {
+    expect(offersContestEntry({ contest: { accepts_entries: false } })).toBe(false);
+    expect(offersContestEntry({ contest: null })).toBe(false);
+    expect(offersContestEntry({})).toBe(false);
   });
 });
