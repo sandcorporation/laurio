@@ -202,9 +202,21 @@ export default function AppealDetailPage() {
                       index % 2 === 1 ? "bg-ink/[2%]" : ""
                     }`}
                   >
-                    <div className="w-[170px] shrink-0 truncate" title={requirement?.text}>
-                      {requirement ? requirement.text : `요건 ${item.requirementId !== null ? `#${item.requirementId}` : "?"}`}
-                      {requirement?.hidden ? <Badge tone="neutral">숨은 항목</Badge> : null}
+                    <div
+                      data-testid={`appeal-score-reasoning-item-${index}-requirement`}
+                      className="flex w-[170px] shrink-0 items-center gap-1.5"
+                      title={requirement?.text}
+                    >
+                      {requirement?.hidden ? (
+                        <span className="shrink-0">
+                          <Badge tone="neutral" testId={`appeal-score-reasoning-item-${index}-hidden`}>
+                            숨은 항목
+                          </Badge>
+                        </span>
+                      ) : null}
+                      <span className="min-w-0 truncate">
+                        {requirement ? requirement.text : `요건 ${item.requirementId !== null ? `#${item.requirementId}` : "?"}`}
+                      </span>
                     </div>
                     <div className="w-[70px] shrink-0">
                       {item.isMet === null ? (
@@ -226,13 +238,15 @@ export default function AppealDetailPage() {
             <div className="border-b border-rule px-4 py-3 text-[14px] font-semibold">
               무엇을 보고 판단하나
             </div>
-            {appeal.score.scored_assets.length > 0 && (
+            {appeal.score.scored_assets.some((asset) => asset.label.trim() !== "") && (
               <div className="flex flex-wrap gap-2 px-4 pt-3">
-                {appeal.score.scored_assets.map((asset) => (
-                  <Badge key={asset.asset_id} tone="neutral">
-                    {asset.label}
-                  </Badge>
-                ))}
+                {appeal.score.scored_assets
+                  .filter((asset) => asset.label.trim() !== "")
+                  .map((asset) => (
+                    <Badge key={asset.asset_id} tone="neutral">
+                      {asset.label}
+                    </Badge>
+                  ))}
               </div>
             )}
             <SourceReveal
