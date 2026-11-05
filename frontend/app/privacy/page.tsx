@@ -25,17 +25,23 @@ import type { ReactNode } from "react";
 
 import { PageHeader, PageShell } from "@/app/components/ui";
 import { supportEmail } from "@/lib/legal/contact";
+import { effectiveNotice, koreanDate } from "@/lib/legal/effective-notice";
 
 export const metadata = {
   title: "개인정보처리방침",
   description: "Codemit 이 수집하는 개인정보 항목과 보유 기간, 위탁·국외 이전 상대를 밝힙니다.",
 };
 
-// 시행일은 백엔드 설정 `PRIVACY_POLICY_EFFECTIVE_DATE` 와 같은 값이다 — 시행일 전 Claude(Anthropic)
-// 키 저장 잠금이 그 설정을 본다(#803, `backend/tests/test_privacy_policy_lock.py` 가 두 값이 같은지 지킨다).
-// 이 파일은 백엔드 없이도 그려져야 하므로 값을 요청으로 받지 않고 나란히 고친다.
-const EFFECTIVE_DATE = "2026년 11월 6일";
-const PREVIOUS_EFFECTIVE_DATE = "2026년 10월 3일";
+// 이 판(완성도 채점을 6항 이전 목적에 더한 개정, #897)의 시행일은 병합일(KST)+7일이다(방침 12항의
+// 7일 전 공지). 시행일 전에는 머리에 「개정 예정 · 시행일 …」이 뜨고 시행일부터 저절로 내린다(#892).
+const EFFECTIVE_ISO = "2026-11-12";
+const EFFECTIVE_DATE = koreanDate(EFFECTIVE_ISO);
+
+// Anthropic, PBC 이전을 더한 개정(#803)의 시행일 — 이 판의 시행일이 아니다. 백엔드 설정
+// `PRIVACY_POLICY_EFFECTIVE_DATE` 와 같은 값이어야 하고(Claude 키 저장 잠금의 기준일이다 — 이 값을 옮기면
+// 열린 키 저장이 다시 잠긴다), `backend/tests/test_privacy_policy_lock.py` 가 아래 한 줄을 읽어 지킨다.
+const ANTHROPIC_TRANSFER_EFFECTIVE_ISO = "2026-11-06";
+const PREVIOUS_EFFECTIVE_DATE = koreanDate(ANTHROPIC_TRANSFER_EFFECTIVE_ISO);
 
 function Article({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -59,7 +65,7 @@ export default function PrivacyPolicyPage() {
         eyebrow="공개 문서"
         title="개인정보처리방침"
         titleTestId="privacy-heading"
-        description={`시행일 ${EFFECTIVE_DATE}`}
+        description={effectiveNotice(EFFECTIVE_ISO, new Date())}
       />
 
       <div className="flex flex-col gap-7" data-testid="privacy-body">
@@ -100,7 +106,7 @@ export default function PrivacyPolicyPage() {
           <Items>
             <li>회원 식별과 로그인 상태 유지</li>
             <li>공모전과 클래스의 운영 — 개최자·참가자·강사·참여자를 구분하여 표시</li>
-            <li>제출물의 채점과 그 결과 통지</li>
+            <li>제출물의 채점(요구사항 충족 여부와 완성도)과 그 결과 통지</li>
             <li>이의 제기 절차의 처리</li>
             <li>서비스 이용에 관한 문의 응대와 고충 처리</li>
           </Items>
@@ -185,7 +191,7 @@ export default function PrivacyPolicyPage() {
             <li>이전되는 국가: 미국</li>
             <li>이전 일시와 방법: 회원이 제출물을 낸 즉시 정보통신망을 통해 전송</li>
             <li>이전 항목: 제출한 소스코드와 요구사항에 대한 자가 응답</li>
-            <li>이전 목적: 요구사항 충족 여부의 자동 채점과 판정 근거 생성</li>
+            <li>이전 목적: 요구사항 충족 여부의 자동 채점, 완성도 채점과 그 근거 생성</li>
             <li>보유·이용 기간: 채점에 필요한 기간</li>
           </Items>
           <p>② Anthropic, PBC</p>
@@ -194,7 +200,7 @@ export default function PrivacyPolicyPage() {
             <li>이전되는 국가: 미국</li>
             <li>이전 일시와 방법: 채점할 때마다 정보통신망을 통해 전송</li>
             <li>이전 항목: 강사가 Claude 키로 채점을 연결한 클래스에서 제출한 소스코드</li>
-            <li>이전 목적: 요구사항 충족 여부의 자동 채점과 판정 근거 생성</li>
+            <li>이전 목적: 요구사항 충족 여부의 자동 채점, 완성도 채점과 그 근거 생성</li>
             <li>
               보유·이용 기간: 이전받는 자가 받은 날부터 30일 이내에 삭제(이용 정책 위반으로
               분류된 경우 최대 2년)
