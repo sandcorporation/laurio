@@ -37,6 +37,15 @@
 // **공개 앱 BFF 도 같은 틈에 같은 예외를 냈다**(2026-09-21, GlitchTip 74 — 알림 수
 // 3건). 강의실에만 있던 이 함수를 공유 패키지로 옮겨 두 앱이 같은 예산을 쓴다.
 //
+// **GET·HEAD 는 응답 전에 닫힌 연결도 다시 보낸다**(2026-11-05, GlitchTip 64 가 겹쳐
+// 바꾸기(#485) 뒤에 다시 올라왔다 — 강의실 채점 비용, 원인 `SocketError: other side
+// closed`). 겹쳐 바꾸기는 새 backend 가 답한 뒤 옛 것을 멈추는데, undici 는 옛
+// 컨테이너로 맺어 둔 keep-alive 연결을 쥐고 있다가 그 순간 요청을 실었고, 멈추는
+// gunicorn 이 응답 없이 연결을 닫았다. 연결은 맺어졌으니 위의 규칙으로는 다시 보낼 수
+// 없지만, GET·HEAD 는 다시 보내도 결과가 같다(HTTP 의 안전한 메서드) — 그래서 그
+// 메서드일 때만, 호출부가 `method` 를 넘긴 때만 다시 보낸다. 새 연결은 이름을 다시
+// 풀어 새 컨테이너로 간다. POST 등은 지금처럼 그대로 낸다.
+//
 // 브라우저가 이미 떠났으면(`signal`) 기다리지 않는다 — 예산이 길어진 만큼 이
 // 확인이 **물러서기 전에도** 한 번 있어야 한다. 안 그러면 떠난 브라우저 때문에
 // 8초를 마저 자고 나서야 그 사실을 안다.
@@ -50,24 +59,32 @@ const NOT_CONNECTED_CODES: ReadonlySet<unknown> = new Set([
   "EAI_AGAIN",
 ]);
 
-function isConnectionRefused(error: unknown): boolean {
-  if (!(error instanceof TypeError)) return false;
+// 연결은 맺어졌지만 응답이 오기 전에 닫힌 것 — 안전한 메서드만 다시 보낸다.
+const CLOSED_BEFORE_RESPONSE_CODES: ReadonlySet<unknown> = new Set(["UND_ERR_SOCKET", "ECONNRESET"]);
+const SAFE_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+
+function causeCode(error: unknown): unknown {
+  if (!(error instanceof TypeError)) return undefined;
   const cause = (error as { cause?: unknown }).cause;
-  return (
-    typeof cause === "object" && cause !== null && NOT_CONNECTED_CODES.has((cause as { code?: unknown }).code)
-  );
+  return typeof cause === "object" && cause !== null ? (cause as { code?: unknown }).code : undefined;
+}
+
+function isRetryable(error: unknown, method: string | undefined): boolean {
+  const code = causeCode(error);
+  if (NOT_CONNECTED_CODES.has(code)) return true;
+  return method !== undefined && SAFE_METHODS.has(method.toUpperCase()) && CLOSED_BEFORE_RESPONSE_CODES.has(code);
 }
 
 export async function retryWhileConnectionRefused(
   send: () => Promise<Response>,
-  options: { delaysMs?: readonly number[]; signal?: AbortSignal } = {},
+  options: { delaysMs?: readonly number[]; signal?: AbortSignal; method?: string } = {},
 ): Promise<Response> {
   const delays = options.delaysMs ?? DEFAULT_DELAYS_MS;
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await send();
     } catch (error) {
-      if (!isConnectionRefused(error) || attempt >= delays.length) throw error;
+      if (!isRetryable(error, options.method) || attempt >= delays.length) throw error;
       if (options.signal?.aborted) throw error;
       await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
       if (options.signal?.aborted) throw error;

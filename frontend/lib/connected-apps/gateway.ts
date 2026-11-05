@@ -47,7 +47,7 @@ export async function forwardConnectedAppRequest(request: NextRequest, backendPa
   const url = `${backendBaseUrl()}${backendPath}${new URL(request.url).search}`;
   const upstream = await retryWhileConnectionRefused(
     () => forwardRequest(request.method, url, headers, body, request.signal),
-    { signal: request.signal },
+    { signal: request.signal, method: request.method },
   );
 
   const responseHeaders = new Headers();
