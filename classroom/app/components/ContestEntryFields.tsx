@@ -13,11 +13,14 @@ import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/
 import {
   EVIDENCE_KINDS,
   OPTIONAL_ASSET_LABELS,
+  removeOptionalAsset,
   type ContestEntryForm,
   type ContestEntryState,
+  type EntryAsset,
   type EntryResponseState,
 } from "@/lib/submissions/contest-entry";
 import { useSourceUpload } from "@/lib/submissions/use-source-upload";
+import { VIDEO_LINK_SHAPE_MESSAGE, isSafeVideoLink } from "@/lib/submissions/video-link";
 
 function formatDeadline(iso: string | null): string {
   if (!iso) return "";
@@ -92,6 +95,7 @@ export function ContestEntryFields({
                 state={
                   state.responses[requirement.requirement_id] ?? { isMet: false, note: "", evidence: [] }
                 }
+                assets={state.optionalAssets}
                 onChange={(next) => setResponse(requirement.requirement_id, next)}
                 disabled={disabled}
               />
@@ -124,6 +128,7 @@ function RequirementEntry({
   required,
   testId,
   state,
+  assets,
   onChange,
   disabled,
 }: {
@@ -131,6 +136,7 @@ function RequirementEntry({
   required: boolean;
   testId: string;
   state: EntryResponseState;
+  assets: EntryAsset[];
   onChange: (next: EntryResponseState) => void;
   disabled: boolean;
 }) {
@@ -177,6 +183,27 @@ function RequirementEntry({
             {EVIDENCE_KINDS.map((kind) => (
               <option key={kind.value} value={kind.value}>
                 {kind.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={item.asset_index != null ? String(item.asset_index) : ""}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange({
+                ...state,
+                evidence: state.evidence.map((e, i) =>
+                  i === index ? { ...e, asset_index: event.target.value === "" ? null : Number(event.target.value) } : e,
+                ),
+              })
+            }
+            data-testid={`${testId}-evidence-${index}-asset`}
+            className={`min-w-0 ${INPUT_CLASS}`}
+          >
+            <option value="">어느 자료에서 볼 수 있는지 (선택 안 함)</option>
+            {assets.map((asset, assetIndex) => (
+              <option key={`${asset.kind}-${asset.value}`} value={assetIndex}>
+                {OPTIONAL_ASSET_LABELS[asset.kind] ?? asset.kind}: {asset.label || asset.value}
               </option>
             ))}
           </select>
@@ -228,6 +255,7 @@ function OptionalAssets({
   disabled: boolean;
 }) {
   const [demoUrl, setDemoUrl] = useState("");
+  const [videoLink, setVideoLink] = useState("");
   const screenshot = useSourceUpload(form.upload_target_refs.screenshot ?? null);
   const video = useSourceUpload(form.upload_target_refs.demo_video ?? null);
 
@@ -263,14 +291,12 @@ function OptionalAssets({
             <li key={`${asset.kind}-${asset.value}`} className="flex items-center gap-2 text-[12.5px]">
               <Badge>{OPTIONAL_ASSET_LABELS[asset.kind] ?? asset.kind}</Badge>
               <span className="min-w-0 flex-1 truncate text-ink/70">
-                {asset.kind === "demo_url" ? asset.value : asset.label || "올린 파일"}
+                {asset.kind === "demo_url" || asset.kind === "video_link" ? asset.value : asset.label || "올린 파일"}
               </span>
               <button
                 type="button"
                 disabled={disabled}
-                onClick={() =>
-                  onChange({ ...state, optionalAssets: state.optionalAssets.filter((_, i) => i !== index) })
-                }
+                onClick={() => onChange(removeOptionalAsset(state, index))}
                 className="text-[12px] text-ink/45 hover:underline"
               >
                 빼기
@@ -283,7 +309,7 @@ function OptionalAssets({
         <input
           type="url"
           className={`min-w-0 flex-1 ${INPUT_CLASS}`}
-          placeholder="데모 주소 https://"
+          placeholder="데모 URL https://"
           value={demoUrl}
           disabled={disabled}
           onChange={(event) => setDemoUrl(event.target.value)}
@@ -301,6 +327,34 @@ function OptionalAssets({
           더하기
         </button>
       </div>
+      <div className="flex gap-2">
+        <input
+          type="url"
+          className={`min-w-0 flex-1 ${INPUT_CLASS}`}
+          placeholder="시연 영상 링크 https://"
+          value={videoLink}
+          disabled={disabled}
+          onChange={(event) => setVideoLink(event.target.value)}
+          data-testid="contest-entry-video-link"
+        />
+        <button
+          type="button"
+          disabled={disabled || videoLink.trim() === "" || !isSafeVideoLink(videoLink)}
+          onClick={() => {
+            addAsset("video_link", videoLink.trim(), "");
+            setVideoLink("");
+          }}
+          data-testid="contest-entry-video-link-add"
+          className={buttonClass("secondary", "sm")}
+        >
+          더하기
+        </button>
+      </div>
+      {videoLink.trim() !== "" && !isSafeVideoLink(videoLink) ? (
+        <ErrorNote>
+          <span data-testid="contest-entry-video-link-error">{VIDEO_LINK_SHAPE_MESSAGE}</span>
+        </ErrorNote>
+      ) : null}
       <div className="flex flex-wrap gap-2 text-[12.5px]">
         <label className={`${buttonClass("secondary", "sm")} cursor-pointer`}>
           스크린샷 올리기

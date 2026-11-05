@@ -75,11 +75,13 @@ class ImportableContest:
 
 @dataclass(frozen=True)
 class EntryEvidence:
-    """요구사항 하나에 붙는 근거 한 줄 — 공모전 직접 제출의 Evidence 와 같은 모양이다.
-    자료를 가리키는 칸(asset_id)은 없다: 강의실에서 낸 자료는 아직 공모전 쪽 id 가 없다."""
+    """요구사항 하나에 붙는 확인 위치 한 줄 — 공모전 직접 제출의 Evidence 와 같은 모양이다.
+    강의실에서 낸 자료는 아직 공모전 쪽 id 가 없으므로 asset_id 대신 같은 내기의
+    `optional_assets` 순번(0부터)으로 가리킨다 — 공모전 쪽이 받아 저장하면서 새 id 로 잇는다."""
 
     kind: str
     value: str
+    asset_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -114,7 +116,7 @@ class ContestEntry:
     #: 소스를 자기 업로드 대상으로 옮겨 필수 자료로 쓴다.
     scoring_asset: EntryAsset
     responses: tuple[EntryResponse, ...] = ()
-    #: 데모 주소·시연 영상·스크린샷. 영상·스크린샷은 이미 공모전 쪽 업로드 대상에 올라가 있다.
+    #: 데모 URL·시연 영상·시연 영상 링크·스크린샷. 영상·스크린샷은 이미 공모전 쪽 업로드 대상에 올라가 있다.
     optional_assets: tuple[EntryAsset, ...] = ()
     source_access_consent: bool = False
 

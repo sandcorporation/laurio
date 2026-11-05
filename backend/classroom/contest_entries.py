@@ -4,7 +4,7 @@
 강의실은 공모전 앱을 임포트하지 못하므로(ADR-0037) 공유층 `core.contest_catalog` 로만 건넌다.
 
 1. **시도를 만들기 전** — `prepare_contest_entry` 가 거른다: 공모전 문제가
-   아님·받지 않는 공모전은 여기서, 동의·근거 모양·선택 자료는 카탈로그의 `check_entry`
+   아님·받지 않는 공모전은 여기서, 동의·확인 위치 모양·선택 자료는 카탈로그의 `check_entry`
    로(직접 제출과 같은 문장) 422. 이미 낸 제출이 있는데 「이 시도로 바뀝니다」를 확인하지 않았으면 409.
 2. **시도가 커밋된 뒤** — `contest_entry_requested` 를 보낸다. 시도는 「내는 중」으로 남는다.
 3. **결과** — 공모전 쪽이 `contest_entry_resolved` 로 답하면 `on_contest_entry_resolved` 가
@@ -88,7 +88,7 @@ def contest_entry_form(problem: Problem, user_id: int) -> ContestEntryFormOut:
                         is_met=response.is_met,
                         note=response.note,
                         evidence=[
-                            ContestEntryEvidenceOut(kind=e.kind, value=e.value)
+                            ContestEntryEvidenceOut(kind=e.kind, value=e.value, asset_index=e.asset_index)
                             for e in response.evidence
                         ],
                     )
@@ -141,7 +141,10 @@ def prepare_contest_entry(
                 requirement_id=r.requirement_id,
                 is_met=r.is_met,
                 note=r.note,
-                evidence=tuple(EntryEvidence(kind=e.kind, value=e.value) for e in r.evidence),
+                evidence=tuple(
+                    EntryEvidence(kind=e.kind, value=e.value, asset_index=e.asset_index)
+                    for e in r.evidence
+                ),
             )
             for r in entry_in.requirement_responses
         ),
@@ -151,7 +154,7 @@ def prepare_contest_entry(
         ),
         source_access_consent=entry_in.source_access_consent,
     )
-    # 동의·근거 모양·선택 자료는 공모전 쪽이 직접 제출과 같은 문장으로 답한다.
+    # 동의·확인 위치 모양·선택 자료는 공모전 쪽이 직접 제출과 같은 문장으로 답한다.
     reason = contest_catalog().check_entry(entry)
     if reason is not None:
         raise HttpError(422, reason)
@@ -245,7 +248,7 @@ def contest_entry_out(submission: ClassroomSubmission) -> dict | None:
 @dataclass(frozen=True)
 class EntryMarks:
     """강사 화면이 시도에 다는 표시. 강사에게 보이는 것은 「냈는지와 어느 시도인지」뿐이다 —
-    근거·공모전 점수·수상 여부는 공모전 쪽의 것이라 여기 없다."""
+    확인 위치·공모전 점수·수상 여부는 공모전 쪽의 것이라 여기 없다."""
 
     #: 「공모전에도 냈다」로 받아들여진 시도.
     entered: frozenset[int] = frozenset()

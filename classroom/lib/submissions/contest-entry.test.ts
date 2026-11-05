@@ -8,6 +8,8 @@ import {
   entryBlockedReason,
   initialEntryState,
   offersContestEntry,
+  OPTIONAL_ASSET_LABELS,
+  removeOptionalAsset,
   type ContestEntryForm,
 } from "./contest-entry";
 
@@ -108,5 +110,49 @@ describe("offersContestEntry", () => {
     expect(offersContestEntry({ contest: { accepts_entries: false } })).toBe(false);
     expect(offersContestEntry({ contest: null })).toBe(false);
     expect(offersContestEntry({})).toBe(false);
+  });
+});
+
+describe("시연 영상 링크 (#921)", () => {
+  const YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+  const link = { kind: "video_link", value: YOUTUBE, label: "", content_type: "" };
+
+  it("자료 목록 라벨이 직접 제출 화면과 같다", () => {
+    expect(OPTIONAL_ASSET_LABELS.video_link).toBe("시연 영상 링크");
+    expect(OPTIONAL_ASSET_LABELS.demo_url).toBe("데모 URL");
+  });
+
+  it("미리 채우기가 영상 링크를 지우지 않고 그대로 싣는다", () => {
+    const f = form({ optional_assets: [link] });
+    const payload = buildEntryPayload(f, { ...initialEntryState(f), on: true, consent: true });
+    expect(payload?.optional_assets).toEqual([link]);
+  });
+
+  it("javascript:·사용자 정보가 든 링크는 내기 전에 막는다", () => {
+    for (const value of ["javascript:alert(1)", "https://user:pw@example.com/v", "ftp://example.com/v"]) {
+      const f = form({ optional_assets: [{ ...link, value }] });
+      const state = { ...initialEntryState(f), on: true, consent: true };
+      expect(entryBlockedReason(f, state)).toContain("http:// 또는 https://");
+    }
+    const ok = form({ optional_assets: [link] });
+    expect(entryBlockedReason(ok, { ...initialEntryState(ok), on: true, consent: true })).toBeNull();
+  });
+
+  it("확인 위치가 가리키는 자료 순번이 자료를 빼고 빈 값을 거를 때 함께 움직인다", () => {
+    const f = form({
+      optional_assets: [
+        { kind: "demo_url", value: "https://todo.example.com", label: "", content_type: "" },
+        link,
+        { kind: "screenshot", value: "key/shot", label: "a.png", content_type: "image/png" },
+      ],
+    });
+    const base = { ...initialEntryState(f), on: true, consent: true };
+    base.responses[2] = { isMet: true, note: "", evidence: [{ kind: "video_timestamp", value: "0:10", asset_index: 2 }] };
+    const removed = removeOptionalAsset(base, 0);
+    expect(removed.responses[2].evidence[0].asset_index).toBe(1);
+    const cleared = removeOptionalAsset(base, 2);
+    expect(cleared.responses[2].evidence[0].asset_index).toBeNull();
+    const payload = buildEntryPayload(f, removed);
+    expect(payload?.requirement_responses[1].evidence[0].asset_index).toBe(1);
   });
 });

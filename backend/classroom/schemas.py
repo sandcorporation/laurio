@@ -736,11 +736,12 @@ class ClassroomProblemMineOut(Schema):
 
 
 class ContestEntryEvidenceIn(Schema):
-    """근거 한 줄 — 공모전 직접 제출의 Evidence 와 같은 모양이다(#549). 자료를 가리키는 칸은
-    없다: 이 시도의 자료는 아직 공모전 쪽 id 가 없다."""
+    """확인 위치 한 줄 — 공모전 직접 제출의 Evidence 와 같은 모양이다(#549, #921). 이 시도의
+    자료는 아직 공모전 쪽 id 가 없으므로 asset_id 대신 `optional_assets` 의 순번으로 가리킨다."""
 
     kind: str
     value: str = Field(max_length=500)
+    asset_index: int | None = None
 
 
 class ContestEntryResponseIn(Schema):
@@ -751,7 +752,7 @@ class ContestEntryResponseIn(Schema):
 
 
 class ContestEntryAssetIn(Schema):
-    """선택 자료 하나 — 데모 주소·시연 영상·스크린샷. 영상·스크린샷은 `ContestEntryFormOut.
+    """선택 자료 하나 — 데모 URL·시연 영상·시연 영상 링크·스크린샷. 영상·스크린샷은 `ContestEntryFormOut.
     upload_target_refs` 의 업로드 대상에 먼저 올린 object_key 다."""
 
     kind: str
@@ -774,6 +775,8 @@ class ContestEntryIn(Schema):
 class ContestEntryEvidenceOut(Schema):
     kind: str
     value: str
+    #: 미리 채운 선택 자료(`ContestEntryFormOut.optional_assets`)의 순번.
+    asset_index: int | None = None
 
 
 class ContestEntryResponseOut(Schema):
