@@ -29,7 +29,7 @@ export function MyQualityCard({ quality }: { quality: MyQuality }) {
                   {item.score}/5 · {formatPoints(item.item_points)} / {item.points}점
                 </Num>
               </span>
-              <span className="text-ink/70">{item.reasoning}</span>
+              {item.hidden ? null : <span className="text-ink/70">{item.reasoning}</span>}
             </li>
           ))}
         </ul>

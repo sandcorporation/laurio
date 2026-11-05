@@ -23,7 +23,7 @@ import {
   type OwnScore,
   type SourceReading,
 } from "@/lib/appeals/use-appeal-page";
-import { modelLineOf } from "@/lib/submissions/score-summary";
+import { HiddenSummaryLine, modelLineOf } from "@/lib/submissions/score-summary";
 import { formatPoints, formatQualityTotal, type SubmissionQuality } from "@/lib/submissions/quality";
 import { badgeClass } from "@/lib/ui/classnames";
 
@@ -121,6 +121,9 @@ function ScoreSection({ score }: { score: OwnScore }) {
         </p>
       ) : null}
 
+      <div className="mt-3">
+        <HiddenSummaryLine summary={score.hidden_summary} testId="appeal-hidden-summary" />
+      </div>
       <ul className="mt-3 flex flex-col gap-2" data-testid="appeal-score-reasoning">
         {score.reasoning.map((item, index) => (
           <li key={index} className="border border-rule bg-surface p-3 text-sm">
@@ -150,7 +153,7 @@ function QualitySection({ quality }: { quality: SubmissionQuality }) {
                 {item.score}/5 · {formatPoints(item.item_points)} / {item.points}점
               </span>
             </div>
-            <p className="mt-1 text-ink/70">{item.reasoning}</p>
+            {item.hidden ? null : <p className="mt-1 text-ink/70">{item.reasoning}</p>}
           </li>
         ))}
       </ul>

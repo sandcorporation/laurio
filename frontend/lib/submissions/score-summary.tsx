@@ -23,6 +23,23 @@ export interface ScoreSummaryData {
   // 커플링을 프론트에서 재도입하지 않는다).
   scoring_basis: ScoringBasis;
   reasoning: unknown[];
+  // 숨은 항목(#906) — 항목 문구는 오지 않고 개수만 온다.
+  hidden_summary?: { total: number; met: number } | null;
+}
+
+export function HiddenSummaryLine({
+  summary,
+  testId,
+}: {
+  summary: { total: number; met: number } | null | undefined;
+  testId: string;
+}) {
+  if (!summary || summary.total <= 0) return null;
+  return (
+    <p className="text-sm" data-testid={testId}>
+      숨은 항목 {summary.total}개 중 {summary.met}개 충족
+    </p>
+  );
 }
 
 function reasoningTextOf(item: unknown): string {
@@ -82,6 +99,7 @@ export function ScoreSummary({
       <p className="text-sm text-ink/70" data-testid={`${testIdPrefix}-model`}>
         {modelLineOf(score)}
       </p>
+      <HiddenSummaryLine summary={score.hidden_summary} testId={`${testIdPrefix}-hidden-summary`} />
       {reasoningLink ? (
         <Link
           className="text-sm underline"

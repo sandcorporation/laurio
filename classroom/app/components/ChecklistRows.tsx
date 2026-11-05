@@ -18,7 +18,7 @@ import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { type ChecklistReorderSave, createChecklistMover } from "@/lib/problems/checklist-reorder";
 import { BONUS_RATER_LABEL, type ChecklistGrade, GRADE_LABEL, nextGrade } from "@/lib/problems/grade";
 
-export type ChecklistRowItem = { key: string | number; label: string; grade: ChecklistGrade; points: number };
+export type ChecklistRowItem = { key: string | number; label: string; grade: ChecklistGrade; points: number; hidden?: boolean };
 
 /** 등급 배지 버튼 — 누를 때마다 필수 → 선택 → 가산(#905). 가산이면 「강사가 매김」이 붙는다. */
 export function GradeToggle({
@@ -66,6 +66,7 @@ export function ChecklistRows({
   onReorder,
   onGradeChange,
   onPointsChange,
+  onHiddenChange,
   onDelete,
 }: {
   items: ChecklistRowItem[];
@@ -84,13 +85,15 @@ export function ChecklistRows({
   onReorder: ChecklistReorderSave<ChecklistRowItem["key"]>;
   onGradeChange: (key: ChecklistRowItem["key"], grade: ChecklistGrade) => void;
   onPointsChange: (key: ChecklistRowItem["key"], points: number) => void;
+  /** 「제출자에게 숨기기」(#906) — 있으면 줄마다 스위치를 그린다. */
+  onHiddenChange?: (key: ChecklistRowItem["key"], hidden: boolean) => void;
   onDelete: (key: ChecklistRowItem["key"]) => void;
 }): ReactNode {
   const [rows, setRows] = useState(items);
   // 부모는 렌더마다 새 배열을 내려주므로 identity 가 아니라 내용(순서·라벨·필수)이 바뀔 때만 맞춘다 —
   // 아니면 끌어 놓은 순서가 저장이 끝나기도 전에 되돌아간다.
   const signature = items
-    .map((item) => `${item.key}\u0000${item.label}\u0000${item.grade}\u0000${item.points}`)
+    .map((item) => `${item.key}\u0000${item.label}\u0000${item.grade}\u0000${item.points}\u0000${item.hidden ? 1 : 0}`)
     .join("\u0001");
   useEffect(() => setRows(items), [signature]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -238,6 +241,19 @@ export function ChecklistRows({
                 </option>
               ))}
             </select>
+            {onHiddenChange ? (
+              <label className="flex shrink-0 items-center gap-1 text-xs text-ink/70">
+                <input
+                  type="checkbox"
+                  data-testid={`${testId}-hidden-input`}
+                  checked={item.hidden === true}
+                  disabled={readOnly}
+                  onChange={(event) => onHiddenChange(item.key, event.target.checked)}
+                  className="accent-attention"
+                />
+                제출자에게 숨기기
+              </label>
+            ) : null}
             {lockedStructure ? null : (
               <button
                 type="button"

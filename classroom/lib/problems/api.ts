@@ -30,6 +30,8 @@ export type ChecklistItemRow = {
   required: boolean;
   /** 배점 1~10 — 완성도에만 쓴다(#904). */
   points: number;
+  /** 제출자(참여자)에게 숨김(#906) — 개최자·강사 응답에만 true 가 온다. */
+  hidden: boolean;
   order: number;
 };
 
@@ -174,7 +176,7 @@ export function createProblem(
     submission_formats: SubmissionFormat[];
     // 만들기 화면에서 함께 적는 체크리스트 항목(#315). 순서가 그대로
     // 서버의 order가 된다.
-    checklist_items?: { label: string; grade: ChecklistGrade; points?: number }[];
+    checklist_items?: { label: string; grade: ChecklistGrade; points?: number; hidden?: boolean }[];
     // 이 문제만의 채점 모델(#327). 빈 문자열이면 클래스 기본값을 따른다 —
     // 화면의 "클래스 기본값을 따릅니다"가 보내는 값이다.
     model?: string;
@@ -334,7 +336,7 @@ export function updateChecklistItem(
   classId: number,
   problemId: number,
   itemId: number,
-  patch: Partial<{ label: string; grade: ChecklistGrade; points: number }>,
+  patch: Partial<{ label: string; grade: ChecklistGrade; points: number; hidden: boolean }>,
 ): Promise<ApiResult<SavedChecklistItemRow>> {
   return apiRequest<SavedChecklistItemRow>(
     `${checklistItemsPath(classId, problemId)}/${itemId}`,

@@ -29,6 +29,8 @@ export type ProblemMine = {
   // 앞에 「소스에 문법 오류가 없다」와 「기본」 표시를 둔다.
   syntax_check_enabled: boolean;
   checklist_items: ChecklistItemRow[];
+  // 제출자에게 숨긴 항목 수(#906) — 항목은 checklist_items 에 없다.
+  hidden_checklist_item_count: number;
   // 공모전 문제면 그 공모전의 지금 상태(#548), 아니면 null.
   contest: ProblemContest | null;
   // 공모전 문제의 수업용 안내(#548) — 설명 위에 보인다.
@@ -117,6 +119,8 @@ export type ClassroomScore = {
   reasoning: ChecklistVerdict[];
   // 채점 시점에 그 문제의 기본 항목이 꺼져 있었으면 `null`이다(#408).
   syntax_check: SyntaxCheckVerdict | null;
+  // 숨은 항목(#906) — 문구 없이 개수만. 숨은 항목이 없으면 없거나 total 0.
+  hidden_summary?: { total: number; met: number } | null;
   created_at: string;
 };
 
