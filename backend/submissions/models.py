@@ -166,7 +166,7 @@ class SubmissionAsset(models.Model):
     가시성은 종류가 가른다(ADR-0014, ADR-0027, ADR-0036):
 
     - `SOURCE`·`REPOSITORY` — 본인 + Award 후 Sponsor
-    - `DEMO_VIDEO`·`SCREENSHOT`·`DEMO_URL` — 진행 중엔 본인·Sponsor, 마감 후 전면 공개
+    - `DEMO_VIDEO`·`VIDEO_LINK`·`SCREENSHOT`·`DEMO_URL` — 진행 중엔 본인·Sponsor, 마감 후 전면 공개
 
     `SOURCE`·`DEMO_VIDEO`·`SCREENSHOT`는 `SubmissionTargetStateResolver`가 슬롯 단위로
     이미 판정하므로 리졸버를 손댈 것이 없다 — object_key가 `<target_ref>/<32자리 hex>`라
@@ -188,6 +188,9 @@ class SubmissionAsset(models.Model):
         DEMO_VIDEO = "demo_video", "시연 영상"
         SCREENSHOT = "screenshot", "스크린샷"
         DEMO_URL = "demo_url", "데모 URL"
+        #: 시연 영상의 외부 링크(#910) — 값이 URL 이라 파일 규칙(파기·content-type)이
+        #: 붙지 않는다. 공개 범위·개수 한도는 `DEMO_VIDEO` 와 한 칸이다.
+        VIDEO_LINK = "video_link", "시연 영상 링크"
         REPOSITORY = "repository", "GitHub 저장소"
 
     #: 채점 입력이 되는 종류 — 같은 LLM 컨텍스트 예산을 나눠 쓴다(#191). `SCREENSHOT`은

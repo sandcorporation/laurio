@@ -25,6 +25,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { ErrorNote, EmptyState, PageHeader, buttonClass } from "@/app/components/ui";
+import { VideoLinkView } from "@/components/submissions/video-link-view";
+import { timestampSeconds, youtubeVideoId } from "@/lib/submissions/video-link";
 import { badgeClass } from "@/lib/ui/classnames";
 import { remainingTime, remainingTimeLabel } from "@/lib/contest-format";
 import { bffClient } from "@/lib/bff/client";
@@ -75,6 +77,8 @@ export default function JudgeComparisonPage() {
   const [pointsError, setPointsError] = useState<string | null>(null);
   const [savingPointsId, setSavingPointsId] = useState<number | null>(null);
   const [now, setNow] = useState(() => new Date());
+  // 확인 위치(영상 타임스탬프)를 눌러 고른 재생 위치 — 제출작마다 하나(#910).
+  const [playback, setPlayback] = useState<Record<number, { assetId: number; start: number }>>({});
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 60_000);
@@ -276,6 +280,7 @@ export default function JudgeComparisonPage() {
                       }
                       onConfirm={() => requestAward(submission.submission_id)}
                       onCancel={() => setAward({ status: "idle" })}
+                      playback={playback[submission.submission_id] ?? null}
                     />
                   </th>
                 ))}
@@ -359,11 +364,50 @@ export default function JudgeComparisonPage() {
                                 className="flex flex-col gap-1"
                                 data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}-locations`}
                               >
-                                {entry!.evidence.map((item, index) => (
-                                  <li key={index} className="font-mono text-xs text-ink">
-                                    [{evidenceKindLabel(item.kind)}] {item.value}
-                                  </li>
-                                ))}
+                                {entry!.evidence.map((item, index) => {
+                                  const text = `[${evidenceKindLabel(item.kind)}] ${item.value}`;
+                                  const link =
+                                    item.kind === "video_timestamp" && item.asset_id != null
+                                      ? submission.assets.find(
+                                          (a) => a.id === item.asset_id && a.kind === "video_link",
+                                        )
+                                      : undefined;
+                                  const embedded = link != null && youtubeVideoId(link.value) !== null;
+                                  return (
+                                    <li key={index} className="font-mono text-xs text-ink">
+                                      {link != null && embedded ? (
+                                        <button
+                                          type="button"
+                                          className="text-left underline"
+                                          data-testid={`evidence-play-${link.id}`}
+                                          onClick={() =>
+                                            setPlayback((prev) => ({
+                                              ...prev,
+                                              [submission.submission_id]: {
+                                                assetId: link.id,
+                                                start: timestampSeconds(item.value) ?? 0,
+                                              },
+                                            }))
+                                          }
+                                        >
+                                          {text}
+                                        </button>
+                                      ) : link != null ? (
+                                        <a
+                                          href={link.value}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="underline"
+                                          data-testid={`evidence-open-${link.id}`}
+                                        >
+                                          {text}
+                                        </a>
+                                      ) : (
+                                        text
+                                      )}
+                                    </li>
+                                  );
+                                })}
                               </ul>
                             )}
                             {entry?.note && <p className="text-xs text-ink">{entry.note}</p>}
@@ -434,6 +478,7 @@ function SubmissionColumnHeader({
   onAwardClick,
   onConfirm,
   onCancel,
+  playback,
 }: {
   submission: ComparisonSubmissionOut;
   isAwarded: boolean;
@@ -442,6 +487,7 @@ function SubmissionColumnHeader({
   onAwardClick: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  playback: { assetId: number; start: number } | null;
 }) {
   const isConfirming =
     award.status === "confirming" && award.submissionId === submission.submission_id;
@@ -517,6 +563,20 @@ function SubmissionColumnHeader({
               <source src={asset.download_url!} />
             </video>
           </div>
+        ))}
+      {/* 시연 영상 링크(#910) — 유튜브는 nocookie 임베드, 그 밖은 새 창 링크. 확인 위치를
+          누르면 그 영상이 그 시각부터 다시 재생된다. */}
+      {submission.assets
+        .filter((asset) => asset.kind === "video_link")
+        .map((asset) => (
+          <VideoLinkView
+            key={asset.id}
+            url={asset.value}
+            label={asset.label || "시연 영상"}
+            startSeconds={playback?.assetId === asset.id ? playback.start : 0}
+            testId={`submission-${submission.submission_id}-video-link-${asset.id}`}
+            className="w-56"
+          />
         ))}
       {submission.assets
         .filter((asset) => asset.kind === "screenshot" && asset.download_url)

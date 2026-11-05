@@ -313,6 +313,33 @@ class Command(BaseCommand):
             kind=Evidence.Kind.SOURCE_LOCATION,
             value="src/auth/login.ts",
         )
+        # 시연 영상 링크(#910) — 유튜브(임베드)와 그 밖의 링크(새 창), 확인 위치가 각각을 가리킨다.
+        video_youtube = SubmissionAsset.objects.create(
+            submission=submission_a,
+            kind=SubmissionAsset.Kind.VIDEO_LINK,
+            value="https://youtu.be/dQw4w9WgXcQ",
+            label="유튜브 시연",
+            order=1,
+        )
+        video_other = SubmissionAsset.objects.create(
+            submission=submission_a,
+            kind=SubmissionAsset.Kind.VIDEO_LINK,
+            value="https://videos.example.invalid/e2e-demo",
+            label="다른 사이트 시연",
+            order=2,
+        )
+        Evidence.objects.create(
+            response=response_a_required,
+            kind=Evidence.Kind.VIDEO_TIMESTAMP,
+            value="01:23",
+            asset=video_youtube,
+        )
+        Evidence.objects.create(
+            response=response_a_required,
+            kind=Evidence.Kind.VIDEO_TIMESTAMP,
+            value="00:10",
+            asset=video_other,
+        )
         RequirementResponse.objects.create(
             submission=submission_a, requirement=judging_optional_req, is_met=False, note=""
         )

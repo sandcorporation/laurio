@@ -18,6 +18,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { EmptyState, PageHeader, PageShell, SectionHeading } from "@/app/components/ui";
+import { VideoLinkView } from "@/components/submissions/video-link-view";
 import { fetchDeveloperProfile, type PublicSubmission } from "@/lib/api/developers";
 
 type Params = { id: string };
@@ -106,6 +107,7 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
   const videos = submission.assets.filter(
     (asset) => asset.kind === "demo_video" && asset.download_url,
   );
+  const videoLinks = submission.assets.filter((asset) => asset.kind === "video_link");
   const screenshots = submission.assets.filter(
     (asset) => asset.kind === "screenshot" && asset.download_url,
   );
@@ -158,7 +160,7 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
           ))}
         </ul>
       )}
-      {(videos.length > 0 || screenshots.length > 0) && (
+      {(videos.length > 0 || videoLinks.length > 0 || screenshots.length > 0) && (
         <div className="flex flex-wrap gap-3">
           {videos.map((asset) => (
             <div key={asset.id} className="flex flex-col gap-1">
@@ -172,6 +174,15 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
                 <source src={asset.download_url!} />
               </video>
             </div>
+          ))}
+          {videoLinks.map((asset) => (
+            <VideoLinkView
+              key={asset.id}
+              url={asset.value}
+              label={asset.label || "시연 영상"}
+              testId={`video-link-${asset.id}`}
+              className="w-48"
+            />
           ))}
           {screenshots.map((asset) => (
             // eslint-disable-next-line @next/next/no-img-element -- presigned URL, Next Image 최적화 대상이 아니다

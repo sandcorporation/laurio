@@ -82,6 +82,7 @@ from submissions.schemas import (
     RequirementResponseOut,
     SubmissionAssetOut,
 )
+from submissions.video_link import VIDEO_LINK_SHAPE_MESSAGE, is_safe_video_link
 from verification.models import Verification
 
 from .images import ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
@@ -304,6 +305,10 @@ _KIND_LIMIT_FIELDS = {
     SubmissionAsset.Kind.REPOSITORY: "max_repository_assets",
 }
 
+#: 「시연 영상」 한 칸을 파일과 링크 두 방식으로 채운다(#910) — 개수 한도(`max_demo_video_assets`)는
+#: 둘을 합쳐 센다. 정책 필드를 따로 두지 않는다.
+_DEMO_VIDEO_KINDS = (SubmissionAsset.Kind.DEMO_VIDEO, SubmissionAsset.Kind.VIDEO_LINK)
+
 _KIND_LABELS = dict(SubmissionAsset.Kind.choices)
 
 # ContestImage(#234, ADR-0032)와 같은 허용목록을 그대로 쓴다(#264, ADR-0036).
@@ -421,6 +426,11 @@ def _clean_assets_in(
                 raise HttpError(422, REPOSITORY_URL_SHAPES_MESSAGE)
             value = target.repo_url
             repository_ref, repository_commit_sha = target.ref, target.commit_sha
+        elif item.kind == SubmissionAsset.Kind.VIDEO_LINK:
+            # 시연 영상 링크(#910) — http(s) 에 호스트가 있고 사용자 정보가 없는 URL 만.
+            value = sanitize_free_text(value)
+            if not is_safe_video_link(value):
+                raise HttpError(422, VIDEO_LINK_SHAPE_MESSAGE)
         else:
             # 데모 URL은 자유 텍스트다 — 다중화 이전과 같은 취급이다.
             value = sanitize_free_text(value)
@@ -500,6 +510,12 @@ def _clean_assets_in(
             raise HttpError(
                 422, f"{_KIND_LABELS[kind]} 자료는 최대 {limit}개까지 담을 수 있습니다."
             )
+    if sum(counts.get(k, 0) for k in _DEMO_VIDEO_KINDS) > policy.max_demo_video_assets:
+        raise HttpError(
+            422,
+            "시연 영상은 파일과 링크를 합쳐 최대 "
+            f"{policy.max_demo_video_assets}개까지 담을 수 있습니다.",
+        )
 
     scoring_inputs = sum(counts.get(k, 0) for k in SubmissionAsset.SCORING_INPUT_KINDS)
     if scoring_inputs > policy.max_scoring_input_assets:
@@ -694,6 +710,7 @@ def validate_requirement_responses(
 #: 같은 칸에 세웠다).
 _PUBLIC_AFTER_DEADLINE_KINDS = (
     SubmissionAsset.Kind.DEMO_VIDEO,
+    SubmissionAsset.Kind.VIDEO_LINK,
     SubmissionAsset.Kind.SCREENSHOT,
     SubmissionAsset.Kind.DEMO_URL,
 )
@@ -827,12 +844,15 @@ def _completion_of(
         if asset.test_account:
             has_test_account = True
 
+    # 시연 영상은 파일이든 링크든 한 칸이다(#910).
+    demo_video_total = sum(counts.get(k, 0) for k in _DEMO_VIDEO_KINDS)
+
     return CompletionOut(
-        has_demo_video=bool(counts.get(SubmissionAsset.Kind.DEMO_VIDEO)),
+        has_demo_video=demo_video_total > 0,
         has_demo_url=bool(counts.get(SubmissionAsset.Kind.DEMO_URL)),
         has_test_account=has_test_account,
         source_count=counts.get(SubmissionAsset.Kind.SOURCE, 0),
-        demo_video_count=counts.get(SubmissionAsset.Kind.DEMO_VIDEO, 0),
+        demo_video_count=demo_video_total,
         demo_url_count=counts.get(SubmissionAsset.Kind.DEMO_URL, 0),
         repository_count=counts.get(SubmissionAsset.Kind.REPOSITORY, 0),
         total_requirement_count=total_requirements,
@@ -1513,7 +1533,7 @@ def get_contest_metrics(request: HttpRequest, contest_id: int):
     # 나온다.
     completion_agg = submissions_qs.aggregate(
         demo_video_count=Count(
-            "id", filter=Q(assets__kind=SubmissionAsset.Kind.DEMO_VIDEO), distinct=True
+            "id", filter=Q(assets__kind__in=_DEMO_VIDEO_KINDS), distinct=True
         ),
         demo_url_count=Count(
             "id", filter=Q(assets__kind=SubmissionAsset.Kind.DEMO_URL), distinct=True
