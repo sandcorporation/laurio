@@ -87,6 +87,8 @@ export type ProblemRow = {
   // 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#408,
   // CONTEXT.md 「문법 검사」). 기본은 켜짐이고, 강사는 끌 수만 있다(#410).
   syntax_check_enabled: boolean;
+  // 완성도 공개 스위치(#883, ADR-0072) — 기본 꺼짐.
+  quality_public: boolean;
   checklist_items: ChecklistItemRow[];
   // 이 문제를 한 번이라도 통과한 참여자 수(#289) — 강사 본인·내보낸
   // 참여자는 빼고 센다.
@@ -210,6 +212,8 @@ export function updateProblem(
     grading_strictness: GradingStrictness;
     grading_guideline_text: string;
     syntax_check_enabled: boolean;
+    // 완성도 공개 스위치(#883) — 켜면 참여자가 자기 완성도만 본다.
+    quality_public: boolean;
     // 공모전 문제의 수업용 안내(#548) — 공모전 문제가 아니면 서버가 422.
     instructor_note: string;
     // 권장 기한·마감(#770) — 생략하면 그대로, null 이면 비운다. 권장 > 마감이면 서버가 422.

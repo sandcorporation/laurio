@@ -19,6 +19,7 @@ import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { ContestEntryFields } from "@/app/components/ContestEntryFields";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
+import { useMyQuality } from "@/lib/quality/use-quality";
 import { useMe } from "@/lib/auth/use-me";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { fetchContestEntryForm, submitAttempt } from "@/lib/submissions/api";
@@ -64,6 +65,12 @@ export default function ProblemSubmitPage() {
   const classId = Number(params.id);
   const problemId = Number(params.problemId);
   const { state, reload } = useMyProblem(classId, problemId);
+  // 본인 완성도(#883) — 공개가 꺼졌거나 기록이 없으면 404 라 그리지 않는다. 강사가 학생 화면으로 볼 때는 묻지 않는다.
+  const quality = useMyQuality(
+    classId,
+    problemId,
+    state.status === "ready" && !state.data.viewing_as_instructor,
+  );
   const me = useMe();
 
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -207,6 +214,7 @@ export default function ProblemSubmitPage() {
   return (
     <PageShell>
       <ProblemParticipantView
+        quality={quality}
         interactive
         backHref={viewingAsInstructor ? `/classes/${classId}` : `/classes/${classId}/problems/mine`}
         eyebrow={className}

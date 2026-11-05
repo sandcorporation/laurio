@@ -24,6 +24,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
+import { QualityRankingCard } from "@/app/components/QualityRankingCard";
 import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
 import { detailTabHref } from "@/lib/classes/detail-tab";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
@@ -382,6 +383,12 @@ export default function ProblemSubmissionsPage() {
             </div>
           ) : null}
         </Card>
+
+        <QualityRankingCard
+          classId={classId}
+          problemId={problemId}
+          canChangeKey={classState.status === "ready" && classState.classroom.role === "owner"}
+        />
       </div>
     </PageShell>
   );
