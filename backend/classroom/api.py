@@ -78,6 +78,8 @@ from .schemas import (
     QualityBoardOut,
     QualityEstimateOut,
     QualityItemOut,
+    ClassroomBonusScoreIn,
+    ClassroomBonusScoreOut,
     QualityRankRowOut,
     QualityRunOut,
     ChecklistItemIn,
@@ -2768,6 +2770,39 @@ def run_problem_quality(request: HttpRequest, class_id: int, problem_id: int):
     return 200, QualityRunOut(queued_count=quality.enqueue(scope.problem, as_of=Clock.now()))
 
 
+@router.put(
+    "/classes/{class_id}/problems/{problem_id}/quality/bonus/{submission_id}/{item_id}",
+    response={200: ClassroomBonusScoreOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def rate_problem_bonus(
+    request: HttpRequest,
+    class_id: int,
+    problem_id: int,
+    submission_id: int,
+    item_id: int,
+    payload: ClassroomBonusScoreIn,
+):
+    """강사·공동 강사가 가산 하나에 0~5 와 한 줄 메모를 매긴다(#905, ADR-0073) — 그 참여자의 **지금 완성도
+    대상 시도**에만(아니면 409). 보관된 클래스에서는 403(쓰기). 문제 마감은 막지 않는다."""
+
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
+    try:
+        row = quality.save_bonus_score(
+            scope.problem,
+            submission_id=submission_id,
+            item_id=item_id,
+            score=payload.score,
+            memo=payload.memo,
+            rated_by_id=request.auth_user.id,
+        )
+    except quality.BonusTargetError as exc:
+        return 409, ErrorOut(detail=str(exc))
+    return 200, ClassroomBonusScoreOut(
+        submission_id=row.submission_id, item_id=row.item_id, score=row.score, memo=row.memo
+    )
+
+
 @router.get(
     "/classes/{class_id}/problems/{problem_id}/quality/mine",
     response={200: MyQualityOut, 404: ErrorOut},
@@ -2785,6 +2820,7 @@ def get_my_problem_quality(request: HttpRequest, class_id: int, problem_id: int)
     if mine is None:
         return 404, ErrorOut(detail="공개된 완성도가 없습니다.")
     row, total = mine
+    # 「가산 다시 매김 필요」는 강사 화면 몫이라 `MyQualityOut` 에 칸이 없다.
     return 200, MyQualityOut(
         rank=row["rank"],
         total=total,

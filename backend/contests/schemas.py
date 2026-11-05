@@ -226,7 +226,7 @@ class QuoteOut(Schema):
 
 class RequirementIn(Schema):
     text: str = Field(max_length=500)
-    grade: str  # "required" | "optional"
+    grade: str  # "required" | "optional" | "bonus"(가산, #905)
     #: 배점 1~10(완성도에만 쓴다, #904 ADR-0073). 없으면 등급별 기본값(필수 2·선택 1).
     points: int | None = Field(default=None, ge=1, le=10)
 
@@ -464,7 +464,7 @@ class JudgingExtensionPaymentOut(Schema):
 
 class RequirementCreateIn(Schema):
     text: str = Field(min_length=1, max_length=500)
-    grade: str  # "required" | "optional"
+    grade: str  # "required" | "optional" | "bonus"(가산, #905)
     #: 배점 1~10(#904). 없으면 등급별 기본값(필수 2·선택 1).
     points: int | None = Field(default=None, ge=1, le=10)
 

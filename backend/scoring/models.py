@@ -170,6 +170,32 @@ class SubmissionQualityReview(AppendOnlyModel):
         return f"SubmissionQualityReview(submission={self.submission_id}, weighted={self.weighted_score})"
 
 
+class SubmissionBonusScore(models.Model):
+    """공모전 제출 하나 × 가산 Requirement 하나의 개최자 점수(#905, ADR-0073) — 0~5 와 한 줄 메모(선택).
+
+    AI 는 가산을 판정하지도, 완성도 채점하지도 않는다. 개최자가 **마감 뒤**에만 매긴다
+    (`contests.submission_api.rate_bonus`). Score·달성률·Distribution·Award 와 무관하고 완성도 합계에만 든다.
+    고치기는 덮어쓰기다 — 이력은 남기지 않는다. 제출·Requirement 와 함께 지워진다(시드 정리 경로가 따로 알 필요가
+    없게 `SubmissionQualityReview` 처럼 CASCADE)."""
+
+    submission = models.ForeignKey("submissions.Submission", related_name="bonus_scores", on_delete=models.CASCADE)
+    requirement = models.ForeignKey("contests.Requirement", related_name="bonus_scores", on_delete=models.CASCADE)
+    score = models.PositiveSmallIntegerField()
+    #: 한 줄 — 강의실 `ClassroomBonusScore` 와 같은 길이(200).
+    memo = models.CharField(max_length=200, blank=True, default="")
+    rated_by = models.ForeignKey(settings.AUTH_USER_MODEL, related_name="+", null=True, on_delete=models.SET_NULL)
+    rated_at = models.DateTimeField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["submission", "requirement"], name="scoring_bonus_score_unique"),
+            models.CheckConstraint(condition=models.Q(score__gte=0, score__lte=5), name="scoring_bonus_score_range"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"SubmissionBonusScore(submission={self.submission_id}, requirement={self.requirement_id})"
+
+
 class QualityReviewAttempt(models.Model):
     """실패한 완성도 채점의 이력(#884) — `ScoringAttempt` 와 같은 운영 로그. 스캔은 영구 실패가
     하나라도 있거나 `QUALITY_FAILURE_LIMIT` 번 실패한 제출을 더 집지 않는다(`scoring.quality`)."""

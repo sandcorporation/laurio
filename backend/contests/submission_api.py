@@ -63,7 +63,8 @@ from core.keyset import decode_cursor, keyset_page
 from policies.scope import current_policy
 from policies.services import get_current_policy
 from core.quality_review import quality_view
-from scoring.quality import ranked_reviews
+from scoring.models import SubmissionBonusScore
+from scoring.quality import bonus_scores, ranked_reviews
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from storage.policy import get_download_ttl_resolver
@@ -91,6 +92,8 @@ from .submission_participation import next_action_for
 from .submission_retention import demo_video_destroy_at
 from .submission_schemas import (
     ComparisonEntryOut,
+    BonusScoreIn,
+    BonusScoreOut,
     ComparisonQualityOut,
     ComparisonSubmissionOut,
     CompletionDistributionOut,
@@ -1311,11 +1314,11 @@ def get_developer_public_profile(request: HttpRequest, developer_id: int):
     )
 
 
-def _comparison_quality(found, points: dict[int, int]) -> ComparisonQualityOut | None:
+def _comparison_quality(found, points: dict[int, int], bonus) -> ComparisonQualityOut | None:
     if found is None:
         return None
     review, _total, rank = found
-    return ComparisonQualityOut(**quality_view(review.items, points), rank=rank)
+    return ComparisonQualityOut(**quality_view(review.items, points, bonus), rank=rank)
 
 
 @router.get(
@@ -1359,6 +1362,8 @@ def compare_submissions(request: HttpRequest, contest_id: int):
     # 완성도(#884) — 개최자는 모든 제출작의 완성도·등수·근거를 본다.
     quality_by_submission = ranked_reviews(contest.id, [s.id for s in submissions])
     quality_points = {r.id: r.points for r in requirements}
+    # 가산(#905) — 개최자가 마감 뒤 매기는 사람 점수. 완성도 기록이 없어도 입력 칸은 나간다.
+    bonus_by_submission = bonus_scores(contest.id, [s.id for s in submissions])
 
     for submission in submissions:
         developer_name = (
@@ -1421,7 +1426,13 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 completion=_completion_of(
                     assets, total_requirements=total, linked_count=linked_count
                 ),
-                quality=_comparison_quality(quality_by_submission.get(submission.id), quality_points),
+                quality=_comparison_quality(
+                    quality_by_submission.get(submission.id), quality_points, bonus_by_submission[submission.id]
+                ),
+                bonus_scores=[
+                    BonusScoreOut(requirement_id=b.item_id, score=b.score, memo=b.memo, rated=b.rated)
+                    for b in bonus_by_submission[submission.id]
+                ],
             )
         )
 
@@ -1439,6 +1450,41 @@ def compare_submissions(request: HttpRequest, contest_id: int):
             for r in requirements
         ],
     )
+
+
+@router.put(
+    "/contests/{contest_id}/submissions/{submission_id}/bonus/{requirement_id}",
+    response={200: BonusScoreOut},
+    auth=jwt_auth,
+)
+def rate_bonus(request: HttpRequest, contest_id: int, submission_id: int, requirement_id: int, payload: BonusScoreIn):
+    """개최자가 제출 하나의 가산 항목에 0~5 와 한 줄 메모를 매긴다(#905, ADR-0073). 덮어쓰기다.
+
+    **마감 뒤에만** — 비교 화면(`compare_submissions`)과 같은 기준(`deadline_at`)이다. 마감 전에는 제출물을
+    볼 수 없으니 매길 것도 없다. Score·달성률·Distribution 과 무관하고 완성도 합계에만 든다."""
+
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
+    if contest.sponsor.user_id != request.auth_user.id:
+        raise HttpError(403, "본인이 개최한 공모전의 가산만 매길 수 있습니다.")
+    if Clock.now() < contest.deadline_at:
+        raise HttpError(409, "가산은 마감 뒤에 매길 수 있습니다.")
+    requirement = Requirement.objects.filter(
+        id=requirement_id, contest=contest, grade=Requirement.Grade.BONUS
+    ).first()
+    if requirement is None:
+        raise HttpError(404, "가산 항목을 찾을 수 없습니다.")
+    if not ContestSubmission.objects.filter(id=submission_id, contest=contest).exists():
+        raise HttpError(404, "제출물을 찾을 수 없습니다.")
+    memo = payload.memo.strip()
+    SubmissionBonusScore.objects.update_or_create(
+        submission_id=submission_id,
+        requirement=requirement,
+        defaults={"score": payload.score, "memo": memo, "rated_by_id": request.auth_user.id, "rated_at": Clock.now()},
+    )
+    return 200, BonusScoreOut(requirement_id=requirement.id, score=payload.score, memo=memo, rated=True)
 
 
 @router.get(

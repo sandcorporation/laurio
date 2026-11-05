@@ -4,7 +4,8 @@
 쓰도록 여기(`core`)에 둔다(ADR-0037 — `core` 는 기능 앱을 import 하지 않는다). 기능 앱은 자기
 항목을 `QualityItemInput` 으로 옮겨 넘긴다.
 
-- 항목 완성도: 항목 하나의 0~5 정수. AI 가 근거와 함께 매긴다(가산 항목은 매기지 않는다).
+- 항목 완성도: 항목 하나의 0~5 정수. AI 가 근거와 함께 매긴다. 가산 항목은 AI 가 매기지 않고 사람(공모전
+  개최자·클래스 강사)이 0~5 와 한 줄 메모로 매긴다(#905) — 기능 앱이 `BonusScore` 로 옮겨 넘긴다.
 - 항목 점수: 0~5 ÷ 5 × 배점(항목마다 1~10).
 - 완성도: 항목 점수의 합 「37.4 / 45점」 — 만점은 배점 합(가산 포함, 매기지 않은 항목은 0점).
 - **기록에는 0~5 만 믿고, 합은 읽을 때 지금 배점으로 계산한다**(ADR-0073) — 배점을 고쳐도 AI 를 다시
@@ -115,6 +116,18 @@ class QualityReviewAdapter(Protocol):
 
 
 @dataclass(frozen=True)
+class BonusScore:
+    """가산 항목 하나의 사람 점수(#905, ADR-0073) — 지금 체크리스트의 가산 항목마다 하나. 매기기 전이면
+    `score=0`·`rated=False` 다(만점에는 든다)."""
+
+    item_id: int
+    label: str
+    score: int = 0
+    memo: str = ""
+    rated: bool = False
+
+
+@dataclass(frozen=True)
 class QualityTotal:
     """완성도 하나 — `raw` = 정수 Σ(0~5 × 배점)(등수 몫), `maximum` = 배점 합(만점)."""
 
@@ -128,11 +141,20 @@ class QualityTotal:
         return self.raw / QUALITY_SCORE_MAX
 
 
-def quality_total(items: Sequence[QualityItemRecord], points: Mapping[int, int]) -> QualityTotal:
-    """기록의 0~5 를 **지금 배점**으로 합한다. `points` 는 지금 체크리스트의 항목 id → 배점(가산 포함) 전부다.
-    기록에 없는 항목(가산 등)은 0점, 지금 체크리스트에 없는 기록 항목은 세지 않는다."""
+def quality_total(
+    items: Sequence[QualityItemRecord], points: Mapping[int, int], bonus: Sequence[BonusScore] = ()
+) -> QualityTotal:
+    """기록의 0~5 와 가산 사람 점수를 **지금 배점**으로 합한다. `points` 는 지금 체크리스트의 항목 id → 배점
+    (가산 포함) 전부다. 기록에 없는 항목·매기지 않은 가산은 0점, 지금 체크리스트에 없는 항목은 세지 않는다.
+    기록에 가산 항목 id 가 남아 있으면(가산으로 바뀌기 전 기록) 그 AI 점수는 세지 않는다 — 가산은 사람 몫이다."""
 
-    raw = sum(item["score"] * points[item["item_id"]] for item in items if item["item_id"] in points)
+    bonus_ids = {b.item_id for b in bonus}
+    raw = sum(
+        item["score"] * points[item["item_id"]]
+        for item in items
+        if item["item_id"] in points and item["item_id"] not in bonus_ids
+    )
+    raw += sum(b.score * points[b.item_id] for b in bonus if b.item_id in points)
     return QualityTotal(raw=raw, maximum=sum(points.values()))
 
 
@@ -152,6 +174,10 @@ class QualityItemView(TypedDict):
     reasoning: str
     points: int
     item_points: float
+    #: 가산 항목이면 참 — `reasoning` 자리에 사람이 쓴 한 줄 메모가 온다(#905).
+    bonus: bool
+    #: 가산을 아직 매기지 않았으면 거짓(0점). AI 항목은 늘 참.
+    rated: bool
 
 
 class QualityView(TypedDict):
@@ -167,10 +193,14 @@ class QualityView(TypedDict):
     items: list[QualityItemView]
 
 
-def quality_view(items: Sequence[QualityItemRecord], points: Mapping[int, int]) -> QualityView:
-    """기록 하나를 지금 배점으로 응답 모양으로 만든다 — 지금 체크리스트에 없는 기록 항목은 뺀다."""
+def quality_view(
+    items: Sequence[QualityItemRecord], points: Mapping[int, int], bonus: Sequence[BonusScore] = ()
+) -> QualityView:
+    """기록 하나와 가산 사람 점수를 지금 배점으로 응답 모양으로 만든다 — 지금 체크리스트에 없는 항목은 뺀다.
+    AI 항목 뒤에 가산 항목이 온다(매기지 않은 가산도 0점으로 나온다)."""
 
-    total = quality_total(items, points)
+    total = quality_total(items, points, bonus)
+    bonus_ids = {b.item_id for b in bonus}
     legacy = historical_columns(total)
     return QualityView(
         total=total.total,
@@ -188,9 +218,26 @@ def quality_view(items: Sequence[QualityItemRecord], points: Mapping[int, int]) 
                 reasoning=item["reasoning"],
                 points=points[item["item_id"]],
                 item_points=item_points(item["score"], points[item["item_id"]]),
+                bonus=False,
+                rated=True,
             )
             for item in items
-            if item["item_id"] in points
+            if item["item_id"] in points and item["item_id"] not in bonus_ids
+        ]
+        + [
+            QualityItemView(
+                item_id=b.item_id,
+                label=b.label,
+                required=False,
+                score=b.score,
+                reasoning=b.memo,
+                points=points[b.item_id],
+                item_points=item_points(b.score, points[b.item_id]),
+                bonus=True,
+                rated=b.rated,
+            )
+            for b in bonus
+            if b.item_id in points
         ],
     )
 

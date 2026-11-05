@@ -500,7 +500,7 @@ TOOLS: dict[str, Tool] = {
                     **_BRIEF,
                     "requirements": {
                         "type": "array",
-                        "items": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}, "points": _POINTS}, "required": ["text", "grade"]},
+                        "items": {"type": "object", "properties": {"text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _POINTS}, "required": ["text", "grade"]},
                     },
                 },
                 "required": ["title", "category_id", "deliverable_type_ids", "deadline_at"],
@@ -519,14 +519,14 @@ TOOLS: dict[str, Tool] = {
             "add_requirement",
             "요구사항 더하기",
             "요구사항 하나를 끝에 더한다. 마감 전까지만.",
-            {"type": "object", "properties": {"contest_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}, "points": _POINTS}, "required": ["contest_id", "text", "grade"], "additionalProperties": False},
+            {"type": "object", "properties": {"contest_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "points": _POINTS}, "required": ["contest_id", "text", "grade"], "additionalProperties": False},
             _add_requirement,
         ),
         _write(
             "update_requirement",
             "요구사항 고치기",
             "요구사항 하나의 문장·등급·순서를 고친다. 마감 전까지만.",
-            {"type": "object", "properties": {"contest_id": _ID, "requirement_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional"]}, "order": _INT}, "required": ["contest_id", "requirement_id"], "additionalProperties": False},
+            {"type": "object", "properties": {"contest_id": _ID, "requirement_id": _ID, "text": {"type": "string", "maxLength": 500}, "grade": {"type": "string", "enum": ["required", "optional", "bonus"]}, "order": _INT}, "required": ["contest_id", "requirement_id"], "additionalProperties": False},
             _update_requirement,
         ),
         _write(

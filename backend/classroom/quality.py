@@ -32,6 +32,9 @@ from core.llm_scoring import (
 )
 from core.observability import tag_error_scope
 from core.quality_review import (
+    QUALITY_SCORE_MAX,
+    QUALITY_SCORE_MIN,
+    BonusScore,
     QualityInput,
     QualityItemInput,
     QualityItemView,
@@ -55,6 +58,7 @@ from .models import (
     ChecklistItem,
     Class,
     ClassMember,
+    ClassroomBonusScore,
     ClassroomQualityJob,
     ClassroomQualityReview,
     ClassroomSubmission,
@@ -108,6 +112,10 @@ class Board:
     items: list[ChecklistItem]
     fingerprint: str
     targets: list[TargetState]
+    #: 대상 시도 id → 지금 가산 항목마다의 강사 점수(#905). 매기지 않은 가산은 0점·`rated=False`.
+    bonus: dict[int, list[BonusScore]]
+    #: 「가산 다시 매김 필요」 — 지난 대상 시도에 가산 점수가 있었는데 지금 대상 시도에는 하나도 없는 시도 id.
+    rerate_needed: frozenset[int]
 
     @property
     def new_targets(self) -> list[TargetState]:
@@ -159,7 +167,75 @@ def board(problem: Problem) -> Board:
                 failed=review is None and job is not None and job.queued_at is None and job.failed_at is not None,
             )
         )
-    return Board(problem=problem, items=items, fingerprint=fingerprint, targets=targets)
+    bonus, rerate_needed = _bonus_state(problem, items, submissions)
+    return Board(
+        problem=problem,
+        items=items,
+        fingerprint=fingerprint,
+        targets=targets,
+        bonus=bonus,
+        rerate_needed=rerate_needed,
+    )
+
+
+def _bonus_state(
+    problem: Problem, items: list[ChecklistItem], submissions: list[ClassroomSubmission]
+) -> tuple[dict[int, list[BonusScore]], frozenset[int]]:
+    """대상 시도마다 지금 가산 항목의 점수, 그리고 「가산 다시 매김 필요」 시도(#905, ADR-0073).
+
+    가산 점수는 시도에 붙는다. 강사는 대상 시도에만 매기므로(`save_bonus_score`) 다른 시도에 남은 점수는 곧
+    「지난 대상 시도의 점수」다 — 그런 점수가 있는데 지금 대상 시도엔 하나도 없으면 다시 매겨야 한다."""
+
+    bonus_items = [i for i in items if i.grade == ChecklistGrade.BONUS]
+    if not bonus_items or not submissions:
+        return {s.id: [BonusScore(item_id=i.id, label=i.label) for i in bonus_items] for s in submissions}, frozenset()
+    target_ids = {s.id for s in submissions}
+    rows = list(
+        ClassroomBonusScore.objects.filter(
+            item__in=bonus_items, submission__member_id__in=[s.member_id for s in submissions]
+        ).values_list("submission_id", "submission__member_id", "item_id", "score", "memo")
+    )
+    stored = {(sid, item_id): (score, memo) for sid, _member, item_id, score, memo in rows if sid in target_ids}
+    members_with_past = {member for sid, member, *_ in rows if sid not in target_ids}
+    rated_targets = {sid for sid, *_ in rows if sid in target_ids}
+    bonus: dict[int, list[BonusScore]] = {}
+    for s in submissions:
+        scores = []
+        for i in bonus_items:
+            found = stored.get((s.id, i.id))
+            scores.append(
+                BonusScore(item_id=i.id, label=i.label)
+                if found is None
+                else BonusScore(item_id=i.id, label=i.label, score=found[0], memo=found[1], rated=True)
+            )
+        bonus[s.id] = scores
+    rerate = frozenset(s.id for s in submissions if s.member_id in members_with_past and s.id not in rated_targets)
+    return bonus, rerate
+
+
+class BonusTargetError(ValueError):
+    """가산을 매길 수 없는 자리 — 가산 항목이 아니거나 지금 완성도 대상 시도가 아니다."""
+
+
+def save_bonus_score(
+    problem: Problem, *, submission_id: int, item_id: int, score: int, memo: str, rated_by_id: int
+) -> ClassroomBonusScore:
+    """강사·공동 강사가 가산 하나를 매긴다(#905) — **그 참여자의 지금 완성도 대상 시도**에만. 덮어쓰기다."""
+
+    if not QUALITY_SCORE_MIN <= score <= QUALITY_SCORE_MAX:
+        raise BonusTargetError("가산은 0~5 로 매깁니다.")
+    item = problem.checklist_items.filter(id=item_id, grade=ChecklistGrade.BONUS).first()
+    if item is None:
+        raise BonusTargetError("가산 항목을 찾을 수 없습니다.")
+    items = list(problem.checklist_items.all())
+    if submission_id not in {s.id for s in _target_submissions(problem, items)}:
+        raise BonusTargetError("완성도 대상 시도에만 가산을 매길 수 있습니다.")
+    row, _ = ClassroomBonusScore.objects.update_or_create(
+        submission_id=submission_id,
+        item=item,
+        defaults={"score": score, "memo": memo.strip(), "rated_by_id": rated_by_id, "rated_at": Clock.now()},
+    )
+    return row
 
 
 # --- 비용 ---------------------------------------------------------------------------------
@@ -256,6 +332,8 @@ class RankRow(TypedDict):
     weighted_score: int
     max_weighted_score: int
     items: list[QualityItemView]
+    #: 「가산 다시 매김 필요」(#905) — 강사 화면 몫. 참여자 응답에는 싣지 않는다.
+    bonus_needs_rerate: bool
 
 
 def ranking(current: Board) -> list[RankRow]:
@@ -263,7 +341,11 @@ def ranking(current: Board) -> list[RankRow]:
     등수(1, 2, 2, 4). 저장 칸(`weighted_score` 등)은 역사값이라 읽지 않는다(ADR-0073)."""
 
     points = points_of(current.items)
-    reviewed = [(t.submission, quality_view(t.review.items, points)) for t in current.reviewed if t.review is not None]
+    reviewed = [
+        (t.submission, quality_view(t.review.items, points, current.bonus.get(t.submission.id, ())))
+        for t in current.reviewed
+        if t.review is not None
+    ]
     ranks = competition_ranks([view["raw_total"] for _, view in reviewed])
     rows = [
         RankRow(
@@ -272,6 +354,7 @@ def ranking(current: Board) -> list[RankRow]:
             display_name=s.member.display_name,
             submission_id=s.id,
             attempt_number=s.attempt_number,
+            bonus_needs_rerate=s.id in current.rerate_needed,
             **view,
         )
         for rank, (s, view) in zip(ranks, reviewed, strict=True)

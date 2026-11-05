@@ -28,6 +28,7 @@ from django.db.models.functions import Coalesce
 from contests.models import Contest, ContestSubmission, Requirement
 from core.llm_scoring import LLMAdapterError, LLMAdapterPermanentError, get_adapter
 from core.quality_review import (
+    BonusScore,
     QualityInput,
     QualityItemInput,
     QualityReviewAdapter,
@@ -42,7 +43,7 @@ from core.quality_review import (
 from core.scans import ScanSpec
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
-from .models import QualityReviewAttempt, Score, SubmissionQualityReview
+from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
 
 logger = logging.getLogger(__name__)
 
@@ -170,10 +171,42 @@ SUBMISSION_QUALITY_SCAN = ScanSpec(
 )
 
 
-def review_total(review: SubmissionQualityReview, points: dict[int, int]) -> QualityTotal:
-    """기록의 0~5 를 지금 배점으로 합한다 — 저장 칸(`weighted_score` 등)은 역사값이라 읽지 않는다(ADR-0073)."""
+def bonus_scores(contest_id: int, submission_ids: list[int]) -> dict[int, list[BonusScore]]:
+    """제출 id → 지금 가산 Requirement 마다의 개최자 점수(#905). 매기지 않은 가산은 0점·`rated=False` 로 채운다
+    — 완성도 합계와 화면이 같은 목록을 본다."""
 
-    return quality_total(review.items, points)
+    bonus_requirements = list(
+        Requirement.objects.filter(contest_id=contest_id, grade=Requirement.Grade.BONUS).order_by("order", "id")
+    )
+    stored = {
+        (row.submission_id, row.requirement_id): row
+        for row in SubmissionBonusScore.objects.filter(
+            submission_id__in=submission_ids, requirement__in=bonus_requirements
+        )
+    }
+    result: dict[int, list[BonusScore]] = {}
+    for submission_id in submission_ids:
+        scores = []
+        for requirement in bonus_requirements:
+            row = stored.get((submission_id, requirement.id))
+            scores.append(
+                BonusScore(item_id=requirement.id, label=requirement.text)
+                if row is None
+                else BonusScore(
+                    item_id=requirement.id, label=requirement.text, score=row.score, memo=row.memo, rated=True
+                )
+            )
+        result[submission_id] = scores
+    return result
+
+
+def review_total(
+    review: SubmissionQualityReview, points: dict[int, int], bonus: list[BonusScore] | None = None
+) -> QualityTotal:
+    """기록의 0~5 와 가산 사람 점수를 지금 배점으로 합한다 — 저장 칸(`weighted_score` 등)은 역사값이라 읽지
+    않는다(ADR-0073)."""
+
+    return quality_total(review.items, points, bonus or ())
 
 
 def ranked_reviews(
@@ -184,13 +217,15 @@ def ranked_reviews(
 
     points = points_by_requirement(contest_id)
     reviews = list(SubmissionQualityReview.objects.filter(submission_id__in=submission_ids))
-    totals = [review_total(r, points) for r in reviews]
+    bonus = bonus_scores(contest_id, [r.submission_id for r in reviews])
+    totals = [review_total(r, points, bonus[r.submission_id]) for r in reviews]
     ranks = competition_ranks([t.raw for t in totals])
     return {r.submission_id: (r, t, rank) for r, t, rank in zip(reviews, totals, ranks, strict=True)}
 
 
 __all__ = [
     "QUALITY_FAILURE_LIMIT",
+    "bonus_scores",
     "SUBMISSION_QUALITY_SCAN",
     "points_by_requirement",
     "ranked_reviews",

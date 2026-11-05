@@ -92,8 +92,12 @@ def _requirement_inputs(submission: ContestSubmission) -> list[RequirementInput]
     # Evidence(화면 이름 「확인 위치」)는 판정 입력이 아니다(#909, ADR-0074) — 제출자가 개최자에게
     # 「이 항목은 여기서 보세요」라고 알려 주는 선택 안내일 뿐이라 여기서 읽지 않는다. 같은 제출에
     # 확인 위치를 붙이든 떼든 Score·완성도 프롬프트는 바이트 단위로 같다.
+    # 가산(#905, ADR-0073)은 개최자가 마감 뒤 사람 점수로 매긴다 — AI 판정 대상이 아니다. 필수가 아니라
+    # 달성률·Score 에도 들어가지 않으므로 빼도 결과가 같다.
     requirements = list(
-        Requirement.objects.filter(contest_id=submission.contest_id).order_by("order", "id")
+        Requirement.objects.filter(contest_id=submission.contest_id)
+        .exclude(grade=Requirement.Grade.BONUS)
+        .order_by("order", "id")
     )
     self_reported = dict(
         RequirementResponse.objects.filter(submission=submission).values_list("requirement_id", "is_met")
