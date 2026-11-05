@@ -307,6 +307,9 @@ class Problem(models.Model):
     #: 기존 문제도 켜짐이다(#408 AC). 의사코드처럼 실행되는 코드가 아닌
     #: 문제에서는 강사가 끌 수 있다(#410).
     syntax_check_enabled = models.BooleanField(default=True)
+    #: 완성도(#883, ADR-0072)를 참여자에게 보이는가 — 기본은 강사만 본다. 켜도 참여자는 **자기 것만**
+    #: 본다(다른 참여자의 이름·점수는 어느 응답에도 실리지 않는다).
+    quality_public = models.BooleanField(default=False, db_default=False)
 
     #: 「공모전 문제」라면 그 무료 공모전의 번호(#548, ADR-0054). FK 가 아니다 — 강의실은
     #: 공모전 앱을 임포트하지 못하므로(ADR-0037) 원본은 `core.contest_catalog` 로 읽는다.
@@ -1010,6 +1013,72 @@ class ClassTemplateProblemChecklistItem(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassTemplateProblemChecklistItem(id={self.pk}, label={self.label!r})"
+
+
+class ClassroomQualityReview(models.Model):
+    """시도 하나의 완성도 기록(#883, ADR-0072) — 항목마다 0~5 와 근거, 가중 점수, 완성도.
+    **append-only** 다(`ClassroomScore` 와 같은 관용): 체크리스트를 고치면 새 행이 쌓이고 지난 행은
+    그대로 남는다. 어느 행이 지금의 것인가는 「같은 시도 + 같은 체크리스트 지문」으로 고른다.
+    판정(`ClassroomScore`)·통과와 무관하다 — 통과의 뜻과 계산을 바꾸지 않는다.
+
+    대상은 참여자의 통과한 시도뿐이라 `ClassroomScore` 와 같은 PROTECT 가 문제·클래스 삭제를 새로 막지
+    않는다(둘 다 참여자의 시도가 있으면 이미 거절한다)."""
+
+    submission = models.ForeignKey(
+        ClassroomSubmission, related_name="quality_reviews", on_delete=models.PROTECT
+    )
+    #: 항목 id·라벨·필수 여부의 해시(`core.quality_review.checklist_fingerprint`).
+    checklist_fingerprint = models.CharField(max_length=64)
+    model_version = models.CharField(max_length=200)
+    prompt = models.TextField()
+    #: [{"item_id", "label"(스냅샷), "required", "score"(0~5), "reasoning"}, ...]
+    items = models.JSONField()
+    weighted_score = models.PositiveIntegerField()
+    max_weighted_score = models.PositiveIntegerField()
+    #: 0~100 — 화면은 소수 첫째 자리까지. 등수는 이 값이 아니라 `weighted_score` 로 매긴다.
+    completeness = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["submission", "checklist_fingerprint"], name="classroom_quality_sub_fp_idx")]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValueError("ClassroomQualityReview 는 append-only 다 — 새 행을 만든다.")
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomQualityReview(submission={self.submission_id}, weighted={self.weighted_score})"
+
+
+class ClassroomQualityJob(models.Model):
+    """완성도 채점 큐의 한 줄(#883, ADR-0072) — 시도 하나에 하나. 판정 큐(`ClassroomSubmission` 의
+    `scoring_*` 칸)와 같은 임대 방식이되 **칸을 따로 둔다**: 판정 큐의 칸에 얹으면 「채점됐는가」 조건과
+    시도 하나에 임대 하나라는 전제가 섞인다. 기록이 아니라 운영 상태라 고쳐 쓴다."""
+
+    submission = models.OneToOneField(
+        ClassroomSubmission, related_name="quality_job", on_delete=models.CASCADE
+    )
+    #: 강사가 「완성도 채점」을 눌러 큐에 넣은 시각 — 비어 있으면 큐에 없다.
+    queued_at = models.DateTimeField(null=True, blank=True)
+    lease_owner = models.CharField(max_length=64, blank=True, default="", db_default="")
+    lease_until = models.DateTimeField(null=True, blank=True)
+    #: 마지막 실패(「완성도 채점 실패」) — 다음 버튼에서 다시 큐에 넣으며 비운다. 자동으로 다시 하지 않는다.
+    failed_at = models.DateTimeField(null=True, blank=True)
+    error = models.TextField(blank=True, default="", db_default="")
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["queued_at"],
+                name="classroom_quality_queued_idx",
+                condition=models.Q(queued_at__isnull=False),
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomQualityJob(submission={self.submission_id}, queued={self.queued_at})"
 
 
 class ClassroomScoringAttempt(models.Model):

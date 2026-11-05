@@ -1217,6 +1217,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Problem Quality
+         * @description 강사의 「완성도 순위」 — 등수·참여자·완성도·항목별 0~5·근거. 대상이 아닌(통과 못 한) 참여자는 없다.
+         */
+        get: operations["classroom_api_get_problem_quality"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/quality/estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estimate Problem Quality
+         * @description 「완성도 채점」을 누르기 전의 확인 — 새로 채점할 n명과 예상 비용.
+         */
+        get: operations["classroom_api_estimate_problem_quality"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/quality/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get My Problem Quality
+         * @description 참여자 본인의 「완성도 순위 k등 / N명」·항목별. 공개가 꺼졌거나 본인 기록이 없으면 404 — 완성도는
+         *     참여자 응답 어디에도 실리지 않는다. 다른 참여자의 이름·점수는 이 응답에 없다.
+         */
+        get: operations["classroom_api_get_my_problem_quality"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/problems/{problem_id}/quality/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Problem Quality
+         * @description 확인한 뒤 큐에 넣는다 — 대상 시도가 바뀐 사람(과 체크리스트를 고친 뒤의 모두)만. 비용이 강사 키에
+         *     나가므로 쓰기로 다룬다(보관된 클래스에서는 403).
+         */
+        post: operations["classroom_api_run_problem_quality"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/problems/{problem_id}/reopen": {
         parameters: {
             query?: never;
@@ -7149,6 +7231,20 @@ export interface components {
             next: string | null;
         };
         /**
+         * MyQualityOut
+         * @description 참여자 본인의 완성도 — 공개가 켜졌고 본인 기록이 있을 때만. 다른 참여자의 이름·점수는 없다.
+         */
+        MyQualityOut: {
+            /** Completeness */
+            completeness: number;
+            /** Items */
+            items: components["schemas"]["QualityItemOut"][];
+            /** Rank */
+            rank: number;
+            /** Total */
+            total: number;
+        };
+        /**
          * MySponsoredContestOut
          * @description 「내 공모전」의 한 행 (#81) — Sponsor 가 자기가 연 공모전을 볼 때 받는 것.
          *
@@ -7996,6 +8092,11 @@ export interface components {
             passed_count: number;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /**
+             * Quality Public
+             * @default false
+             */
+            quality_public: boolean;
+            /**
              * Reasoning Effort
              * @default
              */
@@ -8036,6 +8137,8 @@ export interface components {
             model?: string | null;
             /** Model Is Reasoning */
             model_is_reasoning?: boolean | null;
+            /** Quality Public */
+            quality_public?: boolean | null;
             /** Reasoning Effort */
             reasoning_effort?: string | null;
             /** Recommended Due At */
@@ -8188,6 +8291,74 @@ export interface components {
             publisher_display_name: string;
             /** Share Code */
             share_code: string;
+        };
+        /**
+         * QualityBoardOut
+         * @description 강사용 「완성도 순위」 — 대상(참여자별 최근 통과 시도) 가운데 지금의 기록이 있는 사람만 줄에 든다.
+         */
+        QualityBoardOut: {
+            /** Failed Count */
+            failed_count: number;
+            /** Failed Names */
+            failed_names: string[];
+            /** Quality Public */
+            quality_public: boolean;
+            /** Queued Count */
+            queued_count: number;
+            /** Rows */
+            rows: components["schemas"]["QualityRankRowOut"][];
+            /** Target Count */
+            target_count: number;
+        };
+        /** QualityEstimateOut */
+        QualityEstimateOut: {
+            /** Blocked Reason */
+            blocked_reason: string | null;
+            /** Cost Krw */
+            cost_krw: number | null;
+            /** New Count */
+            new_count: number;
+            /** Reuse Count */
+            reuse_count: number;
+        };
+        /** QualityItemOut */
+        QualityItemOut: {
+            /** Item Id */
+            item_id: number;
+            /** Label */
+            label: string;
+            /** Reasoning */
+            reasoning: string;
+            /** Required */
+            required: boolean;
+            /** Score */
+            score: number;
+        };
+        /** QualityRankRowOut */
+        QualityRankRowOut: {
+            /** Attempt Number */
+            attempt_number: number;
+            /** Completeness */
+            completeness: number;
+            /** Display Name */
+            display_name: string;
+            /** Items */
+            items: components["schemas"]["QualityItemOut"][];
+            /** Max Weighted Score */
+            max_weighted_score: number;
+            /** Member Id */
+            member_id: number;
+            /** Rank */
+            rank: number;
+            /** Submission Id */
+            submission_id: number;
+            /** Weighted Score */
+            weighted_score: number;
+        };
+        /** QualityRunOut */
+        QualityRunOut: {
+            /** Queued Count */
+            queued_count: number;
         };
         /** QuoteIn */
         QuoteIn: {
@@ -11426,6 +11597,152 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_problem_quality: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityBoardOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_estimate_problem_quality: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityEstimateOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_my_problem_quality: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyQualityOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_run_problem_quality: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                problem_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualityRunOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

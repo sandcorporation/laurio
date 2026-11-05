@@ -270,7 +270,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
 | `GET .../recent-attempts` | 참여자의 최근 시도 열 건(고정) — 이름·문제 제목·상태(`passed`·`attempted_not_passed`·`scoring`·`needs_setup`)·시각, 강사 전용(#632) |
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 채점 지침(#386)과 권장 기한·마감(`recommended_due_at`·`due_at`, 둘 다 nullable, 권장 > 마감이면 422, #769)도 받는다. PATCH 에서 두 날짜는 생략하면 그대로·null 이면 비운다. 마감이 지나면 참여자의 `POST .../submissions` 가 403(`submit_blocked_reason` = `deadline_passed`, 보관 → 내보냄 → 숨김 → 마감 순)이고 강사·공동 강사는 낸다. 시도 응답(`ClassroomSubmissionOut`·강사용·최근 시도)과 참여자 목록 줄·격자 칸의 `late` 는 제출 시각 > 권장 기한을 응답마다 셈한 값이다(마지막 시도 기준) — 저장하지 않아 날짜를 옮기면 바뀐다. 복사·템플릿은 두 날짜를 옮기지 않는다(`PROBLEM_FIELD_TRANSFER_TABLE`). MCP `create_problem`·`update_problem` 도 같은 칸을 받는다. 응답에 참여자(강사 본인·내보낸 사람 제외)의 마지막 제출 시각과 시도 수(`participant_attempt_count`, #674 — 제출 현황의 「시도」와 같은 집합, 목록에서도 질의 하나)를 싣는다 |
-| `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·「추론 모델」 스위치(`model_is_reasoning`, #602)·채점 지침(#386)을 고친다 — 호환 서버면 자기 모델을 고르거나 스위치를 바꿀 때 클래스 기본과 같은 시험 호출을 거친다(만들 때도) |
+| `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·「추론 모델」 스위치(`model_is_reasoning`, #602)·채점 지침(#386)·완성도 공개(`quality_public`, #883)를 고친다 — 호환 서버면 자기 모델을 고르거나 스위치를 바꿀 때 클래스 기본과 같은 시험 호출을 거친다(만들 때도) |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
 | `POST .../problems/{id}/open`·`.../hide`·`.../reopen` | 초안→열림→숨김→열림 전이(#440, `classroom.problem_transitions`) — 표에 없는 상태에서 부르면 400, 열림·숨김으로 가는 전이는 필수 체크리스트 항목이 없으면 400 |
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |
@@ -279,6 +279,10 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·상태·시도 수·마지막 시도 시각(#288, #639), 그리고 눈썹의 강사 이름들(`instructor_display_names`, 가입 미리보기와 같은 함수, #671) |
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286), 소스 업로드 상한(`max_source_asset_bytes`, 운영자 정책 값 그대로, #671) |
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286). 저장소는 저장소·`/tree/<브랜치>`·`/commit/<sha>` 셋을 받고(#777) 응답 `value` 는 낸 URL 그대로, `commit_sha` 는 고정 커밋 |
+| `GET .../problems/{id}/quality` | 강사의 「완성도 순위」(#883, ADR-0072) — 참여자(강사·내보낸 사람 제외)별 가장 최근 통과 시도 가운데 지금의 기록(같은 시도 + 같은 체크리스트 지문)이 있는 사람만, 가중 점수로 등수(동점 같은 등수), 완성도(0~100)·항목별 0~5·근거, 큐에 있는 수·실패한 사람. 공개 스위치(`quality_public`)는 문제 PATCH 로 바꾼다 |
+| `GET .../problems/{id}/quality/estimate` | 「완성도 채점」 확인 단계 — 새로 채점할 사람 수·재사용할 수·예상 비용(원, 단가 모름이면 null)·채점을 막는 사유(`no_api_key`·`model_rejected`) |
+| `POST .../problems/{id}/quality/run` | 새로 채점할 시도를 큐에 넣는다(grader 가 판정과 같은 연결당 상한 아래에서 집는다) — 막는 사유가 있으면 409, 보관된 클래스면 403. 비용·사용량은 그 클래스의 채점 연결(강사 키) |
+| `GET .../problems/{id}/quality/mine` | 참여자 본인의 「완성도 순위 k등 / N명」·완성도·항목별 — 공개가 꺼졌거나 본인 기록이 없으면 404. 다른 참여자의 이름·점수는 없다 |
 | `POST .../problems/{id}/copy` | 문제를 자기 다른 클래스로 복사한다 — 체크리스트·채점 설정은 따라오고 제출물·시도·Score는 없다, 복사본은 언제나 초안이다(#292) |
 | `POST /api/classroom/classes/{id}/copy` | 클래스를 복사해 다음 기수를 연다 — 문제·체크리스트·채점 설정이 순서대로 따라오고 참여자·제출물·Score·채점 연결(OpenAI 키·Claude 키·호환 서버 주소와 인증 값)은 따라오지 않는다(#293, #605) |
 | `POST .../problems/{id}/publish-template` | 문제를 공개 시점의 사본(템플릿)으로 뜬다 — 원본을 고치거나 지워도 바뀌지 않는다, 채점 모델은 담기지 않는다(#316) |

@@ -325,6 +325,9 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
     if payload.syntax_check_enabled is not None:
         problem.syntax_check_enabled = payload.syntax_check_enabled
         update_fields.append("syntax_check_enabled")
+    if payload.quality_public is not None:
+        problem.quality_public = payload.quality_public
+        update_fields.append("quality_public")
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
     return problem

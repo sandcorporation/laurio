@@ -74,6 +74,12 @@ from .contest_entries import (
 )
 from .contest_problems import contest_state, import_contest_problem
 from .schemas import (
+    MyQualityOut,
+    QualityBoardOut,
+    QualityEstimateOut,
+    QualityItemOut,
+    QualityRankRowOut,
+    QualityRunOut,
     ChecklistItemIn,
     ChecklistItemOut,
     ChecklistItemSavedOut,
@@ -142,7 +148,7 @@ from .schemas import (
 )
 from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
-from . import pending_scoring
+from . import pending_scoring, quality
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -569,6 +575,7 @@ def _serialize_problem(
         grading_strictness=problem.grading_strictness,
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
+        quality_public=problem.quality_public,
         checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
         passed_count=passed_count,
         member_count=member_count,
@@ -2692,6 +2699,92 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
         )
         for s in submissions
     ]
+# --- 완성도(#883, ADR-0072) ---------------------------------------------------------------
+
+
+def _quality_item_outs(items) -> list[QualityItemOut]:
+    return [QualityItemOut(**item) for item in items]
+
+
+@router.get(
+    "/classes/{class_id}/problems/{problem_id}/quality",
+    response={200: QualityBoardOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_problem_quality(request: HttpRequest, class_id: int, problem_id: int):
+    """강사의 「완성도 순위」 — 등수·참여자·완성도·항목별 0~5·근거. 대상이 아닌(통과 못 한) 참여자는 없다."""
+
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False).problem
+    current = quality.board(problem)
+    return 200, QualityBoardOut(
+        quality_public=problem.quality_public,
+        target_count=len(current.targets),
+        queued_count=sum(1 for t in current.targets if t.queued),
+        failed_count=sum(1 for t in current.targets if t.failed),
+        failed_names=sorted(t.submission.member.display_name for t in current.targets if t.failed),
+        rows=[
+            QualityRankRowOut(**{**row, "items": _quality_item_outs(row["items"])})
+            for row in quality.ranking(current)
+        ],
+    )
+
+
+@router.get(
+    "/classes/{class_id}/problems/{problem_id}/quality/estimate",
+    response={200: QualityEstimateOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def estimate_problem_quality(request: HttpRequest, class_id: int, problem_id: int):
+    """「완성도 채점」을 누르기 전의 확인 — 새로 채점할 n명과 예상 비용."""
+
+    problem = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False).problem
+    result = quality.estimate(problem)
+    return 200, QualityEstimateOut(
+        new_count=result.new_count,
+        reuse_count=result.reuse_count,
+        cost_krw=result.cost_krw,
+        blocked_reason=result.blocked_reason,
+    )
+
+
+@router.post(
+    "/classes/{class_id}/problems/{problem_id}/quality/run",
+    response={200: QualityRunOut, 403: ErrorOut, 404: ErrorOut, 409: ErrorOut},
+    auth=jwt_auth,
+)
+def run_problem_quality(request: HttpRequest, class_id: int, problem_id: int):
+    """확인한 뒤 큐에 넣는다 — 대상 시도가 바뀐 사람(과 체크리스트를 고친 뒤의 모두)만. 비용이 강사 키에
+    나가므로 쓰기로 다룬다(보관된 클래스에서는 403)."""
+
+    scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
+    reason = pending_scoring.blocking_reason(scope.class_obj, scope.problem)
+    if reason is not None:
+        return 409, ErrorOut(detail=quality.BLOCKED_MESSAGES[reason])
+    return 200, QualityRunOut(queued_count=quality.enqueue(scope.problem, as_of=Clock.now()))
+
+
+@router.get(
+    "/classes/{class_id}/problems/{problem_id}/quality/mine",
+    response={200: MyQualityOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_my_problem_quality(request: HttpRequest, class_id: int, problem_id: int):
+    """참여자 본인의 「완성도 순위 k등 / N명」·항목별. 공개가 꺼졌거나 본인 기록이 없으면 404 — 완성도는
+    참여자 응답 어디에도 실리지 않는다. 다른 참여자의 이름·점수는 이 응답에 없다."""
+
+    member = _get_member_or_404(class_id, request.auth_user.id)
+    problem = _get_visible_problem_for_participant_or_404(class_id, problem_id, member)
+    if not problem.quality_public:
+        return 404, ErrorOut(detail="공개된 완성도가 없습니다.")
+    mine = quality.my_row(quality.board(problem), member)
+    if mine is None:
+        return 404, ErrorOut(detail="공개된 완성도가 없습니다.")
+    row, total = mine
+    return 200, MyQualityOut(
+        rank=row["rank"], total=total, completeness=row["completeness"], items=_quality_item_outs(row["items"])
+    )
+
+
 @router.post(
     "/classes/{class_id}/problems/{problem_id}/copy",
     response={201: ProblemOut, 403: ErrorOut, 404: ErrorOut},

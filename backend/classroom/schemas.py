@@ -371,6 +371,8 @@ class ProblemPatchIn(Schema):
     #: 필드를 생략하면(`None`) 바꾸지 않는다. 보내면 그 값으로 켜고 끈다
     #: (#410) — 켜고 꺼도 이미 매긴 판정은 바뀌지 않는다(ADR-0006).
     syntax_check_enabled: bool | None = None
+    #: 완성도를 참여자에게 공개하는가(#883). 생략하면 바꾸지 않는다.
+    quality_public: bool | None = None
     #: 공모전 문제의 수업용 안내(#548). 공모전 문제가 아니면 422다.
     instructor_note: str | None = Field(default=None, max_length=5000)
     #: 권장 기한·마감(#769). 다른 칸과 달리 **생략과 null 이 다르다** — 생략하면
@@ -471,6 +473,8 @@ class ProblemOut(Schema):
     #: 문법 검사 기본 항목 「소스에 문법 오류가 없다」의 켜짐 여부(#408,
     #: CONTEXT.md 「문법 검사」). 기본은 켜짐이고, 강사는 끌 수만 있다(#410).
     syntax_check_enabled: bool = True
+    #: 완성도 공개 스위치(#883) — 켜면 참여자가 자기 완성도만 본다.
+    quality_public: bool = False
     checklist_items: list[ChecklistItemOut] = []
     #: 문제 만들기 응답에서만 채워진다(#810) — 방금 만든 항목 가운데 채점이 확인할 수 없을 수 있는 것.
     gradability_warnings: list[GradabilityWarningOut] = []
@@ -1211,3 +1215,65 @@ class ImportClassTemplateIn(Schema):
     #: 가져가는 사람이 새 클래스에 붙일 이름(#319 AC "이름을 정할 수 있다") —
     #: 원본 이름을 그대로 쓰지 않는다.
     name: str = Field(min_length=1, max_length=200)
+
+
+# --- 완성도(#883, ADR-0072) ---------------------------------------------------------------
+
+
+class QualityItemOut(Schema):
+    item_id: int
+    #: 매긴 때의 라벨(스냅샷).
+    label: str
+    required: bool
+    #: 항목 완성도 0~5.
+    score: int
+    reasoning: str
+
+
+class QualityRankRowOut(Schema):
+    rank: int
+    member_id: int
+    display_name: str
+    submission_id: int
+    attempt_number: int
+    weighted_score: int
+    max_weighted_score: int
+    #: 0~100 — 화면은 소수 첫째 자리까지.
+    completeness: float
+    items: list[QualityItemOut]
+
+
+class QualityBoardOut(Schema):
+    """강사용 「완성도 순위」 — 대상(참여자별 최근 통과 시도) 가운데 지금의 기록이 있는 사람만 줄에 든다."""
+
+    quality_public: bool
+    target_count: int
+    queued_count: int
+    failed_count: int
+    #: 실패한 대상의 이름(「완성도 채점 실패」) — 다음 버튼에서 다시 매긴다.
+    failed_names: list[str]
+    rows: list[QualityRankRowOut]
+
+
+class QualityEstimateOut(Schema):
+    #: 새로 채점할 사람 수 — 0 이면 버튼이 할 일이 없다.
+    new_count: int
+    #: 이전 기록을 그대로 쓰는 사람 수.
+    reuse_count: int
+    #: 예상 비용(원). 단가표에 없는 모델이면 null.
+    cost_krw: float | None
+    #: 채점할 수 없는 이유(`no_api_key`·`model_rejected`) — 화면이 지금 채점과 같은 문구로 막는다.
+    blocked_reason: str | None
+
+
+class QualityRunOut(Schema):
+    queued_count: int
+
+
+class MyQualityOut(Schema):
+    """참여자 본인의 완성도 — 공개가 켜졌고 본인 기록이 있을 때만. 다른 참여자의 이름·점수는 없다."""
+
+    rank: int
+    total: int
+    completeness: float
+    items: list[QualityItemOut]

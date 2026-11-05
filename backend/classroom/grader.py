@@ -54,7 +54,7 @@ from core.events import publish_all
 from core.llm_scoring import LLMAdapterError
 from ops_metrics import recorder as ops_recorder
 
-from . import scoring
+from . import quality, scoring
 from .scoring import Concluded, PreparedScoring, VendorOutcome
 
 logger = logging.getLogger(__name__)
@@ -93,6 +93,8 @@ class Grader:
         self._collect = False
         self._tasks: set[asyncio.Task] = set()
         self._active_ids: set[int] = set()
+        #: 완성도 작업(#883)은 시도 id 가 판정과 겹칠 수 있어 따로 센다.
+        self._active_quality_ids: set[int] = set()
         self._per_class: Counter[int] = Counter()
         # DB 스레드는 하나뿐이다 — 여럿이면 연결도 여럿이 된다(사용자 결정: grader 의 DB 연결은 정확히 1개).
         self._pool = ThreadPoolExecutor(
@@ -176,7 +178,76 @@ class Grader:
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
             started += 1
+        started += await self._pick_quality(as_of)
         return started
+
+    async def _pick_quality(self, as_of) -> int:
+        """완성도 작업(#883, ADR-0072) — 판정이 먼저 자리를 잡고 남은 자리만 쓴다. 연결당 상한은
+        판정과 **함께** 센다(같은 강사 키다)."""
+
+        free = self.global_limit - self.active
+        if free <= 0:
+            return 0
+        full = [cid for cid, n in self._per_class.items() if n >= self.per_connection_limit]
+        candidates = await self._db(
+            quality.next_candidates,
+            as_of,
+            limit=free,
+            exclude_class_ids=full,
+            exclude_ids=set(self._active_quality_ids),
+        )
+        started = 0
+        for submission_id, class_id in candidates:
+            if self.active >= self.global_limit or self._per_class[class_id] >= self.per_connection_limit:
+                continue
+            if not await self._db(quality.claim, submission_id, owner=self.owner, as_of=as_of):
+                continue
+            self._per_class[class_id] += 1
+            self._active_quality_ids.add(submission_id)
+            task = asyncio.create_task(self._process_quality(submission_id, class_id, as_of))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            started += 1
+        return started
+
+    async def _process_quality(self, submission_id: int, class_id: int, as_of) -> None:
+        owner = self.owner
+        try:
+            prepared = await self._db(quality.prepare_head, submission_id, owner=owner, as_of=as_of)
+            if not isinstance(prepared, quality.QualityConcluded):
+                prepared = await self._source(quality.prepare_tail, prepared)
+            if isinstance(prepared, quality.QualityConcluded):
+                result = await self._write(quality.conclude, submission_id, owner=owner, apply=prepared.apply)
+            elif not await self._db(
+                lambda: quality.extend_lease(submission_id, owner=owner, as_of=Clock.now())
+            ):
+                result = {"submission_id": submission_id, "status": "lease_lost"}
+            else:
+                outcome = await self._quality_vendor(prepared)
+                result = await self._write(quality.finish, prepared, outcome)
+        except Exception as exc:  # noqa: BLE001 - 한 작업의 실패가 나머지를 막으면 안 된다.
+            result = await self._write(quality.record_unexpected_failure, submission_id, owner=owner, exc=exc)
+        finally:
+            self._active_quality_ids.discard(submission_id)
+            self._per_class[class_id] -= 1
+            if not self._per_class[class_id]:
+                del self._per_class[class_id]
+        if self._collect:
+            self.results.append(result)
+        logger.info(
+            "grader: quality submission=%s class=%s status=%s active=%s",
+            submission_id,
+            class_id,
+            result.get("status"),
+            self.active - 1,
+        )
+
+    @staticmethod
+    async def _quality_vendor(prepared: quality.PreparedQuality) -> quality.QualityOutcome:
+        try:
+            return await asyncio.wait_for(quality.call_vendor_async(prepared), timeout=VENDOR_OUTER_TIMEOUT_SECONDS)
+        except TimeoutError:
+            return quality.QualityOutcome(error=LLMAdapterError("벤더 응답을 시간 안에 받지 못했다(grader 한도)."))
 
     async def _process(self, submission_id: int, class_id: int, as_of) -> None:
         owner = self.owner
