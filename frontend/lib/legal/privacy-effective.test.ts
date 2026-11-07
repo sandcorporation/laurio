@@ -29,3 +29,20 @@ describe("개인정보처리방침 시행일 표시", () => {
     expect(lines).toHaveLength(2);
   });
 });
+
+describe("개인정보처리방침 서비스 오류 기록(#928)", () => {
+  it("1항에 항목과 공통 문서 링크, 2항에 목적, 3항에 90일 자동 삭제를 적는다", () => {
+    expect(page).toContain('data-testid="privacy-error-log-item"');
+    expect(page).toContain("서비스 이용 중: 오류 기록");
+    expect(page).toContain("로그인한 경우 회원 식별 번호");
+    expect(page).toContain("https://sandcorporation.github.io/privacy-and-terms/errors/");
+    expect(page).toContain("서비스 오류의 발견·수정과 안정성 확보");
+    expect(page).toMatch(/오류 기록은 수집한 날부터 90일이 지나면 자동으로 삭제합니다/);
+  });
+
+  it("호스트·내부 주소는 적지 않고, 위탁·국외 이전 절에는 넣지 않는다", () => {
+    expect(page).not.toMatch(/glitchtip|honeycombpizza/i);
+    const outsourcing = page.slice(page.indexOf('title="5. 개인정보 처리의 위탁"'), page.indexOf('title="7. '));
+    expect(outsourcing).not.toContain("오류 기록");
+  });
+});
