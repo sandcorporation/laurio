@@ -95,6 +95,21 @@ export default function PrivacyPolicyPage() {
               서비스 이용 중: 방문한 페이지의 주소와 유입 경로(쿠키와 이용자 식별자 없이 방문 수를
               집계하는 데에만 쓰며, 회원 정보와 연결하지 않습니다)
             </li>
+            <li data-testid="privacy-error-log-item">
+              서비스 이용 중: 오류 기록 — 오류가 났을 때 오류 내용과 발생 위치, 발생 시각, 서비스
+              버전, 페이지 주소, 브라우저·기기 정보, 서버 오류의 요청 경로와 요청 방식, 접속 IP
+              주소(끝자리를 가려 저장), 로그인한 경우 회원 식별 번호. 쿠키·인증 정보·비밀번호·
+              요청 내용은 지우고 보내며, 이메일과 이름은 보내지 않습니다. 오류 기록은 서비스가 직접
+              운영하는 국내 서버에 저장하며 위탁하거나 국외로 이전하지 않습니다.{" "}
+              <a
+                href="https://sandcorporation.github.io/privacy-and-terms/errors/"
+                className="underline underline-offset-2"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                서비스 오류 기록 안내
+              </a>
+            </li>
           </Items>
           <p>
             수집 방법은 회원이 서비스 화면에서 직접 입력하거나, 소셜 로그인 제공자로부터 회원의
@@ -109,6 +124,7 @@ export default function PrivacyPolicyPage() {
             <li>제출물의 채점(요구사항 충족 여부와 완성도)과 그 결과 통지</li>
             <li>이의 제기 절차의 처리</li>
             <li>서비스 이용에 관한 문의 응대와 고충 처리</li>
+            <li>서비스 오류의 발견·수정과 안정성 확보</li>
           </Items>
         </Article>
 
@@ -130,6 +146,9 @@ export default function PrivacyPolicyPage() {
           </p>
           <p>
             ⑤ 파기 방법: 전자적 파일 형태의 정보는 복구할 수 없는 방법으로 삭제합니다.
+          </p>
+          <p data-testid="privacy-error-log-retention">
+            ⑥ 오류 기록은 수집한 날부터 90일이 지나면 자동으로 삭제합니다.
           </p>
         </Article>
 
