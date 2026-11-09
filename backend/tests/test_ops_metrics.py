@@ -99,7 +99,8 @@ def test_a_classroom_call_lands_in_the_minute_hash_with_closed_labels_only(
     metrics = {field.split("|")[3] for field in fields}
     assert metrics <= {"n", "ms", "in", "out"} | {f"b{i}" for i in range(len(DURATION_BOUNDS) + 1)}
     # 클래스·제출·강사 번호가 키에도 필드에도 없다.
-    ids = {str(ctx["class_id"]), str(ctx["problem"].id)}
+    # 행 id 는 1부터 매겨져 HTTP 상태 코드 라벨(200 등)과 우연히 같을 수 있다 — 그 숫자는 라벨이 맞으니 비교에서 뺀다.
+    ids = {str(ctx["class_id"]), str(ctx["problem"].id)} - {str(code) for code in range(100, 600)}
     for key, values in store.hashes.items():
         for part in [key, *values]:
             assert not ids & set(part.replace(":", "|").split("|"))
