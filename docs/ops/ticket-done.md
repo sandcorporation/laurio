@@ -8,7 +8,7 @@
 Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 가드·e2e·celery 를 돈다(Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서).
 **GitHub Actions `PR 검사` 의 「결과」 잡(`gh pr checks <PR>`·`gh run watch`)이 초록이면(2026-11-09 #930 — Jenkins PR 검사는 기다리지 않는다) 작업자가 `gh pr merge <PR> --squash` 로
 병합한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합 하나가 곧 승격 하나·prod 배포
-하나다**(2026-11-09 #938, ADR-0077): 병합하면 Actions `release.yml` 이 검사 → 이미지 → `production` 승격을 돌고(`gh run list
+하나다**(2026-11-09 #938, ADR-0077): 병합하면 Actions `release.yml` 이 검사·이미지(병렬) → `production` 승격을 돌고(`gh run list
 --workflow release.yml`), `production` push 가 Jenkins 배포 잡(`codemit/deploy`)을 깨운다. 그다음
 `python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡의 GitHub 상태
 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록 — release 가 몇 분 걸리니 그만큼 늦게 시작한다).

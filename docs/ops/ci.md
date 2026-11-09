@@ -24,7 +24,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   기본 권한 `contents: read`, **쓰기는 정해진 자리에만** — `packages: write` 는 image(image.yml·release.yml 의 image 잡), `contents: write`
   는 release.yml 의 promote 잡. 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
 - **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다. 배포되는 커밋이
-  검사를 통과했다는 것은 release 의 check → image → promote 순서가 지킨다.
+  검사를 통과했다는 것은 promote 가 check·image 둘 다를 기다리는 것이 지킨다(check·image 는 병렬로 돈다).
 - **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 글은 꺼진 검사의 기록이다.** 배포 잡의 비상 길(`BUILD_ON=jenkins`)은
   여전히 `build-images.sh`(`images.sh`·`deploy-guard.sh`·`images-ctx.sh`)로 빌드 노드에서 굽는다.
 

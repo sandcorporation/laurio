@@ -1,5 +1,5 @@
 # 배포 이미지(#938, ADR-0077): main 의 커밋마다 여섯 이미지를 GitHub 호스팅 arm64 실행기에서 네이티브로 굽고 ghcr 에 올린다.
-# main push 에서는 release.yml 이 검사(PR 검사와 같은 pr-check.yml) 통과 뒤 workflow_call 로 부른다. 여섯이 모두 오르면
+# main push 에서는 release.yml 이 검사(PR 검사와 같은 pr-check.yml)와 나란히 workflow_call 로 부른다. 여섯이 모두 오르면
 # release.yml 이 production 을 이 sha 로 승격하고, Jenkins `codemit/deploy` 는 production 머리의 이미지를 받아(jenkins-shared
 # sandcorpDeploy deployFrom) oracle 에 배포한다 — 그 전에는 Jenkins 빌드 노드가 `scripts/ci/build-images.sh` 로 구웠다.
 #

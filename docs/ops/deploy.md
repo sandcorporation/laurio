@@ -166,8 +166,8 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 
    **e2e 대조는 걷었다**(#938). 예전에는 PR 검사(Jenkins)가 e2e 가 본 arm64 digest 에 `e2e-<트리>-arm64` 태그를 붙이고 배포가
    떠 있는 이미지와 견줬다(`deploy.sh prod e2e-digest`, #729). Actions PR 검사는 이미지를 올리지 않아 태그가 생기지 않으므로
-   그 대조와 `images-e2e.sh` 를 지웠다. 「배포되는 것은 검사가 통과한 커밋」은 release 의 check → image → promote 순서가
-   지킨다 — production 은 그 커밋의 check 와 여섯 이미지가 모두 초록일 때만 움직인다.
+   그 대조와 `images-e2e.sh` 를 지웠다. 「배포되는 것은 검사가 통과한 커밋」은 release 의 promote 가
+   check·image 를 둘 다 기다리는 것이 지킨다(check·image 는 병렬) — production 은 그 커밋의 check 와 여섯 이미지가 모두 초록일 때만 움직인다.
 
    **자동 롤백은 없다**(`autoRollback: false`) — `deploy.sh` 는 배포 표식 기준으로 바꿀 서비스를 정해서, 같은 스크립트를 옛
    sha 로 다시 부르면 아무것도 되돌리지 않는다. 교체 뒤 실패(종료 2)는 운영을 사람이 봐야 한다는 뜻이다.
