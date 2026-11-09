@@ -65,10 +65,22 @@ jobs:
         run: python3 scripts/test_public_repo.py
 
   checks:
+    name: checks ${{ matrix.name }}
     needs: plan
     if: needs.plan.outputs.tests == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # sub-checks.sh 의 묶음(#932) — pytest 는 시험 파일을 넷으로 나눈다
+        include:
+          - {name: static, args: static}
+          - {name: pytest-1of4, args: pytest 1/4}
+          - {name: pytest-2of4, args: pytest 2/4}
+          - {name: pytest-3of4, args: pytest 3/4}
+          - {name: pytest-4of4, args: pytest 4/4}
+          - {name: web, args: web}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -83,7 +95,7 @@ jobs:
           key: bk-ci-${{ hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml') }}
           restore-keys: bk-ci-
       - name: 검사 묶음(sub-checks.sh)
-        run: bash scripts/ci/sub-checks.sh
+        run: bash scripts/ci/sub-checks.sh ${{ matrix.args }}
       - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-ci.outputs.cache-hit != 'true'
         name: 이미지 층 캐시 저장(ci, main push 만)
         run: rm -rf /tmp/bk/ci && mv /tmp/bk-new/ci /tmp/bk/ci
@@ -95,7 +107,7 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: checks-test-results
+          name: checks-test-results-${{ matrix.name }}
           path: test-results/
           retention-days: 7
 
@@ -144,10 +156,18 @@ jobs:
           path: /tmp/bk/${{ matrix.app }}
           key: bk-${{ matrix.app }}-${{ hashFiles(format('docker/{0}.Dockerfile', matrix.app), 'pnpm-lock.yaml') }}
   e2e:
+    name: e2e ${{ matrix.name }}
     needs: plan
     if: needs.plan.outputs.tests == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # 실행기마다 스택을 따로 굽고 프로젝트를 나눠 돈다(#932). 일꾼은 그대로 1개
+        include:
+          - {name: public-operator, targets: public operator}
+          - {name: classroom, targets: classroom}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -212,6 +232,7 @@ jobs:
         env:
           # 호스팅 실행기는 코어가 적어(비공개 2·공개 4) 앱 셋·백엔드와 일꾼 둘이 다투면 3초 한도를 넘는다
           CODEMIT_E2E_WORKERS: 1
+          CODEMIT_E2E_TARGETS: ${{ matrix.targets }}
         run: bash scripts/ci/e2e.sh
       - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
         name: 이미지 층 캐시 저장(backend, main push 만)
@@ -234,7 +255,7 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: e2e-test-results
+          name: e2e-test-results-${{ matrix.name }}
           path: test-results/
           retention-days: 7
 

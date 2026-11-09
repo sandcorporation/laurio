@@ -32,6 +32,11 @@ ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`
 - **저장은 main push 실행에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
   10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
   `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.
+- **병렬화(#932)**: `checks` 는 `sub-checks.sh <묶음>` 으로 여섯 실행기 — `static`(Django·생성물·문서·언어 검사)·`pytest I/N`(4조각,
+  시험 파일을 정렬한 순번 % 4)·`web`(단위 시험·typecheck). 인자 없이는 전부 돈다(로컬 길). `e2e` 는 `CODEMIT_E2E_TARGETS` 로
+  `public operator`·`classroom` 두 실행기(일꾼 1개 그대로). Playwright `--shard` 대신 프로젝트 단위로 나눈 까닭은 `e2e-two-pass.sh` 의
+  `@exclusive` 패스가 시험 순번 shard 와 섞이면 일꾼 하나 보장이 깨지기 때문이다. 실패 결과물은 `checks-test-results-<묶음>`·`e2e-test-results-<이름>`.
+  동시 잡은 plan 1 + checks 6 + guard 3 + e2e 2 + celery 1 + 결과 1 = 14(공개 저장소 한도 20 안). 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
 - **pnpm 저장소**·**Playwright 브라우저**(`e2e` 잡 호스트 설치, 키는 lockfile 해시·Playwright 버전)도 같은 규칙이다.
 - **10GB**: 키가 lockfile·Dockerfile 해시라 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터 지운다.
   `gh cache list` 합계를 가끔 본다.

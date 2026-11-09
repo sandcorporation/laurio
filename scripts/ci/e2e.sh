@@ -120,7 +120,8 @@ run_target() {
 }
 
 failed=0
-for target in public operator classroom; do
+# GitHub Actions 는 실행기 둘로 나눠 `CODEMIT_E2E_TARGETS` 로 프로젝트를 고른다(#932). 없으면 셋 다.
+for target in ${CODEMIT_E2E_TARGETS:-public operator classroom}; do
   started=$SECONDS
   if run_target "$target"; then
     echo "통과  e2e $target ($((SECONDS - started))초)" | tee -a "$summary"

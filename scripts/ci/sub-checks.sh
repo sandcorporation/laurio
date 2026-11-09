@@ -48,6 +48,6 @@ done
 
 status=0
 docker run --name "$box" --network "$net" --env-file scripts/ci/backend-test.env -e CI=true \
-  "$image" bash scripts/ci/sub-checks-inside.sh || status=$?
+  "$image" bash scripts/ci/sub-checks-inside.sh "$@" || status=$?
 docker cp "$box:/repo/test-results/." test-results/ >/dev/null 2>&1 || true
 exit "$status"
