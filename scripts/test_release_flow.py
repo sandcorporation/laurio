@@ -53,7 +53,7 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertRegex(on.group(1), r"(?m)^  workflow_call:")
         self.assertNotRegex(on.group(1), r"(?m)^  push:")
 
-    def test_release_runs_check_then_image_then_promote_on_main_only(self) -> None:
+    def test_release_runs_check_and_image_then_promote_on_main_only(self) -> None:
         code = read(WORKFLOWS / "release.yml")
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", code)
         assert on
@@ -61,7 +61,8 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/pr-check.yml", job_block(code, "check"))
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)
-        self.assertRegex(image, r"needs:\s*check\b")
+        # check 와 image 는 병렬 — 승격만 둘을 기다린다.
+        self.assertNotIn("needs:", image)
         promote = job_block(code, "promote")
         self.assertRegex(promote, r"needs:\s*\[check, image\]")
         self.assertIn('bash scripts/ci/promote.sh ff "$SHA"', promote)

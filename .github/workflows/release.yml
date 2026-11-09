@@ -1,12 +1,13 @@
-# main push → 검사 → 이미지 → production 승격(#938, ADR-0077). production 브랜치 머리 = 운영 버전.
+# main push → 검사·이미지(병렬) → production 승격(#938, ADR-0077). production 브랜치 머리 = 운영 버전.
 # Jenkins `codemit/deploy` 는 production push 만 보고, 굽지도 검사하지도 않고 그 sha 의 이미지를 받아 oracle 에 배포한다
 # (Jenkinsfile → jenkins-shared sandcorpDeploy deployFrom: 'production').
 #
 #   check   pr-check.yml(workflow_call) — PR 과 같은 검사(정적·pytest·web·guard·e2e·celery). 깨지면 이미지도 승격도 없다.
 #           main 실행이라 이미지 층 캐시를 저장한다(#932).
-#   image   needs check. image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>).
-#   promote needs check·image. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
+#   image   check 와 나란히 돈다(needs 없음 — check 산출물에 기대지 않는다, 캐시는 레지스트리 것). image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>).
+#   promote needs check·image — 둘 다 초록일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
 #           production 이 이미 더 새 판이면(옛 실행이 늦게 끝남) 실패가 아니라 건너뜀.
+#   check 가 붉어도 이미지는 ghcr 에 오를 수 있다 — 승격되지 않으니 배포되지 않는다(병렬로 돌려 병합→배포를 줄인 값).
 # production 은 앞으로만 간다(ruleset: 강제 push·삭제 금지). 되돌리기는 main 에 revert PR — 이 흐름을 그대로 탄다.
 # 급하면 Jenkins 「Build with Parameters」의 ROLLBACK_SHA(production 은 그대로) — docs/ops/deploy.md 「되돌리기」.
 #
@@ -31,7 +32,6 @@ jobs:
       contents: read
 
   image:
-    needs: check
     uses: ./.github/workflows/image.yml
     permissions:
       contents: read
