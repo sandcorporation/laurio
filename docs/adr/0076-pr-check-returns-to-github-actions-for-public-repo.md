@@ -21,15 +21,15 @@ ADR-0061(2026-10-15)은 Actions 를 떠났다. 그 까닭은 비공개 저장소
   않는다 — 값은 `scripts/ci/*.env` 의 CI 전용 가짜 값이다. `permissions: contents: read`, 체크아웃은
   `persist-credentials: false`, 액션은 공식 것만 SHA 로 고정한다.
 - **배포는 Jenkins 에 둔다.** `main` push → `codemit/deploy` 그대로다(ADR-0068·0071).
-- **당분간 둘 다 돈다.** Jenkins `codemit/ci-pr` 는 공개 전환 뒤 대장이 끄기 전까지 Actions 와 함께 돌고, 둘 다 초록이어야
-  병합한다.
+- **병합 기준은 Actions 「결과」 잡이다**(2026-11-09 대표 결정 보충). Jenkins `codemit/ci-pr` 는 대장이 끄기 전까지 함께
+  돌지만 기다리지 않고 결과도 병합 조건이 아니다.
 
 ## Jenkins 와 다른 것
 
 - Actions 는 이미지를 **amd64 로 실행기 안에서** 굽고 레지스트리에 올리지 않는다. 그래서 「시험한 digest = 배포할 digest」
   (Jenkins 의 `images.sh arm64` → e2e, ctx·e2e 태그)는 Actions 에 없다. Jenkins PR 검사를 끄면 배포 잡이 언제나 직접 굽고
   가드하며, prod 의 「e2e 대조」는 「대조 못 함」이 된다(관측만이라 배포를 막지 않는다).
-- e2e 는 호스팅 실행기에서 돈다. 시험 하나 3초·재시도 0(playwright.config.ts)은 그대로다.
+- e2e 는 호스팅 실행기에서 돈다. 시험 하나 3초·재시도 0(playwright.config.ts)은 그대로이고, 코어가 적어 Playwright 일꾼을 하나로 준다(`CODEMIT_E2E_WORKERS=1` — 둘이면 3초를 넘었다).
 
 ## 결과
 

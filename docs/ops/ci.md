@@ -12,14 +12,14 @@
 ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을 amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`e2e`
 (`e2e.sh`, 스택을 여기서 굽는다)·`celery`(`celery-broker.sh`) → `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름).
 이미지를 레지스트리에 올리지 않으므로 ctx·e2e 태그는 Jenkins 만 붙인다. secrets 를 쓰지 않고(`scripts/ci/*.env` 의 가짜
-값), 권한은 `contents: read`, `pull_request_target`·self-hosted 를 쓰지 않으며 액션은 SHA 로 고정한다. **Jenkins PR 검사는
-공개 전환 뒤 대장이 끄기 전까지 함께 돌고, 둘 다 초록이어야 병합한다** — `wait-ci.py` 는 Jenkins 상태만 보므로 Actions 는
-`gh pr checks <PR>`·`gh run watch` 로 따로 본다.
+값), 권한은 `contents: read`, `pull_request_target`·self-hosted 를 쓰지 않으며 액션은 SHA 로 고정한다. **병합 기준은 Actions
+「결과」 잡이다**(2026-11-09 대표 결정, #930 댓글) — `gh pr checks <PR>`·`gh run watch` 로 본다. Jenkins PR 검사는 대장이 끄기
+전까지 함께 돌지만 기다리지 않고 결과도 병합 조건이 아니다. 아래 Jenkins 절은 그 잡이 꺼질 때까지의 사실이다.
 
 **PR 검사는 Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다.** 지금 잡은 **브랜치 발견**이다 —
 GitHub 소스 `sandcorporation/laurio` 의 브랜치(`main`·`production`·옛 `staging` 은 뺀다)마다 하위 잡이 생기고,
 5분마다 훑어 새 push 를 찾는다. 같은 브랜치에 새로 push 하면 옛 빌드를 끊는다. 결과는 브랜치 머리 커밋의 상태
-`continuous-integration/jenkins/branch` 이고, 작업자는 `wait-ci.py <PR>` 가 SUCCESS 일 때 병합한다(「티켓을 닫는 기준」).
+`continuous-integration/jenkins/branch` 이다 — 병합 기준이 아니다(위 Actions 문단, 「티켓을 닫는 기준」).
 라이브러리의 「PR 검사 실패 — …」 댓글은 PR 빌드(`CHANGE_ID`)에서만 달리므로 **지금은 달리지 않는다** — 잡을 PR 발견
 (머지 결과, 라이브러리 README 「잡」)으로 바꾸는 것은 Jenkins 잡 설정이라 대장 몫이다. 그때까지 실패 줄은 home Jenkins
 홈의 빌드 로그(`/var/jenkins_home/jobs/codemit/jobs/ci-pr/branches/<브랜치>/builds/<N>/log`)를 읽는다.
