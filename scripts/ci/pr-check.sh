@@ -26,6 +26,8 @@ export CODEMIT_CI_RUN_ID="${CODEMIT_CI_RUN_ID:-${BUILD_TAG:-codemit-pr}-$(date +
 base=$("${GIT[@]}" merge-base origin/main HEAD 2>/dev/null || true)
 plan=$(bash scripts/ci/changed.sh "$base")
 echo "돌릴 것: $plan (기준 ${base:0:12})"
+# 공개 저장소 위생(#930) — 내부 호스트·OCI 실값·워크플로 보안 규칙. 호스트의 git 이 필요해 CI 이미지 밖에서 돈다.
+python3 scripts/test_public_repo.py || exit 1
 if [ "$plan" = "TESTS=0" ]; then
   exec python3 scripts/check_adr_status.py
 fi

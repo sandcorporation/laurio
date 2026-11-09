@@ -1,6 +1,6 @@
 # CI 는 GitHub Actions 를 떠나 전부 Jenkins 에서 돈다 — 바뀌지 않은 서비스의 이미지는 굽지 않는다
 
-Status: Accepted (2026-10-15 결정)
+Status: Amended by ADR-0076 (2026-10-15 결정)
 
 2026-10-02 부터 시험은 Jenkins(`codemit-pr`·`codemit-train`)가 돌렸고, GitHub Actions 에는 셋만
 남았다 — 배포 이미지 열둘(staging amd64 여섯·prod arm64 여섯), 그 staging 이미지를 받아 보는 부팅

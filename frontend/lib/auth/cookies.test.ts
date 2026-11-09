@@ -43,19 +43,19 @@ describe("setSessionCookies — domain 속성", () => {
   });
 
   test("CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면(prod) 부모 도메인을 domain으로 쓴다", () => {
-    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".example.com";
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
 
     const access = response.cookies.get(ACCESS_COOKIE);
     const refresh = response.cookies.get(REFRESH_COOKIE);
-    expect(access?.domain).toBe(".laurio.honeycombpizza.link");
-    expect(refresh?.domain).toBe(".laurio.honeycombpizza.link");
+    expect(access?.domain).toBe(".example.com");
+    expect(refresh?.domain).toBe(".example.com");
   });
 
   test("httpOnly는 domain 설정 여부와 무관하게 그대로다", () => {
-    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".example.com";
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
@@ -69,15 +69,15 @@ describe("clearSessionCookies — domain 속성이 setSessionCookies와 일치�
   // 로그아웃 시 지우는 쿠키의 domain이 로그인 때 설정한 domain과 다르면 브라우저가
   // 다른 쿠키로 취급해 실제로는 지워지지 않는다.
   test("CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면 삭제 쿠키도 같은 domain을 쓴다", () => {
-    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".example.com";
     const response = new NextResponse();
 
     clearSessionCookies(response);
 
     const access = response.cookies.get(ACCESS_COOKIE);
     const refresh = response.cookies.get(REFRESH_COOKIE);
-    expect(access?.domain).toBe(".laurio.honeycombpizza.link");
-    expect(refresh?.domain).toBe(".laurio.honeycombpizza.link");
+    expect(access?.domain).toBe(".example.com");
+    expect(refresh?.domain).toBe(".example.com");
   });
 });
 

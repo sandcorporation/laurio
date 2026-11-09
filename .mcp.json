@@ -2,7 +2,7 @@
   "mcpServers": {
     "glitchtip": {
       "type": "http",
-      "url": "https://glitchtip.honeycombpizza.link/mcp",
+      "url": "${GLITCHTIP_URL}/mcp",
       "headers": {
         "Authorization": "Bearer ${GLITCHTIP_TOKEN}"
       }

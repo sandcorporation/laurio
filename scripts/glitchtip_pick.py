@@ -74,7 +74,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "https://glitchtip.honeycombpizza.link")
+GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "").rstrip("/")  # 자체 호스팅 GlitchTip 주소 — 저장소에 적지 않는다(#930)
 ORG_SLUG = os.environ.get("GLITCHTIP_ORG", "codemit")
 
 #: 이 접두어의 프로젝트만 집는다. GlitchTip 조직 `codemit` 에는 2026-10-16 부터 다른
@@ -132,6 +132,8 @@ def _load_env_token() -> str:
 
 
 def _request(path: str, token: str, *, method: str = "GET", body: dict | None = None) -> tuple[int, object]:
+    if not GLITCHTIP_URL:
+        raise SystemExit("GLITCHTIP_URL 이 비어 있다 — 자체 호스팅 GlitchTip 주소를 환경변수로 준다")
     url = f"{GLITCHTIP_URL}/api/0/{path.lstrip('/')}"
     data = json.dumps(body).encode("utf-8") if body is not None else None
     request = urllib.request.Request(url, data=data, method=method)

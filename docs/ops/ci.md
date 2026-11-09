@@ -1,4 +1,4 @@
-# CI 는 Jenkins 에서 돈다 — PR 검사 하나, 병합 하나 = 배포 하나
+# CI 는 Jenkins 에서 돈다 — PR 검사 하나, 병합 하나 = 배포 하나 (PR 검사는 Actions 에서도)
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
@@ -6,6 +6,15 @@
 초록이면 작업자가 squash 로 병합하고, 그 main push 가 배포 잡(`sandcorpDeploy`, 「배포」 문서)을 깨운다. 열차
 (`codemit/ci-train`, 2026-10-03~11-05)와 그 상태 `codemit/automerge` 는 없다. 라이브러리의 인자·동작은
 `sandcorporation/jenkins-shared` 의 README 가 원문이고, 여기에는 codemit 에만 있는 것을 적는다.
+
+**PR 검사는 GitHub Actions 에서도 돈다**(2026-11-09 #930, ADR-0076 — 저장소 공개 준비). `.github/workflows/pr-check.yml`
+이 `pull_request`·`main` push 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면
+ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을 amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`e2e`
+(`e2e.sh`, 스택을 여기서 굽는다)·`celery`(`celery-broker.sh`) → `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름).
+이미지를 레지스트리에 올리지 않으므로 ctx·e2e 태그는 Jenkins 만 붙인다. secrets 를 쓰지 않고(`scripts/ci/*.env` 의 가짜
+값), 권한은 `contents: read`, `pull_request_target`·self-hosted 를 쓰지 않으며 액션은 SHA 로 고정한다. **Jenkins PR 검사는
+공개 전환 뒤 대장이 끄기 전까지 함께 돌고, 둘 다 초록이어야 병합한다** — `wait-ci.py` 는 Jenkins 상태만 보므로 Actions 는
+`gh pr checks <PR>`·`gh run watch` 로 따로 본다.
 
 **PR 검사는 Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다.** 지금 잡은 **브랜치 발견**이다 —
 GitHub 소스 `sandcorporation/laurio` 의 브랜치(`main`·`production`·옛 `staging` 은 뺀다)마다 하위 잡이 생기고,
@@ -141,7 +150,7 @@ GitHub 소스 `sandcorporation/laurio` 의 브랜치(`main`·`production`·옛 `
   성공한 prod 배포) 기준으로 바뀐 서비스가 없다고 내 교체 없이 표식만 옮긴다(#873 — 그 전에는 GitHub 의 `production` 브랜치와
   `changed.sh` 로 견줘 노드도 잡지 않았다, #840). 배포 표식은 성공한 배포의 마지막에만 옮기므로 배포가 실패한 커밋 뒤의 문서
   커밋도 그 배포를 다시 시도한다(#709 의 교훈).
-- **GitHub Actions 는 쓰지 않는다**(2026-10-15, #705, ADR-0061). 조직이 Free 요금제라 호스티드 분량(월
+- **배포는 GitHub Actions 를 쓰지 않는다**(2026-10-15, #705, ADR-0061 — PR 검사만 #930 에서 돌아왔다, ADR-0076). 조직이 Free 요금제라 호스티드 분량(월
   2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit/deploy` 잡(`Jenkinsfile`)의 앞 단계가 됐다
   (「배포」 절, `staging` 앞당기기는 #840 에서 걷었다). 이미지는 macos 가 arm64 여섯을 굽고(`scripts/ci/images.sh`; #840 전에는 home 가 amd64 여섯도 구웠고 #841 에서 걷었다),

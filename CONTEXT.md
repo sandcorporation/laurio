@@ -112,7 +112,7 @@ _Avoid_: 체크리스트 항목, Criterion, Spec, AcceptanceCriteria
 참여자가 결과물을 내면 채점이 돌아 통과 여부가 나올 뿐, 강의도 영상도 교재도 없다.
 그래서 용어집과 화면의 표제어를 「클래스」로 옮긴다. **코드는 그대로다** — 백엔드
 앱(`backend/classroom/`)·프런트엔드 앱(`classroom/`)의 이름, 모델 이름(`Class`),
-서브도메인(`classroom.laurio.honeycombpizza.link`)은 「강의실」 계열 식별자를 계속
+서브도메인(`classroom.<운영 도메인>`)은 「강의실」 계열 식별자를 계속
 쓴다(바꾸면 마이그레이션·환경변수·배포 설정이 함께 흔들리고 얻는 것이 없다) — 이
 문서와 화면의 낱말만 바뀐다.
 

@@ -62,7 +62,7 @@ git show <regression_of>          # 지난번에 무엇을 고쳤고 무엇을 �
 
 ```bash
 curl -s -H "Authorization: Bearer $GLITCHTIP_TOKEN" \
-  "https://glitchtip.honeycombpizza.link/api/0/issues/<id>/events/latest/" | python3 -m json.tool | head -200
+  "$GLITCHTIP_URL/api/0/issues/<id>/events/latest/" | python3 -m json.tool | head -200
 ```
 
 여기서 봐야 하는 것: 예외 타입·메시지, 우리 코드의 프레임(`backend/`·`frontend/`·

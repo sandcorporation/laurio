@@ -1,0 +1,151 @@
+# PR 검사 — GitHub 호스팅 실행기에서 Jenkins `codemit/ci-pr`(Jenkinsfile.pr → scripts/ci/pr-check.sh)와 같은 검사를 돈다
+# (#930, ADR-0076). 검사 내용은 이 파일에 쓰지 않고 그 스크립트들을 그대로 부른다 — 두 곳이 다른 검사를 하지 않게.
+#
+#   plan    문서(.md·docs/)만 바뀌었나(`changed.sh`) — 그러면 ADR 상태 검사만
+#   checks  `sub-checks.sh` — Django check·check --deploy·pytest 전체·생성물·문서 검사·단위 시험·타입 검사
+#   guard   세 앱 prod 이미지(amd64)를 여기서 굽고 `deploy-guard.sh` — 설정 없이는 죽고, 완전한 설정으로는 뜬다
+#   e2e     `e2e.sh` — 스택을 여기서 굽고(`up --build`) 세 프로젝트
+#   celery  `celery-broker.sh` — 실제 Redis 브로커로 beat → worker
+#   결과    위가 모두 초록(또는 문서만이라 건너뜀)이면 초록 — 브랜치 보호의 필수 검사로 걸 이름 하나
+#
+# Jenkins 와 다른 것: 이미지는 arm64 가 아니라 amd64 로 이 실행기에서 굽고 레지스트리에 올리지 않는다(ctx·e2e 태그 없음).
+# 배포할 digest 를 굽고 시험하는 일은 Jenkins 에 남는다.
+#
+# 보안(공개 저장소): `pull_request` 만(`pull_request_target` 금지), 호스팅 실행기만, secrets 를 쓰지 않는다(값은
+# scripts/ci/*.env 의 CI 전용 가짜 값), 권한은 contents: read, 액션은 SHA 로 고정한다.
+name: PR 검사
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CODEMIT_CI_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tests: ${{ steps.plan.outputs.tests }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        name: 무엇을 돌릴지
+        run: |
+          base=$(git merge-base origin/main HEAD 2>/dev/null || true)
+          # main push 는 기준이 HEAD 자신이라 「바뀐 것 없음」→ 전부 돈다(changed.sh)
+          plan=$(bash scripts/ci/changed.sh "$base")
+          echo "돌릴 것: $plan (기준 ${base:0:12})"
+          echo "tests=${plan#TESTS=}" >>"$GITHUB_OUTPUT"
+      - name: ADR 상태
+        run: python3 scripts/check_adr_status.py
+      - name: 공개해도 되는 HEAD 인가(내부 호스트·OCI 실값·워크플로 보안)
+        run: python3 scripts/test_public_repo.py
+
+  checks:
+    needs: plan
+    if: needs.plan.outputs.tests == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: 검사 묶음(sub-checks.sh)
+        run: bash scripts/ci/sub-checks.sh
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: checks-test-results
+          path: test-results/
+          retention-days: 7
+
+  guard:
+    needs: plan
+    if: needs.plan.outputs.tests == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [frontend, operator, classroom]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: prod 이미지 굽기(amd64)
+        run: |
+          target=$(python3 scripts/ci/image_context.py field "${{ matrix.app }}" target)
+          docker build -q -f "docker/${{ matrix.app }}.Dockerfile" ${target:+--target "$target"} \
+            -t "codemit-${{ matrix.app }}:gha-guard" .
+      - name: 부팅 가드(deploy-guard.sh)
+        env:
+          CODEMIT_GUARD_ARCH: amd64
+          CODEMIT_GUARD_IMAGE: codemit-${{ matrix.app }}:gha-guard
+        run: bash scripts/ci/deploy-guard.sh "${{ matrix.app }}"
+
+  e2e:
+    needs: plan
+    if: needs.plan.outputs.tests == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: pnpm 과 Playwright 의존 라이브러리
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm --dir frontend exec playwright install --with-deps chromium
+      - name: e2e(e2e.sh)
+        run: bash scripts/ci/e2e.sh
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-test-results
+          path: test-results/
+          retention-days: 7
+
+  celery:
+    needs: plan
+    if: needs.plan.outputs.tests == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: celery 브로커(celery-broker.sh)
+        run: bash scripts/ci/celery-broker.sh
+
+  result:
+    name: 결과
+    needs: [plan, checks, guard, e2e, celery]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 모두 초록인가
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "잡 결과: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) exit 1 ;; esac
+          done

@@ -42,25 +42,25 @@ describe("setSessionCookies — domain 속성이 공개 앱과 같다", () => {
   });
 
   test("CODEMIT_SESSION_COOKIE_DOMAIN이 설정되면 부모 도메인을 domain으로 쓴다", () => {
-    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".example.com";
     const response = new NextResponse();
 
     setSessionCookies(response, { access: fakeJwt(300), refresh: fakeJwt(1209600) });
 
-    expect(response.cookies.get(ACCESS_COOKIE)?.domain).toBe(".laurio.honeycombpizza.link");
-    expect(response.cookies.get(REFRESH_COOKIE)?.domain).toBe(".laurio.honeycombpizza.link");
+    expect(response.cookies.get(ACCESS_COOKIE)?.domain).toBe(".example.com");
+    expect(response.cookies.get(REFRESH_COOKIE)?.domain).toBe(".example.com");
   });
 });
 
 describe("clearSessionCookies", () => {
   test("domain이 설정되면 삭제 쿠키도 같은 domain을 쓴다", () => {
-    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".laurio.honeycombpizza.link";
+    process.env.CODEMIT_SESSION_COOKIE_DOMAIN = ".example.com";
     const response = new NextResponse();
 
     clearSessionCookies(response);
 
-    expect(response.cookies.get(ACCESS_COOKIE)?.domain).toBe(".laurio.honeycombpizza.link");
-    expect(response.cookies.get(REFRESH_COOKIE)?.domain).toBe(".laurio.honeycombpizza.link");
+    expect(response.cookies.get(ACCESS_COOKIE)?.domain).toBe(".example.com");
+    expect(response.cookies.get(REFRESH_COOKIE)?.domain).toBe(".example.com");
   });
 });
 

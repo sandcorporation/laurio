@@ -41,7 +41,10 @@ describe("개인정보처리방침 서비스 오류 기록(#928)", () => {
   });
 
   it("호스트·내부 주소는 적지 않고, 위탁·국외 이전 절에는 넣지 않는다", () => {
-    expect(page).not.toMatch(/glitchtip|honeycombpizza/i);
+    expect(page).not.toMatch(/glitchtip/i);
+    // 적힌 주소는 공개 문서 사이트뿐이다 — 내부 호스트(오류 수집기 등)가 끼면 여기서 걸린다.
+    const hosts = new Set([...page.matchAll(/https?:\/\/([A-Za-z0-9.-]+)/g)].map((m) => m[1]));
+    expect([...hosts]).toEqual(["sandcorporation.github.io"]);
     const outsourcing = page.slice(page.indexOf('title="5. 개인정보 처리의 위탁"'), page.indexOf('title="7. '));
     expect(outsourcing).not.toContain("오류 기록");
   });

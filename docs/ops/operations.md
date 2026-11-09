@@ -27,7 +27,7 @@ docker compose -f docker/compose.dev.yaml exec db psql -U codemit -d codemit
 `sandcorporation/sandcorp-backup` 의 README 가 일정·보관 위치·**복원 절차**를 말한다(oracle 이 매일 04:30 에
 `codemit-prod-db-1` 을 `pg_dumpall` 해 OCI restic 과 home `/data/backups/oracle` 두 곳에 둔다). 앱의
 옛 백업(celery beat `core.backup_database`, `DB_BACKUP_*`, `DatabaseBackup`)은 걷었고, 비공개 버킷
-`codemit-prod` 의 옛 `db-backups/` 객체는 지우지 않고 그대로 둔다(삭제는 대표가 따로 정한다). backend
+비공개 버킷(`STORAGE_BUCKET`)의 옛 `db-backups/` 객체는 지우지 않고 그대로 둔다(삭제는 대표가 따로 정한다). backend
 이미지에 `postgresql-client-17` 도 더는 없다. **손으로 쓰는 beat 항목은 `config/celery.py` 의
 `SCHEDULED_JOBS` 한 자리뿐이다.** 이와 별개로 **prod 배포는 적용할 마이그레이션이 있을 때 migrate 직전에
 한 번 더 덤프한다** — oracle 의 배포 디렉터리 `.jenkins-prod-dumps/` 에 최근 3개(custom 형식, 600)를
@@ -350,7 +350,7 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
 stdout 에만 남고 세 앱에는 오류를 받을 자리조차 없어(`error.tsx` 도 없었다), 배포된
 5xx 가 아무도 모르는 채로 며칠 났다. 지금은 Sentry SDK 로 보내는데 받는 쪽이
 sentry.io 가 아니라 **우리가 띄운 GlitchTip**
-(`https://glitchtip.honeycombpizza.link`, 저장소 밖에서 사람이 띄웠다)이다 — 수업
+(주소는 `GLITCHTIP_URL`·DSN 이 가리킨다, 저장소 밖에서 사람이 띄웠다)이다 — 수업
 제출물·이름·이메일을 다루는 서버라 오류 본문이 바깥 업체로 나가지 않는 편이 낫다.
 프로젝트는 **앱마다 하나**(backend·frontend·operator·classroom)고 DSN 도 그만큼 있다.
 

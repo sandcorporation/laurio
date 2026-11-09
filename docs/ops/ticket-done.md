@@ -6,7 +6,7 @@
 400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. Jenkins
 `codemit/ci-pr`(`Jenkinsfile.pr`)가 home 검사 묶음과 arm64 이미지·부팅 가드·e2e·celery 를 돌린다(「CI 는 Jenkins 에서 돈다」).
-**`python3 ~/.claude/skills/issue-track/scripts/wait-ci.py <PR>` 가 SUCCESS 면 작업자가 `gh pr merge <PR> --squash` 로
+**`python3 ~/.claude/skills/issue-track/scripts/wait-ci.py <PR>` 가 SUCCESS 이고 Actions `PR 검사`(`gh pr checks <PR>`, #930)도 초록이면 작업자가 `gh pr merge <PR> --squash` 로
 병합한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합이 곧 prod 배포다** — 병합하면
 `python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡(`codemit/deploy`)의
 GitHub 상태 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록). `main` 에 직접 push 하지 않는다

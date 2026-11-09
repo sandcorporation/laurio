@@ -32,7 +32,7 @@ test.describe("카카오 OAuth — 옵인 live 테스트", () => {
     const clientSecret = process.env.KAKAO_LIVE_SECRET_KEY;
     const redirectUri =
       process.env.KAKAO_LIVE_REDIRECT_URI ??
-      "https://laurio.honeycombpizza.link/api/auth/social/kakao/callback";
+      "https://codemit.kr/api/auth/social/kakao/callback";
 
     test.skip(
       !clientId || !clientSecret,

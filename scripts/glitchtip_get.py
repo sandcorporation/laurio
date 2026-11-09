@@ -38,7 +38,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "https://glitchtip.honeycombpizza.link")
+GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "").rstrip("/")  # 자체 호스팅 GlitchTip 주소 — 저장소에 적지 않는다(#930)
 ORG_SLUG = os.environ.get("GLITCHTIP_ORG", "codemit")
 TIMEOUT_SECONDS = 20
 
@@ -64,6 +64,8 @@ def _token() -> str:
 def _get(path: str, token: str) -> object:
     """2xx 가 아니면 **여기서 죽는다** — 호출부가 빈 값을 사실로 읽을 길을 없앤다."""
 
+    if not GLITCHTIP_URL:
+        raise SystemExit("GLITCHTIP_URL 이 비어 있다 — 자체 호스팅 GlitchTip 주소를 환경변수로 준다")
     url = f"{GLITCHTIP_URL}/api/0/{path.lstrip('/')}"
     request = urllib.request.Request(url)
     request.add_header("Authorization", f"Bearer {token}")
