@@ -8,12 +8,12 @@ compose 파일이 분리되어 있다 — 시크릿·어댑터 바인딩이 환�
 | | 파일 | `CODEMIT_DEPLOYMENT_TARGET` | 어댑터 | TLS·secure 쿠키 하드닝 |
 | --- | --- | --- | --- | --- |
 | dev | `docker/compose.dev.yaml` | (미설정) | 전부 Fake (MinIO만 예외) | 없음 |
-| prod | `docker/compose.prod.yaml` | `production` | 전부 real(토스 실물, 스토리지는 OCI Object Storage — 버킷 `codemit-prod`·`codemit-prod-public-images`) | 있음 |
+| prod | `docker/compose.prod.yaml` | `production` | 전부 real(토스 실물, 스토리지는 OCI Object Storage — 비공개 버킷·공개 이미지 버킷 둘, 이름은 운영 `.env.prod`) | 있음 |
 
 어댑터 바인딩표(ADR-0007)는 각 compose 파일 상단 주석에 있다. 시크릿은
 `docker/prod.env.example`을 복사해 `docker/.env.prod`로 채운다 — `.gitignore`가 막아 커밋되지 않는다.
 
-**prod 의 버킷은 둘이다**(#233, ADR-0032) — 제출물이 사는 비공개 버킷 `codemit-prod`와, 공모전 이미지만 사는 **익명 읽기 버킷** `codemit-prod-public-images`다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. prod 의 어댑터가 전부
+**prod 의 버킷은 둘이다**(#233, ADR-0032) — 제출물이 사는 비공개 버킷(`STORAGE_BUCKET`)과, 공모전 이미지만 사는 **익명 읽기 버킷**(`STORAGE_IMAGES_BUCKET`)이다. 버킷 생성·정책·CORS 는 이 저장소 밖의 수작업이다. prod 의 어댑터가 전부
 실물 구현이다: `PortOneV2VerificationAdapter`(#85) ·
 `TossPGAdapter`(#87) · `TossPayoutAdapter`·`TossSellerAdapter`(#57) ·
 `OpenAIScoringAdapter`(#88) · `OpenAIRequirementChatAdapter` ·
@@ -410,7 +410,7 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   컨테이너를 다시 켠다. `deploy.sh plan` 이 어느 쪽인지와 이유를 출력한다.
 - **그래서 호스트 포트가 없다** — 같은 서비스 둘이 한 호스트 포트를 잡을 수 없다. 쓰는 곳이
   없었다: 배포 헬스 체크는 컨테이너 안에서 치고 세 앱은 `backend:8000` 으로 간다. 옛 staging 의
-  `api.laurio.honeycombpizza.link`(저장소 밖 npmplus → 호스트 8000)는 남은 로그 사흘 동안
+  `api.<옛 staging 도메인>`(저장소 밖 npmplus → 호스트 8000)는 남은 로그 사흘 동안
   인증서 확인 말고는 스캐너뿐이었다 — 포트가 닫히며 끊긴다.
 - **실측**(세 호스트의 compose 2.33·5.1·5.5, 장난감 서비스): 둘인 동안 DNS 가 둘을 번갈아
   돌려주고, 옛 것을 멈추는 7초 동안 699번 중 연결 거부 1번 — BFF 가 연결 거부를 다시

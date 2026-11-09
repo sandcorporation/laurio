@@ -114,10 +114,10 @@ const REQUIRED_IN_DEPLOYED_ENVIRONMENTS: Array<{ name: string; reason: string }>
   {
     name: "CODEMIT_SESSION_COOKIE_DOMAIN",
     reason:
-      "부모 도메인(예: .laurio.honeycombpizza.link)을 주지 않으면 " +
+      "부모 도메인(예: .codemit.kr)을 주지 않으면 " +
       "lib/auth/cookies.ts의 setSessionCookies가 dev와 동일하게 domain을 " +
-      "생략한다 — laurio.honeycombpizza.link에서 로그인한 세션 쿠키가 " +
-      "classroom.laurio.honeycombpizza.link 등 형제 서브도메인으로 가지 " +
+      "생략한다 — codemit.kr에서 로그인한 세션 쿠키가 " +
+      "classroom.codemit.kr 등 형제 서브도메인으로 가지 " +
       "않아, 회원 공유라는 이 결정의 목적이 조용히 깨진다(ADR-0038).",
   },
 ];

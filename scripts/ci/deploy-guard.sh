@@ -80,7 +80,12 @@ step() { echo; echo "── $*"; }
 ghcr_login
 
 step "이 커밋이 배포하는 $app 이미지를 받는다: $image"
-docker pull -q "$image"
+# CODEMIT_GUARD_IMAGE 로 이 노드에서 구운 이미지를 주면(GitHub Actions PR 검사, #930) 받지 않고 그것을 쓴다.
+if [ -n "${CODEMIT_GUARD_IMAGE:-}" ] && docker image inspect "$image" >/dev/null 2>&1; then
+  echo "이 노드에 있는 이미지를 쓴다"
+else
+  docker pull -q "$image"
+fi
 docker tag "$image" "$local_image"
 image_arch="$(docker image inspect -f '{{.Architecture}}' "$local_image")"
 node_arch="$(docker version -f '{{.Server.Arch}}')"

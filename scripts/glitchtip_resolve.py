@@ -42,7 +42,7 @@ import sys
 import urllib.error
 import urllib.request
 
-GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "https://glitchtip.honeycombpizza.link")
+GLITCHTIP_URL = os.environ.get("GLITCHTIP_URL", "").rstrip("/")  # 자체 호스팅 GlitchTip 주소 — 저장소에 적지 않는다(#930)
 
 #: **줄 전체**가 이 모양일 때만 읽는다 — 본문 산문에 섞인 「GlitchTip: 이슈를 봤는데
 #: 원인은 다른 곳이었다」 같은 문장을 이슈 번호로 착각하지 않게.
@@ -149,6 +149,8 @@ def _issue_ids(base: str, head: str) -> list[str]:
 
 
 def _call(path: str, token: str, *, method: str, body: dict) -> tuple[int, str]:
+    if not GLITCHTIP_URL:
+        raise SystemExit("GLITCHTIP_URL 이 비어 있다 — 자체 호스팅 GlitchTip 주소를 환경변수로 준다")
     request = urllib.request.Request(
         f"{GLITCHTIP_URL}/api/0/{path}",
         data=json.dumps(body).encode("utf-8"),

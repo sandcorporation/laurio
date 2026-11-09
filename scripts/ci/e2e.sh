@@ -36,6 +36,9 @@ fi
 # 앱 셋·백엔드 넷·DB 가 함께 돈다.
 WORKERS=$(( $(getconf _NPROCESSORS_ONLN) / 3 ))
 [ "$WORKERS" -ge 2 ] || WORKERS=2
+# 코어가 적은 노드(GitHub 호스팅 실행기, #930)는 일꾼 수를 직접 준다 — 한도(3초)는 그대로다.
+WORKERS="${CODEMIT_E2E_WORKERS:-$WORKERS}"
+echo "코어 $(getconf _NPROCESSORS_ONLN) · Playwright 일꾼 $WORKERS"
 
 # 스택 로그는 **서비스마다 통째로** `test-results/stack/<서비스>.log` 에 남긴다(#699). 예전의
 # `--tail 80` 한 파일은 앞선 celery 줄로 다 차서, 시험이 붉어진 그 몇 초의 줄이 하나도 없었다
