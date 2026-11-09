@@ -16,6 +16,12 @@ if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then
   # shellcheck source=scripts/ci/ghcr-login.sh
   . scripts/ci/ghcr-login.sh
 fi
+# 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽고,
+# main push 실행만 CODEMIT_BK_CACHE_SAVE=1 로 backend 층을 내보낸다.
+if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
+  C+=(-f docker/compose.ci-cache.yaml)
+  if [ -n "${CODEMIT_BK_CACHE_SAVE:-}" ]; then C+=(-f docker/compose.ci-cache-save.yaml); fi
+fi
 C+=(--profile celery)
 # 구운 이미지까지 지운다(--rmi local) — 프로젝트 이름이 실행마다 달라 남기면 쌓인다(e2e.sh 머리 주석).
 cleanup() {

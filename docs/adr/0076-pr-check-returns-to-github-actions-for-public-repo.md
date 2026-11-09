@@ -21,8 +21,8 @@ ADR-0061(2026-10-15)은 Actions 를 떠났다. 그 까닭은 비공개 저장소
   않는다 — 값은 `scripts/ci/*.env` 의 CI 전용 가짜 값이다. `permissions: contents: read`, 체크아웃은
   `persist-credentials: false`, 액션은 공식 것만 SHA 로 고정한다.
 - **배포는 Jenkins 에 둔다.** `main` push → `codemit/deploy` 그대로다(ADR-0068·0071).
-- **병합 기준은 Actions 「결과」 잡이다**(2026-11-09 대표 결정 보충). Jenkins `codemit/ci-pr` 는 대장이 끄기 전까지 함께
-  돌지만 기다리지 않고 결과도 병합 조건이 아니다.
+- **병합 기준은 Actions 「결과」 잡이다**(2026-11-09 대표 결정 보충). Jenkins `codemit/ci-pr` 는 2026-11-09 에 꺼졌다
+  (#932 — `Jenkinsfile.pr`·`pr-check.sh`·`macos-sweep.sh` 삭제). PR 검사는 Actions 하나다.
 
 ## Jenkins 와 다른 것
 

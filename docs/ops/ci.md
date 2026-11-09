@@ -1,11 +1,14 @@
-# CI 는 Jenkins 에서 돈다 — PR 검사 하나, 병합 하나 = 배포 하나 (PR 검사는 Actions 에서도)
+# PR 검사는 GitHub Actions, 배포는 Jenkins — PR 검사 하나, 병합 하나 = 배포 하나
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
-**2026-11-05(#873, ADR-0071)부터 portfolio·foresight 와 같은 jenkins-shared 흐름이다** — PR 검사(`sandcorpPrCheck`)가
-초록이면 작업자가 squash 로 병합하고, 그 main push 가 배포 잡(`sandcorpDeploy`, 「배포」 문서)을 깨운다. 열차
-(`codemit/ci-train`, 2026-10-03~11-05)와 그 상태 `codemit/automerge` 는 없다. 라이브러리의 인자·동작은
-`sandcorporation/jenkins-shared` 의 README 가 원문이고, 여기에는 codemit 에만 있는 것을 적는다.
+**PR 검사는 GitHub Actions 하나다 — Jenkins PR 검사(`codemit/ci-pr`, `Jenkinsfile.pr`)는 꺼졌다(2026-11-09, #932).**
+`Jenkinsfile.pr`·`scripts/ci/pr-check.sh`(그 파일만 부르던)·`macos-sweep.sh` 는 지웠다. 2026-11-05(#873, ADR-0071)부터
+portfolio·foresight 와 같은 jenkins-shared 흐름이라 Actions 「결과」 잡이 초록이면 작업자가 squash 로 병합하고, 그 main push 가
+배포 잡(`sandcorpDeploy`, 「배포」 문서)을 깨운다. 열차(`codemit/ci-train`)와 `codemit/automerge` 는 없다. 라이브러리의
+인자·동작은 `sandcorporation/jenkins-shared` 의 README 가 원문이다. **아래에서 「PR 검사(Jenkins)」·macos·ctx/e2e 태그를 말하는
+글은 꺼진 검사의 기록이다** — 배포 잡이 쓰는 스크립트(`build-images.sh`·`images.sh`·`images-ctx.sh`·`deploy-guard.sh`·
+`images-e2e.sh`·`deploy-prod.sh`)는 그대로 남아 있고, 배포 잡이 직접 굽는다.
 
 **PR 검사는 GitHub Actions 에서도 돈다**(2026-11-09 #930, ADR-0076 — 저장소 공개 준비). `.github/workflows/pr-check.yml`
 이 `pull_request`·`main` push 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면
@@ -16,13 +19,25 @@ ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`
 「결과」 잡이다**(2026-11-09 대표 결정, #930 댓글) — `gh pr checks <PR>`·`gh run watch` 로 본다. Jenkins PR 검사는 대장이 끄기
 전까지 함께 돌지만 기다리지 않고 결과도 병합 조건이 아니다. 아래 Jenkins 절은 그 잡이 꺼질 때까지의 사실이다.
 
-**PR 검사는 Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr`)가 돌린다.** 지금 잡은 **브랜치 발견**이다 —
-GitHub 소스 `sandcorporation/laurio` 의 브랜치(`main`·`production`·옛 `staging` 은 뺀다)마다 하위 잡이 생기고,
-5분마다 훑어 새 push 를 찾는다. 같은 브랜치에 새로 push 하면 옛 빌드를 끊는다. 결과는 브랜치 머리 커밋의 상태
-`continuous-integration/jenkins/branch` 이다 — 병합 기준이 아니다(위 Actions 문단, 「티켓을 닫는 기준」).
-라이브러리의 「PR 검사 실패 — …」 댓글은 PR 빌드(`CHANGE_ID`)에서만 달리므로 **지금은 달리지 않는다** — 잡을 PR 발견
-(머지 결과, 라이브러리 README 「잡」)으로 바꾸는 것은 Jenkins 잡 설정이라 대장 몫이다. 그때까지 실패 줄은 home Jenkins
-홈의 빌드 로그(`/var/jenkins_home/jobs/codemit/jobs/ci-pr/branches/<브랜치>/builds/<N>/log`)를 읽는다.
+### Actions 의 캐시 — main 이 저장하고 PR 은 복원만 한다(#932)
+
+처음에는 캐시가 없어 PR 하나가 11분(646~665초)쯤 걸렸다. 잡 안쪽을 재 보니 시간은 **이미지 굽기**(`checks` 의 CI 이미지 약 107초,
+`guard` 92~112초, `e2e`·`celery` 의 스택 굽기 e2e 약 6분·celery 약 6분)와 **backend pytest 435초**에 몰려 있다. 앞의 것만 캐시로 줄인다 —
+시험 시간은 그대로다.
+
+- **이미지 층**: buildx `type=local` 캐시를 `actions/cache` 에 얹는다(`docker/setup-buildx-action` 의 컨테이너 빌더, 그래서 `--load`).
+  폴더는 이미지별 — `ci`(`checks`)·`backend`(`e2e`)·`frontend`·`operator`·`classroom`(`guard`) — 이고, 키는
+  `bk-<이름>-<Dockerfile·lockfile 해시>` 다. 복원은 `actions/cache/restore` 가 정확한 키 다음 `bk-<이름>-` 접두사로 가장 새 main 캐시를 받는다.
+  `e2e`·`celery` 는 backend·세 앱 폴더를 모두 복원한다(compose 쪽 연결은 `docker/compose.ci-cache.yaml`).
+- **저장은 main push 실행에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
+  10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
+  `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.
+- **pnpm 저장소**·**Playwright 브라우저**(`e2e` 잡 호스트 설치, 키는 lockfile 해시·Playwright 버전)도 같은 규칙이다.
+- **10GB**: 키가 lockfile·Dockerfile 해시라 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터 지운다.
+  `gh cache list` 합계를 가끔 본다.
+- 보안 규칙(`scripts/test_public_repo.py`)은 그대로다 — 액션 SHA 고정, `permissions: contents: read`, secrets 없음.
+
+(아래 표·글은 꺼진 Jenkins PR 검사의 기록이다.)
 
 | 단계 | 노드 | 하는 일 |
 | --- | --- | --- |

@@ -8,6 +8,10 @@
 #   celery  `celery-broker.sh` — 실제 Redis 브로커로 beat → worker
 #   결과    위가 모두 초록(또는 문서만이라 건너뜀)이면 초록 — 브랜치 보호의 필수 검사로 걸 이름 하나
 #
+# 캐시(#932): 이미지 층은 buildx `type=local` 캐시를 actions/cache 로 옮긴다(키 = Dockerfile·lockfile 해시).
+# **저장은 main push 실행만**, PR 은 복원만(`actions/cache/restore`) — PR 이 만든 캐시는 다른 PR 이 못 쓴다.
+# 별도 권한(`actions: write`)이 필요 없다 — GHA 캐시 백엔드(type=gha) 대신 actions/cache 를 쓰는 까닭이다.
+#
 # Jenkins 와 다른 것: 이미지는 arm64 가 아니라 amd64 로 이 실행기에서 굽고 레지스트리에 올리지 않는다(ctx·e2e 태그 없음).
 # 배포할 digest 를 굽고 시험하는 일은 Jenkins 에 남는다.
 #
@@ -29,6 +33,10 @@ concurrency:
 
 env:
   CODEMIT_CI_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+  # 이미지 층 캐시(#932) — 복원은 어디서나, 저장은 main push 실행에서만(PR 이 만든 캐시는 다른 PR 이 못 쓴다)
+  CODEMIT_BK_CACHE: /tmp/bk
+  CODEMIT_BK_CACHE_NEW: /tmp/bk-new
+  CODEMIT_BK_CACHE_SAVE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
 
 jobs:
   plan:
@@ -63,8 +71,25 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - id: bk-ci
+        name: 이미지 층 캐시 복원(ci)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/ci
+          key: bk-ci-${{ hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml') }}
+          restore-keys: bk-ci-
       - name: 검사 묶음(sub-checks.sh)
         run: bash scripts/ci/sub-checks.sh
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-ci.outputs.cache-hit != 'true'
+        name: 이미지 층 캐시 저장(ci, main push 만)
+        run: rm -rf /tmp/bk/ci && mv /tmp/bk-new/ci /tmp/bk/ci
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-ci.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/ci
+          key: bk-ci-${{ hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml') }}
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -85,17 +110,37 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - id: bk-app
+        name: 이미지 층 캐시 복원(${{ matrix.app }})
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.app }}
+          key: bk-${{ matrix.app }}-${{ hashFiles(format('docker/{0}.Dockerfile', matrix.app), 'pnpm-lock.yaml') }}
+          restore-keys: bk-${{ matrix.app }}-
       - name: prod 이미지 굽기(amd64)
         run: |
           target=$(python3 scripts/ci/image_context.py field "${{ matrix.app }}" target)
-          docker build -q -f "docker/${{ matrix.app }}.Dockerfile" ${target:+--target "$target"} \
-            -t "codemit-${{ matrix.app }}:gha-guard" .
+          cache=(--cache-from "type=local,src=$CODEMIT_BK_CACHE/${{ matrix.app }}")
+          if [ -n "$CODEMIT_BK_CACHE_SAVE" ]; then
+            cache+=(--cache-to "type=local,dest=$CODEMIT_BK_CACHE_NEW/${{ matrix.app }},mode=max")
+          fi
+          docker build -q --load -f "docker/${{ matrix.app }}.Dockerfile" ${target:+--target "$target"} \
+            "${cache[@]}" -t "codemit-${{ matrix.app }}:gha-guard" .
       - name: 부팅 가드(deploy-guard.sh)
         env:
           CODEMIT_GUARD_ARCH: amd64
           CODEMIT_GUARD_IMAGE: codemit-${{ matrix.app }}:gha-guard
         run: bash scripts/ci/deploy-guard.sh "${{ matrix.app }}"
-
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-app.outputs.cache-hit != 'true'
+        name: 이미지 층 캐시 저장(main push 만)
+        run: rm -rf /tmp/bk/${{ matrix.app }} && mv /tmp/bk-new/${{ matrix.app }} /tmp/bk/${{ matrix.app }}
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-app.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.app }}
+          key: bk-${{ matrix.app }}-${{ hashFiles(format('docker/{0}.Dockerfile', matrix.app), 'pnpm-lock.yaml') }}
   e2e:
     needs: plan
     if: needs.plan.outputs.tests == '1'
@@ -105,12 +150,60 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - id: bk-backend
+        name: 이미지 층 캐시 복원(backend)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/backend
+          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
+          restore-keys: bk-backend-
+      - id: bk-frontend
+        name: 이미지 층 캐시 복원(frontend)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/frontend
+          key: bk-frontend-${{ hashFiles('docker/frontend.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-frontend-
+      - id: bk-operator
+        name: 이미지 층 캐시 복원(operator)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/operator
+          key: bk-operator-${{ hashFiles('docker/operator.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-operator-
+      - id: bk-classroom
+        name: 이미지 층 캐시 복원(classroom)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/classroom
+          key: bk-classroom-${{ hashFiles('docker/classroom.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-classroom-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-      - name: pnpm 과 Playwright 의존 라이브러리
+      - id: pnpm-store
+        name: pnpm 저장소 경로·Playwright 버전
         run: |
           corepack enable
+          echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
+          echo "pw=$(grep -o '@playwright/test@[0-9.]*' pnpm-lock.yaml | head -1 | cut -d@ -f3)" >>"$GITHUB_OUTPUT"
+      - id: bk-pnpm
+        name: pnpm 저장소 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - id: bk-pw
+        name: Playwright 브라우저 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.pnpm-store.outputs.pw }}
+      - name: pnpm 과 Playwright 의존 라이브러리
+        run: |
           pnpm install --frozen-lockfile
           pnpm --dir frontend exec playwright install --with-deps chromium
       - name: e2e(e2e.sh)
@@ -118,6 +211,24 @@ jobs:
           # 호스팅 실행기는 코어가 적어(비공개 2·공개 4) 앱 셋·백엔드와 일꾼 둘이 다투면 3초 한도를 넘는다
           CODEMIT_E2E_WORKERS: 1
         run: bash scripts/ci/e2e.sh
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
+        name: 이미지 층 캐시 저장(backend, main push 만)
+        run: rm -rf /tmp/bk/backend && mv /tmp/bk-new/backend /tmp/bk/backend
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/backend
+          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pnpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pw.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.pnpm-store.outputs.pw }}
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -134,7 +245,39 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - id: bk-cbackend
+        name: 이미지 층 캐시 복원(backend)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/backend
+          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
+          restore-keys: bk-backend-
+      - id: bk-cfrontend
+        name: 이미지 층 캐시 복원(frontend)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/frontend
+          key: bk-frontend-${{ hashFiles('docker/frontend.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-frontend-
+      - id: bk-coperator
+        name: 이미지 층 캐시 복원(operator)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/operator
+          key: bk-operator-${{ hashFiles('docker/operator.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-operator-
+      - id: bk-cclassroom
+        name: 이미지 층 캐시 복원(classroom)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/classroom
+          key: bk-classroom-${{ hashFiles('docker/classroom.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-classroom-
       - name: celery 브로커(celery-broker.sh)
+        env:
+          CODEMIT_BK_CACHE_SAVE: ""  # 저장은 e2e·guard 잡이 한다 — 같은 키를 두 잡이 쓰지 않는다
         run: bash scripts/ci/celery-broker.sh
 
   result:
