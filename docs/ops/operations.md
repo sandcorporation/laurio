@@ -467,7 +467,7 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   비밀이 실린 이슈 11개를 지울 때 실측). 스코프는 `event:write` 하나뿐인데도 그렇다 —
   코멘트를 달려면 그 스코프가 있어야 하므로 「코멘트만 쓰는」 토큰은 없다. 그래서 토큰을
   그대로 두고, 그 토큰을 쥐는 것이 세션이 아니라 스크립트 둘(`glitchtip_pick.py` 는
-  코멘트, `glitchtip_resolve.py` 는 해결 표시와 코멘트 — 둘 다 지우는 호출이 없다)이라는
+  코멘트, `glitchtip-resolve.sh` 는 해결 표시 — 둘 다 지우는 호출이 없다)이라는
   데 기댄다 — 세션에는 여전히 읽기 토큰만 준다. 루트 `.env` 의 이 값은
   이슈를 지울 수 있는 값으로 다룬다. 그래서 **코멘트가
   하나라도 있으면 집지 않는다**: 사람이 메모를 달아 둔 오류를 자동화가 가져가지 않는 것이
@@ -501,15 +501,17 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
   `PriceDriftAlert`(#798, 아래 「모델 단가 표 대조」)도 같은 목록에 있다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
-  `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Jenkins
-  `codemit/ci-pr` 가 시험하고, 초록이면 세션이 squash 로 병합한다(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train`
-  이 병합하며 표시했다). 병합 push 가 깨운 배포 잡이 이미지 굽기 끝에 **직전 성공 배포 → 이 커밋 범위**의 줄을 읽어 이슈를
-  resolved 로 돌린다(`scripts/ci/build-images.sh`, 자격증명 `glitchtip-automation-token` 을 라이브러리 `buildCredentials` 로)
+  `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Actions PR 검사가
+  시험하고, 초록이면 세션이 squash 로 병합한다(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train`
+  이 병합하며 표시했다). 병합 뒤 release 가 검사·이미지를 지나 `production` 을 앞당기면 그 push 가 깨운 배포 잡이 배포를
+  마친 뒤(배포 표식 다음) **직전 성공 배포 → 이 커밋 범위**의 줄을 읽어 이슈를 resolved 로 돌린다
+  (`scripts/ci/glitchtip-resolve.sh` — oracle 에서 git·curl 로, 토큰은 `docker/.env.prod` 의 `GLITCHTIP_TOKEN_FOR_AUTOMATION`,
+  #938. 그 전에는 빌드 노드의 `build-images.sh` 가 Jenkins 자격증명 `glitchtip-automation-token` 으로 `glitchtip_resolve.py` 를 불렀다)
   — 「고친 것 같다」와 「고쳤다」를 가르는 자리다. squash 병합 커밋의 메시지에 그 줄이 있어야 하므로 PR 본문(`--fill`)에
   남긴다. 범위가 배포 하나로 닫히므로 옛 방식의 두 문제가 없다: push 와 표시 사이의 5~10분
   공백(그래서 두던 `glitchtip-ack` 예고 코멘트)과, 연달아 push 할 때 취소된 실행이 범위를
   놓치던 것(오류 75 — 그래서 범위를 「직전에 그 잡이 성공한 실행 이후」로 잡았다,
-  `glitchtip_resolve.py` 의 `auto` 모드가 그 흔적이다).
+  지금은 그 파이썬 스크립트를 걷고 셸 하나다).
 - **배경 세션은 「지금」을 말하는 문서를 고칠 수 없다.** 평소 티켓이라면 「티켓을 닫는
   기준」이 `CLAUDE.md`(`docs/ops/`)·`CONTEXT.md`·`docs/features/` 를 같은 커밋에서 고치라고 하는데,
   아무도 보고 있지 않은 세션에는 그 규칙을 적용하지 않는다 — 그 셋(과 `docs/adr/`)이

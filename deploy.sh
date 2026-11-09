@@ -21,7 +21,6 @@
 #                       적용할 마이그레이션이 있으면 그 전에 DB 를 덤프한다(실패하면 멈춘다, #839)
 #   predeploy-dump      그 덤프만 — 적용할 마이그레이션이 있을 때만 뜬다(prod, 아래 dump_before_migrate)
 #   verify              컨테이너가 running 인지 본다
-#   e2e-digest          떠 있는 앱·backend 가 PR 검사의 e2e 가 본 이미지인지 견준다(prod, 관측만 — #729)
 #   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   recreate-infra      db·redis 를 compose 의 이미지(digest)대로 다시 만든다 — 사람이 손으로만(#790)
@@ -1141,95 +1140,6 @@ cmd_verify() {
   log "컨테이너 전부 running"
 }
 
-# ------------------------------------------------------- e2e 가 본 이미지인가
-
-# 끝 조건 「e2e 가 돈 이미지 = prod 이미지」를 사람이 아니라 잡이 본다(#729). PR 검사(`scripts/ci/pr-check.sh`)는
-# e2e·celery 가 초록이면 e2e 가 받은 arm64 이미지(`test-results/images.txt` 의 RepoDigests)에 **병합 전에**
-# `e2e-<트리>-arm64` 태그를 붙인다(`scripts/ci/images-e2e.sh`; #873 전에는 열차가 묶음 트리로). PR 이 main 위에 있던
-# 채 squash 병합되면 main 의 트리가 그 트리와 같으므로, 여기서 이 커밋의 트리로 그 태그를 받아 떠 있는 컨테이너의 이미지 ID 와 견준다 — 같은
-# ID 면 같은 이미지다(이미 있는 층이라 받기는 매니페스트 한 번이다). PR 검사 산출물을 Jenkins API 로 읽지 않는
-# 이유: oracle 에이전트에는 Jenkins 자격증명이 없고(copyartifact 플러그인도 없다), 레지스트리 로그인은 이미
-# 있다. 태그가 없으면 PR 검사가 보지 않은 트리(직접 push·뒤처진 PR 의 병합·한 push 에 묶인 병합)라고 적는다.
-# **관측만 한다 — 다르거나 대조하지 못해도 0 으로 끝난다.** 콘솔의 「e2e 대조:」 줄이 결과다.
-#
-# **다르다고 다 다른 코드는 아니다**(#738). ctx 태그가 prune 으로 지워진 서비스는 PR 검사가 같은 문맥을 다시
-# 굽는데 buildx 는 digest 가 같다는 보장이 없고, `plan` 은 문맥이 같으니 그 서비스를 바꿔 끼우지 않는다. 그래서
-# 다르면 떠 있는 컨테이너를 만든 커밋(이미지 이름의 `<sha>-<arch>` 태그 — 배포가 `CODEMIT_IMAGE_TAG` 로 쓴
-# 것)과 이 커밋의 문맥을 `plan` 과 같은 `image_context.py changed` 로 견준다: 같으면 「다르다(문맥 같음 — 다시
-# 구운 것)」, 다르면 「다르다!(문맥 다름)」, 견주지 못하면(커밋 태그가 아니다·그 커밋을 모른다) 「다르다!(문맥
-# 모름)」. 어느 쪽이든 두 이미지 ID 와 떠 있는 커밋을 줄에 싣는다.
-cmd_e2e_digest() {
-  arch=arm64
-  repo="${CODEMIT_IMAGE_REPO:-ghcr.io/sandcorporation}"
-  tree=$($GIT rev-parse "HEAD^{tree}" 2>/dev/null) || { log "e2e 대조: 이 커밋의 트리를 모른다"; return 0; }
-  head=$($GIT rev-parse HEAD 2>/dev/null)
-  same=0; rebuilt=0; differ=0; missing=0
-  ctx_rev=""; ctx_changed=""; ctx_ok=false
-  for svc in backend frontend operator classroom; do
-    cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
-    if [ -z "$cid" ]; then
-      echo "e2e 대조: $svc — 떠 있는 컨테이너가 없다"; missing=$((missing + 1)); continue
-    fi
-    running=$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null)
-    ref="$repo/codemit-$svc:e2e-$tree-$arch"
-    if ! docker pull -q "$ref" >/dev/null 2>&1; then
-      echo "e2e 대조: $svc — $ref 가 없다(PR 검사가 이 트리를 e2e 로 보지 않았다)"; missing=$((missing + 1)); continue
-    fi
-    tested=$(docker image inspect -f '{{.Id}}' "$ref" 2>/dev/null)
-    # 대조용 태그는 남기지 않는다 — 떠 있는 이미지에 붙은 태그 하나를 떼는 것뿐이다.
-    docker image rm "$ref" >/dev/null 2>&1 || true
-    if [ -n "$running" ] && [ "$running" = "$tested" ]; then
-      echo "e2e 대조: $svc — 같다 ($(echo "$running" | cut -c1-19))"; same=$((same + 1))
-    else
-      # 떠 있는 컨테이너를 만든 커밋 — 이미지 이름이 `…:<40자 sha>-<arch>` 일 때만 안다.
-      started=$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null)
-      started=${started##*:}
-      started=${started%-"$arch"}
-      case "$started" in
-        *[!0-9a-f]*|'') started="" ;;
-        *) [ ${#started} -eq 40 ] || started="" ;;
-      esac
-      if [ -z "$started" ]; then
-        verdict='다르다!(문맥 모름)'
-      elif [ "$started" = "$head" ]; then
-        verdict='다르다(문맥 같음 — 다시 구운 것)'
-      else
-        # 같은 커밋은 한 번만 견준다 — `changed` 는 여섯 서비스를 다 잰다.
-        if [ "$started" != "$ctx_rev" ]; then
-          ctx_rev=$started
-          # 그 커밋이 이 체크아웃에 없는지는 여기서 가른다 — `changed` 는 모르는 커밋을 「전부 바뀜」으로
-          # 답하고 0 으로 끝난다. `plan` 에는 그것이 맞는 답(모르면 바꿔 끼운다)이라 `changed` 는 그대로 둔다.
-          if ! $GIT cat-file -e "${started}^{commit}" 2>/dev/null; then
-            ctx_ok=false
-          elif context_changed "$started" HEAD; then
-            ctx_changed=$CTX_CHANGED
-            ctx_ok=true
-          else
-            ctx_ok=false
-          fi
-        fi
-        if [ "$ctx_ok" != true ]; then
-          verdict='다르다!(문맥 모름)'
-        elif echo " $(echo $ctx_changed) " | grep -q " $svc "; then
-          verdict='다르다!(문맥 다름)'
-        else
-          verdict='다르다(문맥 같음 — 다시 구운 것)'
-        fi
-      fi
-      case "$verdict" in
-        다르다\(*) rebuilt=$((rebuilt + 1)) ;;
-        *) differ=$((differ + 1)) ;;
-      esac
-      # `cut -c` 는 C 로캘에서 바이트로 자른다 — 한글이 든 값은 자르지 않는다.
-      shown="커밋 모름"
-      [ -z "$started" ] || shown=$(echo "$started" | cut -c1-12)
-      echo "e2e 대조: $svc — $verdict 떠 있는 것 $(echo "$running" | cut -c1-19) ($shown), e2e 가 본 것 $(echo "$tested" | cut -c1-19)"
-    fi
-  done
-  log "e2e 대조: 같다 $same · 다시 구움 $rebuilt · 다르다 $differ · 대조 못 함 $missing (트리 $(echo "$tree" | cut -c1-12))"
-  return 0
-}
-
 # 서비스가 요청을 실제로 받는지 본다. 컨테이너가 running 인 것과 서버가
 # 응답하는 것은 다르다.
 #
@@ -1391,7 +1301,6 @@ case "$COMMAND" in
     ;;
   up) cmd_up ;;
   verify) cmd_verify ;;
-  e2e-digest) cmd_e2e_digest ;;
   health)
     [ -n "$ARG" ] || { echo "health 에는 서비스가 필요하다 (backend|events|search|pgbouncer)"; exit 2; }
     cmd_health "$ARG"
@@ -1423,7 +1332,7 @@ case "$COMMAND" in
     cmd_prune
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|e2e-digest|health|reindex|predeploy-dump|recreate-infra|mark|prune|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|predeploy-dump|recreate-infra|mark|prune|all)"
     exit 2
     ;;
 esac

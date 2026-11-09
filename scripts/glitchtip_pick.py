@@ -371,7 +371,7 @@ _TRAILER = re.compile(r"^[ \t]*GlitchTip:[ \t]*(\d+)[ \t]*$", re.MULTILINE | re.
 def _latest_fixes() -> dict[str, str]:
     """`origin/main` 에서 오류마다 **가장 최근의** 수정 커밋 sha 를 모은다.
 
-    커밋 메시지의 `GlitchTip: <id>` 줄로 찾는다 — 해결 표시(`glitchtip_resolve.py`)가
+    커밋 메시지의 `GlitchTip: <id>` 줄로 찾는다 — 해결 표시(`scripts/ci/glitchtip-resolve.sh`)가
     읽는 것과 같은 줄이다. 한 오류를 두 번 고쳤으면 **최신 것**이 기준이다: 옛 수정만
     포함한 코드에서 난 이벤트는 「최신 수정 이전의 코드」이지 재발이 아니다.
     """

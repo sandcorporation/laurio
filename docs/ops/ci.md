@@ -1,23 +1,32 @@
-# PR 검사는 GitHub Actions, 배포는 Jenkins — PR 검사 하나, 병합 하나 = 배포 하나
+# 검사·이미지는 GitHub Actions, 배포는 Jenkins — PR 검사 하나, 병합 하나 = 승격 하나 = 배포 하나
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
-**PR 검사는 GitHub Actions 하나다 — Jenkins PR 검사(`codemit/ci-pr`, `Jenkinsfile.pr`)는 꺼졌다(2026-11-09, #932).**
-`Jenkinsfile.pr`·`scripts/ci/pr-check.sh`(그 파일만 부르던)·`macos-sweep.sh` 는 지웠다. 2026-11-05(#873, ADR-0071)부터
-portfolio·foresight 와 같은 jenkins-shared 흐름이라 Actions 「결과」 잡이 초록이면 작업자가 squash 로 병합하고, 그 main push 가
-배포 잡(`sandcorpDeploy`, 「배포」 문서)을 깨운다. 열차(`codemit/ci-train`)와 `codemit/automerge` 는 없다. 라이브러리의
-인자·동작은 `sandcorporation/jenkins-shared` 의 README 가 원문이다. **아래에서 「PR 검사(Jenkins)」·macos·ctx/e2e 태그를 말하는
-글은 꺼진 검사의 기록이다** — 배포 잡이 쓰는 스크립트(`build-images.sh`·`images.sh`·`images-ctx.sh`·`deploy-guard.sh`·
-`images-e2e.sh`·`deploy-prod.sh`)는 그대로 남아 있고, 배포 잡이 직접 굽는다.
+**검사와 이미지는 GitHub Actions, 배포는 Jenkins 다**(2026-11-09 #938, ADR-0077 — sandcorp-metrics 와 같은 흐름).
 
-**PR 검사는 GitHub Actions 에서도 돈다**(2026-11-09 #930, ADR-0076 — 저장소 공개 준비). `.github/workflows/pr-check.yml`
-이 `pull_request`·`main` push 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면
-ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을 amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`e2e`
-(`e2e.sh`, 스택을 여기서 굽는다)·`celery`(`celery-broker.sh`) → `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름).
-이미지를 레지스트리에 올리지 않으므로 ctx·e2e 태그는 Jenkins 만 붙인다. secrets 를 쓰지 않고(`scripts/ci/*.env` 의 가짜
-값), 권한은 `contents: read`, `pull_request_target`·self-hosted 를 쓰지 않으며 액션은 SHA 로 고정한다. **병합 기준은 Actions
-「결과」 잡이다**(2026-11-09 대표 결정, #930 댓글) — `gh pr checks <PR>`·`gh run watch` 로 본다. Jenkins PR 검사는 대장이 끄기
-전까지 함께 돌지만 기다리지 않고 결과도 병합 조건이 아니다. 아래 Jenkins 절은 그 잡이 꺼질 때까지의 사실이다.
+```
+PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
+   → release.yml(push: main): check(pr-check.yml 그대로, workflow_call) → image(image.yml, ubuntu-24.04-arm 여섯) → promote(production fast-forward)
+   → Jenkins `codemit/deploy`(*/production): 굽지도 검사하지도 않고 ghcr `codemit-<서비스>:<sha>` 를 받아 oracle 에 배포
+```
+
+- **PR 검사**는 `.github/workflows/pr-check.yml` 하나다(#930·#932, ADR-0076 — Jenkins PR 검사 `codemit/ci-pr` 는 꺼졌다).
+  `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만, 공개 위생
+  `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
+  amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`e2e`(`e2e.sh`, 스택을 여기서 굽는다)·`celery`(`celery-broker.sh`) →
+  `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
+- **main 에서는 `release.yml` 이 같은 pr-check.yml 을 `workflow_call` 로 부른다**(`push: main` 트리거는 pr-check.yml 에서 뺐다 —
+  검사가 두 번 돌지 않는다). 그 실행의 `github.event_name`·`github.ref` 는 부른 쪽의 push·main 이라 아래 캐시 저장이 그대로 돈다.
+  check 가 초록이어야 image(`image.yml`)가 여섯 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서),
+  둘 다 초록이어야 promote 가 `production` 을 그 sha 로 앞당긴다(`scripts/ci/promote.sh ff`). 실행은
+  `gh run list --workflow release.yml`.
+- 보안(공개 저장소, `scripts/test_public_repo.py`): `pull_request_target`·self-hosted 없음, secrets 없음(`github.token` 하나), 워크플로
+  기본 권한 `contents: read`, **쓰기는 정해진 자리에만** — `packages: write` 는 image(image.yml·release.yml 의 image 잡), `contents: write`
+  는 release.yml 의 promote 잡. 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
+- **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다. 배포되는 커밋이
+  검사를 통과했다는 것은 release 의 check → image → promote 순서가 지킨다.
+- **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 글은 꺼진 검사의 기록이다.** 배포 잡의 비상 길(`BUILD_ON=jenkins`)은
+  여전히 `build-images.sh`(`images.sh`·`deploy-guard.sh`·`images-ctx.sh`)로 빌드 노드에서 굽는다.
 
 ### Actions 의 캐시 — main 이 저장하고 PR 은 복원만 한다(#932)
 
@@ -29,7 +38,7 @@ ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`
   폴더는 이미지별 — `ci`(`checks`)·`backend`(`e2e`)·`frontend`·`operator`·`classroom`(`guard`) — 이고, 키는
   `bk-<이름>-<Dockerfile·lockfile 해시>` 다. 복원은 `actions/cache/restore` 가 정확한 키 다음 `bk-<이름>-` 접두사로 가장 새 main 캐시를 받는다.
   `e2e`·`celery` 는 backend·세 앱 폴더를 모두 복원한다(compose 쪽 연결은 `docker/compose.ci-cache.yaml`).
-- **저장은 main push 실행에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
+- **저장은 main 실행(release.yml 의 check)에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
   10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
   `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.
 - **병렬화(#932)**: `checks` 는 `sub-checks.sh <묶음>` 으로 여섯 실행기 — `static`(Django·생성물·문서·언어 검사)·`pytest I/N`(4조각,
@@ -165,13 +174,13 @@ ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`
   #708 끝 조건의 「새 이름으로 한 번씩 초록」은 prod 를 뺀 셋이었다 — 옛 `codemit-deploy-prod` 는 10-21 prod #177
   이 마지막 빌드였고 #779 로 사라졌다.
 - **문서(`*.md`·`docs/`)만 바뀐 커밋은 시험도 교체도 건너뛴다.** PR 검사는 `scripts/ci/changed.sh`(merge-base 와 견준다)로
-  ADR 검사만 한다. 배포 잡은 「배포할 커밋 확인」(라이브러리 DeployGate — 같은 sha 면 `NOT_BUILT`)을 지나 `build-images.sh` 가
-  문맥 해시로 전부 「건너뛴다」(커밋 태그만)가 되고, oracle 의 `deploy.sh plan` 이 **배포 표식**(`.jenkins-prod-deployed`, 마지막으로
+  ADR 검사만 한다. release 의 image 잡은 문맥 해시로 전부 「건너뛴다」(커밋 태그만)가 되고 production 이 앞당겨지면, oracle 의 `deploy.sh plan` 이 **배포 표식**(`.jenkins-prod-deployed`, 마지막으로
   성공한 prod 배포) 기준으로 바뀐 서비스가 없다고 내 교체 없이 표식만 옮긴다(#873 — 그 전에는 GitHub 의 `production` 브랜치와
   `changed.sh` 로 견줘 노드도 잡지 않았다, #840). 배포 표식은 성공한 배포의 마지막에만 옮기므로 배포가 실패한 커밋 뒤의 문서
   커밋도 그 배포를 다시 시도한다(#709 의 교훈).
-- **배포는 GitHub Actions 를 쓰지 않는다**(2026-10-15, #705, ADR-0061 — PR 검사만 #930 에서 돌아왔다, ADR-0076). 조직이 Free 요금제라 호스티드 분량(월
-  2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. Actions 가 하던 셋 — 배포 이미지, 부팅
+- **배포 이미지는 다시 GitHub Actions 가 굽는다**(2026-11-09 #938, ADR-0077 — 공개 저장소라 분량 제한이 없다). 2026-10-15(#705,
+  ADR-0061)에는 조직이 Free 요금제라 호스티드 분량(월 2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. 아래는 그 뒤
+  ~ 11-09 의 Jenkins 굽기이고, 지금은 같은 스크립트를 image.yml 이 arm64 실행기에서 부른다(비상 길 `BUILD_ON=jenkins` 만 Jenkins). Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit/deploy` 잡(`Jenkinsfile`)의 앞 단계가 됐다
   (「배포」 절, `staging` 앞당기기는 #840 에서 걷었다). 이미지는 macos 가 arm64 여섯을 굽고(`scripts/ci/images.sh`; #840 전에는 home 가 amd64 여섯도 구웠고 #841 에서 걷었다),
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그
@@ -185,8 +194,8 @@ ADR 검사만, 공개 위생 `scripts/test_public_repo.py` 는 늘) → `checks`
   만 하는 이미지)로 본다 — 표식에 빌드마다 다른 값을 섞는다(스크립트 자신이 문맥에 들어 고정 문자열이면
   늘 걸린다). 컨테이너 포트를 노드에 열지 않고 띄운 컨테이너의 네트워크에 curl 컨테이너를
   붙여(`--network container:<이름>`) 친다(home 의 Jenkins 가 컨테이너라 바인드 마운트도 쓰지 않는다).
-- **`Jenkinsfile`(배포)은 PR 검사가 보지 못한다** — 그 파일·`build-images.sh`·`deploy-prod.sh` 를 바꾼 PR 의 첫 실행이 곧 그 병합의
-  prod 배포다(`Jenkinsfile.pr` 은 멀티브랜치라 브랜치의 것으로 돈다). 라이브러리 쪽은 `@Library('sandcorp@<브랜치>')` 로 시험할 수
+- **`Jenkinsfile`(배포)·`deploy-prod.sh` 와 `image.yml`·`release.yml` 은 PR 검사가 돌려 보지 못한다** — 바꾼 PR 의 병합 뒤 첫 release
+  실행·첫 배포가 곧 그 시험이다(`scripts/test_release_flow.py` 는 배선만 본다). 라이브러리 쪽은 `@Library('sandcorp@<브랜치>')` 로 시험할 수
   있다(라이브러리 README). 스크립트 쪽은 로컬에서 돈다: `CODEMIT_IMAGES_MODE=plan`(해시와 판단만),
   `CODEMIT_IMAGE_REGISTRY=localhost:<포트>`(로컬 `registry:2` 에 실제로 굽고 건너뛰기), `CODEMIT_GUARD_IMAGE=<이미지>`(가드가
   받을 이미지), `CODEMIT_IMAGE_TAG=<sha>-<arch> scripts/test.sh e2e`(올린 이미지로 e2e — PR 검사의 길). 두 스크립트는 macos 의

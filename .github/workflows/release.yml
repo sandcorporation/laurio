@@ -1,0 +1,58 @@
+# main push → 검사 → 이미지 → production 승격(#938, ADR-0077). production 브랜치 머리 = 운영 버전.
+# Jenkins `codemit/deploy` 는 production push 만 보고, 굽지도 검사하지도 않고 그 sha 의 이미지를 받아 oracle 에 배포한다
+# (Jenkinsfile → jenkins-shared sandcorpDeploy deployFrom: 'production').
+#
+#   check   pr-check.yml(workflow_call) — PR 과 같은 검사(정적·pytest·web·guard·e2e·celery). 깨지면 이미지도 승격도 없다.
+#           main 실행이라 이미지 층 캐시를 저장한다(#932).
+#   image   needs check. image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>).
+#   promote needs check·image. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
+#           production 이 이미 더 새 판이면(옛 실행이 늦게 끝남) 실패가 아니라 건너뜀.
+# production 은 앞으로만 간다(ruleset: 강제 push·삭제 금지). 되돌리기는 main 에 revert PR — 이 흐름을 그대로 탄다.
+# 급하면 Jenkins 「Build with Parameters」의 ROLLBACK_SHA(production 은 그대로) — docs/ops/deploy.md 「되돌리기」.
+#
+# 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다):
+#   - push: main 만. pull_request·pull_request_target 없음. GitHub 호스팅 실행기만. 액션은 SHA 고정. secrets 없음.
+#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만.
+#   - GITHUB_TOKEN 의 push 는 다른 워크플로를 깨우지 않는다(production push 로 Actions 가 다시 돌지 않는다).
+#     저장소 웹훅(Jenkins)은 깨운다.
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: ./.github/workflows/pr-check.yml
+    permissions:
+      contents: read
+
+  image:
+    needs: check
+    uses: ./.github/workflows/image.yml
+    permissions:
+      contents: read
+      packages: write
+
+  promote:
+    needs: [check, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    # 승격이 겹치지 않게 저장소 전체에서 하나씩. 끊지 않고 줄 세운다 —
+    # 기다리는 실행이 둘이면 GitHub 이 앞 것을 취소한다(뒤 것이 더 새 sha 라 괜찮다).
+    concurrency:
+      group: production-branch
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # production 이 이 sha 의 조상인지 보려면 이력이 있어야 한다
+      - name: production fast-forward
+        env:
+          SHA: ${{ github.sha }}
+        run: bash scripts/ci/promote.sh ff "$SHA"

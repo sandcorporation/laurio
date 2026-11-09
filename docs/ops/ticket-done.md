@@ -7,11 +7,13 @@
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. GitHub
 Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 가드·e2e·celery 를 돈다(Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서).
 **GitHub Actions `PR 검사` 의 「결과」 잡(`gh pr checks <PR>`·`gh run watch`)이 초록이면(2026-11-09 #930 — Jenkins PR 검사는 기다리지 않는다) 작업자가 `gh pr merge <PR> --squash` 로
-병합한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합이 곧 prod 배포다** — 병합하면
-`python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡(`codemit/deploy`)의
-GitHub 상태 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록). `main` 에 직접 push 하지 않는다
-(시험 없이 이미지가 구워져 곧바로 prod 에 배포된다). work 에는 Jenkins 키가 없다 — PR 검사의 실패 줄은 home Jenkins 홈의
-빌드 로그(`/var/jenkins_home/jobs/codemit/jobs/ci-pr/branches/<브랜치>/builds/<N>/log`)를 읽기만 해서 본다.
+병합한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합 하나가 곧 승격 하나·prod 배포
+하나다**(2026-11-09 #938, ADR-0077): 병합하면 Actions `release.yml` 이 검사 → 이미지 → `production` 승격을 돌고(`gh run list
+--workflow release.yml`), `production` push 가 Jenkins 배포 잡(`codemit/deploy`)을 깨운다. 그다음
+`python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡의 GitHub 상태
+`sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록 — release 가 몇 분 걸리니 그만큼 늦게 시작한다).
+`main` 에 직접 push 하지 않는다(PR 검사 없이 release 가 돈다). PR 검사의 실패 줄은 Actions 실행 로그
+(`gh run view <id> --log-failed`)에서 본다.
 
 **push 를 빠뜨리면 CI 는 아무것도 보지 않는다.** 실제로 그런 적이 있다 — 하루 작업 20커밋이
 푸시되지 않은 채 쌓였고, 그 사이 CI 잡 하나가 21시간 빨간 것도 아무도 몰랐다. e2e 를 CI 에
@@ -50,7 +52,7 @@ GitHub 상태 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(�
 - **화면을 바꾸면** 1440px·390px 스크린샷을 검토 Artifact 「Codemit 화면 검토」
   (https://claude.ai/artifact/8Xc8xeV9duZJdZhzpxFEcH) 맨 위에 그 PR 절로 더한다(read 후 publish, 새 아티팩트를
   만들지 않는다).
-- **병합 = prod 배포다**(ADR-0068). 문서만 바뀐 병합은 `codemit/deploy` 가 건너뛴다. 배포가 돌았다면 prod
+- **병합 = 승격 = prod 배포다**(ADR-0068·ADR-0077). release 가 빨가면 production 이 움직이지 않는다 — 그 실행의 실패 줄을 보고 고친다. 문서만 바뀐 병합은 `codemit/deploy` 가 교체 없이 표식만 옮긴다. 배포가 돌았다면 prod
   `/api/health` 200 과 콘솔의 「디스코드 알림 실패」 0건을 확인한다(읽기만 — Jenkins 자격증명은 셸 env 의
   `JENKINS_URL`·`JENKINS_USER`·`JENKINS_API_TOKEN`, 값은 출력하지 않는다).
 - **끝나면** 이슈가 닫혔는지 보고, 띄운 `-p codemit-dev-<오프셋>` 스택을 내리고 dev 서버를 멈춘 뒤 워크트리·로컬

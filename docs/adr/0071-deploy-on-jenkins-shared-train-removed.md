@@ -1,6 +1,6 @@
 # 배포를 jenkins-shared 로 — 병합 하나가 배포 하나, 열차를 걷는다
 
-Status: Accepted (2026-11-05 결정)
+Status: Amended by ADR-0077 (2026-11-05 결정)
 
 ## 맥락 (#873)
 

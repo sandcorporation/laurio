@@ -12,7 +12,7 @@
 같은 모양으로 나오지 않는다.
 
 **토큰은 읽기 전용(`GLITCHTIP_TOKEN`)을 쓴다.** 이 도구는 아무것도 쓰지 않는다 —
-쓰기는 `glitchtip_pick.py`(클레임)와 `glitchtip_resolve.py`(표시·예고)만 한다.
+쓰기는 `glitchtip_pick.py`(클레임)와 `scripts/ci/glitchtip-resolve.sh`(해결 표시)만 한다.
 `--alerts` 류 경로는 일부러 지원하지 않는다: 그 응답이 Discord 웹훅 URL 을 평문으로
 돌려준다(`.claude/skills/glitchtip-triage/` 의 「하지 않는 것」).
 
