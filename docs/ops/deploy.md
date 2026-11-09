@@ -131,9 +131,8 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 
 **커밋이 prod 까지 가는 길은 둘이다**(ADR-0068, ADR-0071 — portfolio·foresight 와 같은 jenkins-shared 흐름):
 
-1. **브랜치 → PR → `main`.** Jenkins `codemit/ci-pr`(Multibranch, `Jenkinsfile.pr` = `sandcorpPrCheck`)가 브랜치마다
-   `scripts/ci/pr-check.sh` 를 돈다 — home 검사 묶음, prod(arm64) 이미지·부팅 가드, 그 이미지로 e2e·celery(「CI 는 Jenkins
-   에서 돈다」). 초록(`wait-ci.py <PR>` 가 SUCCESS)이면 **작업자가 squash 로 병합한다**(`gh pr merge <N> --squash`). 열차
+1. **브랜치 → PR → `main`.** GitHub Actions `PR 검사`(`pr-check.yml`)가 검사 묶음·amd64 이미지 부팅 가드·e2e·celery 를 돈다
+   (Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서). 「결과」 잡이 초록(`gh pr checks <PR>`)이면 **작업자가 squash 로 병합한다**(`gh pr merge <N> --squash`). 열차
    (`codemit/ci-train`)·`codemit/automerge` 는 2026-11-05(#873)에 걷었다. **`main` 에 직접 push 하지 않는다** — 그러면
    시험 없이 이미지가 구워져 prod 까지 간다.
 2. **`main` → prod.** **병합 하나(= `main` push 하나)가 곧 prod 배포 하나다.** 웹훅이 Jenkins `codemit/deploy`

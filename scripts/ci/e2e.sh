@@ -32,6 +32,12 @@ if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then
   # shellcheck source=scripts/ci/ghcr-login.sh
   . scripts/ci/ghcr-login.sh
 fi
+# 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽고,
+# main push 실행만 CODEMIT_BK_CACHE_SAVE=1 로 backend 층을 내보낸다.
+if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
+  C+=(-f docker/compose.ci-cache.yaml)
+  if [ -n "${CODEMIT_BK_CACHE_SAVE:-}" ]; then C+=(-f docker/compose.ci-cache-save.yaml); fi
+fi
 # 노드 코어의 1/3 — Playwright 일꾼은 코어 둘에 하나보다 적게 둔다. 같은 노드의 Docker VM 안에서
 # 앱 셋·백엔드 넷·DB 가 함께 돈다.
 WORKERS=$(( $(getconf _NPROCESSORS_ONLN) / 3 ))
@@ -114,7 +120,8 @@ run_target() {
 }
 
 failed=0
-for target in public operator classroom; do
+# GitHub Actions 는 실행기 둘로 나눠 `CODEMIT_E2E_TARGETS` 로 프로젝트를 고른다(#932). 없으면 셋 다.
+for target in ${CODEMIT_E2E_TARGETS:-public operator classroom}; do
   started=$SECONDS
   if run_target "$target"; then
     echo "통과  e2e $target ($((SECONDS - started))초)" | tee -a "$summary"

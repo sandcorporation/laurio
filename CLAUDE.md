@@ -39,7 +39,7 @@ scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400�
 - [테스트](docs/ops/testing.md) — 호스트에서 돈다, `scripts/test.sh`, 앱 경계·금칙어 구조 테스트, 시드.
 - [프론트엔드](docs/ops/frontend.md) — 워크스페이스·e2e 시임·워크트리 dev 서버·남길 e2e·토큰·Docker 함정.
 - [Next 프로덕션 빌드](docs/ops/next-build.md) — Turbopack, 지우면 안 되는 의존성 둘.
-- [CI](docs/ops/ci.md) — 전부 Jenkins·jenkins-shared(PR 검사 → 작업자가 squash 병합 → `main` push 하나가 배포 하나), PR 검사는 GitHub Actions(`pr-check.yml`)에서도 같은 스크립트로 돈다(#930).
+- [CI](docs/ops/ci.md) — PR 검사는 GitHub Actions(`pr-check.yml`, 이미지 층 캐시는 main 저장·PR 복원, #932), Jenkins PR 검사는 꺼졌다(2026-11-09). 작업자가 squash 병합 → `main` push 하나가 Jenkins 배포 하나.
 - [배포](docs/ops/deploy.md) — PR → main(= prod 배포) 체인, deploy.sh, 겹쳐 바꾸기, 풀러, 제품 스위치.
 - [운영](docs/ops/operations.md) — admin 없음, 백업, Prometheus·Loki·GlitchTip, GlitchTip 자동 진단.
 - [커밋 훅](docs/ops/commit-hooks.md) — `.githooks/pre-commit` 이 하는 셋.

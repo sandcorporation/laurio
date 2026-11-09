@@ -43,31 +43,62 @@ deploy_check() {
   cd backend && uv run python manage.py check --deploy --fail-level WARNING
 }
 
-step "Django 검사" bash -c 'cd backend && uv run python manage.py check --fail-level WARNING'
-step "배포 구성 검사(check --deploy)" deploy_check
-step "문법 검사 문법 받기" bash -c 'cd backend && uv run python manage.py prefetch_syntax_grammars --skip-checks'
-step "백엔드 pytest" bash -c 'cd backend && CODEMIT_TEST_CPU_LIMIT=1.5 uv run pytest -p no:cacheprovider \
-  --junitxml=/repo/test-results/backend-junit.xml'
-step "API 타입 최신성" same_after packages/bff-client/src/schema.gen.ts pnpm --dir frontend generate:api
-step "금칙어 생성물 최신성" same_after packages/banned-words/src/generated/banned-words.gen.ts \
-  pnpm --dir packages/banned-words run generate
-step "ADR 상태" python3 scripts/check_adr_status.py
-step "화면 언어" python3 scripts/check_screen_language.py
-step "화면 언어 검사기 자체" python3 scripts/test_check_screen_language.py
-step "GlitchTip precheck 청소 판정" python3 scripts/test_glitchtip_pick.py
-step "이미지 문맥 해시(건너뛰기)" python3 scripts/test_image_context.py
-step "ghcr 정리가 살아 있는 커밋을 남긴다" python3 scripts/test_ghcr_prune.py
-step "배포 이미지 스크립트(건너뛰기·e2e 태그)" python3 scripts/test_ci_images.py
-step "백엔드 오류 문구 언어" python3 scripts/check_backend_error_language.py
-step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
-step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py
-for pkg in packages/bff-shared packages/markdown packages/banned-words; do
-  step "단위 시험 $pkg" pnpm --dir "$pkg" run test
-done
-for app in frontend operator classroom; do
-  step "단위 시험 $app" pnpm --dir "$app" run test:unit
-  step "타입 검사 $app" pnpm --dir "$app" run typecheck
-done
+# 어느 묶음을 돌릴지 — 인자 없이는 전부(로컬·한 번에 도는 길). GitHub Actions 는 matrix 로 나눠 부른다(#932):
+#   static          Django 검사·배포 구성 검사·생성물 최신성·문서/언어/고정 대기 검사(파이썬 스크립트)
+#   pytest [I/N]    백엔드 pytest — I/N 이면 정렬한 시험 파일을 순번 % N 으로 나눈 I번째(1부터) 조각
+#   web             단위 시험(packages·세 앱)과 세 앱 타입 검사
+group="${1:-all}"
+shard="${2:-}"
+case "$group" in all|static|pytest|web) ;; *) echo "알 수 없는 묶음: $group (static|pytest [I/N]|web)" >&2; exit 2 ;; esac
+want() { [ "$group" = all ] || [ "$group" = "$1" ]; }
+
+pytest_run() {
+  local idx total files
+  if [ -z "$shard" ]; then
+    ( cd backend && CODEMIT_TEST_CPU_LIMIT=1.5 uv run pytest -p no:cacheprovider \
+        --junitxml=/repo/test-results/backend-junit.xml )
+    return
+  fi
+  idx="${shard%/*}"; total="${shard#*/}"
+  files=$(cd backend && find tests -name 'test_*.py' | LC_ALL=C sort | awk -v i="$idx" -v n="$total" '(NR - 1) % n == i - 1')
+  [ -n "$files" ] || { echo "조각 $shard 에 시험 파일이 없다"; return 1; }
+  # shellcheck disable=SC2086
+  ( cd backend && CODEMIT_TEST_CPU_LIMIT=1.5 uv run pytest -p no:cacheprovider \
+      --junitxml="/repo/test-results/backend-junit-${idx}of${total}.xml" $files )
+}
+
+if want static; then
+  step "Django 검사" bash -c 'cd backend && uv run python manage.py check --fail-level WARNING'
+  step "배포 구성 검사(check --deploy)" deploy_check
+fi
+if want pytest; then
+  step "문법 검사 문법 받기" bash -c 'cd backend && uv run python manage.py prefetch_syntax_grammars --skip-checks'
+  step "백엔드 pytest ${shard:-전체}" pytest_run
+fi
+if want static; then
+  step "API 타입 최신성" same_after packages/bff-client/src/schema.gen.ts pnpm --dir frontend generate:api
+  step "금칙어 생성물 최신성" same_after packages/banned-words/src/generated/banned-words.gen.ts \
+    pnpm --dir packages/banned-words run generate
+  step "ADR 상태" python3 scripts/check_adr_status.py
+  step "화면 언어" python3 scripts/check_screen_language.py
+  step "화면 언어 검사기 자체" python3 scripts/test_check_screen_language.py
+  step "GlitchTip precheck 청소 판정" python3 scripts/test_glitchtip_pick.py
+  step "이미지 문맥 해시(건너뛰기)" python3 scripts/test_image_context.py
+  step "ghcr 정리가 살아 있는 커밋을 남긴다" python3 scripts/test_ghcr_prune.py
+  step "배포 이미지 스크립트(건너뛰기·e2e 태그)" python3 scripts/test_ci_images.py
+  step "백엔드 오류 문구 언어" python3 scripts/check_backend_error_language.py
+  step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
+  step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py
+fi
+if want web; then
+  for pkg in packages/bff-shared packages/markdown packages/banned-words; do
+    step "단위 시험 $pkg" pnpm --dir "$pkg" run test
+  done
+  for app in frontend operator classroom; do
+    step "단위 시험 $app" pnpm --dir "$app" run test:unit
+    step "타입 검사 $app" pnpm --dir "$app" run typecheck
+  done
+fi
 
 echo
 cat "$summary"
