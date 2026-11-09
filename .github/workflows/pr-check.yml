@@ -114,6 +114,9 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --dir frontend exec playwright install --with-deps chromium
       - name: e2e(e2e.sh)
+        env:
+          # 호스팅 실행기는 코어가 적어(비공개 2·공개 4) 앱 셋·백엔드와 일꾼 둘이 다투면 3초 한도를 넘는다
+          CODEMIT_E2E_WORKERS: 1
         run: bash scripts/ci/e2e.sh
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
