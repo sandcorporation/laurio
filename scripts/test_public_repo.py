@@ -6,7 +6,9 @@
 - 추적 파일에 내부 호스트(`.link` 도메인 — 자체 호스팅 GlitchTip·옛 staging 이 거기 있었다)가 없다.
 - `docker/prod.env.example` 의 OCI 스토리지 값이 자리 표시(`<…>`)다 — 네임스페이스·버킷·리전 실값이 없다.
 - `.github/workflows/*.yml` 이 공개 저장소의 보안 규칙을 지킨다 — `pull_request_target` 없음, 호스팅 실행기만,
-  secrets 없음, `permissions: contents: read`, 액션은 40자 SHA 로 고정.
+  secrets 없음(토큰은 `github.token` 하나), 워크플로 기본 권한 `contents: read`, 액션은 40자 SHA 로 고정(같은 저장소의
+  `./.github/workflows/…` 재사용은 예외). 쓰기 권한은 승격 흐름(#938)의 정해진 자리에만 — `packages: write` 는 image
+  (image.yml 과 release.yml 의 image 잡), `contents: write` 는 release.yml 의 promote 잡.
 
 CI 이미지에는 `.git`·`.github/` 가 없어(.dockerignore) pytest 가 아니라 이 스크립트를 호스트에서 부른다 —
 Actions 는 `plan` 잡, Jenkins 는 `scripts/ci/pr-check.sh`.
@@ -31,6 +33,48 @@ STORAGE_KEYS = (
     "STORAGE_IMAGES_BASE_URL",
 )
 PINNED_USES = re.compile(r"^\s*-?\s*uses:\s*[\w.-]+/[\w./-]+@[0-9a-f]{40}(\s|$)")
+LOCAL_WORKFLOW_USES = re.compile(r"^\s*uses:\s*\./\.github/workflows/[\w.-]+\.ya?ml\s*$")
+# (워크플로 파일, 잡 — 최상위면 "") → 그 자리에서만 허락하는 쓰기 권한(#938). 여기 없는 자리의 쓰기는 모두 실패다.
+ALLOWED_WRITES = {
+    ("image.yml", ""): {"packages"},
+    ("release.yml", "image"): {"packages"},
+    ("release.yml", "promote"): {"contents"},
+}
+# 잡마다 권한을 따로 적어도 되는 워크플로 — 승격 흐름은 잡마다 권한이 달라야 한다.
+JOB_PERMISSIONS_ALLOWED = {"release.yml"}
+
+
+def permission_blocks(code: str) -> list[tuple[str, dict[str, str]]]:
+    """(잡 이름 — 최상위면 "", {권한: 값}) 목록. `permissions: {}`·`read-all` 같은 한 줄 꼴도 담는다."""
+
+    lines = code.splitlines()
+    blocks: list[tuple[str, dict[str, str]]] = []
+    job = ""
+    in_jobs = False
+    for i, line in enumerate(lines):
+        if re.match(r"^jobs:\s*$", line):
+            in_jobs = True
+            continue
+        if re.match(r"^\S", line):
+            in_jobs = False
+            job = ""
+        top_job = re.match(r"^  ([\w-]+):\s*$", line)
+        if in_jobs and top_job:
+            job = top_job.group(1)
+        found = re.match(r"^(\s*)permissions:\s*(\S.*)?$", line)
+        if not found:
+            continue
+        indent = len(found.group(1))
+        values: dict[str, str] = {}
+        if found.group(2):
+            values["*"] = found.group(2).strip()
+        for follow in lines[i + 1 :]:
+            entry = re.match(r"^(\s*)([\w-]+):\s*(\S+)\s*$", follow)
+            if not entry or len(entry.group(1)) <= indent:
+                break
+            values[entry.group(2)] = entry.group(3)
+        blocks.append(("" if indent == 0 else job, values))
+    return blocks
 
 
 def tracked_files() -> list[str]:
@@ -82,12 +126,29 @@ class PublicRepoTest(unittest.TestCase):
                 self.assertNotIn("self-hosted", code)
                 self.assertNotIn("secrets.", code)
                 self.assertRegex(code, r"(?m)^permissions:\n\s+contents: read\s*$")
-                self.assertNotRegex(code, r"(?m)^[ \t]+permissions:", "잡마다 권한을 넓히지 않는다")
+                if workflow.name not in JOB_PERMISSIONS_ALLOWED:
+                    self.assertNotRegex(code, r"(?m)^[ \t]{4}permissions:", "잡마다 권한을 넓히지 않는다")
+                for job, values in permission_blocks(code):
+                    allowed = ALLOWED_WRITES.get((workflow.name, job), set())
+                    for scope, value in values.items():
+                        self.assertNotIn(value, ("write-all", "read-all"), f"{job or '최상위'}: 통째 권한")
+                        if value == "write":
+                            self.assertIn(scope, allowed, f"{workflow.name} {job or '최상위'} 의 {scope}: write")
                 for runs_on in re.findall(r"runs-on:\s*(\S+)", code):
                     self.assertTrue(runs_on.startswith("ubuntu-"), runs_on)
                 for line in code.splitlines():
-                    if "uses:" in line:
+                    if "uses:" in line and not LOCAL_WORKFLOW_USES.match(line):
                         self.assertRegex(line, PINNED_USES, "액션은 SHA 로 고정한다")
+
+    def test_permission_blocks_reads_top_and_job_levels(self) -> None:
+        code = "permissions:\n  contents: read\njobs:\n  a:\n    permissions:\n      packages: write\n    runs-on: x\n"
+        self.assertEqual(permission_blocks(code), [("", {"contents": "read"}), ("a", {"packages": "write"})])
+
+    def test_a_write_outside_the_allowed_places_is_caught(self) -> None:
+        code = "jobs:\n  check:\n    permissions:\n      contents: write\n"
+        [(job, values)] = permission_blocks(code)
+        self.assertNotIn("contents", ALLOWED_WRITES.get(("release.yml", job), set()))
+        self.assertEqual(values, {"contents": "write"})
 
 
 if __name__ == "__main__":

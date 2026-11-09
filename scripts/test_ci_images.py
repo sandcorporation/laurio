@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""배포 이미지 스크립트 — `scripts/ci/images.sh`(건너뛰기·retag·실패 로그)와 `scripts/ci/images-e2e.sh`(e2e 가 본 digest 에
-`e2e-<트리>-arm64` 태그). 가짜 docker 로 돈다.
+"""배포 이미지 스크립트 — `scripts/ci/images.sh`(건너뛰기·retag·실패 로그). 가짜 docker 로 돈다. main 에서는 Actions 의
+image.yml 이 서비스마다 부른다(#938). e2e 태그(`images-e2e.sh`)와 그 대조(`deploy.sh e2e-digest`)는 붙이는 쪽이 없어져 걷었다.
 
 `python3 scripts/test_ci_images.py` 하나로 돈다 — 표준 라이브러리 `unittest` 와 임시 폴더만 쓴다
 (네트워크·도커 없음). PR 검사가 돌린다(`scripts/ci/sub-checks-inside.sh`). 2026-11-05(#873) 전에는 열차의
@@ -111,42 +111,6 @@ class ImagesScript(unittest.TestCase):
         have = "r/codemit-backend:ctx-hbackend-arm64 r/codemit-frontend:ctx-hfrontend-arm64"
         self.assertEqual(self.run_images("retag", have), 0)
         self.assertEqual((self.repo / ".images-arm64.result").read_text(), "backend=skipped\nfrontend=skipped\n")
-
-
-class ImagesE2eTag(unittest.TestCase):
-    """images-e2e.sh — e2e 가 받은 우리 이미지 digest 마다 한 번 `e2e-<트리>-arm64` 를 붙인다(#729)."""
-
-    def test_tags_each_of_our_digests_once_with_the_tree(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            base = pathlib.Path(tmp)
-            repo = base / "repo"
-            (repo / "scripts" / "ci").mkdir(parents=True)
-            for name in ("images-e2e.sh", "ghcr-login.sh"):
-                shutil.copy(ROOT / "scripts" / "ci" / name, repo / "scripts" / "ci" / name)
-            (base / "bin").mkdir()
-            (base / "bin" / "docker").write_text(FAKE_DOCKER)
-            (base / "bin" / "docker").chmod(0o755)
-            a, b = "a" * 64, "b" * 64
-            listing = base / "images.txt"
-            listing.write_text(
-                f"backend ghcr.io/sandcorporation/codemit-backend@sha256:{a}\n"
-                f"celery-worker ghcr.io/sandcorporation/codemit-backend@sha256:{a}\n"
-                f"frontend ghcr.io/sandcorporation/codemit-frontend@sha256:{b}\n"
-                f"db postgres@sha256:{a}\n"
-            )
-            calls = base / "calls"
-            env = {**os.environ, "PATH": f"{base / 'bin'}:{os.environ['PATH']}", "FAKE_CALLS": str(calls), "TMPDIR": tmp}
-            env.pop("GHCR_TOKEN", None)
-            done = subprocess.run(["bash", "scripts/ci/images-e2e.sh", str(listing), "t" * 40], cwd=repo, env=env,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            self.assertEqual(done.returncode, 0, done.stdout)
-            created = sorted(line for line in calls.read_text().splitlines() if "imagetools create --prefer" in line)
-            self.assertEqual(created, [
-                f"buildx imagetools create --prefer-index=false --tag ghcr.io/sandcorporation/codemit-backend:e2e-{'t' * 40}-arm64 "
-                f"ghcr.io/sandcorporation/codemit-backend@sha256:{a}",
-                f"buildx imagetools create --prefer-index=false --tag ghcr.io/sandcorporation/codemit-frontend:e2e-{'t' * 40}-arm64 "
-                f"ghcr.io/sandcorporation/codemit-frontend@sha256:{b}",
-            ])
 
 
 if __name__ == "__main__":

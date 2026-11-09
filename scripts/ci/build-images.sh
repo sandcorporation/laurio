@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 배포 잡(`codemit/deploy`)의 「이미지 굽기」 — jenkins-shared `sandcorpDeploy` 의 `buildScript`(#873, ADR-0071).
-# 라이브러리가 빌드 노드(macos 먼저, 못 잡으면 home)에서 배포할 커밋을 체크아웃한 뒤 이것 하나를 돌린다.
+# 배포 잡(`codemit/deploy`)의 **비상 길** 「이미지 굽기」 — jenkins-shared `sandcorpDeploy` 의 `buildScript`(#873, ADR-0071).
+# 평소에는 GitHub Actions(image.yml)가 굽고 Jenkins 는 굽지 않는다(#938, ADR-0077). 「Build with Parameters」의
+# `BUILD_ON=jenkins` 일 때만 라이브러리가 빌드 노드(macos 먼저, 못 잡으면 home)에서 배포할 커밋을 체크아웃한 뒤 이것을 돌린다.
 #
 #   1. `images.sh arm64`        여섯을 굽거나, 문맥(ctx)이 같으면 커밋 태그만 더한다. PR 검사가 같은 트리를 이미
 #                               굽고 ctx 를 붙였으면(scripts/ci/pr-check.sh) 전부 「건너뛴다」 — 수 초다.
@@ -9,10 +10,10 @@
 #   4. 문맥 해시를 oracle 로     직전 성공 배포(`SANDCORP_PREVIOUS_SHA`) → 이 커밋 사이에 문맥이 바뀐 서비스를
 #                               `$SANDCORP_DEPLOY_ENV` 에 적는다 — 라이브러리가 `deploy-prod.sh` 의 환경으로 넘기고
 #                               `deploy.sh plan` 이 배포 표식과 기준이 같을 때만 쓴다(#849: oracle 에는 python3 가 없다).
-#   5. GlitchTip 해결 표시       같은 범위 커밋의 `GlitchTip: <id>` 줄(열차의 병합 단계가 하던 일). 실패해도 넘어간다.
 #
-# 환경(라이브러리): IMAGE_SHA(배포할 커밋), SANDCORP_PREVIOUS_SHA, SANDCORP_DEPLOY_ENV, GHCR_TOKEN,
-# GLITCHTIP_TOKEN_FOR_AUTOMATION(Jenkinsfile 의 buildCredentials).
+# GlitchTip 해결 표시는 여기서 하지 않는다 — 배포가 끝난 뒤 oracle 의 `deploy-prod.sh` 가 한다(#938).
+#
+# 환경(라이브러리): IMAGE_SHA(배포할 커밋), SANDCORP_PREVIOUS_SHA, SANDCORP_DEPLOY_ENV, GHCR_TOKEN.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -49,7 +50,3 @@ elif changed=$(python3 scripts/ci/image_context.py changed "$base" "$sha"); then
 else
   echo "문맥 해시를 내지 못했다 — deploy.sh 가 경로 비교로 간다"
 fi
-
-# 해결 표시는 배포 결과와 무관하다 — 토큰이 없으면 스크립트가 스스로 넘어간다.
-range_base="${base:-${sha}^}"
-python3 scripts/glitchtip_resolve.py "$range_base" "$sha" || echo "GlitchTip 표시 실패 — 배포와 무관하다"
