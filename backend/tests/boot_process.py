@@ -55,6 +55,7 @@ _PRELOAD = [
     "aiohttp",
     "bleach",
     "bleach.linkifier",
+    "boto3",  # 설정이 S3 어댑터를 읽을 때 자식마다 0.05초(2026-11-09, #936)
     "prometheus_client",
     "jwt",
     "cryptography.fernet",

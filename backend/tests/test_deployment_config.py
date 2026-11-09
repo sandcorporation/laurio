@@ -155,6 +155,15 @@ def _run_check(env: dict[str, str], *, deploy: bool = False) -> subprocess.Compl
     return boot_process.run(args, full_env)
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _warm_boot_check():
+    """이 파일의 첫 시험이 콜드 스타트(앱 모듈 바이트코드 컴파일·디스크 캐시)를 떠안아
+    CI 2코어에서 CPU 1.56초로 한도를 넘었다(#936). 시험 본문 밖(픽스처는 CPU 한도에
+    안 잡힌다)에서 한 번 돌려 두면 시험들이 같은 몫을 쓴다."""
+
+    _run_check(_production_env(), deploy=True)
+
+
 # --- production: 다섯 개의 check --deploy 경고가 실제로 해소됐는지 --------------------
 
 
