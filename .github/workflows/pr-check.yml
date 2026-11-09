@@ -34,6 +34,8 @@ concurrency:
 env:
   CODEMIT_CI_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
   # 이미지 층 캐시(#932) — 복원은 어디서나, 저장은 main push 실행에서만(PR 이 만든 캐시는 다른 PR 이 못 쓴다)
+  # compose(bake)가 로컬 캐시 폴더 읽기·쓰기를 허락받으라고 멈춘다 — 이 실행기 안의 /tmp 폴더라 끈다
+  BUILDX_BAKE_ENTITLEMENTS_FS: "0"
   CODEMIT_BK_CACHE: /tmp/bk
   CODEMIT_BK_CACHE_NEW: /tmp/bk-new
   CODEMIT_BK_CACHE_SAVE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
