@@ -1,5 +1,5 @@
-# PR 검사 — GitHub 호스팅 실행기에서 Jenkins `codemit/ci-pr`(Jenkinsfile.pr → scripts/ci/pr-check.sh)와 같은 검사를 돈다
-# (#930, ADR-0076). 검사 내용은 이 파일에 쓰지 않고 그 스크립트들을 그대로 부른다 — 두 곳이 다른 검사를 하지 않게.
+# PR 검사 — GitHub 호스팅 실행기에서 도는 PR 검사의 유일한 길이다(#930, ADR-0076 — Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932).
+# 검사 내용은 이 파일에 쓰지 않고 scripts/ci/ 의 스크립트들을 그대로 부른다.
 #
 #   plan    문서(.md·docs/)만 바뀌었나(`changed.sh`) — 그러면 ADR 상태 검사만
 #   checks  `sub-checks.sh` — Django check·check --deploy·pytest 전체·생성물·문서 검사·단위 시험·타입 검사
