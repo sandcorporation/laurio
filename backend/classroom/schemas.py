@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from ninja import Field, Schema
 
 from .grading_guidelines import GRADING_GUIDELINE_TEXT_MAX_LENGTH
+from .models import LateStatus
 
 
 class ErrorOut(Schema):
@@ -366,8 +367,8 @@ class ProblemIn(Schema):
     #: 코드가 아닌 문제라면 강사가 끌 수 있다.
     syntax_check_enabled: bool = True
     #: 권장 기한·마감(#769, CONTEXT.md 「Problem」) — 둘 다 비울 수 있다. 둘 다 있으면
-    #: 권장 ≤ 마감(같은 시각 허용), 어기면 422. 마감이 지나면 참여자는 새로 못 내고,
-    #: 권장 기한 뒤의 시도는 응답에서 「늦음」으로 센다.
+    #: 권장 ≤ 마감(같은 시각 허용), 어기면 422. 마감 뒤에도 제출할 수 있고,
+    #: 늦음은 권장 기한 뒤·마감 기한 뒤를 나눈다(#941).
     recommended_due_at: datetime | None = None
     due_at: datetime | None = None
     #: True면 만든 직후 바로 연다(「만들고 바로 열기」, #315). 필수 항목이
@@ -729,8 +730,8 @@ class ClassroomProblemMineOut(Schema):
     #: 강사 쪽 `ProblemOut.zip_git_history_warning` 과 같은 판정(#587) — 제출 화면이 zip 을
     #: 고를 때의 안내를 더 눈에 띄게 그린다.
     zip_git_history_warning: ZipGitHistoryWarningOut | None = None
-    #: 권장 기한·마감(#769) — 참여자도 본다. 마감이 지났는가는 `ClassroomProblemSubmissionsOut.
-    #: submit_blocked_reason == "deadline_passed"` 가, 시도가 늦었는가는 시도의 `late` 가 말한다.
+    #: 권장 기한·마감(#941) — 참여자도 본다.
+    #: 두 날짜로 화면이 안내하고, 시도의 늦음 단계는 `late` 가 말한다. 마감 뒤에도 낼 수 있다.
     recommended_due_at: datetime | None = None
     due_at: datetime | None = None
 
@@ -927,9 +928,9 @@ class ClassroomSubmissionOut(Schema):
     pending_reason: str | None = None
     #: 이 시도를 「공모전에도 내기」로 냈을 때만 채워진다(#549) — 끄고 낸 시도는 None.
     contest_entry: ClassroomContestEntryOut | None = None
-    #: 권장 기한 뒤에 낸 시도인가(#769) — 제출 시각 > `recommended_due_at`. 권장 기한이
-    #: 없으면 거짓. 저장된 값이 아니라 응답마다 다시 센다 — 강사가 날짜를 옮기면 바뀐다.
-    late: bool = False
+    #: 늦음 단계(#941): null | "recommended"(권장 기한 뒤) | "deadline"(마감 기한 뒤).
+    #: 마감이 우선이고 경계 시각은 늦지 않다. 저장하지 않고 응답마다 다시 센다.
+    late: LateStatus
 
 
 class ClassroomProblemSubmissionsOut(Schema):
@@ -944,11 +945,11 @@ class ClassroomProblemSubmissionsOut(Schema):
     submissions: list[ClassroomSubmissionOut]
     #: 이 요청을 보낸 사람이 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면
     #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) |
-    #: "hidden"(강사가 이 문제를 숨김) | "deadline_passed"(마감이 지남, #769) |
+    #: "hidden"(강사가 이 문제를 숨김) |
     #: "viewing_as_instructor"(강사가 학생 화면으로 보는 중) 중 하나다 — 우선순위는
-    #: 보관 → 내보냄 → 숨김 → 마감이고
+    #: 보관 → 내보냄 → 숨김이고
     #: (`classroom.participation.participant_submit_blocked_reason`), 강사
-    #: 보기는 그 넷과 겹치지 않는 별도 판정이다. 예전의 네 불리언
+    #: 보기는 그 셋과 겹치지 않는 별도 판정이다. 예전의 네 불리언
     #: (`member_expelled`·`archived`·`problem_hidden`·`viewing_as_instructor`)을
     #: 이 값 하나로 합쳤다 — 화면이 우선순위를 다시 계산하지 않는다. 지난
     #: 시도는 이 값과 무관하게 `submissions`에 그대로 남는다 — 막히는 것은
@@ -1001,8 +1002,8 @@ class ClassroomGridCellOut(Schema):
     #: 공모전 문제에서만(#550): "current" — 지금 그 공모전의 제출이 이 칸의 시도다,
     #: "entered" — 공모전에도 냈었지만 지금 제출은 다른 시도·직접 고친 것이다, None — 낸 적 없다.
     contest_entry: str | None = None
-    #: 이 칸의 **마지막 시도**가 권장 기한 뒤였는가(#769). 시도가 없으면 거짓.
-    late: bool = False
+    #: 이 칸의 **마지막 시도**의 늦음 단계(#941). 시도가 없으면 null.
+    late: LateStatus
 
 
 class ClassroomGridMemberOut(Schema):
@@ -1033,8 +1034,8 @@ class ClassroomRecentAttemptOut(Schema):
     attempt_number: int
     status: str
     submitted_at: datetime
-    #: 권장 기한 뒤에 낸 시도인가(#769) — `ClassroomSubmissionOut.late` 와 같은 셈.
-    late: bool = False
+    #: 늦음 단계(#941) — `ClassroomSubmissionOut.late` 와 같은 셈.
+    late: LateStatus
 
 
 class ClassroomInstructorSubmissionOut(Schema):
@@ -1068,8 +1069,8 @@ class ClassroomInstructorSubmissionOut(Schema):
     #: 이 시도가 지금 그 공모전의 제출인가(#550) — 켜고 낸 가장 최근 시도이고 그 뒤에 직접
     #: 고치지 않았다.
     is_current_contest_entry: bool = False
-    #: 권장 기한 뒤에 낸 시도인가(#769) — `ClassroomSubmissionOut.late` 와 같은 셈.
-    late: bool = False
+    #: 늦음 단계(#941) — `ClassroomSubmissionOut.late` 와 같은 셈.
+    late: LateStatus
 
 
 class ClassroomProblemListItemOut(Schema):
@@ -1088,10 +1089,10 @@ class ClassroomProblemListItemOut(Schema):
     #: 이 참여자가 이 문제에 낸 시도 수와 마지막 시도 시각(#639). 시도가 없으면 0·None.
     attempt_count: int = 0
     last_attempted_at: datetime | None = None
-    #: 권장 기한·마감(#769)과, **마지막 시도**가 권장 기한 뒤였는가. 시도가 없으면 거짓.
+    #: 권장 기한·마감(#769)과, **마지막 시도**의 늦음 단계. 시도가 없으면 null.
     recommended_due_at: datetime | None = None
     due_at: datetime | None = None
-    late: bool = False
+    late: LateStatus
 
 
 class ClassroomMyProblemsOut(Schema):

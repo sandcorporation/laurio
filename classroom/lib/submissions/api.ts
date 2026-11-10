@@ -1,6 +1,8 @@
 // 참여자 제출 백엔드 호출 (#286/#287/#288/#388). 강사 전용 `problems/api.ts`와
 // 달리 여기는 참여자가 자기 시도만 보고 낸다. 공유 클라이언트 위에
 // 선다(#462).
+import type { LateStatus } from "@/lib/problems/due-dates";
+
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
@@ -62,10 +64,10 @@ export type ProblemListItem = {
     | "not_submitted";
   attempt_count: number;
   last_attempted_at: string | null;
-  // 권장 기한·마감(#769)과 마지막 시도가 권장 기한 뒤였는가(`late`, 마지막 시도 기준).
+  // 권장 기한·마감(#769)과 마지막 시도의 늦음 단계(`late`, 마지막 시도 기준).
   recommended_due_at: string | null;
   due_at: string | null;
-  late: boolean;
+  late: LateStatus;
 };
 
 // 참여자의 문제 목록 응답(#372) — 그 화면 위쪽 인라인 이름 편집 칸이 쓸 지금
@@ -149,8 +151,8 @@ export type ClassroomSubmissionRow = {
   score: ClassroomScore | null;
   // 이 시도 하나가 통과인가(#288) — 미채점("pending")이면 항상 거짓이다.
   passed: boolean;
-  // 제출 시각이 권장 기한 뒤였는가(#769) — 저장된 값이 아니라 응답마다 다시 셈한 것.
-  late: boolean;
+  // 제출 시각의 늦음 단계(#941) — 저장된 값이 아니라 응답마다 다시 셈한 것.
+  late: LateStatus;
   pending_reason: PendingReason;
   // 「공모전에도 내기」로 낸 시도면 그 결과(#549), 끄고 낸 시도면 null.
   contest_entry: AttemptContestEntry | null;
@@ -171,7 +173,6 @@ export type SubmitBlockedReason =
   | "archived"
   | "expelled"
   | "hidden"
-  | "deadline_passed"
   | "viewing_as_instructor"
   | null;
 
@@ -243,8 +244,8 @@ export type InstructorSubmissionRow = {
   status: SubmissionStatus;
   score: ClassroomScore | null;
   passed: boolean;
-  // 제출 시각이 권장 기한 뒤였는가(#769).
-  late: boolean;
+  // 제출 시각의 늦음 단계(#941).
+  late: LateStatus;
   // 참여자용 `ClassroomSubmissionRow.pending_reason`과 같은 값·같은 이유
   // (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
   // 멈춘 것"을 구별해야 한다.

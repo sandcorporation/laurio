@@ -9,6 +9,7 @@ import {
   formatDueDay,
   pickDueDate,
   withLate,
+  lateLabel,
 } from "./due-dates";
 
 // 브라우저 로컬 시각 기준이라 시험도 로컬 생성자로 만든다 — 호스트 시간대가 달라도 같은 결과다.
@@ -61,9 +62,18 @@ describe("describeDue", () => {
 });
 
 describe("withLate", () => {
-  it("「늦음」은 별도 칩이 아니라 배지 글자에 붙는다", () => {
-    expect(withLate("통과", true)).toBe("통과 · 늦음");
-    expect(withLate("미통과", false)).toBe("미통과");
+  it("늦음 두 단계를 배지 글자로 나눈다", () => {
+    expect(withLate("통과", "recommended")).toBe("통과 · 권장 기한 뒤");
+    expect(withLate("미통과", "deadline")).toBe("미통과 · 마감 기한 뒤");
+    expect(withLate("미통과", null)).toBe("미통과");
+  });
+});
+
+describe("격자 늦음 설명", () => {
+  it("셀과 범례에 쓸 두 단계 이름을 구분한다", () => {
+    expect(lateLabel("recommended")).toBe("권장 기한 뒤 제출");
+    expect(lateLabel("deadline")).toBe("마감 기한 뒤 제출");
+    expect(lateLabel(null)).toBeNull();
   });
 });
 

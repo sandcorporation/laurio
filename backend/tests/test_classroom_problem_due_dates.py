@@ -1,16 +1,16 @@
 """문제마다 권장 기한과 마감 (#769, ADR-0063).
 
-마감(`due_at`)이 지나면 참여자는 새 시도를 낼 수 없고(403, `submit_blocked_reason`
-= "deadline_passed") 강사·공동 강사는 언제나 낸다. 권장 기한(`recommended_due_at`)이
-지난 뒤의 시도는 「늦음」(`late`)인데 **저장하지 않고 응답마다 계산한다** — 날짜를
-옮기면 같은 시도의 `late` 가 따라 바뀐다. 복사·템플릿은 두 날짜를 비운다. 전부
-마운트된 HTTP API 로 확인한다(`tests/classroom_scenarios.py`)."""
+마감 뒤에도 참여자는 낸다(#941). 늦음은 권장 기한 뒤·마감 기한 뒤 두 단계이며
+마감이 우선한다. 저장하지 않고 응답마다 계산하므로 날짜를 옮기면 판정이 바뀐다.
+복사·템플릿은 두 날짜를 비운다. 전부 마운트된 HTTP API 로 확인한다."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from classroom.models import Class
+import pytest
+
+from classroom.models import Class, ClassroomSubmission
 
 from tests.classroom_scenarios import (
     CLASSES_URL,
@@ -28,6 +28,8 @@ from tests.classroom_scenarios import (
     open_problem,
     roster_grid,
     submit_repository,
+    submit_source,
+    user_id,
 )
 from tests.test_classroom_connected_apps import _connect
 from tests.test_classroom_mcp_problem_tools import _ok, _refused
@@ -148,31 +150,47 @@ def test_dates_cannot_be_changed_on_an_archived_class(client, db):
     assert response.status_code == 403, response.content
 
 
-# --- 마감 — 참여자만 막힌다 ------------------------------------------------------
+# --- 마감 뒤에도 제출한다 ------------------------------------------------------
 
 
-def test_participant_cannot_submit_after_due_at_but_still_sees_the_problem_and_past_attempts(client, db):
+def test_participant_submits_after_due_at_and_keeps_past_attempts(client, db):
     instructor, participant, class_id, problem_id = _setup_with_participant(client, due=FUTURE)
     submit_repository(client, participant["access"], class_id, problem_id)
     _patch(client, instructor["access"], class_id, problem_id, {"due_at": _iso(PAST)})
 
-    refused = _try_submit(client, participant["access"], class_id, problem_id)
+    accepted = _try_submit(client, participant["access"], class_id, problem_id)
 
-    assert refused.status_code == 403, refused.content
-    assert refused.json()["detail"] == "마감이 지나 새로 낼 수 없습니다."
+    assert accepted.status_code == 201, accepted.content
+    assert accepted.json()["late"] == "deadline"
     body = mine(client, participant["access"], class_id, problem_id)
-    assert body["submit_blocked_reason"] == "deadline_passed"
-    assert len(body["submissions"]) == 1
+    assert body["submit_blocked_reason"] is None
+    assert len(body["submissions"]) == 2
     assert [p["id"] for p in my_problems(client, participant["access"], class_id)["problems"]] == [problem_id]
 
 
-def test_moving_the_due_at_forward_reopens_submission(client, db):
+def test_source_upload_and_submission_are_allowed_after_deadline(client, db):
     instructor, participant, class_id, problem_id = _setup_with_participant(client, due=PAST)
-    assert _try_submit(client, participant["access"], class_id, problem_id).status_code == 403
+    assert _patch(client, instructor["access"], class_id, problem_id, {
+        "submission_formats": ["source"],
+    }).status_code == 200
+    uid = user_id("due-participant")
+    upload = client.post("/api/storage/uploads", data={
+        "target_ref": f"classroom-submission:{problem_id}:{uid}:source",
+    }, content_type="application/json", **auth_header(participant["access"]))
+    assert upload.status_code == 200, upload.content
+    submitted = submit_source(client, participant["access"], class_id, problem_id,
+                              participant_user_id=uid, files={"main.py": "print('학습')"})
+    assert submitted["late"] == "deadline"
+
+
+def test_moving_the_due_at_forward_changes_lateness_without_closing_submission(client, db):
+    instructor, participant, class_id, problem_id = _setup_with_participant(client, due=PAST)
+    assert _try_submit(client, participant["access"], class_id, problem_id).json()["late"] == "deadline"
 
     _patch(client, instructor["access"], class_id, problem_id, {"due_at": _iso(FUTURE)})
 
-    assert _try_submit(client, participant["access"], class_id, problem_id).status_code == 201
+    assert mine(client, participant["access"], class_id, problem_id)["submissions"][0]["late"] is None
+    assert _try_submit(client, participant["access"], class_id, problem_id).json()["late"] is None
     assert mine(client, participant["access"], class_id, problem_id)["submit_blocked_reason"] is None
 
 
@@ -186,7 +204,7 @@ def test_owner_and_co_instructor_submit_after_due_at(client, db):
     assert mine(client, instructor["access"], class_id, problem_id)["submit_blocked_reason"] is None
 
 
-def test_hidden_outranks_deadline_in_the_blocked_reason(client, db):
+def test_hidden_still_blocks_after_deadline(client, db):
     instructor, participant, class_id, problem_id = _setup_with_participant(client, due=PAST)
     _patch(client, instructor["access"], class_id, problem_id, {"due_at": _iso(FUTURE)})
     submit_repository(client, participant["access"], class_id, problem_id)
@@ -197,6 +215,7 @@ def test_hidden_outranks_deadline_in_the_blocked_reason(client, db):
     assert hidden.status_code == 200, hidden.content
 
     assert mine(client, participant["access"], class_id, problem_id)["submit_blocked_reason"] == "hidden"
+    assert _try_submit(client, participant["access"], class_id, problem_id).status_code == 403
 
 
 def test_a_draft_whose_due_at_has_passed_can_still_be_opened(client, db):
@@ -216,7 +235,7 @@ def test_a_draft_whose_due_at_has_passed_can_still_be_opened(client, db):
 def test_an_attempt_after_the_recommended_due_at_is_late_everywhere_and_follows_the_date(client, db):
     instructor, participant, class_id, problem_id = _setup_with_participant(client, recommended=PAST)
     submitted = submit_repository(client, participant["access"], class_id, problem_id)
-    assert submitted["late"] is True
+    assert submitted["late"] == "recommended"
 
     def _everywhere() -> tuple:
         own = mine(client, participant["access"], class_id, problem_id)["submissions"][0]["late"]
@@ -226,40 +245,93 @@ def test_an_attempt_after_the_recommended_due_at_is_late_everywhere_and_follows_
         cell = next(m for m in rows if m["display_name"] == "참여자")["cells"][0]["late"]
         return own, listed, by_instructor, cell
 
-    assert _everywhere() == (True, True, True, True)
+    assert _everywhere() == ("recommended",) * 4
 
     # 권장 기한을 뒤로 옮기면 같은 시도가 늦지 않은 것이 된다 — 저장된 값이 아니다.
     _patch(client, instructor["access"], class_id, problem_id, {"recommended_due_at": _iso(FUTURE)})
-    assert _everywhere() == (False, False, False, False)
+    assert _everywhere() == (None,) * 4
 
     # 권장 기한이 없으면 늦음도 없다.
     _patch(client, instructor["access"], class_id, problem_id, {"recommended_due_at": None})
-    assert _everywhere() == (False, False, False, False)
+    assert _everywhere() == (None,) * 4
 
 
-def test_late_is_about_the_recommended_due_at_not_the_due_at(client, db):
+def test_attempt_before_due_at_without_recommended_is_not_late(client, db):
     _, participant, class_id, problem_id = _setup_with_participant(client, due=FUTURE)
 
-    assert submit_repository(client, participant["access"], class_id, problem_id)["late"] is False
-    assert my_problems(client, participant["access"], class_id)["problems"][0]["late"] is False
+    assert submit_repository(client, participant["access"], class_id, problem_id)["late"] is None
+    assert my_problems(client, participant["access"], class_id)["problems"][0]["late"] is None
 
 
 def test_the_list_row_and_grid_cell_follow_the_last_attempt(client, db):
     instructor, participant, class_id, problem_id = _setup_with_participant(client, recommended=PAST)
     submit_repository(client, participant["access"], class_id, problem_id)
-    _patch(client, instructor["access"], class_id, problem_id, {"recommended_due_at": _iso(FUTURE)})
-    _patch(client, instructor["access"], class_id, problem_id, {"recommended_due_at": _iso(PAST)})
-    # 첫 시도는 늦었고, 권장 기한을 되돌렸으니 둘째도 늦다 — 마지막 시도가 기준임을
-    # 보려면 둘째가 늦지 않아야 한다: 권장 기한을 둘째 시도 뒤로 둔다.
-    second = submit_repository(client, participant["access"], class_id, problem_id)
-    between = datetime.fromisoformat(second["created_at"].replace("Z", "+00:00")) + timedelta(seconds=1)
-    _patch(client, instructor["access"], class_id, problem_id, {"recommended_due_at": _iso(between)})
-
+    first = mine(client, participant["access"], class_id, problem_id)["submissions"][0]
+    submit_repository(client, participant["access"], class_id, problem_id)
+    first_at = _iso(ClassroomSubmission.objects.get(pk=first["id"]).created_at)
+    # 첫 시각 자체는 늦지 않지만 두 번째는 늦다. 집계는 마지막 시도의 마감 단계를 따른다.
+    _patch(client, instructor["access"], class_id, problem_id, {
+        "recommended_due_at": first_at, "due_at": first_at,
+    })
     attempts = mine(client, participant["access"], class_id, problem_id)["submissions"]
-    assert [a["late"] for a in attempts] == [False, False]
-    assert my_problems(client, participant["access"], class_id)["problems"][0]["late"] is False
+    assert [a["late"] for a in attempts] == ["deadline", None]
+    assert my_problems(client, participant["access"], class_id)["problems"][0]["late"] == "deadline"
     rows = roster_grid(client, instructor["access"], class_id)["members"]
-    assert next(m for m in rows if m["display_name"] == "참여자")["cells"][0]["late"] is False
+    assert next(m for m in rows if m["display_name"] == "참여자")["cells"][0]["late"] == "deadline"
+
+
+@pytest.mark.parametrize("recommended,due,expected", [
+    (None, None, None),
+    (PAST, None, "recommended"),
+    (PAST, FUTURE, "recommended"),
+    (None, PAST, "deadline"),
+    (PAST, PAST, "deadline"),
+])
+def test_lateness_contract_in_recent_attempts_and_mcp(client, db, recommended, due, expected):
+    instructor, participant, class_id, problem_id = _setup_with_participant(client, recommended=recommended, due=due)
+    submitted = submit_repository(client, participant["access"], class_id, problem_id)
+    assert submitted["late"] == expected
+    recent = client.get(f"{CLASSES_URL}/{class_id}/recent-attempts", **auth_header(instructor["access"]))
+    assert recent.status_code == 200, recent.content
+    assert recent.json()[0]["late"] == expected
+
+    token = _connect(client, instructor["access"])["access_token"]
+    grid = _ok(client, token, "get_roster_grid", {"class_id": class_id})
+    member = next(m for m in grid["members"] if m["display_name"] == "참여자")
+    assert member["cells"][0]["late"] == expected
+    report = _ok(client, token, "get_participant_report", {"class_id": class_id})
+    member = next(m for m in report["participants"] if m["display_name"] == "참여자")
+    assert member["problems"][0]["late"] == expected
+    assert member["problems"][0]["latest"]["late"] == expected
+
+
+def test_exact_deadlines_are_not_late_and_deadline_wins_after_boundary(client, db):
+    instructor, participant, class_id, problem_id = _setup_with_participant(client)
+    submitted = submit_repository(client, participant["access"], class_id, problem_id)
+    # HTTP 응답은 밀리초로 직렬화되므로 정확한 경계는 저장된 시각을 읽어 쓴다.
+    at = ClassroomSubmission.objects.get(pk=submitted["id"]).created_at
+    def check(recommended, due, expected):
+        assert _patch(client, instructor["access"], class_id, problem_id, {
+            "recommended_due_at": _iso(recommended), "due_at": _iso(due),
+        }).status_code == 200
+        assert mine(client, participant["access"], class_id, problem_id)["submissions"][0]["late"] == expected
+    check(at, at, None)
+    check(at - timedelta(microseconds=1), at, "recommended")
+    check(at - timedelta(microseconds=1), at - timedelta(microseconds=1), "deadline")
+
+
+@pytest.mark.parametrize("reason", ["archived", "expelled"])
+def test_membership_blocks_remain_after_deadline(client, db, reason):
+    instructor, participant, class_id, problem_id = _setup_with_participant(client, due=PAST)
+    if reason == "archived":
+        archive_class(client, instructor["access"], class_id)
+    else:
+        members = client.get(f"{CLASSES_URL}/{class_id}/members", **auth_header(instructor["access"])).json()
+        member_id = next(m["id"] for m in members if m["display_name"] == "참여자")
+        expelled = client.post(f"{CLASSES_URL}/{class_id}/members/{member_id}/expel", **auth_header(instructor["access"]))
+        assert expelled.status_code == 200, expelled.content
+    assert mine(client, participant["access"], class_id, problem_id)["submit_blocked_reason"] == reason
+    assert _try_submit(client, participant["access"], class_id, problem_id).status_code == 403
 
 
 def test_the_grid_problem_header_carries_both_dates(client, db):

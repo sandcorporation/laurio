@@ -78,7 +78,7 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
   if (submission.status === "pending") {
     return (
       <Badge tone={submission.pending_reason ? "attention" : "neutral"}>
-        {submission.pending_reason ? "채점 대기" : "채점 중"}
+        {withLate(submission.pending_reason ? "채점 대기" : "채점 중", submission.late)}
       </Badge>
     );
   }
