@@ -98,6 +98,9 @@ export function ProblemDueCard({
         />
         <DueField label="마감" testId={`${testIdPrefix}-due`} value={due} onChange={onDueChange} invalid={invalid} disabled={disabled} />
       </div>
+      <p className="px-4 pb-4 text-[12px] leading-relaxed text-ink/60">
+        마감이 지나도 제출할 수 있고, 그 뒤 제출은 「마감 기한 뒤 제출」로 표시됩니다.
+      </p>
     </Card>
   );
 }

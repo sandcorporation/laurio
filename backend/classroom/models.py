@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import secrets
+from typing import Literal
 
 from django.conf import settings
 from django.db import models
@@ -23,6 +24,8 @@ from submissions.models import Submission
 
 from .grading_guidelines import DEFAULT_GRADING_STRICTNESS, GRADING_GUIDELINE_TEXT_MAX_LENGTH
 from .scoring_models import DEFAULT_REASONING_EFFORT, DEFAULT_SCORING_MODEL, REASONING_EFFORT_CHOICES
+
+LateStatus = Literal["recommended", "deadline"] | None
 
 
 def _generate_join_code() -> str:
@@ -211,9 +214,9 @@ class Problem(models.Model):
     기한)·`due_at`(마감) 둘 다 비울 수 있다. ADR-0039 가 「강의실 문제에는 마감이
     없다」를 전제로 제출 모델을 갈랐던 것은 그때의 판단이고, 지금은 그 전제가
     뒤집혔다 — 다만 Contest 와 달리 마감이 **채점을 가르지 않는다**: 마감은
-    참여자의 새 시도를 막을 뿐이고(강사는 언제나 낸다), 권장 기한은 그 뒤의
-    시도를 「늦음」으로 세게 할 뿐이다. 둘 다 시도에 박히지 않고 응답마다 다시
-    셈한다(`classroom.participation`).
+    제출을 막지 않고 「마감 기한 뒤 제출」로, 권장 기한은 「권장 기한 뒤 제출」로
+    나눈다(#941, ADR-0078). 둘 다 해당하면 마감이 우선이다. 늦음은 시도에
+    박히지 않고 응답마다 다시 셈한다(`lateness`).
 
     `status`(초안/열림/숨김, #405)는 여기서 이미 구별되고, 참여자가 실제로
     무엇을 보게 거르는 표면은 `ClassMember`(#280) 위에 선다 — 열린 문제는
@@ -322,14 +325,13 @@ class Problem(models.Model):
     #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
     instructor_note = models.TextField(blank=True, default="", db_default="")
 
-    #: 권장 기한(#769, CONTEXT.md 「Problem」) — 이 시각 뒤에 낸 시도는 「늦음」이다.
+    #: 권장 기한(#769, CONTEXT.md 「Problem」) — 이 시각 뒤에 낸 시도는 「권장 기한 뒤 제출」이다.
     #: 늦음은 여기 저장되지 않고 응답마다 `created_at` 과 이 값을 견줘 센다 — 날짜를
     #: 옮기면 같은 시도의 판정이 따라 바뀐다(체크리스트를 고치면 달성률만 다시
-    #: 셈하는 것과 같은 결). 비우면 늦음이 없다.
+    #: 셈하는 것과 같은 결). 비우면 권장 기한 뒤 표시는 없다.
     recommended_due_at = models.DateTimeField(null=True, blank=True, default=None)
-    #: 마감(#769) — 이 시각이 지나면 **참여자**는 새 시도를 낼 수 없다. 강사·공동
-    #: 강사는 언제나 낸다. 지난 시도·판정은 그대로 보이고 채점 중이던 시도는 끝까지
-    #: 채점된다. 둘 다 있으면 `recommended_due_at <= due_at` 이어야 한다(API 가 422
+    #: 마감(#941) — 지나도 제출할 수 있고 「마감 기한 뒤 제출」로 표시한다.
+    #: 채점에는 영향을 주지 않는다. 둘 다 있으면 `recommended_due_at <= due_at` 이어야 한다(API 가 422
     #: 로 막는다). 복사·템플릿은 두 날짜를 옮기지 않는다(`services.
     #: PROBLEM_FIELD_TRANSFER_TABLE`). 보관된 클래스에서는 다른 칸처럼 못 고친다.
     due_at = models.DateTimeField(null=True, blank=True, default=None)
@@ -348,10 +350,14 @@ class Problem(models.Model):
 
         return self.due_at is not None and now > self.due_at
 
-    def is_late(self, submitted_at) -> bool:
-        """`submitted_at` 에 낸 시도가 권장 기한 뒤인가(#769). 권장 기한이 없으면 거짓이다."""
+    def lateness(self, submitted_at) -> LateStatus:
+        """제출 시각의 늦음 단계(#941). 마감이 우선이고 경계 시각 자체는 늦지 않다."""
 
-        return self.recommended_due_at is not None and submitted_at > self.recommended_due_at
+        if self.deadline_passed(submitted_at):
+            return "deadline"
+        if self.recommended_due_at is not None and submitted_at > self.recommended_due_at:
+            return "recommended"
+        return None
 
     def effective_model(self) -> str:
         """실제 채점에 쓰이는 모델(#402, CONTEXT.md 「채점 모델」, #436) — 이

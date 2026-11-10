@@ -57,6 +57,7 @@ from submissions.models import (
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
 from .models import (
+    LateStatus,
     ChecklistGrade,
     ChecklistItem,
     Class,
@@ -161,7 +162,6 @@ from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
-    SUBMIT_BLOCKED_DEADLINE_PASSED,
     SUBMIT_BLOCKED_EXPELLED,
     SUBMIT_BLOCKED_HIDDEN,
     SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
@@ -764,7 +764,7 @@ def _serialize_classroom_submission(
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         pending_reason=pending_reason,
         contest_entry=contest_entry_out(submission),
-        late=problem.is_late(submission.created_at),
+        late=problem.lateness(submission.created_at),
     )
 
 
@@ -821,7 +821,7 @@ def _serialize_instructor_submission(
         pending_reason=_pending_reason(score, class_obj, problem),
         contest_entry=contest_entry_out(submission),
         is_current_contest_entry=marks is not None and submission.id in marks.current,
-        late=problem.is_late(submission.created_at),
+        late=problem.lateness(submission.created_at),
     )
 
 
@@ -1764,13 +1764,13 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
 # --- Roster grid (#290) -----------------------------------------------------------
 
 
-def _last_attempt_late(problem: Problem, submissions: list[ClassroomSubmission]) -> bool:
-    """격자 칸·참여자 목록 줄의 「늦음」(#769) — **마지막 시도**가 권장 기한 뒤였는가.
+def _last_attempt_late(problem: Problem, submissions: list[ClassroomSubmission]) -> LateStatus:
+    """격자 칸·참여자 목록 줄의 「늦음」(#769) — **마지막 시도**의 권장 기한 뒤·마감 기한 뒤를 구분한다.
     통과 이력(`_cell_status`)과 달리 OR 가 아니다: 늦게 낸 뒤 제때 다시 낸 사람은
     늦지 않은 것이고, 반대로 제때 냈다가 늦게 다시 낸 사람은 늦은 것이다."""
 
     last = max((s.created_at for s in submissions), default=None)
-    return last is not None and problem.is_late(last)
+    return problem.lateness(last) if last is not None else None
 
 
 def _cell_status(
@@ -1927,7 +1927,7 @@ def list_recent_attempts(request: HttpRequest, class_id: int):
                 attempt_number=attempt.attempt_number,
                 status=status,
                 submitted_at=attempt.created_at,
-                late=attempt.problem.is_late(attempt.created_at),
+                late=attempt.problem.lateness(attempt.created_at),
             )
         )
     return 200, out
@@ -2558,8 +2558,8 @@ def create_classroom_submission(
     request: HttpRequest, class_id: int, problem_id: int, payload: ClassroomSubmissionIn
 ):
     """제출할 때마다 새 시도가 쌓인다 — 시도 횟수 상한은 없다(ADR-0039, CONTEXT.md
-    「Problem」). 마감(`Problem.due_at`, #769)이 지나면 참여자만 막힌다 — 아래
-    `SUBMIT_BLOCKED_DEADLINE_PASSED`. 근거 연결도 자가 체크도 없다: 소스
+    「Problem」). 마감(`Problem.due_at`)이 지나도 제출할 수 있고
+    늦음 표시만 바뀐다(#941). 근거 연결도 자가 체크도 없다: 소스
     또는 저장소 값 하나만 받는다."""
 
     # 오류에는 식별자만 싣는다(#590) — 제출 값은 요청 본문이라 원래 보내지 않는다.
@@ -2598,10 +2598,6 @@ def create_classroom_submission(
         # (`_get_visible_problem_for_participant_or_404`), 그래도 새로
         # 낼 수는 없다. 다시 열면(`reopen_problem`) 이 분기를 벗어난다.
         raise HttpError(403, "강사가 숨긴 문제라 새로 낼 수 없습니다.")
-    if blocked_reason == SUBMIT_BLOCKED_DEADLINE_PASSED:
-        # 마감이 지났다(#769) — 시도 자체가 만들어지지 않으므로 「공모전에도 내기」도
-        # 함께 막힌다. 강사가 마감을 뒤로 옮기면 이 분기를 벗어난다.
-        raise HttpError(403, "마감이 지나 새로 낼 수 없습니다.")
 
     return _create_submission_row(request, problem, member, payload)
 

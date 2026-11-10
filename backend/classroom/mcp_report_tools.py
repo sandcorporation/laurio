@@ -56,7 +56,7 @@ from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pas
 from .contest_entries import entry_marks
 from .instructor_scope import class_scope, problem_scope
 from .instructors import classes_taught_by, is_instructor
-from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA
+from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA, LATE_STATUS_SCHEMA
 from core.models import ConnectedApp
 
 from .models import ClassroomSubmission
@@ -113,6 +113,7 @@ def _latest_attempt(submission: ClassroomSubmission, class_obj, problem, checkli
         "submission_id": submission.id,
         "attempt_number": submission.attempt_number,
         "submitted_at": submission.created_at,
+        "late": problem.lateness(submission.created_at),
         "status": "scored" if score is not None else "pending",
         "passed": problem.is_score_passed(score, checklist_items=checklist_items),
         "pending_reason": _pending_reason(score, class_obj, problem),
@@ -204,6 +205,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                     "passed": cell_status == "passed",
                     "attempt_count": len(attempts),
                     "last_submitted_at": attempts[0].created_at if attempts else None,
+                    "late": problem.lateness(attempts[0].created_at) if attempts else None,
                     "latest_submission_id": attempts[0].id if attempts else None,
                     "contest_entry": marks.cell(a.id for a in attempts),
                     "contest_entry_submission_id": next(
@@ -472,6 +474,7 @@ _REPORT_OUTPUT = {
                             "properties": {
                                 "problem_id": {"type": "integer"},
                                 "status": _CELL_STATUS,
+                                "late": LATE_STATUS_SCHEMA,
                                 "passed": {"type": "boolean", "description": "한 번이라도 통과했는가"},
                                 "attempt_count": {**_COUNT, "description": "시도 수"},
                                 "last_submitted_at": _NULLABLE_DATETIME,
@@ -491,6 +494,7 @@ _REPORT_OUTPUT = {
                                         "submission_id": {"type": "integer"},
                                         "attempt_number": {"type": "integer"},
                                         "submitted_at": _DATETIME,
+                                        "late": LATE_STATUS_SCHEMA,
                                         "status": {"type": "string", "enum": ["scored", "pending"]},
                                         "passed": {"type": "boolean", "description": "이 시도가 통과인가"},
                                         "pending_reason": {
@@ -505,10 +509,10 @@ _REPORT_OUTPUT = {
                                             "description": "문법 검사 판정. 꺼져 있었거나 미채점이면 null",
                                         },
                                     },
-                                    "required": ["submission_id", "attempt_number", "submitted_at", "status", "passed"],
+                                    "required": ["submission_id", "attempt_number", "submitted_at", "status", "passed", "late"],
                                 },
                             },
-                            "required": ["problem_id", "status", "passed", "attempt_count", "latest_submission_id"],
+                            "required": ["problem_id", "status", "passed", "attempt_count", "latest_submission_id", "late"],
                         },
                     },
                 },
@@ -590,7 +594,7 @@ REPORT_TOOL_SPECS: list[dict] = [
         "title": "참여자 리포트",
         "description": (
             "클래스 하나의 참여자 × 문제 요약 — 누가 어디서 막혔는지. 참여자마다 문제별로 통과 이력(명단 격자와 "
-            "같다), 시도 수, 마지막 제출 시각, 최신 시도의 제출 번호와 판정(충족한 체크리스트 항목 수와 항목별 "
+            "같다), 시도 수, 마지막 제출 시각·늦음 단계(late: null·recommended·deadline), 최신 시도의 제출 번호와 판정(충족한 체크리스트 항목 수와 항목별 "
             f"근거, 근거는 {REASONING_MAX_CHARS}자까지)을 담는다. 참여자는 이 클래스에서 불릴 이름으로만 나오고 "
             "강사(소유자·공동 강사) 자리·내보낸 참여자도 표시와 함께 나온다. 소스는 담지 않는다 — 제출 번호로 "
             "open_submission_source 를 불러 연다. problem_id 를 주면 그 문제 하나만 담는다."

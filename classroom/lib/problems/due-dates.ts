@@ -9,6 +9,8 @@
 // 편집 칸은 날짜 칸 + 시각 칸이고, 보낼 때 로컬 → ISO 8601(오프셋 포함)로 바꾼다.
 import { formatDay } from "../classes/format-day";
 
+export type LateStatus = "recommended" | "deadline" | null;
+
 export type DueFields = { recommended_due_at: string | null; due_at: string | null };
 
 export type DueTone = "normal" | "dim" | "faint" | "attention";
@@ -69,9 +71,17 @@ export function describeDue(
   return { recommended, due };
 }
 
-/** 「통과 · 늦음」 — 「늦음」은 별도 칩이 아니라 상태 배지 글자다. */
-export function withLate(label: string, late: boolean): string {
-  return late ? `${label} · 늦음` : label;
+/** 늦음 단계는 별도 칩이 아니라 상태 배지 글자다(#941). */
+export function withLate(label: string, late: LateStatus): string {
+  if (late === "deadline") return `${label} · 마감 기한 뒤`;
+  if (late === "recommended") return `${label} · 권장 기한 뒤`;
+  return label;
+}
+
+export function lateLabel(late: LateStatus): string | null {
+  if (late === "deadline") return "마감 기한 뒤 제출";
+  if (late === "recommended") return "권장 기한 뒤 제출";
+  return null;
 }
 
 // ── 편집 칸 ───────────────────────────────────────────────────────────────

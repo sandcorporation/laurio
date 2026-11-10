@@ -1367,8 +1367,8 @@ export interface paths {
         /**
          * Create Classroom Submission
          * @description 제출할 때마다 새 시도가 쌓인다 — 시도 횟수 상한은 없다(ADR-0039, CONTEXT.md
-         *     「Problem」). 마감(`Problem.due_at`, #769)이 지나면 참여자만 막힌다 — 아래
-         *     `SUBMIT_BLOCKED_DEADLINE_PASSED`. 근거 연결도 자가 체크도 없다: 소스
+         *     「Problem」). 마감(`Problem.due_at`)이 지나도 제출할 수 있고
+         *     늦음 표시만 바뀐다(#941). 근거 연결도 자가 체크도 없다: 소스
          *     또는 저장소 값 하나만 받는다.
          */
         post: operations["classroom_api_create_classroom_submission"];
@@ -5610,11 +5610,8 @@ export interface components {
         ClassroomGridCellOut: {
             /** Contest Entry */
             contest_entry?: string | null;
-            /**
-             * Late
-             * @default false
-             */
-            late: boolean;
+            /** Late */
+            late: ("recommended" | "deadline") | null;
             /** Problem Id */
             problem_id: number;
             /** Status */
@@ -5675,11 +5672,8 @@ export interface components {
              * @default false
              */
             is_current_contest_entry: boolean;
-            /**
-             * Late
-             * @default false
-             */
-            late: boolean;
+            /** Late */
+            late: ("recommended" | "deadline") | null;
             /** Member Display Name */
             member_display_name: string;
             /** Member Id */
@@ -5747,11 +5741,8 @@ export interface components {
             id: number;
             /** Last Attempted At */
             last_attempted_at?: string | null;
-            /**
-             * Late
-             * @default false
-             */
-            late: boolean;
+            /** Late */
+            late: ("recommended" | "deadline") | null;
             /** Passed */
             passed: boolean;
             /** Recommended Due At */
@@ -5881,11 +5872,8 @@ export interface components {
             attempt_number: number;
             /** Id */
             id: number;
-            /**
-             * Late
-             * @default false
-             */
-            late: boolean;
+            /** Late */
+            late: ("recommended" | "deadline") | null;
             /** Member Display Name */
             member_display_name: string;
             /** Member Id */
@@ -5958,11 +5946,8 @@ export interface components {
             download_url?: string | null;
             /** Id */
             id: number;
-            /**
-             * Late
-             * @default false
-             */
-            late: boolean;
+            /** Late */
+            late: ("recommended" | "deadline") | null;
             /**
              * Passed
              * @default false

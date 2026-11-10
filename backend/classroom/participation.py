@@ -28,8 +28,6 @@ from __future__ import annotations
 from django.db.models import Q, QuerySet
 from ninja.errors import HttpError
 
-from core.clock import Clock
-
 from .models import Class, ClassMember, ClassroomSubmission, Problem
 
 #: 강사 전용 엔드포인트가 보관된 클래스에서 거절할 때 쓰는 공통 문구 —
@@ -49,13 +47,12 @@ def assert_class_mutable(class_obj: Class) -> None:
 
 
 #: 참여자가 지금 이 클래스·문제에 새로 낼 수 없는 이유(#439) — 우선순위는
-#: 보관 → 내보냄 → 숨김 → 마감이다(#769). 강사가 학생 화면으로 보는 경우("강사
-#: 보기")는 이 넷과 겹치지 않는다 — 진짜 참여자가 아니므로 호출부(`classroom.api.
+#: 보관 → 내보냄 → 숨김이다(#941). 강사가 학생 화면으로 보는 경우("강사
+#: 보기")는 이 셋과 겹치지 않는다 — 진짜 참여자가 아니므로 호출부(`classroom.api.
 #: get_my_problem`)가 이 값들과 무관하게 직접 채운다.
 SUBMIT_BLOCKED_ARCHIVED = "archived"
 SUBMIT_BLOCKED_EXPELLED = "expelled"
 SUBMIT_BLOCKED_HIDDEN = "hidden"
-SUBMIT_BLOCKED_DEADLINE_PASSED = "deadline_passed"
 SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR = "viewing_as_instructor"
 
 
@@ -76,19 +73,14 @@ def participant_submit_blocked_reason(
     class_obj: Class, member: ClassMember, problem: Problem
 ) -> str | None:
     """참여자가 지금 이 문제에 새로 낼 수 없는 이유 하나, 없으면 `None`(#439).
-    순서는 보관 → 내보냄 → 숨김 → 마감이다 — 스캔 후보·채점 직전 확인처럼 문제
-    하나에 대한 판정이 아니라 화면·업로드 게이트가 쓰는 자리다. 그래서 마감이
-    여기 있어도 채점 중이던 시도는 끝까지 채점된다(#769) — 채점은 이 함수를
-    부르지 않는다. 마감은 서버 시각(`Clock.now()`)으로 그때그때 판정하고 어디에도
-    저장하지 않는다 — 강사가 마감을 뒤로 옮기면 곧장 다시 열린다."""
+    순서는 보관 → 내보냄 → 숨김이다. 마감은 제출을 막지 않고 늦음 표시에만
+    쓴다(#941). 채점은 이 함수를 부르지 않는다."""
 
     reason = participant_membership_blocked_reason(class_obj, member)
     if reason is not None:
         return reason
     if problem.status == Problem.Status.HIDDEN:
         return SUBMIT_BLOCKED_HIDDEN
-    if problem.deadline_passed(Clock.now()):
-        return SUBMIT_BLOCKED_DEADLINE_PASSED
     return None
 
 

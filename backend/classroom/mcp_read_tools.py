@@ -187,6 +187,14 @@ def _get_roster_grid(grant: ConnectedApp, arguments: dict) -> dict:
     return _as_screen_json(_build_roster_grid(class_obj))
 
 
+#: 명단 격자·참여자 리포트가 함께 쓰는 늦음 단계(#941).
+LATE_STATUS_SCHEMA = {
+    "type": ["string", "null"],
+    "enum": [None, "recommended", "deadline"],
+    "description": "늦음 단계 — 권장 기한 뒤·마감 기한 뒤, 마감 우선. 마지막 시도 기준이며 날짜를 옮기면 다시 계산된다.",
+}
+
+
 #: 명단 격자·참여자 리포트가 함께 쓰는 「공모전에도 냈다」 칸(#550).
 CONTEST_ENTRY_CELL_SCHEMA = {
     "type": ["string", "null"],
@@ -317,11 +325,11 @@ _PROBLEM_OBJECT = {
         "syntax_check_enabled": {"type": "boolean", "description": "문법 검사 항목이 켜져 있는가"},
         "recommended_due_at": {
             "type": ["string", "null"],
-            "description": "권장 기한(ISO 8601) — 이 뒤에 낸 시도는 「늦음」이다. null 이면 없음",
+            "description": "권장 기한(ISO 8601) — 이 뒤에 낸 시도는 「권장 기한 뒤 제출」이다. null 이면 없음",
         },
         "due_at": {
             "type": ["string", "null"],
-            "description": "마감(ISO 8601) — 지나면 참여자는 새로 못 낸다. null 이면 없음",
+            "description": "마감(ISO 8601) — 지나도 제출할 수 있고 「마감 기한 뒤 제출」로 표시된다. null 이면 없음",
         },
         "checklist_items": {
             "type": "array",
@@ -515,7 +523,7 @@ READ_TOOL_SPECS: list[dict] = [
             "참여자 × 문제 격자 — 누가 어느 문제에서 막혔는지. problems 는 문제마다 상태와 달성률, members 는 "
             "참여자마다 문제별 칸이다. 칸의 status 는 통과 이력이다(최신 시도가 아니다): passed 한 번이라도 "
             "통과, attempted_not_passed 채점됐지만 통과 없음, scoring 채점을 기다림, needs_setup 강사가 키나 "
-            "채점 모델을 손봐야 채점됨, not_submitted 시도 없음."
+            "채점 모델을 손봐야 채점됨, not_submitted 시도 없음. late 는 마지막 시도의 늦음 단계(null·recommended·deadline)다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,
         "output_schema": {
@@ -562,8 +570,9 @@ READ_TOOL_SPECS: list[dict] = [
                                             ],
                                         },
                                         "contest_entry": CONTEST_ENTRY_CELL_SCHEMA,
+                                        "late": LATE_STATUS_SCHEMA,
                                     },
-                                    "required": ["problem_id", "status"],
+                                    "required": ["problem_id", "status", "late"],
                                 },
                             },
                         },

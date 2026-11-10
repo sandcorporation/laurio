@@ -232,11 +232,11 @@ _SYNTAX_CHECK = {
 #: 권장 기한·마감(#769) — ISO 8601 시각. 고치기에서 보내지 않으면 그대로, null 이면 비운다.
 _RECOMMENDED_DUE_AT = {
     "type": ["string", "null"],
-    "description": "권장 기한(ISO 8601). 이 뒤에 낸 시도는 「늦음」으로 표시된다. null 이면 없음. 마감보다 늦을 수 없다.",
+    "description": "권장 기한(ISO 8601). 이 뒤에 낸 시도는 「권장 기한 뒤 제출」로 표시된다. null 이면 없음. 마감보다 늦을 수 없다.",
 }
 _DUE_AT = {
     "type": ["string", "null"],
-    "description": "마감(ISO 8601). 지나면 참여자는 새로 못 낸다(강사는 낸다). null 이면 없음.",
+    "description": "마감(ISO 8601). 지나도 제출할 수 있고 「마감 기한 뒤 제출」로 표시된다. null 이면 없음.",
 }
 
 _ITEM_OUT = {
@@ -650,8 +650,8 @@ PROBLEM_TOOLS: list[Tool] = [
         description=(
             "클래스에 문제를 하나 만든다 — 제목·설명·제출 형식·체크리스트·채점 설정·권장 기한·마감을 한 번에. "
             "기본은 초안(참여자에게 안 보임)이고, open 을 참으로 주면 바로 연다(필수 체크리스트 항목이 "
-            "하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. 권장 기한 뒤의 시도는 「늦음」으로 "
-            f"표시되고, 마감이 지나면 참여자는 새로 못 낸다(강사는 낸다). {GRADABILITY_TOOL_NOTE} {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
+            "하나 이상 있어야 한다). 새 문제는 클래스의 맨 뒤에 붙는다. 권장 기한 뒤의 시도는 「권장 기한 뒤 제출」로 "
+            f"표시되고, 마감이 지나도 제출할 수 있고 「마감 기한 뒤 제출」로 표시된다. {GRADABILITY_TOOL_NOTE} {_ARCHIVED_NOTE} {_SUMMARY_NOTE}"
         ),
         input_schema=_CREATE_PROBLEM_INPUT,
         output_schema=_PROBLEM_RESULT,

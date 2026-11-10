@@ -2,7 +2,7 @@
 
 // 클래스 상세의 「참여자」 탭 (#634, 시안 v2 Roster). 예전의 참여자 명단(/members)과 참여자 × 문제
 // 격자(#290)를 하나로 합친 표다 — 한 줄이 한 사람이고, 가입일·문제별 칸·통과 n/N·최근 제출·⋮(내보내기)가
-// 붙는다. 문제 머리 아래에 마감 「~M/D」, 칸 오른쪽 아래 점은 마지막 시도가 권장 기한 뒤였다는 표시다(#770).
+// 붙는다. 문제 머리 아래에 마감 「~M/D」, 칸 오른쪽 아래 점은 마지막 시도의 늦음 단계 표시다(#941).
 // 셀은 최신 시도가 아니라 **통과 이력**을 그린다(#289 「달성률」과 같은 규칙이어야 두 탭이
 // 서로 다른 말을 하지 않는다). 이름 열은 고정이고 가로 스크롤은 문제 열만 한다 — 페이지 전체가 넘치면
 // 이름 열을 고정한 뜻을 잃는다.
@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
-import { describeDue, type DueFields } from "@/lib/problems/due-dates";
+import { describeDue, lateLabel, type LateStatus, type DueFields } from "@/lib/problems/due-dates";
 import { achievementTone, describeAchievementRate } from "@/lib/problems/achievement";
 import type { GridCell, GridCellStatus, GridMemberRow } from "@/lib/roster-grid/api";
 import { gridEntryLabel } from "@/lib/submissions/contest-entry";
@@ -35,7 +35,7 @@ const STATUS_LABEL: Record<GridCellStatus, string> = {
 /** 셀 하나의 모양. 리터럴 hex 없이 토큰 유틸리티로만 그린다. */
 function cellLabel(cell: GridCell): string {
   const entry = gridEntryLabel(cell.contest_entry ?? null);
-  const parts = [STATUS_LABEL[cell.status], entry, cell.late ? "권장 기한 뒤 제출" : null].filter(Boolean);
+  const parts = [STATUS_LABEL[cell.status], entry, lateLabel(cell.late)].filter(Boolean);
   return parts.join(" · ");
 }
 
@@ -51,12 +51,12 @@ function ContestEntryMark({ entry, inline = false }: { entry: "current" | "enter
   );
 }
 
-/** 권장 기한 뒤 제출(#770) — 마지막 시도의 `late`. 칸 표식 오른쪽 아래의 작은 점. */
-function LateMark({ inline = false }: { inline?: boolean }) {
+/** 마지막 시도의 늦음(#941) — 권장은 기존 점, 마감은 주의색의 더 큰 점. */
+function LateMark({ late, inline = false }: { late: Exclude<LateStatus, null>; inline?: boolean }) {
   return (
     <span
       aria-hidden
-      className={`${inline ? "block" : "absolute -bottom-1 -right-1"} h-[6px] w-[6px] border border-surface bg-ink`}
+      className={`${inline ? "block" : "absolute -bottom-1 -right-1"} border border-surface ${late === "deadline" ? "h-[8px] w-[8px] bg-attention" : "h-[6px] w-[6px] bg-ink"}`}
     />
   );
 }
@@ -340,7 +340,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                     <span className="relative mx-auto block w-fit">
                       <StatusMark status={cell.status} />
                       {cell.contest_entry ? <ContestEntryMark entry={cell.contest_entry} /> : null}
-                      {cell.late ? <LateMark /> : null}
+                      {cell.late ? <LateMark late={cell.late} /> : null}
                     </span>
                   </td>
                 ))}
@@ -415,9 +415,15 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
           <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <li className="flex items-center gap-2 text-[12px] text-ink/60">
               <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <LateMark inline />
+                <LateMark late="recommended" inline />
               </span>
               권장 기한 뒤 제출
+            </li>
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <LateMark late="deadline" inline />
+              </span>
+              마감 기한 뒤 제출
             </li>
           </ul>
         ) : null}
