@@ -87,7 +87,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `GET /api/contests/home` | 홈 큐레이션 |
 | `GET /api/contests/{id}` | 상세 — 로그인 없이 열린다 |
 | `POST /api/contests` | 개최(유료) |
-| `PATCH /api/contests/{id}` | 브리프 수정 — DRAFT는 결제 전까지, PUBLISHED는 마감 전까지(제출을 받는 동안, #473, ADR-0051). 마감 뒤(CLOSED 이후)는 409. 무료 공모전은 `allows_classroom_import` 도 켜고 끈다(유료는 422) — 참가 조건이 아니라 변경 이력·참가자 알림에 싣지 않는다(#547) |
+| `PATCH /api/contests/{id}` | 브리프 수정 — DRAFT는 결제 전까지, PUBLISHED는 마감 전까지(제출을 받는 동안, #473, ADR-0051). 마감 뒤(CLOSED 이후)는 409. `require_demo_video`(파일 또는 video_link)·`require_screenshot` 제출 조건도 바꾼다. 무료 공모전은 `allows_classroom_import` 도 켜고 끈다(유료는 422) — 참가 조건이 아니라 변경 이력·참가자 알림에 싣지 않는다(#547) |
 | `POST /api/contests/quote` | 개최 견적(유료) |
 | `GET /api/contests/free/hosting-permission` | 내 무료 공모전 개최 권한(#415) |
 | `POST /api/contests/free` | 무료 개최(#415) — 본인확인·결제 없이, 개최 권한만. `allows_classroom_import` 로 「클래스에서 들여오기」를 허용한다(#547) |
@@ -156,6 +156,7 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 (`contests.classroom_catalog`) 강의실이 읽는다.
 - 들여오기 목록: 공개 중 · 마감 전 · 「클래스에서 들여오기」 허용된 무료 공모전.
 - 공모전 하나의 원본: 제목·설명·Requirement·마감과, 지금 「공모전에도 내기」를 받는가. 마감 뒤에도 읽힌다.
+- 「공모전에도 내기」 폼에는 `require_demo_video`·`require_screenshot`도 실린다 — 직접 제출과 같은 필수 자료 검사다.
 - 공개 중인 무료 공모전의 제목·설명·마감·Requirement 가 바뀌거나 허용이 바뀌면 커밋 뒤
   `contest_source_changed` 신호가 나간다. 공모전 제품 스위치가 꺼지면 목록은 비고 아무것도
   받지 않는다.

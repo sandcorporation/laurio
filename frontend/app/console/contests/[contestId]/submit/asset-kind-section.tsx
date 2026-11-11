@@ -150,7 +150,7 @@ export interface AssetKindSectionProps {
   rows: EditableAsset[];
   onChange: (rows: EditableAsset[]) => void;
   disabled: boolean;
-  /** 최소 한 개가 있어야 하는 종류(현재는 source뿐) — 마지막 행은 지울 수 없다. */
+  /** 최소 한 개 있어야 하는 자료 종류 — 마지막 행은 지울 수 없다. */
   required?: boolean;
   addLabel: string;
   testIdPrefix: string;

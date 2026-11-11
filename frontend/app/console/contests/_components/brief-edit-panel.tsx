@@ -26,6 +26,8 @@ export type BriefEditPatch = {
   title: string;
   category_id: number;
   deliverable_type_ids: number[];
+  require_demo_video: boolean;
+  require_screenshot: boolean;
   // 무료 공모전(#415, ADR-0048)은 상금 자체가 없다 — `prize`를 아예 보내지
   // 않는다(백엔드도 무료 공모전에 `prize`가 실리면 422로 거절한다).
   prize?: number;
@@ -58,6 +60,8 @@ type FormState = {
   title: string;
   categoryId: number | "";
   deliverableTypeIds: number[];
+  requireDemoVideo: boolean;
+  requireScreenshot: boolean;
   prize: string;
   deadlineAt: string;
   description: string;
@@ -69,6 +73,8 @@ function formFromContest(contest: ContestDetail): FormState {
     title: contest.title,
     categoryId: contest.category.id,
     deliverableTypeIds: contest.deliverable_types.map((dt) => dt.id),
+    requireDemoVideo: contest.require_demo_video,
+    requireScreenshot: contest.require_screenshot,
     prize: String(contest.prize),
     deadlineAt: toLocalDatetimeInput(contest.deadline_at),
     description: contest.description,
@@ -161,6 +167,8 @@ export function BriefEditPanel({
       title: form.title.trim(),
       category_id: form.categoryId,
       deliverable_type_ids: form.deliverableTypeIds,
+      require_demo_video: form.requireDemoVideo,
+      require_screenshot: form.requireScreenshot,
       ...(canEditPrize ? { prize: prizeNumber } : {}),
       deadline_at: new Date(form.deadlineAt).toISOString(),
       description: form.description,
@@ -270,6 +278,10 @@ export function BriefEditPanel({
                 <span className="font-mono text-xs text-ink/60">{formatPrize(dt.minimum_prize)}</span>
               </label>
             ))}
+          <div className="mt-3 flex flex-col gap-2 text-sm">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.requireDemoVideo} onChange={(e) => setForm((p) => ({ ...p, requireDemoVideo: e.target.checked }))} />시연 영상 제출 필수</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.requireScreenshot} onChange={(e) => setForm((p) => ({ ...p, requireScreenshot: e.target.checked }))} />스크린샷 제출 필수</label>
+          </div>
           </fieldset>
 
           {canEditPrize && (

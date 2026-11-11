@@ -60,6 +60,8 @@ class ContestSource:
     deadline_at: datetime
     #: 지금 「공모전에도 내기」를 받을 수 있는가 — 공개 중 · 마감 전 · 허용 켜짐.
     accepts_classroom_entries: bool
+    require_demo_video: bool = False
+    require_screenshot: bool = False
     requirements: tuple[ContestRequirementSource, ...] = field(default_factory=tuple)
 
 
@@ -131,6 +133,8 @@ class ContestEntryContext:
     optional_assets: tuple[EntryAsset, ...] = ()
     #: 선택 자료 종류 → 그 사람의 공모전 업로드 대상(target_ref). 형식은 공모전 쪽만 안다.
     upload_target_refs: dict[str, str] = field(default_factory=dict)
+    require_demo_video: bool = False
+    require_screenshot: bool = False
 
 
 @runtime_checkable

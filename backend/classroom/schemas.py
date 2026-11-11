@@ -815,6 +815,8 @@ class ContestEntryFormOut(Schema):
     optional_assets: list[ContestEntryAssetOut] = []
     #: 선택 자료 종류(demo_video·screenshot) → 그 사람의 공모전 업로드 대상.
     upload_target_refs: dict[str, str] = {}
+    require_demo_video: bool = False
+    require_screenshot: bool = False
 
 
 class ClassroomContestEntryOut(Schema):

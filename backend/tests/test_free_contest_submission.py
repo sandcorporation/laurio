@@ -93,7 +93,16 @@ def landing_type(db):
     return DeliverableType.objects.create(name="랜딩·원페이지-제출", minimum_prize=500_000)
 
 
-def _free_published_contest(client, *, host_uid="free-sub-host", deadline_at=None, category, landing_type) -> tuple[dict, dict]:
+def _free_published_contest(
+    client,
+    *,
+    host_uid="free-sub-host",
+    deadline_at=None,
+    category,
+    landing_type,
+    require_demo_video=False,
+    require_screenshot=False,
+) -> tuple[dict, dict]:
     host = _hosted_user(client, host_uid)
     root = _operator_client(f"root-{host_uid}")
     _grant(root, host["user_id"])
@@ -105,6 +114,8 @@ def _free_published_contest(client, *, host_uid="free-sub-host", deadline_at=Non
             "title": f"{host_uid}의 무료 공모전",
             "category_id": category.id,
             "deliverable_type_ids": [landing_type.id],
+            "require_demo_video": require_demo_video,
+            "require_screenshot": require_screenshot,
             "description": "",
             "deadline_at": deadline_at.isoformat(),
             "requirements": [{"text": "할 일을 추가·완료할 수 있다", "grade": "required"}],
@@ -154,6 +165,33 @@ def test_unverified_user_submits_to_a_free_contest_with_consent(client, category
 
     stored = ContestSubmission.objects.get(id=body["id"])
     assert stored.source_access_consent_at is not None
+
+
+def test_submission_is_rejected_when_required_screenshot_is_missing(client, category, landing_type):
+    _host, contest = _free_published_contest(
+        client,
+        category=category,
+        landing_type=landing_type,
+        host_uid="free-required-screenshot",
+        require_screenshot=True,
+    )
+    assert contest["require_screenshot"] is True
+    dev = _hosted_user(client, "free-required-screenshot-dev")
+
+    response = client.post(
+        f"{CONTESTS_URL}/{contest['id']}/submissions",
+        data={
+            "assets": [_source_asset(contest["id"], dev["user_id"])],
+            "requirement_responses": [],
+            "source_access_consent": True,
+        },
+        content_type="application/json",
+        **_auth_header(dev["access"]),
+    )
+
+    assert response.status_code == 422, response.content
+    assert "스크린샷" in response.json()["detail"]
+    assert not ContestSubmission.objects.filter(contest_id=contest["id"]).exists()
 
 
 def test_submitting_without_consent_is_422(client, category, landing_type):

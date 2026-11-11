@@ -82,6 +82,8 @@ class ContestClassroomCatalog:
             description=contest.description,
             deadline_at=contest.deadline_at,
             accepts_classroom_entries=accepts,
+            require_demo_video=contest.require_demo_video,
+            require_screenshot=contest.require_screenshot,
             requirements=tuple(
                 ContestRequirementSource(
                     requirement_id=r.pk, text=r.text, grade=r.grade, order=r.order, points=r.points, hidden=r.hidden

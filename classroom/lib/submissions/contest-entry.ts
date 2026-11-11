@@ -25,6 +25,8 @@ export type ContestEntryForm = {
   requirements: EntryRequirement[];
   optional_assets: EntryAsset[];
   upload_target_refs: Record<string, string>;
+  require_demo_video: boolean;
+  require_screenshot: boolean;
 };
 
 export type ContestEntryInput = {
@@ -93,6 +95,8 @@ export function initialEntryState(form: ContestEntryForm): ContestEntryState {
 export function entryBlockedReason(form: ContestEntryForm, state: ContestEntryState): string | null {
   if (!state.consent) return "소스 열람에 동의해야 공모전에도 낼 수 있습니다.";
   if (form.has_entry && !state.replaceConfirmed) return "이미 낸 공모전 제출이 이 시도로 바뀐다는 것을 확인해 주세요.";
+  if (form.require_demo_video && !state.optionalAssets.some((a) => a.kind === "demo_video" || a.kind === "video_link")) return "시연 영상 자료가 필수입니다.";
+  if (form.require_screenshot && !state.optionalAssets.some((a) => a.kind === "screenshot")) return "스크린샷 자료가 필수입니다.";
   const badLink = state.optionalAssets.find((a) => a.kind === "video_link" && !isSafeVideoLink(a.value));
   if (badLink) return VIDEO_LINK_SHAPE_MESSAGE;
   return null;

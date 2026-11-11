@@ -130,6 +130,8 @@ def contest_view(contest: Contest, grant: ConnectedApp) -> dict:
         "mine": mine,
         "category_id": contest.category_id,
         "deliverable_type_ids": sorted(contest.deliverable_types.values_list("id", flat=True)),
+        "require_demo_video": contest.require_demo_video,
+        "require_screenshot": contest.require_screenshot,
         "description": contest.description,
         "deadline_at": _iso(contest.deadline_at),
         "judging_ends_at": _iso(contest.judging_ends_at),
@@ -232,8 +234,8 @@ def _get_submission(grant: ConnectedApp, arguments: dict) -> dict:
 
 # --- 쓰기 도구 -------------------------------------------------------------------
 
-_CREATE_FIELDS = {"title", "category_id", "deliverable_type_ids", "description", "deadline_at", "requirements", "allows_classroom_import"}
-_UPDATE_FIELDS = {"contest_id", "title", "category_id", "deliverable_type_ids", "description", "deadline_at", "allows_classroom_import"}
+_CREATE_FIELDS = {"title", "category_id", "deliverable_type_ids", "description", "deadline_at", "requirements", "allows_classroom_import", "require_demo_video", "require_screenshot"}
+_UPDATE_FIELDS = {"contest_id", "title", "category_id", "deliverable_type_ids", "description", "deadline_at", "allows_classroom_import", "require_demo_video", "require_screenshot"}
 
 
 def _create(grant: ConnectedApp, arguments: dict) -> WriteResult:
@@ -388,6 +390,8 @@ _CONTEST = {
         "mine": _BOOL,
         "category_id": _ID,
         "deliverable_type_ids": {"type": "array", "items": _ID},
+        "require_demo_video": _BOOL,
+        "require_screenshot": _BOOL,
         "description": _STR,
         "deadline_at": _STR,
         "judging_ends_at": _STR,
@@ -396,7 +400,7 @@ _CONTEST = {
         "requirements": {"type": "array", "items": _REQUIREMENT},
         "hidden_requirement_count": _INT,
     },
-    "required": ["id", "title", "status", "archived", "mine", "category_id", "deliverable_type_ids", "description", "deadline_at", "judging_ends_at", "allows_classroom_import", "submission_count", "requirements", "hidden_requirement_count"],
+    "required": ["id", "title", "status", "archived", "mine", "category_id", "deliverable_type_ids", "require_demo_video", "require_screenshot", "description", "deadline_at", "judging_ends_at", "allows_classroom_import", "submission_count", "requirements", "hidden_requirement_count"],
 }
 _CONTEST_OUT = {"type": "object", "properties": {"contest": _CONTEST}, "required": ["contest"]}
 _PREVIEW_OUT = {
@@ -422,6 +426,8 @@ _BRIEF = {
     "description": _STR,
     "deadline_at": {"type": "string", "description": "마감 시각(ISO 8601, 시간대 포함). 지금보다 뒤여야 한다."},
     "allows_classroom_import": {"type": "boolean", "description": "강의실 강사가 이 공모전을 클래스로 들여올 수 있게 할지"},
+    "require_demo_video": {"type": "boolean", "description": "시연 영상 파일 또는 영상 링크를 제출 필수로 할지"},
+    "require_screenshot": {"type": "boolean", "description": "스크린샷을 제출 필수로 할지"},
 }
 
 

@@ -206,7 +206,12 @@ def entry_context(contest_id: int, user_id: int) -> ContestEntryContext | None:
     }
     existing = _existing_submission(contest_id, user_id)
     if existing is None:
-        return ContestEntryContext(has_entry=False, upload_target_refs=upload_target_refs)
+        return ContestEntryContext(
+            has_entry=False,
+            upload_target_refs=upload_target_refs,
+            require_demo_video=contest.require_demo_video,
+            require_screenshot=contest.require_screenshot,
+        )
     optional_rows = list(
         existing.assets.filter(kind__in=OPTIONAL_ASSET_KINDS).order_by("order", "id")
     )
@@ -234,6 +239,8 @@ def entry_context(contest_id: int, user_id: int) -> ContestEntryContext | None:
         responses=responses,
         optional_assets=optional_assets,
         upload_target_refs=upload_target_refs,
+        require_demo_video=contest.require_demo_video,
+        require_screenshot=contest.require_screenshot,
     )
 
 

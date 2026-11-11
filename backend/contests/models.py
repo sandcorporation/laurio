@@ -265,6 +265,9 @@ class Contest(models.Model):
     title = models.CharField(max_length=200)
     category = models.ForeignKey(Category, related_name="contests", on_delete=models.PROTECT)
     deliverable_types = models.ManyToManyField(DeliverableType, related_name="contests")
+    # 제출 자료 중 개최자가 참가자에게 요구하는 업로드 종류. 동영상 링크도 demo_video로 센다.
+    require_demo_video = models.BooleanField(default=False, db_default=False)
+    require_screenshot = models.BooleanField(default=False, db_default=False)
     description = models.TextField(blank=True)
     prize = models.PositiveIntegerField()
     deadline_at = models.DateTimeField()

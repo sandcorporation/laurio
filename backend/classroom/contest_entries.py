@@ -110,6 +110,8 @@ def contest_entry_form(problem: Problem, user_id: int) -> ContestEntryFormOut:
             for a in context.optional_assets
         ],
         upload_target_refs=dict(context.upload_target_refs),
+        require_demo_video=context.require_demo_video,
+        require_screenshot=context.require_screenshot,
     )
 
 
