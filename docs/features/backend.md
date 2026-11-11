@@ -156,7 +156,7 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 (`contests.classroom_catalog`) 강의실이 읽는다.
 - 들여오기 목록: 공개 중 · 마감 전 · 「클래스에서 들여오기」 허용된 무료 공모전.
 - 공모전 하나의 원본: 제목·설명·Requirement·마감과, 지금 「공모전에도 내기」를 받는가. 마감 뒤에도 읽힌다.
-- 「공모전에도 내기」 폼에는 `require_demo_video`·`require_screenshot`도 실린다 — 직접 제출과 같은 필수 자료 검사다.
+- 「공모전에도 내기」 폼에는 `require_demo_video`·`require_screenshot`도 실린다 — 직접 제출과 같은 필수 자료 검사지만, 시도를 만들기 전 422 로 막지 않는다. 시도는 접수(201)되고 공모전이 받을 때 「내지 못했다(스크린샷/시연 영상 자료가 필수입니다.)」로 남는다.
 - 공개 중인 무료 공모전의 제목·설명·마감·Requirement 가 바뀌거나 허용이 바뀌면 커밋 뒤
   `contest_source_changed` 신호가 나간다. 공모전 제품 스위치가 꺼지면 목록은 비고 아무것도
   받지 않는다.

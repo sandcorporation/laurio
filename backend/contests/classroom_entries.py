@@ -17,7 +17,9 @@ ContestSubmission 을 만들거나 고치고, `contest_entry_resolved` 로 결�
   잇는다(직접 제출의 `asset_id` 와 같은 결과).
 
 미리 거르기(`check_entry`)와 받을 때의 검증은 같은 함수(`_validate`)다 — 마감·허용 철회
-경합은 그 사이에 생기므로 받을 때 한 번 더 본다.
+경합은 그 사이에 생기므로 받을 때 한 번 더 본다. 개최자가 필수로 정한 시연 영상·스크린샷
+(`Contest.require_*`)만은 미리 거르기에서 빼고 받을 때 본다 — 클래스 시도는 접수되고 공모전
+제출만 「내지 못했다(사유)」로 남는다.
 """
 
 from __future__ import annotations
@@ -142,9 +144,12 @@ def _responses_in(
     return responses
 
 
-def _validate(entry: ContestEntry, *, scoring_asset: EntryAsset) -> _Validated:
+def _validate(
+    entry: ContestEntry, *, scoring_asset: EntryAsset, required_media: bool = True
+) -> _Validated:
     """받을 수 있는 내기인지 본다 — 아무것도 쓰지 않는다. `scoring_asset` 은 공모전 쪽 모양의
-    필수 자료다(소스면 공모전 업로드 대상의 키)."""
+    필수 자료다(소스면 공모전 업로드 대상의 키). `required_media` 가 거짓이면 개최자가 필수로
+    정한 시연 영상·스크린샷(`Contest.require_*`)은 보지 않는다 — 시도 접수 전 사전 검사용."""
 
     contest = Contest.objects.filter(pk=entry.contest_id, is_free=True).first()
     if contest is None or not accepts_entries(contest):
@@ -169,6 +174,7 @@ def _validate(entry: ContestEntry, *, scoring_asset: EntryAsset) -> _Validated:
             contest=contest,
             developer_user_id=entry.user_id,
             existing_asset_values=existing_values,
+            enforce_required_media=required_media,
         )
         validate_requirement_responses(
             contest, responses, own_asset_ids=set(), removed_asset_ids=set()
@@ -180,8 +186,15 @@ def _validate(entry: ContestEntry, *, scoring_asset: EntryAsset) -> _Validated:
 
 def check_entry(entry: ContestEntry) -> str | None:
     """시도를 만들기 전에 거른다(강의실의 422). 소스는 아직 옮기지 않았으므로 공모전 쪽
-    모양의 자리표시 키로 필수 자료 검사를 통과시킨다 — 실제 키는 받을 때 생긴다."""
+    모양의 자리표시 키로 필수 자료 검사를 통과시킨다 — 실제 키는 받을 때 생긴다.
 
+    개최자가 필수로 정한 시연 영상·스크린샷은 여기서 보지 않는다. 클래스 시도는 그것 없이도
+    성립하므로 시도는 접수(201)하고, 공모전이 받을 때(`_apply`) 「내지 못했다(사유)」로 남긴다."""
+
+    return _precheck(entry, required_media=False)
+
+
+def _precheck(entry: ContestEntry, *, required_media: bool) -> str | None:
     scoring_asset = entry.scoring_asset
     if scoring_asset.kind == SubmissionAsset.Kind.SOURCE:
         scoring_asset = EntryAsset(
@@ -190,7 +203,7 @@ def check_entry(entry: ContestEntry) -> str | None:
             content_type=scoring_asset.content_type,
         )
     try:
-        _validate(entry, scoring_asset=scoring_asset)
+        _validate(entry, scoring_asset=scoring_asset, required_media=required_media)
     except _Rejected as rejected:
         return rejected.reason
     return None
@@ -271,8 +284,8 @@ def _copy_source(entry: ContestEntry) -> EntryAsset:
 
 
 def _apply(entry: ContestEntry) -> None:
-    # 받을 수 없는 내기에 파일부터 옮기지 않는다 — 자리표시 키로 먼저 거른다.
-    reason = check_entry(entry)
+    # 받을 수 없는 내기에 파일부터 옮기지 않는다 — 자리표시 키로 먼저 거른다(필수 자료 포함).
+    reason = _precheck(entry, required_media=True)
     if reason is not None:
         raise _Rejected(reason)
     scoring_asset = _copy_source(entry)

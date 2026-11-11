@@ -392,6 +392,7 @@ def _clean_assets_in(
     contest: Contest,
     developer_user_id: int,
     existing_asset_values: set[tuple[str, str]] = frozenset(),
+    enforce_required_media: bool = True,
 ) -> list[_CleanedAsset]:
     """페이로드의 자료를 검증하고 저장 가능한 값으로 다듬는다 (#190).
 
@@ -518,7 +519,10 @@ def _clean_assets_in(
             422, "전체 소스코드 또는 GitHub 저장소 중 최소 하나가 필수입니다."
         )
 
-    validate_required_media(contest, cleaned)
+    if enforce_required_media:
+        # 강의실 내기의 사전 검사만 끈다 — 그 자리에서는 시도 접수와 공모전 수락을 나눈다
+        # (classroom_entries.check_entry).
+        validate_required_media(contest, cleaned)
 
     policy = get_current_policy()
     for kind, limit_field in _KIND_LIMIT_FIELDS.items():
