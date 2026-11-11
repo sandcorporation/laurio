@@ -38,6 +38,8 @@ type BriefForm = {
   title: string;
   categoryId: number | "";
   deliverableTypeIds: number[];
+  requireDemoVideo: boolean;
+  requireScreenshot: boolean;
   deadlineAt: string;
   description: string;
   allowsClassroomImport: boolean;
@@ -47,6 +49,8 @@ const EMPTY_BRIEF: BriefForm = {
   title: "",
   categoryId: "",
   deliverableTypeIds: [],
+  requireDemoVideo: false,
+  requireScreenshot: false,
   deadlineAt: "",
   description: "",
   allowsClassroomImport: false,
@@ -155,6 +159,8 @@ export default function NewFreeContestBriefPage() {
         title,
         category_id: brief.categoryId,
         deliverable_type_ids: brief.deliverableTypeIds,
+        require_demo_video: brief.requireDemoVideo,
+        require_screenshot: brief.requireScreenshot,
         description: brief.description,
         deadline_at: new Date(brief.deadlineAt).toISOString(),
         requirements: [],
@@ -277,6 +283,10 @@ export default function NewFreeContestBriefPage() {
               </span>
             </label>
           ))}
+          <div className="mt-3 flex flex-col gap-2 text-sm">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={brief.requireDemoVideo} onChange={(e) => setBrief((p) => ({ ...p, requireDemoVideo: e.target.checked }))} />시연 영상 제출 필수</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={brief.requireScreenshot} onChange={(e) => setBrief((p) => ({ ...p, requireScreenshot: e.target.checked }))} />스크린샷 제출 필수</label>
+          </div>
         </fieldset>
 
         <label className="flex flex-col gap-1 text-sm">

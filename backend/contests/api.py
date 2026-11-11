@@ -196,6 +196,8 @@ def _serialize_contest(
             DeliverableTypeOut(id=dt.id, name=dt.name, minimum_prize=dt.minimum_prize)
             for dt in contest.deliverable_types.all()
         ],
+        require_demo_video=contest.require_demo_video,
+        require_screenshot=contest.require_screenshot,
         description=contest.description,
         prize=contest.prize,
         deadline_at=contest.deadline_at,
@@ -343,6 +345,8 @@ def create_contest(request: HttpRequest, payload: ContestCreateIn):
             status=Contest.Status.DRAFT,
             required_minimum_prize=minimum_total,
             is_underfunded=payload.prize < minimum_total,
+            require_demo_video=payload.require_demo_video,
+            require_screenshot=payload.require_screenshot,
         )
         contest.deliverable_types.set(deliverable_types)
 
@@ -459,6 +463,8 @@ def create_free_contest_draft(user, payload: FreeContestCreateIn) -> ContestOut:
             status=Contest.Status.DRAFT,
             is_free=True,
             allows_classroom_import=payload.allows_classroom_import,
+            require_demo_video=payload.require_demo_video,
+            require_screenshot=payload.require_screenshot,
             required_minimum_prize=0,
             is_underfunded=False,
         )
@@ -948,6 +954,13 @@ def apply_contest_update(contest: Contest, payload: ContestUpdateIn) -> ContestO
                 after["deadline_at"] = payload.deadline_at.isoformat()
             contest.deadline_at = payload.deadline_at
 
+        for field in ("require_demo_video", "require_screenshot"):
+            value = getattr(payload, field)
+            if value is not None and value != getattr(contest, field):
+                before[field] = getattr(contest, field)
+                after[field] = value
+                setattr(contest, field, value)
+
         deliverable_types_changed = False
         if payload.deliverable_type_ids is not None:
             if not payload.deliverable_type_ids:
@@ -1008,7 +1021,10 @@ def apply_contest_update(contest: Contest, payload: ContestUpdateIn) -> ContestO
             contest.allows_classroom_import = payload.allows_classroom_import
 
         contest.save()
-        if import_allowance_changed:
+        media_requirements_changed = any(
+            key in after for key in ("require_demo_video", "require_screenshot")
+        )
+        if import_allowance_changed or media_requirements_changed:
             _announce_contest_source_changed(contest)
 
         if contest.status == Contest.Status.DRAFT and payload.prize is not None:

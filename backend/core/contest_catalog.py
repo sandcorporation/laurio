@@ -21,7 +21,8 @@
   칸이 없다(ADR-0054).
   강의실이 시도를 만들기 **전에** 거를 수 있는 것(동의·근거 모양·선택 자료)은 카탈로그의
   `check_entry` 가 미리 답한다 — 화면이 422 로 막을 수 있게. 마감·허용 철회 경합은 그
-  사이에 생기므로 공모전 쪽이 받을 때 한 번 더 본다.
+  사이에 생기므로 공모전 쪽이 받을 때 한 번 더 본다. 개최자가 필수로 정한 시연 영상·
+  스크린샷은 미리 거르지 않는다 — 시도는 접수되고 받을 때 거절 사유로 남는다.
 
 이 모듈은 어느 기능 앱도 임포트하지 않는다(규칙 B) — 데이터 모양과 등록부뿐이다.
 """
@@ -60,6 +61,8 @@ class ContestSource:
     deadline_at: datetime
     #: 지금 「공모전에도 내기」를 받을 수 있는가 — 공개 중 · 마감 전 · 허용 켜짐.
     accepts_classroom_entries: bool
+    require_demo_video: bool = False
+    require_screenshot: bool = False
     requirements: tuple[ContestRequirementSource, ...] = field(default_factory=tuple)
 
 
@@ -131,6 +134,8 @@ class ContestEntryContext:
     optional_assets: tuple[EntryAsset, ...] = ()
     #: 선택 자료 종류 → 그 사람의 공모전 업로드 대상(target_ref). 형식은 공모전 쪽만 안다.
     upload_target_refs: dict[str, str] = field(default_factory=dict)
+    require_demo_video: bool = False
+    require_screenshot: bool = False
 
 
 @runtime_checkable

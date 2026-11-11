@@ -25,6 +25,8 @@ function form(overrides: Partial<ContestEntryForm> = {}): ContestEntryForm {
     ],
     optional_assets: [{ kind: "demo_url", value: "https://todo.example.com", label: "", content_type: "" }],
     upload_target_refs: {},
+    require_demo_video: false,
+    require_screenshot: false,
     ...overrides,
   };
 }
@@ -59,6 +61,16 @@ describe("buildEntryPayload", () => {
     const f = form({ has_entry: true });
     const state = { ...initialEntryState(f), on: true, consent: true, replaceConfirmed: true };
     expect(buildEntryPayload(f, state)?.replace_existing).toBe(true);
+  });
+});
+
+describe("entryBlockedReason required media", () => {
+  it("requires a video or screenshot when the contest marks it required", () => {
+    const required = form({ require_demo_video: true, require_screenshot: true });
+    const state = { ...initialEntryState(required), on: true, consent: true, optionalAssets: [] };
+    expect(entryBlockedReason(required, state)).toBe("시연 영상 자료가 필수입니다.");
+    expect(entryBlockedReason(required, { ...state, optionalAssets: [{ kind: "video_link", value: "https://youtu.be/abc", label: "", content_type: "" }] })).toBe("스크린샷 자료가 필수입니다.");
+    expect(entryBlockedReason(required, { ...state, optionalAssets: [{ kind: "screenshot", value: "key", label: "", content_type: "image/png" }] })).toBe("시연 영상 자료가 필수입니다.");
   });
 });
 

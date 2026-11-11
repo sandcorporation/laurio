@@ -6341,6 +6341,16 @@ export interface components {
             /** Prize */
             prize: number;
             /**
+             * Require Demo Video
+             * @default false
+             */
+            require_demo_video: boolean;
+            /**
+             * Require Screenshot
+             * @default false
+             */
+            require_screenshot: boolean;
+            /**
              * Requirements
              * @default []
              */
@@ -6424,6 +6434,16 @@ export interface components {
              * @default []
              */
             optional_assets: components["schemas"]["ContestEntryAssetOut"][];
+            /**
+             * Require Demo Video
+             * @default false
+             */
+            require_demo_video: boolean;
+            /**
+             * Require Screenshot
+             * @default false
+             */
+            require_screenshot: boolean;
             /**
              * Requirements
              * @default []
@@ -6667,6 +6687,16 @@ export interface components {
             judging_ends_at: string | null;
             /** Prize */
             prize: number;
+            /**
+             * Require Demo Video
+             * @default false
+             */
+            require_demo_video: boolean;
+            /**
+             * Require Screenshot
+             * @default false
+             */
+            require_screenshot: boolean;
             /** Required Minimum Prize */
             required_minimum_prize: number;
             /** Requirements */
@@ -6742,6 +6772,10 @@ export interface components {
             description?: string | null;
             /** Prize */
             prize?: number | null;
+            /** Require Demo Video */
+            require_demo_video?: boolean | null;
+            /** Require Screenshot */
+            require_screenshot?: boolean | null;
             /** Title */
             title?: string | null;
         };
@@ -6939,6 +6973,16 @@ export interface components {
              * @default
              */
             description: string;
+            /**
+             * Require Demo Video
+             * @default false
+             */
+            require_demo_video: boolean;
+            /**
+             * Require Screenshot
+             * @default false
+             */
+            require_screenshot: boolean;
             /**
              * Requirements
              * @default []

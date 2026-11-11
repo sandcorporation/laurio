@@ -508,6 +508,17 @@ export default function SubmitPage() {
       });
       return;
     }
+    const hasDemoVideo = [...demoVideoAssets, ...videoLinkAssets].some(
+      (row) => row.value.trim() !== "",
+    );
+    if (load.contest.require_demo_video && !hasDemoVideo) {
+      setSaveState({ status: "error", message: "시연 영상이 필수입니다." });
+      return;
+    }
+    if (load.contest.require_screenshot && !screenshotAssets.some((row) => row.value.trim() !== "")) {
+      setSaveState({ status: "error", message: "스크린샷이 필수입니다." });
+      return;
+    }
     // 저장소 주소가 SSH·파일 주소 같은 모양이면 서버에 보내기 전에 막는다 — 그 칸 아래에
     // 이미 이유와 고칠 주소가 떠 있다.
     if (repositoryAssets.some((row) => checkGithubRepositoryUrl(row.value)?.ok === false)) {
@@ -844,6 +855,11 @@ export default function SubmitPage() {
       <AssetKindSection
         kind="demo_video"
         title={ASSET_KIND_LABELS.demo_video}
+        helperText={
+          load.contest.require_demo_video ? (
+            <p className="text-xs text-attention">시연 영상 또는 시연 영상 링크 중 하나가 필수입니다.</p>
+          ) : undefined
+        }
         addLabel="+ 시연 영상 추가"
         testIdPrefix="demo-video-asset"
         rows={demoVideoAssets}
@@ -874,6 +890,7 @@ export default function SubmitPage() {
         addLabel="+ 스크린샷 추가"
         testIdPrefix="screenshot-asset"
         rows={screenshotAssets}
+        required={load.contest.require_screenshot}
         onChange={setScreenshotAssets}
         disabled={!canEdit}
         targetRefPrefix={screenshotTargetRef ?? undefined}

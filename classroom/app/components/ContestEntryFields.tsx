@@ -258,6 +258,10 @@ function OptionalAssets({
   const [videoLink, setVideoLink] = useState("");
   const screenshot = useSourceUpload(form.upload_target_refs.screenshot ?? null);
   const video = useSourceUpload(form.upload_target_refs.demo_video ?? null);
+  const requiredLabels = [
+    ...(form.require_demo_video ? ["시연 영상"] : []),
+    ...(form.require_screenshot ? ["스크린샷"] : []),
+  ];
 
   function addAsset(kind: string, value: string, contentType: string, label = "") {
     onChange({
@@ -284,7 +288,7 @@ function OptionalAssets({
 
   return (
     <div className="flex flex-col gap-2">
-      <FieldLabel>선택 자료</FieldLabel>
+      <FieldLabel>자료 {requiredLabels.length ? `(${requiredLabels.join("·")} 필수)` : "(선택)"}</FieldLabel>
       {state.optionalAssets.length > 0 ? (
         <ul data-testid="contest-entry-assets" className="flex flex-col gap-1.5">
           {state.optionalAssets.map((asset, index) => (

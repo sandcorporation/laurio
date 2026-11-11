@@ -374,12 +374,25 @@ def _asset_identity(kind: str, value: str, ref: str, commit_sha: str) -> tuple[s
     return (kind, value, ref, "" if ref else commit_sha)
 
 
+def validate_required_media(contest: Contest, assets) -> None:
+    """Enforce organizer-required screenshot and demo-video deliverables.
+
+    Video upload and video-link assets both satisfy the single demo-video field.
+    """
+    kinds = {asset if isinstance(asset, str) else asset.kind for asset in assets}
+    if contest.require_screenshot and SubmissionAsset.Kind.SCREENSHOT not in kinds:
+        raise HttpError(422, "스크린샷 자료가 필수입니다.")
+    if contest.require_demo_video and not kinds.intersection(_DEMO_VIDEO_KINDS):
+        raise HttpError(422, "시연 영상 자료가 필수입니다.")
+
+
 def _clean_assets_in(
     assets_in,
     *,
     contest: Contest,
     developer_user_id: int,
     existing_asset_values: set[tuple[str, str]] = frozenset(),
+    enforce_required_media: bool = True,
 ) -> list[_CleanedAsset]:
     """페이로드의 자료를 검증하고 저장 가능한 값으로 다듬는다 (#190).
 
@@ -505,6 +518,11 @@ def _clean_assets_in(
         raise HttpError(
             422, "전체 소스코드 또는 GitHub 저장소 중 최소 하나가 필수입니다."
         )
+
+    if enforce_required_media:
+        # 강의실 내기의 사전 검사만 끈다 — 그 자리에서는 시도 접수와 공모전 수락을 나눈다
+        # (classroom_entries.check_entry).
+        validate_required_media(contest, cleaned)
 
     policy = get_current_policy()
     for kind, limit_field in _KIND_LIMIT_FIELDS.items():

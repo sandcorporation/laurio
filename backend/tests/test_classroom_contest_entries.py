@@ -91,6 +91,23 @@ def _requirement_ids(client, world) -> list[int]:
     return [r["requirement_id"] for r in response.json()["requirements"]]
 
 
+def test_forwarded_entry_rejects_missing_required_screenshot(
+    client, world, django_capture_on_commit_callbacks
+):
+    Contest.objects.filter(pk=world["contest"]["id"]).update(require_screenshot=True)
+    form = _form(client, world).json()
+    assert form["require_screenshot"] is True
+    response = _submit(
+        client,
+        world,
+        entry=_entry([row["requirement_id"] for row in form["requirements"]], optional_assets=[]),
+        capture=django_capture_on_commit_callbacks,
+    )
+    assert response.status_code == 201, response.content
+    assert _latest_attempt(client, world)["contest_entry"]["status"] == "rejected"
+    assert "스크린샷" in _latest_attempt(client, world)["contest_entry"]["reason"]
+
+
 def _entry(requirement_ids, *, evidence="00:12", consent=True, replace=False, optional_assets=None):
     return {
         "source_access_consent": consent,

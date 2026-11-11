@@ -5,7 +5,8 @@
 
 1. **시도를 만들기 전** — `prepare_contest_entry` 가 거른다: 공모전 문제가
    아님·받지 않는 공모전은 여기서, 동의·확인 위치 모양·선택 자료는 카탈로그의 `check_entry`
-   로(직접 제출과 같은 문장) 422. 이미 낸 제출이 있는데 「이 시도로 바뀝니다」를 확인하지 않았으면 409.
+   로(직접 제출과 같은 문장) 422. 개최자가 필수로 정한 시연 영상·스크린샷은 여기서 막지 않는다 —
+   클래스 시도는 그것 없이도 성립하므로 시도는 받고, 3 에서 「내지 못했다(사유)」로 남는다. 이미 낸 제출이 있는데 「이 시도로 바뀝니다」를 확인하지 않았으면 409.
 2. **시도가 커밋된 뒤** — `contest_entry_requested` 를 보낸다. 시도는 「내는 중」으로 남는다.
 3. **결과** — 공모전 쪽이 `contest_entry_resolved` 로 답하면 `on_contest_entry_resolved` 가
    그 시도에 「냈다」/「내지 못했다(사유)」를 남기고, 받지 못했으면 낸 사람에게 알린다.
@@ -110,6 +111,8 @@ def contest_entry_form(problem: Problem, user_id: int) -> ContestEntryFormOut:
             for a in context.optional_assets
         ],
         upload_target_refs=dict(context.upload_target_refs),
+        require_demo_video=context.require_demo_video,
+        require_screenshot=context.require_screenshot,
     )
 
 

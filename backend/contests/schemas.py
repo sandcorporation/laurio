@@ -287,6 +287,8 @@ class ContestCreateIn(Schema):
     title: str = Field(max_length=200)
     category_id: int
     deliverable_type_ids: list[int]
+    require_demo_video: bool = False
+    require_screenshot: bool = False
     description: str = ""
     # Prize는 Sponsor가 실제로 예치하는 금액이다 — 0 이하는 개최로 성립하지 않는다.
     # 스키마에서 막지 않으면 음수가 PositiveIntegerField의 DB CHECK에 걸려 422 대신
@@ -304,6 +306,8 @@ class FreeContestCreateIn(Schema):
     title: str = Field(max_length=200)
     category_id: int
     deliverable_type_ids: list[int]
+    require_demo_video: bool = False
+    require_screenshot: bool = False
     description: str = ""
     deadline_at: datetime
     requirements: list[RequirementIn] = []
@@ -330,6 +334,8 @@ class ContestUpdateIn(Schema):
     title: str | None = Field(default=None, max_length=200)
     category_id: int | None = None
     deliverable_type_ids: list[int] | None = None
+    require_demo_video: bool | None = None
+    require_screenshot: bool | None = None
     description: str | None = None
     prize: int | None = Field(default=None, gt=0)
     deadline_at: datetime | None = None
@@ -342,6 +348,8 @@ class ContestOut(Schema):
     title: str
     category: CategoryOut
     deliverable_types: list[DeliverableTypeOut]
+    require_demo_video: bool = False
+    require_screenshot: bool = False
     description: str
     prize: int
     deadline_at: datetime

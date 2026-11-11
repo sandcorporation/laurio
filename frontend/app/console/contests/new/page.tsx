@@ -47,6 +47,8 @@ type BriefForm = {
   title: string;
   categoryId: number | "";
   deliverableTypeIds: number[];
+  requireDemoVideo: boolean;
+  requireScreenshot: boolean;
   prize: string;
   deadlineAt: string;
   description: string;
@@ -56,6 +58,8 @@ const EMPTY_BRIEF: BriefForm = {
   title: "",
   categoryId: "",
   deliverableTypeIds: [],
+  requireDemoVideo: false,
+  requireScreenshot: false,
   prize: "",
   deadlineAt: "",
   description: "",
@@ -310,6 +314,8 @@ export default function NewContestGrillPage() {
         title,
         category_id: brief.categoryId,
         deliverable_type_ids: brief.deliverableTypeIds,
+        require_demo_video: brief.requireDemoVideo,
+        require_screenshot: brief.requireScreenshot,
         description: brief.description,
         prize: prizeNumber,
         deadline_at: new Date(brief.deadlineAt).toISOString(),
@@ -470,6 +476,10 @@ export default function NewContestGrillPage() {
               <span className="font-mono text-xs text-ink/60">{formatPrize(dt.minimum_prize)}</span>
             </label>
           ))}
+          <div className="flex flex-col gap-2 border-t border-rule pt-3">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={brief.requireDemoVideo} onChange={(e) => setBrief((p) => ({ ...p, requireDemoVideo: e.target.checked }))} />시연 영상 제출 필수</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={brief.requireScreenshot} onChange={(e) => setBrief((p) => ({ ...p, requireScreenshot: e.target.checked }))} />스크린샷 제출 필수</label>
+          </div>
           <div className="flex items-center justify-between border-t border-rule pt-2 text-xs">
             <span className="text-ink/60">최소 제안 상금 합계</span>
             <span className="font-mono font-semibold" data-testid="grill-brief-quote-total">
