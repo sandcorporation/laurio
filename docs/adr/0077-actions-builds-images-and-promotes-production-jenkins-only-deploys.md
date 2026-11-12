@@ -24,7 +24,7 @@ GlitchTip 해결 표시), oracle 이 배포했다. PR 검사는 #930·#932(ADR-0
   레지스트리 캐시 `codemit-buildcache:<서비스>-arm64` 가 그대로라 oracle 의 compose 는 바뀌지 않는다. 같은 매니페스트에
   접미사 없는 `<sha>` 태그를 하나 더한다 — jenkins-shared `waitForGhcrImage` 가 `<repo>:<sha>` 를 기다리기 때문이다.
 - **Jenkinsfile**: `sandcorpDeploy(deployFrom: 'production', images: [여섯], imageWaitHint: release.yml)`. 평소에는 굽지도
-  검사하지도 않는다. 비상 길은 남긴다 — `BUILD_ON=jenkins`(빌드 노드가 `build-images.sh` 로 굽는다)·`ROLLBACK_SHA`.
+  검사하지도 않는다. 배포 파라미터 `ROLLBACK_SHA` 는 Actions 가 올린 GHCR 이미지에만 쓴다. Jenkins 이미지 빌드 비상 길과 빌드 노드 선택 파라미터는 제거한다.
 - **GlitchTip 해결 표시는 배포 단계로**: Actions 에는 GITHUB_TOKEN 외 비밀을 두지 않으므로 `deploy-prod.sh` 가 배포 표식 뒤에
   `scripts/ci/glitchtip-resolve.sh`(git·curl — oracle 에이전트에 python3 가 없다)를 부른다. 토큰은 oracle `docker/.env.prod` 의
   `GLITCHTIP_TOKEN_FOR_AUTOMATION`. `buildCredentials` 와 `glitchtip_resolve.py` 는 걷었다.
@@ -37,7 +37,7 @@ GlitchTip 해결 표시), oracle 이 배포했다. PR 검사는 #930·#932(ADR-0
 ## 대가
 
 - 빌드 노드 단계가 없어 문맥 해시(`CODEMIT_CTX_*`)가 oracle 로 오지 않는다 — `deploy.sh plan` 은 경로 비교로 고른다(문맥 밖
-  파일만 바뀐 커밋에도 서비스를 다시 띄울 수 있다). 비상 길에서는 예전대로 온다.
+  파일만 바뀐 커밋에도 서비스를 다시 띄울 수 있다).
 - 병합에서 배포까지 release 의 check(PR 검사 전체)만큼 늦어진다. 대신 맥이 배포 경로에서 빠진다.
 - Jenkinsfile·deploy-prod.sh·image.yml·release.yml 은 PR 에서 돌려 볼 수 없다 — 병합 뒤 첫 실행이 시험이다
   (`scripts/test_release_flow.py` 는 배선만 본다).

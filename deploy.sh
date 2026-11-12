@@ -263,13 +263,10 @@ cmd_preflight() {
 # 두 커밋 사이에 문맥 해시(`scripts/ci/image_context.py changed`)가 바뀐 서비스 → `CTX_CHANGED`(공백 구분),
 # 어디서 냈는지 → `CTX_FROM`. 내지 못하면 1 을 돌리고 그 이유 한 줄을 `CTX_WHY` 에 둔다.
 #
-# **prod 에이전트에는 python3 가 없다**(#849). `jenkins-desktop-agent` 는 docker CLI·git 만 든 Debian
-# 컨테이너라 이 머리에서 python3 를 부르면 늘 실패했고, `2>/dev/null` 이 그 이유를 삼켜 매 배포가 경로 비교로
-# 떨어졌다(#554·#559·#563 — `backend/tests/` 만 바뀌어도 backend 다섯을 다시 띄웠다). 그래서 python3 가 있는
-# 빌드 노드의 `scripts/ci/build-images.sh` 가 같은 명령을 직전 성공 배포(jenkins-shared 의 `SANDCORP_PREVIOUS_SHA`) 기준으로
-# 돌려 `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·`CODEMIT_CTX_CHANGED` 로 넘긴다(라이브러리 buildScript → deployScript, #873 —
-# 그 전에는 컨트롤러의 「대상 확인」이 GitHub 의 `production` 기준으로 냈다). 여기서는 python3 가 있으면 손수 내고, 없으면
-# 그 값을 **기준과 대상 커밋이 둘 다 같을 때만** 쓴다 — 배포 표식이 그 기준과 어긋났으면 그 답은 다른 질문의 답이다. `CODEMIT_DEPLOY_PYTHON` 은 시험이 「python3 없는 에이전트」를 흉내 내는 자리다.
+# **prod 에이전트에는 python3 가 없다**(#849). Actions 빌드가 문맥 해시를 배포 단계에 전달하지 않으므로
+# `plan` 은 이 에이전트에서 python3 가 있으면 손수 계산하고, 없으면 경로 비교를 쓴다. 문맥 해시를 받으면
+# 기준과 대상 커밋이 둘 다 일치할 때만 쓴다 — 배포 표식이 그 기준과 어긋났으면 그 답은 다른 질문의 답이다.
+# `CODEMIT_DEPLOY_PYTHON` 은 시험이 「python3 없는 에이전트」를 흉내 내는 자리다.
 context_changed() {
   CTX_CHANGED=""; CTX_FROM=""; CTX_WHY=""
   ctx_head=$($GIT rev-parse "$2" 2>/dev/null) || { CTX_WHY="$2 을 모른다"; return 1; }

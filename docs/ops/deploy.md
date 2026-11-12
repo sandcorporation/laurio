@@ -178,8 +178,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    워크플로는 두지 않는다). ② **급하면 Jenkins 「Build with Parameters」의 `ROLLBACK_SHA=<sha 40자>`** — 빌드 없이 그 커밋의
    이미지로 같은 절차를 돈다(`deploy-prod.sh` 가 그 커밋을 체크아웃한다). production 은 그대로라 다음 승격이 다시 앞으로
    간다 — 그 전에 revert PR 을 넣는다. 같은 커밋을 다시 배포할 때도 `ROLLBACK_SHA` 에 그 sha.
-   **Actions 가 못 구울 때**(GitHub 장애·실행기 부족)는 `BUILD_ON=jenkins` — 예전처럼 빌드 노드(macos 먼저, 못 잡으면 home)가
-   `scripts/ci/build-images.sh` 로 굽고 배포한다. 파라미터는 라이브러리 것(`BUILD_ON`·`BUILDER`·`MAC_WAIT_SECONDS`·`ROLLBACK_SHA`)이다.
+   Actions image job 이 실패하면 해당 GitHub Actions 실행을 고치거나 다시 실행한다. Jenkins 는 빌드 노드를 선택하지 않고, `ROLLBACK_SHA` 도 Actions 가 GHCR 에 올린 이미지에만 쓴다.
 
    예전 흐름: 2026-10-02 ~ 10-15 에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging` 을
    앞당겼고 그 push 가 이 잡을 불렀다(조직의 Actions 분량이 바닥나 떠났다 — ADR-0061). 10-15 ~ 10-30 에는
@@ -224,11 +223,7 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   견준다, #729·#738) — 직전 배포와
   지금 커밋에서 문맥이 다른 서비스만 받아 띄우므로, 문맥 밖 파일(e2e 스펙·playwright 설정)만 바뀐 커밋은
   아무것도 다시 띄우지 않는다(예전의 경로 패턴은 `frontend/playwright.config.ts` 주석 하나에
-  frontend 를 다시 띄웠다, #474). **prod 에이전트(`jenkins-desktop-agent`)에는 python3 가 없다**(#849) — 그래서 빌드 노드의 `build-images.sh` 가
-  같은 명령을 직전 성공 배포(라이브러리의 `SANDCORP_PREVIOUS_SHA`) 기준으로 돌려 `CODEMIT_CTX_BASE`·`CODEMIT_CTX_HEAD`·
-  `CODEMIT_CTX_CHANGED` 를 라이브러리 `buildScript` 의 `$SANDCORP_DEPLOY_ENV` 로 넘기고(#873 전에는 컨트롤러의 「대상 확인」이
-  GitHub 의 `production` 기준으로 냈다), `plan` 은 그 기준·대상이 배포 표식·HEAD 와 둘 다 같을 때만 쓴다(콘솔 「문맥 해시로 고른다(컨트롤러가
-  낸 값)」). 해시를 내지 못하면 「이유:」 한 줄을 찍고 경로 패턴으로 떨어진다. compose
+  frontend 를 다시 띄웠다, #474). **prod 에이전트(`jenkins-desktop-agent`)에는 python3 가 없다**(#849). Actions 이미지 빌드의 문맥 해시는 배포 단계로 전달되지 않으므로, `plan` 은 경로 비교로 바꿀 서비스를 고른다. compose
   파일·없는 컨테이너·앱 실행 env 의 규칙은 그대로다. **어떤 경로가 문맥에 드는지는
   Dockerfile 을 읽어 정하고 `scripts/test_image_context.py` 가 못 박는다**(PR CI) — Dockerfile 이
   새 경로를 `COPY` 하는데 표에 없으면 빨갛다. 빠뜨리면 그 경로를 고친 커밋이 옛 이미지로 배포된다.
@@ -246,19 +241,15 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
   그 메시지와 「견줄 수 없어 다시 띄운다」를 찍고(실제 어긋남의 로그와 갈린다) 다시 띄운다(#727·#733, `backend/tests/test_deploy_plan_app_env.py`). 어느 키가 어느 이름으로 가는지는
   `docker/prod.env.example` 과 compose 파일의 앱 서비스에 있다.
 - **ghcr 쓰기는 Actions 의 `GITHUB_TOKEN`**(image 잡만 `packages: write`, `docker/login-action`)이다 — 패키지는 Actions 가
-  만들어 저장소에 연결된다(#938 에서 Jenkins 개인 토큰이 만든 옛 패키지를 지우고 새로 만들었다). 비상 길(`BUILD_ON=jenkins`)은
-  여전히 Jenkins 자격증명 `ghcr-push-token`(classic PAT `write:packages`)을 빌드마다 임시 `DOCKER_CONFIG` 에만 적는다
-  (`scripts/ci/ghcr-login.sh`). 패키지가 저장소에 연결돼 있지 않으면 `GITHUB_TOKEN` 의 push 는 `permission_denied` 로 막힌다.
-- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — prod(arm64) 이미지를 PR 검사(macos)와 이 잡의 「이미지 굽기」가 본다(#838·#840, 이미지와 노드의 아키텍처가 같아야 돈다 — 그래서 배포 잡은 macos 를 20분 기다리고(`macWaitSeconds: 1200`), home 으로 넘어간 빌드는 앱을 새로 구워야 하면 가드에서 멈춘다) — 건너뛴 앱의 이미지는
-  ctx 태그가 가드 뒤에만 붙으므로 이미 한 번 지났다(「CI 는 Jenkins 에서 돈다」).
+  만들어 저장소에 연결된다(#938 에서 Jenkins 개인 토큰이 만든 옛 패키지를 지우고 새로 만들었다). 패키지가 저장소에 연결돼 있지 않으면 `GITHUB_TOKEN` 의 push 는 `permission_denied` 로 막힌다. Jenkins 용 GHCR 쓰기 자격은 필요 없다.
+- **부팅 가드**(`scripts/ci/deploy-guard.sh <앱>`, `CODEMIT_GUARD_ARCH` 기본 arm64)는 이번에 구운 앱만 본다 — prod(arm64) 이미지는 Actions 의 image workflow 에서 가드한다(#838·#840) — 건너뛴 앱의 이미지는
+  ctx 태그가 가드 뒤에만 붙으므로 이미 한 번 지났다.
 - **서버는 배포 에이전트 컨테이너에 한 번 저장해 둔 ghcr 로그인으로 받는다**(read:packages
   classic PAT). 두 컨테이너(home 의 `jenkins`, oracle 의 `jenkins-desktop-agent`) 모두
   `/root/.docker` 가 named volume 이라 컨테이너를 다시 만들어도 남는다(oracle 은 2026-09-17
   에 `jenkins_docker` 를 붙였다). 로그인이 없으면 `deploy.sh preflight` 가 멈추고, PAT 가
   만료되면 pull 에서 멈춘다. ghcr 는 git SSH 키로 인증할 수 없다.
-- 사람 작업(PAT·두 자격증명)은 `scripts/ghcr-setup-wizard.sh` 가 단계별로 안내한다. ghcr·Jenkins 이미지
-  단계가 막혔을 때의 비상구는 서버에서 `DEPLOY_IMAGE_SOURCE=build sh ./deploy.sh <대상>` — 예전처럼 그
-  자리에서 굽는다. `Jenkinsfile`(배포)은 PR 검사가 보지 못한다 — 바꾼 PR 의 첫 실행이 곧 그 병합의 배포다.
+- Jenkins 배포 에이전트에는 GHCR 읽기 자격만 둔다(`scripts/ghcr-setup-wizard.sh`). 이미지가 없거나 못 받으면 배포는 교체 전에 실패한다. `Jenkinsfile`(배포)은 PR 검사가 보지 못한다 — 바꾼 PR 의 첫 실행이 곧 그 병합의 배포다.
 - **GitHub 에는 비밀을 두지 않는다**(#752, #930·#938 — 워크플로는 `GITHUB_TOKEN` 하나만 쓴다). 저장소
   변수·시크릿(옛 `PROD_*`·`JENKINS_*` 등, `PROMOTE_DEPLOY_KEY`·`JENKINS_API_TOKEN`·
   `GLITCHTIP_TOKEN_FOR_AUTOMATION`)과 Deploy key `promote-production` 은 지웠다 — 공개 값은 서버의

@@ -86,7 +86,13 @@ class ReleaseFlowTest(unittest.TestCase):
     def test_jenkins_deploys_production_only(self) -> None:
         jenkinsfile = (ROOT / "Jenkinsfile").read_text(encoding="utf-8")
         self.assertIn("deployFrom: 'production'", jenkinsfile)
+        self.assertNotRegex(jenkinsfile, r"(?m)\b(?:BUILD_ON|BUILDER|MAC_WAIT_SECONDS|buildScript|macWaitSeconds)\b")
         self.assertNotIn("buildCredentials", jenkinsfile, "빌드 노드 자격은 비상 길에도 쓰지 않는다 — GlitchTip 은 배포 단계")
+        deploy = (ROOT / "scripts" / "ci" / "deploy-prod.sh").read_text(encoding="utf-8")
+        self.assertIn("unset DEPLOY_IMAGE_SOURCE", deploy, "Jenkins 배포는 Actions 가 올린 GHCR 이미지만 받는다")
+
+    def test_jenkins_image_build_emergency_path_is_retired(self) -> None:
+        self.assertFalse((ROOT / "scripts" / "ci" / "build-images.sh").exists())
 
 
 if __name__ == "__main__":

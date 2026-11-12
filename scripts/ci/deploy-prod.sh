@@ -19,10 +19,13 @@
 # 2 교체 뒤 실패(되돌리지 않는다 — Jenkinsfile 의 `autoRollback: false`). `SANDCORP_ROLLBACK=1` 로 불리면 거절한다.
 #
 # 라이브러리가 넘기는 `COMPOSE_PROJECT_NAME`·`COMPOSE_FILE` 은 지운다 — deploy.sh 는 `-f docker/compose.prod.yaml` 과
-# 그 파일의 `name: codemit-prod` 를 쓴다. 문맥 해시(`CODEMIT_CTX_*`)는 비상 길(`BUILD_ON=jenkins`)의 `build-images.sh` 만 넘긴다.
+# 그 파일의 `name: codemit-prod` 를 쓴다. 문맥 해시(`CODEMIT_CTX_*`)는 더 이상 Jenkins 배포 단계에서 만들거나 전달하지 않는다.
 set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
 unset COMPOSE_PROJECT_NAME COMPOSE_FILE
+# Jenkins is deployment-only: ignore any local-build override and pull the
+# Actions-published GHCR artifacts checked by sandcorpDeploy's image wait.
+unset DEPLOY_IMAGE_SOURCE
 
 if [ "${SANDCORP_ROLLBACK:-0}" = 1 ]; then
   echo "자동 롤백은 끈 저장소다(autoRollback: false) — 부르지 않아야 한다"
