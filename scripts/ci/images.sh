@@ -22,7 +22,8 @@
 # 다음 빌드가 다시 굽고 가드도 다시 돈다(레지스트리 캐시 덕에 대개 몇 분).
 #
 # 환경변수:
-#   GHCR_TOKEN / GHCR_USER     ghcr 쓰기 토큰(Jenkins `ghcr-push-token`). 없으면 노드의 로그인을 쓴다
+#   GHCR_TOKEN / GHCR_USER     ghcr 쓰기 토큰(현재 GitHub Actions workflow 는 사전 로그인한 GITHUB_TOKEN 사용).
+#                              없으면 실행 환경의 docker 로그인을 쓴다.
 #   CODEMIT_IMAGES_MODE        push(기본) | plan | retag — plan 은 해시와 판단만 적고 굽지도 태그를 더하지도
 #                              않는다. retag 는 건너뛸 것에만 커밋 태그를 더하고 구울 것은 `서비스=pending` 으로
 #                              남긴다 — 빌더를 띄우지 않아 어느 노드에서나 돈다. 지금 부르는 쪽은 없다(#873 전에는

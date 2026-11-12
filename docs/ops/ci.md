@@ -25,8 +25,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   는 release.yml 의 promote 잡. 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
 - **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다. 배포되는 커밋이
   검사를 통과했다는 것은 promote 가 check·image 둘 다를 기다리는 것이 지킨다(check·image 는 병렬로 돈다).
-- **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 글은 꺼진 검사의 기록이다.** 배포 잡의 비상 길(`BUILD_ON=jenkins`)은
-  여전히 `build-images.sh`(`images.sh`·`deploy-guard.sh`·`images-ctx.sh`)로 빌드 노드에서 굽는다.
+- **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 표와 글은 꺼진 검사의 기록이다.** Jenkins 이미지 빌드 비상 길도 제거했다. 검사와 이미지 빌드는 GitHub Actions만 수행한다.
 
 ### Actions 의 캐시 — main 이 저장하고 PR 은 복원만 한다(#932)
 
@@ -148,8 +147,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 - **실측**(2026-10-02, 첫 초록): home 쪽 전체 약 3분(pytest 2489건 47초), macos e2e 공개 14초 ·
   운영자 4초 · 강의실 4초(이미지 굽기 제외).
 - **잡 설정은 저장소 밖이다** — Multibranch 잡·배포 잡·자격증명(`github-sandcorporation-token` 은
-  fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 잡의 `ghcr-push-token`)은 사람이
-  Jenkins 에 만든다. Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
+  fine-grained PAT: 저장소 읽기·PR·커밋 상태·Contents 쓰기, `glitchtip-automation-token`, 이미지 쓰기 토큰은 GitHub Actions `GITHUB_TOKEN` 을 쓴다. (이 표는 당시 Jenkins 설정 기록이다.) Jenkins 설정을 API 로 고칠 때는 `Content-Type: application/xml;
   charset=utf-8` 을 붙인다 — 없으면 한글이 Latin-1 로 읽혀 500 이 난다.
 - **잡은 폴더 `codemit/` 안에 넷이다**(2026-10-23, #780) — Jenkins 첫 화면에는 폴더 하나만 보인다. 2026-10-15(#708)
   부터는 `codemit-<역할>-<대상>` 으로 나란히 섰고, #779 가 `codemit-deploy-prod` 를 `codemit-deploy-staging` 의 「prod 배포」
@@ -161,7 +159,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   | 잡 | 옛 이름 | 파일 | 워크스페이스·이름에 묶인 것 |
   | --- | --- | --- | --- |
   | `codemit/ci-pr`(Multibranch) | `codemit-ci-pr` | `Jenkinsfile.pr` | 검사의 컨테이너·네트워크·이미지(`codemit-ci:<run_id>`)와 e2e·celery 스택 `jenkins-codemit-ci-pr-*`(`BUILD_TAG` 에서) |
-  | `codemit/deploy` | `codemit-deploy-staging` | `Jenkinsfile` | jenkins-shared `sandcorpDeploy` — 확인·알림은 built-in 의 잡 워크스페이스, 굽기는 macos(못 잡으면 home), 배포는 에이전트 `oracle` 의 `ws('/home/jenkins/agent/workspace/codemit-deploy-prod')` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`(사람이 둔 `docker/.env.prod`·배포 표식) |
+  | `codemit/deploy` | `codemit-deploy-staging` | `Jenkinsfile` | jenkins-shared `sandcorpDeploy` — 확인·알림은 built-in 의 잡 워크스페이스, 배포는 에이전트 `oracle` 의 `ws('/home/jenkins/agent/workspace/codemit-deploy-prod')` = oracle 호스트 `/var/jenkins_home/workspace/codemit-deploy-prod/`(사람이 둔 `docker/.env.prod`·배포 표식) |
   | `codemit/ghcr-prune` | `codemit-ghcr-prune` | 저장소 밖 | |
 
   더 전의 이름은 `codemit-pr`·`codemit-train`·`laurio`·`codemit` 이다. 열차 잡 `codemit/ci-train`(2026-10-03~11-05)은
@@ -180,7 +178,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   커밋도 그 배포를 다시 시도한다(#709 의 교훈).
 - **배포 이미지는 다시 GitHub Actions 가 굽는다**(2026-11-09 #938, ADR-0077 — 공개 저장소라 분량 제한이 없다). 2026-10-15(#705,
   ADR-0061)에는 조직이 Free 요금제라 호스티드 분량(월 2,000분)이 바닥나자 `staging` 이 멈췄고, 결제하지 않고 떠났다. 아래는 그 뒤
-  ~ 11-09 의 Jenkins 굽기이고, 지금은 같은 스크립트를 image.yml 이 arm64 실행기에서 부른다(비상 길 `BUILD_ON=jenkins` 만 Jenkins). Actions 가 하던 셋 — 배포 이미지, 부팅
+  ~ 11-09 의 Jenkins 굽기이고, 지금은 image.yml 이 arm64 실행기에서 부른다. Jenkins 빌드 비상 길은 제거했다. Actions 가 하던 셋 — 배포 이미지, 부팅
   가드, `staging` 앞당기기 — 은 `main` push 에서 도는 Jenkins `codemit/deploy` 잡(`Jenkinsfile`)의 앞 단계가 됐다
   (「배포」 절, `staging` 앞당기기는 #840 에서 걷었다). 이미지는 macos 가 arm64 여섯을 굽고(`scripts/ci/images.sh`; #840 전에는 home 가 amd64 여섯도 구웠고 #841 에서 걷었다),
   **바뀌지 않은 서비스는 빌드 문맥 해시로 건너뛴다**. 구운 이미지는 커밋 태그로만 올리고, 문맥 태그

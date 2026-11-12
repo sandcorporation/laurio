@@ -8,9 +8,7 @@
 //                     해결 표시 → prune. 「문서만」 병합은 plan 이 배포 표식 기준으로 비워 교체 없이 표식만 옮긴다.
 //
 // 파라미터(라이브러리):
-//   BUILD_ON=jenkins  비상 길: Actions 가 못 구울 때 빌드 노드(macos 먼저, 못 잡으면 home)에서 `scripts/ci/build-images.sh` 로
-//                     굽고 배포한다(#873 때의 길 그대로 — 문맥 해시 건너뛰기·부팅 가드·ctx 태그·문맥 해시를 oracle 로).
-//   ROLLBACK_SHA      비상 되돌리기: 빌드 없이 그 sha 의 이미지로 배포(deploy-prod.sh 가 그 커밋을 체크아웃한다). production 은
+//   ROLLBACK_SHA      비상 되돌리기: Actions 가 올린 그 sha 의 이미지로 배포(deploy-prod.sh 가 그 커밋을 체크아웃한다). production 은
 //                     그대로라 다음 승격이 다시 앞으로 간다. 정석은 main 에 revert PR — docs/ops/deploy.md 「되돌리기」.
 //
 // **자동 롤백은 끈다**(`autoRollback: false`) — deploy.sh 는 배포 표식 기준으로 바꿀 서비스를 정해, 옛 sha 로 다시
@@ -37,11 +35,7 @@ sandcorpDeploy(
   imageWaitHint: 'https://github.com/sandcorporation/laurio/actions/workflows/release.yml',
   composeProject: 'codemit-prod',
   composeFiles: ['docker/compose.prod.yaml'],
-  // BUILD_ON=jenkins 비상 길에서만 돈다.
-  buildScript: 'bash scripts/ci/build-images.sh',
   deployDir: '/home/jenkins/agent/workspace/codemit-deploy-prod',
   deployScript: 'scripts/ci/deploy-prod.sh',
-  autoRollback: false,
-  // 비상 길의 부팅 가드는 arm64 이미지를 arm64 노드에서만 본다 — home(amd64)으로 넘어가면 앱을 새로 구울 때 멈추므로 macos 를 오래 기다린다.
-  macWaitSeconds: 1200,
+  autoRollback: false
 )

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 프론트 배포 부팅 가드(FE-13, #38) — 방금 올린 이미지가 설정 없이는 죽고, 완전한 설정으로는 뜨는지 본다.
-# prod(arm64) 이미지를 PR 검사(`pr-check.sh`, macos, #838)와 배포 잡의 「이미지 굽기」(`build-images.sh`, #840·#873)가
-# 이 스크립트로 본다. amd64 는 로컬 시험용으로만 남았다(`CODEMIT_GUARD_ARCH=amd64`, #841).
+# prod(arm64) 이미지는 GitHub Actions `image.yml` 이 이 스크립트로 확인한다. amd64 는 로컬 시험용으로만 남았다
+# (`CODEMIT_GUARD_ARCH=amd64`, #841).
 #
 #   [CODEMIT_GUARD_ARCH=arm64|amd64] scripts/ci/deploy-guard.sh <frontend|operator|classroom>
 #
