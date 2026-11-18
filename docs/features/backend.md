@@ -1014,6 +1014,9 @@ id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 
 ## 운영 설정
 
+**`GET /api/health`**(인증 없음, #949)는 db(`SELECT 1`)·redis(`PING`)와 — `HEALTH_REQUIRED_WORKERS` 가 있으면 — celery-worker·
+grader 의 생존 신호(redis 키, TTL 90초)를 본다. 정상 200 `{"status":"ok"}`, 하나라도 실패면 503
+`{"status":"error","failed":["db"|"redis"|"celery"|"grader", …]}`(원문 없음). `?scope=ready` 는 db·redis 만 — 배포 판정용.
 **공모전 AI 의 키·모델 값은 DB 가 env 를 이긴다**(#922, ADR-0075). `policies.RuntimeSetting`(키→값)에 행이
 있으면 그 값, 없으면 지금까지의 환경변수다. 저장은 커밋 뒤 Redis 의 버전 번호(`codemit:runtime-settings:version`)를
 올리고, 프로세스마다 쥔 값은 그 번호가 바뀌면 DB 에서 다시 읽는다 — 재시작 없이 다음 호출부터 새 값이다.

@@ -410,6 +410,9 @@ services:
     environment:
       <<: *backend-env
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      # `/api/health` 가 이 두 역할의 생존 신호(`core.heartbeat`)가 없으면 503 을 낸다(#949) — 외부 감시가 잡는다.
+      # 배포 롤링·`deploy.sh health` 는 `?scope=ready`(db·redis 만)라 워커 교체 중에도 막히지 않는다.
+      HEALTH_REQUIRED_WORKERS: celery,grader
     # **호스트 포트를 열지 않는다**(#485). 배포는 이 서비스를 잠시 둘로 늘려 새 것을 먼저
     # 띄운 뒤 옛 것을 내린다(deploy.sh 의 rolling_replace) — 같은 서비스 둘이 한 호스트
     # 포트를 잡을 수 없다. 이 포트를 쓰던 곳이 없었다: 배포 헬스 체크는 컨테이너 안에서
@@ -459,6 +462,15 @@ services:
     # 하나로도 처리량은 남는다. 그래도 둘인 까닭은 스캔이 내부 HTTP 를 30초까지 기다리고
     # (`core.tasks.call_internal`) 경보 검사는 55초 뒤 버려지므로(`config/celery.py`), backend 가
     # 응답하지 않는 한 번이 그 분의 나머지 작업 전부를 막지 않게 하려는 것이다.
+    healthcheck:
+      # 생존 신호 파일(core/heartbeat.py, 15초 주기)이 90초 안에 갱신됐는지 — redis 없이 mtime 만 본다(#949).
+      # unhealthy 는 redis 키가 끊긴 것과 같은 뜻이라 backend 의 /api/health 가 503 으로 드러낸다.
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/codemit-heartbeat -newermt '-90 seconds' 2>/dev/null)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
     command: celery -A config worker -Q celery -B --schedule /tmp/celerybeat-schedule --concurrency 2 --loglevel info
 
   # 강의실 채점 grader(#584, ADR-0059) — 상주 프로세스 하나가 DB 의 큐(`scoring_queued_at`)에서
@@ -494,6 +506,15 @@ services:
     # 상한이 없으면 메모리를 다 쓰는 일이 같은 호스트의 DB 까지 OOM 에 끌어들일 수 있다(#584 점검).
     # 64건의 요청·응답 본문(응답은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES` 까지)·소스 읽기에 넉넉한 값이다.
     mem_limit: 1g
+    healthcheck:
+      # 생존 신호 파일(core/heartbeat.py, 15초 주기)이 90초 안에 갱신됐는지 — redis 없이 mtime 만 본다(#949).
+      # unhealthy 는 redis 키가 끊긴 것과 같은 뜻이라 backend 의 /api/health 가 503 으로 드러낸다.
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/codemit-heartbeat -newermt '-90 seconds' 2>/dev/null)\" || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
     command: python manage.py grader
 
   # 이벤트 서비스(ADR-0046, #380) — 같은 backend 이미지를 ASGI로 띄우는 별도

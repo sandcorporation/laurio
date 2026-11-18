@@ -15,8 +15,12 @@ import json
 import logging
 import re
 
+import pytest
+
 from core.json_logging import JsonFormatter
 from core.request_id import current_request_id
+
+pytestmark = pytest.mark.django_db  # /api/health 가 DB 를 본다(#949)
 
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
 

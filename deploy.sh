@@ -750,7 +750,7 @@ build_planned_in_background() {
 # backend` 또는 `docker exec <id>`), $2 는 포트. 헤더를 붙이는 이유는 cmd_health 주석에 있다.
 django_answers() {
   # shellcheck disable=SC2086
-  $1 python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${2}/api/health', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null
+  $1 python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${2}/api/health?scope=ready', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null
 }
 
 # **새 것을 먼저 띄우고 옛 것을 내린다**(#485). 예전에는 컨테이너를 내리고 새로 올려,
@@ -759,7 +759,7 @@ django_answers() {
 #
 # 1. 서비스를 잠시 둘로 늘린다(`--scale 2 --no-recreate`) — 옛 것은 그대로 두고 새 설정·
 #    이미지로 하나를 더 띄운다. 그 사이 도커 DNS 는 서비스 이름에 둘을 함께 돌려준다.
-# 2. **새 것이 /api/health 에 200 을 낼 때까지** 기다린다. 끝내 안 뜨면 새 것을 지우고
+# 2. **새 것이 /api/health?scope=ready 에 200 을 낼 때까지** 기다린다(워커 신호는 안 본다, #949). 끝내 안 뜨면 새 것을 지우고
 #    실패로 끝낸다 — 옛 것은 그대로 요청을 받는다(예전에는 이때 서비스가 비었다).
 # 3. 옛 것을 멈춘다(SIGTERM — gunicorn 은 받던 요청을 마저 끝낸다). 멈추는 사이 옛
 #    것으로 간 새 연결은 거부될 수 있는데, BFF 가 연결 거부를 다시 보낸다(`packages/

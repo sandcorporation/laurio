@@ -341,11 +341,18 @@ compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh p
 예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(당시 staging
 실측, GlitchTip 64·74·75 — BFF 재시도 예산 약 15.8초보다 길었다). 지금은 `deploy.sh` 의
 `rolling_replace` 가 서비스를 잠시 둘로 늘려(`--scale 2 --no-recreate`) 새 것이
-`/api/health` 에 답한 뒤에야 옛 것을 멈추고, 새 것의 이름을 옛 이름(`…-backend-1`)으로
+`/api/health?scope=ready`(db·redis 만 — 워커 신호는 안 본다, #949)에 답한 뒤에야 옛 것을 멈추고, 새 것의 이름을 옛 이름(`…-backend-1`)으로
 되돌린다 — 그래서 `docker exec codemit-prod-backend-1` 은 배포 뒤에도 그대로다. 새 것이
 150초 안에 답하지 않으면 새 것만 지우고 배포가 실패로 끝난다 — **옛 것은 계속 요청을
 받는다.** celery-worker 는 지금처럼 내리고 올린다(그 안에서 `-B` 로 도는 beat 는 하나여야 하고
 태스크는 Redis 에서 기다린다).
+
+**`/api/health` 의 워커 신호와 롤링**(#949). 신호(TTL 90초)가 끊겨도 `/api/health`(전체)가 503 인 것은 감시용이고,
+배포 판정(`rolling_replace`·`health`)은 `?scope=ready` 라 영향이 없다. 겹쳐 바꾸는 배포에서 celery-worker 는
+`up -d` 한 번에 옛 것 종료 → 새 것 시작이라 신호가 끊기는 구간은 종료~새 `worker_ready` 사이(수 초~수십 초)로 TTL 90초
+안이다. grader 는 옛 것이 따뜻한 종료(최대 4분)를 하는 동안에도 신호 스레드가 살아 있어 키가 유지되고, 프로세스가
+끝난 뒤 새 것이 뜨는 사이만 비며 TTL 안이다. 겹쳐 바꾸지 않는 길(표식 마이그레이션·풀러 교체)은 grader 를 먼저
+내리고 backend 도 내리므로 그 구간은 backend 자체가 없다 — 마이그레이션 시간 + 90초 이상 503 이 이어질 수 있다.
 
 **beat 는 celery-worker 안에서 돈다**(#859) — 따로 띄우던 `celery-beat` 컨테이너를 걷었다(oracle
 메모리 153MiB). worker 는 `-B --schedule /tmp/celerybeat-schedule --concurrency 2` 로 뜬다. 그래서

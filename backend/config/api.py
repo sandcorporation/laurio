@@ -1,3 +1,6 @@
+from django.conf import settings
+from django.db import connection, transaction
+from django.http import JsonResponse
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
@@ -14,6 +17,7 @@ from classroom.usage_operator_api import usage_operator_router as classroom_usag
 from contests.api import router as contests_router
 from contests.operator_api import operator_router as contests_operator_router
 from contests.submission_api import router as submissions_router
+from core import heartbeat
 from core.api import router as core_internal_router
 from handovers.api import router as handovers_router
 from ledger.api import router as ledger_router
@@ -53,9 +57,51 @@ api.add_router("/classroom", classroom_template_router)
 api.add_router("/classroom", classroom_connected_app_router)
 
 
+def _check_db() -> bool:
+    try:
+        with transaction.atomic(), connection.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout = 1000")  # 각 점검 1초(#949)
+            cur.execute("SELECT 1")
+        return True
+    except Exception:  # noqa: BLE001 — 어떤 오류든 「못 닿음」으로만 알린다(원문은 내지 않는다)
+        return False
+
+
+def _check_redis() -> bool:
+    try:
+        return bool(heartbeat.store().ping())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @api.get("/health")
 def health(request):
-    return {"status": "ok"}
+    """db(`SELECT 1`)·redis(`PING`)·백그라운드 워커 생존 신호를 본다. 하나라도 실패면 503 + 실패한 점검 이름(#949).
+
+    `?scope=ready` 는 db·redis 만(롤링 교체·배포 스모크·컨테이너 healthcheck 용 — 워커 신호가 아직 없는 새 api 를 막지 않는다).
+    워커 점검은 `HEALTH_REQUIRED_WORKERS`(쉼표 목록)가 있을 때만 — 개발·CI 스택은 워커가 없다.
+    호스트·버전·예외 원문은 응답에 넣지 않는다.
+    """
+
+    failed: list[str] = []
+    if not _check_db():
+        failed.append("db")
+    redis_ok = _check_redis()
+    if not redis_ok:
+        failed.append("redis")
+    required = settings.HEALTH_REQUIRED_WORKERS
+    if required and request.GET.get("scope") != "ready":
+        if redis_ok:
+            try:
+                gone = heartbeat.missing_roles(required)
+            except Exception:  # noqa: BLE001
+                gone = list(required)
+        else:
+            gone = list(required)
+        failed.extend(gone)
+    if not failed:
+        return {"status": "ok"}
+    return JsonResponse({"status": "error", "failed": failed}, status=503)
 
 
 api.add_router("/internal", core_internal_router)
