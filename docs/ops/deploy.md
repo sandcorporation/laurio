@@ -462,6 +462,16 @@ OpenSearch 이미지 자체만 바뀐다. `docker/pgbouncer.Dockerfile`·`docker
 는 **pgbouncer**(#453/#458) 하나만 간다 — 연결 풀러 이미지 자체만 바뀐다. 없는
 컨테이너는 변경 여부와 무관하게 받아서 띄운다 — 「없음」은 「최신」이 아니다.
 
+**`compose.prod.yaml` 이 바뀌어도 search·pgbouncer 는 자기 정의가 바뀐 때만 바꾼다**(#951,
+풀러는 #582). 파일이 바뀌면 backend·세 앱은 어느 환경이 바뀌었는지 몰라 다시 세우지만,
+search·pgbouncer 는 `service_definition_changed <서비스>` 가 직전 배포 커밋의 compose 와 지금
+것에서 `docker compose config --hash <서비스>` 를 내어 견준다(이미지 태그는 두 렌더가 같은
+`CODEMIT_IMAGE_TAG` 를 써서 해시를 흔들지 않는다). 해시를 내지 못하면 바뀐 것으로 본다. 같으면 계획에서 빠지고
+받지도 않으며 `up` 도 부르지 않는다 — 모든 `up` 이 `--no-deps` 라 다른 서비스의 `up` 이 의존성으로
+다시 만들지도 않는다. 이미지가 바뀌는 길(`search.Dockerfile`·`pgbouncer.Dockerfile`, 문맥 해시)과
+없는 컨테이너는 그대로 바꾼다. #950 이 워커 healthcheck 만 더했는데 운영 search 가 다시 만들어진
+것이 계기였다. 되돌리려면 `compose.prod.yaml` 변경 블록의 두 `service_definition_changed` 를 `BUILD_* = true` 로 바꾼다.
+
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
 `events` 는 `backend`·`celery-worker` 와 같은 무게로 받고 바꿔
 끼우지만, 그 프로세스가 죽으면 강의실 화면만 폴링으로 물러난다(ADR-0046). 그래도 `deploy.sh` 는 다른 서비스와 똑같이

@@ -60,7 +60,7 @@ esac
 exit 0
 """
 
-# `--hash` 는 풀러만 진짜로 낸다 — 세 앱의 해시는 위 `inspect` 와 같은 `same` 이다.
+# `--hash` 는 풀러·search 만 진짜로 낸다 — 세 앱의 해시는 위 `inspect` 와 같은 `same` 이다.
 FAKE_DOCKER_CONFIG = f"""#!{sys.executable}
 import hashlib, json, sys
 import yaml
@@ -71,7 +71,7 @@ with open(compose_file, encoding="utf-8") as f:
 if names[0] == "--hash":
     for s in names[1:]:
         digest = hashlib.sha256(json.dumps(services[s], sort_keys=True).encode()).hexdigest()
-        print(s, digest if s == "pgbouncer" else "same")
+        print(s, digest if s in ("pgbouncer", "search") else "same")
     sys.exit(0)
 rendered, todo = {{}}, list(names)
 while todo:
@@ -188,6 +188,43 @@ def test_compose_change_to_the_pooler_itself_still_replaces_the_pooler(pooler_ch
 
     assert plan["BUILD_PGBOUNCER"] == "true"
     assert plan["ROLLING_BACKEND"] == "false"
+
+
+def test_compose_change_to_another_service_leaves_search_alone(other_service_changed):
+    plan = _plan(other_service_changed)
+
+    assert plan["BUILD_SEARCH"] == "false"
+    assert plan["BUILD_BACKEND"] == "true"
+
+
+@pytest.fixture
+def search_changed(tmp_path):
+    def change(compose: str) -> str:
+        changed = compose.replace("      DISABLE_SECURITY_PLUGIN: \"true\"\n", "      DISABLE_SECURITY_PLUGIN: \"true\"\n      bootstrap.memory_lock: \"false\"\n", 1)
+        assert changed != compose
+        return changed
+
+    return _prepare(tmp_path, change)
+
+
+def test_compose_change_to_search_itself_replaces_search(search_changed):
+    plan = _plan(search_changed)
+
+    assert plan["BUILD_SEARCH"] == "true"
+    assert plan["BUILD_PGBOUNCER"] == "false"
+
+
+@pytest.fixture
+def search_dockerfile_changed(tmp_path):
+    # compose 는 그대로, 이미지 정의(Dockerfile)만 바뀐다 — 문맥 해시 경로.
+    return _prepare(tmp_path, lambda compose: compose, touch=("docker/search.Dockerfile",))
+
+
+def test_search_dockerfile_change_replaces_search(search_dockerfile_changed):
+    plan = _plan(search_dockerfile_changed)
+
+    assert plan["BUILD_SEARCH"] == "true"
+    assert plan["BUILD_PGBOUNCER"] == "false"
 
 
 @pytest.fixture

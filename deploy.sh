@@ -293,26 +293,27 @@ context_changed() {
   return 1
 }
 
-# 직전 배포($PREVIOUS)의 compose 와 지금 것에서 풀러의 설정 해시가 다른가. 옛 파일은
+# 직전 배포($PREVIOUS)의 compose 와 지금 것에서 서비스 $1(pgbouncer·search)의 설정 해시가 다른가. 옛 파일은
 # 지금 파일과 같은 디렉터리에 잠깐 꺼내 둔다 — 상대 경로(`build.context: ..`)와 프로젝트
 # 이름이 같은 자리에서 풀려야 두 렌더가 비교된다. 무엇이든 실패하면 「바뀌었다」(참)다.
 #
-# **`config pgbouncer` 의 렌더가 아니라 `config --hash pgbouncer` 다**(2026-10-26, GlitchTip 75
+# **`config <서비스>` 의 렌더가 아니라 `config --hash <서비스>` 다**(2026-10-26, GlitchTip 75
 # 재발). 렌더는 `depends_on` 의 `db` 까지 담아, #790 이 db 이미지를 digest 로 고정한 것만으로
 # 풀러를 바꾸게 했다 — backend 넷이 31초 내려가 공개 앱이 500 을 냈다. db 는 배포가 다시
 # 만들지 않으므로(`up --no-recreate`) 풀러가 따라 바뀔 까닭이 없다. 해시는 compose 가 그
 # 컨테이너를 다시 만들지 가르는 바로 그 값이고, 풀러 자신의 정의만 담는다.
-pooler_definition_changed() {
+service_definition_changed() {
+  svc=$1
   previous_compose="docker/.jenkins-${TARGET}-previous-compose.yaml"
   if ! $GIT show "${PREVIOUS}:${COMPOSE_FILE}" > "$previous_compose" 2>/dev/null; then
     rm -f "$previous_compose"
     return 0
   fi
-  before=$(docker compose -f "$previous_compose" --env-file "$ENV_FILE" config --hash pgbouncer 2>/dev/null)
+  before=$(docker compose -f "$previous_compose" --env-file "$ENV_FILE" config --hash "$svc" 2>/dev/null)
   before_status=$?
   rm -f "$previous_compose"
   [ "$before_status" -eq 0 ] && [ -n "$before" ] || return 0
-  after=$($COMPOSE config --hash pgbouncer 2>/dev/null) || return 0
+  after=$($COMPOSE config --hash "$svc" 2>/dev/null) || return 0
   [ -n "$after" ] || return 0
   [ "$before" != "$after" ]
 }
@@ -439,15 +440,23 @@ cmd_plan() {
     # 바꾸게 해 prod 에서 이벤트 서비스 이름이 16초 넘게 안 풀렸고, BFF 재시도 예산(약
     # 15.8초)을 넘겨 강의실이 500 을 냈다. 직전 배포의 compose 와 지금 것을 compose 자신이
     # 낸 풀러의 설정 해시로 비교한다 — 내지 못하면 바뀐 것으로 본다(db 는 넣지 않는다, 위
-    # pooler_definition_changed).
+    # service_definition_changed pgbouncer).
     if touched "^docker/compose\.${TARGET}\.yaml\$"; then
       log "compose.${TARGET}.yaml 이 바뀌었다 — 전부 다시 세운다."
       BUILD_BACKEND=true
       BUILD_FRONTEND=true
       BUILD_OPERATOR=true
       BUILD_CLASSROOM=true
-      BUILD_SEARCH=true
-      if pooler_definition_changed; then
+      # search 도 풀러처럼 정의가 바뀐 때만 바꾼다(#951 — #950 이 워커 healthcheck 만 더했는데
+      # 운영 search 가 다시 만들어졌다). 이미지 태그(`CODEMIT_IMAGE_TAG`)는 두 렌더가 같은 값을
+      # 쓰므로 해시를 흔들지 않는다. 계획에서 빠진 서비스는 받지도 않고 `up` 도 부르지 않으며
+      # (모든 `up` 이 `--no-deps`) 다른 서비스의 `up` 이 의존성으로 다시 만들지도 않는다.
+      if service_definition_changed search; then
+        BUILD_SEARCH=true
+      else
+        log "search 의 정의는 그대로다 — search 는 바꾸지 않는다."
+      fi
+      if service_definition_changed pgbouncer; then
         BUILD_PGBOUNCER=true
       else
         log "풀러(pgbouncer)의 정의는 그대로다 — 풀러는 바꾸지 않는다."
