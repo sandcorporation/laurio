@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 
 import { describe, expect, test } from "vitest";
 
-import { probeBackendHealth } from "./health-probe";
+import { fetchBackendHealth, probeBackendHealth } from "./health-probe";
 
 type Upstream = { url: string; open: () => number; idle: () => number; close: () => Promise<void> };
 
@@ -76,5 +76,28 @@ describe("probeBackendHealth", () => {
 
   test("주소가 잘못돼도 던지지 않고 unreachable", async () => {
     expect(await probeBackendHealth("not a url/healthz", 1000)).toBe("unreachable");
+  });
+});
+
+describe("fetchBackendHealth", () => {
+  test("상태 코드와 본문을 그대로 돌려준다(503 도 바꾸지 않는다)", async () => {
+    const body = '{"status":"error","failed":["grader"]}';
+    const failing = await upstream(`HTTP/1.1 503 Service Unavailable\r\ncontent-length: ${body.length}\r\n\r\n${body}`);
+    try {
+      expect(await fetchBackendHealth(failing.url, 1000)).toEqual({ status: 503, body });
+    } finally {
+      await failing.close();
+    }
+  });
+
+  test("느리면 null — 위쪽에 연결을 남기지 않는다", async () => {
+    const slow = await upstream();
+    try {
+      expect(await fetchBackendHealth(slow.url, 50)).toBeNull();
+      await settle(50);
+      expect(slow.open()).toBe(0);
+    } finally {
+      await slow.close();
+    }
   });
 });

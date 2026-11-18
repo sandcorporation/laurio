@@ -36,6 +36,8 @@
 // 세션을 실어 나를 수 있는 통로가 된다. `/api/internal/*` 을 막는 것과 같은 이유다.
 import { isAllowedPath } from "@codemit/bff-shared";
 
+// `/api/health` 는 여기 없다 — 외부 감시용(#949) 공개 경로는 `app/api/health/route.ts` 가 GET 만, 정확히 그 경로만
+// 받는다(접두어 허용목록으로 열면 `/api/backend/api/health/…` 와 다른 메서드까지 통과한다).
 export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/accounts",
   "/api/verification",

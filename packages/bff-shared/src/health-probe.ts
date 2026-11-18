@@ -44,3 +44,46 @@ export function probeBackendHealth(url: string, timeoutMs: number): Promise<Back
     req.end();
   });
 }
+
+export type BackendHealthReply = { status: number; body: string };
+
+const MAX_REPLY_BYTES = 4096;
+
+/**
+ * 공개 `/api/health`(#949)용 — 상태 코드와 본문을 돌려준다(닿지 않으면 null). 위 프로브와 같은 이유로 연결 풀 없는
+ * `node:http` 를 쓴다. 본문은 앞 4KB 까지만 읽는다.
+ */
+export function fetchBackendHealth(url: string, timeoutMs: number): Promise<BackendHealthReply | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: BackendHealthReply | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      req.destroy();
+      resolve(result);
+    };
+    const send = url.startsWith("https:") ? httpsRequest : httpRequest;
+    let req: ReturnType<typeof send>;
+    try {
+      req = send(url, { method: "GET", agent: false, headers: { connection: "close" } }, (res) => {
+        const chunks: Buffer[] = [];
+        let size = 0;
+        res.on("data", (chunk: Buffer) => {
+          if (size < MAX_REPLY_BYTES) chunks.push(chunk);
+          size += chunk.length;
+        });
+        res.on("end", () =>
+          finish({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).subarray(0, MAX_REPLY_BYTES).toString("utf8") }),
+        );
+        res.on("error", () => finish(null));
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    req.on("error", () => finish(null));
+    req.end();
+  });
+}

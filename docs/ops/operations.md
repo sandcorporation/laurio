@@ -52,8 +52,10 @@ grader 가 죽어도 200 이었다. 지금은 `SELECT 1`(statement_timeout 1초)
 `/tmp/codemit-heartbeat` 의 mtime 을 만진다 — 채점 한 건이 LLM 을 오래 기다려도 멈추지 않는다. 컨테이너
 healthcheck(celery-worker·grader)는 그 파일이 90초 안에 갱신됐는지만 본다. 스레드가 산다는 신호지 태스크
 소비를 증명하지는 않는다. **`?scope=ready`** 는 db·redis 만 본다 — 배포 롤링·`deploy.sh health`·세 앱의
-`/healthz` 프로브가 이것을 쓴다(워커가 죽어도 api 가 배포에서 빠지지 않게). 공개 도메인에는 이 경로가 없다
-(BFF 허용목록에 없고 backend 는 호스트 포트가 없다) — 외부 감시가 보려면 별도 길이 필요하다. 개발·CI 스택은
+`/healthz` 프로브가 이것을 쓴다(워커가 죽어도 api 가 배포에서 빠지지 않게). 공개 도메인의 **`https://<도메인>/api/health`**(공개 앱
+`app/api/health/route.ts`, GET 만)가 backend 의 전체 점검(워커 포함)을 돌려준다 — 외부 감시(Gatus)용. 코드는 200·503
+만, 본문은 `status`·`failed`(알려진 점검 이름만)로 걸러 내고, backend 에 못 닿으면 503 `failed:["backend"]`. `/healthz` 는
+`?scope=ready` 그대로다(롤링·부팅 가드). 개발·CI 스택은
 `HEALTH_REQUIRED_WORKERS` 가 비어 워커를 요구하지 않는다. 되돌리려면 compose 의 그 환경변수 한 줄을 지운다.
 
 **살아 있는지는 oracle 의 Prometheus 가 본다**(2026-09-21). 그 전에는 **prod 가 죽어도
