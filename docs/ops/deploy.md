@@ -329,6 +329,14 @@ compose 가 이미지 id 가 달라졌다며 redis 를 재생성해(prod 10-26 0
 compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh prod recreate-infra`
 를 손으로 부른다(Redis 비워짐·db 잠깐 끊김을 감수할 때만).
 
+**기반 이미지는 digest 로만, 올림은 Dependabot PR**(#945, 2026-11-18). `docker/*.Dockerfile` 의 외부
+`FROM`(uv·node)과 compose.prod 의 외부 `image:` 는 `이름:태그@sha256:<멀티아키 인덱스 digest>` 다 —
+`docker buildx imagetools inspect <이름:태그>` 의 `Digest:`(운영은 arm64, CI 는 amd64 라 인덱스여야 한다).
+태그만 쓴 줄은 `scripts/test_release_flow.py` 가 PR 검사에서 막는다. `.github/dependabot.yml` 이 `/docker`
+를 주 1회 보고 digest 를 올리는 PR 을 연다. **예외 둘**: `search.Dockerfile`(opensearch)·`pgbouncer.Dockerfile`
+(debian)은 아직 태그만이다 — 그 파일을 고치면 `deploy.sh` 가 이미지를 새로 구워 운영 search·pgbouncer 컨테이너를
+바꿔 끼우므로, 다음 의도적 교체 때 digest 를 붙이고 시험의 `FROM_PIN_DEFERRED` 에서 뺀다.
+
 **backend·events 는 겹쳐 바꾼다 — 배포 중에도 요청이 끊기지 않는다**(#485, 2026-09-22).
 예전에는 컨테이너를 내리고 새로 올려, 배포마다 공개 앱이 13~16초 동안 500 을 냈다(당시 staging
 실측, GlitchTip 64·74·75 — BFF 재시도 예산 약 15.8초보다 길었다). 지금은 `deploy.sh` 의
