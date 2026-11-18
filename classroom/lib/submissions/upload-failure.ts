@@ -78,7 +78,41 @@ export function describeUploadFailure(
   tags.upload_error = error instanceof Error ? error.name : typeof error;
   return {
     message:
-      "업로드 서버에 연결하지 못했습니다. 네트워크 상태를 확인하고 다시 시도해주세요.",
+      "업로드 서버에 연결하지 못했습니다. 네트워크 상태를 확인하고 파일을 다시 선택해주세요.",
     tags,
   };
+}
+
+/** 고른 파일의 원본을 읽지 못했다 — 고른 뒤 디스크의 파일이 바뀌었거나 사라졌다.
+ *  Chrome 은 바뀐 File 을 보내려 하면 `ERR_UPLOAD_FILE_CHANGED` 로 끊고, JS 에는
+ *  `Failed to fetch` 만 보인다(#953). 그래서 보내기 전에 읽어 이 실패를 따로 가른다. */
+export function describeFileReadFailure(error: unknown, fileSize: number): UploadFailure {
+  return {
+    message: "파일을 읽지 못했습니다. 파일을 다시 선택해주세요.",
+    tags: {
+      upload_failure: "file_changed",
+      upload_file_bytes: String(fileSize),
+      upload_error: error instanceof Error ? error.name : typeof error,
+    },
+  };
+}
+
+export class FileReadError extends Error {
+  constructor(
+    readonly failure: UploadFailure,
+    readonly cause: unknown,
+  ) {
+    super(failure.message);
+  }
+}
+
+/** 고른 파일의 내용을 메모리로 복사한다. 원본 File 은 전송 시점에 디스크 상태를
+ *  다시 검사받아 바뀌었으면 끊기므로(#953), 이름·type 을 지킨 복사본을 보낸다. */
+export async function copySelectedFile(file: File): Promise<File> {
+  try {
+    const buffer = await file.arrayBuffer();
+    return new File([buffer], file.name, { type: file.type, lastModified: file.lastModified });
+  } catch (error) {
+    throw new FileReadError(describeFileReadFailure(error, file.size), error);
+  }
 }

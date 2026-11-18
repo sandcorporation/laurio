@@ -10,7 +10,7 @@ import { useCallback, useState } from "react";
 import type { ApiFailure } from "@codemit/bff-client";
 
 import { bffClient, unwrap } from "@/lib/bff/client";
-import { describeUploadFailure, type UploadFailureContext } from "./upload-failure";
+import { copySelectedFile, describeUploadFailure, FileReadError, type UploadFailureContext } from "./upload-failure";
 
 function isApiFailure(error: unknown): error is ApiFailure {
   return typeof error === "object" && error !== null && "ok" in error && !(error as ApiFailure).ok;
@@ -46,7 +46,7 @@ type PresignedUpload = {
 /** 바이트는 우리 서버를 거치지 않고 스토리지로 직접 간다 — 그래서 이 실패는
  *  백엔드 로그 어디에도 남지 않는다. 오류 수집기에 남기는 것은 이 자리뿐이다
  *  (2026-09-18, prod 에서 실제로 아무 기록 없이 실패했다). */
-async function sendToStorage(presigned: PresignedUpload, file: File): Promise<void> {
+async function sendToStorage(presigned: PresignedUpload, file: Blob & { name?: string }): Promise<void> {
   const context: UploadFailureContext = {
     uploadUrl: presigned.upload_url,
     method: presigned.method,
@@ -75,13 +75,26 @@ async function sendToStorage(presigned: PresignedUpload, file: File): Promise<vo
   }
 }
 
-function postForm(presigned: PresignedUpload, file: File): FormData {
+function postForm(presigned: PresignedUpload, file: Blob & { name?: string }): FormData {
   const form = new FormData();
   for (const [key, value] of Object.entries(presigned.fields)) {
     form.append(key, value);
   }
-  form.append("file", file);
+  form.append("file", file, file.name ?? "upload");
   return form;
+}
+
+/** 읽기 실패는 수집기에 `file_changed` 로 남기고 다시 고르라고 안내한다. */
+async function copyForUpload(file: File): Promise<File> {
+  try {
+    return await copySelectedFile(file);
+  } catch (error) {
+    if (error instanceof FileReadError) {
+      Sentry.captureException(error.cause, { tags: error.failure.tags });
+      throw new Error(error.failure.message);
+    }
+    throw error;
+  }
 }
 
 /** 수집기에 원문과 맥락을 보내고, 화면에는 한국어 한 문장을 던진다. */
@@ -116,7 +129,7 @@ export function useSourceUpload(targetRef: string | null) {
           const megabytes = Math.round((presigned.max_size_bytes / (1024 * 1024)) * 10) / 10;
           throw new Error(`파일이 너무 큽니다. 최대 ${megabytes}MB까지 업로드할 수 있습니다.`);
         }
-        await sendToStorage(presigned, file);
+        await sendToStorage(presigned, await copyForUpload(file));
         setState({ status: "done", error: null, objectKey: presigned.object_key, contentType });
         return { objectKey: presigned.object_key, contentType };
       } catch (error) {
