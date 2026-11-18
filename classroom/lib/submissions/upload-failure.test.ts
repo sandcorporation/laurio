@@ -4,7 +4,7 @@
 // 그 영어 원문이 화면에 그대로 나왔고 오류 수집기에는 아무것도 남지 않았다.
 import { describe, expect, test } from "vitest";
 
-import { describeUploadFailure } from "./upload-failure";
+import { describeFileReadFailure, describeUploadFailure } from "./upload-failure";
 
 const CONTEXT = {
   uploadUrl: "https://example-store.objectstorage.example.com/codemit-prod?X-Amz-Signature=deadbeef",
@@ -55,5 +55,15 @@ describe("describeUploadFailure — 응답 실패", () => {
 
     expect(tags.upload_status).toBe("400");
     expect(tags.upload_failure).toBe("response");
+  });
+});
+
+describe("describeFileReadFailure — 고른 뒤 원본이 바뀜 (#953)", () => {
+  test("다시 고르라고 말하고 file_changed 태그를 남긴다", () => {
+    const { message, tags } = describeFileReadFailure(new DOMException("x", "NotReadableError"), 99);
+    expect(message).toContain("파일을 다시 선택해주세요");
+    expect(tags.upload_failure).toBe("file_changed");
+    expect(tags.upload_error).toBe("NotReadableError");
+    expect(tags.upload_file_bytes).toBe("99");
   });
 });
