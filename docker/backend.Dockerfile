@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim@sha256:7cf77f594be8042dab6daa9fe326f90962252268b4f120a7f5dccce4d947e6c1
 
 # 가상환경을 /app 밖에 둔다. dev compose가 소스를 /app에 바인드 마운트하므로
 # 안에 두면 마운트가 가려버린다.

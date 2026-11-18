@@ -95,5 +95,59 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertFalse((ROOT / "scripts" / "ci" / "build-images.sh").exists())
 
 
+# 기반 이미지는 digest 로만(#945) — 떠다니는 태그는 상류가 옮기면 다음 배포가 상태 있는 컨테이너를 다시 만든다(#790).
+DIGEST = re.compile(r"@sha256:[0-9a-f]{64}(?:\s|$)")
+# 이 두 파일의 FROM 을 고치면 deploy.sh 가 그 이미지를 새로 구워 운영 search·pgbouncer 컨테이너를 바꿔 끼운다.
+# TODO(다음 의도적 교체 때 고정): 그때 digest 를 붙이고 이 목록에서 뺀다.
+FROM_PIN_DEFERRED = {"search.Dockerfile", "pgbouncer.Dockerfile"}
+
+
+def unpinned_external_froms(dockerfile_texts: dict[str, str], deferred: set[str]) -> list[str]:
+    bad: list[str] = []
+    for name, text in sorted(dockerfile_texts.items()):
+        if name in deferred:
+            continue
+        stages: set[str] = set()
+        for lineno, line in enumerate(text.splitlines(), 1):
+            m = re.match(r"^FROM\s+(?:--\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?", line, re.I)
+            if not m:
+                continue
+            image, stage = m.groups()
+            if image not in stages and not DIGEST.search(image + " "):
+                bad.append(f"{name}:{lineno}: {image}")
+            if stage:
+                stages.add(stage)
+    return bad
+
+
+class BaseImagePinTest(unittest.TestCase):
+    def test_dockerfile_external_from_has_digest(self) -> None:
+        texts = {p.name: p.read_text(encoding="utf-8") for p in (ROOT / "docker").glob("*.Dockerfile")}
+        self.assertEqual(unpinned_external_froms(texts, FROM_PIN_DEFERRED), [], "외부 FROM 은 이름:태그@sha256:<digest>")
+
+    def test_prod_compose_external_image_has_digest(self) -> None:
+        text = (ROOT / "docker" / "compose.prod.yaml").read_text(encoding="utf-8")
+        bad = []
+        for lineno, line in enumerate(text.splitlines(), 1):
+            m = re.match(r"^\s+image:\s*(\S+)", line)
+            if m and not m.group(1).startswith("${CODEMIT_IMAGE_REPO") and not DIGEST.search(m.group(1) + " "):
+                bad.append(f"compose.prod.yaml:{lineno}: {m.group(1)}")
+        self.assertEqual(bad, [], "자체 이미지가 아닌 image: 는 @sha256:<digest>")
+
+    def test_checker_rejects_tag_only_and_allows_stage_refs(self) -> None:
+        digest = "a" * 64
+        ok = f"FROM node:22@sha256:{digest} AS base\nFROM base AS dev\n"
+        self.assertEqual(unpinned_external_froms({"x.Dockerfile": ok}, set()), [])
+        self.assertEqual(
+            unpinned_external_froms({"x.Dockerfile": "FROM node:22 AS base\n"}, set()),
+            ["x.Dockerfile:1: node:22"],
+        )
+
+    def test_dependabot_watches_docker_dir(self) -> None:
+        text = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+        self.assertIn('package-ecosystem: "docker"', text)
+        self.assertIn('directory: "/docker"', text)
+
+
 if __name__ == "__main__":
     unittest.main()
