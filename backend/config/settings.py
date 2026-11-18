@@ -1117,6 +1117,13 @@ EVENT_BUS_REDIS_URL = _env("EVENT_BUS_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDI
 # (위 세션 캐시와 같은 이유 — 같은 Redis 를 여러 체크아웃이 나눠 쓴다).
 OPS_METRICS_REDIS_URL = _env("OPS_METRICS_REDIS_URL", f"redis://127.0.0.1:{_DEV_REDIS_PORT}/3")
 OPS_METRICS_STORE = "memory" if _RUNNING_TESTS else "redis"
+
+# --- /api/health 생존 신호 (#949, `core.heartbeat`) ---------------------------------------
+#: celery-worker·grader 가 15초마다 갱신하는 redis 키를 읽는 곳 — 세션과 같은 인스턴스다. 시험은 흉내 저장소.
+HEALTH_REDIS_URL = _env("HEALTH_REDIS_URL", SESSION_REDIS_URL)
+HEALTH_STORE = "memory" if _RUNNING_TESTS else "redis"
+#: `/api/health` 가 신호를 요구할 역할(쉼표 목록) — 운영 compose 의 backend 만 채운다. 개발·CI 스택엔 워커가 없다.
+HEALTH_REQUIRED_WORKERS = [r.strip() for r in _env("HEALTH_REQUIRED_WORKERS", "").split(",") if r.strip()]
 #: 분 해시의 TTL — flush 가 멈춰도(beat 가 죽어도) 사흘 안에 되살리면 잃지 않는다. 그보다 길면 버린다.
 OPS_METRICS_KEY_TTL_SECONDS = 3 * 24 * 3600
 #: grader 생존 신호(`ops:heartbeat:grader`)의 TTL — 30초마다 쓴다. 경보(#830)는 「3분 넘게 없음」을 보므로

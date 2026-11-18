@@ -43,6 +43,19 @@ pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit <덤�
 cd backend && uv run python manage.py create_operator <아이디> --superuser
 ```
 
+**`/api/health` 는 db·redis·워커를 본다**(#949). 예전에는 늘 `{"status":"ok"}` 라 db·redis·celery-worker·
+grader 가 죽어도 200 이었다. 지금은 `SELECT 1`(statement_timeout 1초)·redis `PING`(소켓 1초)과, backend 에
+`HEALTH_REQUIRED_WORKERS=celery,grader`(compose.prod 의 backend 만)가 있을 때 두 워커의 생존 신호를 본다.
+하나라도 실패면 **503 `{"status":"error","failed":["db"|"redis"|"celery"|"grader", …]}`**, 정상이면 200
+`{"status":"ok"}`. 호스트·버전·예외 원문은 내지 않는다. 신호는 celery-worker(beat 포함)·grader 프로세스 안의
+**별도 스레드**(`core/heartbeat.py`)가 15초마다 redis 키 `codemit:heartbeat:<역할>`(TTL 90초)을 갱신하고
+`/tmp/codemit-heartbeat` 의 mtime 을 만진다 — 채점 한 건이 LLM 을 오래 기다려도 멈추지 않는다. 컨테이너
+healthcheck(celery-worker·grader)는 그 파일이 90초 안에 갱신됐는지만 본다. 스레드가 산다는 신호지 태스크
+소비를 증명하지는 않는다. **`?scope=ready`** 는 db·redis 만 본다 — 배포 롤링·`deploy.sh health`·세 앱의
+`/healthz` 프로브가 이것을 쓴다(워커가 죽어도 api 가 배포에서 빠지지 않게). 공개 도메인에는 이 경로가 없다
+(BFF 허용목록에 없고 backend 는 호스트 포트가 없다) — 외부 감시가 보려면 별도 길이 필요하다. 개발·CI 스택은
+`HEALTH_REQUIRED_WORKERS` 가 비어 워커를 요구하지 않는다. 되돌리려면 compose 의 그 환경변수 한 줄을 지운다.
+
 **살아 있는지는 oracle 의 Prometheus 가 본다**(2026-09-21). 그 전에는 **prod 가 죽어도
 아무도 몰랐다** — GlitchTip 은 오류가 **도착해야** 아는 장치라 프로세스가 죽거나 디스크가
 차서 응답을 못 하면 조용하다. 감시 스택은 **이 저장소 밖**이다: oracle 의

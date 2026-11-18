@@ -15,6 +15,7 @@ import os
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_ready
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -54,3 +55,12 @@ SCHEDULED_JOBS = {
 # 임포트)에 읽히므로 등록부를 여기서 건드릴 수 없다. 각 앱의 ready() 가 `register_scan` 으로
 # 더할 때마다 위 함수가 스케줄을 다시 만든다 — beat 프로세스는 django.setup() 뒤에야 읽는다.
 app.conf.beat_schedule = dict(SCHEDULED_JOBS)
+
+
+@worker_ready.connect
+def _start_heartbeat(**_kwargs: object) -> None:
+    """`/api/health` 가 보는 생존 신호(#949) — 별도 스레드라 태스크가 오래 걸려도 멈추지 않는다."""
+
+    from core.heartbeat import start_heartbeat
+
+    start_heartbeat("celery")

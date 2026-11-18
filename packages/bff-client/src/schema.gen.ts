@@ -2867,7 +2867,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description db(`SELECT 1`)·redis(`PING`)·백그라운드 워커 생존 신호를 본다. 하나라도 실패면 503 + 실패한 점검 이름(#949).
+         *
+         *     `?scope=ready` 는 db·redis 만(롤링 교체·배포 스모크·컨테이너 healthcheck 용 — 워커 신호가 아직 없는 새 api 를 막지 않는다).
+         *     워커 점검은 `HEALTH_REQUIRED_WORKERS`(쉼표 목록)가 있을 때만 — 개발·CI 스택은 워커가 없다.
+         *     호스트·버전·예외 원문은 응답에 넣지 않는다.
+         */
         get: operations["config_api_health"];
         put?: never;
         post?: never;

@@ -13,6 +13,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from core import llm_metrics
+from core.heartbeat import start_heartbeat
 
 from classroom.grader import Grader
 
@@ -27,6 +28,8 @@ class Command(BaseCommand):
         # 이 프로세스의 LLM 지표를 긁게 연다(#585) — grader 는 단일 프로세스라 합산이 필요 없다. 0 이면 끈다.
         if settings.CLASSROOM_GRADER_METRICS_PORT:
             llm_metrics.serve(settings.CLASSROOM_GRADER_METRICS_PORT)
+        # `/api/health` 의 생존 신호(#949) — 채점 루프와 따로 스레드로 낸다(LLM 호출이 길어도 멈추지 않게).
+        start_heartbeat("grader")
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):

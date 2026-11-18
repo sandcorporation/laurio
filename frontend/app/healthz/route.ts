@@ -23,7 +23,7 @@ function backendBaseUrl(): string {
 
 // 전역 fetch 가 아니라 연결 풀 없는 프로브로 친다 — 끊길 때 backend 에 빈 연결을 남기지 않는다(#725).
 function probeBackend() {
-  return probeBackendHealth(`${backendBaseUrl()}/api/health`, BACKEND_PROBE_TIMEOUT_MS);
+  return probeBackendHealth(`${backendBaseUrl()}/api/health?scope=ready`, BACKEND_PROBE_TIMEOUT_MS);
 }
 
 export async function GET() {

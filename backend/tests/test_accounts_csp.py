@@ -4,6 +4,10 @@ JWT를 localStorage에 두는 결정은 CSP로 XSS의 파급력을 좁히는 것
 """
 
 
+import pytest
+
+
+@pytest.mark.django_db  # /api/health 가 DB 를 본다(#949)
 def test_csp_header_present_on_every_response(client):
     response = client.get("/api/health")
 
