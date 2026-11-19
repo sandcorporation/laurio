@@ -108,7 +108,8 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
   await expect(page.getByTestId(`submission-row-${submissionId}-status`)).toHaveText("통과");
   // 가장 최근 채점의 판정은 체크리스트 카드가 품는다(#640).
   await expect(page.getByTestId("my-problem-checklist-badge")).toContainText("통과");
-  await expect(page.getByTestId("my-problem-checklist")).toContainText("충족");
+  await expect(page.getByTestId("my-problem-checklist-summary")).toContainText("통과 · 필수");
+  await expect(page.getByTestId("my-problem-checklist")).toContainText("통과");
   // 알림이 가리킨 시도의 줄은 「판정 보기」가 펼쳐진 채로 열린다 — 채점된 줄마다 있는 같은
   // 토글이라(#660) 접었다 다시 펼칠 수 있다.
   const toggle = page.getByTestId(`submission-row-${submissionId}-verdict-toggle`);

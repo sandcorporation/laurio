@@ -41,10 +41,11 @@ import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
-import type { ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
+import type { ChecklistVerdict, ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
 import { attemptEntryLabel } from "@/lib/submissions/contest-entry";
-import { VERDICT_LABEL, type VerdictValue, verdictFromMet, verdictMarkerClass, verdictOf } from "@/lib/submissions/verdict";
+import { checklistSummaryLine, verdictGlyph, verdictStatusText } from "@/lib/submissions/checklist-summary";
+import { VERDICT_LABEL, type VerdictValue, verdictFromMet, verdictOf } from "@/lib/submissions/verdict";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 
@@ -404,8 +405,8 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   );
 }
 
-// 체크리스트 카드(#640) — 가장 최근 채점의 판정을 품는다. 머리에 어느 시도의 판정인지와 미통과·필수 m/n,
-// 항목마다 충족/미충족 표식과 AI 의 사유. 판정이 아직 없으면 항목만.
+// 체크리스트 카드(#640, #985) — 가장 최근 채점의 판정을 품는다. 머리에 어느 시도의 판정인지, 그 밑에 결과 한 줄,
+// 그리고 「통과에 필요한 것」·「심화」 두 묶음. 줄마다 상태가 표식(모양)과 글자로 읽힌다. 판정이 아직 없으면 항목만.
 function ChecklistWithVerdict({
   items,
   hiddenCount,
@@ -429,36 +430,55 @@ function ChecklistWithVerdict({
   const syntax = score?.syntax_check ?? null;
   // 문법 결과 없이 만든 자동 미달 점수(#674·#679) — 줄의 판정은 `requiredSummary` 가, 사유는 그 점수의 공통 문구가.
   const autoFailReasoning = syntaxLineReasoning(score);
+  const requiredItems = items.filter((item) => item.required);
+  const advancedItems = items.filter((item) => !item.required);
+  const valueOf = (item: ParticipantChecklistItem): VerdictValue | null => {
+    const verdict = verdictById.get(item.id);
+    return verdict ? verdictOf(verdict) : null;
+  };
+  const advancedValues = advancedItems.map(valueOf);
+  const unverifiable =
+    requiredItems.map(valueOf).filter((value) => value === "unverifiable").length +
+    advancedValues.filter((value) => value === "unverifiable").length;
+  const summaryLine = checklistSummaryLine({
+    judged: judged ? { passed: judged.passed, perfect: judged.perfect } : null,
+    required: {
+      met: judgedSummary?.met ?? null,
+      total: requiredItems.length + (syntaxCheckEnabled ? 1 : 0),
+      unmetCount: judgedSummary?.unmet.length ?? 0,
+    },
+    advanced: { total: advancedItems.length, verdicts: advancedValues },
+    hidden: score?.hidden_summary ?? null,
+    unverifiable,
+  });
+  const syntaxVerdict = judgedSummary?.syntaxMet == null ? null : verdictFromMet(judgedSummary.syntaxMet);
   return (
     <Card>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-4 py-3">
         <h2 className="text-[15px] font-semibold tracking-[-0.005em]">
           체크리스트
-          <span
-            data-testid="my-problem-checklist-meta"
-            className="ml-2.5 text-[12.5px] font-normal text-ink/45"
-          >
-            {judged ? `시도 ${judged.attempt_number} 의 판정 · ${formatRelativeTime(score?.created_at ?? null)} · ` : ""}
-            지침 「{strictnessLabel}」
-          </span>
+          {judged ? (
+            <span data-testid="my-problem-checklist-meta" className="ml-2.5 text-[12.5px] font-normal text-ink/45">
+              시도 {judged.attempt_number} · {formatRelativeTime(score?.created_at ?? null)}
+            </span>
+          ) : null}
         </h2>
         {judged && judgedSummary ? (
           <span data-testid="my-problem-checklist-badge">
             {stampKind(judged.passed, judged.perfect) ? (
-              <>
-                <Stamp kind={stampKind(judged.passed, judged.perfect)!} scope={`submission-${judged.id}`} />{" "}
-                <span className="text-[12.5px] text-ink/60">
-                  필수 {judgedSummary.met}/{judgedSummary.total}
-                </span>
-              </>
+              <Stamp kind={stampKind(judged.passed, judged.perfect)!} scope={`submission-${judged.id}`} />
             ) : (
-              <Badge tone="error">
-                미통과 · 필수 {judgedSummary.met}/{judgedSummary.total}
-              </Badge>
+              <Badge tone="error">미통과</Badge>
             )}
           </span>
         ) : null}
       </div>
+      <p
+        data-testid="my-problem-checklist-summary"
+        className="border-t border-rule px-4 py-2.5 text-[13px] font-medium"
+      >
+        {summaryLine}
+      </p>
       {customGuideline.trim() === "" ? null : (
         <p
           data-testid="my-problem-grading-guideline-text"
@@ -467,110 +487,133 @@ function ChecklistWithVerdict({
           {customGuideline}
         </p>
       )}
-      {items.some((item) => !item.required) ? (
-        <p
-          data-testid="my-problem-advanced-note"
-          className="border-t border-rule px-4 py-2 text-[12.5px] text-ink/60"
-        >
-          <Badge tone="advanced">심화</Badge> 안 해도 통과, 더 해 보고 싶을 때 도전
-        </p>
-      ) : null}
-      <ul data-testid="my-problem-checklist" className="divide-y divide-rule border-t border-rule">
-        {syntaxCheckEnabled ? (
-          <ChecklistLine
-            testId="checklist-item-syntax-check"
-            verdict={judgedSummary?.syntaxMet == null ? null : verdictFromMet(judgedSummary.syntaxMet)}
+      {requiredItems.length > 0 || syntaxCheckEnabled ? (
+        <section data-testid="my-problem-checklist-required" aria-labelledby="my-problem-checklist-required-title">
+          <h3
+            id="my-problem-checklist-required-title"
+            className="border-t border-rule px-4 py-2 text-[12px] font-semibold text-ink/60"
           >
-            <div className="text-[13.5px]">
-              {SYNTAX_CHECK_LABEL} <Badge>기본</Badge>
-              {syntax ? (
-                <>
-                  {" "}
-                  <Badge>{judgedByLabel(syntax.judged_by)}</Badge>
-                </>
-              ) : null}
-            </div>
-            {syntax ? (
-              <>
-                <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{syntax.reasoning}</div>
-                {syntax.findings.map((finding, index) => (
-                  <div
-                    key={index}
-                    data-testid={`my-problem-checklist-syntax-check-finding-${index}`}
-                    className="font-mono text-[12px] text-ink/60"
-                  >
-                    {finding.path}
-                    {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
-                  </div>
-                ))}
-              </>
-            ) : autoFailReasoning ? (
-              <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{autoFailReasoning}</div>
-            ) : null}
-          </ChecklistLine>
-        ) : null}
-        {items.map((item) => {
-          const verdict = verdictById.get(item.id);
-          const value = verdict ? verdictOf(verdict) : null;
-          return (
-            <ChecklistLine key={item.id} testId={`checklist-item-${item.id}`} verdict={value}>
-              <div className="text-[13.5px]">
-                {item.label}
-                {item.required ? null : (
+            통과에 필요한 것
+          </h3>
+          <ul data-testid="my-problem-checklist" className="divide-y divide-rule border-t border-rule">
+            {syntaxCheckEnabled ? (
+              <ChecklistLine testId="checklist-item-syntax-check" verdict={syntaxVerdict} required>
+                <div className="text-[13.5px]">
+                  {SYNTAX_CHECK_LABEL}
+                  {syntax ? (
+                    <>
+                      {" "}
+                      <Badge>{judgedByLabel(syntax.judged_by)}</Badge>
+                    </>
+                  ) : null}
+                </div>
+                {syntax ? (
                   <>
-                    {" "}
-                    <Badge tone="advanced">심화</Badge>
+                    <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{syntax.reasoning}</div>
+                    {syntax.findings.map((finding, index) => (
+                      <div
+                        key={index}
+                        data-testid={`my-problem-checklist-syntax-check-finding-${index}`}
+                        className="font-mono text-[12px] text-ink/60"
+                      >
+                        {finding.path}
+                        {finding.line !== null ? `:${finding.line}` : ""} — {finding.message}
+                      </div>
+                    ))}
                   </>
-                )}
-                {value === "unverifiable" ? (
-                  <>
-                    {" "}
-                    <span data-testid={`checklist-item-${item.id}-unverifiable`}>
-                      <Badge>{VERDICT_LABEL.unverifiable}</Badge>
-                    </span>
-                  </>
+                ) : autoFailReasoning ? (
+                  <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{autoFailReasoning}</div>
+                ) : judged ? (
+                  <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">이 시도에는 문법 검사 결과가 없다</div>
                 ) : null}
-              </div>
-              {verdict ? (
-                <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{verdict.reasoning}</div>
-              ) : null}
-            </ChecklistLine>
-          );
-        })}
-        {hiddenCount > 0 ? (
-          <li data-testid="my-problem-checklist-hidden" className="px-4 py-2.5 text-[13px] text-ink/60">
-            숨은 항목 {hiddenCount}개
-          </li>
-        ) : null}
-      </ul>
-      {score ? (
-        <div
-          data-testid="my-problem-checklist-footer"
-          className="border-t border-rule px-4 py-2.5 text-[11.5px] text-ink/45"
-        >
-          {scoreJudgeLabel(score)} · {formatRelativeTime(score.created_at)}
-        </div>
+              </ChecklistLine>
+            ) : null}
+            {requiredItems.map((item) => (
+              <ChecklistItemLine key={item.id} item={item} verdict={verdictById.get(item.id)} />
+            ))}
+          </ul>
+        </section>
       ) : null}
+      {advancedItems.length > 0 || hiddenCount > 0 ? (
+        <section data-testid="my-problem-checklist-advanced" aria-labelledby="my-problem-checklist-advanced-title">
+          <h3
+            id="my-problem-checklist-advanced-title"
+            data-testid="my-problem-advanced-note"
+            className="border-t border-rule px-4 py-2 text-[12px] font-semibold text-ink/60"
+          >
+            심화 — 안 해도 통과, 더 해 보고 싶을 때
+          </h3>
+          <ul data-testid="my-problem-checklist-advanced-list" className="divide-y divide-rule border-t border-rule">
+            {advancedItems.map((item) => (
+              <ChecklistItemLine key={item.id} item={item} verdict={verdictById.get(item.id)} />
+            ))}
+            {hiddenCount > 0 ? (
+              <li data-testid="my-problem-checklist-hidden" className="px-4 py-2.5 text-[13px] text-ink/60">
+                숨은 항목 {hiddenCount}개
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+      <div
+        data-testid="my-problem-checklist-footer"
+        className="border-t border-rule px-4 py-2.5 text-[11.5px] text-ink/45"
+      >
+        {score ? `채점 ${scoreJudgeLabel(score)} · ` : ""}지침 「{strictnessLabel}」
+      </div>
     </Card>
   );
 }
 
-// 항목 한 줄 — 표식은 충족(채움) · 미충족(붉은 테두리) · 확인 불가(점선) · 아직 판정 없음(옅은 테두리).
-// 글자로도 읽히게 sr-only(확인 불가는 줄 안의 표시가 보이는 글자로도 말한다).
+// 체크리스트 항목 한 줄 — 항목 이름과 AI 의 사유. 줄 오른쪽에 상태 글자.
+function ChecklistItemLine({
+  item,
+  verdict,
+}: {
+  item: ParticipantChecklistItem;
+  verdict: ChecklistVerdict | undefined;
+}) {
+  const value = verdict ? verdictOf(verdict) : null;
+  return (
+    <ChecklistLine testId={`checklist-item-${item.id}`} verdict={value} required={item.required}>
+      <div className="text-[13.5px]">
+        {item.label}
+        {value === "unverifiable" ? (
+          <span data-testid={`checklist-item-${item.id}-unverifiable`} className="sr-only">
+            {VERDICT_LABEL.unverifiable}
+          </span>
+        ) : null}
+      </div>
+      {verdict ? <div className="mt-1 text-[12.5px] leading-[1.65] text-ink/60">{verdict.reasoning}</div> : null}
+    </ChecklistLine>
+  );
+}
+
+// 항목 한 줄 — 앞 표식은 모양(✓ ✕ ? ○)과 색, 오른쪽 상태 글자(통과·미통과·확인 불가·아직)가 같은 말을 한다.
 function ChecklistLine({
   testId,
   verdict,
+  required,
   children,
 }: {
   testId: string;
   verdict: VerdictValue | null;
+  required: boolean;
   children: ReactNode;
 }) {
+  const tone =
+    verdict === "met"
+      ? "text-success"
+      : verdict === "unmet" && required
+        ? "text-error"
+        : "text-ink/45";
   return (
     <li data-testid={testId} className="flex items-start gap-3 px-4 py-3">
-      <span aria-hidden className={`mt-1 h-[14px] w-[14px] shrink-0 border ${verdictMarkerClass(verdict)}`} />
-      {verdict === null ? null : <span className="sr-only">{VERDICT_LABEL[verdict]}</span>}
+      <span aria-hidden className={`mt-px w-[14px] shrink-0 text-center text-[14px] font-semibold leading-snug ${tone}`}>
+        {verdictGlyph(verdict, required)}
+      </span>
       <div className="min-w-0 flex-1 leading-relaxed">{children}</div>
+      <span className={`shrink-0 text-[12.5px] leading-relaxed ${tone}`}>{verdictStatusText(verdict, required)}</span>
     </li>
   );
 }
