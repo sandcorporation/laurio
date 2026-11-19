@@ -54,6 +54,13 @@ Status: Accepted (2026-11-19 결정)
   개정으로 강의실에서 풀렸다).
 - 얼린 값(`classroom/lib/design/tokens.test.ts`)과 위 표를 함께 고쳤다.
 
+## 개정 (2026-11-19, #978) — 경고·심화 글자색을 AA 위로
+
+- 밝은 테마 warning·advanced 를 **#c4442b → #c3442b** 로 명도만 낮췄다(둘은 같은 색으로 둔다 — 대표 결정). 어두운 값 #e5694f 는 그대로다.
+- 까닭: #c4442b 가 밝은 paper 위에서 4.49:1 로 AA(4.5:1)에 0.01 모자랐다. 가장 작은 폭이 #c3442b 다.
+- 대비 전후: 밝음 paper 4.49 → 4.52 · surface 4.94 → 4.98, 어둠 paper 5.58 · surface 5.07(변경 없음).
+- `frontend/lib/design/contrast.test.ts` 가 warning·advanced·error × paper·surface 를 두 테마에서 4.5:1 이상으로 고정한다.
+
 ## 되돌리는 법
 
 PR 하나를 revert 한다. 토큰 값이 옛 값 그대로라 데이터·마이그레이션은 없다.
