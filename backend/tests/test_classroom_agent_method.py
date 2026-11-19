@@ -68,15 +68,6 @@ def _claude_stream(output: dict | None) -> str:
     return "\n".join(json.dumps(e, ensure_ascii=False) for e in events)
 
 
-def _codex_stream(output: dict) -> str:
-    events = [
-        {"type": "item.completed", "item": {"type": "command_execution", "command": "rg -n 테스트", "exit_code": 0, "aggregated_output": ""}},
-        {"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps(output, ensure_ascii=False)}},
-        {"type": "turn.completed", "usage": {"input_tokens": 500, "output_tokens": 50}},
-    ]
-    return "\n".join(json.dumps(e, ensure_ascii=False) for e in events)
-
-
 class _Runner:
     """`request_run` 자리. `through_proxy` 면 받은 실행 토큰으로 프록시를 한 번 지나간다(CLI 의 첫 요청처럼)."""
 
@@ -131,9 +122,11 @@ def _claude_key_class(client, monkeypatch, *, method: str | None = "agent"):
 # --- 설정 ---------------------------------------------------------------------------------------
 
 
-def test_methods_default_to_single_and_agent_is_open_for_a_key_connection(client, db):
+def test_methods_default_to_single_and_agent_is_open_for_a_claude_key_connection(client, db, monkeypatch):
+    _anthropic_vendor(monkeypatch)
     owner = login(client, uid="owner")
-    class_id = create_class(client, owner["access"])
+    class_id = create_class(client, owner["access"], with_key=False)
+    assert set_anthropic_key(client, owner["access"], class_id).status_code == 200
 
     body = get_class(client, owner["access"], class_id)
 
@@ -160,6 +153,26 @@ def test_a_compatible_server_class_cannot_pick_agent(client, db, monkeypatch):
         assert response.status_code == 422, response.content
         assert "compatible_server" in response.json()["detail"]
     assert get_class(client, instructor["access"], class_id)["scoring_method"] == "single"
+
+
+def test_an_openai_key_class_cannot_pick_agent_until_codex_is_verified(client, db):
+    """#1681: Codex 에이전트는 운영에서 예산에 끊겨 판정을 내지 못했다 — OpenAI 키 클래스는 고를 수 없다(호환 서버와
+    다른 까닭 코드)."""
+
+    owner = login(client, uid="owner")
+    class_id = create_class(client, owner["access"])
+
+    assert get_class(client, owner["access"], class_id)["grading_method_options"][1] == {
+        "value": "agent",
+        "selectable": False,
+        "unavailable_reason": "agent_vendor_unverified",
+    }
+    for field in ("scoring_method", "quality_method"):
+        response = _patch_class(client, owner["access"], class_id, {field: "agent"})
+        assert response.status_code == 422, response.content
+        assert "agent_vendor_unverified" in response.json()["detail"]
+    body = get_class(client, owner["access"], class_id)
+    assert (body["scoring_method"], body["quality_method"]) == ("single", "single")
 
 
 # --- 채점 ---------------------------------------------------------------------------------------
@@ -245,8 +258,10 @@ def test_held_agent_scoring_is_not_a_failure_and_leaves_the_queue(client, db, mo
 
 
 def test_agent_quality_check_reads_the_snapshot_with_the_class_key_and_records_the_run(client, db, monkeypatch):
-    world = _world(client)
+    _anthropic_vendor(monkeypatch)
+    world = _world(client, with_key=False)
     instructor = world["instructor"]["access"]
+    assert set_anthropic_key(client, instructor, world["class_id"]).status_code == 200
     response = _patch_class(client, instructor, world["class_id"], {"quality_method": "agent"})
     assert response.status_code == 200, response.content
     _submit(client, world, "p-a", f"# {REQUIRED}\n# {OPTIONAL}\n")
@@ -257,19 +272,19 @@ def test_agent_quality_check_reads_the_snapshot_with_the_class_key_and_records_t
             {"requirement_id": optional_id, "score": 0, "reasoning": "없다.", "evidence": []},
         ]
     }
-    runner = _Runner(lambda: _codex_stream(scores))
+    runner = _Runner(lambda: _claude_stream(scores))
     monkeypatch.setattr(agent_scoring, "request_run", runner)
 
     assert _run(client, world) == {"queued_count": 1}
 
     (spec,) = runner.specs
-    assert spec["vendor"] == "openai"
+    assert spec["vendor"] == "anthropic"
     assert AgentRunToken.objects.get().key_class_id == world["class_id"]
     [row] = _board(client, world)["rows"]
     assert [i["score"] for i in row["items"]] == [5, 0]
     assert "main.py:1" in row["items"][0]["reasoning"]
     run = AgentRun.objects.get()
     assert (run.purpose, run.outcome, run.record["key_source"]) == ("quality", AgentRun.Outcome.ACCEPTED, "class")
-    # #1048: Haiku 가 아니면(여기선 OpenAI) 엄격 규칙이 붙지 않는다. 기록의 지문은 CLI 에 넘긴 지침의 것이다.
-    assert "반례를 한 번 찾습니다" not in spec["prompt"]
+    # #1048: 엄격 규칙 7~9 는 모델이 Haiku 계열일 때만 붙는다. 기록의 지문은 CLI 에 넘긴 지침의 것이다.
+    assert ("9. 2 점 이상을 매길 항목마다 반례를" in spec["prompt"]) is spec["model"].startswith("claude-haiku-")
     assert run.record["prompt_sha256"] == hashlib.sha256(spec["prompt"].encode("utf-8")).hexdigest()

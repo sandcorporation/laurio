@@ -7104,7 +7104,7 @@ export interface components {
             /** Selectable */
             selectable: boolean;
             /** Unavailable Reason */
-            unavailable_reason?: "compatible_server" | null;
+            unavailable_reason?: ("compatible_server" | "agent_vendor_unverified") | null;
             /**
              * Value
              * @enum {string}

@@ -50,8 +50,9 @@ class GradingMethodOptionOut(Schema):
 
     value: Literal["single", "agent"]
     selectable: bool
-    #: 고를 수 없는 까닭 — "compatible_server"(호환 서버 연결). 고를 수 있으면 `None`.
-    unavailable_reason: Literal["compatible_server"] | None = None
+    #: 고를 수 없는 까닭 — "compatible_server"(호환 서버 연결), "agent_vendor_unverified"(에이전트로 확인되지 않은
+    #: 벤더 — 지금은 OpenAI 키, #1681). 고를 수 있으면 `None`.
+    unavailable_reason: Literal["compatible_server", "agent_vendor_unverified"] | None = None
 
 
 class PublishedTemplateSummaryOut(Schema):
