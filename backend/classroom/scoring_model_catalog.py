@@ -5,8 +5,10 @@
 거부됐거나 벤더 조회가 실패하면 `classroom.scoring_models.
 FALLBACK_SCORING_MODEL_CHOICES`와 「조회하지 못했다」는 이유를 돌려준다.
 
-**같은 키의 조회 결과는 짧게(분 단위) 캐시한다**(#401 AC "같은 키로 두 번
-물으면 벤더를 한 번만 부른다") — 캐시 키는 채점 연결(#599)의 종류·주소·암호화된
+**같은 키의 조회 결과는 캐시한다** — 고르는 화면은 5분까지 믿고, 비용 어림은 하루 묵은
+값도 쓰며 캐시가 없으면 벤더에 묻지 않고 작은 목록으로 어림한다(#982,
+`cached_scoring_model_catalog`). 5분은 #401 AC "같은 키로 두 번 물으면 벤더를 한 번만
+부른다"에서 왔다 — 캐시 키는 채점 연결(#599)의 종류·주소·암호화된
 값의 해시다(`ScoringConnection.cache_identity`): 원문 키를
 캐시 키에 쓰지 않고, 그래도 키를 바꾸면(=암호문이 바뀌면) 캐시가 갈린다.
 Fernet 암호화는 매 호출 비결정적(#284)이라 같은 클래스가 같은 키를 계속
@@ -31,7 +33,9 @@ Fernet 암호화는 매 호출 비결정적(#284)이라 같은 클래스가 같�
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from typing import TypedDict
 
 from django.conf import settings
 from django.core.cache import cache
@@ -45,7 +49,22 @@ from .scoring_connection import FAKE_COMPATIBLE_MODEL_IDS, ScoringConnection, co
 from .scoring_models import ScoringModelChoice, build_catalog, build_claude_catalog, fallback_choices_for
 
 _CACHE_KEY_PREFIX = "classroom:scoring-models:"
-_CACHE_TTL_SECONDS = 300
+#: 모델 고르는 화면(`get_scoring_model_catalog`)이 이 나이까지만 믿고, 넘으면 벤더에 다시 묻는다.
+_FRESH_SECONDS = 300
+#: 비용 어림(`cached_scoring_model_catalog`)은 이 나이까지 묵은 목록도 쓴다(#982) — 캐시 키가
+#: 연결(종류·주소·암호문)이라 키를 바꾸면 저절로 갈리고, 남는 것은 「그 사이 벤더가 모델을
+#: 더하거나 뺐다」뿐이다. 그 차이는 어림 줄 몇 개이고, 고르는 화면이 5분마다 바로잡는다.
+_STALE_SECONDS = 24 * 60 * 60
+
+
+class _CachedModelIds(TypedDict):
+    ids: list[str]
+    #: 벤더에게 받은 시각(`time.time()`) — 고르는 화면이 「5분 안」을 이것으로 가른다.
+    fetched_at: float
+
+
+def _now() -> float:
+    return time.time()
 
 #: dev·CI(`CLASSROOM_SCORING_ADAPTER_MODE=fake`)에서 실제 벤더 대신 쓰는 고정
 #: 목록 — 4o·4.1 계열과 추론 모델(gpt-5.5, gpt-5, gpt-5-mini)을 섞어, 키를 넣으면
@@ -88,7 +107,20 @@ def remember_model_ids(connection: ScoringConnection, model_ids: list[str] | Non
     """저장할 때 이미 받은 목록을 캐시에 둔다 — 화면이 곧바로 같은 서버에 다시 묻지 않게."""
 
     if model_ids:
-        cache.set(_CACHE_KEY_PREFIX + connection.cache_identity, model_ids, timeout=_CACHE_TTL_SECONDS)
+        _store(connection, model_ids)
+
+
+def _store(connection: ScoringConnection, model_ids: list[str]) -> None:
+    entry: _CachedModelIds = {"ids": list(model_ids), "fetched_at": _now()}
+    cache.set(_CACHE_KEY_PREFIX + connection.cache_identity, entry, timeout=_STALE_SECONDS)
+
+
+def _cached(connection: ScoringConnection) -> _CachedModelIds | None:
+    entry = cache.get(_CACHE_KEY_PREFIX + connection.cache_identity)
+    # 예전 모양(목록만)은 조회 시각을 몰라 없는 것으로 본다.
+    if not isinstance(entry, dict) or not isinstance(entry.get("ids"), list):
+        return None
+    return entry
 
 
 @dataclass(frozen=True)
@@ -97,7 +129,8 @@ class ScoringModelCatalog:
     #: "live"(벤더에게 실제로 물어 걸렀다) | "fallback"(저장소의 작은 목록) |
     #: "manual"(호환 서버가 목록을 주지 않았다 — 모델 이름을 직접 넣는다, #601).
     source: str
-    #: `source`가 "fallback"일 때만 뜻이 있다 — "no_api_key" | "fetch_failed".
+    #: `source`가 "fallback"일 때만 뜻이 있다 — "no_api_key" | "fetch_failed" |
+    #: "not_cached"(비용 어림이 벤더에 묻지 않았다 — `cached_scoring_model_catalog`, #982).
     #: 벤더가 401·403으로 거절한 경우도 "fetch_failed"로 묶는다: 이 API는
     #: 키 상태(`Class.openai_api_key_status`)를 바꾸지 않는다 — 그건
     #: `classroom.api.set_class_openai_key`가 저장 시점에 이미 하는 일이다.
@@ -109,27 +142,54 @@ def _fallback(reason: str, kind: str = Class.ScoringConnectionKind.OPENAI_KEY) -
 
 
 def get_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
+    """모델 고르는 화면·저장 검증이 쓴다 — 5분 넘은 목록이면 벤더에게 다시 묻는다(요청 안 왕복)."""
+
     connection = connection_for(class_obj)
     if connection is None:
         return _fallback("no_api_key", class_obj.scoring_connection_kind)
 
     # 연결(종류·주소·암호문)이 같으면 같은 목록이다 — 캐시가 맞으면 인증 값을 풀지 않는다.
-    cache_key = _CACHE_KEY_PREFIX + connection.cache_identity
-    vendor_ids = cache.get(cache_key)
-    compatible = connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER
-    if vendor_ids is None:
-        vendor_ids = _list_vendor_models(connection)
-        # 호환 서버·Claude 키는 빈 목록도 「받지 못했다」로 본다 — Claude 는 벤더가 이미 걸렀으니 빈
-        # 목록이면 쓸 모델이 없다는 뜻이고, 작은 목록으로 물러선다.
-        if vendor_ids is None or (not vendor_ids and connection.kind != Class.ScoringConnectionKind.OPENAI_KEY):
-            if compatible:
-                return ScoringModelCatalog(models=(), source="manual", unavailable_reason="no_model_list")
-            return _fallback("fetch_failed", connection.kind)
-        cache.set(cache_key, vendor_ids, timeout=_CACHE_TTL_SECONDS)
+    entry = _cached(connection)
+    if entry is not None and _now() - entry["fetched_at"] < _FRESH_SECONDS:
+        return _live_catalog(connection, entry["ids"])
 
-    if compatible:
+    vendor_ids = _list_vendor_models(connection)
+    # 호환 서버·Claude 키는 빈 목록도 「받지 못했다」로 본다 — Claude 는 벤더가 이미 걸렀으니 빈
+    # 목록이면 쓸 모델이 없다는 뜻이고, 작은 목록으로 물러선다.
+    if vendor_ids is None or (not vendor_ids and connection.kind != Class.ScoringConnectionKind.OPENAI_KEY):
+        if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+            return ScoringModelCatalog(models=(), source="manual", unavailable_reason="no_model_list")
+        return _fallback("fetch_failed", connection.kind)
+    _store(connection, vendor_ids)
+    return _live_catalog(connection, vendor_ids)
+
+
+def cached_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
+    """비용 어림(#591)이 쓴다 — **벤더에게 묻지 않는다**(#982).
+
+    고르는 화면이 받아 둔 목록이면 하루까지 묵었어도 그대로 쓰고, 없으면 조회하지 못했을 때와
+    같은 작은 목록(`fallback_choices_for`)이다. 비용 어림은 화면을 열 때마다 불리고(MCP 읽기
+    도구도), 한산한 뒤 첫 요청이 벤더 왕복(1~2.5초)을 기다리던 것이 GlitchTip 127 이었다.
+    fake 스위치(dev·CI)는 네트워크가 없으니 고정 목록을 그대로 쓴다."""
+
+    connection = connection_for(class_obj)
+    if connection is None:
+        return _fallback("no_api_key", class_obj.scoring_connection_kind)
+    entry = _cached(connection)
+    if entry is not None:
+        return _live_catalog(connection, entry["ids"])
+    if is_fake_adapter_binding(settings.CLASSROOM_SCORING_ADAPTER_MODE):
+        fake_ids = _list_vendor_models(connection)
+        if fake_ids:
+            return _live_catalog(connection, fake_ids)
+    if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+        return ScoringModelCatalog(models=(), source="manual", unavailable_reason="no_model_list")
+    return _fallback("not_cached", connection.kind)
+
+
+def _live_catalog(connection: ScoringConnection, vendor_ids: list[str]) -> ScoringModelCatalog:
+    if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         return ScoringModelCatalog(models=_unfiltered_choices(vendor_ids), source="live")
-
     if connection.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
         return ScoringModelCatalog(models=tuple(build_claude_catalog(vendor_ids)), source="live")
     return ScoringModelCatalog(models=tuple(build_catalog(vendor_ids)), source="live")
