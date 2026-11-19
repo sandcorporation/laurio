@@ -18,7 +18,11 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
    허용 목록은 `.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는
    `README` 를 조용히 버렸고, staging 의 `octocat/Hello-World` 는 그 때문에
    「채점할 파일 0개」가 됐다(ADR-0031). 바이너리는 3번이 따로 거른다.
-2. 전체 선택량이 `MAX_SOURCE_BYTES`를 넘지 않도록 예산을 두고, 예산이 바닥나면 그
+2. 예산은 앱 코드부터 채운다(#986, `selection_tier`) — 앱 코드 → 시험·README → 그 밖의 텍스트 →
+   문서·스크래치·생성물·배포·CI. 경로 이름 순 하나로 채우던 때는 앞 글자 폴더(`.scratch/`·
+   `deploy/`·`backend/.sqlx/`)가 예산을 다 써 앱 코드가 0파일인 제출이 0%를 받았다. 예산 밖으로
+   빠진 양은 `SelectionOmission` 으로 돌려준다.
+   전체 선택량이 `MAX_SOURCE_BYTES`를 넘지 않도록 예산을 두고, 예산이 바닥나면 그
    자리에서 선별을 멈춘다(마지막 파일은 잘려서라도 담을 수 있는 만큼만 담는다).
    압축 해제 자체도 예산만큼만 한다(`ZipExtFile.read(budget)`로 스트리밍 read) —
    `archive.read(info)`로 멤버 전체를 먼저 압축 해제한 뒤 슬라이스하면, 압축률이
@@ -139,6 +143,53 @@ def _is_selectable(path: str) -> bool:
     return not is_excluded_path(path)
 
 
+#: 코드로 치는 확장자(소문자) — 예산을 채우는 순서에서 맨 앞에 온다(#986, `selection_tier`).
+CODE_SUFFIXES = (
+    ".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte",
+    ".java", ".kt", ".kts", ".scala", ".go", ".rs", ".rb", ".php", ".cs", ".fs",
+    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".m", ".mm", ".swift", ".dart",
+    ".ex", ".exs", ".erl", ".clj", ".lua", ".r", ".jl", ".hs", ".ml",
+    ".html", ".htm", ".css", ".scss", ".sass", ".less", ".sql", ".sh", ".gd",
+)
+
+#: 경로에 이 조각이 있으면 맨 뒤로 민다(소문자 비교, 경로 앞에 「/」를 붙여 본다) — 사람이 쓴
+#: 앱 코드가 아니거나(문서·스크래치·실험·생성물·배포·CI) 채점 근거로 약한 것들이다. 빼지는
+#: 않는다: 예산이 남으면 담긴다. 공모전 3에서 `.scratch/`·`deploy/`·`docs/`, `backend/.sqlx/`
+#: 가 경로 이름 순으로 앞서 예산을 다 써 앱 코드가 0파일이었다(617·866·809).
+DEPRIORITIZED_DIR_FRAGMENTS = (
+    "/docs/", "/doc/", "/.scratch/", "/scratch/", "/experiments/", "/examples/",
+    "/.sqlx/", "/migrations/", "/fixtures/", "/__snapshots__/", "/deploy/", "/infra/",
+    "/.github/", "/.circleci/", "/.gitlab/", "/.vscode/", "/.devcontainer/",
+)
+
+_TEST_DIR_FRAGMENTS = ("/test/", "/tests/", "/__tests__/", "/spec/", "/e2e/")
+
+
+def selection_tier(path: str) -> int:
+    """예산을 채우는 차례(작을수록 먼저, #986). 같은 차례 안에서는 경로 이름 순이라 결정적이다.
+
+    0 앱 코드 → 1 시험 코드·README → 2 그 밖의 텍스트(설정·`.md`·`.txt`·Dockerfile) →
+    3 문서·스크래치·생성물·배포·CI 폴더(`DEPRIORITIZED_DIR_FRAGMENTS`)와 숨은 폴더.
+    예전에는 경로 이름 순 하나였다 — 앞 글자 폴더가 크면 앱 코드가 예산 밖으로 밀렸다.
+    """
+
+    lower = "/" + path.lower()
+    directory, _, name = lower.rpartition("/")
+    directory += "/"
+    if any(fragment in directory for fragment in DEPRIORITIZED_DIR_FRAGMENTS) or any(
+        segment.startswith(".") for segment in directory.split("/") if segment
+    ):
+        return 3
+    if name.startswith("readme"):
+        return 1
+    if name.endswith(CODE_SUFFIXES):
+        is_test = any(fragment in directory for fragment in _TEST_DIR_FRAGMENTS) or (
+            name.startswith("test_") or ".test." in name or ".spec." in name or name.endswith("_test.go")
+        )
+        return 1 if is_test else 0
+    return 2
+
+
 def _decode_utf8_prefix(data: bytes) -> str | None:
     """budget 경계에서 멀티바이트 시퀀스가 잘렸을 수 있으니 끝에서 최대 3바이트까지
     떼어내며 재시도한다. 그래도 실패하면 진짜 바이너리로 보고 None을 돌려준다.
@@ -169,6 +220,8 @@ class _Candidate:
     reader: Callable[[int], bytes]
     #: 원본 파일인가 — 변환 결과·「열 수 없는」 줄은 다시 플러그인에게 묻지 않는다.
     convertible: bool = True
+    #: 풀었을 때의 크기(모르면 None) — 예산 밖으로 빠진 양을 셀 때만 쓴다(#986).
+    size: int | None = None
 
 
 def _text_candidate(path: str, text: str) -> _Candidate:
@@ -230,7 +283,8 @@ def _convert(candidate: _Candidate, converters: tuple[SourceConverter, ...]) -> 
 def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]:
     archive = stack.enter_context(zipfile.ZipFile(io.BytesIO(raw)))
     candidates: list[_Candidate] = []
-    for info in sorted(archive.infolist(), key=lambda i: i.filename):
+    # 앱 코드가 먼저다(#986, `selection_tier`) — 같은 차례 안에서는 경로 이름 순.
+    for info in sorted(archive.infolist(), key=lambda i: (selection_tier(i.filename), i.filename)):
         if info.is_dir() or not _is_selectable(info.filename):
             continue
 
@@ -241,7 +295,7 @@ def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]
             with archive.open(info) as member:
                 return member.read(budget)
 
-        candidates.append(_Candidate(path=info.filename, reader=_reader))
+        candidates.append(_Candidate(path=info.filename, reader=_reader, size=info.file_size))
     return candidates
 
 
@@ -251,12 +305,35 @@ def _source_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candida
     try:
         return _zip_candidates(raw, stack)
     except zipfile.BadZipFile:
-        return [_Candidate(path="source", reader=lambda budget: raw[:budget])]
+        return [_Candidate(path="source", reader=lambda budget: raw[:budget], size=len(raw))]
+
+
+@dataclass(frozen=True)
+class SelectionOmission:
+    """예산 때문에 프롬프트에 다 싣지 못한 것(#986) — 통째로 빠진 파일과 중간에서 잘린 파일.
+    `code_*` 는 그중 앱 코드(`selection_tier` 0)만 센다. 바이트는 풀었을 때의 크기 기준이다."""
+
+    omitted_files: int = 0
+    omitted_bytes: int = 0
+    omitted_code_files: int = 0
+    truncated_files: int = 0
+
+    @property
+    def any(self) -> bool:
+        return bool(self.omitted_files or self.truncated_files)
 
 
 def select_source_files(
     sources: list[tuple[int, str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
 ) -> list[SourceFile]:
+    """`select_source_files_with_omission` 의 고른 파일만."""
+
+    return select_source_files_with_omission(sources, max_bytes=max_bytes)[0]
+
+
+def select_source_files_with_omission(
+    sources: list[tuple[int, str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
+) -> tuple[list[SourceFile], SelectionOmission]:
     """여러 소스(각각 `(자산 id, 자산 라벨, 원본 바이트)`)를 예산 안에서 라운드로빈으로
     고른다.
 
@@ -275,6 +352,7 @@ def select_source_files(
     files: list[SourceFile] = []
     budget = max_bytes
     converters = registered_converters()
+    truncated = 0
 
     with contextlib.ExitStack() as stack:
         queues: list[tuple[int, str, collections.deque[_Candidate]]] = []
@@ -320,9 +398,19 @@ def select_source_files(
                         )
                     )
                     budget -= len(content_bytes)
+                    if candidate.size is not None and len(content_bytes) < candidate.size:
+                        truncated += 1
 
                 next_queues.append((asset_id, label, queue))
 
             queues = next_queues
 
-    return files
+        left = [candidate for _asset_id, _label, queue in queues for candidate in queue]
+
+    omission = SelectionOmission(
+        omitted_files=len(left),
+        omitted_bytes=sum(c.size or 0 for c in left),
+        omitted_code_files=sum(1 for c in left if c.convertible and selection_tier(c.path) == 0),
+        truncated_files=truncated,
+    )
+    return files, omission

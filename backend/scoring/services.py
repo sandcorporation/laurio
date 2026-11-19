@@ -87,7 +87,7 @@ from submissions.scoring_basis import (
 )
 
 from .models import Score, ScoringAttempt
-from .source_selection import select_source_files
+from core.source_selection import select_source_files_with_omission
 
 logger = logging.getLogger(__name__)
 
@@ -722,13 +722,27 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
 
     try:
         requirements = _requirement_inputs(submission)
-        source_files = select_source_files(
+        source_files, omission = select_source_files_with_omission(
             [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
             + [
                 (asset.id, _asset_label(asset), cloned.zip_bytes)
                 for asset, cloned in cloned_repositories
             ]
         )
+        if omission.any:
+            # 잘린 채 채점된 제출을 남긴다(#986) — 보류하지 않는다: 300KB 를 넘는 정상 저장소가
+            # 점수 없이 묶이면 ADR-0031 「반드시 끝난다」와 부딪힌다. 앱 코드가 먼저 담기므로
+            # (`selection_tier`) 빠지는 것은 대개 문서·설정 쪽이고, `omitted_code_files` 가 0이
+            # 아니면 앱 코드까지 넘친 제출이다.
+            logger.warning(
+                "Submission(pk=%s) 소스가 예산을 넘어 일부만 채점에 실었다 "
+                "(omitted_files=%s omitted_bytes=%s omitted_code_files=%s truncated_files=%s)",
+                submission.id,
+                omission.omitted_files,
+                omission.omitted_bytes,
+                omission.omitted_code_files,
+                omission.truncated_files,
+            )
         contest = submission.contest
         prompt = _build_prompt(
             contest=contest, requirements=requirements, source_files=source_files
