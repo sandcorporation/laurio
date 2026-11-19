@@ -96,4 +96,4 @@ class AlertState(models.Model):
     value = models.CharField(max_length=100, blank=True, default="")
     threshold = models.CharField(max_length=100, blank=True, default="")
     pending_notice = models.CharField(max_length=16, blank=True, default="")
-    clear_streak = models.PositiveIntegerField(default=0)
+    clear_streak = models.PositiveIntegerField(default=0, db_default=0)
