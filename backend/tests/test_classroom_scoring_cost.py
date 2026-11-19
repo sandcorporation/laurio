@@ -12,6 +12,7 @@ import requests
 from django.core.cache import cache
 
 from classroom import scoring_cost, scoring_model_catalog
+from classroom.tasks import refresh_scoring_models
 from classroom.scoring_models import FALLBACK_SCORING_MODEL_CHOICES
 from tests.classroom_scenarios import (
     CLASSES_URL,
@@ -391,7 +392,7 @@ def test_a_cold_cache_estimate_answers_from_the_fallback_list_without_asking_the
     ]
 
 
-def test_a_list_the_picker_saw_hours_ago_still_shapes_the_estimate_but_the_picker_asks_again(
+def test_a_list_the_picker_saw_hours_ago_still_shapes_the_estimate_and_the_picker_answers_it_while_refreshing_behind(
     client, db, monkeypatch
 ):
     with force_real_scoring_adapter():
@@ -408,8 +409,30 @@ def test_a_list_the_picker_saw_hours_ago_still_shapes_the_estimate_but_the_picke
         assert list(dict.fromkeys(r["model_id"] for r in estimate["rows"]))[: len(picked)] == picked
         assert "gpt-5.5" in picked
 
-        calls = track_models_endpoint_calls(monkeypatch, model_ids=["gpt-4o-mini"])
+        # 5분 넘은 목록: 응답은 벤더를 기다리지 않는다(큐에 넣기만 한다) — 묵은 목록 그대로.
+        queued: list = []
+        monkeypatch.setattr(refresh_scoring_models, "delay", lambda class_pk: queued.append(class_pk))
+        stale = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"])).json()
+        assert calls == []
+        assert queued == [class_id]
+        assert [m["id"] for m in stale["models"]] == picked
+
+        # 재조회가 아직 도는 동안 또 물어도 겹쳐 넣지 않는다.
+        client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"]))
+        assert queued == [class_id]
+
+        # 재조회가 실패하면 묵은 캐시를 그대로 두고, 잠금은 풀린다.
+        refresh_scoring_models(class_id)
+        assert calls == [1]
+        kept = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"])).json()
+        assert [m["id"] for m in kept["models"]] == picked
+        assert queued == [class_id, class_id]
+
+        # 재조회가 되면 다음 요청에 새 목록이 보인다.
+        track_models_endpoint_calls(monkeypatch, model_ids=["gpt-4o-mini"])
+        refresh_scoring_models(class_id)
+        monkeypatch.setattr(scoring_model_catalog, "_now", lambda: later + 1)
         again = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"])).json()
 
-    assert len(calls) == 1
     assert [m["id"] for m in again["models"]] == ["gpt-4o-mini"]
+    assert queued == [class_id, class_id]

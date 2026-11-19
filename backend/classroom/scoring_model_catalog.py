@@ -33,6 +33,7 @@ Fernet 암호화는 매 호출 비결정적(#284)이라 같은 클래스가 같�
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import TypedDict
@@ -48,7 +49,13 @@ from .models import Class
 from .scoring_connection import FAKE_COMPATIBLE_MODEL_IDS, ScoringConnection, connection_for
 from .scoring_models import ScoringModelChoice, build_catalog, build_claude_catalog, fallback_choices_for
 
+logger = logging.getLogger(__name__)
+
 _CACHE_KEY_PREFIX = "classroom:scoring-models:"
+#: 뒤에서 다시 묻는 중이라는 표시(#1051) — 같은 연결의 재조회가 겹치지 않게 한다. 작업이 끝나면 지우고,
+#: 작업이 사라져도 이 시간이 지나면 저절로 풀린다(벤더 조회 한도보다 넉넉히).
+_REFRESH_LOCK_PREFIX = "classroom:scoring-models-refresh:"
+_REFRESH_LOCK_SECONDS = 120
 #: 모델 고르는 화면(`get_scoring_model_catalog`)이 이 나이까지만 믿고, 넘으면 벤더에 다시 묻는다.
 _FRESH_SECONDS = 300
 #: 비용 어림(`cached_scoring_model_catalog`)은 이 나이까지 묵은 목록도 쓴다(#982) — 캐시 키가
@@ -142,7 +149,8 @@ def _fallback(reason: str, kind: str = Class.ScoringConnectionKind.OPENAI_KEY) -
 
 
 def get_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
-    """모델 고르는 화면·저장 검증이 쓴다 — 5분 넘은 목록이면 벤더에게 다시 묻는다(요청 안 왕복)."""
+    """모델 고르는 화면·저장 검증이 쓴다 — 5분 넘은 목록은 하루까지 바로 돌려주고 뒤에서 다시 묻는다
+    (#1051). 목록이 아예 없을 때만 요청 안에서 벤더에게 묻는다."""
 
     connection = connection_for(class_obj)
     if connection is None:
@@ -153,15 +161,59 @@ def get_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
     if entry is not None and _now() - entry["fetched_at"] < _FRESH_SECONDS:
         return _live_catalog(connection, entry["ids"])
 
+    # 5분은 넘었어도 하루 안의 목록이 있으면 바로 돌려주고 응답 뒤에 갈아 둔다(#1051) — 한산한 뒤
+    # 첫 요청이 벤더 왕복(1~2초)을 기다리던 것이 GlitchTip 140 이었다.
+    if entry is not None:
+        _enqueue_refresh(class_obj, connection)
+        return _live_catalog(connection, entry["ids"])
+
     vendor_ids = _list_vendor_models(connection)
     # 호환 서버·Claude 키는 빈 목록도 「받지 못했다」로 본다 — Claude 는 벤더가 이미 걸렀으니 빈
     # 목록이면 쓸 모델이 없다는 뜻이고, 작은 목록으로 물러선다.
-    if vendor_ids is None or (not vendor_ids and connection.kind != Class.ScoringConnectionKind.OPENAI_KEY):
+    if not _usable_vendor_ids(connection, vendor_ids):
         if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
             return ScoringModelCatalog(models=(), source="manual", unavailable_reason="no_model_list")
         return _fallback("fetch_failed", connection.kind)
     _store(connection, vendor_ids)
     return _live_catalog(connection, vendor_ids)
+
+
+def _usable_vendor_ids(connection: ScoringConnection, vendor_ids: list[str] | None) -> bool:
+    return vendor_ids is not None and (bool(vendor_ids) or connection.kind == Class.ScoringConnectionKind.OPENAI_KEY)
+
+
+def _enqueue_refresh(class_obj: Class, connection: ScoringConnection) -> None:
+    """묵은 목록을 뒤에서 다시 묻는 작업을 큐에 넣는다 — 이미 돌고 있으면 넣지 않고, 큐가 막혀도
+    요청은 묵은 목록으로 계속 간다."""
+
+    from .tasks import refresh_scoring_models
+
+    if not cache.add(_REFRESH_LOCK_PREFIX + connection.cache_identity, 1, timeout=_REFRESH_LOCK_SECONDS):
+        return
+    try:
+        refresh_scoring_models.delay(class_obj.pk)
+    except Exception:  # noqa: BLE001 — 브로커 오류가 요청을 깨면 안 된다; 잠금은 시간이 지나 풀린다
+        logger.warning("scoring model refresh could not be queued", exc_info=True)
+
+
+def refresh_cached_models(class_id: int) -> None:
+    """`refresh_scoring_models` 태스크의 몸통 — 벤더에게 다시 물어 캐시를 갈아 둔다. 실패하면(조회 오류·
+    빈 응답) 묵은 캐시를 그대로 둔다."""
+
+    connection = None
+    try:
+        class_obj = Class.objects.filter(pk=class_id).first()
+        connection = connection_for(class_obj) if class_obj is not None else None
+        if connection is None:
+            return
+        vendor_ids = _list_vendor_models(connection)
+        if _usable_vendor_ids(connection, vendor_ids):
+            _store(connection, vendor_ids or [])
+    except Exception:  # noqa: BLE001 — 재조회 실패는 묵은 캐시를 두고 넘어간다
+        logger.warning("scoring model refresh failed", exc_info=True)
+    finally:
+        if connection is not None:
+            cache.delete(_REFRESH_LOCK_PREFIX + connection.cache_identity)
 
 
 def cached_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
