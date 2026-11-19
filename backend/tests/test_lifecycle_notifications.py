@@ -32,7 +32,6 @@ from policies.scope import current_policy
 
 KST = ZoneInfo("Asia/Seoul")
 
-TICK_URL = "/api/internal/tick"
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
@@ -230,7 +229,8 @@ def _submit(client, dev: dict, contest_id: int, *, requirement_id: int, grounded
 
 def _close_contest(client, contest: dict, *, deadline) -> None:
     _freeze(deadline + timedelta(minutes=1))
-    tick_resp = client.post(TICK_URL, **_internal_headers())
+    # `/tick` 은 등록부 전부를 한 바퀴 돌아 요청마다 CPU 가 든다(#1014) — 이 전이 스캔만 돈다.
+    tick_resp = client.post("/api/internal/scans/contest-close", **_internal_headers())
     assert tick_resp.status_code == 200
     assert Contest.objects.get(id=contest["id"]).status == Contest.Status.CLOSED
 
@@ -245,7 +245,8 @@ def _end_judging_period(client, contest_id: int) -> None:
     judging_ends_at = Contest.objects.get(id=contest_id).judging_ends_at
     assert judging_ends_at is not None
     _freeze(judging_ends_at + timedelta(minutes=1))
-    tick_resp = client.post(TICK_URL, **_internal_headers())
+    # `/tick` 은 등록부 전부를 한 바퀴 돌아 요청마다 CPU 가 든다(#1014) — 이 전이 스캔만 돈다.
+    tick_resp = client.post("/api/internal/scans/contest-judging-end", **_internal_headers())
     assert tick_resp.status_code == 200
     assert Contest.objects.get(id=contest_id).status == Contest.Status.JUDGING_ENDED
 
@@ -1394,7 +1395,7 @@ def test_distribution_final_warning_query_does_not_get_crowded_out_by_not_yet_du
         _close_contest(client, contest, deadline=deadline_at)
         contest_judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
         _freeze(contest_judging_ends_at + timedelta(minutes=1))
-        tick_resp = client.post(TICK_URL, **_internal_headers())
+        tick_resp = client.post("/api/internal/scans/contest-judging-end", **_internal_headers())
         assert tick_resp.status_code == 200
         assert Contest.objects.get(id=contest["id"]).status == Contest.Status.JUDGING_ENDED
 
