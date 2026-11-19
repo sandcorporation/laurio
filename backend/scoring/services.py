@@ -87,7 +87,8 @@ from submissions.scoring_basis import (
 )
 
 from .models import Score, ScoringAttempt
-from .source_selection import select_source_files
+from core.model_context import source_budget_bytes
+from core.source_selection import select_source_files_with_omission
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,9 @@ def _build_prompt(*, contest: Contest, requirements: list[RequirementInput], sou
         "판정 근거(reasoning)는 소스코드를 그대로 옮겨 적지 말고 서술로 쓰세요. "
         "코드 조각이나 문자열 리터럴을 원문 그대로 인용하지 말고, 무엇이 있고 "
         "무엇이 없는지를 문장으로 설명하세요.",
+        # 선택 요구사항은 점수에 들어가지 않아 모델이 통째로 건너뛴 적이 있다(#986, 공모전 3의
+        # 809 — 선택 8개 전부 누락). 스키마가 막지만(`requirement_ids`) 지시로도 못 박는다.
+        "선택 요구사항도 필수 요구사항과 똑같이 하나도 빠짐없이 판정하세요.",
         "",
         "## Requirements",
     ]
@@ -491,9 +495,21 @@ _TRANSIENT_VENDOR_FAILURE = (
 #: #986: 공모전 채점 한 건의 벤더 호출 한도. 예전에는 기본 20초(`core.llm_scoring.
 #: _OPENAI_REQUEST_TIMEOUT_SECONDS`, #88 — 바깥 `call_internal` 30초 안에 들도록)를 그대로
 #: 썼는데, 실제 공모전 입력(약 8.3만 토큰)의 성공 호출이 13~18초라 조금만 큰 저장소도 20초를
-#: 넘었다(공모전 3, ReadTimeout 7건). 성공 최대의 세 배 남짓을 준다. 바깥 예산은 이 스캔만
-#: 따로 늘린다(아래 `SUBMISSION_SCORING_SCAN`).
-CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 60
+#: 넘었다(공모전 3, ReadTimeout 7건). #987 이 60초로 올렸고, 보탬 4 가 채점을 celery 워커 안으로
+#: 옮기면서(아래 `SUBMISSION_SCORING_SCAN`) 강의실과 같은 180초로 맞춘다
+#: (`classroom.scoring.CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS`) — 소스 예산이 모델 컨텍스트를
+#: 따르게 되어(`core.model_context`) 입력이 128K 토큰 가까이 갈 수 있다.
+CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 180
+
+#: 채점 보류 표식(#986) — 앱 코드가 모델 컨텍스트에 다 들어가지 않는 제출의 `ScoringAttempt.error`
+#: 머리. 이 표식이 있는 제출은 채점 대기에서 빠지고(재시도·0% 확정 없음), `release_scoring_hold`
+#: 명령이 표식을 지워야 다시 고른다.
+SCORING_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
+
+#: 사람이 보류를 푼 표식(#986, `release_scoring_hold`) — 보류 기록의 머리를 이것으로 바꾼다. 이
+#: 표식이 있는 제출은 앱 코드가 넘쳐도 실린 만큼으로 채점한다. 두 표식 모두 실패 상한의 횟수에
+#: 세지 않는다 — 벤더를 부르지 않았고 제출물이 실패한 것도 아니다.
+SCORING_HOLD_RELEASED_ERROR_PREFIX = "SourceOverBudgetReleased:"
 
 
 def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
@@ -510,7 +526,11 @@ def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """
 
     counts = submission.scoring_attempts.aggregate(
-        total=Count("id"),
+        total=Count(
+            "id",
+            filter=~Q(error__startswith=SCORING_HOLD_ERROR_PREFIX)
+            & ~Q(error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX),
+        ),
         permanent=Count("id", filter=Q(permanent=True)),
         transient=Count("id", filter=_TRANSIENT_VENDOR_FAILURE),
     )
@@ -719,19 +739,58 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
 
     try:
         requirements = _requirement_inputs(submission)
-        source_files = select_source_files(
+        contest = submission.contest
+        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
+        # 예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
+        # 프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
+        instruction_bytes = len(
+            _build_prompt(contest=contest, requirements=requirements, source_files=[]).encode("utf-8")
+        )
+        source_budget = source_budget_bytes(
+            str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
+        )
+        source_files, omission = select_source_files_with_omission(
             [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
             + [
                 (asset.id, _asset_label(asset), cloned.zip_bytes)
                 for asset, cloned in cloned_repositories
-            ]
+            ],
+            max_bytes=source_budget,
         )
-        contest = submission.contest
+        if omission.any and not submission.scoring_attempts.filter(
+            error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX
+        ).exists():
+            # 「코드 아님」을 뺀 뒤 남은 것은 전부 구현 근거다(보탬 4, `core.source_selection.
+            # excluded_kind`) — 그중 하나라도 모델 컨텍스트에 다 들어가지 않으면 잘린 소스로 「없는
+            # 기능」 미달 판정이 나므로 벤더를 부르지 않고 보류한다(#986). 보류 표식이 있는 제출은
+            # `_pending_submissions` 가 빼므로 재시도도, 실패 상한의 0% 확정도 없다. 사람이
+            # `release_scoring_hold` 로 풀 때까지 그대로다.
+            reason = (
+                f"{SCORING_HOLD_ERROR_PREFIX} 소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 "
+                f"(model={getattr(llm, 'model_version', '')} budget_bytes={source_budget} "
+                f"omitted_files={omission.omitted_files} omitted_bytes={omission.omitted_bytes} "
+                f"truncated_files={omission.truncated_files} "
+                f"omitted_code_files={omission.omitted_code_files} "
+                f"truncated_code_files={omission.truncated_code_files})"
+            )
+            logger.warning("Submission(pk=%s) %s", submission.id, reason)
+            ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+            return {"submission_id": submission.id, "status": "held", "error": reason}
+        if omission.any:
+            # 사람이 보류를 풀었다(`release_scoring_hold`) — 잘린 채 채점하되 빠진 양을 남긴다.
+            logger.warning(
+                "Submission(pk=%s) 보류를 푼 제출이라 소스 일부만 채점에 실었다 "
+                "(omitted_files=%s omitted_bytes=%s omitted_code_files=%s truncated_files=%s)",
+                submission.id,
+                omission.omitted_files,
+                omission.omitted_bytes,
+                omission.omitted_code_files,
+                omission.truncated_files,
+            )
         prompt = _build_prompt(
             contest=contest, requirements=requirements, source_files=source_files
         )
 
-        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
         scoring_input = ScoringInput(
             submission_id=submission.id,
             contest_id=contest.id,
@@ -868,6 +927,8 @@ def _notify_scored(submission: ContestSubmission) -> None:
                 "contest_id": submission.contest_id,
                 "contest_title": submission.contest.title,
                 "submission_id": submission.id,
+                # 무료 공모전에는 이의 신청이 없다(`appeals.api` 404) — 문구가 이의 기간을 말하지 않게(#986 보탬 5).
+                "is_free": submission.contest.is_free,
                 # 이의 기한을 함께 준다 — "언제까지" 가 통지에 없으면 받는 사람이
                 # 다시 들어와 찾아야 한다.
                 "appeal_deadline": (
@@ -970,6 +1031,14 @@ def _pending_submissions(as_of, ctx):
             contest__deadline_at__gt=as_of - _REPOSITORY_VISIBILITY_GRACE,
         )
         .annotate(attempt_count=Coalesce(Subquery(attempt_count), 0))
+        # 보류된 제출(#986, `SCORING_HOLD_ERROR_PREFIX`)은 사람이 풀 때까지 다시 고르지 않는다.
+        .exclude(
+            Exists(
+                ScoringAttempt.objects.filter(
+                    submission_id=OuterRef("pk"), error__startswith=SCORING_HOLD_ERROR_PREFIX
+                )
+            )
+        )
         .select_related("contest")
     )
 
@@ -993,7 +1062,7 @@ def _score_one(submission, as_of, ctx):
         return {"submission_id": submission.id, "status": status, "error": str(exc)}
 
 
-# 배치 50·예산 20초는 뼈대 기본값 그대로다(#88 코드리뷰 지적 1) — 실물 LLM 은 느린 호출 하나로
+# 배치 50 은 뼈대 기본값 그대로다(예산은 아래 #986 절). 예산을 둔 까닭(#88 코드리뷰 지적 1) — 실물 LLM 은 느린 호출 하나로
 # 30초 HTTP 타임아웃을 넘길 수 있고, 그 상태로 워커가 SIGKILL되면 진행 중이던 건은
 # ScoringAttempt조차 못 남기고 사라져 다음 beat가 같은 앞머리를 다시 집어 똑같이 죽는다.
 # 예산을 넘기면 남은 Submission을 시작하지 않는다 — 나머지는 다음 스캔이 이어받는다.
@@ -1004,24 +1073,21 @@ def _score_one(submission, as_of, ctx):
 # 앞선다. 시도 횟수가 같은 후보끼리는 `id`가 결정적 이차 정렬이라 회차마다 같은
 # 앞머리를 반복해 집는다(순서가 흔들리지 않는다).
 #
-# **#986: 이 스캔만 바깥 예산을 따로 둔다.** 벤더 한도를 `CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`
-# (60초)로 올리면 기본 예산(행 시작 20초 + `call_internal` 30초)에 들지 않는다. 세 값을 함께 맞춘다:
-# - 행 시작 예산 5초 — 성공 호출이 13초 이상이라 사실상 한 번에 한 건이다. 첫 행은 늘 돈다.
-# - HTTP 예산 90초 = 행 시작 5 + 벤더 60 + clone·스토리지·DB 25. 이 안에서 끝나야 부른 쪽이
-#   끊고 재시도(`core.tasks.run_scan` autoretry)해 같은 건을 겹쳐 부르지 않는다.
-# - 주기 120초 — 한 실행(≤90초)이 다음 beat 와 겹치지 않는다. 겹치면 워커(`--concurrency 2`)
-#   둘이 다 이 스캔에 묶여 돈을 움직이는 다른 스캔이 밀린다.
-# gunicorn(gthread)은 긴 요청을 죽이지 않고(`config/gunicorn.conf.py`), 요청 DB 한도는 문 하나
-# 25초라(`core.db_timeouts`) 벤더 대기와 무관하다. 내부 호출은 `http://backend:8000` 직통이라
-# 프록시를 지나지 않는다. 워커 안으로 옮기는 구조 변경은 후속이다.
+# **#986 보탬 4: 이 스캔은 celery 워커 안에서 돈다**(`ScanSpec.worker_time_limit_seconds`). 내부 HTTP
+# (`call_internal` 30초, #987 의 90초)에 벤더 180초가 들지 않기 때문이다. 세 값을 함께 맞춘다:
+# - 행 시작 예산 60초 — 첫 행은 늘 돌고, 성공 호출(13~18초)이면 한 실행에 몇 건을 잇는다.
+# - 실행 상한 300초 = 행 시작 60 + 벤더 180 + clone·스토리지·DB 60. 실행 잠금(`core.scan_lock`)도
+#   이 시간이라, 앞 실행이 도는 동안 beat 가 다시 보낸 실행은 바로 건너뛴다 — 워커(`--concurrency 2`)
+#   둘이 다 이 스캔에 묶이지 않고, 같은 앞머리를 겹쳐 집지 않는다.
+# - 주기 60초(기본) — 잠금이 겹침을 막으므로 짧게 둔다. 밀린 메시지는 주기 안에 버린다(expires).
+# 실패 횟수·상한의 뜻은 #987 그대로다(시간 초과·판정 누락은 상한에 세지 않는다).
 SUBMISSION_SCORING_SCAN = ScanSpec(
     name="submission-scoring",
     candidates=_pending_submissions,
     handle_row=_score_one,
     order_by=("attempt_count", "id"),
-    time_budget_seconds=5.0,
-    request_timeout_seconds=90.0,
-    interval_seconds=120.0,
+    time_budget_seconds=60.0,
+    worker_time_limit_seconds=60.0 + CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS + 60.0,
     # #991: 공모전 AI 채점 스위치(운영 설정 `CONTEST_AI_SCORING`, 값이 없으면 꺼짐). 꺼지면 시도 기록·
     # 실패 상한 0%·「입력 없음」 0% 가 하나도 생기지 않는다 — 이 스캔이 통째로 돌지 않는다.
     enabled=contest_ai_scoring_enabled,

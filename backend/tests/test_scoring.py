@@ -24,6 +24,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from django.core.management import call_command
 from django.conf import settings
 from django.test import override_settings
 from django.utils import timezone
@@ -1029,6 +1030,9 @@ def test_oversized_source_is_truncated_to_the_selection_budget(client, category,
     submission_id = submit_resp.json()["id"]
 
     _close_contest(client, contest, deadline=deadline)
+    # 앱 코드가 컨텍스트를 넘으면 먼저 보류된다(#986) — 사람이 풀면 실린 만큼으로 채점한다.
+    assert _run_pending(client)["rows"][0]["status"] == "held"
+    call_command("release_scoring_hold", str(submission_id))
     _run_pending(client)
 
     score = Score.objects.get(submission_id=submission_id)
@@ -1114,6 +1118,9 @@ def test_two_source_assets_are_both_scored_via_round_robin_budget(
     submission_id = submit_resp.json()["id"]
 
     _close_contest(client, contest, deadline=deadline)
+    # A 의 앱 코드가 예산을 넘어 먼저 보류된다(#986) — 풀면 라운드로빈 예산으로 채점한다.
+    assert _run_pending(client)["rows"][0]["status"] == "held"
+    call_command("release_scoring_hold", str(submission_id))
     result = _run_pending(client)
     assert result["rows"][0]["status"] == "scored"
 
@@ -1724,9 +1731,11 @@ def test_five_failures_and_six_hour_grace_finalizes_as_zero_without_calling_llm(
     # 통지는 기존 채점 완료 알림 그대로다 — 새 알림 종류를 만들지 않는다.
     from notifications.models import Notification, NotificationType
 
-    assert Notification.objects.filter(
+    notice = Notification.objects.get(
         recipient_id=dev["user_id"], notification_type=NotificationType.SCORING_COMPLETE
-    ).exists()
+    )
+    # 무료 여부를 실어 문구가 이의 기간을 말할지 가른다(#986 보탬 5).
+    assert notice.context["is_free"] is False
 
 
 @pytest.mark.django_db

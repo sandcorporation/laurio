@@ -18,7 +18,12 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
    허용 목록은 `.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는
    `README` 를 조용히 버렸고, staging 의 `octocat/Hello-World` 는 그 때문에
    「채점할 파일 0개」가 됐다(ADR-0031). 바이너리는 3번이 따로 거른다.
-2. 전체 선택량이 `MAX_SOURCE_BYTES`를 넘지 않도록 예산을 두고, 예산이 바닥나면 그
+2. 예산은 앱 코드부터 채운다(#986, `selection_tier`) — 앱 코드 → README → 그 밖의 텍스트 →
+   마이그레이션·배포·설정. 「코드 아님」(시험·문서·스크래치·생성물·데이터 json)은 아예 뺀다
+   (`excluded_kind`, 보탬 4). 경로 이름 순 하나로 채우던 때는 앞 글자 폴더(`.scratch/`·
+   `deploy/`·`backend/.sqlx/`)가 예산을 다 써 앱 코드가 0파일인 제출이 0%를 받았다. 예산 밖으로
+   빠진 양은 `SelectionOmission` 으로 돌려준다.
+   전체 선택량이 `MAX_SOURCE_BYTES`를 넘지 않도록 예산을 두고, 예산이 바닥나면 그
    자리에서 선별을 멈춘다(마지막 파일은 잘려서라도 담을 수 있는 만큼만 담는다).
    압축 해제 자체도 예산만큼만 한다(`ZipExtFile.read(budget)`로 스트리밍 read) —
    `archive.read(info)`로 멤버 전체를 먼저 압축 해제한 뒤 슬라이스하면, 압축률이
@@ -52,6 +57,7 @@ import concurrent.futures
 import contextlib
 import io
 import logging
+import re
 import zipfile
 from dataclasses import dataclass
 from typing import Callable
@@ -119,24 +125,114 @@ CONVERTER_TIMEOUT_SECONDS = 10.0
 _MAX_UTF8_TRIM = 3
 
 
-def is_excluded_path(path: str) -> bool:
-    """사람이 쓴 소스가 아니라고 알려진 경로인가 — 벤더·빌드 디렉터리, 잠금
-    파일, 압축 번들·소스맵·바이너리. 채점 선별과 문법 검사(`classroom.
-    syntax_check`)가 같은 판정을 쓴다: 잠금 파일(`package-lock.json`)은
-    `.json` 이라 문법 검사의 코드 확장자에도 걸리는데, 그쪽이 따로 거르지
-    않으면 생성물에 「구문 오류가 있는가」를 AI 에게 묻고 그 본문을 프롬프트에
-    싣는다."""
+#: 「코드 아님」 제외 규칙(#986 보탬 4, 대장 #1438) — 구현을 증명하지 않는 것을 후보에서 뺀다.
+#: 공모전 3 의 16건을 요구사항 22개와 대조해 정했다: 시험·문서는 「구현했다」는 주장일 뿐이고,
+#: yml/yaml/toml/sql/conf/Dockerfile/compose·migrations 는 **남긴다**(미디어 서버 설정의 녹화·
+#: 훅, 마이그레이션·스키마 SQL·compose 볼륨이 영구 저장·송출 요구사항의 근거다).
+#: 디렉터리는 경로 조각 하나와 같으면 걸린다(소문자, 어느 깊이든).
+EXCLUDED_DIR_NAMES: dict[str, frozenset[str]] = {
+    "docs": frozenset({"docs"}),
+    "scratch": frozenset({
+        ".scratch", "experiments", "scratch", ".claude", ".agents", ".cursor", ".github", ".vscode", ".idea",
+    }),
+    "generated": frozenset({".sqlx", "generated"}),
+    "tests": frozenset({"test", "tests", "__tests__", "e2e", "spec"}),
+}
+
+#: 끝이 이것이면 빼는 파일(소문자). `.txt` 는 **뺄 목록에 없다** — Packet Tracer 장비 설정
+#: (`configs/R1.txt`)이 그 확장자라 빼면 네트워크 과제의 근거가 사라진다(ADR-0031, 2026-10-02 에
+#: 허용 목록이 `.txt` 를 버려 「채점할 파일 0개」가 된 일).
+EXCLUDED_KIND_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "docs": (".md", ".mdx", ".rst"),
+    "generated": (".snap", ".svg", ".csv", ".lock", ".min.js", "schema.d.ts"),
+    "data_json": (".json",),
+}
+
+#: 데이터 json 규칙의 예외 — 의존성·빌드 설정이라 남긴다.
+KEPT_JSON_NAMES = frozenset({"package.json", "tsconfig.json", "composer.json"})
+
+_TEST_FILE_PATTERN = re.compile(r"(\.test\.|\.spec\.|_test\.(go|py)$|^test_.*\.py$)")
+
+
+def excluded_kind(path: str) -> str | None:
+    """이 경로를 빼는 까닭(묶음 이름) — 남기면 None. 판정은 여기 한 자리다: 공모전·강의실 선별과
+    강의실 문법 검사(`classroom.syntax_check`)가 모두 `is_excluded_path` 로 이것을 본다.
+
+    묶음: `vendor`(벤더·빌드 폴더, 잠금 파일, 압축 번들·소스맵·바이너리) · `docs` · `scratch` ·
+    `generated` · `tests` · `data_json`. 루트(깊이 ≤1 — GitHub zip 은 `<저장소>-<sha>/README.md`)의
+    `README.md` 는 문서지만 남긴다."""
 
     lower = path.lower()
     if any(fragment in lower for fragment in EXCLUDED_DIR_FRAGMENTS):
-        return True
-    if lower.rsplit("/", 1)[-1] in EXCLUDED_FILE_NAMES:
-        return True
-    return lower.endswith(EXCLUDED_SUFFIXES)
+        return "vendor"
+    segments = [segment for segment in lower.split("/") if segment]
+    if not segments:
+        return None
+    name = segments[-1]
+    if name in EXCLUDED_FILE_NAMES or lower.endswith(EXCLUDED_SUFFIXES):
+        return "vendor"
+    directories = set(segments[:-1])
+    for kind, names in EXCLUDED_DIR_NAMES.items():
+        if directories & names:
+            return kind
+    if _TEST_FILE_PATTERN.search(name):
+        return "tests"
+    if name == "readme.md" and len(segments) <= 2:
+        return None
+    for kind, suffixes in EXCLUDED_KIND_SUFFIXES.items():
+        if name.endswith(suffixes) and not (kind == "data_json" and name in KEPT_JSON_NAMES):
+            return kind
+    return None
+
+
+def is_excluded_path(path: str) -> bool:
+    """사람이 쓴 소스·구현 근거가 아니라고 알려진 경로인가(`excluded_kind`). 채점 선별과 문법 검사
+    (`classroom.syntax_check`)가 같은 판정을 쓴다: 잠금 파일(`package-lock.json`)은 `.json` 이라
+    문법 검사의 코드 확장자에도 걸리는데, 그쪽이 따로 거르지 않으면 생성물에 「구문 오류가
+    있는가」를 AI 에게 묻고 그 본문을 프롬프트에 싣는다."""
+
+    return excluded_kind(path) is not None
 
 
 def _is_selectable(path: str) -> bool:
     return not is_excluded_path(path)
+
+
+#: 코드로 치는 확장자(소문자) — 예산을 채우는 순서에서 맨 앞에 온다(#986, `selection_tier`).
+CODE_SUFFIXES = (
+    ".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte",
+    ".java", ".kt", ".kts", ".scala", ".go", ".rs", ".rb", ".php", ".cs", ".fs",
+    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".m", ".mm", ".swift", ".dart",
+    ".ex", ".exs", ".erl", ".clj", ".lua", ".r", ".jl", ".hs", ".ml",
+    ".html", ".htm", ".css", ".scss", ".sass", ".less", ".sql", ".sh", ".gd",
+)
+
+#: 이 폴더 아래의 코드는 앱 코드 다음 차례(2)다 — 남기지만(구현 근거) 앱 코드의 예산을 먼저 쓰지 않게.
+SECONDARY_DIR_NAMES = frozenset({"migrations", "deploy", "infra", "examples", "fixtures"})
+
+
+def selection_tier(path: str) -> int:
+    """예산을 채우는 차례(작을수록 먼저, #986). 같은 차례 안에서는 경로 이름 순이라 결정적이다.
+
+    0 앱 코드 → 1 README → 2 그 밖(설정·yml·sql·Dockerfile·마이그레이션·배포·숨은 폴더).
+    「코드 아님」은 이 차례에 오기 전에 `excluded_kind` 가 뺀다. 예전에는 경로 이름 순 하나였다 —
+    앞 글자 폴더가 크면 앱 코드가 예산 밖으로 밀렸다.
+    """
+
+    segments = [segment for segment in path.lower().split("/") if segment]
+    if not segments:
+        return 2
+    name = segments[-1]
+    directories = segments[:-1]
+    if name.startswith("readme"):
+        return 1
+    if (
+        name.endswith(CODE_SUFFIXES)
+        and not SECONDARY_DIR_NAMES.intersection(directories)
+        and not any(segment.startswith(".") for segment in directories)
+    ):
+        return 0
+    return 2
 
 
 def _decode_utf8_prefix(data: bytes) -> str | None:
@@ -169,6 +265,8 @@ class _Candidate:
     reader: Callable[[int], bytes]
     #: 원본 파일인가 — 변환 결과·「열 수 없는」 줄은 다시 플러그인에게 묻지 않는다.
     convertible: bool = True
+    #: 풀었을 때의 크기(모르면 None) — 예산 밖으로 빠진 양을 셀 때만 쓴다(#986).
+    size: int | None = None
 
 
 def _text_candidate(path: str, text: str) -> _Candidate:
@@ -230,7 +328,8 @@ def _convert(candidate: _Candidate, converters: tuple[SourceConverter, ...]) -> 
 def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]:
     archive = stack.enter_context(zipfile.ZipFile(io.BytesIO(raw)))
     candidates: list[_Candidate] = []
-    for info in sorted(archive.infolist(), key=lambda i: i.filename):
+    # 앱 코드가 먼저다(#986, `selection_tier`) — 같은 차례 안에서는 경로 이름 순.
+    for info in sorted(archive.infolist(), key=lambda i: (selection_tier(i.filename), i.filename)):
         if info.is_dir() or not _is_selectable(info.filename):
             continue
 
@@ -241,7 +340,7 @@ def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]
             with archive.open(info) as member:
                 return member.read(budget)
 
-        candidates.append(_Candidate(path=info.filename, reader=_reader))
+        candidates.append(_Candidate(path=info.filename, reader=_reader, size=info.file_size))
     return candidates
 
 
@@ -251,12 +350,39 @@ def _source_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candida
     try:
         return _zip_candidates(raw, stack)
     except zipfile.BadZipFile:
-        return [_Candidate(path="source", reader=lambda budget: raw[:budget])]
+        return [_Candidate(path="source", reader=lambda budget: raw[:budget], size=len(raw))]
+
+
+@dataclass(frozen=True)
+class SelectionOmission:
+    """예산 때문에 프롬프트에 다 싣지 못한 것(#986) — 통째로 빠진 파일과 중간에서 잘린 파일.
+    `code_*` 는 그중 앱 코드(`selection_tier` 0)만 센다. 바이트는 풀었을 때의 크기 기준이다."""
+
+    omitted_files: int = 0
+    omitted_bytes: int = 0
+    omitted_code_files: int = 0
+    truncated_files: int = 0
+    truncated_code_files: int = 0
+
+    @property
+    def any(self) -> bool:
+        """무엇이든 빠지거나 잘렸는가 — 공모전 보류 기준(#986 보탬 4). 「코드 아님」은 후보에 오기 전에
+        빠지므로 여기 남은 것은 전부 구현 근거다."""
+
+        return bool(self.omitted_files or self.truncated_files)
 
 
 def select_source_files(
     sources: list[tuple[int, str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
 ) -> list[SourceFile]:
+    """`select_source_files_with_omission` 의 고른 파일만."""
+
+    return select_source_files_with_omission(sources, max_bytes=max_bytes)[0]
+
+
+def select_source_files_with_omission(
+    sources: list[tuple[int, str, bytes]], *, max_bytes: int = MAX_SOURCE_BYTES
+) -> tuple[list[SourceFile], SelectionOmission]:
     """여러 소스(각각 `(자산 id, 자산 라벨, 원본 바이트)`)를 예산 안에서 라운드로빈으로
     고른다.
 
@@ -275,6 +401,8 @@ def select_source_files(
     files: list[SourceFile] = []
     budget = max_bytes
     converters = registered_converters()
+    truncated = 0
+    truncated_code = 0
 
     with contextlib.ExitStack() as stack:
         queues: list[tuple[int, str, collections.deque[_Candidate]]] = []
@@ -320,9 +448,22 @@ def select_source_files(
                         )
                     )
                     budget -= len(content_bytes)
+                    if candidate.size is not None and len(content_bytes) < candidate.size:
+                        truncated += 1
+                        if candidate.convertible and selection_tier(candidate.path) == 0:
+                            truncated_code += 1
 
                 next_queues.append((asset_id, label, queue))
 
             queues = next_queues
 
-    return files
+        left = [candidate for _asset_id, _label, queue in queues for candidate in queue]
+
+    omission = SelectionOmission(
+        omitted_files=len(left),
+        omitted_bytes=sum(c.size or 0 for c in left),
+        omitted_code_files=sum(1 for c in left if c.convertible and selection_tier(c.path) == 0),
+        truncated_files=truncated,
+        truncated_code_files=truncated_code,
+    )
+    return files, omission

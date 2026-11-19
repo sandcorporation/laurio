@@ -92,9 +92,9 @@ def test_an_unverifiable_required_item_does_not_pass_and_both_surfaces_say_unver
 
     # 요청: 강의실 스키마는 verdict 세 값을 받고 is_met 을 받지 않는다. 프롬프트에 판정 규칙이 실린다.
     [body] = sent
-    item = body["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["items"]
+    item = next(iter(body["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["properties"].values()))
     assert item["properties"]["verdict"] == {"type": "string", "enum": ["met", "unmet", "unverifiable"]}
-    assert item["required"] == ["requirement_id", "verdict", "reasoning"] and "is_met" not in item["properties"]
+    assert item["required"] == ["verdict", "reasoning"] and "is_met" not in item["properties"]
     prompt = body["messages"][1]["content"]
     assert UNVERIFIABLE_VERDICT_RULE in prompt
     # 실제 동작을 말하는 항목은 코드가 있어도 확인 불가, 존재를 말하는 항목은 정적 판정 — 판정 예시 두 줄(#816).
@@ -184,7 +184,7 @@ def test_claude_scoring_asks_for_the_three_values_too(client, db, monkeypatch, s
 
     [(_, _, kwargs)] = [c for c in calls if c[0] == "POST"]
     schema = kwargs["json"]["output_config"]["format"]["schema"]
-    assert "verdict" in schema["properties"]["verdicts"]["items"]["required"]
+    assert "verdict" in next(iter(schema["properties"]["verdicts"]["properties"].values()))["required"]
     [attempt] = mine(client, participant["access"], class_id, problem.id)["submissions"]
     assert attempt["passed"] is False
     assert [(r["is_met"], r["verdict"]) for r in attempt["score"]["reasoning"]] == [(False, "unverifiable")]

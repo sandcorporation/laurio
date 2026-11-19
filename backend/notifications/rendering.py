@@ -58,6 +58,9 @@ def render_message(notification: Notification) -> str:
         return f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest에서 수상하셨습니다! codemit에서 확인하세요."
 
     if notification_type == NotificationType.SCORING_COMPLETE:
+        if context.get("is_free"):
+            # 무료 공모전에는 이의 신청이 없다(#986 보탬 5) — 이의 기간을 말하지 않는다.
+            return f"{_BRAND_PREFIX} 제출하신 '{contest_title}' Contest 채점이 완료됐습니다. codemit에서 확인하세요."
         return (
             f"{_BRAND_PREFIX} 제출하신 '{contest_title}' Contest 채점이 완료됐습니다. "
             "이의제기 기간이 시작됩니다 — codemit에서 확인하세요."

@@ -56,9 +56,11 @@ class ScanSpec:
     batch_size: int = DEFAULT_BATCH_SIZE
     time_budget_seconds: float = DEFAULT_TIME_BUDGET_SECONDS
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS
-    # beat 가 이 스캔의 엔드포인트를 부를 때 기다리는 HTTP 한도(`core.tasks.run_scan`). 기본은
-    # 30초 — 행 시작 예산(위)과 행 하나의 최장 시간을 더한 값보다 커야 한다(#986, 채점 스캔).
-    request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
+    # 값이 있으면 이 스캔은 내부 HTTP(`call_internal` 30초)를 거치지 않고 **celery 워커 안에서** 돈다
+    # (#986 보탬 4, 공모전 채점 — 벤더 한도 180초가 요청 하나에 들지 않는다). 값은 한 실행의 상한(초)이다:
+    # 같은 스캔의 실행은 한 번에 하나이고(`core.scan_lock`, 이 값이 잠금 시간), beat 메시지는 이 값에서
+    # 워커가 끊는다(`time_limit`). 행 시작 예산 + 행 하나의 최장 시간보다 커야 한다.
+    worker_time_limit_seconds: float | None = None
     # 후보 QuerySet 에 뼈대가 거는 정렬 — 기본 id. 예외적으로 due 시각 순이 필요한 스캔이 준다.
     order_by: tuple[str, ...] = ("id",)
     # 이 스캔이 지금 도는가 — None 이면 항상 돈다(대다수). #413: 유료 공모전
@@ -162,6 +164,19 @@ def run_scan(name: str, *, as_of=None, ctx: dict | None = None, params: dict | N
         # 같은 예외로 통일한다. `is_scan_active`를 먼저 확인하지 않고 직접
         # `run_scan`을 부르는 자리(Celery 태스크 등)도 같은 문을 보게 한다.
         raise KeyError(name)
+    if spec.worker_time_limit_seconds is None:
+        return _run(name, spec, as_of=as_of, ctx=ctx, params=params)
+    from core import scan_lock
+
+    with scan_lock.hold(name, spec.worker_time_limit_seconds) as acquired:
+        if not acquired:
+            # 앞 실행이 아직 돈다 — 겹쳐 돌면 같은 앞머리 행을 두 번 집는다(#986 보탬 4).
+            logger.info("스캔 %s 의 앞 실행이 아직 돌아 이번 실행은 건너뛴다.", name)
+            return {"scan": name, "skipped": "running", "count": 0, "failed": [], "rows": []}
+        return _run(name, spec, as_of=as_of, ctx=ctx, params=params)
+
+
+def _run(name: str, spec: ScanSpec, *, as_of, ctx: dict | None, params: dict | None) -> dict:
     as_of = as_of if as_of is not None else Clock.now()
     ctx = {} if ctx is None else ctx
     deadline = time.monotonic() + spec.time_budget_seconds
@@ -226,6 +241,12 @@ def beat_schedule() -> dict:
             "task": "core.run_scan",
             "schedule": spec.interval_seconds,
             "args": [name],
+            **(
+                {}
+                if spec.worker_time_limit_seconds is None
+                # 워커 안에서 도는 스캔(#986 보탬 4): 밀린 메시지는 다음 beat 전에 버리고, 상한에서 끊는다.
+                else {"options": {"expires": spec.interval_seconds, "time_limit": spec.worker_time_limit_seconds}}
+            ),
         }
         for name, spec in SCAN_REGISTRY.items()
         if spec.keep_scheduled_when_disabled or is_scan_active(name)

@@ -111,8 +111,8 @@ def test_the_request_asks_for_the_verdict_schema_with_the_native_messages_api(mo
     assert body["output_config"]["effort"] == "low"
     fmt = body["output_config"]["format"]
     assert fmt["type"] == "json_schema"
-    item = fmt["schema"]["properties"]["verdicts"]["items"]
-    assert item["required"] == ["requirement_id", "is_met", "reasoning"]
+    item = next(iter(fmt["schema"]["properties"]["verdicts"]["properties"].values()))
+    assert item["required"] == ["is_met", "reasoning"]
     assert item["additionalProperties"] is False and fmt["schema"]["additionalProperties"] is False
     # 구조화 출력은 GA 라 베타 헤더도, 폐기 예정 필드도 싣지 않는다. temperature 는 사고와 함께 쓰지 않는다.
     assert "anthropic-beta" not in call["headers"]
@@ -303,7 +303,7 @@ def test_with_unverifiable_the_schema_asks_for_three_verdicts_and_reads_them(mon
 
     output = _adapter(allow_unverifiable=True).score(INPUT)
 
-    item = calls[0]["json"]["output_config"]["format"]["schema"]["properties"]["verdicts"]["items"]
-    assert item["required"] == ["requirement_id", "verdict", "reasoning"]
+    item = next(iter(calls[0]["json"]["output_config"]["format"]["schema"]["properties"]["verdicts"]["properties"].values()))
+    assert item["required"] == ["verdict", "reasoning"]
     assert item["properties"]["verdict"]["enum"] == ["met", "unmet", "unverifiable"]
     assert [(v.is_met, v.verdict) for v in output.verdicts] == [(True, "met"), (False, "unverifiable")]

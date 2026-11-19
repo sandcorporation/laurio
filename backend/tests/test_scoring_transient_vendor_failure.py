@@ -154,32 +154,35 @@ def test_contest_scoring_calls_the_vendor_with_the_contest_timeout(
     _run_pending(client)
 
     assert timeouts == [services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS]
-    assert services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS > 20
+    assert services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS == 180
 
 
-def test_scoring_scan_budgets_fit_the_longer_vendor_timeout():
-    """행 시작 예산 + 벤더 한도가 HTTP 예산 안에 들고, 한 실행이 다음 beat 와 겹치지 않는다."""
+def test_scoring_scan_runs_in_the_worker_with_room_for_the_vendor_timeout():
+    """보탬 4: 행 시작 예산 + 벤더 한도가 실행 상한 안에 들고, 그 상한이 잠금·beat 의 time_limit 이다."""
 
     spec = scans.SCAN_REGISTRY["submission-scoring"]
+    assert spec.worker_time_limit_seconds is not None
     assert (
         spec.time_budget_seconds + services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS
-        < spec.request_timeout_seconds
+        < spec.worker_time_limit_seconds
     )
-    assert spec.request_timeout_seconds < spec.interval_seconds
+    entry = scans.beat_schedule()["scan:submission-scoring"]
+    assert entry["task"] == "core.run_scan"
+    assert entry["options"] == {"expires": spec.interval_seconds, "time_limit": spec.worker_time_limit_seconds}
 
 
-def test_run_scan_task_waits_for_the_scans_own_request_timeout(monkeypatch):
+def test_run_scan_task_runs_worker_scans_in_process_and_others_over_http(monkeypatch):
     calls: list[tuple[str, float]] = []
     monkeypatch.setattr(
         core_tasks, "call_internal", lambda path, *, timeout: calls.append((path, timeout)) or {}
     )
+    ran: list[str] = []
+    monkeypatch.setattr(scans, "run_scan", lambda name: ran.append(name) or {"scan": name})
     spec = scans.SCAN_REGISTRY["submission-scoring"]
-    monkeypatch.setitem(scans.SCAN_REGISTRY, "submission-scoring", replace(spec, request_timeout_seconds=77.0))
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "submission-scoring", replace(spec, enabled=lambda: True))
 
     core_tasks.run_scan.run("submission-scoring")
     core_tasks.run_scan.run("contest-close")
 
-    assert calls == [
-        ("/api/internal/scans/submission-scoring", 77.0),
-        ("/api/internal/scans/contest-close", scans.DEFAULT_REQUEST_TIMEOUT_SECONDS),
-    ]
+    assert ran == ["submission-scoring"]
+    assert calls == [("/api/internal/scans/contest-close", scans.DEFAULT_REQUEST_TIMEOUT_SECONDS)]

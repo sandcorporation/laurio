@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
+from core.model_context import KNOWN_CLAUDE_CONTEXT_WINDOWS, KNOWN_OPENAI_CONTEXT_WINDOWS
+
 
 @dataclass(frozen=True)
 class ScoringModelChoice:
@@ -51,22 +53,7 @@ _SIZE_ORDER = {None: 0, "-mini": 1, "-nano": 2}
 #: 하지 않았다 — staging 키로 `/v1/models`를 조회해도 컨텍스트 크기는 내려오지
 #: 않는다(#401 Problem Statement). 표에 없는 모델은 `context_window=None`으로
 #: 내려 「크기 미확인」이 뜨고, 소스 선별은 128K 기준으로 보수적으로 자른다.
-_KNOWN_CONTEXT_WINDOWS: dict[str, int] = {
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "gpt-4.1": 1_047_576,
-    "gpt-4.1-mini": 1_047_576,
-    "gpt-4.1-nano": 1_047_576,
-    "gpt-5": 400_000,
-    "gpt-5.1": 400_000,
-    "gpt-5.2": 400_000,
-    "gpt-5.4": 400_000,
-    "gpt-5.5": 400_000,
-    "gpt-5-mini": 400_000,
-    "gpt-5-nano": 400_000,
-    "gpt-5.4-mini": 400_000,
-    "gpt-5.4-nano": 400_000,
-}
+_KNOWN_CONTEXT_WINDOWS = KNOWN_OPENAI_CONTEXT_WINDOWS  # 표는 공유층에 있다(#986, `core.model_context`).
 
 
 def _version_sort_key(version: str) -> float:
@@ -188,11 +175,7 @@ _CLAUDE_ID_PATTERN = re.compile(r"^claude-(haiku|sonnet|opus)-([0-9]+)(?:-([0-9]
 _CLAUDE_LINE_LABEL = {"haiku": "Haiku", "sonnet": "Sonnet", "opus": "Opus"}
 
 #: 문서(2026-10-28, https://platform.claude.com/docs/en/about-claude/models/overview)의 컨텍스트 크기.
-_KNOWN_CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
-    "claude-haiku-5-5": 1_000_000,
-    "claude-sonnet-5-5": 1_000_000,
-    "claude-sonnet-5": 1_000_000,
-}
+_KNOWN_CLAUDE_CONTEXT_WINDOWS = KNOWN_CLAUDE_CONTEXT_WINDOWS  # 표는 공유층에 있다(#986, `core.model_context`).
 
 #: 「Claude(Anthropic) 키」 연결의 기본 채점 모델 — Haiku 계열 최신(#795: 비용).
 DEFAULT_ANTHROPIC_SCORING_MODEL = "claude-haiku-5-5"
