@@ -34,3 +34,17 @@ def check_alerts() -> dict | None:
     from ops_metrics.alerts import check_alerts as check
 
     return check(now=datetime.now(dt_timezone.utc))
+
+
+@shared_task(name="ops_metrics.check_slow_routes_daily", ignore_result=True)
+def check_slow_routes_daily() -> list[str]:
+    """매일 00:10(서울) — 어제 하루의 경로별 중앙값을 평소와 견줘 느린 경로를 GlitchTip 에 올린다(#971).
+
+    1분 검사(`check_alerts`)가 놓치는, 하루 몇 건뿐인 경로를 잡는 몫이다."""
+
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from ops_metrics.slow_route_check import check_daily
+
+    return check_daily(now=datetime.now(dt_timezone.utc))

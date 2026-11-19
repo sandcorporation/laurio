@@ -357,6 +357,35 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   남기고 다음 검사가 다시 보낸다. 「발생」이 닿기 전에 해소되면 둘 다 버린다. 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`)이
   비면 보내지 않고 상태만 기록한다. 겹쳐 돈 검사는 advisory 잠금을 못 잡아 건너뛴다. 지금 울리는 목록은 같은
   `GET /api/operator/ops-metrics` 의 `alerts`(기간과 무관)로 콘솔 `/ops` 맨 위 패널에 보인다.
+- **느린 경로 경고(#971, `ops_metrics.slow_route_check`).** 요청 지표(`RequestMinute` + 아직 옮기지 않은 Redis 분)를
+  **경로(메서드 + URL 패턴)마다** 보고, 느리면 디스코드가 아니라 **GlitchTip 에 `warning` 경고**를 올린다 — 자동 진단이
+  집는다(아래 「GlitchTip 자동 진단」). 판정은 순수 함수 `ops_metrics.slow_routes` 하나다(재생 스크립트도 같은 함수).
+
+  | 판정 | 언제 | 창 | 조건 | 해소 |
+  | --- | --- | --- | --- | --- |
+  | 1분 | `check_alerts` 안(같은 잠금) | 지금 분 + 앞 29분 | 3건 이상 · 중앙값 ≥ 1초 · 평소 중앙값 × 5 이상 | 60번(1시간) 연속 괜찮을 때 |
+  | 하루 | 매일 00:10(서울) `ops_metrics.check_slow_routes_daily` | 어제(서울) 하루 | 1건 이상 · 나머지 같음 | 다음 날 괜찮을 때 |
+
+  「평소」는 창 바로 앞 14일의 같은 경로다(평소가 없는 새 경로는 울리지 않는다). 중앙값은 요청 시간 칸
+  (`core.metrics.DURATION_BOUNDS`)을 보간한 근삿값이다. 평소 대비로 보는 까닭: 원래 느린 경로(LLM·업로드)가
+  울리지 않게, 제외 목록을 손으로 들지 않게. 전체 평균을 쓰지 않는 까닭: 하루 몇 건짜리 경로가 묻힌다
+  (`api/contests/mine` 이 11-11 부터 2초대였는데 아무도 몰랐다, #958). 하루 판정은 그런 경로(1분 창에 3건이
+  안 모이는)를 잡는 몫이다. 수치는 운영 기록(10-30~11-19)에 돌려 정했다 — `scripts/slow_route_replay.py`
+  (운영 DB 는 읽기 전용으로 내보낸다, CSV 는 저장소에 넣지 않는다). 그 기간 1분 판정 6번·하루 판정 2번
+  울렸고, contests/mine 은 둘 다 잡혔다(하루 11-17 00:10, 1분 11-19 17:38).
+
+  상태는 경로마다 `AlertState` 한 행(`slow-route:<경로>`·`slow-route-daily:<경로>`, 운영자 「경보」 목록에는
+  나오지 않는다). **울리기 시작할 때 한 번만** 보낸다 — 해소는 보내지 않는다(SDK 로는 이슈를 닫을 수 없다).
+  지문은 `["slow-route", "<메서드> <URL 패턴>"]` 이라 1분·하루 판정이 같은 경로를 보면 이슈 하나에 모이고,
+  해소 뒤 다시 울리면 같은 이슈에 이벤트가 붙는다(해결된 이슈면 GlitchTip 이 다시 연다). 메시지는
+  `느린 경로 GET api/contests/mine — 중앙값 2.17초, 평소 40ms의 54배 (최근 30분 6건)`, 태그 `alert=slow-route`·
+  `slow_route`·`slow_route_check=realtime|daily`, 맥락 `slow_route`(중앙값·평소·배수·요청 수·기간·기준). URL 패턴
+  (`resolver_match.route`)과 수치뿐이다 — 실제 경로·사용자는 없다.
+
+  `manage.py slow_routes` 는 지금(30분)과 어제의 판정을 찍기만 한다(상태·전송 없음). `--send-sample` 은 지문
+  `["slow-route", "sample"]`·태그 `slow_route_sample=1` 인 시험 경고 하나를 올린다(DB 에 쓰지 않는다) — 자동 진단이
+  집는지 볼 때 쓰고, 진단 세션은 이것을 보면 「집혔다」만 보고하고 멈춘다. 끄려면 `check_alerts` 의
+  `slow_route_check.check_realtime` 한 줄과 beat 항목 `ops-metrics:slow-routes-daily` 를 뺀다.
 
 **로그 소음 둘을 걷었다**(2026-09-21, Loki 로 처음 보였다). pgbouncer 가 트랜잭션 모드에서
 연결·끊김마다 한 줄씩 **시간당 492줄**(prod 전체의 절반 가까이)을 찍어 `log_connections`·
@@ -518,6 +547,9 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   `metadata.type`(예외 클래스 이름)으로 한다, 제목 문자열이 아니다 — 그 메시지는
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
   `PriceDriftAlert`(#798, 아래 「모델 단가 표 대조」)도 같은 목록에 있다.
+  **느린 경로 경고(#971)는 이 목록에 없다 — 집히는 것이 목적이다.** 예외가 아니라 메시지라 `metadata.type`
+  이 없고, precheck 는 `is:unresolved` 만 걸고 등급을 보지 않는다(`glitchtip_pick.py` `_pick`). 세션은
+  스킬의 「느린 경로 경고」 절을 따른다 — 재현 대신 운영 DB 읽기 전용 `EXPLAIN`·통계로 원인을 찾아 티켓으로 넘긴다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
   `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Actions PR 검사가
   시험하고, 초록이면 세션이 squash 로 병합한다(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train`

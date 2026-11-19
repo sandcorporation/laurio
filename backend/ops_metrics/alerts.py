@@ -1,5 +1,7 @@
 """운영 경보(#830) — celery beat 가 1분마다 규칙을 검사하고, 울릴 때와 해소될 때 디스코드로 한 번씩 보낸다.
 
+같은 검사가 느린 경로(#971, `ops_metrics.slow_route_check`)도 본다 — 그쪽은 디스코드가 아니라 GlitchTip 이다.
+
 oracle prometheus `alerts.yml` 에 있던 codemit 규칙을 옮겼다(사이트 다운·호스트 자원·컨테이너 재시작은 밖의
 감시가 맡는다).
 
@@ -35,7 +37,7 @@ from django.db.models import Sum
 
 from core.llm_metrics import QUEUE_WAIT_BOUNDS
 
-from . import recorder
+from . import recorder, slow_route_check
 from .flush import _buckets, _grouped
 from .models import AlertState, LlmMinute, LlmQueueMinute
 from .quantile import add_counts, histogram_quantile
@@ -257,6 +259,8 @@ def check_alerts(*, now: datetime) -> dict[str, str] | None:
             _step(state, rule, rule.read(inputs), now)
             _deliver(state)
             state.save()
+        # 느린 경로(#971)는 디스코드가 아니라 GlitchTip 으로 간다 — 같은 잠금 안에서 경로마다 따로 상태를 든다.
+        slow_route_check.check_realtime(now=now)
         return {name: str(state.status) for name, state in states.items()}
 
 

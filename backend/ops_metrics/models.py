@@ -73,13 +73,18 @@ class AlertState(models.Model):
 
     `streak` 은 조건이 연속으로 참이었던 검사 수다 — 규칙의 「지속」(예 5분)은 이것이 그 횟수에 닿을 때다.
     `pending_notice` 는 아직 디스코드에 닿지 못한 알림(`firing`/`resolved`, 없으면 빈 칸) — 다음 검사가 다시 보낸다.
+
+    느린 경로 경고(#971, `ops_metrics.slow_route_check`)도 경로마다 한 행을 쓴다 — `rule` 이
+    `slow-route:<메서드> <URL 패턴>`(1분 검사)·`slow-route-daily:<메서드> <URL 패턴>`(하루 판정)이고, 알림은
+    디스코드가 아니라 GlitchTip 이다. `clear_streak` 는 울리는 중 연속으로 괜찮았던 검사 수(해소 조건)다.
     """
 
     class Status(models.TextChoices):
         FIRING = "firing"
         RESOLVED = "resolved"
 
-    rule = models.CharField(max_length=64, unique=True)
+    #: 규칙 이름 — 느린 경로 행은 접두어 + 메서드 + URL 패턴(최대 200자)이라 길다.
+    rule = models.CharField(max_length=255, unique=True)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.RESOLVED)
     streak = models.PositiveIntegerField(default=0)
     #: 마지막으로 울리기 시작한 시각 — 한 번도 울리지 않았으면 null.
@@ -91,3 +96,4 @@ class AlertState(models.Model):
     value = models.CharField(max_length=100, blank=True, default="")
     threshold = models.CharField(max_length=100, blank=True, default="")
     pending_notice = models.CharField(max_length=16, blank=True, default="")
+    clear_streak = models.PositiveIntegerField(default=0, db_default=0)

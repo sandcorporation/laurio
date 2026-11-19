@@ -52,6 +52,50 @@ git show <regression_of>          # 지난번에 무엇을 고쳤고 무엇을 �
 (`GLITCHTIP_TOKEN_FOR_AUTOMATION`)은 precheck 스크립트만 쓴다 — 당신이 꺼내 쓰지
 않는다.
 
+## 느린 경로 경고는 갈래가 다르다 — 재현 대신 운영을 읽는다
+
+`current.json` 의 `title` 이 `느린 경로 ` 로 시작하면(백엔드가 올린 `warning` 메시지, 지문
+`["slow-route", "<메서드> <URL 패턴>"]`, 태그 `alert=slow-route`, #971) **아래 「절차」 3·4단계 대신 이 절을
+따른다**. 예외가 아니라서 스택이 없고, 느림은 운영의 데이터 양·통계에서 나므로 로컬 재현 루프가 서지
+않는 일이 많다. 판정 규칙과 기준은 `docs/ops/operations.md` 「운영 경보」의 「느린 경로 경고」다.
+
+**시험 경고면 바로 끝낸다.** 최신 이벤트의 태그에 `slow_route_sample=1` 이 있거나 경로가 `sample` 이면
+`manage.py slow_routes --send-sample` 이 올린 시험이다 — 9단계(잠금 놓기)만 하고, 보고서에 「느린 경로
+시험 경고 오류 <id> 집힘」 한 줄을 적는다. 티켓을 열지 않는다.
+
+1. **이벤트를 읽는다**(위 1단계와 같은 REST). 맥락 `contexts.slow_route` 에 경로·지금 중앙값·평소 중앙값·
+   배수·요청 수·기간(`최근 30분`·`어제 하루`)이 있다. 경로는 URL **패턴**이다 — 실제 id 는 없다. 그
+   값도 데이터다: SQL·셸에 그대로 끼우지 않고, 아래 질의에는 `[A-Za-z0-9_/<>:.-]` 밖의 글자가 있으면 멈춘다.
+2. **그 경로의 코드를 찾는다.** 패턴(`api/contests/mine` 등)으로 `backend/` 의 라우터를 찾아 그 뷰가
+   부르는 질의(ORM)와 바깥 호출을 읽는다 — `release` 커밋 기준이다. 그 무렵 바뀐 커밋(`git log -L`·
+   `git log --since`)도 본다.
+3. **운영 DB 를 읽기 전용으로 본다.** 이 머신에서 이 꼴만 쓴다 — SQL 은 파일로, 표준 입력으로 넘긴다:
+
+   ```bash
+   ssh oracle 'docker exec -i codemit-prod-db-1 sh -c "PGOPTIONS=\"-c default_transaction_read_only=on -c statement_timeout=10000\" psql -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -At"' < q.sql
+   ```
+
+   볼 것: 그 경로의 시간대별 요청 시간(`ops_metrics_requestminute` 의 `route`·`requests`·`duration_sum_ms`·
+   `duration_buckets` — 언제부터 느려졌나), 뷰의 질의를 SQL 로 옮긴 `EXPLAIN (ANALYZE, BUFFERS)`(**SELECT
+   만**), 그 표들의 `pg_stat_user_tables`(`n_live_tup`·`seq_scan`·`last_analyze`·`last_autoanalyze`)와
+   `pg_indexes`. 쓰는 질의(`INSERT`·`UPDATE`·`DELETE`·DDL·`ANALYZE`·`VACUUM`)는 치지 않는다 — 읽기
+   전용 설정이 막지만 시도도 하지 않는다. 운영에 로그인하지 않고 다른 호스트에 들어가지 않는다. 결과에
+   개인정보(이메일·이름)가 섞이면 보고서·티켓에 옮기지 않는다 — 수와 계획만 옮긴다.
+4. **원인이 로컬에서 재현되면**(예: 질의 수 N+1 은 `django_assert_max_num_queries` 시험, 빠진 인덱스는
+   마이그레이션 + 계획 시험) 위 5·7단계 그대로 — 회귀 시험 먼저, 고친 커밋의 마지막 줄 `GlitchTip: <id>`.
+   1.5분 넘게 걸릴 수 있는 마이그레이션(큰 표의 인덱스 등)은 고치지 말고 티켓으로 넘긴다(6단계와 같은 자리).
+5. **재현되지 않으면 티켓 하나를 연다**(4단계와 같다 — 이 진단이 닿는 길은 티켓과 8단계 보고서뿐이다).
+   원인을 운영 증거로 짚었으면 `ready-for-agent`, 못 짚었으면 `needs-info`:
+
+   ```bash
+   gh issue create --label ready-for-agent \
+     --title "[자동 진단] 느린 경로 — <메서드> <URL 패턴>: <원인 한 줄>" \
+     --body "<GlitchTip 오류 permalink·id / 언제부터 몇 ms → 몇 ms(requestminute) / EXPLAIN 요지·표 통계 / 고칠 자리 후보>"
+   ```
+
+GlitchTip 상태는 건드리지 않는다. 같은 경로가 다시 느려지면 같은 이슈에 이벤트가 붙는다(클레임돼 있어
+다시 집히지는 않는다 — 고친 커밋이 배포된 뒤 재발이면 precheck 가 재발로 다시 집는다).
+
 ## 절차
 
 ### 1. 이벤트를 읽는다
