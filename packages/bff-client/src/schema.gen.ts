@@ -3009,6 +3009,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/scoring/agent-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Runs
+         * @description 에이전트 실행 기록(#1000) — 기본은 사람이 볼 것만: 보류(`held`)와, 받아들였지만 필수 전부 충족·전부
+         *     미충족이라 한 번 더 볼 것(`review`). `?all=true` 면 받아들인 것까지 최근 순으로. 원본(`record`)은 크므로
+         *     싣지 않는다 — 시도 수·거절 사유만 낸다.
+         */
+        get: operations["scoring_api_agent_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/scoring/incomplete-contests": {
         parameters: {
             query?: never;
@@ -14484,6 +14506,26 @@ export interface operations {
             path: {
                 name: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    scoring_api_agent_runs: {
+        parameters: {
+            query?: {
+                all?: boolean;
+            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

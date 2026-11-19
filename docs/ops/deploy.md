@@ -472,11 +472,11 @@ search·pgbouncer 는 `service_definition_changed <서비스>` 가 직전 배포
 없는 컨테이너는 그대로 바꾼다. #950 이 워커 healthcheck 만 더했는데 운영 search 가 다시 만들어진
 것이 계기였다. 되돌리려면 `compose.prod.yaml` 변경 블록의 두 `service_definition_changed` 를 `BUILD_* = true` 로 바꾼다.
 
-**에이전트 채점 실행기 `agent-grader`(#999)는 따로 받고, 부르는 쪽이 없으면 놀기만 한다.** 이미지
+**에이전트 채점 실행기 `agent-grader`(#999)는 따로 받고, `CONTEST_SCORING_METHOD=agent` 가 아니면 놀기만 한다.** 이미지
 `codemit-agent-grader`(`docker/agent-grader.Dockerfile`)는 Claude Code·Codex CLI 를 고정 버전으로 담고(버전은
 `backend/scoring/agent_runner.py` 의 상수 한 자리), 실행 틀 파일 하나만 문맥에 든다 — 그 파일과 Dockerfile 이 바뀐 커밋만 다시
-굽는다. 키·자격증명이 없고 네트워크는 `agent`(internal) 하나라 벤더에는 `llm-proxy`(#998)를 거쳐서만 닿는다. 채점기(#1000)가
-부르기 전에는 HTTP 요청을 기다릴 뿐 CLI 를 띄우지 않는다. `plan` 은 문맥 해시·없는 컨테이너·`compose.prod.yaml` 변경으로 계획에
+굽는다. 키·자격증명이 없고 네트워크는 `agent`(internal) 하나라 벤더에는 `llm-proxy`(#998)를 거쳐서만 닿는다. 채점기(#1000)는
+`CONTEST_SCORING_METHOD=agent` 일 때만 부른다 — 그 전에는 HTTP 요청을 기다릴 뿐 CLI 를 띄우지 않는다. `plan` 은 문맥 해시·없는 컨테이너·`compose.prod.yaml` 변경으로 계획에
 넣고(`BUILD_AGENT_GRADER`), `up` 은 맨 끝에 `--no-deps` 로 띄운다 — 정의·이미지가 그대로면 다시 만들지 않는다. 실행 중에
 바뀌면 그 실행이 끊기고 부르는 쪽이 일시 실패로 센다. **seccomp 는 자기 프로필을 쓰는 유일한 서비스다**
 (`docker/agent-grader-seccomp.json`): docker 기본 프로필(moby/profiles seccomp v0.2.4)에 Codex `--sandbox read-only` 의

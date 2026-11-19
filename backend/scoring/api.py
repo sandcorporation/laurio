@@ -15,7 +15,7 @@ from contests.models import Contest, ContestSubmission
 from core.auth import InternalAuth
 from core.clock import Clock
 
-from .models import ScoringAttempt
+from .models import AgentRun, ScoringAttempt
 from .services import SCORING_FAILURE_GRACE, SCORING_FAILURE_LIMIT
 
 router = Router(tags=["internal", "scoring"], auth=InternalAuth())
@@ -138,3 +138,38 @@ def incomplete_contests(request):
         for contest in contests
     ]
     return {"count": len(payload), "contests": payload}
+
+
+AGENT_RUNS_LIMIT = 200
+
+
+@router.get("/agent-runs")
+def agent_runs(request, all: bool = False):  # noqa: A002 — 쿼리 이름
+    """에이전트 실행 기록(#1000) — 기본은 사람이 볼 것만: 보류(`held`)와, 받아들였지만 필수 전부 충족·전부
+    미충족이라 한 번 더 볼 것(`review`). `?all=true` 면 받아들인 것까지 최근 순으로. 원본(`record`)은 크므로
+    싣지 않는다 — 시도 수·거절 사유만 낸다."""
+
+    runs = AgentRun.objects.order_by("-created_at", "-id")
+    if not all:
+        runs = runs.filter(Q(outcome=AgentRun.Outcome.HELD) | ~Q(review=""))
+    picked = list(runs[:AGENT_RUNS_LIMIT])
+    contest_by_submission = dict(
+        ContestSubmission.objects.filter(pk__in={run.submission_id for run in picked}).values_list("pk", "contest_id")
+    )
+    return {
+        "runs": [
+            {
+                "id": run.id,
+                "submission_id": run.submission_id,
+                "contest_id": contest_by_submission.get(run.submission_id),
+                "purpose": run.purpose,
+                "outcome": run.outcome,
+                "review": run.review,
+                "reasons": run.reasons,
+                "model_version": run.model_version,
+                "attempts": len(run.record.get("attempts") or []),
+                "created_at": run.created_at.isoformat(),
+            }
+            for run in picked
+        ]
+    }

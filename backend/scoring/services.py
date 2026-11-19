@@ -50,8 +50,10 @@ Score를 만들지 않았다"로 돌아온다. `submission-scoring` 스캔이 �
 
 from __future__ import annotations
 
+import io
 import logging
 import uuid
+import zipfile
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -67,12 +69,18 @@ from core.llm_scoring import (
     LLMAdapterPermanentError,
     LLMAdapterTimeoutError,
     RequirementInput,
+    RequirementVerdict,
     ScoringInput,
     get_adapter,
 )
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
-from policies.runtime_settings import contest_ai_scoring_enabled
+from core.observability import capture_handled_exception
+from policies.runtime_settings import (
+    SCORING_METHOD_AGENT,
+    contest_ai_scoring_enabled,
+    contest_scoring_method,
+)
 from repositories.adapters import ClonedRepository, GitHubRefNotFoundError, get_github_adapter
 from repositories.models import RepositorySnapshot
 from storage.adapters import StorageAdapterError, get_storage_adapter
@@ -86,7 +94,10 @@ from submissions.scoring_basis import (
     PLATFORM_FAILURE_MODEL_VERSION,
 )
 
-from .models import Score, ScoringAttempt
+from .agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
+from .agent_scoring import AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
+from .agent_runner import AgentGraderBusy, AgentGraderError
+from .models import AgentRun, Score, ScoringAttempt
 from core.model_context import source_budget_bytes
 from core.source_selection import select_source_files_with_omission
 
@@ -488,6 +499,8 @@ SCORING_TRANSIENT_FAILURE_GRACE = timedelta(hours=24)
 #: (공모전 3의 809) 문구의 표지로도 잡는다.
 _TRANSIENT_VENDOR_FAILURE = (
     Q(error__startswith=f"{LLMAdapterTimeoutError.__name__}:")
+    | Q(error__startswith=f"{AgentGraderBusy.__name__}:")
+    | Q(error__startswith=f"{AgentGraderError.__name__}:")
     | Q(error__startswith=f"{LLMAdapterMissingVerdictError.__name__}:")
     | Q(error__contains="missing_requirement_ids=")
 )
@@ -511,6 +524,26 @@ SCORING_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
 #: 세지 않는다 — 벤더를 부르지 않았고 제출물이 실패한 것도 아니다.
 SCORING_HOLD_RELEASED_ERROR_PREFIX = "SourceOverBudgetReleased:"
 
+#: 에이전트 채점 보류 표식(#1000) — 받아들이는 조건이 최초·재실행 두 번 다 어긋났다. 소스 보류와 같이
+#: 채점 대기에서 빠지고 실패 상한에 세지 않는다. `release_scoring_hold` 가 풀면 다음 스캔이 에이전트를 다시
+#: 부른다(풀린 표식은 아무 것도 바꾸지 않는다 — 다시 어긋나면 또 보류다).
+AGENT_SCORING_HOLD_ERROR_PREFIX = "AgentScoringHold:"
+AGENT_SCORING_HOLD_RELEASED_ERROR_PREFIX = "AgentScoringReleased:"
+
+#: 채점 대기에서 빼는 보류 표식과, 실패 상한에 세지 않는 표식.
+_HOLD_PREFIXES = (SCORING_HOLD_ERROR_PREFIX, AGENT_SCORING_HOLD_ERROR_PREFIX)
+_NOT_A_FAILURE_PREFIXES = _HOLD_PREFIXES + (
+    SCORING_HOLD_RELEASED_ERROR_PREFIX,
+    AGENT_SCORING_HOLD_RELEASED_ERROR_PREFIX,
+)
+
+
+def _startswith_any(prefixes: tuple[str, ...]) -> Q:
+    query = Q()
+    for prefix in prefixes:
+        query |= Q(error__startswith=prefix)
+    return query
+
 
 def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """실패 상한(#222, ADR-0031)에 이르렀는가 — 영구 실패가 하나라도 있으면 유예 없이
@@ -528,8 +561,7 @@ def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     counts = submission.scoring_attempts.aggregate(
         total=Count(
             "id",
-            filter=~Q(error__startswith=SCORING_HOLD_ERROR_PREFIX)
-            & ~Q(error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX),
+            filter=~_startswith_any(_NOT_A_FAILURE_PREFIXES),
         ),
         permanent=Count("id", filter=Q(permanent=True)),
         transient=Count("id", filter=_TRANSIENT_VENDOR_FAILURE),
@@ -561,6 +593,111 @@ def _contest_already_settled(contest: Contest) -> bool:
     """
 
     return hasattr(contest, "award") or hasattr(contest, "distribution")
+
+
+def _agent_snapshot(
+    readable_sources: list[tuple[SubmissionAsset, bytes]],
+    cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]],
+) -> Snapshot | None:
+    """에이전트에게 줄 박제본 — 채점 입력이 저장소 하나, 또는 zip 소스 자료 하나일 때만. 여럿이면 None 이고
+    한 번 호출로 채점한다(에이전트 실행 하나는 저장소 한 벌만 읽는다)."""
+
+    if len(cloned_repositories) == 1 and not readable_sources:
+        asset, cloned = cloned_repositories[0]
+        return Snapshot(zip_bytes=cloned.zip_bytes, commit_sha=cloned.commit_sha, asset_id=asset.id)
+    if not cloned_repositories and len(readable_sources) == 1:
+        asset, raw = readable_sources[0]
+        if zipfile.is_zipfile(io.BytesIO(raw)):
+            return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.id)
+    logger.warning(
+        "에이전트 채점은 채점 입력이 하나일 때만 한다 — 한 번 호출로 채점한다 (sources=%s repositories=%s)",
+        len(readable_sources),
+        len(cloned_repositories),
+    )
+    return None
+
+
+def _agent_review_flag(requirements: list[RequirementInput], verdicts: list[RequirementVerdict]) -> str:
+    """받아들였지만 사람이 한 번 더 볼 판정 — 필수 전부 충족·전부 미충족(공모전 3 의 「한 번 더 본다」)."""
+
+    required = {r.requirement_id for r in requirements if r.grade == Requirement.Grade.REQUIRED}
+    if not required:
+        return ""
+    met = sum(1 for v in verdicts if v.requirement_id in required and v.is_met)
+    if met == len(required):
+        return "필수 전부 충족"
+    if met == 0:
+        return "필수 전부 미충족"
+    return ""
+
+
+def _score_with_agent(
+    submission: ContestSubmission, requirements: list[RequirementInput], snapshot: Snapshot
+) -> tuple[str, list[dict], Decimal, str] | dict:
+    """에이전트 채점 한 건 — 받아들이면 (지침, 판정 이유, 달성률, model_version), 보류면 스캔 결과 dict."""
+
+    prompt = build_scoring_prompt(requirements)
+    job = AgentJob(
+        submission=submission,
+        purpose="scoring",
+        prompt=prompt,
+        output_schema=SCORING_OUTPUT_SCHEMA,
+        expected_ids=frozenset(r.requirement_id for r in requirements),
+        items_key=ITEMS_KEY,
+        id_key=ID_KEY,
+        evidence_required=lambda item: item.get("met") is True,
+    )
+    try:
+        with provided_snapshot(submission.id, snapshot):
+            outcome = run_agent_job(job)
+    except AgentRunHeld as held:
+        AgentRun.objects.create(
+            submission=submission,
+            purpose=job.purpose,
+            outcome=AgentRun.Outcome.HELD,
+            model_version=f"agent:{held.record.get('vendor')}:{held.record.get('model')}",
+            reasons=held.reasons,
+            record=held.record,
+        )
+        reason = (
+            f"{AGENT_SCORING_HOLD_ERROR_PREFIX} 에이전트 채점의 받아들이는 조건이 두 번 다 어긋나 보류한다: "
+            + "; ".join(held.reasons)
+        )
+        logger.warning("Submission(pk=%s) %s", submission.id, reason)
+        ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+        capture_handled_exception(held, area="contest-agent-scoring", submission_id=str(submission.id))
+        return {"submission_id": submission.id, "status": "held", "error": reason}
+
+    by_id = {item[ID_KEY]: item for item in outcome.structured_output[ITEMS_KEY]}
+    verdicts = [
+        RequirementVerdict(
+            requirement_id=r.requirement_id,
+            is_met=by_id[r.requirement_id]["met"] is True,
+            reasoning=scoring_reasoning(
+                str(by_id[r.requirement_id]["reason"]),
+                is_met=by_id[r.requirement_id]["met"] is True,
+                evidence=[str(e) for e in by_id[r.requirement_id]["evidence"]],
+            ),
+        )
+        for r in requirements
+    ]
+    AgentRun.objects.create(
+        submission=submission,
+        purpose=job.purpose,
+        outcome=AgentRun.Outcome.ACCEPTED,
+        model_version=outcome.model_version,
+        review=_agent_review_flag(requirements, verdicts),
+        record=outcome.record,
+    )
+    reasoning_payload = [
+        {"requirement_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning} for v in verdicts
+    ]
+    return (
+        prompt,
+        reasoning_payload,
+        _percentage(requirements=requirements, verdicts=verdicts),
+        outcome.model_version,
+    )
 
 
 def score_submission_once(submission: ContestSubmission, as_of) -> dict:
@@ -740,99 +877,116 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
     try:
         requirements = _requirement_inputs(submission)
         contest = submission.contest
-        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
-        # 예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
-        # 프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
-        instruction_bytes = len(
-            _build_prompt(contest=contest, requirements=requirements, source_files=[]).encode("utf-8")
-        )
-        source_budget = source_budget_bytes(
-            str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
-        )
-        source_files, omission = select_source_files_with_omission(
-            [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
-            + [
-                (asset.id, _asset_label(asset), cloned.zip_bytes)
-                for asset, cloned in cloned_repositories
-            ],
-            max_bytes=source_budget,
-        )
-        if omission.any and not submission.scoring_attempts.filter(
-            error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX
-        ).exists():
-            # 「코드 아님」을 뺀 뒤 남은 것은 전부 구현 근거다(보탬 4, `core.source_selection.
-            # excluded_kind`) — 그중 하나라도 모델 컨텍스트에 다 들어가지 않으면 잘린 소스로 「없는
-            # 기능」 미달 판정이 나므로 벤더를 부르지 않고 보류한다(#986). 보류 표식이 있는 제출은
-            # `_pending_submissions` 가 빼므로 재시도도, 실패 상한의 0% 확정도 없다. 사람이
-            # `release_scoring_hold` 로 풀 때까지 그대로다.
-            reason = (
-                f"{SCORING_HOLD_ERROR_PREFIX} 소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 "
-                f"(model={getattr(llm, 'model_version', '')} budget_bytes={source_budget} "
-                f"omitted_files={omission.omitted_files} omitted_bytes={omission.omitted_bytes} "
-                f"truncated_files={omission.truncated_files} "
-                f"omitted_code_files={omission.omitted_code_files} "
-                f"truncated_code_files={omission.truncated_code_files})"
-            )
-            logger.warning("Submission(pk=%s) %s", submission.id, reason)
-            ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
-            return {"submission_id": submission.id, "status": "held", "error": reason}
-        if omission.any:
-            # 사람이 보류를 풀었다(`release_scoring_hold`) — 잘린 채 채점하되 빠진 양을 남긴다.
-            logger.warning(
-                "Submission(pk=%s) 보류를 푼 제출이라 소스 일부만 채점에 실었다 "
-                "(omitted_files=%s omitted_bytes=%s omitted_code_files=%s truncated_files=%s)",
-                submission.id,
-                omission.omitted_files,
-                omission.omitted_bytes,
-                omission.omitted_code_files,
-                omission.truncated_files,
-            )
-        prompt = _build_prompt(
-            contest=contest, requirements=requirements, source_files=source_files
-        )
-
-        scoring_input = ScoringInput(
-            submission_id=submission.id,
-            contest_id=contest.id,
-            prompt=prompt,
-            source_files=source_files,
-            requirements=requirements,
-        )
-        output = llm.score(scoring_input)
-        percentage = _percentage(requirements=requirements, verdicts=output.verdicts)
-        reasoning_payload = [
-            {"requirement_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
-            for v in output.verdicts
-        ]
-        # 실제로 프롬프트에 파일을 하나라도 남긴 자산들만 "쓰였다"고 기록한다
-        # (#191 코드리뷰 지적) — `readable_sources`는 스토리지에서 읽는 데
-        # 성공한 자산 전부지만, 그중 일부는 선별 전략(`select_source_files`)이
-        # 통째로 걸러낼 수 있다(제외 확장자뿐이거나 전부 바이너리인 zip 등).
-        # 그런 자산까지 "쓰였다"고 적으면 Score 스냅샷이 실제로 채점되지 않은
-        # 것을 채점 근거인 것처럼 보여준다 — 이의를 제기하는 사람과 심판하는
-        # 사람이 "같은 것을 보고" 이야기해야 한다는 이 필드의 존재 이유를
-        # 정확히 어긴다.
-        #
-        # `asset.id`로 판정한다 — 라벨 문자열로 되짚으면 두 가지 실제 사고가
-        # 난다: 참가자가 두 자산에 같은 라벨을 붙이면 하나만 쓰이고 다른 하나는
-        # 통째로 걸러졌어도 둘 다 "쓰였다"로 잡히고, 참가자가 라벨을 빈 자산의
-        # 폴백 표시(`_asset_label`의 "소스 자료 #7" 형식)와 똑같이 타이핑하면
-        # 남의 자산 정체성을 흉내낼 수 있다(#191 코드리뷰 지적). `SourceFile.
-        # asset_id`는 `select_source_files`가 만들 때 라벨을 거치지 않고 그대로
-        # 실어 나르므로 이 문제가 없다. `commit_sha`는 `kind=repository`
-        # 자산에만 붙는다(#193) — 소스 자산은 항상 None이다.
         commit_sha_by_asset_id = {
             asset.id: cloned.commit_sha for asset, cloned in cloned_repositories
         }
-        # `dict.fromkeys`로 순서를 보존한 유일 집합을 만든다 — `source_files`가
-        # 이미 라운드로빈이 고른 순서이므로, 그 순서를 스냅샷에도 그대로
-        # 남긴다(코드리뷰 지적: 자산 객체를 다시 조립해 거르는 중간 단계가
-        # 불필요했다).
-        used_asset_ids = dict.fromkeys(f.asset_id for f in source_files)
-        scored_assets_payload = [
-            {"asset_id": asset_id, "commit_sha": commit_sha_by_asset_id.get(asset_id)}
-            for asset_id in used_asset_ids
-        ]
+        agent_snapshot = (
+            _agent_snapshot(readable_sources, cloned_repositories)
+            if contest_scoring_method() == SCORING_METHOD_AGENT
+            else None
+        )
+        if agent_snapshot is not None:
+            # #1000: CLI 에이전트가 박제본을 읽고 판정한다. 받아들이는 조건이 두 번 다 어긋나면 보류 —
+            # 0% 로 굳히지 않고, 사람이 `release_scoring_hold` 로 풀 때까지 다시 고르지 않는다.
+            agent = _score_with_agent(submission, requirements, agent_snapshot)
+            if isinstance(agent, dict):
+                return agent
+            prompt, reasoning_payload, percentage, model_version = agent
+            scored_assets_payload = [
+                {"asset_id": agent_snapshot.asset_id, "commit_sha": agent_snapshot.commit_sha}
+            ]
+        else:
+            llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
+            # 예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
+            # 프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
+            instruction_bytes = len(
+                _build_prompt(contest=contest, requirements=requirements, source_files=[]).encode("utf-8")
+            )
+            source_budget = source_budget_bytes(
+                str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
+            )
+            source_files, omission = select_source_files_with_omission(
+                [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
+                + [
+                    (asset.id, _asset_label(asset), cloned.zip_bytes)
+                    for asset, cloned in cloned_repositories
+                ],
+                max_bytes=source_budget,
+            )
+            if omission.any and not submission.scoring_attempts.filter(
+                error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX
+            ).exists():
+                # 「코드 아님」을 뺀 뒤 남은 것은 전부 구현 근거다(보탬 4, `core.source_selection.
+                # excluded_kind`) — 그중 하나라도 모델 컨텍스트에 다 들어가지 않으면 잘린 소스로 「없는
+                # 기능」 미달 판정이 나므로 벤더를 부르지 않고 보류한다(#986). 보류 표식이 있는 제출은
+                # `_pending_submissions` 가 빼므로 재시도도, 실패 상한의 0% 확정도 없다. 사람이
+                # `release_scoring_hold` 로 풀 때까지 그대로다.
+                reason = (
+                    f"{SCORING_HOLD_ERROR_PREFIX} 소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 "
+                    f"(model={getattr(llm, 'model_version', '')} budget_bytes={source_budget} "
+                    f"omitted_files={omission.omitted_files} omitted_bytes={omission.omitted_bytes} "
+                    f"truncated_files={omission.truncated_files} "
+                    f"omitted_code_files={omission.omitted_code_files} "
+                    f"truncated_code_files={omission.truncated_code_files})"
+                )
+                logger.warning("Submission(pk=%s) %s", submission.id, reason)
+                ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+                return {"submission_id": submission.id, "status": "held", "error": reason}
+            if omission.any:
+                # 사람이 보류를 풀었다(`release_scoring_hold`) — 잘린 채 채점하되 빠진 양을 남긴다.
+                logger.warning(
+                    "Submission(pk=%s) 보류를 푼 제출이라 소스 일부만 채점에 실었다 "
+                    "(omitted_files=%s omitted_bytes=%s omitted_code_files=%s truncated_files=%s)",
+                    submission.id,
+                    omission.omitted_files,
+                    omission.omitted_bytes,
+                    omission.omitted_code_files,
+                    omission.truncated_files,
+                )
+            prompt = _build_prompt(
+                contest=contest, requirements=requirements, source_files=source_files
+            )
+
+            scoring_input = ScoringInput(
+                submission_id=submission.id,
+                contest_id=contest.id,
+                prompt=prompt,
+                source_files=source_files,
+                requirements=requirements,
+            )
+            output = llm.score(scoring_input)
+            percentage = _percentage(requirements=requirements, verdicts=output.verdicts)
+            model_version = output.model_version
+            reasoning_payload = [
+                {"requirement_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning}
+                for v in output.verdicts
+            ]
+            # 실제로 프롬프트에 파일을 하나라도 남긴 자산들만 "쓰였다"고 기록한다
+            # (#191 코드리뷰 지적) — `readable_sources`는 스토리지에서 읽는 데
+            # 성공한 자산 전부지만, 그중 일부는 선별 전략(`select_source_files`)이
+            # 통째로 걸러낼 수 있다(제외 확장자뿐이거나 전부 바이너리인 zip 등).
+            # 그런 자산까지 "쓰였다"고 적으면 Score 스냅샷이 실제로 채점되지 않은
+            # 것을 채점 근거인 것처럼 보여준다 — 이의를 제기하는 사람과 심판하는
+            # 사람이 "같은 것을 보고" 이야기해야 한다는 이 필드의 존재 이유를
+            # 정확히 어긴다.
+            #
+            # `asset.id`로 판정한다 — 라벨 문자열로 되짚으면 두 가지 실제 사고가
+            # 난다: 참가자가 두 자산에 같은 라벨을 붙이면 하나만 쓰이고 다른 하나는
+            # 통째로 걸러졌어도 둘 다 "쓰였다"로 잡히고, 참가자가 라벨을 빈 자산의
+            # 폴백 표시(`_asset_label`의 "소스 자료 #7" 형식)와 똑같이 타이핑하면
+            # 남의 자산 정체성을 흉내낼 수 있다(#191 코드리뷰 지적). `SourceFile.
+            # asset_id`는 `select_source_files`가 만들 때 라벨을 거치지 않고 그대로
+            # 실어 나르므로 이 문제가 없다. `commit_sha`는 `kind=repository`
+            # 자산에만 붙는다(#193) — 소스 자산은 항상 None이다.
+            # `dict.fromkeys`로 순서를 보존한 유일 집합을 만든다 — `source_files`가
+            # 이미 라운드로빈이 고른 순서이므로, 그 순서를 스냅샷에도 그대로
+            # 남긴다(코드리뷰 지적: 자산 객체를 다시 조립해 거르는 중간 단계가
+            # 불필요했다).
+            used_asset_ids = dict.fromkeys(f.asset_id for f in source_files)
+            scored_assets_payload = [
+                {"asset_id": asset_id, "commit_sha": commit_sha_by_asset_id.get(asset_id)}
+                for asset_id in used_asset_ids
+            ]
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
         message = f"{type(exc).__name__}: {exc}"
         logger.exception(
@@ -900,7 +1054,7 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
     return _finalize_score(
         submission,
         percentage=percentage,
-        model_version=output.model_version,
+        model_version=model_version,
         prompt=prompt,
         reasoning_payload=reasoning_payload,
         scored_assets_payload=scored_assets_payload,
@@ -1031,11 +1185,11 @@ def _pending_submissions(as_of, ctx):
             contest__deadline_at__gt=as_of - _REPOSITORY_VISIBILITY_GRACE,
         )
         .annotate(attempt_count=Coalesce(Subquery(attempt_count), 0))
-        # 보류된 제출(#986, `SCORING_HOLD_ERROR_PREFIX`)은 사람이 풀 때까지 다시 고르지 않는다.
+        # 보류된 제출(#986 소스 보류·#1000 에이전트 보류)은 사람이 풀 때까지 다시 고르지 않는다.
         .exclude(
             Exists(
-                ScoringAttempt.objects.filter(
-                    submission_id=OuterRef("pk"), error__startswith=SCORING_HOLD_ERROR_PREFIX
+                ScoringAttempt.objects.filter(submission_id=OuterRef("pk")).filter(
+                    _startswith_any(_HOLD_PREFIXES)
                 )
             )
         )

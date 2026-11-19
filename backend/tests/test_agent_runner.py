@@ -513,8 +513,10 @@ def test_seccomp_profile_does_not_open_clone3_or_setns() -> None:
         assert not opened or rule.get("includes", {}).get("caps") == ["CAP_SYS_ADMIN"], rule
 
 
-def test_nothing_in_the_backend_calls_the_runner_yet() -> None:
-    """배포해도 운영 동작이 그대로다 — 부르는 쪽은 #1000 이 `CONTEST_SCORING_METHOD=agent` 뒤에 더한다."""
+def test_only_the_agent_scorer_calls_the_runner() -> None:
+    """실행기를 부르는 곳은 허용 목록뿐이다 — `scoring.agent_scoring`(#1000)과 완성도 리뷰 `scoring.quality`(#1001),
+    채점 서비스는 예외 이름만 들인다.
+    기본값(`CONTEST_SCORING_METHOD=single_call`)이면 그마저 타지 않는다(`test_agent_scoring.py`)."""
 
     callers = []
     for path in (REPO_ROOT / "backend").rglob("*.py"):
@@ -523,4 +525,13 @@ def test_nothing_in_the_backend_calls_the_runner_yet() -> None:
         text = path.read_text(encoding="utf-8")
         if "agent_runner" in text:
             callers.append(str(path.relative_to(REPO_ROOT)))
-    assert callers == []
+    allowed = {
+        "backend/scoring/agent_scoring.py",
+        "backend/scoring/quality.py",
+        "backend/scoring/services.py",
+    }
+    assert "backend/scoring/agent_scoring.py" in callers
+    assert set(callers) <= allowed, sorted(set(callers) - allowed)
+    services_text = (REPO_ROOT / "backend/scoring/services.py").read_text(encoding="utf-8")
+    assert "from .agent_runner import AgentGraderBusy, AgentGraderError\n" in services_text
+    assert "request_run" not in services_text
