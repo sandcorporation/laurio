@@ -495,9 +495,11 @@ _TRANSIENT_VENDOR_FAILURE = (
 #: #986: 공모전 채점 한 건의 벤더 호출 한도. 예전에는 기본 20초(`core.llm_scoring.
 #: _OPENAI_REQUEST_TIMEOUT_SECONDS`, #88 — 바깥 `call_internal` 30초 안에 들도록)를 그대로
 #: 썼는데, 실제 공모전 입력(약 8.3만 토큰)의 성공 호출이 13~18초라 조금만 큰 저장소도 20초를
-#: 넘었다(공모전 3, ReadTimeout 7건). 성공 최대의 세 배 남짓을 준다. 바깥 예산은 이 스캔만
-#: 따로 늘린다(아래 `SUBMISSION_SCORING_SCAN`).
-CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 60
+#: 넘었다(공모전 3, ReadTimeout 7건). #987 이 60초로 올렸고, 보탬 4 가 채점을 celery 워커 안으로
+#: 옮기면서(아래 `SUBMISSION_SCORING_SCAN`) 강의실과 같은 180초로 맞춘다
+#: (`classroom.scoring.CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS`) — 소스 예산이 모델 컨텍스트를
+#: 따르게 되어(`core.model_context`) 입력이 128K 토큰 가까이 갈 수 있다.
+CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 180
 
 #: 채점 보류 표식(#986) — 앱 코드가 모델 컨텍스트에 다 들어가지 않는 제출의 `ScoringAttempt.error`
 #: 머리. 이 표식이 있는 제출은 채점 대기에서 빠지고(재시도·0% 확정 없음), `release_scoring_hold`
@@ -1060,7 +1062,7 @@ def _score_one(submission, as_of, ctx):
         return {"submission_id": submission.id, "status": status, "error": str(exc)}
 
 
-# 배치 50·예산 20초는 뼈대 기본값 그대로다(#88 코드리뷰 지적 1) — 실물 LLM 은 느린 호출 하나로
+# 배치 50 은 뼈대 기본값 그대로다(예산은 아래 #986 절). 예산을 둔 까닭(#88 코드리뷰 지적 1) — 실물 LLM 은 느린 호출 하나로
 # 30초 HTTP 타임아웃을 넘길 수 있고, 그 상태로 워커가 SIGKILL되면 진행 중이던 건은
 # ScoringAttempt조차 못 남기고 사라져 다음 beat가 같은 앞머리를 다시 집어 똑같이 죽는다.
 # 예산을 넘기면 남은 Submission을 시작하지 않는다 — 나머지는 다음 스캔이 이어받는다.
@@ -1071,24 +1073,21 @@ def _score_one(submission, as_of, ctx):
 # 앞선다. 시도 횟수가 같은 후보끼리는 `id`가 결정적 이차 정렬이라 회차마다 같은
 # 앞머리를 반복해 집는다(순서가 흔들리지 않는다).
 #
-# **#986: 이 스캔만 바깥 예산을 따로 둔다.** 벤더 한도를 `CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`
-# (60초)로 올리면 기본 예산(행 시작 20초 + `call_internal` 30초)에 들지 않는다. 세 값을 함께 맞춘다:
-# - 행 시작 예산 5초 — 성공 호출이 13초 이상이라 사실상 한 번에 한 건이다. 첫 행은 늘 돈다.
-# - HTTP 예산 90초 = 행 시작 5 + 벤더 60 + clone·스토리지·DB 25. 이 안에서 끝나야 부른 쪽이
-#   끊고 재시도(`core.tasks.run_scan` autoretry)해 같은 건을 겹쳐 부르지 않는다.
-# - 주기 120초 — 한 실행(≤90초)이 다음 beat 와 겹치지 않는다. 겹치면 워커(`--concurrency 2`)
-#   둘이 다 이 스캔에 묶여 돈을 움직이는 다른 스캔이 밀린다.
-# gunicorn(gthread)은 긴 요청을 죽이지 않고(`config/gunicorn.conf.py`), 요청 DB 한도는 문 하나
-# 25초라(`core.db_timeouts`) 벤더 대기와 무관하다. 내부 호출은 `http://backend:8000` 직통이라
-# 프록시를 지나지 않는다. 워커 안으로 옮기는 구조 변경은 후속이다.
+# **#986 보탬 4: 이 스캔은 celery 워커 안에서 돈다**(`ScanSpec.worker_time_limit_seconds`). 내부 HTTP
+# (`call_internal` 30초, #987 의 90초)에 벤더 180초가 들지 않기 때문이다. 세 값을 함께 맞춘다:
+# - 행 시작 예산 60초 — 첫 행은 늘 돌고, 성공 호출(13~18초)이면 한 실행에 몇 건을 잇는다.
+# - 실행 상한 300초 = 행 시작 60 + 벤더 180 + clone·스토리지·DB 60. 실행 잠금(`core.scan_lock`)도
+#   이 시간이라, 앞 실행이 도는 동안 beat 가 다시 보낸 실행은 바로 건너뛴다 — 워커(`--concurrency 2`)
+#   둘이 다 이 스캔에 묶이지 않고, 같은 앞머리를 겹쳐 집지 않는다.
+# - 주기 60초(기본) — 잠금이 겹침을 막으므로 짧게 둔다. 밀린 메시지는 주기 안에 버린다(expires).
+# 실패 횟수·상한의 뜻은 #987 그대로다(시간 초과·판정 누락은 상한에 세지 않는다).
 SUBMISSION_SCORING_SCAN = ScanSpec(
     name="submission-scoring",
     candidates=_pending_submissions,
     handle_row=_score_one,
     order_by=("attempt_count", "id"),
-    time_budget_seconds=5.0,
-    request_timeout_seconds=90.0,
-    interval_seconds=120.0,
+    time_budget_seconds=60.0,
+    worker_time_limit_seconds=60.0 + CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS + 60.0,
     # #991: 공모전 AI 채점 스위치(운영 설정 `CONTEST_AI_SCORING`, 값이 없으면 꺼짐). 꺼지면 시도 기록·
     # 실패 상한 0%·「입력 없음」 0% 가 하나도 생기지 않는다 — 이 스캔이 통째로 돌지 않는다.
     enabled=contest_ai_scoring_enabled,

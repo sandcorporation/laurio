@@ -506,24 +506,23 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 `docker/*.env.example`을 건드리지 않기 위해서다, #274와 같은 판단) — 공모전
 채점·저장소 스캔 동작은 그대로다.
 
-**채점에 실리는 파일은 「코드 확장자만」이 아니라 「알려진 잡음만 뺀 텍스트 전부」다**
-(2026-10-02, `core.source_selection`). zip 안에서 벤더·빌드 디렉터리(`node_modules`·
-`dist` 등), 잠금 파일(`package-lock.json`·`uv.lock` 등), 압축 번들·소스맵(`.min.js`·
-`.map`), 이미지·아카이브·폰트 같은 바이너리 확장자, 맥 zip 의 `__MACOSX/`·`.DS_Store`
-만 빼고, 나머지는 NUL 바이트 없이 UTF-8 로 읽히면 **앱 코드부터**(#986, `selection_tier`:
-앱 코드 → README → 그 밖의 텍스트 → 시험·문서·스크래치·생성물·배포·CI·숨은 폴더, 같은 차례 안은
-경로 이름 순) 예산(`MAX_SOURCE_BYTES`, 약 300KB)까지 싣는다(NUL 이 프롬프트에 실리면 채점 결과 저장이
-PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
-`.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는 `README` 를 조용히 버렸다.
-공모전과 강의실 채점이 같은 모듈을 쓴다. 대가는 예산이다 — 앱 코드 확장자인 큰 파일
-(코드로 쓴 데이터 등)은 여전히 다른 코드의 몫을 먹는다; 그런 파일이 실제로 문제가 되면
-`EXCLUDED_FILE_NAMES`·`EXCLUDED_SUFFIXES` 에 한 줄 더한다. 공모전 채점의 예산은 부를 모델의
-컨텍스트에서 정하고(`core.model_context.source_budget_bytes`, 모르는 모델은 128K), **앱 코드가 그 안에
-다 들어가지 않으면 벤더를 부르지 않고 보류한다** — 시도 기록이 `SourceOverBudgetHold:` 로 시작하고,
+**채점에 실리는 파일은 「알려진 잡음과 「코드 아님」을 뺀 텍스트 전부」다**(2026-10-02, #986 보탬 4,
+`core.source_selection.excluded_kind` 한 자리 — 공모전·강의실 선별과 강의실 문법 검사가 같이 본다). zip
+안에서 벤더·빌드 디렉터리(`node_modules`·`dist` 등)·잠금 파일·압축 번들·소스맵·바이너리, 맥 zip 의
+`__MACOSX/`·`.DS_Store` 에 더해 **구현을 증명하지 않는 것**을 뺀다: 문서(`docs/`, `*.md`·`*.mdx`·`*.rst`,
+루트 `README.md` 는 남긴다), 스크래치·도구(`.scratch/`·`experiments/`·`.claude/`·`.github/`·`.vscode/` 등),
+생성물(`.sqlx/`·`generated/`, `*.snap`·`*.svg`·`*.csv`·`*.lock`·`schema.d.ts`), 시험(`tests/`·`e2e/`·
+`spec/` 등, `*.test.*`·`*.spec.*`·`test_*.py`·`*_test.go|py`), 데이터 json(`package.json`·`tsconfig.json`·
+`composer.json` 만 남긴다). **yml/toml/sql/conf/Dockerfile/compose·migrations·`.txt` 는 남긴다** — 미디어
+서버 설정·마이그레이션·compose 볼륨이 송출·녹화·영구 저장 요구사항의 근거이고, `.txt` 는 Packet Tracer
+장비 설정이다. 남은 것은 NUL 바이트 없이 UTF-8 로 읽히면 **앱 코드부터**(`selection_tier`: 앱 코드 →
+README → 그 밖(설정·마이그레이션·배포·숨은 폴더), 같은 차례 안은 경로 이름 순) 예산까지 싣는다(NUL 이
+프롬프트에 실리면 채점 결과 저장이 PostgreSQL `DataError` 로 깨진다). 공모전 채점의 예산은 부를 모델의
+컨텍스트에서 정하고(`core.model_context.source_budget_bytes`, 모르는 모델은 128K), **남은 것이 하나라도 그
+안에 다 들어가지 않으면 벤더를 부르지 않고 보류한다** — 시도 기록이 `SourceOverBudgetHold:` 로 시작하고,
 재시도도 실패 상한의 0% 확정도 없다. `manage.py release_scoring_hold <제출 id…>` 로 풀면 실린 만큼으로
-채점한다(ADR-0027 개정). 앱 코드는 다 실리고 뒤 차례만 빠진 제출은 채점하되 빠진 양을 경고 로그
-「소스가 예산을 넘어 일부만 채점에 실었다」로 남긴다(`SelectionOmission`). 강의실은 `MAX_SOURCE_BYTES`
-로 잘라 그대로 채점한다.
+채점하고 빠진 양을 경고 로그로 남긴다(ADR-0027 개정). 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
+채점한다.
 
 **zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
 `classroom.git_history_hint`). 위 제외 목록이 `.git/` 를 빼므로, 받는 형식에 소스(zip)가
@@ -866,7 +865,8 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 **채점은 반드시 끝난다**(ADR-0031). 실패가 5회에 이르고 **동시에** 마감 후 6시간이 지나면
 0% 로 확정한다. 영구 실패는 유예를 기다리지 않고 즉시 끝난다. 벤더 시간 초과·판정 누락은
 그 5회에 세지 않는다 — 그것까지 합쳐야 5회면 마감 후 24시간이 지나야 끝난다(#986). 공모전
-채점의 벤더 한도는 60초, 채점 스캔은 HTTP 예산 90초·주기 120초로 따로 돈다.
+채점은 celery 워커 안에서 돈다(#986 보탬 4, `ScanSpec.worker_time_limit_seconds`) — 벤더 한도 180초,
+행 시작 예산 60초, 실행 상한 300초(잠금 `core.scan_lock` 으로 한 번에 한 실행), 주기 60초.
 판정 응답 스키마는 요청에 실은 requirement_id 를 키로 한 객체라(선택 요구사항 포함, 전부 required)
 구조화 출력이 판정을 빠뜨리지 못한다(#986, 공모전·강의실·Claude 공통).
 

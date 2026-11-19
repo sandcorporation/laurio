@@ -49,7 +49,7 @@ pg_restore --clean --if-exists --no-owner -h <host> -U codemit -d codemit <덤�
 cd backend && uv run python manage.py create_operator <아이디> --superuser
 ```
 
-보류된 공모전 채점(#986 — 앱 코드가 모델 컨텍스트를 넘어 벤더를 부르지 않은 제출, 시도 기록이
+보류된 공모전 채점(#986 — 「코드 아님」을 뺀 소스가 모델 컨텍스트를 넘어 벤더를 부르지 않은 제출, 시도 기록이
 `SourceOverBudgetHold:` 로 시작한다)은 저절로 끝나지 않는다. 보고 정하면 풀어 실린 만큼으로 채점한다 —
 Score 없는 제출은 배분 컷라인에서 빠지므로 심사기간 안에:
 

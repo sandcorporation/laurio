@@ -13,6 +13,9 @@ ADR-0003: 스캔 진입점은 내부 인증 HTTP 엔드포인트다 — 워커·
 
 - `contests.index_contest`(#450) — 공모전 하나를 검색 색인에 다시 싣는 멱등 갱신이라 HTTP
   경계를 하나 더 둘 이유가 없다.
+- 공모전 채점 스캔(`submission-scoring`, #986 보탬 4) — 벤더 한도 180초가 요청 하나에 들지 않는다.
+  같은 `core.run_scan` 태스크가 `ScanSpec.worker_time_limit_seconds` 를 보고 엔드포인트 대신 스캔을 직접
+  부른다. 엔드포인트(`/api/internal/scans/submission-scoring`)는 수동·시험용으로 그대로 있다.
 
 강의실 채점은 celery 태스크가 아니다 — 상주 프로세스 `manage.py grader`(ADR-0059, #584)가
 큐를 읽어 채점한다. #582 부터 #584 전까지는 워커 안의 `classroom.score_attempt` 태스크였다.
@@ -73,7 +76,11 @@ def run_scan(name: str) -> dict:
         # 런타임 스위치로 꺼진 스캔(#991, `keep_scheduled_when_disabled`) — beat 일정에는 남아 있지만
         # 엔드포인트를 부르지 않는다(부르면 404 를 실패로 남긴다).
         return {"scan": name, "skipped": "disabled"}
-    # 스캔마다 자기 HTTP 한도(#986) — 등록부 밖의 이름은 기본값으로 불러 엔드포인트가 404 로 거부한다.
-    timeout = spec.request_timeout_seconds if spec is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
-    return call_internal(f"/api/internal/scans/{name}", timeout=timeout)
+    if spec is not None and spec.worker_time_limit_seconds is not None:
+        # 워커 안에서 도는 스캔(#986 보탬 4) — 아래 docstring 의 예외. 「두 번 쏴도 한 번만」은 행 처리의
+        # 조건부 기록과 실행 잠금(`core.scan_lock`)이 지킨다.
+        from core.scans import run_scan as run_scan_in_worker
+
+        return run_scan_in_worker(name)
+    return call_internal(f"/api/internal/scans/{name}", timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS)
 

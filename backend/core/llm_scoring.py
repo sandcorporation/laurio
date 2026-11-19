@@ -330,7 +330,7 @@ _OPENAI_DEFAULT_TEMPERATURE = 0
 # `classroom.scoring.CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS`). 키 확인·모델 목록
 # 조회는 사람이 기다리는 요청 안이라 이 값을 그대로 쓴다. 공모전 채점도 이제 이 값을 쓰지
 # 않는다 — 실제 공모전 입력이 20초를 넘어(#986) 자기 값(`scoring.services.
-# CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`)과 그에 맞춘 스캔 HTTP 예산을 넘긴다.
+# CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`, 180초)을 넘기고, 보탬 4 부터 강의실처럼 워커 안에서 돈다.
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
 _OPENAI_SYSTEM_PROMPT = (
     # 공모전과 강의실이 함께 쓴다 — 제품 이름을 적지 않는다(무엇을 채점하는지는
