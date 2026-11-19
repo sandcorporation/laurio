@@ -467,6 +467,14 @@ function ChecklistWithVerdict({
           {customGuideline}
         </p>
       )}
+      {items.some((item) => !item.required) ? (
+        <p
+          data-testid="my-problem-advanced-note"
+          className="border-t border-rule px-4 py-2 text-[12.5px] text-ink/60"
+        >
+          <Badge tone="advanced">심화</Badge> 안 해도 통과, 더 해 보고 싶을 때 도전
+        </p>
+      ) : null}
       <ul data-testid="my-problem-checklist" className="divide-y divide-rule border-t border-rule">
         {syntaxCheckEnabled ? (
           <ChecklistLine
