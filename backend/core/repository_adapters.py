@@ -44,6 +44,7 @@ import hashlib
 import io
 import logging
 import re
+import tempfile
 import zipfile
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -235,8 +236,12 @@ _GITHUB_API_BASE = "https://api.github.com"
 _REQUEST_TIMEOUT_SECONDS = 15
 # codeload 응답을 무한정 메모리에 올리지 않는다 — 300KB 채점 예산에 비해 넉넉한
 # 상한이지만(select_source_files가 어차피 그 예산까지만 쓴다), 저장소 하나가
-# 통째로 수백 MB일 수 있으므로 다운로드 자체에 상한을 둔다.
-_MAX_CLONE_DOWNLOAD_BYTES = 20_000_000
+# 통째로 수백 MB일 수 있으므로 다운로드 자체에 상한을 둔다. 100MB(#996, 대표 결정) —
+# 짝: `core.source_selection.MAX_CONVERTER_INPUT_BYTES`(같은 값, 시험이 못 박는다).
+_MAX_CLONE_DOWNLOAD_BYTES = 100_000_000
+# 다운로드 조각은 이 크기까지만 메모리에 두고 넘으면 임시 파일로 흘린다 — 조각 리스트를
+# `b"".join` 하면 100MB 가 두 벌(조각 + 합친 것)이 된다. 파일에서 한 번 읽으면 한 벌이다.
+_CLONE_SPOOL_MEMORY_BYTES = 8_000_000
 
 
 class GitHubAPIAdapter:
@@ -448,18 +453,18 @@ class GitHubAPIAdapter:
                     f"owner={owner}, repo={repo})."
                 )
 
-            chunks: list[bytes] = []
             total = 0
-            for chunk in zip_response.iter_content(chunk_size=65536):
-                total += len(chunk)
-                if total > _MAX_CLONE_DOWNLOAD_BYTES:
-                    raise GitHubAdapterError(
-                        f"저장소 zip이 다운로드 상한({_MAX_CLONE_DOWNLOAD_BYTES}바이트)을 "
-                        f"넘었다(owner={owner}, repo={repo})."
-                    )
-                chunks.append(chunk)
-
-        return b"".join(chunks)
+            with tempfile.SpooledTemporaryFile(max_size=_CLONE_SPOOL_MEMORY_BYTES) as spool:
+                for chunk in zip_response.iter_content(chunk_size=65536):
+                    total += len(chunk)
+                    if total > _MAX_CLONE_DOWNLOAD_BYTES:
+                        raise GitHubAdapterError(
+                            f"저장소 zip이 다운로드 상한({_MAX_CLONE_DOWNLOAD_BYTES}바이트)을 "
+                            f"넘었다(owner={owner}, repo={repo})."
+                        )
+                    spool.write(chunk)
+                spool.seek(0)
+                return spool.read()
 
 
 def get_github_adapter() -> GitHubAdapter:

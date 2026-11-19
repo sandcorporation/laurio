@@ -261,3 +261,38 @@ def test_clone_at_a_pinned_commit_skips_the_default_branch_lookup(monkeypatch):
 
     assert cloned.commit_sha == "d" * 40
     assert requested == [f"https://codeload.github.com/acme/widgets/zip/{'d' * 40}"]
+
+
+def _clone_with_chunks(monkeypatch, chunks):
+    def fake_get(url, *args, **kwargs):
+        if url == "https://api.github.com/repos/acme/widgets":
+            return _FakeResponse(status_code=200, json_body={"default_branch": "main", "private": False})
+        if "/branches/" in url:
+            return _FakeResponse(status_code=200, json_body={"commit": {"sha": "c" * 40}})
+        return _FakeResponse(status_code=200, chunks=chunks)
+
+    monkeypatch.setattr("requests.get", fake_get)
+    return GitHubAPIAdapter(token="").clone("https://github.com/acme/widgets")
+
+
+def test_a_repository_zip_over_the_old_20mb_limit_is_downloaded_whole_and_in_order(monkeypatch):
+    """#996 — 상한이 100MB 다: 20MB 를 넘는 zip 도 바이트 하나 안 틀리고 받는다(임시 파일로 흘려도)."""
+
+    chunk = bytes(range(256)) * 256  # 64KiB
+    chunks = [chunk[i % 7 :] + chunk[: i % 7] for i in range(400)]  # 약 26MB, 조각마다 다르다
+    result = _clone_with_chunks(monkeypatch, chunks)
+
+    assert result.zip_bytes == b"".join(chunks)
+    assert len(result.zip_bytes) > 20_000_000
+
+
+def test_a_repository_zip_over_the_download_limit_is_refused(monkeypatch):
+    monkeypatch.setattr("core.repository_adapters._MAX_CLONE_DOWNLOAD_BYTES", 1000)
+    with pytest.raises(GitHubAdapterError, match="다운로드 상한"):
+        _clone_with_chunks(monkeypatch, [b"x" * 600, b"y" * 600])
+
+
+def test_the_converter_input_limit_matches_the_repository_download_limit():
+    from core import repository_adapters, source_selection
+
+    assert source_selection.MAX_CONVERTER_INPUT_BYTES == repository_adapters._MAX_CLONE_DOWNLOAD_BYTES == 100_000_000

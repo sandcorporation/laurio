@@ -505,7 +505,8 @@ services:
     stop_grace_period: 4m
     # 상한이 없으면 메모리를 다 쓰는 일이 같은 호스트의 DB 까지 OOM 에 끌어들일 수 있다(#584 점검).
     # 64건의 요청·응답 본문(응답은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES` 까지)·소스 읽기에 넉넉한 값이다.
-    mem_limit: 1g
+    # 소스 읽기 스레드 8개가 저장소 zip(최대 100MB, #996)을 한 벌씩 쥐는 최악(800MB)에 변환 입력·응답이 얹혀도 든다.
+    mem_limit: 2g
     healthcheck:
       # 생존 신호 파일(core/heartbeat.py, 15초 주기)이 90초 안에 갱신됐는지 — redis 없이 mtime 만 본다(#949).
       # unhealthy 는 redis 키가 끊긴 것과 같은 뜻이라 backend 의 /api/health 가 503 으로 드러낸다.
