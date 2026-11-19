@@ -11,3 +11,12 @@ def check_price_drift() -> dict:
     from classroom.price_drift import run_price_drift_check
 
     return run_price_drift_check()
+
+
+@shared_task(name="classroom.refresh_scoring_models", ignore_result=True)
+def refresh_scoring_models(class_id: int) -> None:
+    """5분 넘은 채점 모델 목록을 응답 뒤에 다시 묻고 캐시를 갈아 둔다(#1051). 실패하면 묵은 캐시를 둔다."""
+
+    from classroom.scoring_model_catalog import refresh_cached_models
+
+    refresh_cached_models(class_id)
