@@ -109,8 +109,8 @@ PAID_CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_PAID_CONTEST_PRODUCT_ENABLED",
 PRIVACY_POLICY_EFFECTIVE_DATE = date(2026, 11, 6)
 
 # 플랫폼 채점(공모전 채점·완성도)을 Claude(Anthropic)로 돌려도 되는 날(#994). 지금 방침 5·6항은 Anthropic
-# 이전을 「강사가 Claude 키로 연결한 클래스」로만 적고 공모전 채점은 적지 않았다 — 그래서 **없음(None)이었고,
-# 없으면 운영 설정의 채점 벤더에 anthropic 을 저장할 수 없다**(`core.privacy_policy.platform_anthropic_scoring_open`).
+# 이전을 「강사가 Claude 키로 연결한 클래스」로만 적고 공모전 채점은 적지 않았다. 이 날짜는 방침 화면 잠금 시험만
+# 본다 — 채점 벤더 저장·실행 토큰·Claude 어댑터는 더 막지 않는다(대표 결정 2026-11-20, 위험은 대표가 진다).
 # 방침에 공모전 채점의 Anthropic 이전을 더한 개정(#997)의 시행일(KST 0시) — 화면 `EFFECTIVE_ISO` 와 같은 값이다.
 PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE: date | None = date(2026, 11, 27)
 

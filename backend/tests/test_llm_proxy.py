@@ -333,11 +333,10 @@ def test_codex_stream_usage_is_recorded_and_summed():
 # --- 발급 ----------------------------------------------------------------------------------------
 
 
-def test_anthropic_token_is_not_issued_before_policy_covers_it(settings):
+def test_anthropic_token_is_issued_whatever_the_policy_date(settings):
+    """대표 결정(2026-11-20): 방침 시행일로 막지 않는다."""
     settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE = None
-    with pytest.raises(RunTokenRefused):
-        _issue()
-    assert _issue(vendor="openai", model=GPT).token.startswith("cmrt_")
+    assert _issue().token.startswith("cmrt_")
 
 
 def test_unknown_price_model_is_not_issued():

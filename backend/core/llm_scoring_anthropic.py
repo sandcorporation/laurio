@@ -560,14 +560,10 @@ __all__ = [
 def platform_adapter(*, timeout: float | None = None) -> AnthropicScoringAdapter:
     """플랫폼 채점(공모전 채점·완성도)의 Claude 어댑터(#994) — `core.llm_scoring.get_adapter` 가 운영 설정의
     채점 벤더가 anthropic 일 때 부른다. 키·모델은 운영 설정(DB → env)에서 읽는다. 키가 비면 OpenAI 키
-    없음과 같은 `LLMAdapterError` 다. 방침이 덮지 않으면(env 로 벤더를 넣은 경우) 같은 갈래로 막는다."""
+    없음과 같은 `LLMAdapterError` 다."""
 
     from policies.runtime_settings import setting_value
 
-    from core.privacy_policy import platform_anthropic_scoring_open
-
-    if not platform_anthropic_scoring_open():
-        raise LLMAdapterError("개인정보처리방침이 공모전 채점의 Anthropic 이전을 덮지 않아 Claude 로 채점하지 않는다.")
     api_key = setting_value("ANTHROPIC_API_KEY")
     if not api_key:
         raise LLMAdapterError("ANTHROPIC_API_KEY가 비어 있다 — 운영 설정 화면이나 환경변수로 넣는다.")

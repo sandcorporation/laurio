@@ -94,16 +94,13 @@ def test_new_settings_show_defaults_and_hide_the_key(su, monkeypatch):
 # --- 저장 규칙 -----------------------------------------------------------------
 
 
-def test_anthropic_is_refused_while_the_policy_does_not_cover_contest_scoring(save):
-    response = save("LLM_SCORING_VENDOR", "anthropic")
-    assert response.status_code == 422
-    assert response.json()["code"] == "privacy_not_covered"
-    assert RuntimeSetting.objects.count() == 0
+def test_anthropic_can_be_saved_whatever_the_policy_date(save, settings, su):
+    """대표 결정(2026-11-20): 방침 시행일과 상관없이 anthropic 을 저장한다 — 위험은 대표가 진다."""
 
-
-def test_anthropic_is_refused_before_the_policy_date(save, settings):
-    settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE = NOT_YET
-    assert save("LLM_SCORING_VENDOR", "anthropic").json()["code"] == "privacy_not_covered"
+    for when in (None, NOT_YET):
+        settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE = when
+        assert save("LLM_SCORING_VENDOR", "anthropic").status_code == 200
+        assert _views(su)["LLM_SCORING_VENDOR"]["value"] == "anthropic"
 
 
 def test_values_outside_the_choices_are_refused_without_echo(save):
@@ -157,12 +154,12 @@ def test_missing_anthropic_key_fails_like_a_missing_openai_key(save, settings):
         get_adapter(timeout=60)
 
 
-def test_env_vendor_cannot_send_to_anthropic_while_the_policy_does_not_cover_it(settings, monkeypatch):
+def test_env_vendor_sends_to_anthropic_whatever_the_policy_date(settings, monkeypatch):
+    settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE = None
     settings.LLM_ADAPTER_MODE = REAL_OPENAI
     monkeypatch.setenv("LLM_SCORING_VENDOR", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", ANT_KEY)
-    with pytest.raises(LLMAdapterError, match="개인정보처리방침"):
-        get_adapter()
+    assert type(get_adapter()).__name__ == "AnthropicScoringAdapter"
 
 
 def test_fake_mode_stays_fake_whatever_the_vendor(settings, monkeypatch):

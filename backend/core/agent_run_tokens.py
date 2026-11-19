@@ -5,7 +5,7 @@
 확인해 진짜 키를 붙인다(#992 보고서 6-4).
 
 - **발급**: `issue_run_token` — 채점기(신뢰 영역)가 실행마다 부른다. 묶인 값은 제출 id·용도·벤더·모델·
-  예산(기본 $1)·만료(15분). Anthropic 은 방침이 덮을 때만(`platform_anthropic_scoring_open`) 발급한다.
+  예산(기본 $1)·만료(15분).
   단가를 모르는 모델은 상한을 걸 수 없으므로 발급하지 않는다.
 - **확인**: `authorize` — 프록시가 요청마다 부른다. 거절 이유는 `Refusal` 하나로 돌려준다.
 - **기록**: `record_usage` — 프록시가 응답을 다 흘려보낸 뒤 usage 와 비용을 그 토큰 행에 더한다.
@@ -35,7 +35,6 @@ from django.utils import timezone
 from classroom.scoring_cost import ModelPrice, price_for
 from core.clock import Clock
 from core.models import AgentRunToken
-from core.privacy_policy import platform_anthropic_scoring_open
 from policies.runtime_settings import ScoringVendor, agent_scoring_daily_limit_usd
 
 #: 실행 하나의 기본 예산(USD) — 공모전 3 실측 1건 $0.09~0.21 의 다섯 배쯤.
@@ -105,7 +104,6 @@ RefusalCode = Literal[
     "expired",
     "wrong_vendor",
     "wrong_model",
-    "vendor_closed",
     "run_budget",
     "daily_limit",
 ]
@@ -140,8 +138,6 @@ def issue_run_token(
         raise RunTokenRefused(f"알 수 없는 용도: {purpose}")
     if vendor not in _VENDORS:
         raise RunTokenRefused(f"알 수 없는 벤더: {vendor}")
-    if vendor == "anthropic" and not platform_anthropic_scoring_open():
-        raise RunTokenRefused("Anthropic 채점은 개인정보 처리방침이 덮기 전이다")
     if price_for(model) is None:
         raise RunTokenRefused(f"단가를 모르는 모델이라 비용 상한을 걸 수 없다: {model}")
     if budget_usd <= 0:
@@ -195,8 +191,6 @@ def authorize(token: str | None, *, vendor: ScoringVendor, model: str | None) ->
         return Refusal("wrong_vendor", 403, "이 실행 토큰은 다른 벤더 것이다")
     if model != row.model:
         return Refusal("wrong_model", 403, f"이 실행 토큰은 모델 {row.model} 만 부를 수 있다")
-    if vendor == "anthropic" and not platform_anthropic_scoring_open():
-        return Refusal("vendor_closed", 403, "Anthropic 채점은 개인정보 처리방침이 덮기 전이다")
     if row.spent_usd >= row.budget_usd:
         return Refusal("run_budget", 429, f"실행 예산 ${row.budget_usd} 을 다 썼다")
     limit = agent_scoring_daily_limit_usd()
