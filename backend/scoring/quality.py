@@ -12,6 +12,9 @@
   싣는다 — Score 와 같은 것을 보고 매기고, 스토리지·GitHub 를 한 번 더 치지 않는다. 그 글은 참가자가 낸
   데이터라 `core.quality_review.build_prompt` 가 `neutralize_untrusted` 로 무력화해 경계 안에 넣는다.
 - **키**: `core.llm_scoring.get_adapter()` — Score 와 같은 플랫폼 어댑터다.
+- **에이전트 판(#1001)**: `CONTEST_SCORING_METHOD=agent` 면 위 「무엇을 읽나」 대신 `scoring.quality_agent` 가
+  박제본을 채점과 같은 격리·프록시로 읽는다. 두 번 다 받아들이는 조건을 어기면 **보류** — 영구 실패 이력
+  (`HELD_ERROR_PREFIX`)만 남기고 0~5 를 지어내지 않는다. 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않는다.
 - **실패**: `QualityReviewAttempt` 에 남긴다. 영구 실패(`LLMAdapterPermanentError`)가 하나라도 있거나
   `QUALITY_FAILURE_LIMIT` 번 실패하면 더 집지 않는다. 0% 같은 대체값을 지어내지 않는다 — 완성도는 상금과
   무관하니 「없음」으로 남겨도 아무것도 막지 않는다.
@@ -41,15 +44,21 @@ from core.quality_review import (
     records,
 )
 from core.scans import ScanSpec
-from policies.runtime_settings import contest_ai_scoring_enabled
+from core.agent_run_tokens import RunTokenRefused
+from policies.runtime_settings import SCORING_METHOD_AGENT, contest_ai_scoring_enabled, contest_scoring_method
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
+from .agent_runner import AgentGraderBusy
 from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
+from .quality_agent import QualityReviewHeld, review_with_agent
 
 logger = logging.getLogger(__name__)
 
 #: 이 횟수만큼 실패하면 더 집지 않는다 — Score 의 실패 상한(`SCORING_FAILURE_LIMIT`)과 같은 수.
 QUALITY_FAILURE_LIMIT = 5
+
+#: 에이전트 리뷰 보류(`QualityReviewHeld`)의 실패 이력 머리 — 운영자가 보류를 일반 실패와 가려 본다.
+HELD_ERROR_PREFIX = "보류(받아들이는 조건 불일치): "
 
 #: AI 가 소스를 읽지 않은 자동 0% Score 들 — 완성도를 매기지 않는다.
 SKIPPED_SCORE_MODEL_VERSIONS = (NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION)
@@ -116,24 +125,29 @@ def review_submission_once(submission: ContestSubmission) -> dict:
         return {"submission_id": submission.id, "status": "already_reviewed"}
     contest = submission.contest
     items = requirement_inputs(list(Requirement.objects.filter(contest=contest).order_by("order", "id")))
-    source = _submission_text(submission.score)
-    prompt = build_prompt(
-        title=contest.title, description="", guideline_text=_CONTEST_GUIDELINE, items=items, submission_text=source
-    )
-    adapter = get_adapter()
-    if not isinstance(adapter, QualityReviewAdapter):
-        raise LLMAdapterPermanentError("이 채점 어댑터는 완성도를 매기지 못한다.")
-    output = adapter.review_quality(
-        QualityInput(submission_id=submission.id, prompt=prompt, items=tuple(items), source_text=source)
-    )
-    scored = records(output.scores)
+    if contest_scoring_method() == SCORING_METHOD_AGENT:
+        agent = review_with_agent(submission, items)
+        prompt, scores, model_version = agent.prompt, agent.scores, agent.model_version
+    else:
+        source = _submission_text(submission.score)
+        prompt = build_prompt(
+            title=contest.title, description="", guideline_text=_CONTEST_GUIDELINE, items=items, submission_text=source
+        )
+        adapter = get_adapter()
+        if not isinstance(adapter, QualityReviewAdapter):
+            raise LLMAdapterPermanentError("이 채점 어댑터는 완성도를 매기지 못한다.")
+        output = adapter.review_quality(
+            QualityInput(submission_id=submission.id, prompt=prompt, items=tuple(items), source_text=source)
+        )
+        scores, model_version = list(output.scores), output.model_version
+    scored = records(scores)
     total = quality_total(scored, points_by_requirement(contest.id))
     try:
         with transaction.atomic():
             SubmissionQualityReview.objects.create(
                 submission_id=submission.id,
                 checklist_fingerprint=checklist_fingerprint(items),
-                model_version=output.model_version,
+                model_version=model_version,
                 prompt=prompt,
                 items=scored,
                 **historical_columns(total),
@@ -148,6 +162,16 @@ def _review_one(submission, as_of, ctx):
     del as_of, ctx
     try:
         return review_submission_once(submission)
+    except (AgentGraderBusy, RunTokenRefused) as exc:
+        # 실행기가 바쁘거나 오늘 예산이 찼다 — 제출 탓이 아니니 실패로 세지 않고 다음 스캔에 다시 집는다.
+        return {"submission_id": submission.id, "status": "deferred", "error": f"{type(exc).__name__}: {exc}"}
+    except QualityReviewHeld as exc:
+        # 두 번 다 받아들이는 조건을 어겼다 — 보류. 0~5 를 지어내지 않고, 다시 돌려 예산을 쓰지 않도록 더 집지 않는다.
+        logger.warning("Submission(pk=%s) 완성도 에이전트 리뷰 보류: %s", submission.id, exc)
+        QualityReviewAttempt.objects.create(
+            submission_id=submission.id, error=f"{HELD_ERROR_PREFIX}{exc}"[:2000], permanent=True
+        )
+        return {"submission_id": submission.id, "status": "held", "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - 한 건의 실패가 배치를 막지 않는다.
         if not isinstance(exc, LLMAdapterError):
             logger.exception("Submission(pk=%s) 완성도 채점 중 예외, 다음 건으로 계속", submission.id)
