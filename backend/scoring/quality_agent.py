@@ -54,13 +54,13 @@ def review_with_agent(submission: ContestSubmission, items: Sequence[QualityItem
 
     from .agent_snapshot import contest_snapshot
 
-    prompt = build_agent_prompt(title=submission.contest.title, items=items)
+    title = submission.contest.title
     try:
         outcome = agent_scoring.run_agent_job(
             agent_scoring.AgentJob(
                 submission=submission,
                 purpose="quality",
-                prompt=prompt,
+                build_prompt=lambda model: build_agent_prompt(title=title, items=items, model=model),
                 output_schema=agent_response_schema(),
                 expected_ids=frozenset(i.item_id for i in items),
                 items_key=ITEMS_KEY,
@@ -72,7 +72,7 @@ def review_with_agent(submission: ContestSubmission, items: Sequence[QualityItem
     except agent_scoring.AgentRunHeld as exc:
         raise QualityReviewHeld(exc.reasons) from exc
     scores = parse_content(with_evidence(outcome.structured_output), items=items, submission_id=submission.id)
-    return AgentReview(prompt=prompt, scores=scores, model_version=outcome.model_version)
+    return AgentReview(prompt=outcome.prompt, scores=scores, model_version=outcome.model_version)
 
 
 __all__ = [

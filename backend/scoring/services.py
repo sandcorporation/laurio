@@ -636,11 +636,10 @@ def _score_with_agent(
 ) -> tuple[str, list[dict], Decimal, str] | dict:
     """에이전트 채점 한 건 — 받아들이면 (지침, 판정 이유, 달성률, model_version), 보류면 스캔 결과 dict."""
 
-    prompt = build_scoring_prompt(requirements)
     job = AgentJob(
         submission=submission,
         purpose="scoring",
-        prompt=prompt,
+        build_prompt=lambda model: build_scoring_prompt(requirements, model=model),
         output_schema=SCORING_OUTPUT_SCHEMA,
         expected_ids=frozenset(r.requirement_id for r in requirements),
         items_key=ITEMS_KEY,
@@ -693,7 +692,7 @@ def _score_with_agent(
         {"requirement_id": v.requirement_id, "is_met": v.is_met, "reasoning": v.reasoning} for v in verdicts
     ]
     return (
-        prompt,
+        outcome.prompt,
         reasoning_payload,
         _percentage(requirements=requirements, verdicts=verdicts),
         outcome.model_version,

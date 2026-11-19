@@ -91,7 +91,7 @@ class ClassKey:
 class AgentJob:
     submission: Submission  # 공모전·강의실 제출 모두(자산은 바탕 `Submission` 에 붙는다)
     purpose: Literal["scoring", "quality"]  # issue_run_token 의 purpose 로 간다
-    prompt: str  # 지침 전문(호출자가 만든다)
+    build_prompt: Callable[[str], str]  # 모델 → 지침 전문(호출자가 준다). 모델을 정한 뒤에 부른다(#1048)
     output_schema: dict  # JSON 스키마(호출자가 만든다) — 계약 서명 그대로(#1000 댓글)
     expected_ids: frozenset[int]  # 응답 items 의 id 가 정확히 이 집합이어야 한다
     items_key: str  # 응답에서 항목 배열의 키 (채점 "verdicts", 리뷰 "items" 등)
@@ -106,6 +106,7 @@ class AgentJobOutcome:
     structured_output: dict  # 받아들인 응답
     model_version: str  # f"agent:{vendor}:{model}" — 리뷰·Score 기록에 그대로 쓴다
     record: dict  # 시도 기록 원본
+    prompt: str  # CLI 에 넘긴 지침 전문 — 기록(`Score.prompt` 등)에 이것을 남긴다(#1048)
 
 
 class AgentRunHeld(Exception):
@@ -453,7 +454,7 @@ def agent_model(vendor: Vendor) -> str:
     return setting_value("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
 
 
-def _attempt(job: AgentJob, *, vendor: Vendor, model: str, snapshot: Snapshot, index: _LineIndex) -> tuple[list[str], dict[str, JSON], JSON]:
+def _attempt(job: AgentJob, *, vendor: Vendor, model: str, prompt: str, snapshot: Snapshot, index: _LineIndex) -> tuple[list[str], dict[str, JSON], JSON]:
     issued = issue_run_token(
         submission_id=job.submission.id,
         purpose=job.purpose,
@@ -465,7 +466,7 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, snapshot: Snapshot, i
     spec = RunSpec(
         vendor=vendor,
         model=model,
-        prompt=job.prompt,
+        prompt=prompt,
         output_schema=job.output_schema,
         run_token=issued.token,
         max_budget_usd=float(RUN_BUDGET_USD),
@@ -524,12 +525,13 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
     else:
         vendor = scoring_vendor()
         model = agent_model(vendor)
+    prompt = job.build_prompt(model)
     record: dict[str, JSON] = {
         "purpose": job.purpose,
         "vendor": vendor,
         "model": model,
         "key_source": "class" if job.class_key is not None else "platform",
-        "prompt_sha256": hashlib.sha256(job.prompt.encode("utf-8")).hexdigest(),
+        "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "attempts": [],
     }
     try:
@@ -544,7 +546,7 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
     problems: list[str] = []
     for _ in range(MAX_ATTEMPTS):
         try:
-            problems, attempt, output = _attempt(job, vendor=vendor, model=model, snapshot=snapshot, index=index)
+            problems, attempt, output = _attempt(job, vendor=vendor, model=model, prompt=prompt, snapshot=snapshot, index=index)
         except RunRejected as exc:
             # 실행 전에 거절됐다(박제본이 너무 크다 등) — 다시 보내도 같다.
             attempts.append({"rejected": exc.reason})
@@ -552,7 +554,9 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
         attempts.append(attempt)
         if not problems and isinstance(output, dict):
             record["accepted"] = True
-            return AgentJobOutcome(structured_output=output, model_version=f"agent:{vendor}:{model}", record=record)
+            return AgentJobOutcome(
+                structured_output=output, model_version=f"agent:{vendor}:{model}", record=record, prompt=prompt
+            )
         if _budget_spent(attempt):
             # 실행 예산을 다 쓰고 끊긴 시도는 다시 돌려도 같은 길을 헤맨다 — 재실행하면 예산을 한 번 더 쓴다(#1681).
             problems = [*problems, "실행 예산 소진 — 재실행하지 않는다"]

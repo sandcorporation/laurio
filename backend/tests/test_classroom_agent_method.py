@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
 
@@ -200,6 +201,9 @@ def test_agent_scoring_of_a_claude_key_class_uses_the_class_key_through_the_prox
     assert "app.py:1" in score.reasoning[0]["reasoning"]
     run = AgentRun.objects.get()
     assert (run.purpose, run.outcome, run.record["key_source"]) == ("scoring", AgentRun.Outcome.ACCEPTED, "class")
+    # #1048: Haiku 클래스 키이면 엄격 규칙 8~10 이 붙고, 기록의 지문은 CLI 에 넘긴 지침의 것이다.
+    assert "10. 충족으로 볼 항목마다 반례를 한 번 찾습니다" in spec["prompt"]
+    assert run.record["prompt_sha256"] == hashlib.sha256(spec["prompt"].encode("utf-8")).hexdigest()
     for text in (json.dumps(spec), json.dumps(run.record), score.prompt):
         assert CLASS_KEY not in text
         assert PLATFORM_KEY not in text
@@ -266,3 +270,6 @@ def test_agent_quality_check_reads_the_snapshot_with_the_class_key_and_records_t
     assert "main.py:1" in row["items"][0]["reasoning"]
     run = AgentRun.objects.get()
     assert (run.purpose, run.outcome, run.record["key_source"]) == ("quality", AgentRun.Outcome.ACCEPTED, "class")
+    # #1048: Haiku 가 아니면(여기선 OpenAI) 엄격 규칙이 붙지 않는다. 기록의 지문은 CLI 에 넘긴 지침의 것이다.
+    assert "반례를 한 번 찾습니다" not in spec["prompt"]
+    assert run.record["prompt_sha256"] == hashlib.sha256(spec["prompt"].encode("utf-8")).hexdigest()

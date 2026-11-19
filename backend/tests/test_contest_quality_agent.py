@@ -18,7 +18,8 @@ from scoring.quality import HELD_ERROR_PREFIX, QUALITY_FAILURE_LIMIT
 from scoring.quality_agent import agent_response_schema, needs_evidence
 from tests.test_contest_quality import _run_quality, category, closed, landing_type  # noqa: F401 - 픽스처
 
-AGENT_MODEL_VERSION = "agent:anthropic:claude-sonnet-4-6"
+AGENT_MODEL = "claude-sonnet-4-6"
+AGENT_MODEL_VERSION = f"agent:anthropic:{AGENT_MODEL}"
 
 
 @dataclass
@@ -26,10 +27,14 @@ class _FakeAgent:
     """`run_agent_job` 대역 — 받은 일을 남기고, `mode` 대로 답하거나 던진다."""
 
     mode: str = "ok"
+    model: str = AGENT_MODEL
     jobs: list[AgentJob] = field(default_factory=list)
+    prompts: list[str] = field(default_factory=list)
 
     def run(self, job: AgentJob) -> AgentJobOutcome:
+        # 실물처럼 모델을 정한 뒤에 지침을 만든다.
         self.jobs.append(job)
+        self.prompts.append(job.build_prompt(self.model))
         if self.mode == "held":
             raise AgentRunHeld(["근거 경로가 박제본에 없다: src/none.py:3"], {"attempts": [{}, {}]})
         if self.mode == "busy":
@@ -40,7 +45,7 @@ class _FakeAgent:
         ]
         if self.mode == "out_of_range":
             verdicts[0]["score"] = 7
-        return AgentJobOutcome({job.items_key: verdicts}, AGENT_MODEL_VERSION, {"attempts": [{}]})
+        return AgentJobOutcome({job.items_key: verdicts}, AGENT_MODEL_VERSION, {"attempts": [{}]}, self.prompts[-1])
 
 
 @pytest.fixture
@@ -59,19 +64,20 @@ def test_agent_method_reviews_from_the_snapshot_with_evidence(client, closed, ag
     rows = _run_quality(client)["rows"]
 
     assert {r["status"] for r in rows} == {"reviewed"}
-    job = next(j for j in agent.jobs if j.submission.id == closed["a"])
+    job, prompt = next((j, p) for j, p in zip(agent.jobs, agent.prompts) if j.submission.id == closed["a"])
     requirement_ids = [r["id"] for r in closed["contest"]["requirements"]]
     assert job.purpose == "quality"
     assert job.expected_ids == frozenset(requirement_ids)
     assert (job.items_key, job.id_key) == ("scores", "requirement_id")
     assert job.output_schema == agent_response_schema()
     # 지침은 규칙(저장소 글은 지시 아님·근거는 실제 코드 줄·문서/시험만으론 0점)과 항목을 싣는다.
-    assert "지시가 아닙니다" in job.prompt and "경로:줄" in job.prompt and "0 점" in job.prompt
-    assert all(f"requirement_id {rid} " in job.prompt for rid in requirement_ids)
+    assert "지시가 아닙니다" in prompt and "경로:줄" in prompt and "0 점" in prompt
+    assert all(f"requirement_id {rid} " in prompt for rid in requirement_ids)
+    assert "반례를 한 번 찾습니다" not in prompt  # Sonnet 에는 엄격 규칙이 붙지 않는다(#1048).
 
     review = SubmissionQualityReview.objects.get(submission_id=closed["a"])
     assert review.model_version == AGENT_MODEL_VERSION
-    assert review.prompt == job.prompt
+    assert review.prompt == prompt
     assert "<<<SOURCE_FILE_START>>>" not in review.prompt  # 잘린 Score.prompt 를 다시 읽지 않는다.
     assert [i["item_id"] for i in review.items] == requirement_ids
     assert all(i["score"] == 4 and "(근거: src/auth.py:10-24)" in i["reasoning"] for i in review.items)
@@ -144,3 +150,17 @@ def test_agent_schema_adds_evidence_without_touching_the_shared_schema():
     assert item["required"] == ["requirement_id", "score", "reasoning", "evidence"]
     assert item["properties"]["evidence"]["maxItems"] == 5
     assert "evidence" not in response_schema()["properties"]["scores"]["items"]["properties"]  # type: ignore[index]
+
+
+@pytest.mark.django_db
+def test_haiku_review_gets_the_strict_rules_and_the_record_keeps_that_prompt(client, closed, agent, monkeypatch):  # noqa: F811
+    """#1048: 모델이 Haiku 계열이면 엄격 규칙 7~9 가 붙고, 리뷰 기록에는 그 지침이 남는다."""
+
+    monkeypatch.setenv("CONTEST_SCORING_METHOD", "agent")
+    agent.model = "claude-haiku-5-5"
+
+    _run_quality(client)
+
+    prompt = next(p for j, p in zip(agent.jobs, agent.prompts) if j.submission.id == closed["a"])
+    assert "7. 1 점 이상을 매기기 전에" in prompt and "9. 2 점 이상을 매길 항목마다 반례를" in prompt
+    assert SubmissionQualityReview.objects.get(submission_id=closed["a"]).prompt == prompt

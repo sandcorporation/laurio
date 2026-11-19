@@ -3,6 +3,9 @@
 규칙 일곱은 그때 그대로다. 바뀐 것은 둘이다: 근거가 `{path, line}` 객체 대신 `"경로:줄"`·`"경로:줄-줄"` 문자열
 (최대 5개, 이슈 #1000 의 계약)이 됐고, 요구사항 수와 목록을 공모전마다 채운다. 지침을 고치면 `AgentRun.record` 의
 `prompt_sha256` 이 달라진다 — 어느 지침으로 판정했는지는 그 값으로 가린다.
+
+엄격 규칙 8~10(#1040 이 넣고 #1043 이 뗐다)은 모델이 Haiku 계열일 때만 붙는다(#1048) — 측정을 Haiku 로만 했고,
+운영은 먼저 Sonnet 이다. Sonnet 지침은 규칙 1~7 그대로다. 지침은 모델을 안 뒤에 만든다(`AgentJob.build_prompt`).
 """
 
 from __future__ import annotations
@@ -50,16 +53,32 @@ _RULES = """규칙:
 6. reason 은 한국어 한두 문장입니다.
 7. {count}개 requirement_id 모두에 대해 빠짐없이 한 번씩 판정합니다."""
 
+# Haiku 로 쟀을 때 쓴 엄격 규칙(#1686·#1040) — 공모전 3 의 7건에서 claude-haiku-5-5 가 정답 109/110·틀린 근거 0 으로
+# sonnet 과 같았다. 그 측정은 이 지침(요구사항 판정)에서만 했다.
+_HAIKU_RULES = """8. 충족으로 판정하기 전에 그 기능을 실제로 수행하는 코드 줄을 Read 로 직접 열어 확인하고, 그 줄을 evidence 로 댑니다. 파일·함수·변수·라우트의 이름, 주석, README, 설정 키, 의존성 목록, 빈 화면 컴포넌트만으로는 충족이 아닙니다.
+9. 기능을 수행하는 코드를 찾지 못했으면 미충족입니다. 「있을 것 같다」「구조상 가능하다」는 충족이 아닙니다.
+10. 충족으로 볼 항목마다 반례를 한 번 찾습니다: 그 코드가 빈 구현·TODO·스텁·mock 이 아닌지, 실제로 어디선가 호출·연결되는지(화면에서 부르는 API, 라우터에 등록된 핸들러 등)를 Grep 으로 확인합니다. 연결되지 않은 코드는 충족이 아닙니다."""
 
-def build_scoring_prompt(requirements: list[RequirementInput]) -> str:
-    """에이전트 채점 지침 전문. 참가자의 자가 응답은 싣지 않는다 — 에이전트는 저장소만 본다."""
+
+def wants_strict_rules(model: str) -> bool:
+    """엄격 규칙을 붙일 모델인가 — Haiku 계열(`claude-haiku-*`)만(#1048)."""
+
+    return model.startswith("claude-haiku-")
+
+
+def build_scoring_prompt(requirements: list[RequirementInput], *, model: str) -> str:
+    """에이전트 채점 지침 전문. 참가자의 자가 응답은 싣지 않는다 — 에이전트는 저장소만 본다.
+    `model` 이 Haiku 계열이면 엄격 규칙 8~10 을 붙인다."""
 
     count = len(requirements)
+    rules = _RULES.format(count=count, max_evidence=MAX_EVIDENCE)
+    if wants_strict_rules(model):
+        rules += "\n" + _HAIKU_RULES
     lines = [
         "당신은 코딩 공모전 제출물을 채점하는 채점 보조자입니다. 지금 작업 디렉터리는 참가자가 제출한 저장소(마감 직전 커밋)입니다.",
         f"아래 요구사항 {count}개 각각에 대해, 저장소의 실제 구현 코드가 그 요구사항을 충족하는지 판정합니다.",
         "",
-        _RULES.format(count=count, max_evidence=MAX_EVIDENCE),
+        rules,
         "",
         "요구사항:",
     ]
