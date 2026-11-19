@@ -698,3 +698,59 @@ def test_can_edit_is_true_for_draft_and_published_and_false_after_close(
     by_id = {row["contest_id"]: row for row in _mine(client, sponsor["access"])}
     assert by_id[contest["id"]]["can_edit"] is False
     assert by_id[draft.json()["id"]]["can_edit"] is True
+
+
+# --- 질의 수 (#958) ------------------------------------------------------------------
+#
+# 운영에서 이 목록이 2행에 2.2초였다. 원인은 질의 수가 아니라 JIT 였지만(`core/db_timeouts.py`
+# 「JIT 를 끈다」), 그걸 가르려고 잰 값 — 요청 하나에 7개(토큰 폐기 확인·사용자·개최자 프로필·
+# 시계·정책·목록·건수) — 을 여기 못 박는다. 행마다 판정에 조회가 끼면 N+1 이 바로 여기서 터진다.
+
+_MY_CONTESTS_MAX_QUERIES = 7
+
+
+def _count_mine_queries(client, access: str) -> int:
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    with CaptureQueriesContext(connection) as ctx:
+        _mine(client, access)
+    return len(ctx.captured_queries)
+
+
+@pytest.mark.django_db
+def test_my_contests_query_count_has_a_ceiling_and_does_not_grow_with_rows(
+    client, category, landing_type, django_assert_max_num_queries
+):
+    from tests.test_source_readings import CONTESTS_URL
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type,
+        sponsor_uid="sponsor-958", sponsor_ci="ci-958", deadline_at=deadline,
+    )
+    with django_assert_max_num_queries(_MY_CONTESTS_MAX_QUERIES):
+        assert len(_mine(client, sponsor["access"])) == 1
+    one_row = _count_mine_queries(client, sponsor["access"])
+
+    for i in range(4):
+        draft = client.post(
+            CONTESTS_URL,
+            data={
+                "title": f"초안 {i}",
+                "category_id": category.id,
+                "deliverable_type_ids": [landing_type.id],
+                "prize": 900_000,
+                "deadline_at": (timezone.now() + timedelta(days=3)).isoformat(),
+                "requirements": [],
+            },
+            content_type="application/json",
+            **_auth_header(sponsor["access"]),
+        )
+        assert draft.status_code == 200, draft.content
+    # 상태가 다른 행도 섞는다 — 판정 분기마다 조회가 따로 끼지 않는지.
+    _close_contest(client, contest, deadline=deadline)
+
+    with django_assert_max_num_queries(_MY_CONTESTS_MAX_QUERIES):
+        assert len(_mine(client, sponsor["access"])) == 5
+    assert _count_mine_queries(client, sponsor["access"]) == one_row

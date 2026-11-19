@@ -55,6 +55,17 @@ def _settings_view(request):
     )
 
 
+def _jit_view(request):
+    with connection.cursor() as cursor:
+        cursor.execute("SHOW jit")
+        autocommit = cursor.fetchone()[0]
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT current_setting('jit')")
+            in_atomic = cursor.fetchone()[0]
+    return JsonResponse({"autocommit": autocommit, "atomic": in_atomic})
+
+
 def _divide_by_zero_view(request):
     with connection.cursor() as cursor:
         cursor.execute("SELECT 1/0")
@@ -80,6 +91,7 @@ urlpatterns = [
     path("iterator/", _iterator_view),
     path("settings/", _settings_view),
     path("divide-by-zero/", _divide_by_zero_view),
+    path("jit/", _jit_view),
 ]
 
 
@@ -118,6 +130,21 @@ def test_requests_run_with_statement_and_lock_timeouts(client_here):
     with connection.cursor() as cursor:
         cursor.execute("SHOW statement_timeout")
         assert cursor.fetchone()[0] == "0"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_requests_run_without_jit_and_it_does_not_outlive_the_request(client_here):
+    # #958 — 통계 없는 작은 표 탓에 계획 비용이 부풀면 요청의 몇 ms 짜리 문이 JIT 컴파일에 2초를
+    # 썼다. 요청 안에서는 꺼지고, 요청 밖(celery·관리 명령)은 서버 기본값 그대로다.
+    with connection.cursor() as cursor:
+        cursor.execute("SHOW jit")
+        outside = cursor.fetchone()[0]
+
+    assert client_here.get("/jit/").json() == {"autocommit": "off", "atomic": "off"}
+
+    with connection.cursor() as cursor:
+        cursor.execute("SHOW jit")
+        assert cursor.fetchone()[0] == outside
 
 
 @pytest.mark.django_db(transaction=True)
