@@ -1,6 +1,9 @@
+from typing import Any
+
 from django.conf import settings
 from django.db import connection, transaction
 from django.http import JsonResponse
+
 from ninja import NinjaAPI
 
 from accounts.api import router as accounts_router
@@ -12,8 +15,12 @@ from classroom.api import router as classroom_router
 from classroom.connected_app_api import router as classroom_connected_app_router
 from contests.connected_app_api import router as contests_connected_app_router
 from classroom.template_api import router as classroom_template_router
-from classroom.template_operator_api import operator_router as classroom_template_operator_router
-from classroom.usage_operator_api import usage_operator_router as classroom_usage_operator_router
+from classroom.template_operator_api import (
+    operator_router as classroom_template_operator_router,
+)
+from classroom.usage_operator_api import (
+    usage_operator_router as classroom_usage_operator_router,
+)
 from contests.api import router as contests_router
 from contests.operator_api import operator_router as contests_operator_router
 from contests.submission_api import router as submissions_router
@@ -36,7 +43,31 @@ from storage.policy import StorageAccessDenied
 from verification.api import router as verification_router
 from verification.operator_api import operator_router as verification_operator_router
 
-api = NinjaAPI(title="Codemit API", version="0.1.0")
+
+class CodemitAPI(NinjaAPI):
+    """OpenAPI 스키마를 한 번만 만든다 — 라우터는 import 때 다 붙고 그 뒤로 바뀌지 않는다.
+
+    ninja 는 `/api/openapi.json` 요청마다 엔드포인트 전부(지금 197개)의 pydantic 스키마를 다시 만든다.
+    로컬 CPU 0.4초, CI 1.5초 남짓이고 엔드포인트 수에 비례해 는다. 시험 CPU 한도(#1014)를 넘은 까닭이다.
+    """
+
+    _openapi_cache: dict[str, Any]
+
+    def get_openapi_schema(
+        self,
+        *,
+        path_prefix: str | None = None,
+        path_params: dict[str, Any] | None = None,
+    ) -> Any:
+        if path_prefix is None:
+            path_prefix = self.get_root_path(path_params or {})
+        cache = self.__dict__.setdefault("_openapi_cache", {})
+        if path_prefix not in cache:
+            cache[path_prefix] = super().get_openapi_schema(path_prefix=path_prefix)
+        return cache[path_prefix]
+
+
+api = CodemitAPI(title="Codemit API", version="0.1.0")
 
 api.add_router("", accounts_router)
 api.add_router("", verification_router)
