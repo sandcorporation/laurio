@@ -531,9 +531,9 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 부른다). 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
 필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/scoring/agent-runs` 가 보인다. Score 의
 `model_version` 은 `agent:<벤더>:<모델>`, 판정 이유는 「이유 근거: 경로:줄, …」(충족만, 근거 5개, 2000자)다. 지침·스키마는
-`core.agent_prompt`(공모전 3 재채점의 규칙 일곱). **모델이 Haiku 계열(`claude-haiku-*`)이면 엄격 규칙 8~10 이 더
-붙는다**(#1048 — 실제 코드 줄을 Read 로 열고, 못 찾으면 미충족, 충족마다 빈 구현·미연결 반례를 Grep) — 그 밖의 모델(운영
-기본 Sonnet)은 규칙 일곱 그대로다. 지침은 실행 모델이 정해진 뒤 `AgentJob.build_prompt(model)` 로 만들고, Score·리뷰의
+`core.agent_prompt`(공모전 3 재채점의 규칙 일곱에, 충족 전에 파일을 Read 로 열어 보고 근거는 Read 로 본 줄을 대라는
+규칙 8·9 — #1717, 모든 모델). **모델이 Haiku 계열(`claude-haiku-*`)이면 엄격 규칙 10~12 가 더 붙는다**(#1048 — 실제
+코드 줄을 Read 로 열고, 못 찾으면 미충족, 충족마다 빈 구현·미연결 반례를 Grep). 지침은 실행 모델이 정해진 뒤 `AgentJob.build_prompt(model)` 로 만들고, Score·리뷰의
 `prompt` 와 `AgentRun.record.prompt_sha256` 에는 CLI 에 넘긴 그 지침이 남는다. 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
 채점한다.
 
@@ -1089,7 +1089,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 않는다. 결과는 같은 `Score`·`SubmissionQualityReview` 이고 화면·알림·순위·박제는 그대로다.
 
 - **완성도**(#1001)는 `CONTEST_SCORING_METHOD=agent` 일 때 같은 박제본을 읽고 항목마다 0~5 와 근거 `경로:줄` 을 받는다.
-  Haiku 계열이면 채점의 엄격 규칙을 0~5 로 옮긴 규칙 7~9 가 붙는다(#1048, 강의실 완성도도 같다).
+  모든 모델에 「1 점 이상은 파일을 Read 로 열어 보고, 근거는 Read 로 본 줄」 규칙 7·8 이 붙고(#1717), Haiku 계열이면
+  채점의 엄격 규칙을 0~5 로 옮긴 규칙 9~11 이 더 붙는다(#1048, 강의실 완성도도 같다).
   기록의 `model_version` 은 `agent:<벤더>:<모델>`.
 - 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 은 방침 시행일
   (2026-11-27) 전에 거절된다(#995·#997).

@@ -162,5 +162,5 @@ def test_haiku_review_gets_the_strict_rules_and_the_record_keeps_that_prompt(cli
     _run_quality(client)
 
     prompt = next(p for j, p in zip(agent.jobs, agent.prompts) if j.submission.id == closed["a"])
-    assert "7. 1 점 이상을 매기기 전에" in prompt and "9. 2 점 이상을 매길 항목마다 반례를" in prompt
+    assert "9. 1 점 이상을 매기기 전에 그 기능을 실제로" in prompt and "11. 2 점 이상을 매길 항목마다 반례를" in prompt
     assert SubmissionQualityReview.objects.get(submission_id=closed["a"]).prompt == prompt
