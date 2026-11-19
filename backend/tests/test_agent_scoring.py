@@ -98,9 +98,11 @@ class _FakeRunner:
         self.repo_root_prefix = repo_root_prefix
         self.zips: list[bytes] = []
         self.specs: list[dict] = []
+        self.http_timeouts: list[float | None] = []
 
-    def __call__(self, spec, repo_zip: bytes, **_kwargs):
+    def __call__(self, spec, repo_zip: bytes, **kwargs):
         self.specs.append(dict(spec))
+        self.http_timeouts.append(kwargs.get("timeout"))
         self.zips.append(repo_zip)
         stdout = self.stdouts[min(len(self.specs), len(self.stdouts)) - 1]
         return {
@@ -370,6 +372,31 @@ def test_an_api_error_result_keeps_its_text_and_the_stdout_tail(
 
     assert "오류 결과 success api_error_status=400 API Error: 400 invalid_request_error" in run.record["attempts"][0]["problems"]
     assert "API Error: 400" in run.record["attempts"][0]["stdout_tail"]
+
+
+@pytest.mark.django_db
+def test_each_attempt_carries_its_cli_and_http_time_limits(client, category, landing_type, monkeypatch, agent_method, claude_vendor):
+    """#1686 — 실행기 기본 600초가 아니라 시도 상한(300초)을 넘기고, 실행기 HTTP 는 그보다 60초 더 기다린다."""
+
+    _closed_submission(client, category, landing_type)
+    runner = _use(monkeypatch, _FakeRunner(_claude_stream(None), exit_code=1))
+
+    _run_pending(client)
+
+    assert [s["timeout_seconds"] for s in runner.specs] == [agent_scoring.ATTEMPT_TIMEOUT_SECONDS] * 2
+    assert runner.http_timeouts == [agent_scoring.ATTEMPT_TIMEOUT_SECONDS + 60] * 2
+
+
+def test_scoring_prompt_carries_the_strict_rules():
+    """#1686 — Haiku 측정에 쓴 엄격 규칙 8~10 이 운영 지침에 있다."""
+
+    from core.llm_scoring import RequirementInput
+    from scoring.agent_prompt import build_scoring_prompt
+
+    prompt = build_scoring_prompt([RequirementInput(requirement_id=1, text="로그인", grade="required", self_reported_met=False)])
+    assert "8. 충족으로 판정하기 전에 그 기능을 실제로 수행하는 코드 줄을 Read 로 직접 열어 확인" in prompt
+    assert "9. 기능을 수행하는 코드를 찾지 못했으면 미충족입니다." in prompt
+    assert "10. 충족으로 볼 항목마다 반례를 한 번 찾습니다" in prompt
 
 
 @pytest.mark.django_db

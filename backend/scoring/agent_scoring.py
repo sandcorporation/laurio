@@ -48,6 +48,13 @@ JSON = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 
 RUN_BUDGET_USD = Decimal("1")
 MAX_ATTEMPTS = 2  # 최초 + 1회 재실행
+#: 시도 하나의 CLI 시간 상한(초, #1686). 실행기 상한(`agent_runner.RUN_TIMEOUT_SECONDS` 600)보다 짧게 넘긴다 —
+#: Haiku+엄격 규칙 실측 최장 175초(공모전 3, 7건)의 1.7배. 이것과 부르는 쪽 HTTP 여유가 스캔 한도를 정한다.
+ATTEMPT_TIMEOUT_SECONDS = 300
+#: 실행기 HTTP 를 기다리는 시간 — CLI 상한 + 박제본 풀기·결과 전송 여유.
+ATTEMPT_HTTP_TIMEOUT_SECONDS = ATTEMPT_TIMEOUT_SECONDS + 60
+#: 에이전트 한 건(재시도 포함)의 최장 — 이 일을 부르는 스캔의 워커 한도가 이보다 커야 한다.
+AGENT_JOB_MAX_SECONDS = MAX_ATTEMPTS * ATTEMPT_HTTP_TIMEOUT_SECONDS
 MAX_EVIDENCE = 5
 STDOUT_TAIL_CHARS = 4000  # 기록(AgentRun.attempts)에 남기는 CLI stdout 꼬리
 EVIDENCE_PATTERN = r"^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$"
@@ -445,8 +452,9 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, snapshot: Snapshot, i
         output_schema=job.output_schema,
         run_token=issued.token,
         max_budget_usd=float(RUN_BUDGET_USD),
+        timeout_seconds=ATTEMPT_TIMEOUT_SECONDS,
     )
-    result = request_run(spec, snapshot.zip_bytes)
+    result = request_run(spec, snapshot.zip_bytes, timeout=ATTEMPT_HTTP_TIMEOUT_SECONDS)
     parsed = parse_claude_stream(result["stdout"]) if vendor == VENDOR_ANTHROPIC else parse_codex_stream(result["stdout"])
     problems, evidence = acceptance_problems(vendor=vendor, result=result, parsed=parsed, job=job, index=index)
     usage = run_usage(issued.record_id)
