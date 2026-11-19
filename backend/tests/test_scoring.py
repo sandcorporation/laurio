@@ -1731,9 +1731,11 @@ def test_five_failures_and_six_hour_grace_finalizes_as_zero_without_calling_llm(
     # 통지는 기존 채점 완료 알림 그대로다 — 새 알림 종류를 만들지 않는다.
     from notifications.models import Notification, NotificationType
 
-    assert Notification.objects.filter(
+    notice = Notification.objects.get(
         recipient_id=dev["user_id"], notification_type=NotificationType.SCORING_COMPLETE
-    ).exists()
+    )
+    # 무료 여부를 실어 문구가 이의 기간을 말할지 가른다(#986 보탬 5).
+    assert notice.context["is_free"] is False
 
 
 @pytest.mark.django_db

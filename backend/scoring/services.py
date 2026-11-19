@@ -923,6 +923,8 @@ def _notify_scored(submission: ContestSubmission) -> None:
                 "contest_id": submission.contest_id,
                 "contest_title": submission.contest.title,
                 "submission_id": submission.id,
+                # 무료 공모전에는 이의 신청이 없다(`appeals.api` 404) — 문구가 이의 기간을 말하지 않게(#986 보탬 5).
+                "is_free": submission.contest.is_free,
                 # 이의 기한을 함께 준다 — "언제까지" 가 통지에 없으면 받는 사람이
                 # 다시 들어와 찾아야 한다.
                 "appeal_deadline": (
