@@ -39,7 +39,7 @@
    * 역할은 일곱이다: primary·secondary·info·success·warning·error·advanced.
    * **#961 은 보이는 색을 바꾸지 않았다**(옛 값을 새 이름으로 옮기기만 했다). #965 가 error 만 갈랐다.
    *   success  = 옛 verified (충족·검증)
-   *   warning·advanced = 옛 attention 의 붉은 주황(#c4442b / #e5694f). 둘은 아직 같은 값이다.
+   *   warning·advanced = 옛 attention 의 붉은 주황(#c3442b / #e5694f). 둘은 같은 값이다. 밝은 값은 #978 이 paper 위 AA(4.5:1)를 넘게 명도만 낮췄다.
    *   error = 심화와 겹치지 않는 장미빛 붉은색(#b01e4a / #ff7a99, #965 — ADR-0080 Amended).
    *     오류·실패·검증 오류만 쓴다. 주의·마감 지남은 warning, 심화는 advanced.
    *   primary·secondary·info = 아직 색상이 없다. 지금 화면의 주 동작·보조·안내는 잉크로 그려지므로
@@ -49,9 +49,9 @@
   --color-secondary: light-dark(#17160f, #ece8dc);
   --color-info: light-dark(#17160f, #ece8dc);
   --color-success: light-dark(#2e6a4c, #62b489);
-  --color-warning: light-dark(#c4442b, #e5694f);
+  --color-warning: light-dark(#c3442b, #e5694f);
   --color-error: light-dark(#b01e4a, #ff7a99);
-  --color-advanced: light-dark(#c4442b, #e5694f);
+  --color-advanced: light-dark(#c3442b, #e5694f);
 
   /* 옛 이름(별칭) — operator 앱(자체 tokens.css, 이번 범위 밖)과 공유 마크다운 패키지가
    * 아직 이 이름을 쓴다. 두 앱의 화면 코드는 새 이름으로 옮겼다. 마지막 사용처가 옮겨가면 지운다. */

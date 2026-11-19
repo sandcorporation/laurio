@@ -44,7 +44,10 @@ describe("다크·라이트 토큰의 대비는 WCAG AA 를 넘는다 (#397)", (
       ["통과 초록 / 뜬 면 (verified/surface)", verified, surface],
       ["오류 장미빛 붉은색 / 바탕 (error/paper)", error, paper],
       ["오류 장미빛 붉은색 / 뜬 면 (error/surface)", error, surface],
+      ["주의 붉은 주황 / 바탕 (warning/paper)", warning, paper],
       ["주의 붉은 주황 / 뜬 면 (warning/surface)", warning, surface],
+      ["주의 배지 글자 / 주의 바탕 (paper 글자, warning 바탕)", paper, warning],
+      ["심화 붉은 주황 / 바탕 (advanced/paper)", advanced, paper],
       ["심화 붉은 주황 / 뜬 면 (advanced/surface)", advanced, surface],
     ];
 

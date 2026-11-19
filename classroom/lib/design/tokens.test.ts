@@ -52,7 +52,8 @@ describe("디자인 토큰은 공개 앱과 한 벌이다 (#298)", () => {
   describe("팔레트 역할은 얼린 값을 가리킨다 (#961·#965)", () => {
     const css = fs.readFileSync(CLASSROOM, "utf8");
     const ink = ["#17160f", "#ece8dc"];
-    const attention = ["#c4442b", "#e5694f"];
+    // #978 — 밝은 값만 명도를 낮췄다(#c4442b → #c3442b, paper 위 4.49 → 4.52). 어두운 값은 그대로.
+    const attention = ["#c3442b", "#e5694f"];
     // #965 — error 만 심화와 겹치지 않는 장미빛 붉은색으로 갈랐다(ADR-0080 Amended).
     const error = ["#b01e4a", "#ff7a99"];
     const verified = ["#2e6a4c", "#62b489"];
