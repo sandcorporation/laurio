@@ -101,6 +101,7 @@ CONTEXT.md 「소셜 계정」). 이메일은 로그인에서 사람을 찾는 �
 | `GET .../metrics` | 개최자용 지표 |
 | `POST .../reopen` | 재개최 |
 | `POST .../extend-judging-period[/{order}/confirm]` | 심사기간 연장(유료) |
+| `GET .../submissions/roster` | 제출 명단(#956, ADR-0079) — 개최자만(남이면 403), **마감 전에도**. 표시 이름(탈퇴자는 null)·낸 시각뿐, 낸 시각 순. 제출 id·자료·점수·수상 여부는 없다. 유료·무료·강의실 경유가 같다 |
 | `GET .../submissions/compare` | 제출작 비교 — 요구사항마다 배점, 제출마다 완성도(#884·#904, ADR-0072·0073: 지금 배점으로 계산한 합·만점 「total / max_total」·정수 합 `raw_total`·「완성도 순위」 등수·요구사항별 0~5·항목 점수·근거, 아직 없으면 null) |
 | `PUT .../submissions/{sid}/bonus/{rid}` | 가산 점수(#905, ADR-0073) — 개최자만(남이면 403), 마감 뒤에만(전이면 409), 가산 요구사항만. 0~5·메모(200자). 다시 매기면 덮어쓴다. Score·Distribution 은 바뀌지 않고 완성도 합에만 든다. 비교 응답에 `bonus_scores` |
 | `POST .../award` | 선정 |

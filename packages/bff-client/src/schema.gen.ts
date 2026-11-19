@@ -2735,8 +2735,9 @@ export interface paths {
          *     설치해보지 않고도 이 화면으로 1차로 거를 수 있어야 한다(User Story 45).
          *
          *     소스는 이 응답 어디에도 없다 — Award 전까지 Sponsor에게 열리지 않는다
-         *     (ADR-0014). 마감 전에는 열지 않는다 — 진행 중 비공개 원칙(REQUEST.md)이 여기도
-         *     적용된다. "마감"은 다른 곳과 같은 기준으로 deadline_at을 직접 비교한다(#11 이후
+         *     (ADR-0014). 마감 전에는 열지 않는다 — 진행 중 개최자는 단건 조회(데모·영상·
+         *     스크린샷)와 명단(#956)만 본다(ADR-0079). 진행 중 비공개는 Developer 사이의
+         *     규율이고, 이 화면의 완성도·등수·가산은 마감 뒤의 일이다. "마감"은 다른 곳과 같은 기준으로 deadline_at을 직접 비교한다(#11 이후
          *     이 코드베이스의 일관된 규약).
          */
         get: operations["contests_submission_api_compare_submissions"];
@@ -2759,6 +2760,31 @@ export interface paths {
         get: operations["contests_submission_api_get_my_submission"];
         /** Update Submission */
         put: operations["contests_submission_api_update_submission"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/submissions/roster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Submission Roster
+         * @description 개최자가 자기 공모전의 제출 명단을 본다 — 마감 전에도 (#956, ADR-0079).
+         *
+         *     칸은 표시 이름과 낸 시각뿐이다. 제출 id·자료·응답·완성도·점수는 싣지 않는다 —
+         *     그것들은 비교 화면(마감 뒤)과 단건 조회의 몫이다. 유료·무료·강의실 경유 제출이
+         *     같은 규칙이다(강의실 들여오기도 같은 `ContestSubmission` 행이다, ADR-0054).
+         *     소유권 검사는 `compare_submissions`와 같다.
+         */
+        get: operations["contests_submission_api_get_submission_roster"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -6741,6 +6767,13 @@ export interface components {
             /** Prize */
             prize: number;
         };
+        /** ContestRosterOut */
+        ContestRosterOut: {
+            /** Contest Id */
+            contest_id: number;
+            /** Entries */
+            entries: components["schemas"]["RosterEntryOut"][];
+        };
         /**
          * ContestSort
          * @description 공개 목록의 정렬 축 (#39).
@@ -9088,6 +9121,22 @@ export interface components {
             birth_date: string;
             /** Real Name */
             real_name: string;
+        };
+        /**
+         * RosterEntryOut
+         * @description 제출 명단 한 줄(#956, ADR-0079) — 표시 이름과 낸 시각뿐이다.
+         *
+         *     제출 id·developer id 는 싣지 않는다 — 명단이 상세 열람의 길잡이가 되지 않게 한다.
+         *     탈퇴로 이름이 지워졌으면(ADR-0025) null 이다.
+         */
+        RosterEntryOut: {
+            /** Display Name */
+            display_name: string | null;
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
         };
         /**
          * RulingOut
@@ -14214,6 +14263,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SubmissionOut"];
+                };
+            };
+        };
+    };
+    contests_submission_api_get_submission_roster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContestRosterOut"];
                 };
             };
         };

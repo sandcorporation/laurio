@@ -99,10 +99,12 @@ from .submission_schemas import (
     CompletionDistributionOut,
     ContestComparisonOut,
     ContestMetricsOut,
+    ContestRosterOut,
     DailyParticipationOut,
     DeveloperPublicProfileOut,
     ErrorOut,
     MyParticipationOut,
+    RosterEntryOut,
     MyParticipationPageOut,
     OwnScoreOut,
     PublicSubmissionOut,
@@ -1354,8 +1356,9 @@ def compare_submissions(request: HttpRequest, contest_id: int):
     설치해보지 않고도 이 화면으로 1차로 거를 수 있어야 한다(User Story 45).
 
     소스는 이 응답 어디에도 없다 — Award 전까지 Sponsor에게 열리지 않는다
-    (ADR-0014). 마감 전에는 열지 않는다 — 진행 중 비공개 원칙(REQUEST.md)이 여기도
-    적용된다. "마감"은 다른 곳과 같은 기준으로 deadline_at을 직접 비교한다(#11 이후
+    (ADR-0014). 마감 전에는 열지 않는다 — 진행 중 개최자는 단건 조회(데모·영상·
+    스크린샷)와 명단(#956)만 본다(ADR-0079). 진행 중 비공개는 Developer 사이의
+    규율이고, 이 화면의 완성도·등수·가산은 마감 뒤의 일이다. "마감"은 다른 곳과 같은 기준으로 deadline_at을 직접 비교한다(#11 이후
     이 코드베이스의 일관된 규약).
     """
 
@@ -1469,6 +1472,45 @@ def compare_submissions(request: HttpRequest, contest_id: int):
                 entries=entries_by_requirement[r.id],
             )
             for r in requirements
+        ],
+    )
+
+
+@router.get(
+    "/contests/{contest_id}/submissions/roster",
+    response={200: ContestRosterOut},
+    auth=jwt_auth,
+)
+def get_submission_roster(request: HttpRequest, contest_id: int):
+    """개최자가 자기 공모전의 제출 명단을 본다 — 마감 전에도 (#956, ADR-0079).
+
+    칸은 표시 이름과 낸 시각뿐이다. 제출 id·자료·응답·완성도·점수는 싣지 않는다 —
+    그것들은 비교 화면(마감 뒤)과 단건 조회의 몫이다. 유료·무료·강의실 경유 제출이
+    같은 규칙이다(강의실 들여오기도 같은 `ContestSubmission` 행이다, ADR-0054).
+    소유권 검사는 `compare_submissions`와 같다.
+    """
+
+    try:
+        contest = Contest.objects.select_related("sponsor").get(id=contest_id)
+    except Contest.DoesNotExist as exc:
+        raise HttpError(404, "공모전을 찾을 수 없습니다.") from exc
+
+    if contest.sponsor.user_id != request.auth_user.id:
+        raise HttpError(403, "본인이 개최한 공모전의 명단만 볼 수 있습니다.")
+
+    submissions = (
+        ContestSubmission.objects.filter(contest=contest)
+        .select_related("developer")
+        .order_by("created_at", "id")
+    )
+    return 200, ContestRosterOut(
+        contest_id=contest.id,
+        entries=[
+            RosterEntryOut(
+                display_name=s.developer.display_name or None,
+                submitted_at=s.created_at,
+            )
+            for s in submissions
         ],
     )
 
