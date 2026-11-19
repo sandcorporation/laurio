@@ -45,8 +45,10 @@ export function inputAttributes(setting: RuntimeSetting): {
 }
 
 const CHOICE_LABELS: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Claude(Anthropic)",
+  openai: "OpenAI (Codex)",
+  anthropic: "Anthropic (Claude Code)",
+  single_call: "한 번 호출",
+  agent: "에이전트",
 };
 
 /** 선택 상자의 항목(#994) — `choice` 가 아니면 null. 첫 항목 「—」는 고르지 않음(저장하지 않는다). */
@@ -82,4 +84,39 @@ export function changeText(change: RuntimeSettingChange): string {
 export function updatedText(setting: RuntimeSetting): string | null {
   if (!setting.updated_at) return null;
   return `${new Date(setting.updated_at).toLocaleString("ko-KR")} · ${setting.updated_by ?? ""}`;
+}
+
+export type SettingsTabId = "ai" | "limits" | "etc";
+
+export const SETTINGS_TABS: { id: SettingsTabId; label: string; keys: readonly string[] }[] = [
+  {
+    id: "ai",
+    label: "AI 채점",
+    keys: [
+      "LLM_SCORING_VENDOR",
+      "CONTEST_SCORING_METHOD",
+      "LLM_OPENAI_MODEL",
+      "OPEN_AI_API_KEY",
+      "LLM_ANTHROPIC_MODEL",
+      "ANTHROPIC_API_KEY",
+      "CONTEST_AI_SCORING",
+      "CONTEST_AI_QUALITY_REVIEW",
+      "AGENT_SCORING_DAILY_LIMIT_USD",
+    ],
+  },
+  { id: "limits", label: "한도", keys: ["REPOSITORY_DOWNLOAD_LIMIT_MB"] },
+  { id: "etc", label: "기타", keys: [] },
+];
+
+/** 주소의 `?tab=` 값 → 탭. 모르는 값·없는 값은 첫 탭. */
+export function tabFromParam(param: string | null): SettingsTabId {
+  return SETTINGS_TABS.find((tab) => tab.id === param)?.id ?? SETTINGS_TABS[0].id;
+}
+
+/** 탭에 속한 설정 — 「AI 채점」·「한도」는 정한 순서대로, 「기타」는 어느 탭에도 없는 나머지(새 키가 사라지지 않는다). */
+export function settingsOfTab(settings: RuntimeSetting[], tab: SettingsTabId): RuntimeSetting[] {
+  const named = SETTINGS_TABS.flatMap((t) => t.keys);
+  if (tab === "etc") return settings.filter((setting) => !named.includes(setting.key));
+  const keys = SETTINGS_TABS.find((t) => t.id === tab)?.keys ?? [];
+  return keys.flatMap((key) => settings.filter((setting) => setting.key === key));
 }

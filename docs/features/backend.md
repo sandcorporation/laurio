@@ -1061,7 +1061,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
-| `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·완성도 리뷰(`submission-quality-review`) 스캔 | **off** — 두 스캔이 돌지 않는다 |
+| `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`) 스캔만 | **off** — 채점 스캔이 돌지 않는다 |
+| `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 
 **에이전트 채점 키 프록시 `llm-proxy`**(#998) — backend 이미지의 별도 프로세스(`manage.py llm_proxy`,

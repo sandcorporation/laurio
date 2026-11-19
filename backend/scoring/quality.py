@@ -45,7 +45,7 @@ from core.quality_review import (
 )
 from core.scans import ScanSpec
 from core.agent_run_tokens import RunTokenRefused
-from policies.runtime_settings import SCORING_METHOD_AGENT, contest_ai_scoring_enabled, contest_scoring_method
+from policies.runtime_settings import SCORING_METHOD_AGENT, contest_quality_review_enabled, contest_scoring_method
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
 from .agent_runner import AgentGraderBusy
@@ -186,15 +186,15 @@ def _review_one(submission, as_of, ctx):
         }
 
 
-#: 무료·유료 모두 대상이라 유료 제품 스위치는 걸지 않는다 — 대신 공모전 AI 채점 스위치(#991,
-#: 기본 꺼짐)를 `submission-scoring` 과 같이 건다: 둘 다 공모전 벤더 호출이다.
+#: 무료·유료 모두 대상이라 유료 제품 스위치는 걸지 않는다 — 대신 공모전 완성도 리뷰 스위치(#1033,
+#: 기본 꺼짐)를 건다. 채점 스위치(`CONTEST_AI_SCORING`)와는 따로 여닫는다.
 #: 정렬은 Score 스캔과 같다: 덜 시도한 것이 먼저, 같으면 id.
 SUBMISSION_QUALITY_SCAN = ScanSpec(
     name="submission-quality-review",
     candidates=_pending_quality,
     handle_row=_review_one,
     order_by=("attempt_count", "id"),
-    enabled=contest_ai_scoring_enabled,
+    enabled=contest_quality_review_enabled,
     keep_scheduled_when_disabled=True,
 )
 

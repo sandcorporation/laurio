@@ -11,6 +11,8 @@ import {
   savePayload,
   secretSummary,
   valueSummary,
+  settingsOfTab,
+  tabFromParam,
 } from "./view";
 
 function setting(overrides: Partial<RuntimeSetting> = {}): RuntimeSetting {
@@ -121,8 +123,8 @@ describe("선택형 설정(#994)", () => {
   it("선택 상자는 「—」 다음에 받는 값을 이름으로 보인다", () => {
     expect(choiceOptions(vendor)).toEqual([
       { value: "", label: "—" },
-      { value: "openai", label: "OpenAI" },
-      { value: "anthropic", label: "Claude(Anthropic)" },
+      { value: "openai", label: "OpenAI (Codex)" },
+      { value: "anthropic", label: "Anthropic (Claude Code)" },
     ]);
   });
 
@@ -133,5 +135,28 @@ describe("선택형 설정(#994)", () => {
   it("값이 없으면 기본값을 보이고 연결 시험이 없다", () => {
     expect(valueSummary(vendor)).toBe("기본 openai");
     expect(canProbe(vendor)).toBe(false);
+  });
+});
+
+describe("탭(#1033)", () => {
+  const all = ["LLM_OPENAI_TEMPERATURE", "REPOSITORY_DOWNLOAD_LIMIT_MB", "CONTEST_AI_QUALITY_REVIEW", "LLM_SCORING_VENDOR", "NEW_KEY"].map(
+    (key) => setting({ key }),
+  );
+
+  it("탭은 정한 순서로 설정을 모으고 나머지는 기타로 간다", () => {
+    expect(settingsOfTab(all, "ai").map((s) => s.key)).toEqual(["LLM_SCORING_VENDOR", "CONTEST_AI_QUALITY_REVIEW"]);
+    expect(settingsOfTab(all, "limits").map((s) => s.key)).toEqual(["REPOSITORY_DOWNLOAD_LIMIT_MB"]);
+    expect(settingsOfTab(all, "etc").map((s) => s.key)).toEqual(["LLM_OPENAI_TEMPERATURE", "NEW_KEY"]);
+  });
+
+  it("주소의 탭 값이 없거나 모르면 첫 탭이다", () => {
+    expect(tabFromParam("limits")).toBe("limits");
+    expect(tabFromParam(null)).toBe("ai");
+    expect(tabFromParam("zzz")).toBe("ai");
+  });
+
+  it("채점 방식 값은 뜻을 말한다", () => {
+    const method = setting({ key: "CONTEST_SCORING_METHOD", kind: "choice", choices: ["single_call", "agent"] });
+    expect(choiceOptions(method)?.map((o) => o.label)).toEqual(["—", "한 번 호출", "에이전트"]);
   });
 });
