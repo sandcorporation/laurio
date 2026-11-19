@@ -2,10 +2,13 @@
 # Jenkins `codemit/deploy` 는 production push 만 보고, 굽지도 검사하지도 않고 그 sha 의 이미지를 받아 oracle 에 배포한다
 # (Jenkinsfile → jenkins-shared sandcorpDeploy deployFrom: 'production').
 #
+#   verify  scripts/ci/verified_tree.py(#959) — 이 커밋의 트리를 PR 검사가 이미 초록으로 돌았나. 증명하면 skip=1.
+#           증명 = 병합(squash) 커밋 트리 == PR 검사가 돈 refs/pull/N/merge 커밋의 트리(plan 잡 「검사한 커밋」 단계 이름).
+#           그사이 main 이 움직였거나·문서만이라 시험을 건너뛴 PR 이거나·캐시 키 파일을 바꿨거나·API 가 실패하면 skip=0.
 #   check   pr-check.yml(workflow_call) — PR 과 같은 검사(정적·pytest·web·guard·e2e·celery). 깨지면 이미지도 승격도 없다.
-#           main 실행이라 이미지 층 캐시를 저장한다(#932).
+#           verify 가 skip=1 이라고 할 때만 건너뛴다(verify 가 죽어도 돈다). main 실행이라 이미지 층 캐시를 저장한다(#932).
 #   image   check 와 나란히 돈다(needs 없음 — check 산출물에 기대지 않는다, 캐시는 레지스트리 것). image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>).
-#   promote needs check·image — 둘 다 초록일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
+#   promote needs verify·check·image — image 초록 + (check 초록 또는 verify 가 증명해 건너뜀)일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
 #           production 이 이미 더 새 판이면(옛 실행이 늦게 끝남) 실패가 아니라 건너뜀.
 #   check 가 붉어도 이미지는 ghcr 에 오를 수 있다 — 승격되지 않으니 배포되지 않는다(병렬로 돌려 병합→배포를 줄인 값).
 # production 은 앞으로만 간다(ruleset: 강제 push·삭제 금지). 되돌리기는 main 에 revert PR — 이 흐름을 그대로 탄다.
@@ -26,7 +29,32 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # GITHUB_TOKEN 읽기만 — 병합 커밋의 PR(pull-requests)·그 PR 검사 실행과 잡(actions)·커밋 트리(contents)
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    outputs:
+      skip: ${{ steps.verify.outputs.skip }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 2 # 부모와 비교한다(바뀐 파일·부모 수)
+          persist-credentials: false
+      - id: verify
+        name: 이미 검사한 트리인가
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: python3 scripts/ci/verified_tree.py "$SHA"
+
   check:
+    needs: verify
+    # verify 가 실패·취소돼도(출력 없음) 돈다 — 건너뛰는 것은 증명했을 때뿐
+    if: ${{ !cancelled() && needs.verify.outputs.skip != '1' }}
     uses: ./.github/workflows/pr-check.yml
     permissions:
       contents: read
@@ -38,7 +66,10 @@ jobs:
       packages: write
 
   promote:
-    needs: [check, image]
+    needs: [verify, check, image]
+    if: >-
+      ${{ !cancelled() && needs.image.result == 'success' && (needs.check.result == 'success' ||
+      (needs.check.result == 'skipped' && needs.verify.result == 'success' && needs.verify.outputs.skip == '1')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
