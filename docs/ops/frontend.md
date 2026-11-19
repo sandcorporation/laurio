@@ -130,6 +130,15 @@ cd <worktree>
   뜨지 않는다. `stop-all` 은 이 워크트리에서 띄운 Playwright 크롬(촬영 스크립트의 pid 나무,
   그리고 cwd 가 이 워크트리 안인 chrom 프로세스)도 걷는다 — 다른 세션의 크롬은 그대로다.
   손으로 before 워크트리를 만들어 서버 둘을 동시에 띄우지 않는다.
+- **로그인이 필요한 화면은 `scripts/shoot.mjs` 의 환경변수로 찍는다**(#985). 백엔드는 이 워크트리 몫만
+  (`scripts/dev-server.sh start backend` — 앞서 `docker compose -p <프로젝트> up -d db redis` 와 `manage.py migrate`),
+  `seed_demo_classroom --email <강사>` 로 데모를 심는다. 참여자 계정은 **시드 전에** 한 번 로그인해 만든다 —
+  `POST /api/auth/social/kakao/login` 에 `{"access_token":"demo3:demo-classroom-3@example.com"}`(dev 의 fake 소셜 로그인,
+  시드가 쓰는 `demo-classroom-<n>@example.com` 이메일과 맞춰야 시드가 그 계정을 그대로 쓴다. 시드 뒤에 로그인하면 이메일이 빈 새 계정이 생겨 404 가 난다).
+  시드를 다시 돌리면 클래스·문제 번호가 바뀐다(주소를 다시 본다). 그다음
+  `CODEMIT_API_BASE_URL=<백엔드 주소> SHOOT_LOGIN_BACKEND=<백엔드 주소> SHOOT_WAIT='[data-testid="…"]'
+  SHOOT_LOGINS='이름=<uid>:<이메일>,…' scripts/shoot-before-after.sh …` — 계정마다 이름이 파일명에 붙고, `SHOOT_WAIT` 는
+  클라이언트가 데이터를 받아 그릴 때까지 기다릴 요소다. `stop-all` 은 백엔드도 걷으니 촬영 한 번마다 백엔드를 다시 띄운다.
 
 **로컬 시험의 입구는 `scripts/test.sh` 하나다**(2026-10-02, web-rpg 의 `deploy/test.sh` 와
 같은 방식). `scripts/test.sh backend [pytest 인자]` · `scripts/test.sh e2e [playwright 인자]`.
