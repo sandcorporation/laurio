@@ -36,6 +36,8 @@ import {
 } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { DueRows } from "@/app/components/DueLabel";
+import { Stamp } from "@/app/components/Stamp";
+import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
@@ -102,6 +104,8 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   /** `undefined`면 통과 배지를 아예 내지 않는다 — 미리보기는 아직 아무도
    *  푼 적이 없으므로 「통과」/「미통과」 어느 쪽도 사실이 아니다. */
   passed?: boolean;
+  /** 한 번이라도 「완벽」을 받았는가(#962) — null·undefined 면 완벽 도장이 없다. */
+  perfect?: boolean | null;
   /** 권장 기한·마감(#770) — 「제출」 카드 머리 아래 두 줄. 미리보기도 같은 자리에 그린다. */
   recommendedDueAt?: string | null;
   dueAt?: string | null;
@@ -171,6 +175,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     title,
     titleTestId,
     passed,
+    perfect,
     recommendedDueAt = null,
     dueAt = null,
     description,
@@ -354,7 +359,11 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             )}
             {passed === undefined ? null : (
               <span data-testid="my-problem-passed-status">
-                <Badge tone={passed ? "verified" : "attention"}>{passed ? "통과" : "아직 미통과"}</Badge>
+                {stampKind(passed, perfect) ? (
+                  <Stamp kind={stampKind(passed, perfect)!} />
+                ) : (
+                  <Badge tone="attention">아직 미통과</Badge>
+                )}
               </span>
             )}
           </div>
@@ -435,9 +444,18 @@ function ChecklistWithVerdict({
         </h2>
         {judged && judgedSummary ? (
           <span data-testid="my-problem-checklist-badge">
-            <Badge tone={judged.passed ? "verified" : "attention"}>
-              {judged.passed ? "통과" : "미통과"} · 필수 {judgedSummary.met}/{judgedSummary.total}
-            </Badge>
+            {stampKind(judged.passed, judged.perfect) ? (
+              <>
+                <Stamp kind={stampKind(judged.passed, judged.perfect)!} scope={`submission-${judged.id}`} />{" "}
+                <span className="text-[12.5px] text-ink/60">
+                  필수 {judgedSummary.met}/{judgedSummary.total}
+                </span>
+              </>
+            ) : (
+              <Badge tone="attention">
+                미통과 · 필수 {judgedSummary.met}/{judgedSummary.total}
+              </Badge>
+            )}
           </span>
         ) : null}
       </div>
@@ -493,7 +511,7 @@ function ChecklistWithVerdict({
                 {item.required ? null : (
                   <>
                     {" "}
-                    <Badge>선택</Badge>
+                    <Badge tone="advanced">심화</Badge>
                   </>
                 )}
                 {value === "unverifiable" ? (
@@ -624,9 +642,16 @@ function AttemptRow({
           {submission.status === "pending" ? (
             <Badge>{withLate(submission.pending_reason ? "채점 대기" : "채점 중", submission.late)}</Badge>
           ) : (
-            <Badge tone={submission.passed ? "verified" : "attention"}>
-              {withLate(submission.passed ? "통과" : "미통과", submission.late)}
-            </Badge>
+            (() => {
+              const kind = stampKind(submission.passed, submission.perfect);
+              return kind ? (
+                <Stamp kind={kind} scope={`submission-${submission.id}`}>
+                  {withLate(STAMP_LABEL[kind], submission.late)}
+                </Stamp>
+              ) : (
+                <Badge tone="attention">{withLate("미통과", submission.late)}</Badge>
+              );
+            })()
           )}
         </span>
         <span className="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-x-3 gap-y-0.5 text-[12.5px] text-ink/60">

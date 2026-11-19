@@ -33,6 +33,8 @@ import { withLate } from "@/lib/problems/due-dates";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
+import { Stamp } from "@/app/components/Stamp";
+import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
 
 const STATUS_BADGE: Record<
@@ -79,7 +81,13 @@ function ProblemListRow({
           data-testid={`my-problem-row-${problem.id}-status`}
           className="w-[96px] shrink-0 text-right"
         >
-          <Badge tone={badge.tone}>{withLate(badge.label, problem.late)}</Badge>
+          {problem.status === "passed" ? (
+            <Stamp kind={stampKind(true, problem.perfect)!} size="sm">
+              {withLate(STAMP_LABEL[stampKind(true, problem.perfect)!], problem.late)}
+            </Stamp>
+          ) : (
+            <Badge tone={badge.tone}>{withLate(badge.label, problem.late)}</Badge>
+          )}
         </span>
       </Link>
     </li>

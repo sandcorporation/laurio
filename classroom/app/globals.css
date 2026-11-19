@@ -18,3 +18,23 @@ body {
 }
 
 /* 이 브랜드는 그림자를 쓰지 않는다 — 면과 면은 괘선(`border-rule`)으로 가른다. */
+
+/* 판정 도장(#963) — 처음 볼 때 한 번 찍히는 짧은 움직임. 움직임 줄이기면 멈춘다. */
+@keyframes stamp-press {
+  from {
+    opacity: 0;
+    transform: rotate(var(--stamp-tilt)) scale(1.5);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(var(--stamp-tilt)) scale(1);
+  }
+}
+.stamp-press {
+  animation: stamp-press 220ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stamp-press {
+    animation: none;
+  }
+}

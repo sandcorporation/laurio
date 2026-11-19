@@ -147,18 +147,19 @@ export function iconButtonClass(tone: ButtonTone = "secondary"): string {
   return `${BUTTON_BASE} ${BUTTON_TONE[tone]} p-2`;
 }
 
-/** 상태 표시. 셋뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
+/** 상태 표시. 넷뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
 export function Badge({
   tone = "neutral",
   children,
 }: {
-  tone?: "neutral" | "attention" | "verified";
+  tone?: "neutral" | "attention" | "verified" | "advanced";
   children: ReactNode;
 }) {
   const cls = {
     neutral: "border-rule text-ink/60",
     attention: "border-error text-error",
     verified: "border-success text-success",
+    advanced: "border-advanced text-advanced",
   }[tone];
   return (
     // `shrink-0 whitespace-nowrap` — 배지는 flex 안에서 눌리면 안 된다(2026-09-16).
