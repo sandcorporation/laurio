@@ -55,7 +55,7 @@ def test_the_worker_runs_beat_with_a_writable_schedule_and_a_fixed_pool(name):
 
 
 def test_deploy_no_longer_names_the_beat_service_anywhere_but_the_orphan_sweep():
-    assert 'backend) echo "backend celery-worker events grader" ;;' in DEPLOY
+    assert 'backend) echo "backend celery-worker events grader llm-proxy" ;;' in DEPLOY
     rest = DEPLOY.replace(_retire_function(), "")
     code = [line for line in rest.splitlines() if not line.lstrip().startswith("#")]
     assert not [line for line in code if "celery-beat" in line]

@@ -27,6 +27,11 @@
 같이 채점 시도를 남기지 않고 실패한다. **`anthropic` 은 2026-11-27 0시(KST)부터 저장된다**(#997) — 방침 5·6절이 공모전 제출물의 Anthropic 이전을
 적은 개정의 시행일이 `settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 이고, 그 전에는 거절된다. 기본값은 계속 `openai` 다.
 
+**에이전트 채점 키 프록시 `llm-proxy`**(#998)는 backend 계열과 함께 배포되는 상주 프로세스다(내부 전용, 포트를
+열지 않는다). 하루 비용 상한은 「운영 설정」의 `AGENT_SCORING_DAILY_LIMIT_USD`(값이 없으면 $20), 실행 하나의 예산은
+발급 때 정한다(기본 $1). 넘은 요청은 429 와 이유(`run_budget`·`daily_limit`)로 거절되고 로그에
+`llm-proxy: refused … code=…` 한 줄이 남는다. 토큰을 발급하는 채점기가 아직 없어 지금은 아무것도 중계하지 않는다.
+
 데이터는 이렇게 훑는다:
 
 ```bash

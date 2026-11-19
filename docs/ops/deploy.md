@@ -450,8 +450,8 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
 서비스든 받을 이미지는 있다). 기준점은 `.jenkins-<대상>-deployed`
 (gitignore, 빌드 디렉터리에 남는다 — 시크릿과 같은 전제). 그 파일이 없거나 그것이
 가리키는 커밋이 저장소에 없으면 전부 바꿔 끼운다. 경로 → 서비스 팬아웃은 1:1 이 아니다:
-`backend/` 는 **backend + celery-worker(beat 포함, #859) + events + grader**(#380,
-ADR-0046, #584)을 함께 간다(넷이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
+`backend/` 는 **backend + celery-worker(beat 포함, #859) + events + grader + llm-proxy**(#380,
+ADR-0046, #584, #998)을 함께 간다(llm-proxy 는 celery-worker 와 같이 겹쳐 바꾸지 않고 다시 만든다)(넷이 한 이미지 이름을 쓴다, 2026-09-17 — 예전에는 공유 `image:` 태그가 없어
 **이미지가 넷**이었고, `build backend` 만 하면 나머지 셋이 옛 이미지에 남아 배포가 초록으로
 끝난 채 스캔·강의실 실시간 신호만 옛 코드로 돌았다),
 `packages/` **아래 무엇이든** 과 `pnpm-lock.yaml`·`pnpm-workspace.yaml`·루트

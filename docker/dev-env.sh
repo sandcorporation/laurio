@@ -45,6 +45,7 @@ export COMPOSE_PROJECT_NAME=codemit-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$
 export CODEMIT_DB_PORT=$(( 55432 + slot ))
 export CODEMIT_API_PORT=$(( 58000 + slot ))
 export CODEMIT_EVENTS_PORT=$(( 58001 + slot ))
+export CODEMIT_LLM_PROXY_PORT=$(( 58002 + slot ))
 export CODEMIT_REDIS_PORT=$(( 16379 + slot ))
 export CODEMIT_PGBOUNCER_PORT=$(( 16432 + slot ))
 export CODEMIT_MINIO_PORT=$(( 19000 + slot ))

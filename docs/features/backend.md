@@ -1048,7 +1048,18 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 은 방침이 공모전 채점의 Anthropic 이전을 적은 개정의 시행일(`PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` = 2026-11-27, #997) 0시(KST) 전에는 저장되지 않는다(422 `privacy_not_covered`) |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
+| `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·완성도 리뷰(`submission-quality-review`) 스캔 | **off** — 두 스캔이 돌지 않는다 |
+
+**에이전트 채점 키 프록시 `llm-proxy`**(#998) — backend 이미지의 별도 프로세스(`manage.py llm_proxy`,
+`core.llm_proxy`, aiohttp, 8002). 에이전트 실행기에 진짜 벤더 키 대신 **실행 토큰**을 주고, 이 프로세스가 토큰을
+확인해 진짜 키(`ANTHROPIC_API_KEY`·`OPEN_AI_API_KEY`)를 붙여 넘긴다. 경로는 Anthropic `POST /v1/messages`·OpenAI
+`POST /v1/responses` 둘이고 스트리밍을 그대로 흘려보낸다. 토큰(`core.models.AgentRunToken`, 해시만 저장)은
+`core.agent_run_tokens.issue_run_token` 이 실행마다 발급한다 — 제출 id·용도(채점/완성도)·벤더·모델·예산(기본 $1)·
+만료(15분)가 묶이고, Anthropic 은 방침이 덮을 때만, 단가표(`classroom.scoring_cost.PRICES`)에 없는 모델은 발급하지
+않는다. 요청마다 토큰 없음·모름·만료(401), 다른 벤더·다른 모델·방침 닫힘(403), 실행 예산·하루 합계(429)를 본다.
+응답의 usage 와 그 비용이 토큰 행에 쌓인다(`run_usage`). 벤더 오류 응답은 진짜 키·키 꼴 문자열을 가려 돌려준다.
+**지금 토큰을 발급하는 운영 코드가 없다** — 떠 있어도 모든 요청이 401 이고 벤더로는 아무것도 나가지 않는다.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |

@@ -50,7 +50,7 @@
 # 바뀌지 않은 서비스까지 전부 다시 뜬다. 그런데 「바뀐 것」과 「바꿔 끼울 것」이
 # 1:1 이 아니다 — 그 어긋남이 이 파일의 대부분이다.
 #
-#   backend/             -> backend + celery-worker(beat 포함, #859) + events + grader
+#   backend/             -> backend + celery-worker(beat 포함, #859) + events + grader + llm-proxy(#998)
 #                                                                   (이미지 하나 — events 는 ASGI 로
 #                                                                    강의실 실시간 신호만 여는 별도
 #                                                                    프로세스다, ADR-0046, #380;
@@ -208,7 +208,7 @@ $svc
 # 서비스 이름 → compose 서비스들. backend 는 넷을 함께 받는다(beat 는 worker 안이다, #859)(채점 grader 포함, #584)(아래 build 의 주석).
 compose_services() {
   case "$1" in
-    backend) echo "backend celery-worker events grader" ;;
+    backend) echo "backend celery-worker events grader llm-proxy" ;;
     frontend|operator|classroom|search|pgbouncer) echo "$1" ;;
     *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search|pgbouncer)" >&2; return 2 ;;
   esac
@@ -470,7 +470,7 @@ cmd_plan() {
     [ -z "$($COMPOSE ps -q "$1" 2>/dev/null | head -1)" ]
   }
 
-  for svc in backend celery-worker events grader; do
+  for svc in backend celery-worker events grader llm-proxy; do
     if missing "$svc"; then
       log "백엔드 계열 컨테이너 '$svc' 가 없다 — 굽는다."
       BUILD_BACKEND=true
@@ -641,7 +641,7 @@ cmd_plan() {
     if [ "$1" = true ]; then echo "바꿔 끼운다"; else echo "건너뛴다"; fi
   }
   echo "계획"
-  echo "  backend(+celery-worker,+events,+grader) : $(plan_word "$BUILD_BACKEND")"
+  echo "  backend(+celery-worker,+events,+grader,+llm-proxy) : $(plan_word "$BUILD_BACKEND")"
   echo "  frontend                                      : $(plan_word "$BUILD_FRONTEND")"
   echo "  operator                                      : $(plan_word "$BUILD_OPERATOR")"
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
@@ -1030,7 +1030,7 @@ cmd_up() {
     # 채점 워커를 먼저 따로 내린다 — 따뜻한 종료가 채점 중인 것을 마저 끝내느라 최대
     # 4분(`stop_grace_period`) 걸릴 수 있고, 그동안 backend 는 아직 요청을 받는다.
     $COMPOSE stop grader
-    $COMPOSE stop backend celery-worker events
+    $COMPOSE stop backend celery-worker events llm-proxy
     # shellcheck disable=SC2086
     $COMPOSE up -d --no-deps $UP_FLAGS pgbouncer
     # **풀러가 다시 들을 때까지 넷을 올리지 않는다.** 먼저 올리면 첫 요청들이 또
@@ -1042,7 +1042,7 @@ cmd_up() {
       # 이 배포가 backend 를 바꾸지 않으면 아래 블록이 넷을 올리지 않는다 —
       # 내린 그 컨테이너를 그대로 다시 켠다(`start` 는 다시 만들지 않으므로 이미지가
       # 바뀌지 않는다). 바꾸는 배포면 아래 블록이 새 이미지로 올린다.
-      $COMPOSE start backend celery-worker events grader
+      $COMPOSE start backend celery-worker events grader llm-proxy
     fi
   fi
 
@@ -1081,7 +1081,8 @@ cmd_up() {
       # 받지 않고(태스크는 Redis 에서 기다린다) 품은 beat 는 하나여야 하므로 지금처럼 바꾼다.
       rolling_replace backend 8000 30
       # shellcheck disable=SC2086
-      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker
+      # llm-proxy(#998, 에이전트 채점 키 프록시)는 에이전트 실행기만 부르고 실행이 없으면 놀므로 겹쳐 바꾸지 않는다.
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker llm-proxy
       rolling_replace events 8001 10
       # grader 는 맨 끝에 바꾼다(#584, ADR-0059) — 옛 grader 가 채점 중인 것을 마저
       # 끝내는 따뜻한 종료를 최대 4분(`stop_grace_period`) 기다리므로, 앞에 두면
@@ -1100,19 +1101,19 @@ cmd_up() {
       # 이유), 그동안 backend 는 아직 요청을 받는다. backend 가 없는 창을 늘리지 않는다.
       retire_orphan_services
       $COMPOSE stop grader
-      $COMPOSE stop backend celery-worker events
+      $COMPOSE stop backend celery-worker events llm-proxy
       if ! run_migrations; then
         # 내린 그 컨테이너(옛 이미지)를 되살린다 — 서비스가 통째로 비는 것보다 낫다.
         # Postgres 의 DDL 은 트랜잭션이라 실패한 마이그레이션 자체는 되감겼지만, 그 앞의
         # 것은 적용됐을 수 있다. 사람이 `showmigrations` 로 보고 판단한다.
         echo "마이그레이션이 실패했다 — 내렸던 옛 컨테이너를 다시 켠다. 앞선 마이그레이션은 적용됐을 수 있다."
-        $COMPOSE start backend celery-worker events grader || true
+        $COMPOSE start backend celery-worker events grader llm-proxy || true
         exit 1
       fi
       # shellcheck disable=SC2086
       $COMPOSE up -d --no-deps $UP_FLAGS backend
       # shellcheck disable=SC2086
-      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker events grader
+      $COMPOSE up -d --no-deps $UP_FLAGS celery-worker events grader llm-proxy
     fi
   fi
   # shellcheck disable=SC2086
@@ -1130,7 +1131,7 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker events grader frontend operator classroom search pgbouncer; do
+  for svc in backend celery-worker events grader llm-proxy frontend operator classroom search pgbouncer; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
       echo "[$svc] 컨테이너가 없다"

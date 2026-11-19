@@ -30,6 +30,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Literal, Protocol
 
 from django.conf import settings
@@ -77,6 +78,10 @@ VENDOR_ANTHROPIC: ScoringVendor = "anthropic"
 _SWITCH_ON = {"on", "true", "1", "yes"}
 _SWITCH_OFF = {"off", "false", "0", "no"}
 
+#: 에이전트 채점 하루 비용 상한(#998) — 키와 기본값(USD).
+AGENT_SCORING_DAILY_LIMIT_USD = "AGENT_SCORING_DAILY_LIMIT_USD"
+_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD = "20"
+
 #: 화면으로 옮긴 설정. 무엇을 넣고 무엇을 뺐는지와 그 이유는 ADR-0075 에 있다.
 SPECS: dict[str, SettingSpec] = {
     spec.key: spec
@@ -115,6 +120,16 @@ SPECS: dict[str, SettingSpec] = {
         # **값이 없으면 꺼짐** — 처리기를 다시 켜는 배포가 공모전 채점까지 켜지 않게 했다. 켜려면 화면에서
         # 「on」을 저장한다(dev·시험은 환경변수로 켠다).
         SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점 (on/off)", "switch", default="off", max_length=3),
+        # #998: 에이전트 채점 키 프록시(`llm-proxy`)가 하루(KST)에 쓰는 비용 합계의 상한. 넘으면 그날의
+        # 요청을 429 로 거절한다. 값이 없으면 기본값(`agent_scoring_daily_limit_usd`).
+        SettingSpec(
+            AGENT_SCORING_DAILY_LIMIT_USD,
+            "에이전트 채점 하루 비용 상한 (USD)",
+            "float",
+            default=_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD,
+            min_value=0.0,
+            max_value=1000.0,
+        ),
     )
 }
 
@@ -338,6 +353,20 @@ def contest_ai_scoring_enabled() -> bool:
     """공모전 AI 채점 스캔이 지금 도는가(#991) — 스캔의 `enabled` 콜백이라 호출마다 다시 읽는다."""
 
     return switch_on(CONTEST_AI_SCORING)
+
+
+def agent_scoring_daily_limit_usd() -> Decimal:
+    """에이전트 채점 하루 비용 상한(#998, USD) — 값이 없거나 읽을 수 없으면(env 는 저장 검사를 지나지
+    않는다) 기본값 20, 음수는 0 으로 본다."""
+
+    raw = (setting_value(AGENT_SCORING_DAILY_LIMIT_USD) or "").strip()
+    try:
+        value = Decimal(raw or _DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
+    except InvalidOperation:
+        value = Decimal(_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
+    if not value.is_finite():
+        value = Decimal(_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
+    return max(value, Decimal(0))
 
 
 # --- 화면에 보일 모양 ----------------------------------------------------------

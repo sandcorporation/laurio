@@ -553,7 +553,10 @@ def test_deployed_compose_runs_the_grader_and_no_scoring_worker(target):
 
 def test_deploy_script_replaces_the_grader_with_the_backend_image():
     deploy = (REPO_ROOT / "deploy.sh").read_text(encoding="utf-8")
-    assert 'backend) echo "backend celery-worker events grader" ;;' in deploy
+    # backend 계열 서비스 목록에 grader 가 있다 — 줄 전체를 못 박지 않는다(계열에 서비스가 늘어도 이 시험의 몫이 아니다).
+    backend_group = re.search(r'^\s*backend\) echo "([^"]*)" ;;$', deploy, re.MULTILINE)
+    assert backend_group is not None
+    assert "grader" in backend_group.group(1).split()
     assert "events celery-scoring" not in deploy  # 서비스 목록에서 빠졌다(고아는 `retire_scoring_worker` 가 걷는다)
 
 
