@@ -31,6 +31,7 @@ sandcorpDeploy(
     [repo: 'ghcr.io/sandcorporation/codemit-classroom', envVar: 'CODEMIT_CLASSROOM_IMAGE'],
     [repo: 'ghcr.io/sandcorporation/codemit-search', envVar: 'CODEMIT_SEARCH_IMAGE'],
     [repo: 'ghcr.io/sandcorporation/codemit-pgbouncer', envVar: 'CODEMIT_PGBOUNCER_IMAGE'],
+    [repo: 'ghcr.io/sandcorporation/codemit-agent-grader', envVar: 'CODEMIT_AGENT_GRADER_IMAGE'],
   ],
   imageWaitHint: 'https://github.com/sandcorporation/laurio/actions/workflows/release.yml',
   composeProject: 'codemit-prod',

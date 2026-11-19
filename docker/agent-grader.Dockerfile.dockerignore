@@ -1,0 +1,3 @@
+# agent-grader 이미지(#999)는 실행 틀 파일 하나만 읽는다 — 나머지 문맥은 들이지 않는다.
+*
+!backend/scoring/agent_runner.py

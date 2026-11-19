@@ -6,6 +6,8 @@
 #   guard   (PR 에서는 건너뜀, release 에서만 — #1015) 세 앱 prod 이미지(amd64)를 여기서 굽고 `deploy-guard.sh` — 설정 없이는 죽고, 완전한 설정으로는 뜬다
 #   (e2e 는 PR·release 에서 빠졌다 — e2e.yml 이 main 을 매시 돈다, #1015)
 #   celery  `celery-broker.sh` — 실제 Redis 브로커로 beat → worker
+#   agent-grader  `agent-grader-check.sh` — 에이전트 채점 실행기 이미지를 arm64 실행기에서 굽고, 운영과 같은 격리 설정으로
+#           가짜 벤더(`llm-proxy` 자리)에 Claude Code·Codex 를 한 번씩 돌린다(#999). 진짜 벤더·키 없음
 #   결과    위가 모두 초록(또는 문서만이라 건너뜀)이면 초록 — 브랜치 보호의 필수 검사로 걸 이름 하나
 #
 # main 에서는 release.yml(#938, ADR-0077)이 이 워크플로를 workflow_call 로 부른다 — 같은 검사가 초록이어야 image.yml 이
@@ -214,16 +216,34 @@ jobs:
           CODEMIT_BK_CACHE_SAVE: ""  # 저장은 guard 잡(과 e2e.yml)이 한다 — 같은 키를 두 잡이 쓰지 않는다
         run: bash scripts/ci/celery-broker.sh
 
+  agent-grader:
+    needs: plan
+    if: needs.plan.outputs.tests == '1'
+    # 운영 호스트와 같은 arm64 — Codex 의 bubblewrap 샌드박스가 이 커널·docker 에서 도는지까지 본다.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # 이 실행기(Ubuntu 24.04)는 AppArmor 가 비특권 사용자 네임스페이스에 능력을 주지 않는다 — Codex 의 bwrap 이 loopback 을
+      # 못 세운다(「bwrap: loopback: Failed RTM_NEWADDR」, #999). 운영 호스트에는 AppArmor 가 없어 이 제한 자체가 없다 —
+      # 일회용 실행기에서 그 조건을 흉내 내는 것이고, 운영 호스트의 sysctl 은 건드릴 일이 없다.
+      - name: 운영 호스트와 같은 조건 — AppArmor 의 사용자 네임스페이스 제한 끄기
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: agent-grader 이미지·두 CLI(agent-grader-check.sh)
+        run: bash scripts/ci/agent-grader-check.sh
+
   result:
     name: 결과
-    needs: [plan, checks, guard, celery]
+    needs: [plan, checks, guard, celery, agent-grader]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # skipped 를 통과로 세지 않는다(#1015) — 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어져도 초록이 되던 구멍.
       # 돌아야 할 잡은 이벤트·plan 이 정한다: plan 이 시험 없음(문서만)이면 나머지는 skipped 여야 하고,
-      # 아니면 checks·celery 는 success, guard 는 PR 이 아닐 때(plan 출력 guard=1) success 이고 PR 에서만 skipped.
+      # 아니면 checks·celery·agent-grader 는 success, guard 는 PR 이 아닐 때(plan 출력 guard=1) success 이고 PR 에서만 skipped.
       - name: 돌아야 할 잡이 success 인가
         env:
           PLAN: ${{ needs.plan.result }}
@@ -232,17 +252,18 @@ jobs:
           CHECKS: ${{ needs.checks.result }}
           GUARD: ${{ needs.guard.result }}
           CELERY: ${{ needs.celery.result }}
+          AGENT_GRADER: ${{ needs.agent-grader.result }}
         run: |
-          echo "plan=$PLAN tests=$TESTS guard_on=$GUARD_ON checks=$CHECKS guard=$GUARD celery=$CELERY"
+          echo "plan=$PLAN tests=$TESTS guard_on=$GUARD_ON checks=$CHECKS guard=$GUARD celery=$CELERY agent_grader=$AGENT_GRADER"
           [ "$PLAN" = success ] || { echo "plan 이 success 가 아니다"; exit 1; }
           if [ "$TESTS" = 1 ]; then
-            want_checks=success; want_celery=success
+            want_checks=success; want_celery=success; want_agent_grader=success
             if [ "$GUARD_ON" = 1 ]; then want_guard=success; else want_guard=skipped; fi
           else
-            want_checks=skipped; want_celery=skipped; want_guard=skipped
+            want_checks=skipped; want_celery=skipped; want_guard=skipped; want_agent_grader=skipped
           fi
           bad=0
-          for pair in "checks:$CHECKS:$want_checks" "guard:$GUARD:$want_guard" "celery:$CELERY:$want_celery"; do
+          for pair in "checks:$CHECKS:$want_checks" "guard:$GUARD:$want_guard" "celery:$CELERY:$want_celery" "agent-grader:$AGENT_GRADER:$want_agent_grader"; do
             IFS=: read -r name got want <<<"$pair"
             [ "$got" = "$want" ] || { echo "$name: $got (기대 $want)"; bad=1; }
           done

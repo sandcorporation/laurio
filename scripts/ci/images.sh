@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 배포 이미지 여섯을 한 아키텍처로 굽거나, 바뀌지 않았으면 건너뛴다(#705, Jenkinsfile 「이미지」).
+# 배포 이미지 일곱을 한 아키텍처로 굽거나, 바뀌지 않았으면 건너뛴다(#705, Jenkinsfile 「이미지」).
 #
-#   scripts/ci/images.sh arm64     prod 호스트(oracle)의 것 — 여섯 전부 `-arm64`. 배포는 이것 하나다
+#   scripts/ci/images.sh arm64     prod 호스트(oracle)의 것 — 일곱 전부 `-arm64`. 배포는 이것 하나다
 #   scripts/ci/images.sh amd64     로컬 시험용 — PR 검사·배포 잡은 부르지 않는다(staging 제거, #841). 문맥 해시의
 #                                  플랫폼 구분(`image_context.py`)과 그 시험이 아직 두 값을 전제해 인자는 남겼다
 #
@@ -28,7 +28,7 @@
 #                              않는다. retag 는 건너뛸 것에만 커밋 태그를 더하고 구울 것은 `서비스=pending` 으로
 #                              남긴다 — 빌더를 띄우지 않아 어느 노드에서나 돈다. 지금 부르는 쪽은 없다(#873 전에는
 #                              `codemit/deploy` 의 「대상 확인」이 열차가 구운 커밋을 macos 없이 끝내던 길, #729)
-#   CODEMIT_IMAGES_SERVICES    다룰 서비스(공백으로 가름, 기본 여섯 전부)
+#   CODEMIT_IMAGES_SERVICES    다룰 서비스(공백으로 가름, 기본 일곱 전부)
 #   CODEMIT_IMAGE_REGISTRY     기본 ghcr.io/sandcorporation (로컬 시험은 localhost:<포트>)
 #   CODEMIT_IMAGES_BUILDER     buildx 빌더 이름(기본 codemit-images — 없으면 docker-container 로 만든다.
 #                              레지스트리 캐시를 내보내려면 docker 드라이버로는 안 된다)
