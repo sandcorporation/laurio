@@ -6,7 +6,8 @@
 
 ```
 PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
-   → release.yml(push: main): check(pr-check.yml 그대로, workflow_call) → image(image.yml, ubuntu-24.04-arm 여섯) → promote(production fast-forward)
+   → release.yml(push: main): verify(이미 검사한 트리인가) → check(pr-check.yml 그대로, workflow_call — 증명되면 건너뜀)
+                              ‖ image(image.yml, ubuntu-24.04-arm 여섯) → promote(production fast-forward)
    → Jenkins `codemit/deploy`(*/production): 굽지도 검사하지도 않고 ghcr `codemit-<서비스>:<sha>` 를 받아 oracle 에 배포
 ```
 
@@ -25,6 +26,16 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   는 release.yml 의 promote 잡. 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
 - **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다. 배포되는 커밋이
   검사를 통과했다는 것은 promote 가 check·image 둘 다를 기다리는 것이 지킨다(check·image 는 병렬로 돈다).
+- **production 승격 전에 그 커밋을 보증하는 것: 그 트리가 「결과」 초록을 받았다 — release 의 check 가 초록이거나, 같은 트리
+  해시를 PR 검사가 시험을 다 돌려 초록으로 받았다(verify 가 증명)**(#959).
+  - 왜: release check 가 PR 검사를 그대로 다시 돌아(병합 5건 모두 같은 트리였다) 병합→승격이 7~11분이었다. 시간의 대부분은 check 의 e2e 다.
+  - 증명(`scripts/ci/verified_tree.py`, GITHUB_TOKEN 읽기 권한만): 병합 커밋 → 그 PR(`commits/<sha>/pulls`) → PR head 의 초록
+    PR 검사 실행 → plan 잡의 단계 이름 `검사한 커밋 <refs/pull/N/merge sha>` → 그 커밋의 트리 == 병합 커밋 트리면 `skip=1`.
+  - 전체 check 를 도는 때: 트리가 다르다(그사이 main 이 움직였다 — ruleset strict 가 꺼져 있어 두 PR 의 조합은 여기서만 잡힌다),
+    PR 검사가 시험을 건너뛰었다(문서만), 이미지 층 캐시 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이
+    바뀌었다(캐시 저장은 main check 만 한다), squash 가 아니다, API 실패. 판정과 까닭은 verify 잡 로그·요약에 한 줄로 남는다.
+  - 판정 규칙은 `scripts/test_release_flow.py` 가 고정한다. 되돌리기: release.yml 의 check 에서 `if:` 를 빼면(또는 verify 잡을
+    지우고 promote 조건을 `needs: [check, image]` 로) 늘 전체 check 다.
 - **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 표와 글은 꺼진 검사의 기록이다.** Jenkins 이미지 빌드 비상 길도 제거했다. 검사와 이미지 빌드는 GitHub Actions만 수행한다.
 
 ### Actions 의 캐시 — main 이 저장하고 PR 은 복원만 한다(#932)

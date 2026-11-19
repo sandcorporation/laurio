@@ -55,6 +55,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # release.yml 의 verify 잡(#959)이 jobs API 로 이 단계 이름을 읽어 「이 트리는 이미 초록」을 증명한다 — 이름 꼴을 바꾸지 않는다
+      # (scripts/ci/verified_tree.py 의 TESTED_STEP). PR 이면 github.sha 는 refs/pull/N/merge 커밋이다.
+      - name: 검사한 커밋 ${{ github.sha }}
+        run: echo "트리 $(git rev-parse HEAD^{tree})"
       - id: plan
         name: 무엇을 돌릴지
         run: |
