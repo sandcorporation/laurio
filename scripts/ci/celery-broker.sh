@@ -32,7 +32,8 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM
 if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then ghcr_login; fi
 
-"${C[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} || { echo "스택을 띄우지 못했다"; exit 1; }
+# 이 시험에 필요한 것만 — celery-worker 와 그 의존(db·redis·minio·backend)이다. Next 앱 셋·events·grader 는 굽지도 띄우지도 않는다(#1020).
+"${C[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} celery-worker || { echo "스택을 띄우지 못했다"; exit 1; }
 
 # 브로커 드라이버가 이미지에 들어 있다.
 "${C[@]}" exec -T celery-worker python -c "import redis, kombu; print('redis', redis.__version__, 'kombu', kombu.__version__)" || exit 1
@@ -60,13 +61,14 @@ echo "worker: pong"
 TASK_NAME=$("${C[@]}" exec -T celery-worker python -c "from core.tasks import run_scan; print(run_scan.name)" | tr -d '\r\n')
 [ -n "$TASK_NAME" ] || { echo "core.tasks.run_scan 의 태스크 이름을 읽지 못했다"; exit 1; }
 echo "찾는 태스크: $TASK_NAME"
-for _ in $(seq 1 40); do
+# beat 간격은 compose.ci.yaml 의 CODEMIT_CI_BEAT_INTERVAL_SECONDS(10초)다 — 첫 발사까지 10초대.
+for _ in $(seq 1 60); do
   logs=$("${C[@]}" logs celery-worker 2>&1 || true)
   if grep -q "${TASK_NAME}.*succeeded" <<<"$logs"; then
     echo "beat -> worker 경로 확인"
     exit 0
   fi
-  sleep 3
+  sleep 2
 done
 echo "beat 가 쏜 태스크를 worker 가 실행하지 못했다"
 "${C[@]}" logs celery-worker | tail -50

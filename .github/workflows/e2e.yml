@@ -9,6 +9,14 @@ on:
   schedule:
     - cron: "7 * * * *"
   workflow_dispatch:
+    inputs:
+      # 알림 시험(#1020) — e2e 는 돌리지 않고 notify 잡만 fail(실패로)·ok(초록으로) 흉내 낸다. main 에서만 이슈를 건드리며,
+      # 제목에 「(알림 시험)」이 붙어 실제 e2e 실패 이슈·gate 판정(schedule 실행만 본다)·직전 초록 조회를 흐리지 않는다.
+      simulate:
+        description: "알림 시험 — none(실제 e2e)·fail·ok"
+        type: choice
+        options: [none, fail, ok]
+        default: none
 
 permissions:
   contents: read
@@ -44,6 +52,8 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           run=1
+          # 알림 시험이면 실제 e2e 는 돌리지 않는다
+          [ "${{ inputs.simulate || 'none' }}" = none ] || run=0
           if [ "$EVENT" = schedule ]; then
             last=$(gh run list --workflow e2e.yml --event schedule --branch main --status completed --limit 20 \
               --json conclusion,headSha -q '[.[]|select(.conclusion=="success" or .conclusion=="failure")][0] | "\(.conclusion) \(.headSha)"' || true)
@@ -158,7 +168,7 @@ jobs:
 
   notify:
     needs: [gate, e2e]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.gate.outputs.run == '1' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success') }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && ((needs.gate.outputs.run == '1' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success')) || (inputs.simulate || 'none') != 'none') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -168,24 +178,33 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          fetch-depth: 2
           persist-credentials: false
       - name: 결과를 이슈로
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          SIM: ${{ inputs.simulate || 'none' }}
           RESULT: ${{ needs.e2e.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # 직전 초록 = 이 실행 앞의 가장 새 성공 실행의 sha(건너뛴 실행도 같은 sha 라 그대로 맞다)
-          green=$(gh run list --workflow e2e.yml --branch main --status success --limit 10 --json databaseId,headSha \
+          # (schedule 실행만 본다 — 수동·알림 시험 실행은 e2e 를 안 돌았을 수 있다)
+          green=$(gh run list --workflow e2e.yml --branch main --event schedule --status success --limit 10 --json databaseId,headSha \
             -q "[.[]|select(.databaseId != ${{ github.run_id }})][0].headSha // empty" || true)
           title="e2e 실패 — main 의 화면이 깨졌을 수 있다"
+          if [ "$SIM" != none ]; then
+            title="${title} (알림 시험)"
+            green=$(git rev-parse HEAD~1)   # 시험이니 바로 앞 커밋을 직전 초록으로 쓴다(compare 링크·커밋 목록 확인용)
+            [ "$SIM" = fail ] && RESULT=failure || RESULT=success
+          fi
           if [ "$RESULT" = success ]; then
             bash scripts/ci/ci-issue.sh ok "$title" "복구됨 ${SHA} — ${RUN_URL}"
             exit 0
           fi
           jobs=$(gh run view ${{ github.run_id }} --json jobs -q '[.jobs[]|select(.conclusion=="failure")|.name]|join(", ")' || true)
+          [ "$SIM" = none ] || jobs="(알림 시험 — 실제 실패 아님)"
           body="main \`${SHA}\` 의 e2e 가 실패했다. 실패한 잡: ${jobs:-?}. 실행: ${RUN_URL}"
           if [ -n "$green" ] && [ "$green" != "$SHA" ]; then
             body="${body}"$'\n\n'"직전 초록 \`${green}\` … 이번 \`${SHA}\`: https://github.com/${GH_REPO}/compare/${green}...${SHA}"

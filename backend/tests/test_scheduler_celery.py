@@ -79,3 +79,24 @@ def test_tick_is_not_scheduled_by_beat():
 
     assert not any(e["task"] == "core.call_scheduler_tick" for e in celery_app.conf.beat_schedule.values())
     assert not hasattr(core_tasks, "call_scheduler_tick")
+
+
+def test_ci_beat_interval_env_shortens_interval_scans_only(monkeypatch):
+    """CI 의 celery 잡만 쓰는 값(#1020) — 주기(초) 스캔은 줄이고 crontab 은 그대로, 값이 없으면 손대지 않는다."""
+    from celery.schedules import crontab
+
+    from config.celery import SCHEDULED_JOBS, sync_beat_schedule
+
+    monkeypatch.delenv("CODEMIT_CI_BEAT_INTERVAL_SECONDS", raising=False)
+    default = sync_beat_schedule()
+    assert all(e["schedule"] != 10.0 for n, e in default.items() if n.startswith("scan:"))
+    monkeypatch.setenv("CODEMIT_CI_BEAT_INTERVAL_SECONDS", "10")
+    try:
+        short = sync_beat_schedule()
+        scans = {n: e for n, e in short.items() if n.startswith("scan:")}
+        assert scans and all(e["schedule"] == 10.0 for e in scans.values())
+        for name, entry in SCHEDULED_JOBS.items():
+            assert isinstance(short[name]["schedule"], crontab)
+    finally:
+        monkeypatch.delenv("CODEMIT_CI_BEAT_INTERVAL_SECONDS")
+        sync_beat_schedule()
