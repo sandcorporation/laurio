@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import date, timedelta
 
@@ -177,6 +178,35 @@ def test_claude_agent_verdict_becomes_the_score(client, category, landing_type, 
     assert attempt["turns"] == 4
     assert attempt["evidence_check"] == {"checked": 1, "bad": [], "missing_for": []}
     assert len(run.record["prompt_sha256"]) == 64
+
+
+_STRICT_RULE = "10. 충족으로 볼 항목마다 반례를 한 번 찾습니다"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("model", "strict"),
+    [("claude-sonnet-5-5", False), ("claude-haiku-5-5", True)],
+)
+def test_strict_rules_follow_the_model_and_the_score_keeps_the_prompt_sent_to_the_cli(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor, model, strict
+):
+    """#1048: 엄격 규칙 8~10 은 Haiku 계열에만 붙는다. Score·실행 기록에는 CLI 에 넘긴 지침이 그대로 남는다."""
+
+    monkeypatch.setenv("LLM_ANTHROPIC_MODEL", model)
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    rid = _requirement_id(submission_id)
+    runner = _use(monkeypatch, _FakeRunner(_claude_stream(_verdicts(rid))))
+    monkeypatch.setattr(services, "get_adapter", lambda *, timeout=None: _MustNotBeCalled())
+
+    assert _run_pending(client)["rows"][0]["status"] == "scored"
+
+    (spec,) = runner.specs
+    assert spec["model"] == model
+    assert (_STRICT_RULE in spec["prompt"]) is strict
+    assert Score.objects.get(submission_id=submission_id).prompt == spec["prompt"]
+    record = AgentRun.objects.get(submission_id=submission_id).record
+    assert record["prompt_sha256"] == hashlib.sha256(spec["prompt"].encode("utf-8")).hexdigest()
 
 
 @pytest.mark.django_db
