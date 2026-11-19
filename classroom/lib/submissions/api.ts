@@ -40,6 +40,8 @@ export type ProblemMine = {
   // 이 문제를 한 번이라도 통과한 적이 있는가(#288) — 최신 시도가 아니라
   // 시도 전체의 OR. 한 번 통과하면 나중에 미통과가 나와도 계속 참이다.
   passed: boolean;
+  // 한 번이라도 「완벽」을 받았는가(#962) — 시도 전체의 OR. 심화 항목이 없는 문제는 null.
+  perfect?: boolean | null;
   // 권장 기한·마감(#769) — ISO 8601 또는 null. 제출 카드가 두 줄로 그린다(#770).
   recommended_due_at: string | null;
   due_at: string | null;
@@ -54,6 +56,8 @@ export type ProblemListItem = {
   title: string;
   submission_formats: SubmissionFormat[];
   passed: boolean;
+  // 한 번이라도 「완벽」을 받았는가(#962) — 심화 항목이 없는 문제는 null.
+  perfect?: boolean | null;
   // 통과 이력 상태(#639) — 격자·최근 시도와 같은 낱말. 미제출은 시도 0.
   // `needs_setup` 은 키·모델 사정으로 멈춘 시도 — 화면은 「채점 대기」(#670).
   status:
@@ -151,6 +155,8 @@ export type ClassroomSubmissionRow = {
   score: ClassroomScore | null;
   // 이 시도 하나가 통과인가(#288) — 미채점("pending")이면 항상 거짓이다.
   passed: boolean;
+  // 이 시도 하나가 「완벽」인가(#962) — 심화 항목이 없는 문제는 null.
+  perfect?: boolean | null;
   // 제출 시각의 늦음 단계(#941) — 저장된 값이 아니라 응답마다 다시 셈한 것.
   late: LateStatus;
   pending_reason: PendingReason;
@@ -244,6 +250,8 @@ export type InstructorSubmissionRow = {
   status: SubmissionStatus;
   score: ClassroomScore | null;
   passed: boolean;
+  // 참여자용 시도 행의 `perfect` 와 같은 값(#962).
+  perfect?: boolean | null;
   // 제출 시각의 늦음 단계(#941).
   late: LateStatus;
   // 참여자용 `ClassroomSubmissionRow.pending_reason`과 같은 값·같은 이유

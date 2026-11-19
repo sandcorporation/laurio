@@ -520,6 +520,9 @@ class ProblemOut(Schema):
     #: `passed_count / member_count`. 분모가 0이면 `None`이다 — 화면이 그때
     #: "0%"가 아니라 "아직 없음"으로 말하도록 0.0과 구별한다(#289 AC).
     pass_rate: float | None = None
+    #: 이 문제를 한 번이라도 「완벽」 받은 참여자 수(#962, CONTEXT.md 「완벽」) — 통과 수의 부분집합.
+    #: 심화 항목이 없는 문제는 `None`(완벽이 없다 — 0명과 구별한다).
+    perfect_count: int | None = None
     #: 이 문제를 원본으로 하는, 지금 살아 있는 문제 템플릿(#333) —
     #: `ClassOut.published_template`과 같은 이유·같은 모양.
     published_template: PublishedTemplateSummaryOut | None = None
@@ -727,6 +730,9 @@ class ClassroomProblemMineOut(Schema):
     #: 최신 시도가 아니라 시도 전체에 대한 OR다. 한 번 통과하면 나중에 다시
     #: 내서 미통과가 나와도 계속 참이다.
     passed: bool = False
+    #: 이 문제를 한 번이라도 「완벽」 받은 적이 있는가(#962) — `passed` 처럼 시도 전체에 대한 OR다.
+    #: 심화 항목이 없는 문제는 `None`(완벽이 없다), 있으면 참·거짓.
+    perfect: bool | None = None
     #: 강사 쪽 `ProblemOut.zip_git_history_warning` 과 같은 판정(#587) — 제출 화면이 zip 을
     #: 고를 때의 안내를 더 눈에 띄게 그린다.
     zip_git_history_warning: ZipGitHistoryWarningOut | None = None
@@ -921,6 +927,8 @@ class ClassroomSubmissionOut(Schema):
     #: 이 시도 하나가 통과인가 — 채점된 필수 체크리스트 항목을 전부
     #: 충족했는가(#288). 미채점("pending")이면 항상 거짓이다.
     passed: bool = False
+    #: 이 시도 하나가 「완벽」인가(#962) — 필수·심화 전부 충족. 심화 항목이 없는 문제는 `None`.
+    perfect: bool | None = None
     #: "no_api_key" | "model_rejected" | `None` — `classroom.pending_scoring.pending_reason`이
     #: 이 우선순위(키 → 모델)로 정한다(#434, #629). `status`가 "pending"일 때만 채워진다 —
     #: 강사가 채점 키를 아직 설정하지 않았으면(#346) "no_api_key", 키는 멀쩡한데 이 문제의
@@ -984,6 +992,8 @@ class ClassroomProblemStatsOut(Schema):
     passed_count: int
     member_count: int
     pass_rate: float | None = None
+    #: 「완벽」 받은 참여자 수(#962) — `ProblemOut.perfect_count` 와 같은 값. 심화 없으면 `None`.
+    perfect_count: int | None = None
     #: 권장 기한·마감(#769) — 격자 화면이 문제 목록에서 꿰매 넣지 않고 이 응답만 읽는다(#774).
     recommended_due_at: datetime | None = None
     due_at: datetime | None = None
@@ -1001,6 +1011,9 @@ class ClassroomGridCellOut(Schema):
     #: 셀은 강사가 직접 손대기 전까지는 절대 바뀌지 않는다
     #: (`classroom.pending_scoring.needs_setup`).
     status: str
+    #: 이 칸의 참여자가 이 문제를 한 번이라도 「완벽」 받았는가(#962) — `status` 가 "passed" 인
+    #: 칸 가운데 일부가 참이다. 심화 항목이 없는 문제는 `None`.
+    perfect: bool | None = None
     #: 공모전 문제에서만(#550): "current" — 지금 그 공모전의 제출이 이 칸의 시도다,
     #: "entered" — 공모전에도 냈었지만 지금 제출은 다른 시도·직접 고친 것이다, None — 낸 적 없다.
     contest_entry: str | None = None
@@ -1061,6 +1074,8 @@ class ClassroomInstructorSubmissionOut(Schema):
     status: str
     score: ClassroomScoreOut | None = None
     passed: bool = False
+    #: 참여자용 `ClassroomSubmissionOut.perfect` 와 같은 값(#962).
+    perfect: bool | None = None
     #: 참여자용 `ClassroomSubmissionOut.pending_reason`과 같은 값·같은 이유
     #: (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
     #: 멈춘 것"을 구별해야 한다.
@@ -1083,6 +1098,8 @@ class ClassroomProblemListItemOut(Schema):
     title: str
     submission_formats: list[str]
     passed: bool
+    #: 「완벽」 이력(#962) — `ClassroomProblemMineOut.perfect` 와 같은 값.
+    perfect: bool | None = None
     #: 통과 이력 상태(#639) — 격자·최근 시도와 같은 낱말이다: "passed" |
     #: "attempted_not_passed" | "scoring" | "needs_setup" | "not_submitted".
     #: "needs_setup" 은 키·모델 사정으로 멈춘 시도다 — 화면은 「채점 대기」로 보인다

@@ -5645,6 +5645,8 @@ export interface components {
             contest_entry?: string | null;
             /** Late */
             late: ("recommended" | "deadline") | null;
+            /** Perfect */
+            perfect?: boolean | null;
             /** Problem Id */
             problem_id: number;
             /** Status */
@@ -5718,6 +5720,8 @@ export interface components {
             passed: boolean;
             /** Pending Reason */
             pending_reason?: string | null;
+            /** Perfect */
+            perfect?: boolean | null;
             /** Problem Id */
             problem_id: number;
             score?: components["schemas"]["ClassroomScoreOut"] | null;
@@ -5778,6 +5782,8 @@ export interface components {
             late: ("recommended" | "deadline") | null;
             /** Passed */
             passed: boolean;
+            /** Perfect */
+            perfect?: boolean | null;
             /** Recommended Due At */
             recommended_due_at?: string | null;
             /**
@@ -5838,6 +5844,8 @@ export interface components {
              * @default false
              */
             passed: boolean;
+            /** Perfect */
+            perfect?: boolean | null;
             /** Recommended Due At */
             recommended_due_at?: string | null;
             /** Submission Formats */
@@ -5869,6 +5877,8 @@ export interface components {
             pass_rate?: number | null;
             /** Passed Count */
             passed_count: number;
+            /** Perfect Count */
+            perfect_count?: number | null;
             /** Recommended Due At */
             recommended_due_at?: string | null;
             /** Status */
@@ -5988,6 +5998,8 @@ export interface components {
             passed: boolean;
             /** Pending Reason */
             pending_reason?: string | null;
+            /** Perfect */
+            perfect?: boolean | null;
             /** Problem Id */
             problem_id: number;
             score?: components["schemas"]["ClassroomScoreOut"] | null;
@@ -8491,6 +8503,8 @@ export interface components {
              * @default 0
              */
             passed_count: number;
+            /** Perfect Count */
+            perfect_count?: number | null;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /**
              * Quality Public

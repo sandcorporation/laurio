@@ -425,6 +425,39 @@ class Problem(models.Model):
         met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
         return required_item_ids.issubset(met_ids)
 
+    @staticmethod
+    def has_advanced_items(checklist_items) -> bool:
+        """이 체크리스트에 **심화**(내부 값 `optional`) 항목이 하나라도 있는가(#962, CONTEXT.md
+        「심화」) — 숨긴 항목도 센다. 없으면 이 문제에는 「완벽」이 없다."""
+
+        return any(item.grade == GRADE_OPTIONAL for item in checklist_items)
+
+    def is_score_perfect(self, score, checklist_items=None) -> bool:
+        """이 채점 하나가 이 문제에서 **완벽**인가(#962, CONTEXT.md 「완벽」, ADR-0081) —
+        필수와 심화(`optional`) 항목이 전부 충족이다. `is_score_passed` 와 같은 꼴이다:
+
+        - **지금의 체크리스트로 다시 센다**(저장하지 않는다) — 강사가 뒤에 심화 항목을
+          더하거나 고치면 완벽도 다시 센다.
+        - 충족은 `is_met` 가 참인 것뿐이다 — 확인 불가는 충족이 아니다.
+        - 제출자에게 숨긴 항목(`hidden`)도 포함한다 — `checklist_items` 에 숨김 여부로 거르지 않는다.
+        - 가산 항목은 뺀다(ADR-0073).
+        - 통과의 나머지 조건(문법 검사)도 같이 요구한다 — 완벽은 통과의 부분집합이다.
+        - 심화 항목이 없는 문제는 언제나 거짓이다(완벽이 없다). 그 문제를 구별해야 하면
+          `has_advanced_items` 를 같이 부른다.
+
+        `checklist_items` 를 주면 다시 질의하지 않는다(`is_score_passed` 와 같은 이유)."""
+
+        if score is None:
+            return False
+        items = self.checklist_items.all() if checklist_items is None else checklist_items
+        advanced_item_ids = {item.id for item in items if item.grade == GRADE_OPTIONAL}
+        if not advanced_item_ids:
+            return False
+        if not self.is_score_passed(score, checklist_items=items):
+            return False
+        met_ids = {r["checklist_item_id"] for r in score.reasoning if r["is_met"]}
+        return advanced_item_ids.issubset(met_ids)
+
 
 class ClassMember(models.Model):
     """한 사람이 한 Class에 속한다는 사실(#280, CONTEXT.md 「ClassMember」).

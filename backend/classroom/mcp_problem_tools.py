@@ -188,7 +188,7 @@ _SUBMISSION_FORMATS = {
 _LABEL = {"type": "string", "minLength": 1, "maxLength": 200, "description": GRADABILITY_LABEL_NOTE}
 _REQUIRED = {
     "type": "boolean",
-    "description": "필수 항목인가. 필수 항목을 모두 만족해야 통과다. 열린·숨긴 문제는 필수 항목이 하나 이상 있어야 한다.",
+    "description": "필수 항목인가. 필수 항목을 모두 만족해야 통과다. 아니면 선택 항목(optional)이고 강의실 화면에서는 「심화」로 보인다 — 통과에는 안 들어가고, 필수·심화를 전부 만족하면 「완벽」이다. 열린·숨긴 문제는 필수 항목이 하나 이상 있어야 한다.",
 }
 #: 배점 1~10(#904) — 완성도에만 쓴다. 없으면 필수 2·선택 1.
 _POINTS = {
@@ -244,7 +244,11 @@ _ITEM_OUT = {
     "properties": {
         "id": {"type": "integer"},
         "label": {"type": "string"},
-        "grade": {"type": "string", "enum": ["required", "optional", "bonus"]},
+        "grade": {
+            "type": "string",
+            "enum": ["required", "optional", "bonus"],
+            "description": "optional 은 강의실 화면에서는 「심화」로 보인다(값은 그대로 optional).",
+        },
         "required": {"type": "boolean"},
         "points": {"type": "integer"},
         "hidden": {"type": "boolean"},
