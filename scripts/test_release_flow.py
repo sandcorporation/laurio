@@ -58,14 +58,15 @@ class ReleaseFlowTest(unittest.TestCase):
         code = read(WORKFLOWS / "release.yml")
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", code)
         assert on
-        self.assertEqual(re.sub(r"\s+", " ", on.group(1)).strip(), "push: branches: [main]")
+        self.assertEqual(re.sub(r"\s+", " ", on.group(1)).strip(), "push: branches: [main] workflow_dispatch:")
         self.assertIn("uses: ./.github/workflows/pr-check.yml", job_block(code, "check"))
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)
         # check 와 image 는 병렬 — 승격만 둘을 기다린다.
-        self.assertNotIn("needs:", image)
+        self.assertRegex(image, r"needs:\s*main_only\s*\n")
+        self.assertNotRegex(image, r"needs:.*(verify|check)")
         promote = job_block(code, "promote")
-        self.assertRegex(promote, r"needs:\s*\[verify, check, image\]")
+        self.assertRegex(promote, r"needs:\s*\[main_only, verify, check, image\]")
         # 건너뛴 check 로 승격하는 길은 verify 가 증명했을 때 하나뿐(#959)
         self.assertIn("needs.image.result == 'success'", promote)
         self.assertIn(
@@ -165,8 +166,8 @@ class ReleaseSkipsAlreadyCheckedTreeTest(unittest.TestCase):
     def test_release_check_is_skipped_only_on_proof_and_verify_only_reads(self) -> None:
         code = read(WORKFLOWS / "release.yml")
         check = job_block(code, "check")
-        self.assertIn("needs: verify", check)
-        self.assertIn("if: ${{ !cancelled() && needs.verify.outputs.skip != '1' }}", check)
+        self.assertIn("needs: [main_only, verify]", check)
+        self.assertIn("if: ${{ !cancelled() && needs.main_only.result == 'success' && needs.verify.outputs.skip != '1' }}", check)
         verify = job_block(code, "verify")
         self.assertIn('python3 scripts/ci/verified_tree.py "$SHA"', verify)
         scopes = dict(re.findall(r"(?m)^      ([\w-]+): (read|write)$", verify))
