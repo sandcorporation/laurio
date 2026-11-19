@@ -48,6 +48,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
 from django.db import InterfaceError, OperationalError, close_old_connections, connection, connections
 
+from policies.runtime_settings import refresh_settings
 from core.clock import Clock
 from core import llm_metrics
 from core.events import publish_all
@@ -158,6 +159,8 @@ class Grader:
         if free <= 0:
             return 0
         as_of = await self._db(Clock.now)
+        # 소스 읽기 스레드는 DB 를 못 쓴다 — 저장소 다운로드 상한(운영 설정, #1005)을 여기서 캐시에 올려 둔다.
+        await self._db(refresh_settings)
         full = [cid for cid, n in self._per_class.items() if n >= self.per_connection_limit]
         candidates = await self._db(
             scoring.next_candidates,

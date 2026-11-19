@@ -542,7 +542,7 @@ README → 그 밖(설정·마이그레이션·배포·숨은 폴더), 같은 �
 `<원본 경로>/<이름>` 으로 다른 파일과 같은 예산·라운드로빈을 받는다. 형식을 확정한
 뒤 실패하면 그 파일 자리에 「(열 수 없는 ○○ 파일 — 내용을 읽지 못했다)」 한 줄이
 남아 채점자가 「없다」로 오판하지 않는다. 플러그인의 예외는 그 플러그인만, 시간
-상한(10초)·입력 상한(100MB, 저장소 zip 다운로드 상한과 같은 값 — #996)은 그 파일만 건너뛰고 선별은 계속한다. 쓸 수 없는 경로는
+상한(10초)·입력 상한(저장소 다운로드 상한 운영 설정과 같은 값, 기본 100MB — #996·#1005)은 그 파일만 건너뛰고 선별은 계속한다. 쓸 수 없는 경로는
 `manage.py check` 가 거절한다(`core.E004`·`core.E005`, dev 에서도). 플러그인은
 지금 Packet Tracer(`.pkt`, #497 — `core.source_converters.packet_tracer`, 해독은
 Unpacket 에서 들여온 MIT 코드) 하나다. **기본값은 dev·CI 가 Packet Tracer, 배포
@@ -1049,6 +1049,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
+| `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·완성도 리뷰(`submission-quality-review`) 스캔 | **off** — 두 스캔이 돌지 않는다 |
 
 **에이전트 채점 키 프록시 `llm-proxy`**(#998) — backend 이미지의 별도 프로세스(`manage.py llm_proxy`,
