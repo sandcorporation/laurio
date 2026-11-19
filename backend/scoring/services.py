@@ -72,6 +72,7 @@ from core.llm_scoring import (
 )
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
+from policies.runtime_settings import contest_ai_scoring_enabled
 from repositories.adapters import ClonedRepository, GitHubRefNotFoundError, get_github_adapter
 from repositories.models import RepositorySnapshot
 from storage.adapters import StorageAdapterError, get_storage_adapter
@@ -1021,4 +1022,8 @@ SUBMISSION_SCORING_SCAN = ScanSpec(
     time_budget_seconds=5.0,
     request_timeout_seconds=90.0,
     interval_seconds=120.0,
+    # #991: 공모전 AI 채점 스위치(운영 설정 `CONTEST_AI_SCORING`, 값이 없으면 꺼짐). 꺼지면 시도 기록·
+    # 실패 상한 0%·「입력 없음」 0% 가 하나도 생기지 않는다 — 이 스캔이 통째로 돌지 않는다.
+    enabled=contest_ai_scoring_enabled,
+    keep_scheduled_when_disabled=True,
 )

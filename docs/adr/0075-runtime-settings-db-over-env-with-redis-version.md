@@ -36,7 +36,8 @@ Status: Accepted (2026-11-05 결정)
    `lru_cache` 없음) 키를 생성자에서 읽으므로 celery·grader 같은 오래 사는 프로세스도 다음 호출부터 새 키다.
    **강의실(`product="classroom"`)은 읽지 않는다** — 강사 BYOK 키·모델을 인자로 받고 나머지는 지금처럼 env 다.
 5. **화면으로 옮긴 것**: `OPEN_AI_API_KEY`(비밀)·`LLM_OPENAI_MODEL`·`LLM_OPENAI_TEMPERATURE`·
-   `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE`. **더 옮긴 한도·주기 값은 없다** — 후보(`SAFE_OUTBOUND_*`·
+   `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE`, 그리고 #991 의 스위치 `CONTEST_AI_SCORING`(on/off, **값이 없으면 꺼짐** —
+   이 표에서 유일하게 「출처 없음」이 지금까지의 동작과 다르다. 공모전 채점만 멈출 길이 없어 처리기 전체를 세운 일이 있었다). **더 옮긴 한도·주기 값은 없다** — 후보(`SAFE_OUTBOUND_*`·
    `CLASSROOM_GRADER_*`)는 강의실 grader 와 바깥 호출 전체에 걸려 이 티켓의 범위(공모전 AI) 밖이고, 공모전 AI 의
    타임아웃(20초)은 env 가 아니라 코드 상수다.
    **넣지 않는 것**: DB·Redis 접속, 시크릿·서명·암호화 키, OAuth·결제·웹훅 비밀, 도메인·Origin·쿠키(바뀌면

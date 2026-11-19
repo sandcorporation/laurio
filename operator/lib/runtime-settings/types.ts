@@ -1,7 +1,7 @@
 // 운영 설정(#922, ADR-0075) — 백엔드 `policies.schemas.RuntimeSetting*Out` 의 모양.
 // 비밀 값은 어느 응답에도 오지 않는다 — `configured`·`last4` 만 온다.
 
-export type RuntimeSettingKind = "secret" | "text" | "float";
+export type RuntimeSettingKind = "secret" | "text" | "float" | "switch";
 export type RuntimeSettingSource = "db" | "env" | "none";
 export type ProbeResult = "ok" | "invalid_key" | "unavailable";
 
