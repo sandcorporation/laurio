@@ -279,6 +279,10 @@ async def _relay(
         )
     headers = {k: v for k, v in request.headers.items() if k.lower() in _FORWARD_REQUEST_HEADERS}
     headers.update(_auth_headers(vendor, key))
+    # 압축하지 말라고 못 박는다(#1666). aiohttp 는 Accept-Encoding(gzip·deflate)을 저절로 붙이는데, 세션은
+    # `auto_decompress=False`(본문을 그대로 흘려 보내며 미터가 읽는다)이고 Content-Encoding 은 넘기지 않는다 —
+    # 벤더가 gzip 으로 답하면 CLI 는 압축 바이트를 JSON 으로 읽다 죽고(`Unrecognized token \x1f`) 미터도 usage 를 못 읽는다.
+    headers["accept-encoding"] = "identity"
     target = url + (f"?{request.query_string}" if request.query_string else "")
     meter: UsageMeter | None = None
     settled = False
