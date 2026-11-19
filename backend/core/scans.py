@@ -39,6 +39,7 @@ DEFAULT_BATCH_SIZE = 50
 # core/tasks.py 의 HTTP 타임아웃(30초) 안에서 끝나야 한다 — 그래서 20초.
 DEFAULT_TIME_BUDGET_SECONDS = 20.0
 DEFAULT_INTERVAL_SECONDS = 60.0
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,9 @@ class ScanSpec:
     batch_size: int = DEFAULT_BATCH_SIZE
     time_budget_seconds: float = DEFAULT_TIME_BUDGET_SECONDS
     interval_seconds: float = DEFAULT_INTERVAL_SECONDS
+    # beat 가 이 스캔의 엔드포인트를 부를 때 기다리는 HTTP 한도(`core.tasks.run_scan`). 기본은
+    # 30초 — 행 시작 예산(위)과 행 하나의 최장 시간을 더한 값보다 커야 한다(#986, 채점 스캔).
+    request_timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
     # 후보 QuerySet 에 뼈대가 거는 정렬 — 기본 id. 예외적으로 due 시각 순이 필요한 스캔이 준다.
     order_by: tuple[str, ...] = ("id",)
     # 이 스캔이 지금 도는가 — None 이면 항상 돈다(대다수). #413: 유료 공모전

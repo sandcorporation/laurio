@@ -191,6 +191,13 @@ class LLMAdapterTimeoutError(LLMAdapterError):
     호출자는 지금처럼 다룬다. 지표의 결과 라벨 `timeout` 이 이것이다."""
 
 
+class LLMAdapterMissingVerdictError(LLMAdapterError):
+    """응답이 실린 requirement 일부의 판정을 빠뜨렸다(#986) — 같은 입력을 다시 부르면 대개
+    전부 판정한다(공모전 3의 809). 일시 실패의 하위 예외라 이 클래스를 모르는 호출자는 지금처럼
+    재시도한다. 공모전 실패 상한은 시간 초과와 함께 이것을 「일시 벤더 실패」로 따로 센다
+    (`scoring.services._scoring_cap_reached`, ADR-0031 개정)."""
+
+
 class LLMAdapterUnreachableError(LLMAdapterError):
     """호환 서버에 닿지 않았다(#603) — 이름이 풀리지 않거나, 연결이 서지 않거나, 인증서가
     맞지 않거나, 막힌 주소로 풀렸거나, 리다이렉트로 답했다(`core.safe_outbound.OutboundRefused.
@@ -235,6 +242,10 @@ class FakeLLMScoringAdapter:
     """
 
     model_version = "fake-llm-v1"
+
+    def __init__(self, *, timeout: float | None = None) -> None:
+        # 실물 어댑터와 같은 생성 계약(`get_adapter(timeout=…)`, #986) — 흉내라 쓰지 않는다.
+        self.timeout = timeout
 
     def score(self, scoring_input: ScoringInput) -> ScoringOutput:
         if scoring_input.submission_id in settings.LLM_FAKE_RAISING_SUBMISSION_IDS:
@@ -317,7 +328,9 @@ _OPENAI_DEFAULT_TEMPERATURE = 0
 # 프롬프트 구성·DB 조회 등 나머지 오버헤드에 10초 여유를 남긴다. 강의실 채점은
 # 이 예산 밖(Celery 워커 안)에서 돌아 자기 값(180초)을 넘긴다(#582, ADR-0056 —
 # `classroom.scoring.CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS`). 키 확인·모델 목록
-# 조회는 사람이 기다리는 요청 안이라 이 값을 그대로 쓴다.
+# 조회는 사람이 기다리는 요청 안이라 이 값을 그대로 쓴다. 공모전 채점도 이제 이 값을 쓰지
+# 않는다 — 실제 공모전 입력이 20초를 넘어(#986) 자기 값(`scoring.services.
+# CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`)과 그에 맞춘 스캔 HTTP 예산을 넘긴다.
 _OPENAI_REQUEST_TIMEOUT_SECONDS = 20
 _OPENAI_SYSTEM_PROMPT = (
     # 공모전과 강의실이 함께 쓴다 — 제품 이름을 적지 않는다(무엇을 채점하는지는
@@ -765,7 +778,7 @@ def verdicts_from_content(
 
     missing = [rid for rid in requirement_ids if rid not in verdict_by_id]
     if missing:
-        raise LLMAdapterError(
+        raise LLMAdapterMissingVerdictError(
             f"{vendor} 응답이 일부 requirement에 대한 판정을 빠뜨렸다"
             f"(missing_requirement_ids={missing}, submission={submission_id}) — "
             "미충족으로 채우지 않고 채점 자체를 실패로 남긴다."
@@ -1155,8 +1168,12 @@ def fake_probe_openai_key(api_key: str) -> Literal["ok", "invalid_key", "unavail
     return "ok" if api_key.startswith("sk-") and len(api_key) >= 20 else "invalid_key"
 
 
-def get_adapter() -> LLMScoringAdapter:
+def get_adapter(*, timeout: float | None = None) -> LLMScoringAdapter:
+    """`timeout` 을 주면 실물 어댑터의 벤더 호출 한도로 넘긴다(#986 — 공모전 채점이
+    `scoring.services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS` 를 쓴다). fake 는 받지 않는다."""
+
     return resolve_adapter(
+        factory_kwargs=None if timeout is None else {"timeout": timeout},
         mode=settings.LLM_ADAPTER_MODE,
         fake_factory=FakeLLMScoringAdapter,
         not_implemented_hint=(

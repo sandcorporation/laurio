@@ -26,7 +26,7 @@ from celery import shared_task
 from django.conf import settings
 
 
-def call_internal(path: str) -> dict:
+def call_internal(path: str, *, timeout: float = 30) -> dict:
     """`path`(예: "/api/internal/tick")로 내부 인증 POST 한 번을 보낸다.
 
     응답이 2xx가 아니면 `raise_for_status()`가 예외를 던진다 — Celery가 이 태스크를
@@ -38,7 +38,7 @@ def call_internal(path: str) -> dict:
     response = requests.post(
         f"{settings.INTERNAL_API_BASE_URL}{path}",
         headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN},
-        timeout=30,
+        timeout=timeout,
     )
     response.raise_for_status()
     return response.json()
@@ -65,6 +65,11 @@ def run_scan(name: str) -> dict:
 
     from core.observability import tag_error_scope
 
+    from core.scans import DEFAULT_REQUEST_TIMEOUT_SECONDS, SCAN_REGISTRY
+
     tag_error_scope("scan", scan=name)
-    return call_internal(f"/api/internal/scans/{name}")
+    spec = SCAN_REGISTRY.get(name)
+    # 스캔마다 자기 HTTP 한도(#986) — 등록부 밖의 이름은 기본값으로 불러 엔드포인트가 404 로 거부한다.
+    timeout = spec.request_timeout_seconds if spec is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
+    return call_internal(f"/api/internal/scans/{name}", timeout=timeout)
 

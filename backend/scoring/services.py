@@ -62,7 +62,14 @@ from django.db.models.functions import Coalesce
 from contests.models import Contest, ContestSubmission, Requirement
 from contests.submission_target_refs import source_target_ref
 from core.clock import Clock
-from core.llm_scoring import LLMAdapterPermanentError, RequirementInput, ScoringInput, get_adapter
+from core.llm_scoring import (
+    LLMAdapterMissingVerdictError,
+    LLMAdapterPermanentError,
+    LLMAdapterTimeoutError,
+    RequirementInput,
+    ScoringInput,
+    get_adapter,
+)
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
 from core.scans import ScanSpec
 from repositories.adapters import ClonedRepository, GitHubRefNotFoundError, get_github_adapter
@@ -463,11 +470,37 @@ SCORING_FAILURE_LIMIT = 5
 #: 하루조차 쓰지 않는 값이다 — 유예가 배분을 밀지 않는다.
 SCORING_FAILURE_GRACE = timedelta(hours=6)
 
+#: #986(ADR-0031 개정): 벤더가 늦거나(시간 초과) 판정 일부를 빠뜨린(판정 누락) 실패는 제출물
+#: 탓이 아니고 다시 부르면 대개 낫는다 — 공모전 3에서 이 둘만으로 16건 전원이 6시간 뒤 0%가 될
+#: 뻔했다. 그래서 위 횟수(`SCORING_FAILURE_LIMIT`)에 세지 않는다. 그래도 「반드시 끝난다」는
+#: 지킨다: 이 일시 실패까지 합친 횟수가 상한에 이르고 마감 후 이 유예가 지나면 끝낸다. 하루는
+#: 가장 짧은 심사기간(`judging_period_days` ≥ 1)과 같다 — 심사가 끝나기 전에 모두 확정되고,
+#: 그 사이 벤더 한도·장애를 사람이 고칠 시간이 된다.
+SCORING_TRANSIENT_FAILURE_GRACE = timedelta(hours=24)
+
+#: 일시 벤더 실패로 치는 시도 기록(#986). `ScoringAttempt.error` 는 `"<예외 이름>: <문구>"` 다
+#: (`score_submission_once`). 판정 누락은 #986 전에는 `LLMAdapterError` 이름으로 남았으므로
+#: (공모전 3의 809) 문구의 표지로도 잡는다.
+_TRANSIENT_VENDOR_FAILURE = (
+    Q(error__startswith=f"{LLMAdapterTimeoutError.__name__}:")
+    | Q(error__startswith=f"{LLMAdapterMissingVerdictError.__name__}:")
+    | Q(error__contains="missing_requirement_ids=")
+)
+
+#: #986: 공모전 채점 한 건의 벤더 호출 한도. 예전에는 기본 20초(`core.llm_scoring.
+#: _OPENAI_REQUEST_TIMEOUT_SECONDS`, #88 — 바깥 `call_internal` 30초 안에 들도록)를 그대로
+#: 썼는데, 실제 공모전 입력(약 8.3만 토큰)의 성공 호출이 13~18초라 조금만 큰 저장소도 20초를
+#: 넘었다(공모전 3, ReadTimeout 7건). 성공 최대의 세 배 남짓을 준다. 바깥 예산은 이 스캔만
+#: 따로 늘린다(아래 `SUBMISSION_SCORING_SCAN`).
+CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 60
+
 
 def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """실패 상한(#222, ADR-0031)에 이르렀는가 — 영구 실패가 하나라도 있으면 유예 없이
     즉시 True다. 아니면 실패 횟수가 `SCORING_FAILURE_LIMIT`에 이르고 **동시에**
-    마감 후 `SCORING_FAILURE_GRACE`가 지났을 때만 True다.
+    마감 후 `SCORING_FAILURE_GRACE`가 지났을 때만 True다. 일시 벤더 실패(시간 초과·판정
+    누락, `_TRANSIENT_VENDOR_FAILURE`)는 그 횟수에 세지 않고, 그것까지 합쳐야 상한에 이르는
+    제출은 `SCORING_TRANSIENT_FAILURE_GRACE`가 지나야 끝난다(#986, ADR-0031 개정).
 
     `ScoringAttempt`를 집계해서만 판정한다(#221과 같은 이유 — `Submission`에
     카운터를 두지 않는다. 카운터 증가와 이력 생성이 같은 트랜잭션을 벗어나는
@@ -476,13 +509,20 @@ def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """
 
     counts = submission.scoring_attempts.aggregate(
-        total=Count("id"), permanent=Count("id", filter=Q(permanent=True))
+        total=Count("id"),
+        permanent=Count("id", filter=Q(permanent=True)),
+        transient=Count("id", filter=_TRANSIENT_VENDOR_FAILURE),
     )
     if counts["permanent"]:
         return True
-    if (counts["total"] or 0) < SCORING_FAILURE_LIMIT:
+    total = counts["total"] or 0
+    if total < SCORING_FAILURE_LIMIT:
         return False
-    return as_of >= submission.contest.deadline_at + SCORING_FAILURE_GRACE
+    deadline_at = submission.contest.deadline_at
+    if total - (counts["transient"] or 0) >= SCORING_FAILURE_LIMIT:
+        return as_of >= deadline_at + SCORING_FAILURE_GRACE
+    # 일시 벤더 실패를 빼면 상한에 못 미친다(#986) — 더 긴 유예 뒤에만 끝낸다.
+    return as_of >= deadline_at + SCORING_TRANSIENT_FAILURE_GRACE
 
 
 def _contest_already_settled(contest: Contest) -> bool:
@@ -690,7 +730,7 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
             contest=contest, requirements=requirements, source_files=source_files
         )
 
-        llm = get_adapter()
+        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
         scoring_input = ScoringInput(
             submission_id=submission.id,
             contest_id=contest.id,
@@ -962,9 +1002,23 @@ def _score_one(submission, as_of, ctx):
 # 먼저고 `id`가 동률을 가른다: 한 번도 시도되지 않은 제출이 재시도 중인 것보다 항상
 # 앞선다. 시도 횟수가 같은 후보끼리는 `id`가 결정적 이차 정렬이라 회차마다 같은
 # 앞머리를 반복해 집는다(순서가 흔들리지 않는다).
+#
+# **#986: 이 스캔만 바깥 예산을 따로 둔다.** 벤더 한도를 `CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`
+# (60초)로 올리면 기본 예산(행 시작 20초 + `call_internal` 30초)에 들지 않는다. 세 값을 함께 맞춘다:
+# - 행 시작 예산 5초 — 성공 호출이 13초 이상이라 사실상 한 번에 한 건이다. 첫 행은 늘 돈다.
+# - HTTP 예산 90초 = 행 시작 5 + 벤더 60 + clone·스토리지·DB 25. 이 안에서 끝나야 부른 쪽이
+#   끊고 재시도(`core.tasks.run_scan` autoretry)해 같은 건을 겹쳐 부르지 않는다.
+# - 주기 120초 — 한 실행(≤90초)이 다음 beat 와 겹치지 않는다. 겹치면 워커(`--concurrency 2`)
+#   둘이 다 이 스캔에 묶여 돈을 움직이는 다른 스캔이 밀린다.
+# gunicorn(gthread)은 긴 요청을 죽이지 않고(`config/gunicorn.conf.py`), 요청 DB 한도는 문 하나
+# 25초라(`core.db_timeouts`) 벤더 대기와 무관하다. 내부 호출은 `http://backend:8000` 직통이라
+# 프록시를 지나지 않는다. 워커 안으로 옮기는 구조 변경은 후속이다.
 SUBMISSION_SCORING_SCAN = ScanSpec(
     name="submission-scoring",
     candidates=_pending_submissions,
     handle_row=_score_one,
     order_by=("attempt_count", "id"),
+    time_budget_seconds=5.0,
+    request_timeout_seconds=90.0,
+    interval_seconds=120.0,
 )
