@@ -49,6 +49,7 @@ JSON = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
 RUN_BUDGET_USD = Decimal("1")
 MAX_ATTEMPTS = 2  # 최초 + 1회 재실행
 MAX_EVIDENCE = 5
+STDOUT_TAIL_CHARS = 4000  # 기록(AgentRun.attempts)에 남기는 CLI stdout 꼬리
 EVIDENCE_PATTERN = r"^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$"
 _EVIDENCE_RE = re.compile(r"^(?P<path>[^:\n]+):(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?$")
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"  # `core.llm_scoring._OPENAI_DEFAULT_MODEL` 과 같은 값
@@ -222,7 +223,14 @@ def parse_claude_stream(stdout: str) -> ParsedRun:
         return parsed
     parsed.is_error = bool(result.get("is_error"))
     if parsed.is_error:
-        parsed.error_detail = str(result.get("subtype") or "")
+        # subtype 만으로는 「success 인데 오류」(API 호출 실패를 Claude Code 가 결과로 감싼 꼴, #1666)를 가를 수 없다 —
+        # 벤더 상태와 결과 본문 머리를 붙인다.
+        detail = [str(result.get("subtype") or "")]
+        if result.get("api_error_status") is not None:
+            detail.append(f"api_error_status={result.get('api_error_status')}")
+        if isinstance(result.get("result"), str) and result["result"].strip():
+            detail.append(result["result"].strip()[:300])
+        parsed.error_detail = " ".join(d for d in detail if d)
     turns = result.get("num_turns")
     parsed.turns = turns if isinstance(turns, int) else None
     usage = result.get("usage")
@@ -450,6 +458,8 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, snapshot: Snapshot, i
         "duration_seconds": result["duration_seconds"],
         "stdout_truncated": result["stdout_truncated"],
         "stderr_tail": result["stderr_tail"][-2000:],
+        # CLI 는 오류도 stdout(stream-json)에 낸다 — stderr 가 빈 채 실패하면 이것만이 단서다(#1666).
+        "stdout_tail": result["stdout"][-STDOUT_TAIL_CHARS:],
         "init_tools": list(parsed.init_tools) if parsed.init_tools is not None else None,
         "api_key_source": parsed.api_key_source,
         "tool_calls": dict(parsed.tool_calls),

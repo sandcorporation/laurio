@@ -91,8 +91,11 @@ class FakeVendor:
             "output_tokens": 1,
         }
         if not body.get("stream"):
-            return web.json_response({"type": "message", "usage": {**usage, "output_tokens": self.usage_output}})
+            plain = web.json_response({"type": "message", "usage": {**usage, "output_tokens": self.usage_output}})
+            plain.enable_compression()  # 실제 벤더처럼 Accept-Encoding 이 허락하면 gzip 으로 답한다(#1666)
+            return plain
         response = web.StreamResponse(headers={"content-type": "text/event-stream"})
+        response.enable_compression()
         await response.prepare(request)
         events = [
             {"type": "message_start", "message": {"model": body.get("model"), "usage": usage}},
@@ -115,8 +118,11 @@ class FakeVendor:
             "output_tokens": self.usage_output,
         }
         if not body.get("stream"):
-            return web.json_response({"object": "response", "usage": usage})
+            plain = web.json_response({"object": "response", "usage": usage})
+            plain.enable_compression()
+            return plain
         response = web.StreamResponse(headers={"content-type": "text/event-stream"})
+        response.enable_compression()
         await response.prepare(request)
         events = [
             {"type": "response.created", "response": {"usage": None}},
@@ -311,6 +317,27 @@ def test_claude_stream_passes_through_and_usage_is_recorded():
     assert usage.usage.cache_read_tokens == 5000
     # 1000×$2 + 200×$10 + 5000×$2×0.1 (/100만) = 0.002 + 0.002 + 0.001
     assert usage.spent_usd == Decimal("0.005")
+
+
+@pytest.mark.parametrize("stream", [True, False])
+def test_vendor_is_asked_for_identity_so_the_cli_gets_plain_bytes(stream):
+    """#1666 — 압축된 답을 Content-Encoding 없이 넘기면 CLI 가 `\x1f` 를 JSON 으로 읽다 죽는다."""
+    issued = _issue()
+    vendor = FakeVendor(usage_input=1000, usage_output=200)
+    got: dict[str, bytes] = {}
+
+    async def body(client: TestClient) -> None:
+        response = await client.post("/v1/messages", **_claude(issued.token, stream=stream))
+        assert response.status == 200
+        got["raw"] = await response.read()
+        got["encoding"] = response.headers.get("content-encoding", "").encode()
+
+    _run(vendor, body)
+    assert vendor.requests[0][1]["Accept-Encoding"] == "identity"
+    assert not got["raw"].startswith(b"\x1f")
+    assert got["encoding"] == b""
+    assert b"usage" in got["raw"]
+    assert run_usage(issued.record_id).usage.output_tokens == 200
 
 
 def test_codex_stream_usage_is_recorded_and_summed():

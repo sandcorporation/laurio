@@ -351,6 +351,28 @@ def test_nonzero_exit_and_schema_mismatch_are_held(
 
 
 @pytest.mark.django_db
+def test_an_api_error_result_keeps_its_text_and_the_stdout_tail(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor
+):
+    """#1666 — 벤더 요청이 실패하면 Claude Code 는 stderr 없이 stdout 에 「success 인데 is_error」 결과를 낸다."""
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    stream = "\n".join(
+        json.dumps(e)
+        for e in (
+            {"type": "system", "subtype": "init", "tools": ["Read", "Grep", "Glob"], "apiKeySource": "ANTHROPIC_API_KEY"},
+            {"type": "result", "subtype": "success", "is_error": True, "num_turns": 1, "api_error_status": 400,
+             "result": "API Error: 400 invalid_request_error"},
+        )
+    )
+    runner = _use(monkeypatch, _FakeRunner(stream, exit_code=1))
+
+    run = _held(client, submission_id, runner)
+
+    assert "오류 결과 success api_error_status=400 API Error: 400 invalid_request_error" in run.record["attempts"][0]["problems"]
+    assert "API Error: 400" in run.record["attempts"][0]["stdout_tail"]
+
+
+@pytest.mark.django_db
 def test_a_held_submission_is_not_retried_nor_finalized_as_zero(
     client, category, landing_type, monkeypatch, agent_method, claude_vendor
 ):
