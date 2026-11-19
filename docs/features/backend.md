@@ -1045,6 +1045,9 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_OPENAI_MODEL` | 모델 이름 | 같은 셋 | `gpt-4o-mini` |
 | `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
+| `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 은 방침이 공모전 채점의 Anthropic 이전을 덮기 전(`PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 없음)에는 저장되지 않는다(422 `privacy_not_covered`) |
+| `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
+| `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·완성도 리뷰(`submission-quality-review`) 스캔 | **off** — 두 스캔이 돌지 않는다 |
 
 | 엔드포인트 | 하는 일 |

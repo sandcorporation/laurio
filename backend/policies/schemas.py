@@ -105,6 +105,8 @@ class RuntimeSettingOut(Schema):
     last4: str | None
     updated_at: datetime | None
     updated_by: str | None
+    # `choice` 가 받는 값(#994). 그 밖의 kind 는 null.
+    choices: list[str] | None = None
 
 
 class RuntimeSettingsOut(Schema):

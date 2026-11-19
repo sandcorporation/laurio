@@ -9202,6 +9202,8 @@ export interface components {
         };
         /** RuntimeSettingOut */
         RuntimeSettingOut: {
+            /** Choices */
+            choices?: string[] | null;
             /** Configured */
             configured: boolean;
             /** Default */

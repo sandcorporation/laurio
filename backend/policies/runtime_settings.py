@@ -43,7 +43,8 @@ from core.crypto import DecryptionError, decrypt, encrypt
 logger = logging.getLogger(__name__)
 
 Source = Literal["db", "env", "none"]
-Kind = Literal["secret", "text", "float", "switch"]
+Kind = Literal["secret", "text", "float", "switch", "choice"]
+ScoringVendor = Literal["openai", "anthropic"]
 ProbeResult = Literal["ok", "invalid_key", "unavailable"]
 
 FALLBACK_TTL_SECONDS = 30.0
@@ -61,10 +62,17 @@ class SettingSpec:
     max_length: int = 100
     min_value: float | None = None
     max_value: float | None = None
+    #: `choice` 가 받는 값(#994). 그 밖의 값은 저장을 거부한다.
+    choices: tuple[str, ...] = ()
 
 
 #: 공모전 AI 채점 스위치의 키(#991) — `contest_ai_scoring_enabled`.
 CONTEST_AI_SCORING = "CONTEST_AI_SCORING"
+
+#: 플랫폼 채점 벤더의 키(#994) — `scoring_vendor`. 값이 없으면 `openai`(그 전과 같다).
+LLM_SCORING_VENDOR = "LLM_SCORING_VENDOR"
+VENDOR_OPENAI: ScoringVendor = "openai"
+VENDOR_ANTHROPIC: ScoringVendor = "anthropic"
 
 _SWITCH_ON = {"on", "true", "1", "yes"}
 _SWITCH_OFF = {"off", "false", "0", "no"}
@@ -75,6 +83,18 @@ SPECS: dict[str, SettingSpec] = {
     for spec in (
         SettingSpec("OPEN_AI_API_KEY", "OpenAI API 키", "secret", max_length=500),
         SettingSpec("LLM_OPENAI_MODEL", "OpenAI 모델", "text", default="gpt-4o-mini", max_length=100),
+        # #994: 플랫폼 채점(공모전 채점·완성도, `core.llm_scoring.get_adapter`)의 벤더. 강의실(클래스 키)·
+        # 요구사항 대화는 이 값을 보지 않는다. anthropic 은 방침이 덮을 때만 저장된다(`_refuse_uncovered_vendor`).
+        SettingSpec(
+            LLM_SCORING_VENDOR,
+            "채점 벤더",
+            "choice",
+            default=VENDOR_OPENAI,
+            max_length=20,
+            choices=(VENDOR_OPENAI, VENDOR_ANTHROPIC),
+        ),
+        SettingSpec("ANTHROPIC_API_KEY", "Anthropic API 키", "secret", max_length=500),
+        SettingSpec("LLM_ANTHROPIC_MODEL", "Claude 모델", "text", default="claude-sonnet-5-5", max_length=100),
         SettingSpec(
             "LLM_OPENAI_TEMPERATURE",
             "채점 temperature",
@@ -307,6 +327,13 @@ def switch_on(key: str, *, reader: RuntimeSettingsReader | None = None) -> bool:
     return (setting_value(key, reader=reader) or "").strip().lower() in _SWITCH_ON
 
 
+def scoring_vendor() -> ScoringVendor:
+    """플랫폼 채점 벤더(#994) — 값이 없거나 알 수 없는 값(env 는 저장 검사를 지나지 않는다)이면 `openai`."""
+
+    value = (setting_value(LLM_SCORING_VENDOR) or "").strip().lower()
+    return VENDOR_ANTHROPIC if value == VENDOR_ANTHROPIC else VENDOR_OPENAI
+
+
 def contest_ai_scoring_enabled() -> bool:
     """공모전 AI 채점 스캔이 지금 도는가(#991) — 스캔의 `enabled` 콜백이라 호출마다 다시 읽는다."""
 
@@ -338,6 +365,7 @@ class SettingView:
     last4: str | None
     updated_at: datetime | None
     updated_by: str | None
+    choices: tuple[str, ...] = ()
 
 
 def describe_settings() -> list[SettingView]:
@@ -373,6 +401,7 @@ def describe_settings() -> list[SettingView]:
                 last4=(last4 if value is not None else None) if secret else None,
                 updated_at=row.updated_at if row else None,
                 updated_by=row.updated_by if row else None,
+                choices=spec.choices,
             )
         )
     return views
@@ -408,6 +437,11 @@ def _normalize(spec: SettingSpec, raw: str) -> str:
         if lowered in _SWITCH_OFF:
             return "off"
         raise RuntimeSettingError("on 또는 off 만 쓸 수 있습니다.", "invalid_value")
+    if spec.kind == "choice":
+        lowered = value.lower()
+        if lowered in spec.choices:
+            return lowered
+        raise RuntimeSettingError(f"{' 또는 '.join(spec.choices)} 만 쓸 수 있습니다.", "invalid_value")
     if spec.kind == "text":
         if not _MODEL_PATTERN.match(value):
             raise RuntimeSettingError("영문·숫자·「. _ : / -」만 쓸 수 있습니다.", "invalid_value")
@@ -423,6 +457,19 @@ def _normalize(spec: SettingSpec, raw: str) -> str:
             f"{spec.min_value:g}~{spec.max_value:g} 사이여야 합니다.", "out_of_range"
         )
     return format(number, "g")
+
+
+def _refuse_uncovered_vendor(key: str, value: str) -> None:
+    """방침이 덮지 않는 국외 이전을 만들지 않는다(#994) — 방침 5·6항의 Anthropic 이전은 강의실 클래스 키
+    채점만 적었다. 공모전 채점의 이전을 적은 개정이 시행되기 전에는 anthropic 을 저장하지 않는다."""
+
+    from core.privacy_policy import platform_anthropic_scoring_open
+
+    if key == LLM_SCORING_VENDOR and value == VENDOR_ANTHROPIC and not platform_anthropic_scoring_open():
+        raise RuntimeSettingError(
+            "개인정보처리방침의 Anthropic 국외 이전에 공모전 채점이 없어 저장할 수 없습니다.",
+            "privacy_not_covered",
+        )
 
 
 def _display(spec: SettingSpec, value: str, last4: str) -> str:
@@ -455,6 +502,7 @@ def save_setting(key: str, raw: str, *, operator: AbstractBaseUser) -> bool:
     if not raw.strip():
         return False
     value = _normalize(spec, raw)
+    _refuse_uncovered_vendor(key, value)
     secret = spec.kind == "secret"
     last4 = last4_of(value) if secret else ""
     now = Clock.now()
@@ -525,21 +573,32 @@ def probe_setting(key: str, raw: str | None) -> ProbeResult:
     """키로 가벼운 호출 하나를 해 본다. `raw` 가 비면 지금 쓰이는 값(DB→env)으로 한다."""
 
     spec = _spec(key)
-    if key != "OPEN_AI_API_KEY":
+    probes = _probes().get(key)
+    if probes is None:
         raise RuntimeSettingError("연결 시험이 없는 설정입니다.", "not_probeable")
     candidate = _normalize(spec, raw) if raw and raw.strip() else _current_for_probe(key)
     if not candidate:
         raise RuntimeSettingError("시험할 키가 없습니다.", "not_configured")
-    from core.llm_scoring import fake_probe_openai_key, probe_openai_key
-
-    probe = (
-        fake_probe_openai_key
-        if is_fake_adapter_binding(settings.LLM_ADAPTER_MODE)
-        else probe_openai_key
-    )
+    real, fake = probes
+    probe = fake if is_fake_adapter_binding(settings.LLM_ADAPTER_MODE) else real
     result = probe(candidate)
     logger.info("runtime setting %s probe result=%s", key, result)
     return result
+
+
+Probe = Callable[[str], ProbeResult]
+
+
+def _probes() -> dict[str, tuple[Probe, Probe]]:
+    """키마다 (실물, 흉내) 연결 시험. 늦은 임포트 — core 의 어댑터가 이 모듈을 늦게 임포트한다."""
+
+    from core.llm_scoring import fake_probe_openai_key, probe_openai_key
+    from core.llm_scoring_anthropic import fake_probe_anthropic_key, probe_anthropic_key
+
+    return {
+        "OPEN_AI_API_KEY": (probe_openai_key, fake_probe_openai_key),
+        "ANTHROPIC_API_KEY": (probe_anthropic_key, fake_probe_anthropic_key),
+    }
 
 
 def _current_for_probe(key: str) -> str | None:

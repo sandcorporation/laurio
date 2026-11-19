@@ -55,6 +55,7 @@ def _out(view: SettingView) -> RuntimeSettingOut:
         last4=view.last4,
         updated_at=view.updated_at,
         updated_by=view.updated_by,
+        choices=list(view.choices) or None,
     )
 
 

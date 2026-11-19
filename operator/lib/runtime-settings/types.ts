@@ -1,7 +1,7 @@
 // 운영 설정(#922, ADR-0075) — 백엔드 `policies.schemas.RuntimeSetting*Out` 의 모양.
 // 비밀 값은 어느 응답에도 오지 않는다 — `configured`·`last4` 만 온다.
 
-export type RuntimeSettingKind = "secret" | "text" | "float" | "switch";
+export type RuntimeSettingKind = "secret" | "text" | "float" | "switch" | "choice";
 export type RuntimeSettingSource = "db" | "env" | "none";
 export type ProbeResult = "ok" | "invalid_key" | "unavailable";
 
@@ -19,6 +19,8 @@ export interface RuntimeSetting {
   last4: string | null;
   updated_at: string | null;
   updated_by: string | null;
+  /** `choice` 가 받는 값(#994). 그 밖의 kind 는 null. */
+  choices: string[] | null;
 }
 
 export interface RuntimeSettingChange {

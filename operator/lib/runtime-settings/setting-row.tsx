@@ -11,6 +11,7 @@ import {
   SOURCE_LABELS,
   canClear,
   canProbe,
+  choiceOptions,
   initialInput,
   inputAttributes,
   savePayload,
@@ -36,6 +37,7 @@ export function RuntimeSettingRow({
   const [probe, setProbe] = useState<ProbeResult | null>(null);
   const id = `runtime-setting-${setting.key}`;
   const attrs = inputAttributes(setting);
+  const options = choiceOptions(setting);
 
   async function run(action: () => Promise<{ ok: boolean; detail?: string }>, after: () => void) {
     setPending(true);
@@ -117,17 +119,33 @@ export function RuntimeSettingRow({
           <label htmlFor={`${id}-input`} className="sr-only">
             {setting.label}
           </label>
-          <input
-            id={`${id}-input`}
-            data-testid={`${id}-input`}
-            type={attrs.type}
-            autoComplete={attrs.autoComplete}
-            inputMode={attrs.inputMode}
-            spellCheck={false}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            className="min-w-0 flex-1 basis-[220px] border border-rule bg-paper px-2.5 py-1.5 font-mono text-[13px] text-ink"
-          />
+          {options ? (
+            <select
+              id={`${id}-input`}
+              data-testid={`${id}-input`}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              className="min-w-0 flex-1 basis-[220px] border border-rule bg-paper px-2.5 py-1.5 font-mono text-[13px] text-ink"
+            >
+              {options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              id={`${id}-input`}
+              data-testid={`${id}-input`}
+              type={attrs.type}
+              autoComplete={attrs.autoComplete}
+              inputMode={attrs.inputMode}
+              spellCheck={false}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              className="min-w-0 flex-1 basis-[220px] border border-rule bg-paper px-2.5 py-1.5 font-mono text-[13px] text-ink"
+            />
+          )}
           <button type="submit" data-testid={`${id}-save`} disabled={pending} className={PRIMARY}>
             저장
           </button>
