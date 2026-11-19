@@ -1,5 +1,7 @@
 // 운영 설정 화면의 순수 규칙(#922) — vitest 가 이 파일만 본다(react 없이).
 
+import { POLICY_FEE_FIELDS, POLICY_LIMIT_FIELDS } from "../policies/types";
+import type { PolicyField } from "../policies/types";
 import type { ProbeResult, RuntimeSetting, RuntimeSettingChange, RuntimeSettingSource } from "./types";
 
 export const MASK = "••••";
@@ -86,7 +88,7 @@ export function updatedText(setting: RuntimeSetting): string | null {
   return `${new Date(setting.updated_at).toLocaleString("ko-KR")} · ${setting.updated_by ?? ""}`;
 }
 
-export type SettingsTabId = "ai" | "limits" | "etc";
+export type SettingsTabId = "ai" | "limits" | "fees" | "etc";
 
 export const SETTINGS_TABS: { id: SettingsTabId; label: string; keys: readonly string[] }[] = [
   {
@@ -104,7 +106,8 @@ export const SETTINGS_TABS: { id: SettingsTabId; label: string; keys: readonly s
       "AGENT_SCORING_DAILY_LIMIT_USD",
     ],
   },
-  { id: "limits", label: "한도", keys: ["REPOSITORY_DOWNLOAD_LIMIT_MB"] },
+  { id: "limits", label: "크기·개수 상한", keys: ["REPOSITORY_DOWNLOAD_LIMIT_MB"] },
+  { id: "fees", label: "수수료·세금", keys: [] },
   { id: "etc", label: "기타", keys: [] },
 ];
 
@@ -119,4 +122,11 @@ export function settingsOfTab(settings: RuntimeSetting[], tab: SettingsTabId): R
   if (tab === "etc") return settings.filter((setting) => !named.includes(setting.key));
   const keys = SETTINGS_TABS.find((t) => t.id === tab)?.keys ?? [];
   return keys.flatMap((key) => settings.filter((setting) => setting.key === key));
+}
+
+/** 탭에 서는 정책 칸(#1041) — 정책 탭은 칸이 있고, 없는 탭은 빈 배열. */
+export function policyFieldsOfTab(tab: SettingsTabId): readonly PolicyField[] {
+  if (tab === "limits") return POLICY_LIMIT_FIELDS;
+  if (tab === "fees") return POLICY_FEE_FIELDS;
+  return [];
 }

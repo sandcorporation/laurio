@@ -55,7 +55,7 @@ async function warmRoutes(): Promise<void> {
     `${operatorBase}/appeals`,
     `${operatorBase}/payouts`,
     `${operatorBase}/operators`,
-    `${operatorBase}/policy`,
+    `${operatorBase}/settings`,
     `${operatorBase}/deliverable-types`,
   ];
   const started = Date.now();

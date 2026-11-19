@@ -12,6 +12,7 @@ import {
   secretSummary,
   valueSummary,
   settingsOfTab,
+  policyFieldsOfTab,
   tabFromParam,
 } from "./view";
 
@@ -158,5 +159,25 @@ describe("탭(#1033)", () => {
   it("채점 방식 값은 뜻을 말한다", () => {
     const method = setting({ key: "CONTEST_SCORING_METHOD", kind: "choice", choices: ["single_call", "agent"] });
     expect(choiceOptions(method)?.map((o) => o.label)).toEqual(["—", "한 번 호출", "에이전트"]);
+  });
+});
+
+describe("정책 탭(#1041)", () => {
+  it("상한 탭에는 크기·개수 정책 칸 여섯이, 수수료·세금 탭에는 요율 칸 넷이 선다", () => {
+    expect(policyFieldsOfTab("limits")).toContain("max_source_asset_bytes");
+    expect(policyFieldsOfTab("limits")).toHaveLength(6);
+    expect(policyFieldsOfTab("fees")).toEqual([
+      "platform_fee_bps",
+      "withholding_tax_bps",
+      "withholding_necessary_expense_bps",
+      "withholding_minor_income_exempt_won",
+    ]);
+    expect(policyFieldsOfTab("ai")).toEqual([]);
+  });
+
+  it("저장소 다운로드 상한은 소스 업로드 상한과 같은 탭이다", () => {
+    const rows = [setting({ key: "REPOSITORY_DOWNLOAD_LIMIT_MB" })];
+    expect(settingsOfTab(rows, "limits")).toHaveLength(1);
+    expect(tabFromParam("fees")).toBe("fees");
   });
 });

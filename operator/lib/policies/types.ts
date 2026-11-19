@@ -22,6 +22,22 @@ export const POLICY_FIELDS = [
   "max_screenshot_assets",
 ] as const;
 
+/** 설정 화면의 탭이 나눠 쓰는 정책 묶음(#1041) — 저장은 묶음마다 따로(이유·version 은 그대로). */
+export const POLICY_FEE_FIELDS: readonly PolicyField[] = [
+  "platform_fee_bps",
+  "withholding_tax_bps",
+  "withholding_necessary_expense_bps",
+  "withholding_minor_income_exempt_won",
+];
+export const POLICY_LIMIT_FIELDS: readonly PolicyField[] = [
+  "max_source_asset_bytes",
+  "max_demo_video_asset_bytes",
+  "max_screenshot_asset_bytes",
+  "max_build_asset_bytes",
+  "demo_video_retention_grace_days",
+  "max_screenshot_assets",
+];
+
 export type PolicyField = (typeof POLICY_FIELDS)[number];
 
 export type PlatformPolicyValues = Record<PolicyField, number>;

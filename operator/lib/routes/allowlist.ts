@@ -9,4 +9,8 @@ import type { OrphanAllowlistEntry } from "@codemit/route-audit";
 // 실현 가능성 확인 세션(#166 이슈 본문)에서 운영자 앱은 고아가 0개였다 — 지금은
 // 비어 있다. 운영자 앱에 개발용 진단 화면이 생기면(공개 앱의 /dev-tokens 같은 것)
 // 여기에 이유와 함께 추가한다.
-export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [];
+export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
+  // #1041: 정책 화면이 설정 화면의 「수수료·세금」 탭으로 옮겨 갔다. 옛 링크·북마크를 새 주소로 돌리는
+  // 리다이렉트만 남았고 제품 안에서는 아무도 부르지 않는다.
+  { route: "/policy", reason: "옛 주소 — /settings?tab=fees 로 돌리는 리다이렉트(#1041)" },
+];
