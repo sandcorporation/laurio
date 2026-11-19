@@ -13,7 +13,7 @@ import pytest
 
 from core import scans
 from core import tasks as core_tasks
-from policies.runtime_settings import SPECS, contest_ai_scoring_enabled
+from policies.runtime_settings import SPECS, contest_ai_scoring_enabled, contest_quality_review_enabled
 from scoring.models import QualityReviewAttempt, Score, ScoringAttempt, SubmissionQualityReview
 from tests.test_runtime_settings import _client_for, _clear, _save
 from tests.test_scoring import (  # noqa: F401 - fixture 들을 이 모듈에도 등록한다.
@@ -33,6 +33,7 @@ CONTEST_SCANS = ("submission-scoring", "submission-quality-review")
 
 def _off(monkeypatch):
     monkeypatch.delenv("CONTEST_AI_SCORING", raising=False)
+    monkeypatch.delenv("CONTEST_AI_QUALITY_REVIEW", raising=False)
 
 
 def _closed_submission(client, category, landing_type):
@@ -158,7 +159,40 @@ def test_contest_scans_stay_on_the_beat_schedule_while_off(monkeypatch):
 def test_other_scans_do_not_follow_the_switch(monkeypatch):
     _off(monkeypatch)
 
-    gated = {name for name, spec in scans.SCAN_REGISTRY.items() if spec.enabled is contest_ai_scoring_enabled}
+    gated = {
+        name
+        for name, spec in scans.SCAN_REGISTRY.items()
+        if spec.enabled in (contest_ai_scoring_enabled, contest_quality_review_enabled)
+    }
 
     assert gated == set(CONTEST_SCANS)
     assert scans.is_scan_active("classroom-submission-scoring")
+
+
+def test_the_two_switches_are_independent_and_off_by_default(monkeypatch):
+    monkeypatch.delenv("CONTEST_AI_SCORING", raising=False)
+    monkeypatch.delenv("CONTEST_AI_QUALITY_REVIEW", raising=False)
+    assert SPECS["CONTEST_AI_QUALITY_REVIEW"].default == "off"
+    assert not contest_ai_scoring_enabled()
+    assert not contest_quality_review_enabled()
+
+    monkeypatch.setenv("CONTEST_AI_QUALITY_REVIEW", "on")
+    assert contest_quality_review_enabled()
+    assert not contest_ai_scoring_enabled()
+
+    monkeypatch.delenv("CONTEST_AI_QUALITY_REVIEW")
+    monkeypatch.setenv("CONTEST_AI_SCORING", "on")
+    assert contest_ai_scoring_enabled()
+    assert not contest_quality_review_enabled()
+
+
+def test_each_switch_opens_only_its_own_scan(monkeypatch):
+    _off(monkeypatch)
+    monkeypatch.setenv("CONTEST_AI_QUALITY_REVIEW", "on")
+    assert not scans.is_scan_active("submission-scoring")
+    assert scans.is_scan_active("submission-quality-review")
+
+    monkeypatch.delenv("CONTEST_AI_QUALITY_REVIEW")
+    monkeypatch.setenv("CONTEST_AI_SCORING", "on")
+    assert scans.is_scan_active("submission-scoring")
+    assert not scans.is_scan_active("submission-quality-review")

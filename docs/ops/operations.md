@@ -17,7 +17,8 @@
 암호화돼 있으니 그 키를 바꾸면 운영 설정의 키도 다시 넣어야 한다(복호화 실패 시 그 설정만 env 로 물러난다).
 
 **공모전 AI 채점만 멈추고 켜는 길도 「운영 설정」이다**(#991) — `CONTEST_AI_SCORING` 에 `off` 를 저장하면 다음
-실행부터 공모전 채점(`submission-scoring`)과 완성도 리뷰(`submission-quality-review`)만 멈춘다. 강의실 채점·마감
+실행부터 공모전 채점(`submission-scoring`)만 멈춘다. 완성도 리뷰(`submission-quality-review`)는 따로
+`CONTEST_AI_QUALITY_REVIEW`(#1033)가 여닫는다 — 같은 방식으로 값이 없으면 꺼짐. 강의실 채점·마감
 전이·알림은 그대로 돈다(처리기를 세우지 않는다). 멈춘 동안에는 시도 기록·실패 상한 0%·「입력 없음」 0% 가 하나도
 생기지 않는다. **값이 없으면 꺼짐**이라 운영·staging 은 화면에서 `on` 을 저장해야 공모전 채점이 돈다(「지우기」도
 꺼짐이다). beat 일정에는 남아 있어 재시작 없이 따른다. dev 는 compose 가 환경변수로 켠다.
@@ -36,8 +37,8 @@
 **에이전트 채점을 켜는 순서**(#1002, ADR-0082) — 배포해도 꺼져 있다. 순서를 지킨다: ① 키 — 고른 벤더의 `OPEN_AI_API_KEY`
 (Codex) 또는 `ANTHROPIC_API_KEY`(Claude, 방침 시행일 2026-11-27 이후)를 「운영 설정」에 저장하고 「연결 시험」으로 확인한다.
 `agent-grader`·`llm-proxy` 가 떠 있고(`deploy.md` 의 샌드박스 확인 줄) 하루 상한 `AGENT_SCORING_DAILY_LIMIT_USD` 가 알맞은지 본다.
-② `CONTEST_SCORING_METHOD=agent` 를 저장한다. ③ 마지막에 `CONTEST_AI_SCORING=on`. 켜기 전에 한두 건을 먼저 돌려 시도
-기록(`AgentRun`, `GET /api/internal/scoring/agent-runs`)의 근거와 비용을 사람이 본다. 되돌리기는 거꾸로다 — `CONTEST_AI_SCORING` 을 끄면 스캔이 멈추고,
+② `CONTEST_SCORING_METHOD=agent` 를 저장한다. ③ 마지막에 `CONTEST_AI_SCORING=on`(완성도 리뷰도 돌리려면 `CONTEST_AI_QUALITY_REVIEW=on` 도). 켜기 전에 한두 건을 먼저 돌려 시도
+기록(`AgentRun`, `GET /api/internal/scoring/agent-runs`)의 근거와 비용을 사람이 본다. 되돌리기는 거꾸로다 — `CONTEST_AI_SCORING`·`CONTEST_AI_QUALITY_REVIEW` 를 끄면 각 스캔이 멈추고,
 `CONTEST_SCORING_METHOD=single_call` 이면 다음 채점부터 한 번 호출이다(이미 매긴 Score 는 그대로). 보류된 제출은 0% 가
 아니라 Score 없이 남고 `release_scoring_hold` 로 풀 때까지 스캔이 집지 않는다(위 「채점 보류」). `agent-grader` 는 내부 네트워크라 밖에서 직접 부르지 않는다.
 

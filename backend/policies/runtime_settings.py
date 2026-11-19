@@ -69,6 +69,8 @@ class SettingSpec:
 
 #: 공모전 AI 채점 스위치의 키(#991) — `contest_ai_scoring_enabled`.
 CONTEST_AI_SCORING = "CONTEST_AI_SCORING"
+#: 공모전 완성도 리뷰 스위치의 키(#1033) — `contest_quality_review_enabled`. 채점 스위치와 따로 켜고 끈다.
+CONTEST_AI_QUALITY_REVIEW = "CONTEST_AI_QUALITY_REVIEW"
 
 #: 플랫폼 채점 벤더의 키(#994) — `scoring_vendor`. 값이 없으면 `openai`(그 전과 같다).
 LLM_SCORING_VENDOR = "LLM_SCORING_VENDOR"
@@ -142,7 +144,9 @@ SPECS: dict[str, SettingSpec] = {
         # #991: 공모전 AI 채점(`submission-scoring`·`submission-quality-review` 스캔)만 끄는 스위치.
         # **값이 없으면 꺼짐** — 처리기를 다시 켜는 배포가 공모전 채점까지 켜지 않게 했다. 켜려면 화면에서
         # 「on」을 저장한다(dev·시험은 환경변수로 켠다).
-        SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점 (on/off)", "switch", default="off", max_length=3),
+        SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점", "switch", default="off", max_length=3),
+        # #1033: 완성도 리뷰(`submission-quality-review` 스캔)만 여닫는 스위치. 값이 없으면 꺼짐.
+        SettingSpec(CONTEST_AI_QUALITY_REVIEW, "공모전 완성도 리뷰", "switch", default="off", max_length=3),
         # #998: 에이전트 채점 키 프록시(`llm-proxy`)가 하루(KST)에 쓰는 비용 합계의 상한. 넘으면 그날의
         # 요청을 429 로 거절한다. 값이 없으면 기본값(`agent_scoring_daily_limit_usd`).
         SettingSpec(
@@ -397,6 +401,12 @@ def contest_ai_scoring_enabled() -> bool:
     """공모전 AI 채점 스캔이 지금 도는가(#991) — 스캔의 `enabled` 콜백이라 호출마다 다시 읽는다."""
 
     return switch_on(CONTEST_AI_SCORING)
+
+
+def contest_quality_review_enabled() -> bool:
+    """공모전 완성도 리뷰 스캔이 지금 도는가(#1033) — 채점 스위치와 따로다."""
+
+    return switch_on(CONTEST_AI_QUALITY_REVIEW)
 
 
 def agent_scoring_daily_limit_usd() -> Decimal:

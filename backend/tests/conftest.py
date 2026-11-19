@@ -278,6 +278,7 @@ def _contest_ai_scoring_on(monkeypatch):
     꺼진 동작을 보는 시험은 `monkeypatch.delenv("CONTEST_AI_SCORING")` 로 끈다."""
 
     monkeypatch.setenv("CONTEST_AI_SCORING", "on")
+    monkeypatch.setenv("CONTEST_AI_QUALITY_REVIEW", "on")  # #1033: 완성도 리뷰 스위치도 따로다.
 
 
 @pytest.fixture(autouse=True)
