@@ -52,8 +52,8 @@ const SCANNED_DIRS = [
   "packages/markdown/src",
 ].map((d) => path.join(REPO, d));
 
-/** 이 브랜드의 색은 정확히 여섯이다(`app/tokens.css` 의 `@theme`). */
-const DEFINED_COLORS = new Set(["ink", "paper", "surface", "rule", "attention", "verified"]);
+/** 이 브랜드의 색 이름(`app/tokens.css` 의 `@theme`) — 중립 넷, 팔레트 역할 일곱(ADR-0080), 옛 이름 둘(별칭). */
+const DEFINED_COLORS = new Set(["ink", "paper", "surface", "rule", "primary", "secondary", "info", "success", "warning", "error", "advanced", "attention", "verified"]);
 
 /** `--radius-*` 를 읽는 반경들. 맨 `rounded` 와 `rounded-full` 은 여기 없다. */
 const TOKEN_RADII = new Set([

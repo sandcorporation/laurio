@@ -202,7 +202,7 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
               <li
                 key={row.requirement_id}
                 className={`border p-3 text-sm ${
-                  noOneMet ? "border-attention bg-paper" : "border-rule bg-surface"
+                  noOneMet ? "border-error bg-paper" : "border-rule bg-surface"
                 }`}
                 data-testid={`metrics-requirement-${row.requirement_id}`}
                 data-no-one-met={noOneMet ? "true" : "false"}
@@ -217,7 +217,7 @@ function RequirementFulfillmentSection({ metrics }: { metrics: ContestMetricsOut
                   <span>{row.text}</span>
                 </div>
                 <p
-                  className={`mt-1 font-mono ${noOneMet ? "font-semibold text-attention" : ""}`}
+                  className={`mt-1 font-mono ${noOneMet ? "font-semibold text-error" : ""}`}
                   data-testid={`metrics-requirement-${row.requirement_id}-count`}
                 >
                   {row.total_submission_count}명 중 {row.met_count}명 충족

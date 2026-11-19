@@ -740,7 +740,7 @@ export default function SubmitPage() {
           // 보여줄 상태가 없으므로(제출물 자체가 없다) 남은 시간만 보여준다 —
           // 이건 판정이 아니라 시계 표시다.
           <span
-            className={`font-mono ${canEdit ? "text-ink" : "text-attention"}`}
+            className={`font-mono ${canEdit ? "text-ink" : "text-error"}`}
             data-testid="submit-state-band"
           >
             {stateLabel ?? formatSubmitCountdown(contest.deadline_at, new Date(now))}
@@ -787,7 +787,7 @@ export default function SubmitPage() {
           권장 자료 {completion.optionalFilled}/3
         </p>
         <div className="h-2 w-full border border-rule">
-          <div className="h-full bg-verified" style={{ width: `${completion.percent}%` }} />
+          <div className="h-full bg-success" style={{ width: `${completion.percent}%` }} />
         </div>
       </section>
 
@@ -857,7 +857,7 @@ export default function SubmitPage() {
         title={ASSET_KIND_LABELS.demo_video}
         helperText={
           load.contest.require_demo_video ? (
-            <p className="text-xs text-attention">시연 영상 또는 시연 영상 링크 중 하나가 필수입니다.</p>
+            <p className="text-xs text-error">시연 영상 또는 시연 영상 링크 중 하나가 필수입니다.</p>
           ) : undefined
         }
         addLabel="+ 시연 영상 추가"
@@ -969,7 +969,7 @@ export default function SubmitPage() {
             </ErrorNote>
           )}
           {saveState.status === "done" && (
-            <p data-testid="submit-success" className="text-sm text-verified">
+            <p data-testid="submit-success" className="text-sm text-success">
               저장되었습니다. 마감 전까지 몇 번이든 다시 수정할 수 있습니다.
             </p>
           )}

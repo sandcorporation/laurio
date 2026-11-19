@@ -456,7 +456,7 @@ export default function ContestPaymentPage() {
         <h1 className="text-2xl font-semibold" data-testid="payment-heading">
           {title}
         </h1>
-        <p className="mt-6 text-attention" data-testid="payment-success">
+        <p className="mt-6 text-error" data-testid="payment-success">
           결제가 완료되어 공모전이 공개되었습니다.
         </p>
         <Link

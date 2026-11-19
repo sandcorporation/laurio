@@ -54,13 +54,13 @@ export default function DevTokensPage() {
       <div className="flex flex-wrap items-center gap-4 rounded-md border border-rule bg-surface p-4">
         <span
           data-token-proof="attention"
-          className="rounded-sm border border-attention px-3 py-1 text-sm text-attention"
+          className="rounded-sm border border-error px-3 py-1 text-sm text-error"
         >
           상금미달
         </span>
         <span
           data-token-proof="verified"
-          className="rounded-sm border border-verified px-3 py-1 text-sm text-verified"
+          className="rounded-sm border border-success px-3 py-1 text-sm text-success"
         >
           충족
         </span>

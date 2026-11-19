@@ -37,7 +37,7 @@ env `CODEMIT_PUBLIC_METRICS_SNIPPET_URL` 이 있을 때만 `<script defer src=�
 
 **되돌릴 수 없는 행위는 색으로 구별된다**(#344, `lib/ui.ts` 의 `dangerButtonClass`) — 입구·
 한 번에 끝나는 버튼은 주의색 테두리, 확인을 거친 최종 실행은 주의색 채움, 되돌릴 수 있는
-것은 보통이다. 화면은 이 함수를 부를 뿐 `text-attention` 을 직접 적지 않는다.
+것은 보통이다. 화면은 이 함수를 부를 뿐 `text-error` 를 직접 적지 않는다.
 
 **공모전 제품 스위치는 「공모전 / 유료 공모전」 둘이다**
 (실행 env `CODEMIT_PUBLIC_CONTEST_PRODUCT_ENABLED`·`CODEMIT_PUBLIC_PAID_CONTEST_PRODUCT_ENABLED`,

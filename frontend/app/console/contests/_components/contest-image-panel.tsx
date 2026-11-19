@@ -173,7 +173,7 @@ export function ContestImagePanel({
                     type="button"
                     onClick={() => void handleRemove(image)}
                     data-testid={`contest-image-${image.id}-remove`}
-                    className="text-attention hover:underline"
+                    className="text-error hover:underline"
                   >
                     빼기
                   </button>

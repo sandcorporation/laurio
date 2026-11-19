@@ -108,7 +108,7 @@ export function ProblemScoringCost({
       {
         label: `${estimate.baseline_model_id} 대비`,
         value: ratioText(row),
-        tone: isBaseline ? "text-verified" : isReasoning ? "text-attention" : "",
+        tone: isBaseline ? "text-success" : isReasoning ? "text-error" : "",
       },
     ];
   }

@@ -30,8 +30,8 @@ describe("다크·라이트 토큰의 대비는 WCAG AA 를 넘는다 (#397)", (
     const ink = palette.ink[theme];
     const paper = palette.paper[theme];
     const surface = palette.surface[theme];
-    const attention = palette.attention[theme];
-    const verified = palette.verified[theme];
+    const attention = palette.error[theme];
+    const verified = palette.success[theme];
     const dimInk = blendOver(ink, surface, DIM_ALPHA);
 
     const combos: Array<[string, Rgb, Rgb]> = [

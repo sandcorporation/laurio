@@ -61,8 +61,8 @@ function ClassActionLinks({
   );
 }
 
-const TONE_TEXT = { verified: "text-verified", attention: "text-attention", ink: "text-ink" } as const;
-const TONE_BAR = { verified: "bg-verified", attention: "bg-attention", ink: "bg-ink" } as const;
+const TONE_TEXT = { verified: "text-success", attention: "text-error", ink: "text-ink" } as const;
+const TONE_BAR = { verified: "bg-success", attention: "bg-error", ink: "bg-ink" } as const;
 
 // 행 오른쪽의 막대 — 가르치는 행은 「61% 달성률」, 참여 중 행은 「3/6 통과」(시안 v2 Home).
 // 보관 행은 색을 빼고 흐리게 한다. `ratio` 가 null 이면 빈 막대에 「—」다.

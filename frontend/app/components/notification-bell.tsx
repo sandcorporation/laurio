@@ -82,7 +82,7 @@ export function NotificationBell({ sessionState }: { sessionState: HeaderSession
       {count > 0 && (
         <span
           data-testid="header-notification-badge"
-          className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-attention px-1.5 text-[11px] leading-none font-medium text-paper"
+          className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-error px-1.5 text-[11px] leading-none font-medium text-paper"
         >
           {count > 99 ? "99+" : count}
         </span>

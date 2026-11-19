@@ -300,7 +300,7 @@ function NotificationGroupRow({
             <>
               <span
                 data-testid={`notification-group-unread-${testKey}`}
-                className="bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
+                className="bg-error px-1.5 py-0.5 text-[10px] font-medium text-paper"
               >
                 안 읽음 {unreadCount}
               </span>
@@ -350,7 +350,7 @@ function NotificationListRow({
           <div className="flex shrink-0 items-center gap-2">
             <span
               data-testid={`notification-new-badge-${notification.id}`}
-              className="bg-attention px-1.5 py-0.5 text-[10px] font-medium text-paper"
+              className="bg-error px-1.5 py-0.5 text-[10px] font-medium text-paper"
             >
               새 알림
             </span>

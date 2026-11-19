@@ -96,10 +96,10 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
 
           {!eligibility.eligibility.can_withdraw ? (
             <section
-              className="mt-6 border border-attention bg-surface p-4"
+              className="mt-6 border border-error bg-surface p-4"
               data-testid="withdraw-blocked"
             >
-              <p className="font-semibold text-attention">
+              <p className="font-semibold text-error">
                 지금은 탈퇴할 수 없습니다 — 다음을 끝내야 합니다.
               </p>
               <ul className="mt-3 flex flex-col gap-2" data-testid="withdraw-blocking-reasons">
@@ -170,7 +170,7 @@ function WhatHappensSection() {
           <li>결제·지급 원장 — 계약 상대방의 기록이라 법이 보존을 요구합니다</li>
         </ul>
       </div>
-      <p className="text-sm font-semibold text-attention" data-testid="withdraw-irreversible">
+      <p className="text-sm font-semibold text-error" data-testid="withdraw-irreversible">
         탈퇴는 되돌릴 수 없습니다. 신원(CI)을 지우기 때문에, 나중에 같은 계정으로 다시
         가입해도 지금의 참가작·기록과 다시 이어 붙일 방법이 없습니다.
       </p>

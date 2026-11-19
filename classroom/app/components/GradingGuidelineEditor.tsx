@@ -104,7 +104,7 @@ export function GradingGuidelineEditor({
             {isEmptyCustom ? (
               <span
                 data-testid={`${testIdPrefix}-grading-guideline-empty-notice`}
-                className="text-[11.5px] text-attention"
+                className="text-[11.5px] text-error"
               >
                 문장을 적어야 저장할 수 있습니다.
               </span>

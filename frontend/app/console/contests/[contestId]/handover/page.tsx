@@ -178,7 +178,7 @@ function ReleasedNotice({ handover }: { handover: Handover }) {
     : "";
 
   return (
-    <p className="mt-6 font-semibold text-verified" data-testid="handover-released">
+    <p className="mt-6 font-semibold text-success" data-testid="handover-released">
       {via} 예치금이 해제되었습니다{releasedAt ? ` (${releasedAt})` : ""} — 개발자에게 상금이
       지급됩니다.
     </p>
@@ -227,7 +227,7 @@ function PendingAcceptance({
           인수 확인
         </button>
       ) : (
-        <div className="flex flex-col gap-2 border border-attention bg-surface p-4">
+        <div className="flex flex-col gap-2 border border-error bg-surface p-4">
           <p data-testid="handover-accept-confirm-notice">
             정말 확인하시겠습니까? 예치금이 즉시 해제되며 되돌릴 수 없습니다.
           </p>

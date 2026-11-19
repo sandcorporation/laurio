@@ -117,7 +117,7 @@ export function ProblemSettingsForm({
             </label>
           </div>
           {submissionFormats.length === 0 ? (
-            <span data-testid={`${testIdPrefix}-format-empty-notice`} className="text-[11.5px] text-attention">
+            <span data-testid={`${testIdPrefix}-format-empty-notice`} className="text-[11.5px] text-error">
               하나 이상 골라야 합니다.
             </span>
           ) : null}

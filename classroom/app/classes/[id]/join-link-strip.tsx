@@ -62,7 +62,7 @@ export function JoinLinkStrip({
           {url}
         </span>
         {copied ? (
-          <span data-testid="join-link-copied" className="text-[12px] text-verified">
+          <span data-testid="join-link-copied" className="text-[12px] text-success">
             복사됨
           </span>
         ) : null}

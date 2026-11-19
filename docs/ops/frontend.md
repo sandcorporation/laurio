@@ -245,6 +245,10 @@ page/route 는 `export const dynamic = "force-dynamic"` 을 선언해야 한다)
 빼지 않은 이유는 손으로 관리되는 목록 셋이 또 늘고 로컬 게이트가 그것을 못 보기
 때문이다(#166). 대신 `classroom/lib/design/tokens.test.ts` 가 두 파일이 한 글자라도
 갈리면 빨개진다 — 「복사했으니 언젠가 갈라진다」를 규율이 아니라 검사로 바꿨다.
+**색은 중립 넷(ink·paper·surface·rule)과 MUI 꼴 팔레트 역할 일곱이다**(#961, ADR-0080):
+primary·secondary·info·success·warning·error·advanced. 값은 옛 토큰을 옮기기만 해 보이는 색이
+같다. 세 앱의 `tokens.css` 는 한 글자도 다르지 않고(`operator/lib/design/tokens.test.ts`),
+옛 이름 `attention`·`verified` 는 별칭으로 남아 operator 화면과 공유 마크다운 패키지가 쓴다.
 **토큰이 같아도 화면이 그 밖의 이름을 부르면 갈라진다** — 그래서
 `frontend/lib/ui/brand-guard.test.ts`(#370)가 세 앱과 `packages/markdown/src`(2026-09-16
 — 두 앱의 설명 화면이 그 패키지로 옮겨 갔다)의 소스를 텍스트로 훑어 정의된 적

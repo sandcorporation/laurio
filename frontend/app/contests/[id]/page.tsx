@@ -134,7 +134,7 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
             ) : (
               <>
                 <span
-                  className={`font-mono text-2xl font-medium ${contest.is_underfunded ? "text-attention" : ""}`}
+                  className={`font-mono text-2xl font-medium ${contest.is_underfunded ? "text-error" : ""}`}
                 >
                   {formatPrize(contest.prize)}원
                 </span>
@@ -151,7 +151,7 @@ export default async function ContestDetailPage({ params }: { params: Promise<Pa
             <span className="text-xs tracking-wide text-ink/60">마감</span>
             <span
               data-testid="deadline"
-              className={`font-mono text-2xl font-medium ${imminent ? "text-attention" : ""}`}
+              className={`font-mono text-2xl font-medium ${imminent ? "text-error" : ""}`}
             >
               {remainingTimeLabel(contest.deadline_at)}
             </span>

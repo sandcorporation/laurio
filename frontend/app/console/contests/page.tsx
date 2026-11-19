@@ -94,7 +94,7 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
     >
       {/* 「다음 행동」이 제목보다 먼저 온다 — 이 화면에 온 이유가 그것이다. */}
       <p
-        className={label.mine ? "font-semibold text-attention" : "text-ink/60"}
+        className={label.mine ? "font-semibold text-error" : "text-ink/60"}
         data-testid={`my-contest-row-${row.contest_id}-next-action`}
       >
         {label.mine ? `내 차례 · ${label.text}` : label.text}

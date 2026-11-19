@@ -69,7 +69,7 @@ export function ProblemSideActions({
             시도가 있어 지울 수 없습니다
           </span>
         ) : (
-          <button type="button" data-testid="delete-problem-open" aria-expanded={open === "delete"} onClick={() => toggle("delete")} className={`${LINK_CLASS} hover:text-attention`}>
+          <button type="button" data-testid="delete-problem-open" aria-expanded={open === "delete"} onClick={() => toggle("delete")} className={`${LINK_CLASS} hover:text-error`}>
             문제 삭제
           </button>
         )}

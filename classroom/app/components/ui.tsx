@@ -6,7 +6,7 @@
 // 고칠 때 나머지가 남는다.
 //
 // 리터럴 hex 는 여기에도 없다 — 전부 `app/tokens.css` 의 `@theme` 가 만든
-// 유틸리티다(`bg-paper`·`text-ink`·`border-rule`·`text-attention`·`text-verified`).
+// 유틸리티다(`bg-paper`·`text-ink`·`border-rule`·`text-error`·`text-success`).
 import { createElement } from "react";
 import type { ReactNode } from "react";
 
@@ -124,11 +124,11 @@ const BUTTON_BASE =
 const BUTTON_TONE = {
   primary: "bg-ink text-paper hover:bg-ink/85",
   secondary: "border border-rule bg-surface text-ink hover:bg-paper",
-  danger: "border border-attention bg-surface text-attention hover:bg-attention/5",
+  danger: "border border-error bg-surface text-error hover:bg-error/5",
   // 되돌릴 수 없는 행위 중, 확인을 이미 거친 최종 실행에만 쓴다(#344) — 입구·한
   // 번에 끝나는 행위는 위 danger(테두리)를 쓴다. 공개 앱의 확정 버튼과 같은
-  // bg-attention/text-paper 조합이라 두 앱에서 「채움 = 최종 실행」이 같은 색으로 읽힌다.
-  dangerFilled: "bg-attention text-paper hover:bg-attention/85",
+  // bg-error/text-paper 조합이라 두 앱에서 「채움 = 최종 실행」이 같은 색으로 읽힌다.
+  dangerFilled: "bg-error text-paper hover:bg-error/85",
 } as const;
 
 export type ButtonTone = keyof typeof BUTTON_TONE;
@@ -157,8 +157,8 @@ export function Badge({
 }) {
   const cls = {
     neutral: "border-rule text-ink/60",
-    attention: "border-attention text-attention",
-    verified: "border-verified text-verified",
+    attention: "border-error text-error",
+    verified: "border-success text-success",
   }[tone];
   return (
     // `shrink-0 whitespace-nowrap` — 배지는 flex 안에서 눌리면 안 된다(2026-09-16).
@@ -191,7 +191,7 @@ export const INPUT_CLASS =
 /** 오류는 붉게, 그러나 배경을 채우지 않는다 — 이 브랜드는 면을 칠하지 않는다. */
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" className="text-[13px] leading-relaxed text-attention">
+    <p role="alert" className="text-[13px] leading-relaxed text-error">
       {children}
     </p>
   );
@@ -199,7 +199,7 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 
 /** 설명·주의를 담는 띠. 괘선 하나로 본문과 구별한다. */
 export function Note({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "attention" }) {
-  const border = tone === "attention" ? "border-attention" : "border-rule";
+  const border = tone === "attention" ? "border-error" : "border-rule";
   const text = tone === "attention" ? "text-ink/75" : "text-ink/60";
   return (
     <div className={`border ${border} bg-surface px-4 py-3 text-[13px] leading-relaxed ${text}`}>

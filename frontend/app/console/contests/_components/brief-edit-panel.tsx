@@ -206,7 +206,7 @@ export function BriefEditPanel({
         <div
           role="status"
           data-testid="draft-deliverable-types-changed-notice"
-          className="mt-3 flex items-start justify-between gap-3 border border-attention/50 bg-attention/5 px-3 py-2 text-xs text-attention"
+          className="mt-3 flex items-start justify-between gap-3 border border-error/50 bg-error/5 px-3 py-2 text-xs text-error"
         >
           <span>
             요구형태가 바뀌었습니다 — 기존에 붙여둔 요구사항이 새 요구형태와 맞는지 검토해 주세요. 지워지지는

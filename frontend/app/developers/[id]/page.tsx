@@ -138,7 +138,7 @@ function ArchivedSubmissionRow({ submission }: { submission: PublicSubmission })
               href={asset.value}
               target="_blank"
               rel="noreferrer noopener"
-              className="border border-verified px-1.5 py-0.5 text-verified"
+              className="border border-success px-1.5 py-0.5 text-success"
               data-testid="demo-url-link"
             >
               {asset.label || "데모 보기"}

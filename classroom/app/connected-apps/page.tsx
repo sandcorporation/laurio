@@ -58,7 +58,7 @@ function ConnectAddress({ url }: { url: string }) {
             복사
           </button>
           {copied ? (
-            <span data-testid="connected-apps-mcp-url-copied" className="text-[12px] text-verified">
+            <span data-testid="connected-apps-mcp-url-copied" className="text-[12px] text-success">
               복사됨
             </span>
           ) : null}

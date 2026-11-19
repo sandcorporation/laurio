@@ -317,7 +317,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           className="flex flex-col gap-3.5 p-4"
         >
           {deadlinePassed && props.submitBlockedReason === null ? (
-            <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-attention">
+            <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-error">
               마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
             </p>
           ) : null}
@@ -666,7 +666,7 @@ function AttemptRow({
                 href={submission.value}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 text-attention hover:underline"
+                className="shrink-0 text-error hover:underline"
               >
                 저장소
               </a>
@@ -687,7 +687,7 @@ function AttemptRow({
             <a
               href={submission.download_url}
               data-testid={`submission-row-${submission.id}-download`}
-              className="shrink-0 text-attention hover:underline"
+              className="shrink-0 text-error hover:underline"
             >
               다운로드
             </a>
@@ -702,7 +702,7 @@ function AttemptRow({
         <p
           data-testid={`submission-row-${submission.id}-contest-entry`}
           className={`mt-1.5 text-[12.5px] leading-relaxed ${
-            submission.contest_entry.status === "rejected" ? "text-attention" : "text-ink/60"
+            submission.contest_entry.status === "rejected" ? "text-error" : "text-ink/60"
           }`}
         >
           {attemptEntryLabel(submission.contest_entry)}
@@ -754,21 +754,21 @@ function InteractiveSubmissionForm(
   // 백엔드가 보관 → 내보냄 → 숨김 순서로 이유를 하나만 정해 주므로(#439, #941) 그대로 분기한다.
   if (submitBlockedReason === "archived") {
     return (
-      <p data-testid="class-archived-note" className="text-[13px] text-attention">
+      <p data-testid="class-archived-note" className="text-[13px] text-error">
         이 클래스는 보관되어 새 제출을 받지 않습니다.
       </p>
     );
   }
   if (submitBlockedReason === "expelled") {
     return (
-      <p data-testid="member-expelled-note" className="text-[13px] text-attention">
+      <p data-testid="member-expelled-note" className="text-[13px] text-error">
         이 클래스에서 내보내져 새로 제출할 수 없습니다.
       </p>
     );
   }
   if (submitBlockedReason === "hidden") {
     return (
-      <p data-testid="problem-hidden-note" className="text-[13px] text-attention">
+      <p data-testid="problem-hidden-note" className="text-[13px] text-error">
         강사가 숨긴 문제라 새로 낼 수 없습니다.
       </p>
     );
@@ -841,7 +841,7 @@ function InteractiveSubmissionForm(
               className={`${INPUT_CLASS} font-mono`}
             />
             {repositoryCheck !== null && !repositoryCheck.ok ? (
-              <p data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-attention">
+              <p data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
                 {repositoryCheck.message}
                 {repositoryCheck.suggestion ? (
                   <>
@@ -874,7 +874,7 @@ function InteractiveSubmissionForm(
           {zipGitHistoryWarning ? (
             <Note tone="attention">
               <div data-testid="zip-git-history-warning" className="flex flex-col gap-2">
-                <p className="text-attention">
+                <p className="text-error">
                   {submissionFormats.includes("repository")
                     ? "이 문제는 커밋 기록을 봅니다. zip 에는 Git 기록(.git)이 들어가지 않으니 저장소로 내세요."
                     : "이 문제는 커밋 기록을 봅니다. zip 에는 Git 기록(.git)이 들어가지 않아 그 항목은 충족되지 않습니다."}
@@ -898,7 +898,7 @@ function InteractiveSubmissionForm(
           )}
           {/* 드롭 칸 — 투명한 파일 입력이 칸 전체를 덮어 끌어다 놓기와 고르기를 함께 받는다. */}
           <div className="relative border border-dashed border-rule bg-paper px-5 py-6 text-center text-[13.5px] text-ink/60">
-            소스 zip 을 끌어다 놓거나 <span className="text-attention">고르기</span>
+            소스 zip 을 끌어다 놓거나 <span className="text-error">고르기</span>
             <div data-testid="source-file-max-size" className="mt-1 text-[11.5px] text-ink/45">
               최대 {formatMegabytes(maxSourceAssetBytes)}MB
             </div>

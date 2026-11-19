@@ -249,7 +249,7 @@ export function ChecklistRows({
                   checked={item.hidden === true}
                   disabled={readOnly}
                   onChange={(event) => onHiddenChange(item.key, event.target.checked)}
-                  className="accent-attention"
+                  className="accent-error"
                 />
                 제출자에게 숨기기
               </label>

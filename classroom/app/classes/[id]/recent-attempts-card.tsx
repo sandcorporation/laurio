@@ -9,17 +9,17 @@ import { withLate } from "@/lib/problems/due-dates";
 import { useRecentAttempts, type RecentAttemptStatus } from "@/lib/classes/use-recent-attempts";
 
 const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: string }> = {
-  passed: { label: "통과", className: "text-verified" },
+  passed: { label: "통과", className: "text-success" },
   attempted_not_passed: { label: "미통과", className: "text-ink/60" },
   scoring: { label: "채점 중", className: "text-ink/45" },
-  needs_setup: { label: "설정 필요", className: "text-attention" },
+  needs_setup: { label: "설정 필요", className: "text-error" },
 };
 
 function AttemptMark({ status }: { status: RecentAttemptStatus }) {
   const size = "h-[14px] w-[14px] shrink-0";
-  if (status === "passed") return <span className={`${size} bg-verified`} />;
-  if (status === "attempted_not_passed") return <span className={`${size} border border-attention`} />;
-  if (status === "needs_setup") return <span className={`${size} border border-dashed border-attention`} />;
+  if (status === "passed") return <span className={`${size} bg-success`} />;
+  if (status === "attempted_not_passed") return <span className={`${size} border border-error`} />;
+  if (status === "needs_setup") return <span className={`${size} border border-dashed border-error`} />;
   return (
     <span
       className={`${size} border border-rule bg-[repeating-linear-gradient(45deg,var(--color-rule)_0_2px,transparent_2px_4px)]`}
@@ -38,7 +38,7 @@ export function RecentAttemptsCard({ classId }: { classId: number }) {
           불러오는 중...
         </p>
       ) : state.status === "error" ? (
-        <p data-testid="recent-attempts-error" className="px-4 py-3 text-[12.5px] text-attention">
+        <p data-testid="recent-attempts-error" className="px-4 py-3 text-[12.5px] text-error">
           불러오지 못했습니다.
         </p>
       ) : state.data.length === 0 ? (

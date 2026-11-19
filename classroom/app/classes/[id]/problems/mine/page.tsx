@@ -164,7 +164,7 @@ function ProgressLine({ problems }: { problems: ProblemListItem[] }) {
         className="relative h-2 w-full max-w-[320px] border border-rule bg-paper"
       >
         <div
-          className="absolute inset-y-0 left-0 bg-verified"
+          className="absolute inset-y-0 left-0 bg-success"
           style={{ width: `${(passed / problems.length) * 100}%` }}
         />
       </div>
@@ -293,7 +293,7 @@ function MyDisplayName({
       {error ? (
         <span
           data-testid="my-display-name-error"
-          className="text-[12px] text-attention"
+          className="text-[12px] text-error"
         >
           {error}
         </span>
