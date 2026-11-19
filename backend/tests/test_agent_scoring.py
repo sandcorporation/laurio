@@ -327,6 +327,33 @@ def test_evidence_that_does_not_exist_in_the_snapshot_is_held(
 
 
 @pytest.mark.django_db
+def test_a_whole_file_reference_to_an_existing_file_is_accepted(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor
+):
+    """#1699 — 줄 없이 파일만 댄 근거(운영: migration.sql·toss.ts)는 그 파일이 있으면 받아들인다. 없는 파일은 여전히 어긋남."""
+
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    rid = _requirement_id(submission_id)
+    runner = _use(monkeypatch, _FakeRunner(_claude_stream(_verdicts(rid, evidence=["app.py"]))))
+
+    assert _run_pending(client)["rows"][0]["status"] == "scored"
+    run = AgentRun.objects.get(submission_id=submission_id)
+    assert run.record["attempts"][0]["evidence_check"] == {"checked": 1, "bad": [], "missing_for": []}
+    assert len(runner.specs) == 1
+
+
+@pytest.mark.django_db
+def test_a_whole_file_reference_to_a_missing_file_is_still_held(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor
+):
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    rid = _requirement_id(submission_id)
+    runner = _use(monkeypatch, _FakeRunner(_claude_stream(_verdicts(rid, evidence=["nope.py"]))))
+
+    assert _held(client, submission_id, runner).reasons == [f"근거 실재 안 함 1: ['{rid}:nope.py(없음)']"]
+
+
+@pytest.mark.django_db
 def test_missing_requirement_id_is_held(client, category, landing_type, monkeypatch, agent_method, claude_vendor):
     submission_id, _deadline = _closed_submission(client, category, landing_type)
     rid = _requirement_id(submission_id)

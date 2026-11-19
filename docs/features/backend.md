@@ -525,7 +525,7 @@ README → 그 밖(설정·마이그레이션·배포·숨은 폴더), 같은 �
 선별·예산을 거치지 않는다** — 에이전트가 박제본(clone 한 커밋의 zip, 또는 zip 소스 하나)을 Read·Grep·Glob(Claude)이나
 read-only 셸(Codex)로 필요한 만큼 읽는다. 실행 토큰(예산 $1) → `agent-grader` → 스트림 해석 뒤 **받아들이는 조건**을 본다:
 Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실행 토큰, Read ≥1·Grep/Glob ≥1, Codex 는 명령 실행 ≥1 /
-종료코드 0·스키마 일치·요구사항 id 가 빠짐도 남음도 없음 / 충족마다 근거 `경로:줄`(`경로:줄-줄`, 최대 5개)이 박제본에
+종료코드 0·스키마 일치·요구사항 id 가 빠짐도 남음도 없음 / 충족마다 근거 `경로:줄`(`경로:줄-줄`, 줄 없는 `경로` 는 파일 전체 — #1699, 최대 5개)이 박제본에
 실재. 어긋나면 한 번 더 돌리고, 그래도면 **보류**다 — 시도 기록이 `AgentScoringHold:` 로 시작하고 소스 보류와 같이
 재시도도 0% 확정도 없으며 GlitchTip 에 한 건 간다. `release_scoring_hold` 가 같이 풀고(다음 스캔이 에이전트를 다시
 부른다). 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
@@ -806,7 +806,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(영구 실패 이력 「보류(…)」), 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않고 다음 스캔에 다시 집는다. 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
+| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않고 다음 스캔에 다시 집는다. 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
@@ -876,7 +876,7 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 0% 로 확정한다. 영구 실패는 유예를 기다리지 않고 즉시 끝난다. 벤더 시간 초과·판정 누락은
 그 5회에 세지 않는다 — 그것까지 합쳐야 5회면 마감 후 24시간이 지나야 끝난다(#986). 공모전
 채점은 celery 워커 안에서 돈다(#986 보탬 4, `ScanSpec.worker_time_limit_seconds`) — 벤더 한도 180초,
-행 시작 예산 60초, 실행 상한 300초(잠금 `core.scan_lock` 으로 한 번에 한 실행), 주기 60초.
+행 시작 예산 60초, 실행 상한 300초(잠금 `core.scan_lock` 으로 한 번에 한 실행 — 60초 임대를 실행이 사는 동안 늘린다, 워커가 죽으면 60초 안에 풀린다, #1699), 주기 60초.
 판정 응답 스키마는 요청에 실은 requirement_id 를 키로 한 객체라(선택 요구사항 포함, 전부 required)
 구조화 출력이 판정을 빠뜨리지 못한다(#986, 공모전·강의실·Claude 공통).
 
@@ -1093,7 +1093,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(OpenAI 키 → Codex, Claude 키 → Claude Code),
   모델은 문제의 채점 모델, 키는 그 클래스 키, 박제본은 채점 준비가 읽은 zip(아니면 보류). 기록은 `ClassroomAgentRun`
   (공모전 `AgentRun` 과 같은 꼴). 판정 보류는 시도 기록 머리 `AgentScoringHold:` 로 채점 대기에서 빠지고 실패 상한에
-  세지 않는다(0% 로 굳히지 않는다). 완성도 보류는 「보류(…)」 실패로 남는다. grader 는 에이전트 실행을 제 스레드에서
+  세지 않는다(0% 로 굳히지 않는다). 완성도 보류는 「보류(…)」 실패 한 번으로 남는다(영구 아님, #1699). grader 는 에이전트 실행을 제 스레드에서
   돌리고 임대를 실행 전체(`AGENT_LEASE`, 14분)로 늘린다. 실행기와 실행 코드는 공유층(`core.agent_scoring`·
   `core.agent_prompt`·`core.quality_review_agent`)에 있고, 공모전 박제본 받기만 `scoring.agent_snapshot` 에 있다.
 
