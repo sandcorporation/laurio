@@ -839,6 +839,10 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 `AlertState` 에 기록하고, 울리기 시작할 때와 해소될 때 한 번씩 디스코드 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`,
 비면 보내지 않는다)으로 보낸다. 같은 응답의 `alerts` 가 지금 울리는 목록(규칙·시작·값·기준)이다
 (`docs/ops/operations.md` 「운영 경보」).
+같은 검사가 **느린 경로**(#971)도 본다 — 경로(메서드 + URL 패턴)마다 최근 30분 중앙값을 그 경로의 앞 14일 중앙값과
+견줘(3건 이상 · 1초 이상 · 5배 이상) 울리기 시작할 때 GlitchTip `warning` 경고 하나를 올린다(디스코드가 아니다). 매일
+00:10(서울) `ops_metrics.check_slow_routes_daily` 가 어제 하루를 같은 기준(1건 이상)으로 본다(`docs/ops/operations.md`
+「운영 경보」).
 
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
@@ -1093,4 +1097,4 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `notifications` | Notification · NotificationDispatch · NotificationOptIn |
 | `policies` | PlatformPolicy · PolicyChange |
 | `core` | ClockOverride · ScheduledStateDemo |
-| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute · RequestMinute(#828)(1분 집계, 90일 보관) · AlertState(#830, 규칙마다 한 행) |
+| `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute · RequestMinute(#828)(1분 집계, 90일 보관) · AlertState(#830, 규칙마다 한 행 · 느린 경로는 경로마다 한 행, #971) |
