@@ -806,7 +806,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다) |
+| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(영구 실패 이력 「보류(…)」), 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않고 다음 스캔에 다시 집는다) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
