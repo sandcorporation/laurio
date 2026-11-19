@@ -37,7 +37,14 @@ from storage.adapters.fake import FakeStorageAdapter
 from submissions.models import Submission
 
 
-class _PoisonPillAdapter:
+class _AdapterBase:
+    """dotted path 로 불리는 시험 어댑터 — `get_adapter(timeout=…)` 의 생성 계약(#986)을 받는다."""
+
+    def __init__(self, *, timeout: float | None = None) -> None:
+        self.timeout = timeout
+
+
+class _PoisonPillAdapter(_AdapterBase):
     """한 Submission에서 LLMAdapterError가 아닌 예외로 죽는 어댑터 (#12 리뷰 지적 2).
 
     `settings.LLM_POISON_PILL_SUBMISSION_IDS`에 있는 submission_id만 RuntimeError로
@@ -60,7 +67,7 @@ class _PoisonPillAdapter:
         )
 
 
-class _PartialVerdictAdapter:
+class _PartialVerdictAdapter(_AdapterBase):
     """일부 Requirement에 대한 판정을 아예 돌려주지 않는 어댑터 (#12 리뷰 지적 3).
 
     실제 LLM이 요청받은 requirement_id 중 하나를 누락하거나 환각으로 다른 값을
@@ -81,7 +88,7 @@ class _PartialVerdictAdapter:
         )
 
 
-class _PermanentFailureAdapter:
+class _PermanentFailureAdapter(_AdapterBase):
     """LLMAdapterPermanentError로 죽는 어댑터 (#88 코드리뷰 지적 2).
 
     `settings.LLM_PERMANENT_FAILURE_SUBMISSION_IDS`에 있는 submission_id만
@@ -110,7 +117,7 @@ class _PermanentFailureAdapter:
         )
 
 
-class _SlowAdapter:
+class _SlowAdapter(_AdapterBase):
     """`settings.LLM_SLOW_ADAPTER_SLEEP_SECONDS`만큼 잠들었다 성공하는 어댑터.
 
     스캔의 시간 예산(#88 코드리뷰 지적 1)이 실제로
