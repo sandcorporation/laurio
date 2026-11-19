@@ -50,7 +50,7 @@ from policies.runtime_settings import SCORING_METHOD_AGENT, contest_quality_revi
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
 from .agent_runner import AgentGraderBusy
-from core.agent_scoring import AGENT_JOB_MAX_SECONDS
+from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentVendorRefused, note_scan_refusal, scan_refusal
 from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
 from .quality_agent import QualityReviewHeld, review_with_agent
 
@@ -161,9 +161,18 @@ def review_submission_once(submission: ContestSubmission) -> dict:
 
 
 def _review_one(submission, as_of, ctx):
-    del as_of, ctx
+    del as_of
+    refused = scan_refusal(ctx)
+    if refused is not None:
+        # 이번 스캔이 벤더 계정 거절을 받았다(#1052) — 남은 제출은 벤더를 부르지 않고 다음 스캔으로 미룬다.
+        return {"submission_id": submission.id, "status": "deferred", "error": f"이번 스캔에서 벤더 계정이 거절했다: {refused}"}
     try:
         return review_submission_once(submission)
+    except AgentVendorRefused as exc:
+        # 사용 한도·빈도 제한·크레딧 — 제출 탓이 아니다. 실행기 바쁨과 같이 실패로 세지 않는다(#1052).
+        note_scan_refusal(ctx, exc)
+        logger.warning("Submission(pk=%s) 완성도 에이전트 리뷰 미룸 — 벤더 계정 거절: %s", submission.id, exc.reason)
+        return {"submission_id": submission.id, "status": "deferred", "error": exc.reason}
     except (AgentGraderBusy, RunTokenRefused) as exc:
         # 실행기가 바쁘거나 오늘 예산이 찼다 — 제출 탓이 아니니 실패로 세지 않고 다음 스캔에 다시 집는다.
         return {"submission_id": submission.id, "status": "deferred", "error": f"{type(exc).__name__}: {exc}"}

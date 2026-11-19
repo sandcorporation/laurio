@@ -528,7 +528,13 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 종료코드 0·스키마 일치·요구사항 id 가 빠짐도 남음도 없음 / 충족마다 근거 `경로:줄`(`경로:줄-줄`, 줄 없는 `경로` 는 파일 전체 — #1699, 최대 5개)이 박제본에
 실재. 어긋나면 한 번 더 돌리고, 그래도면 **보류**다 — 시도 기록이 `AgentScoringHold:` 로 시작하고 소스 보류와 같이
 재시도도 0% 확정도 없으며 GlitchTip 에 한 건 간다. `release_scoring_hold` 가 같이 풀고(다음 스캔이 에이전트를 다시
-부른다). 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
+부른다). **벤더가 계정 쪽으로 거절한 시도는 보류가 아니라 미룸이다**(#1052) — CLI 결과의 오류 본문이 사용 한도
+(`… workspace API usage limits`)·빈도 제한(`rate_limit`·429)·크레딧(`credit balance is too low`·`insufficient_quota`)이면
+(문구 목록은 `core.agent_scoring.ACCOUNT_REFUSAL_MARKERS` 한 곳) 다시 돌리지 않고, 시도 기록도 `AgentRun` 도 남기지 않아
+보류·실패 횟수가 늘지 않으며 다음 스캔에 다시 집힌다. 같은 스캔에서 첫 거절 뒤 남은 제출은 벤더를 부르지 않고
+`deferred` 로 넘긴다 — 스캔마다 한 건만 묻는다. 완성도 리뷰(`submission-quality-review`)도 같고, 강의실(클래스 키)은
+크레딧 소진과 같은 자리(`Class.scoring_quota_exhausted_at`)로 멈춘다. 다른 오류(스키마 어긋남 같은 400)는 그대로 재실행·보류다.
+시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
 필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/scoring/agent-runs` 가 보인다. Score 의
 `model_version` 은 `agent:<벤더>:<모델>`, 판정 이유는 「이유 근거: 경로:줄, …」(충족만, 근거 5개, 2000자)다. 지침·스키마는
 `core.agent_prompt`(공모전 3 재채점의 규칙 일곱). **모델이 Haiku 계열(`claude-haiku-*`)이면 엄격 규칙 8~10 이 더
@@ -809,7 +815,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않고 다음 스캔에 다시 집는다. 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
+| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |

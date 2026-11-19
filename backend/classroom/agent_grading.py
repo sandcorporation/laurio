@@ -33,6 +33,7 @@ from core.agent_run_tokens import RunTokenRefused
 from core.llm_scoring import (
     LLMAdapterError,
     LLMAdapterPermanentError,
+    LLMAdapterQuotaExhaustedError,
     LLMAdapterRateLimitedError,
     RequirementInput,
     RequirementVerdict,
@@ -41,7 +42,14 @@ from core.quality_review import QualityItemInput, QualityItemScore, parse_conten
 
 from core import agent_scoring
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
-from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentGraderBusy, AgentGraderError, Snapshot, SnapshotUnavailable
+from core.agent_scoring import (
+    AGENT_JOB_MAX_SECONDS,
+    AgentGraderBusy,
+    AgentGraderError,
+    AgentVendorRefused,
+    Snapshot,
+    SnapshotUnavailable,
+)
 from core.quality_review_agent import ID_KEY as QUALITY_ID_KEY
 from core.quality_review_agent import ITEMS_KEY as QUALITY_ITEMS_KEY
 from core.quality_review_agent import agent_response_schema, build_agent_prompt, needs_evidence, with_evidence
@@ -146,6 +154,10 @@ def _run(job: agent_scoring.AgentJob) -> AgentResult:
         outcome = agent_scoring.run_agent_job(job)
     except agent_scoring.AgentRunHeld as held:
         return AgentHeld(reasons=list(held.reasons), record=held.record)
+    except AgentVendorRefused as exc:
+        # 클래스 키의 계정 쪽 거절(#1052, 사용 한도·빈도 제한·크레딧) — 참여자 탓이 아니다. 크레딧 소진(#586)과 같은
+        # 자리로 보낸다: 시도 기록 없이 그 클래스의 채점을 멈추고, 다시 확인 간격마다 한 건만 다시 쳐 본다.
+        raise LLMAdapterQuotaExhaustedError(f"벤더가 이 클래스 키를 계정 쪽으로 거절했다: {exc.reason}") from exc
     except AgentGraderBusy as exc:
         # 실행기가 꽉 찼다 — 제출 탓이 아니다. 빈도 제한과 같은 자리(몇 번은 세지 않는다).
         raise LLMAdapterRateLimitedError(f"에이전트 실행기가 바쁘다: {exc}") from exc

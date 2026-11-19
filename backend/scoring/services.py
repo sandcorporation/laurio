@@ -95,7 +95,17 @@ from submissions.scoring_basis import (
 )
 
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
-from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
+from core.agent_scoring import (
+    AGENT_JOB_MAX_SECONDS,
+    AgentJob,
+    AgentRunHeld,
+    AgentVendorRefused,
+    Snapshot,
+    note_scan_refusal,
+    provided_snapshot,
+    run_agent_job,
+    scan_refusal,
+)
 from .agent_runner import AgentGraderBusy, AgentGraderError
 from .models import AgentRun, Score, ScoringAttempt
 from core.model_context import source_budget_bytes
@@ -986,6 +996,9 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
                 {"asset_id": asset_id, "commit_sha": commit_sha_by_asset_id.get(asset_id)}
                 for asset_id in used_asset_ids
             ]
+    except AgentVendorRefused:
+        # 벤더 계정 쪽 거절(#1052) — 이 제출의 실패가 아니다. 시도 기록 없이 스캔(`_score_one`)이 미룬다.
+        raise
     except Exception as exc:  # noqa: BLE001 - 이 건 하나의 실패가 배치 전체를 막으면 안 된다.
         message = f"{type(exc).__name__}: {exc}"
         logger.exception(
@@ -1201,10 +1214,20 @@ def _score_one(submission, as_of, ctx):
     감싼다 — 뼈대의 행별 격리에 맡기지 않는 이유는 실패를 **ScoringAttempt 로 남겨야** 하기
     때문이다: `permanent=True`·5회 실패가 실패 상한 판정(#222, ADR-0031)의 유일한 근거다.
 
-    `as_of`를 그대로 넘긴다 — 이번 스캔 실행 전체가 같은 시각을 쓴다(ADR-0003)."""
+    `as_of`를 그대로 넘긴다 — 이번 스캔 실행 전체가 같은 시각을 쓴다(ADR-0003).
 
+    벤더가 계정 쪽으로 거절하면(#1052, 사용 한도·빈도 제한·크레딧) 실행기 바쁨과 같이 미룬다 — 시도 기록을 남기지
+    않아 보류도 실패 횟수도 늘지 않고 다음 스캔에 다시 집힌다. 이번 스캔의 남은 행은 벤더를 부르지 않는다."""
+
+    refused = scan_refusal(ctx)
+    if refused is not None:
+        return {"submission_id": submission.id, "status": "deferred", "error": f"이번 스캔에서 벤더 계정이 거절했다: {refused}"}
     try:
         return score_submission_once(submission, as_of)
+    except AgentVendorRefused as exc:
+        note_scan_refusal(ctx, exc)
+        logger.warning("Submission(pk=%s) 에이전트 채점 미룸 — 벤더 계정 거절: %s", submission.id, exc.reason)
+        return {"submission_id": submission.id, "status": "deferred", "error": exc.reason}
     except Exception as exc:  # noqa: BLE001 - 한 행의 실패가 나머지 배치를 막으면 안 된다.
         logger.exception("Submission(pk=%s) 채점 스캔 처리 중 예외, 다음 건으로 계속", submission.id)
         is_permanent = isinstance(exc, LLMAdapterPermanentError)
