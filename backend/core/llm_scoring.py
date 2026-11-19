@@ -38,7 +38,7 @@ import json as _json
 import os
 from dataclasses import dataclass
 from enum import Enum
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal, Protocol, runtime_checkable
 
 import aiohttp
@@ -379,17 +379,59 @@ _OPENAI_QUOTA_EXHAUSTED_LABELS = frozenset({"insufficient_quota", "credit_balanc
 #: 것」의 목록이 강의실 모듈(`classroom.gradability_hint`)에 있고 core 는 강의실을 모른다. 여기는 스키마뿐이다.
 
 
-def _openai_verdict_response_schema(*, allow_unverifiable: bool = False) -> dict:
+def _openai_verdict_response_schema(
+    *, allow_unverifiable: bool = False, requirement_ids: Sequence[int] | None = None
+) -> dict:
     """OpenAI Structured Outputs용 JSON 스키마.
 
     `allow_unverifiable=True`(강의실, #811)면 `is_met` 대신 `verdict`(met·unmet·unverifiable)를 받는다 —
     둘을 함께 받으면 서로 어긋나는 응답을 어느 쪽으로 읽을지 정해야 해 하나만 둔다. `is_met` 은 파서가
     `verdict` 에서 만든다. 공모전(기본값)은 지금 그대로 `is_met` 이다.
 
-    `strict: True`가 타입은 강제하지만(정수·불리언·문자열, 필수 키), 요청에 실린
-    requirement_id를 빠짐없이 채웠는지·중복 없이 채웠는지는 스키마가 보장하지
-    못한다 — 그건 `_parse_openai_scoring_response`가 응답을 받은 뒤 직접 확인한다.
+    `requirement_ids` 를 주면(채점 요청, #986) `verdicts` 가 배열이 아니라 **requirement_id 를 키로 한
+    객체**다 — 키마다 판정 하나, 키 전부가 `required`, 다른 키는 `additionalProperties: False`. 그러면
+    구조화 출력이 요청에 실린 id 를 하나도 빠뜨리거나 겹치거나 지어낼 수 없다(공모전 3의 809 는 배열
+    스키마에서 선택 요구사항 8개를 통째로 빠뜨렸다). 쓰는 키워드가 `properties`·`required`·
+    `additionalProperties` 뿐이라 OpenAI strict 와 Anthropic 구조화 출력이 모두 받는다.
+
+    주지 않으면 옛 배열 모양이다 — 그때는 `strict: True`가 타입만 강제하고(정수·불리언·문자열, 필수
+    키), 빠짐·중복은 `_parse_openai_scoring_response`가 응답을 받은 뒤 직접 확인한다(그 검사는 두
+    모양 모두에 그대로 남는다).
     """
+
+    verdict_properties: dict[str, dict] = {
+        **(
+            {"verdict": {"type": "string", "enum": list(VERDICT_VALUES)}}
+            if allow_unverifiable
+            else {"is_met": {"type": "boolean"}}
+        ),
+        "reasoning": {"type": "string"},
+    }
+    if requirement_ids:
+        verdict_item = {
+            "type": "object",
+            "properties": verdict_properties,
+            "required": list(verdict_properties),
+            "additionalProperties": False,
+        }
+        keys = [str(rid) for rid in requirement_ids]
+        return {
+            "name": "scoring_verdicts",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "verdicts": {
+                        "type": "object",
+                        "properties": {key: verdict_item for key in keys},
+                        "required": keys,
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["verdicts"],
+                "additionalProperties": False,
+            },
+        }
 
     return {
         "name": "scoring_verdicts",
@@ -717,6 +759,16 @@ def verdicts_from_content(
         ) from None
 
     raw_verdicts = parsed.get("verdicts") if isinstance(parsed, dict) else None
+    if isinstance(raw_verdicts, dict):
+        # requirement_id 를 키로 한 객체(#986, `_openai_verdict_response_schema(requirement_ids=…)`) —
+        # 배열 항목 모양으로 펴서 아래 같은 검사를 지나게 한다. 키가 정수 모양이 아니면 그대로 둬
+        # 아래 「정수가 아니다」로 떨어진다.
+        raw_verdicts = [
+            {**item, "requirement_id": int(key) if key.isdigit() else key}
+            if isinstance(item, dict)
+            else item
+            for key, item in raw_verdicts.items()
+        ]
     if not isinstance(raw_verdicts, list):
         raise LLMAdapterError(
             f"{vendor} 응답에 verdicts 배열이 없다(submission={submission_id})."
@@ -889,7 +941,10 @@ class OpenAIScoringAdapter:
             ],
             "response_format": {
                 "type": "json_schema",
-                "json_schema": _openai_verdict_response_schema(allow_unverifiable=self._allow_unverifiable),
+                "json_schema": _openai_verdict_response_schema(
+                    allow_unverifiable=self._allow_unverifiable,
+                    requirement_ids=[r.requirement_id for r in scoring_input.requirements],
+                ),
             },
         }
         # 추론 모델은 temperature를 받지 않고 reasoning_effort를 받는다

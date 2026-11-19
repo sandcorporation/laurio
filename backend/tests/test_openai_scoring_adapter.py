@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from django.test import override_settings
@@ -586,8 +587,8 @@ def test_the_contest_adapter_keeps_is_met_and_does_not_ask_for_a_verdict(monkeyp
 
     output = OpenAIScoringAdapter().score(_scoring_input(requirement_ids=[10, 11]))
 
-    item = sent[0]["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["items"]
-    assert item["required"] == ["requirement_id", "is_met", "reasoning"] and "verdict" not in item["properties"]
+    item = next(iter(sent[0]["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["properties"].values()))
+    assert item["required"] == ["is_met", "reasoning"] and "verdict" not in item["properties"]
     assert [(v.is_met, v.verdict) for v in output.verdicts] == [(True, None), (False, None)]
 
 
@@ -609,7 +610,7 @@ def test_the_classroom_adapter_reads_all_three_verdicts(monkeypatch):
 
     schema = sent[0]["response_format"]["json_schema"]
     assert schema["strict"] is True
-    assert schema["schema"]["properties"]["verdicts"]["items"]["properties"]["verdict"]["enum"] == [
+    assert next(iter(schema["schema"]["properties"]["verdicts"]["properties"].values()))["properties"]["verdict"]["enum"] == [
         "met",
         "unmet",
         "unverifiable",
@@ -632,3 +633,58 @@ def test_a_verdict_outside_the_three_values_fails_the_attempt(monkeypatch, bad):
     with pytest.raises(LLMAdapterError) as exc:
         OpenAIScoringAdapter(allow_unverifiable=True).score(_scoring_input(requirement_ids=[10]))
     assert SECRET_SOURCE_MARKER not in str(exc.value)
+
+
+# --- #986: 응답 스키마가 실린 requirement_id 전부(선택 포함)를 강제한다 ---------------------------
+
+
+def test_the_schema_requires_a_verdict_for_every_requirement_including_optional_ones(monkeypatch):
+    """공모전 3의 809 는 배열 스키마에서 선택 요구사항 8개를 통째로 빠뜨렸다 — 이제 id 마다 키가
+    있고 전부 required, 다른 키는 받지 않으므로 구조화 출력이 하나도 빠뜨릴 수 없다."""
+
+    sent: list = []
+    _capture_post(
+        monkeypatch,
+        _chat_completion_body(
+            {
+                "10": {"is_met": True, "reasoning": "확인됨"},
+                "11": {"is_met": False, "reasoning": "없음"},
+                "12": {"is_met": False, "reasoning": "선택 — 없음"},
+            }
+        ),
+        sent,
+    )
+    scoring_input = _scoring_input(requirement_ids=[10, 11, 12])
+    scoring_input.requirements[2] = replace(scoring_input.requirements[2], grade="optional")
+
+    output = OpenAIScoringAdapter().score(scoring_input)
+
+    verdicts = sent[0]["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]
+    assert verdicts["type"] == "object"
+    assert verdicts["required"] == ["10", "11", "12"]
+    assert list(verdicts["properties"]) == ["10", "11", "12"]
+    assert verdicts["additionalProperties"] is False
+    assert sent[0]["response_format"]["json_schema"]["strict"] is True
+    assert [(v.requirement_id, v.is_met) for v in output.verdicts] == [(10, True), (11, False), (12, False)]
+
+
+def test_a_keyed_response_that_still_misses_an_id_fails_as_a_transient_missing_verdict(monkeypatch):
+    from core.llm_scoring import LLMAdapterMissingVerdictError
+
+    _capture_post(monkeypatch, _chat_completion_body({"10": {"is_met": True, "reasoning": "확인됨"}}), [])
+
+    with pytest.raises(LLMAdapterMissingVerdictError):
+        OpenAIScoringAdapter().score(_scoring_input(requirement_ids=[10, 11]))
+
+
+def test_a_keyed_response_with_a_non_numeric_key_is_rejected(monkeypatch):
+    _capture_post(
+        monkeypatch,
+        _chat_completion_body(
+            {"10": {"is_met": True, "reasoning": "a"}, "x": {"is_met": True, "reasoning": "b"}}
+        ),
+        [],
+    )
+
+    with pytest.raises(LLMAdapterError, match="정수가 아니다"):
+        OpenAIScoringAdapter().score(_scoring_input(requirement_ids=[10]))

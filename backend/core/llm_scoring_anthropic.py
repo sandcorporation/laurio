@@ -95,11 +95,13 @@ _SYSTEM_PROMPT = llm_scoring._OPENAI_SYSTEM_PROMPT + (
 )
 
 
-def _verdict_schema(*, allow_unverifiable: bool = False) -> dict:
+def _verdict_schema(*, allow_unverifiable: bool = False, requirement_ids: list[int] | None = None) -> dict:
     """OpenAI 와 같은 판정 스키마(`core.llm_scoring._openai_verdict_response_schema` 의 `schema`) —
     Anthropic 은 이름·strict 없이 스키마만 받는다. 강의실은 「확인 불가」를 받는 쪽이다(#811)."""
 
-    return llm_scoring._openai_verdict_response_schema(allow_unverifiable=allow_unverifiable)["schema"]
+    return llm_scoring._openai_verdict_response_schema(
+        allow_unverifiable=allow_unverifiable, requirement_ids=requirement_ids
+    )["schema"]
 
 
 def _headers(api_key: str, *, json_body: bool) -> dict[str, str]:
@@ -278,7 +280,13 @@ class AnthropicScoringAdapter:
 
     def _payload(self, scoring_input: ScoringInput) -> dict:
         output_config: dict[str, Any] = {
-            "format": {"type": "json_schema", "schema": _verdict_schema(allow_unverifiable=self._allow_unverifiable)}
+            "format": {
+                "type": "json_schema",
+                "schema": _verdict_schema(
+                    allow_unverifiable=self._allow_unverifiable,
+                    requirement_ids=[r.requirement_id for r in scoring_input.requirements],
+                ),
+            }
         }
         if self._reasoning_effort is not None:
             output_config["effort"] = self._reasoning_effort

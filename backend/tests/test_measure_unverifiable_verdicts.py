@@ -102,7 +102,7 @@ def test_it_counts_each_verdict_per_item_and_model_without_printing_keys(monkeyp
     openai_body = calls[0][1]["json"]
     assert openai_body["model"] == "gpt-4.1-mini" and "reasoning_effort" not in openai_body
     assert UNVERIFIABLE_VERDICT_RULE in openai_body["messages"][1]["content"]
-    assert "verdict" in openai_body["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["items"]["required"]
+    assert "verdict" in next(iter(openai_body["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["properties"].values()))["required"]
     anthropic_body = calls[2][1]["json"]
     assert anthropic_body["model"] == "claude-haiku-5-5" and anthropic_body["output_config"]["effort"] == "low"
 
