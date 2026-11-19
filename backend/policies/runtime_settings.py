@@ -82,6 +82,14 @@ _SWITCH_OFF = {"off", "false", "0", "no"}
 AGENT_SCORING_DAILY_LIMIT_USD = "AGENT_SCORING_DAILY_LIMIT_USD"
 _DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD = "20"
 
+#: 저장소 다운로드 상한(#1005) — 키·기본값·한계(MB). 아래 한계는 grader(`mem_limit: 2g`, 소스 읽기
+#: 스레드 8개)가 저장소 zip 을 한 벌씩 동시에 쥐는 최악(8 × 상한)에 기반 몫 400MB 를 남긴 값이다
+#: — (2048 − 400) / 8 ≈ 206 → 200. grader 메모리 한도를 올리면 이 최대치도 같이 올린다.
+REPOSITORY_DOWNLOAD_LIMIT_MB = "REPOSITORY_DOWNLOAD_LIMIT_MB"
+DEFAULT_REPOSITORY_DOWNLOAD_LIMIT_MB = 100
+MIN_REPOSITORY_DOWNLOAD_LIMIT_MB = 1
+MAX_REPOSITORY_DOWNLOAD_LIMIT_MB = 200
+
 #: 화면으로 옮긴 설정. 무엇을 넣고 무엇을 뺐는지와 그 이유는 ADR-0075 에 있다.
 SPECS: dict[str, SettingSpec] = {
     spec.key: spec
@@ -129,6 +137,15 @@ SPECS: dict[str, SettingSpec] = {
             default=_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD,
             min_value=0.0,
             max_value=1000.0,
+        ),
+        # #1005: 저장소 zip 다운로드 상한 — 넘으면 0점이 아니라 보류. 변환 입력 상한(`source_selection`)이 같은 값을 따른다.
+        SettingSpec(
+            REPOSITORY_DOWNLOAD_LIMIT_MB,
+            f"저장소 다운로드 상한 (MB, {MIN_REPOSITORY_DOWNLOAD_LIMIT_MB}~{MAX_REPOSITORY_DOWNLOAD_LIMIT_MB})",
+            "float",
+            default=str(DEFAULT_REPOSITORY_DOWNLOAD_LIMIT_MB),
+            min_value=float(MIN_REPOSITORY_DOWNLOAD_LIMIT_MB),
+            max_value=float(MAX_REPOSITORY_DOWNLOAD_LIMIT_MB),
         ),
     )
 }
@@ -265,6 +282,11 @@ class RuntimeSettingsReader:
         self._store_failed_at = None
         return version
 
+    def cached(self) -> dict[str, StoredSetting] | None:
+        """지금 쥔 값 — DB·Redis 를 부르지 않는다(아직 못 읽었으면 `None`)."""
+
+        return self._values
+
     def snapshot(self) -> dict[str, StoredSetting]:
         with self._lock:
             now = self._clock()
@@ -367,6 +389,33 @@ def agent_scoring_daily_limit_usd() -> Decimal:
     if not value.is_finite():
         value = Decimal(_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
     return max(value, Decimal(0))
+
+
+def repository_download_limit_bytes() -> int:
+    """저장소 zip 다운로드 상한(#1005, 바이트) — 다운로드할 때마다 읽는다(모듈 로드 때 굳히지 않는다).
+
+    **DB 를 부르지 않는다**: 이미 캐시에 올라온 값만 본다 — grader 의 소스 읽기 스레드가 부르기 때문이다
+    (DB 일은 `grader-db` 스레드 하나에서만). 캐시는 grader 가 임대를 집을 때마다(`refresh_settings`)
+    다른 프로세스는 다른 설정을 읽을 때 갱신된다. 값이 없거나 범위 밖(env 는 저장 검사를 지나지
+    않는다)이면 기본값이다. 1MB = 1,000,000바이트."""
+
+    stored = (_default_reader().cached() or {}).get(REPOSITORY_DOWNLOAD_LIMIT_MB)
+    raw = stored.value if stored is not None else os.environ.get(REPOSITORY_DOWNLOAD_LIMIT_MB)
+    try:
+        megabytes = float((raw or "").strip() or DEFAULT_REPOSITORY_DOWNLOAD_LIMIT_MB)
+    except ValueError:
+        megabytes = float(DEFAULT_REPOSITORY_DOWNLOAD_LIMIT_MB)
+    if not math.isfinite(megabytes) or not (
+        MIN_REPOSITORY_DOWNLOAD_LIMIT_MB <= megabytes <= MAX_REPOSITORY_DOWNLOAD_LIMIT_MB
+    ):
+        megabytes = float(DEFAULT_REPOSITORY_DOWNLOAD_LIMIT_MB)
+    return int(megabytes * 1_000_000)
+
+
+def refresh_settings() -> None:
+    """캐시를 지금 값으로 맞춘다 — DB 일을 해도 되는 스레드에서 부른다."""
+
+    _default_reader().snapshot()
 
 
 # --- 화면에 보일 모양 ----------------------------------------------------------

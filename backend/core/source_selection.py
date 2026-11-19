@@ -62,6 +62,8 @@ import zipfile
 from dataclasses import dataclass
 from typing import Callable
 
+from policies.runtime_settings import repository_download_limit_bytes
+
 from core.llm_scoring import SourceFile
 from core.source_converters import (
     SourceConversionFailed,
@@ -110,10 +112,9 @@ EXCLUDED_DIR_FRAGMENTS = (
     ".venv/", "venv/", "target/", ".next/", "coverage/", ".gradle/", ".idea/",
 )
 
-#: 변환 플러그인에게 넘기는 파일 하나의 상한 — 그보다 큰 파일은 묻지 않고 버린다.
-#: 저장소 zip 다운로드 상한(`core.repository_adapters._MAX_CLONE_DOWNLOAD_BYTES`)과
-#: 같은 값이다: 그 이상은 어차피 한 제출 안에 들어오지 않는다.
-MAX_CONVERTER_INPUT_BYTES = 100_000_000
+#: 변환 플러그인에게 넘기는 파일 하나의 상한 — 그보다 큰 파일은 묻지 않고 버린다. 저장소 zip
+#: 다운로드 상한(운영 설정 `REPOSITORY_DOWNLOAD_LIMIT_MB`)을 그대로 따른다(#1005): 그 이상은
+#: 어차피 한 제출 안에 들어오지 않는다.
 
 #: 변환 플러그인 하나가 파일 하나에 쓸 수 있는 시간. 넘기면 그 파일만 버리고 선별을
 #: 계속한다 — 워커가 플러그인 하나에 붙잡히지 않게.
@@ -291,8 +292,9 @@ def _convert(candidate: _Candidate, converters: tuple[SourceConverter, ...]) -> 
     """UTF-8로 못 읽은 원본 파일 하나를 플러그인들에게 차례로 묻는다. 아무도
     맡지 않으면 빈 목록 — 예전처럼 그 파일은 버려진다."""
 
-    raw = candidate.reader(MAX_CONVERTER_INPUT_BYTES + 1)
-    if len(raw) > MAX_CONVERTER_INPUT_BYTES:
+    limit = repository_download_limit_bytes()
+    raw = candidate.reader(limit + 1)
+    if len(raw) > limit:
         logger.warning("변환하기에 너무 큰 파일을 건너뛴다(path=%s).", candidate.path)
         return []
 

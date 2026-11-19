@@ -287,12 +287,21 @@ def test_a_repository_zip_over_the_old_20mb_limit_is_downloaded_whole_and_in_ord
 
 
 def test_a_repository_zip_over_the_download_limit_is_refused(monkeypatch):
-    monkeypatch.setattr("core.repository_adapters._MAX_CLONE_DOWNLOAD_BYTES", 1000)
+    monkeypatch.setattr("core.repository_adapters.repository_download_limit_bytes", lambda: 1000)
     with pytest.raises(GitHubAdapterError, match="다운로드 상한"):
         _clone_with_chunks(monkeypatch, [b"x" * 600, b"y" * 600])
 
 
-def test_the_converter_input_limit_matches_the_repository_download_limit():
-    from core import repository_adapters, source_selection
+def test_the_default_download_limit_is_100mb_and_the_converter_limit_follows_it(monkeypatch):
+    from policies.runtime_settings import repository_download_limit_bytes
 
-    assert source_selection.MAX_CONVERTER_INPUT_BYTES == repository_adapters._MAX_CLONE_DOWNLOAD_BYTES == 100_000_000
+    monkeypatch.delenv("REPOSITORY_DOWNLOAD_LIMIT_MB", raising=False)
+    assert repository_download_limit_bytes() == 100_000_000
+
+
+@pytest.mark.parametrize("raw", ["0", "0.5", "201", "nope", "inf"])
+def test_an_unreadable_or_out_of_range_value_falls_back_to_the_default(monkeypatch, raw):
+    from policies.runtime_settings import REPOSITORY_DOWNLOAD_LIMIT_MB, repository_download_limit_bytes
+
+    monkeypatch.setenv(REPOSITORY_DOWNLOAD_LIMIT_MB, raw)
+    assert repository_download_limit_bytes() == 100_000_000
