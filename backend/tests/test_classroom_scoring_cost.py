@@ -8,8 +8,11 @@
 from __future__ import annotations
 
 import pytest
+import requests
+from django.core.cache import cache
 
-from classroom import scoring_cost
+from classroom import scoring_cost, scoring_model_catalog
+from classroom.scoring_models import FALLBACK_SCORING_MODEL_CHOICES
 from tests.classroom_scenarios import (
     CLASSES_URL,
     auth_header,
@@ -19,10 +22,13 @@ from tests.classroom_scenarios import (
     join_class,
     login,
     patch_class,
+    respond_to_models_endpoint,
     respond_with_permanent_failure,
     respond_with_verdict,
     run_scan,
+    set_key,
     submit_source,
+    track_models_endpoint_calls,
     user_id,
 )
 
@@ -342,3 +348,68 @@ def test_someone_elses_class_and_problem_are_not_found(client, db):
     _estimate(client, stranger["access"], class_id, expect=404)
     other_class = create_class(client, stranger["access"])
     _estimate(client, stranger["access"], other_class, problem.id, expect=404)
+
+
+# --- 벤더에 묻지 않는다(#982) ------------------------------------------------------
+#
+# 비용 어림은 화면을 열 때마다 불린다 — 한산한 뒤 첫 요청이 벤더 모델 목록 왕복(1~2.5초)을
+# 기다리던 것이 GlitchTip 127 이었다. 모델 목록은 고르는 화면(`scoring-models`)이 받아 둔다.
+
+
+def _real_key_class(client, monkeypatch) -> tuple[dict, int]:
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"], with_key=False)
+    respond_to_models_endpoint(monkeypatch, model_ids=["gpt-4o-mini", "gpt-5.5", "gpt-5"])
+    set_key(client, instructor["access"], class_id, "sk-live-key")
+    return instructor, class_id
+
+
+def _vendor_that_would_hang(monkeypatch) -> list:
+    """불리면 기록하고 시간 초과로 끝나는 벤더 — 비용 어림이 부르면 시험이 잡는다."""
+
+    calls: list = []
+
+    def _hang(*args, **kwargs):
+        calls.append(1)
+        raise requests.Timeout("vendor /v1/models did not answer")
+
+    monkeypatch.setattr("core.llm_scoring.requests.get", _hang)
+    return calls
+
+
+def test_a_cold_cache_estimate_answers_from_the_fallback_list_without_asking_the_vendor(client, db, monkeypatch):
+    with force_real_scoring_adapter():
+        instructor, class_id = _real_key_class(client, monkeypatch)
+        cache.clear()
+        calls = _vendor_that_would_hang(monkeypatch)
+
+        estimate = _estimate(client, instructor["access"], class_id)
+
+    assert calls == []
+    assert list(dict.fromkeys(r["model_id"] for r in estimate["rows"])) == [
+        c.id for c in FALLBACK_SCORING_MODEL_CHOICES
+    ]
+
+
+def test_a_list_the_picker_saw_hours_ago_still_shapes_the_estimate_but_the_picker_asks_again(
+    client, db, monkeypatch
+):
+    with force_real_scoring_adapter():
+        instructor, class_id = _real_key_class(client, monkeypatch)
+        picker = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"])).json()
+        later = scoring_model_catalog._now() + 3 * 60 * 60
+        monkeypatch.setattr(scoring_model_catalog, "_now", lambda: later)
+        calls = _vendor_that_would_hang(monkeypatch)
+
+        estimate = _estimate(client, instructor["access"], class_id)
+        assert calls == []
+        picked = [m["id"] for m in picker["models"]]
+        # 그 뒤 한 줄은 지금 설정(클래스 기본 모델 gpt-4.1-mini)이다 — 키 목록에 없어도 줄을 받는다.
+        assert list(dict.fromkeys(r["model_id"] for r in estimate["rows"]))[: len(picked)] == picked
+        assert "gpt-5.5" in picked
+
+        calls = track_models_endpoint_calls(monkeypatch, model_ids=["gpt-4o-mini"])
+        again = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"])).json()
+
+    assert len(calls) == 1
+    assert [m["id"] for m in again["models"]] == ["gpt-4o-mini"]

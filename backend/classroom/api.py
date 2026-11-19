@@ -174,7 +174,7 @@ from . import class_authoring, co_instructors, ownership_transfers, problem_auth
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
 from . import scoring_cost
-from .scoring_model_catalog import get_scoring_model_catalog, remember_model_ids
+from .scoring_model_catalog import cached_scoring_model_catalog, get_scoring_model_catalog, remember_model_ids
 from . import scoring_connection
 from .scoring_models import (
     DEFAULT_ANTHROPIC_SCORING_MODEL,
@@ -1172,7 +1172,7 @@ def _cost_attempt_out(cost: scoring_cost.AttemptCost, unit: str) -> ScoringCostA
 
 def scoring_cost_estimate(class_obj: Class, problem: Problem | None = None) -> scoring_cost.CostEstimate:
     """이 클래스(와 문제)의 예상 채점 비용(#591) — 화면 API 와 연결된 앱이 같은 값을 읽는다.
-    줄은 이 키로 쓸 수 있는 모델(`get_scoring_model_catalog`)만, 지금 설정(클래스 기본값과
+    줄은 이 키로 쓸 수 있는 모델(`cached_scoring_model_catalog` — 벤더에 묻지 않는다, #982)만, 지금 설정(클래스 기본값과
     이 문제가 실제로 쓸 모델)은 단가를 몰라도 한 줄을 받는다."""
 
     current = [class_obj.default_model]
@@ -1215,7 +1215,7 @@ def scoring_cost_estimate(class_obj: Class, problem: Problem | None = None) -> s
     return scoring_cost.estimate(
         class_obj,
         participant_count=len(_active_member_ids(class_obj)),
-        catalog_model_ids=[c.id for c in get_scoring_model_catalog(class_obj).models],
+        catalog_model_ids=[c.id for c in cached_scoring_model_catalog(class_obj).models],
         current_model_ids=current,
         problem=problem,
     )
