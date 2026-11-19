@@ -108,8 +108,28 @@ cd <worktree>
 를 써 두어 호스트 `next dev` 가 `EACCES` 로 죽는데, 주 워크트리는 애초에 컨테이너가
 서빙하므로 호스트에서 띄울 대상이 아니다. 도구가 그 경우를 알아보고 이유를 적는다.
 
-**이 머신에는 그 위에 메모리 한도도 걸려 있다** — 자세한 값과 근거는 커밋되지 않는
-`CLAUDE.local.md` 에 있다(사용자 슬라이스만 제한하고 docker 는 `system.slice` 라 밖이다).
+**user 슬라이스 한도가 있는 머신에서는 모든 세션이 메모리 묶음 하나를 나눠 쓴다**(#976).
+묶음이 `memory.high` 를 넘기면 커널이 파일 캐시를 쫓아내고 다시 읽느라 머신이 멎는다 —
+2026-11-18 에 전후 스크린샷용 next dev 다섯이 묶음을 15GB 로 만들어 80분을 잃었다. 값은
+커밋되지 않는 `CLAUDE.local.md` 에 있고, 도구는 값을 하드코딩하지 않는다.
+
+- **여유 검사.** `start` 는 띄우기 전에 `/proc/self/cgroup` 에서 자기 묶음을 찾아 위로
+  올라가며 한도(`memory.high`, 없으면 `memory.max`)가 숫자인 가장 가까운 곳의
+  `memory.current` 를 읽는다. 지금 값 + 예상 크기(next 2GB, runserver 0.2GB)가 한도의 85%
+  (`CODEMIT_DEV_SERVER_MEM_PCT`)를 넘으면 **거절**(종료코드 1)하고, 이 머신에 뜬 서버를
+  `list` 꼴(워크트리·앱·RSS)로 찍어 무엇을 내릴지 보인다. cgroup v2 가 없거나 한도가 `max`
+  면 막지 않고 한 줄만 알린다. 띄우지 않고 보려면 `dev-server.sh check <대상>`.
+  `CODEMIT_DEV_SERVER_FORCE=1` 로 건너뛸 수 있지만 **쓰지 않는다** — 거절은 내릴 것이 있다는 뜻이다.
+- **동시에 next 둘 넘기지 않는다.** 앱 하나가 1.3~2.1GB 다. 다른 앱을 보려면 앞의 것을
+  `stop <대상>` 으로 내린다. `start --built <대상>` 은 `next build` 뒤 `next start` 라 뜬 뒤 RSS 가
+  약 0.3GB 다(classroom 실측: dev 2.0GB·build 최고 1.9GB·start 0.3GB). 빌드 중 최고치는 dev
+  와 비슷하지만 끝나면 사라진다.
+- **스크린샷은 차례 촬영 스크립트로, 끝나면 바로 `stop-all`.**
+  `scripts/shoot-before-after.sh --app classroom --before origin/main --paths /login,/ --sizes 1440,390 --themes light,dark --out <폴더>`
+  가 임시 워크트리로 before 를 빌드해 띄워 찍고 내린 뒤 after 를 그렇게 한다. 두 서버가 같이
+  뜨지 않는다. `stop-all` 은 이 워크트리에서 띄운 Playwright 크롬(촬영 스크립트의 pid 나무,
+  그리고 cwd 가 이 워크트리 안인 chrom 프로세스)도 걷는다 — 다른 세션의 크롬은 그대로다.
+  손으로 before 워크트리를 만들어 서버 둘을 동시에 띄우지 않는다.
 
 **로컬 시험의 입구는 `scripts/test.sh` 하나다**(2026-10-02, web-rpg 의 `deploy/test.sh` 와
 같은 방식). `scripts/test.sh backend [pytest 인자]` · `scripts/test.sh e2e [playwright 인자]`.
