@@ -351,19 +351,31 @@ def _active_member_ids(class_obj: Class) -> set[int]:
 def _problem_pass_stats(
     problem: Problem, active_member_ids: set[int], *, submissions=None
 ) -> tuple[int, int]:
-    """(passed_count, member_count) — 분모는 `active_member_ids`의 크기,
-    분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). 매번 지금의
+    """(passed_count, member_count) — `_problem_stats` 에서 통과 수와 분모만."""
+
+    passed_count, _perfect_count, member_count = _problem_stats(problem, active_member_ids, submissions=submissions)
+    return passed_count, member_count
+
+
+def _problem_stats(
+    problem: Problem, active_member_ids: set[int], *, submissions=None
+) -> tuple[int, int | None, int]:
+    """(passed_count, perfect_count, member_count) — 분모는 `active_member_ids`의 크기,
+    분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). `perfect_count` 는 그중 한 번이라도
+    「완벽」(`Problem.is_score_perfect`, #962)을 받은 사람 수이고, 심화 항목이 없는 문제는 `None` 이다.
+    같은 시도 묶음을 한 번 훑어 둘을 함께 센다 — 질의는 늘지 않는다. 매번 지금의
     체크리스트 기준으로 다시 셈한다 — `Problem.is_score_passed`(#436)가
     그렇게 되어 있어 여기서는 한 번 불러온 체크리스트만 그대로 넘기면
     된다."""
 
     member_count = len(active_member_ids)
-    if not active_member_ids:
-        return 0, 0
-
     checklist_items = list(problem.checklist_items.all())
+    has_advanced = Problem.has_advanced_items(checklist_items)
+    if not active_member_ids:
+        return 0, (0 if has_advanced else None), 0
+
     if not any(item.required for item in checklist_items):
-        return 0, member_count
+        return 0, (0 if has_advanced else None), member_count
 
     if submissions is None:
         submissions = ClassroomSubmission.objects.filter(
@@ -371,14 +383,19 @@ def _problem_pass_stats(
         ).select_related("classroom_score").defer(*_SCORE_PROMPT)
 
     passed_member_ids: set[int] = set()
+    perfect_member_ids: set[int] = set()
     for submission in submissions:
-        if submission.member_id in passed_member_ids:
+        if submission.member_id in passed_member_ids and (
+            not has_advanced or submission.member_id in perfect_member_ids
+        ):
             continue
         score = getattr(submission, "classroom_score", None)
         if problem.is_score_passed(score, checklist_items=checklist_items):
             passed_member_ids.add(submission.member_id)
+            if has_advanced and problem.is_score_perfect(score, checklist_items=checklist_items):
+                perfect_member_ids.add(submission.member_id)
 
-    return len(passed_member_ids), member_count
+    return len(passed_member_ids), (len(perfect_member_ids) if has_advanced else None), member_count
 
 
 # --- 집계 필드 (#632, 시안 v2) ------------------------------------------------
@@ -560,7 +577,7 @@ def _serialize_problem(
     last_submitted_at, participant_attempt_count = submission_marks_by_problem.get(problem.id, (None, 0))
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
-    passed_count, member_count = _problem_pass_stats(
+    passed_count, perfect_count, member_count = _problem_stats(
         problem,
         active_member_ids,
         submissions=None if submissions_by_problem is None else submissions_by_problem.get(problem.id, []),
@@ -598,6 +615,7 @@ def _serialize_problem(
         passed_count=passed_count,
         member_count=member_count,
         pass_rate=(passed_count / member_count) if member_count else None,
+        perfect_count=perfect_count,
         published_template=_published_template_summary(live_template),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
         available_transitions=[
@@ -624,7 +642,36 @@ def _contest_out(problem: Problem) -> ProblemContestOut | None:
     return ProblemContestOut(**state) if state is not None else None
 
 
-def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> ClassroomProblemMineOut:
+def _attempt_perfect(problem: Problem, score, checklist_items) -> bool | None:
+    """시도 하나의 「완벽」(#962) — 심화 항목이 없는 문제는 `None`(완벽이 없다)."""
+
+    if not Problem.has_advanced_items(checklist_items):
+        return None
+    return problem.is_score_perfect(score, checklist_items=checklist_items)
+
+
+def _perfect_ever(submissions, problem: Problem, checklist_items) -> bool | None:
+    """시도 전체에 대한 OR — 어느 시도든 한 번 완벽이면 문제는 완벽이다(#962, 대표 결정 3)."""
+
+    if not Problem.has_advanced_items(checklist_items):
+        return None
+    return any(
+        problem.is_score_perfect(getattr(s, "classroom_score", None), checklist_items=checklist_items)
+        for s in submissions
+    )
+
+
+def _serialized_perfect(serialized_submissions, checklist_items) -> bool | None:
+    """이미 직렬화한 시도들(`ClassroomSubmissionOut`)에서 문제의 「완벽」 OR — 다시 세지 않는다."""
+
+    if not Problem.has_advanced_items(checklist_items):
+        return None
+    return any(s.perfect for s in serialized_submissions)
+
+
+def _serialize_problem_mine(
+    problem: Problem, *, passed: bool = False, perfect: bool | None = None
+) -> ClassroomProblemMineOut:
     checklist_items = list(problem.checklist_items.all())
     return ClassroomProblemMineOut(
         id=problem.id,
@@ -641,6 +688,7 @@ def _serialize_problem_mine(problem: Problem, *, passed: bool = False) -> Classr
         checklist_items=[_serialize_checklist_item(i) for i in checklist_items if not i.hidden],
         hidden_checklist_item_count=sum(1 for i in checklist_items if i.hidden),
         passed=passed,
+        perfect=perfect,
         zip_git_history_warning=_zip_git_history_warning(problem, checklist_items),
         recommended_due_at=problem.recommended_due_at,
         due_at=problem.due_at,
@@ -762,6 +810,7 @@ def _serialize_classroom_submission(
         status="scored" if score is not None else "pending",
         score=_serialize_score(score, hidden_items=hidden_items) if score is not None else None,
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
+        perfect=_attempt_perfect(problem, score, checklist_items),
         pending_reason=pending_reason,
         contest_entry=contest_entry_out(submission),
         late=problem.lateness(submission.created_at),
@@ -818,6 +867,7 @@ def _serialize_instructor_submission(
         status="scored" if score is not None else "pending",
         score=_serialize_score(score) if score is not None else None,
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
+        perfect=_attempt_perfect(problem, score, checklist_items),
         pending_reason=_pending_reason(score, class_obj, problem),
         contest_entry=contest_entry_out(submission),
         is_current_contest_entry=marks is not None and submission.id in marks.current,
@@ -1837,7 +1887,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
 
     problem_stats = []
     for problem in problems:
-        passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+        passed_count, perfect_count, member_count = _problem_stats(problem, active_member_ids)
         problem_stats.append(
             ClassroomProblemStatsOut(
                 id=problem.id,
@@ -1846,11 +1896,13 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 passed_count=passed_count,
                 member_count=member_count,
                 pass_rate=(passed_count / member_count) if member_count else None,
+                perfect_count=perfect_count,
                 recommended_due_at=problem.recommended_due_at,
                 due_at=problem.due_at,
             )
         )
 
+    checklist_by_problem = {p.id: list(p.checklist_items.all()) for p in problems}
     marks = entry_marks(problems)
     member_rows = []
     for member in members:
@@ -1861,6 +1913,9 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                     submissions_by_key.get((problem.id, member.id), []),
                     class_obj,
                     problem,
+                ),
+                perfect=_perfect_ever(
+                    submissions_by_key.get((problem.id, member.id), []), problem, checklist_by_problem[problem.id]
                 ),
                 contest_entry=marks.cell(
                     s.id for s in submissions_by_key.get((problem.id, member.id), [])
@@ -2173,6 +2228,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
                     title=problem.title,
                     submission_formats=problem.submission_formats,
                     passed=status == "passed",
+                    perfect=_perfect_ever(own, problem, list(problem.checklist_items.all())),
                     status=status,
                     attempt_count=len(own),
                     last_attempted_at=max((s.created_at for s in own), default=None),
@@ -2494,7 +2550,9 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             class_name=class_obj.name,
             max_source_asset_bytes=get_current_policy().max_source_asset_bytes,
             problem=_serialize_problem_mine(
-                problem, passed=any(s.passed for s in submissions)
+                problem,
+                passed=any(s.passed for s in submissions),
+                perfect=_serialized_perfect(submissions, checklist_items),
             ),
             submissions=submissions,
             # 낼 수 있는 상태가 아니면 그 이유를 말한다 — 보관이 먼저다
@@ -2518,7 +2576,9 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
         # 문제 자체의 통과 여부는 시도 전체의 OR이다(#288 AC "한 번 통과하면
         # 유지된다") — 최신 시도만 보지 않는다.
         problem=_serialize_problem_mine(
-            problem, passed=any(s.passed for s in serialized_submissions)
+            problem,
+            passed=any(s.passed for s in serialized_submissions),
+            perfect=_serialized_perfect(serialized_submissions, checklist_items),
         ),
         submissions=serialized_submissions,
         # 내보내진 사람도 지난 시도는 그대로 읽되(#300 AC), 화면이 제출

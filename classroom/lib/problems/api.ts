@@ -105,6 +105,8 @@ export type ProblemRow = {
   // passed_count / member_count. 분모가 0이면 null — 화면은 "—"(읽기 도구에는 "참여자 없음")로
   // 보여줘야 한다는 신호다(0%와 구별).
   pass_rate: number | null;
+  // 「완벽」 받은 참여자 수(#962) — 심화 항목이 없는 문제는 null(0명과 구별).
+  perfect_count?: number | null;
   // 이 문제의 참여자 제출 중 최신(#632) — 없으면 null.
   last_submitted_at: string | null;
   // 권장 기한·마감(#769, ADR-0063) — ISO 8601 또는 null. 표기는 `due-dates.ts`.

@@ -283,7 +283,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `POST /api/classroom/co-instructor-invites/{token}/accept` | 초대를 쓰고 공동 강사가 된다 — 이 클래스에서 불릴 강사 이름이 필요하다. 1회용(410), 7일 만료(410), 이미 강사면 409 이고 초대는 남는다(#561) |
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281). 강사(소유자·공동 강사)의 자기 참여자 행은 403 「강사는 내보낼 수 없습니다.」(#669) |
-| `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
+| `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력과 「완벽」 여부(`perfect`, 심화 항목이 없는 문제는 `null`, #962), 문제 열에는 `perfect_count`, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
 | `GET .../recent-attempts` | 참여자의 최근 시도 열 건(고정) — 이름·문제 제목·상태(`passed`·`attempted_not_passed`·`scoring`·`needs_setup`)·시각, 강사 전용(#632) |
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 채점 지침(#386)과 권장 기한·마감(`recommended_due_at`·`due_at`, 둘 다 nullable, 권장 > 마감이면 422, #769)도 받는다. PATCH 에서 두 날짜는 생략하면 그대로·null 이면 비운다. 마감이 지나도 참여자가 제출한다(#941, ADR-0078). 보관 → 내보냄 → 숨김에 의한 차단은 유지한다. 시도 응답·참여자 목록 줄·격자 칸의 늦음은 권장 기한 뒤와 마감 기한 뒤를 구분하고 마감이 우선이다(목록·격자는 마지막 시도 기준). MCP 명단 격자와 참여자 리포트도 같은 단계를 싣는다. 저장하지 않고 응답마다 셈하므로 날짜를 옮기면 바뀐다. 복사·템플릿은 두 날짜를 옮기지 않는다(`PROBLEM_FIELD_TRANSFER_TABLE`). MCP `create_problem`·`update_problem` 도 같은 칸을 받는다. 응답에 참여자(강사 본인·내보낸 사람 제외)의 마지막 제출 시각과 시도 수(`participant_attempt_count`, #674 — 제출 현황의 「시도」와 같은 집합, 목록에서도 질의 하나)를 싣는다 |
 | `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·「추론 모델」 스위치(`model_is_reasoning`, #602)·채점 지침(#386)·완성도 공개(`quality_public`, #883)를 고친다 — 호환 서버면 자기 모델을 고르거나 스위치를 바꿀 때 클래스 기본과 같은 시험 호출을 거친다(만들 때도) |
@@ -292,7 +292,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `DELETE .../problems/{id}` | 문제를 지운다 — 참여자의 시도(내보낸 사람 포함)가 없을 때만, 강사 자신의 시도만 있으면 그 채점도 함께 지운다, 되돌릴 수 없다(#430/#431, ADR-0050) |
 | `POST`·`PATCH`·`DELETE .../checklist-items[/{id}]` | 체크리스트 항목을 더하고 고치고 지운다 — 열린·숨긴 문제의 마지막 필수 항목을 삭제·필수 해제하면 422(#440, 초안은 예외). 등급은 `grade`(필수·선택·가산, #905), `grade` 없이 `required` 만 오면 옛 모양으로 읽는다. 배점 `points`(1~10)는 완성도에만 쓰고 고쳐도 다시 채점하지 않는다(#904, ADR-0073) |
 | `POST .../checklist-items/reorder` | 체크리스트 순서를 바꾼다 |
-| `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·상태·시도 수·마지막 시도 시각(#288, #639), 그리고 눈썹의 강사 이름들(`instructor_display_names`, 가입 미리보기와 같은 함수, #671) |
+| `GET .../problems/mine` | 참여자의 문제 목록 — 문제마다 통과 여부·완벽 여부(`perfect`, #962)·상태·시도 수·마지막 시도 시각(#288, #639), 그리고 눈썹의 강사 이름들(`instructor_display_names`, 가입 미리보기와 같은 함수, #671) |
 | `GET .../problems/{id}/mine` | 참여자가 보는 문제 하나 + 본인의 시도 목록(#286), 소스 업로드 상한(`max_source_asset_bytes`, 운영자 정책 값 그대로, #671) |
 | `POST .../problems/{id}/submissions` | 참여자가 소스 또는 저장소로 낸다 — 낼 때마다 새 시도가 쌓인다(#286). 저장소는 저장소·`/tree/<브랜치>`·`/commit/<sha>` 셋을 받고(#777) 응답 `value` 는 낸 URL 그대로, `commit_sha` 는 고정 커밋 |
 | `GET .../problems/{id}/quality` | 강사의 「완성도 순위」(#883, ADR-0072) — 참여자(강사·내보낸 사람 제외)별 가장 최근 통과 시도 가운데 지금의 기록(같은 시도 + 같은 체크리스트 지문)이 있는 사람만, 가중 점수로 등수(동점 같은 등수), 완성도(0~100)·항목별 0~5·근거, 큐에 있는 수·실패한 사람. 공개 스위치(`quality_public`)는 문제 PATCH 로 바꾼다 |

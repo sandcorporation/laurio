@@ -18,6 +18,8 @@ export type GridCellStatus =
 export type GridCell = {
   problem_id: number;
   status: GridCellStatus;
+  // 이 칸의 참여자가 한 번이라도 「완벽」을 받았는가(#962) — 심화 항목이 없는 문제는 null.
+  perfect?: boolean | null;
   // 공모전 문제에서만(#550) — "current": 지금 공모전 제출이 이 칸의 시도다, "entered": 냈었지만
   // 지금 제출은 다른 시도·직접 고친 것이다.
   contest_entry?: "current" | "entered" | null;
@@ -35,6 +37,8 @@ export type GridProblemStats = {
   passed_count: number;
   member_count: number;
   pass_rate: number | null;
+  // 「완벽」 받은 참여자 수(#962) — 심화 항목이 없는 문제는 null(0명과 구별).
+  perfect_count?: number | null;
   // 권장 기한·마감(#769) — 격자 머리는 이 응답만 읽는다(#774, 문제 목록에서 꿰매지 않는다).
   recommended_due_at: string | null;
   due_at: string | null;
