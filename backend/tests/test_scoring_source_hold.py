@@ -110,3 +110,25 @@ def test_submissions_that_fit_are_scored_as_before(client, category, landing_typ
 
     assert _run_pending(client)["rows"][0]["status"] == "scored"
     assert not ScoringAttempt.objects.filter(submission_id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_config_left_out_is_held_too(client, category, landing_type, monkeypatch):
+    """보탬 4: 「코드 아님」을 뺀 뒤 남은 것은 전부 근거다 — 앱 코드가 다 들어가도 설정이 빠지면 보류한다."""
+
+    from core.source_selection import SelectionOmission
+
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    monkeypatch.setattr(services, "get_adapter", lambda *, timeout=None: _MustNotBeCalled())
+    monkeypatch.setattr(
+        services,
+        "select_source_files_with_omission",
+        lambda sources, *, max_bytes: ([], SelectionOmission(omitted_files=1, omitted_bytes=4_000)),
+    )
+
+    rows = _run_pending(client)["rows"]
+
+    assert rows[0]["status"] == "held"
+    attempt = ScoringAttempt.objects.get(submission_id=submission_id)
+    assert "omitted_files=1" in attempt.error
+    assert "omitted_code_files=0" in attempt.error

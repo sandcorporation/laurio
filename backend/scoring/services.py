@@ -755,27 +755,29 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
             ],
             max_bytes=source_budget,
         )
-        if omission.app_code_cut and not submission.scoring_attempts.filter(
+        if omission.any and not submission.scoring_attempts.filter(
             error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX
         ).exists():
-            # 앱 코드가 모델 컨텍스트에 다 들어가지 않는다 — 잘린 소스로 채점하면 「없는 기능」으로
-            # 미달 판정이 나므로 벤더를 부르지 않고 보류한다(#986). 보류 표식이 있는 제출은
+            # 「코드 아님」을 뺀 뒤 남은 것은 전부 구현 근거다(보탬 4, `core.source_selection.
+            # excluded_kind`) — 그중 하나라도 모델 컨텍스트에 다 들어가지 않으면 잘린 소스로 「없는
+            # 기능」 미달 판정이 나므로 벤더를 부르지 않고 보류한다(#986). 보류 표식이 있는 제출은
             # `_pending_submissions` 가 빼므로 재시도도, 실패 상한의 0% 확정도 없다. 사람이
             # `release_scoring_hold` 로 풀 때까지 그대로다.
             reason = (
-                f"{SCORING_HOLD_ERROR_PREFIX} 앱 코드가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 "
+                f"{SCORING_HOLD_ERROR_PREFIX} 소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 "
                 f"(model={getattr(llm, 'model_version', '')} budget_bytes={source_budget} "
+                f"omitted_files={omission.omitted_files} omitted_bytes={omission.omitted_bytes} "
+                f"truncated_files={omission.truncated_files} "
                 f"omitted_code_files={omission.omitted_code_files} "
-                f"truncated_code_files={omission.truncated_code_files} "
-                f"omitted_files={omission.omitted_files} omitted_bytes={omission.omitted_bytes})"
+                f"truncated_code_files={omission.truncated_code_files})"
             )
             logger.warning("Submission(pk=%s) %s", submission.id, reason)
             ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
             return {"submission_id": submission.id, "status": "held", "error": reason}
         if omission.any:
-            # 앱 코드는 다 실렸고 뒤 차례(문서·설정·시험 등)만 빠졌다 — 채점하되 빠진 양을 남긴다.
+            # 사람이 보류를 풀었다(`release_scoring_hold`) — 잘린 채 채점하되 빠진 양을 남긴다.
             logger.warning(
-                "Submission(pk=%s) 소스가 예산을 넘어 일부만 채점에 실었다 "
+                "Submission(pk=%s) 보류를 푼 제출이라 소스 일부만 채점에 실었다 "
                 "(omitted_files=%s omitted_bytes=%s omitted_code_files=%s truncated_files=%s)",
                 submission.id,
                 omission.omitted_files,

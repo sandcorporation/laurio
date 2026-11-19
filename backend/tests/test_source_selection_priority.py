@@ -15,7 +15,6 @@ import pytest
 from core import source_selection
 from core.model_context import DEFAULT_CONTEXT_WINDOW_TOKENS, context_window_tokens, source_budget_bytes
 from core.source_selection import (
-    LOW_PRIORITY_TIER,
     MAX_SOURCE_BYTES,
     select_source_files,
     select_source_files_with_omission,
@@ -103,6 +102,8 @@ def test_the_order_is_deterministic_and_app_code_comes_first():
         f"{root}/tests/test_app.py": "def test_x(): pass\n",
         f"{root}/README.md": "# r\n",
         f"{root}/src/app.py": "print(1)\n",
+        f"{root}/src/migrations/0001_initial.py": "x = 1\n",
+        f"{root}/docker-compose.yml": "services: {}\n",
     }
     raw = _zip(files)
 
@@ -113,28 +114,121 @@ def test_the_order_is_deterministic_and_app_code_comes_first():
     assert first == [
         f"{root}/src/app.py",
         f"{root}/README.md",
+        f"{root}/docker-compose.yml",
         f"{root}/package.json",
-        f"{root}/.github/workflows/ci.yml",
-        f"{root}/docs/a.md",
-        f"{root}/tests/test_app.py",
+        f"{root}/src/migrations/0001_initial.py",
     ]
 
 
-def test_selection_tier_puts_generated_scratch_and_ci_last():
+def test_selection_tier_puts_app_code_then_readme_then_the_rest():
     assert selection_tier("r/src/main.py") == 0
-    assert selection_tier("r/tests/test_main.py") == LOW_PRIORITY_TIER
-    assert selection_tier("r/web/src/App.test.tsx") == LOW_PRIORITY_TIER
     assert selection_tier("r/README.md") == 1
     assert selection_tier("r/Dockerfile") == 2
-    assert selection_tier("r/backend/.sqlx/query-1.json") == LOW_PRIORITY_TIER
-    assert selection_tier("r/backend/app/migrations/0001_initial.py") == LOW_PRIORITY_TIER
-    assert selection_tier("r/.scratch/a.py") == LOW_PRIORITY_TIER
+    assert selection_tier("r/mediamtx.yml") == 2
+    assert selection_tier("r/backend/app/migrations/0001_initial.py") == 2
+    assert selection_tier("r/deploy/run.sh") == 2
+    assert selection_tier("r/.husky/pre-commit.sh") == 2
+
+
+# 「코드 아님」 제외 규칙 표(#986 보탬 4) — 한 줄마다 하나씩. 경로는 GitHub zip 처럼 `<저장소>-<sha>/` 아래다.
+@pytest.mark.parametrize(
+    ("path", "kind"),
+    [
+        # docs
+        ("r-1/docs/guide.py", "docs"),
+        ("r-1/backend/docs/api.yaml", "docs"),
+        ("r-1/CLAUDE.md", "docs"),
+        ("r-1/backend/README.md", "docs"),
+        ("r-1/notes.mdx", "docs"),
+        ("r-1/index.rst", "docs"),
+        # scratch·도구
+        ("r-1/.scratch/a.py", "scratch"),
+        ("r-1/experiments/try.py", "scratch"),
+        ("r-1/scratch/b.ts", "scratch"),
+        ("r-1/.claude/settings.yml", "scratch"),
+        ("r-1/.agents/x.yml", "scratch"),
+        ("r-1/.cursor/rules.yml", "scratch"),
+        ("r-1/.github/workflows/ci.yml", "scratch"),
+        ("r-1/.vscode/launch.yml", "scratch"),
+        ("r-1/.idea/misc.xml", "vendor"),  # 벤더·빌드 폴더 목록에도 있어 그쪽이 먼저 걸린다
+        # 생성물
+        ("r-1/backend/.sqlx/query-1.json", "generated"),
+        ("r-1/web/__snapshots__/a.snap", "generated"),
+        ("r-1/web/logo.svg", "generated"),
+        ("r-1/data/seed.csv", "generated"),
+        ("r-1/Cargo.lock", "vendor"),  # 잠금 파일 이름 목록이 먼저 잡는다
+        ("r-1/flake.lock", "generated"),
+        ("r-1/web/app.min.js", "vendor"),
+        ("r-1/web/src/generated/client.ts", "generated"),
+        ("r-1/web/src/schema.d.ts", "generated"),
+        # 시험
+        ("r-1/test/a.py", "tests"),
+        ("r-1/tests/test_a.py", "tests"),
+        ("r-1/web/__tests__/App.tsx", "tests"),
+        ("r-1/web/e2e/login.ts", "tests"),
+        ("r-1/spec/user_spec.rb", "tests"),
+        ("r-1/web/src/App.test.tsx", "tests"),
+        ("r-1/web/src/App.spec.ts", "tests"),
+        ("r-1/server/main_test.go", "tests"),
+        ("r-1/app/views_test.py", "tests"),
+        ("r-1/app/test_views.py", "tests"),
+        # 데이터 json
+        ("r-1/data/items.json", "data_json"),
+        ("r-1/web/public/manifest.json", "data_json"),
+    ],
+)
+def test_not_code_is_excluded(path, kind):
+    assert source_selection.excluded_kind(path) == kind
+    assert source_selection.is_excluded_path(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "r-1/README.md",  # 루트 README 는 남긴다(깊이 ≤1)
+        "README.md",
+        "r-1/mediamtx.yml",  # 녹화·훅 설정이 송출·녹화 요구사항의 근거다
+        "r-1/docker-compose.yaml",
+        "r-1/compose.yml",
+        "r-1/Dockerfile",
+        "r-1/pyproject.toml",
+        "r-1/nginx/nginx.conf",
+        "r-1/db/schema.sql",
+        "r-1/backend/app/migrations/0001_initial.py",
+        "r-1/backend/migrations/20260101_init.sql",
+        "r-1/package.json",
+        "r-1/web/tsconfig.json",
+        "r-1/composer.json",
+        "r-1/configs/R1.txt",  # Packet Tracer 장비 설정(ADR-0031)
+        "r-1/src/latest.py",  # 「test」가 이름 중간에 있어도 시험이 아니다
+        "r-1/src/contest/views.py",
+    ],
+)
+def test_evidence_is_kept(path):
+    assert source_selection.excluded_kind(path) is None
+
+
+def test_mediamtx_and_migrations_reach_the_prompt():
+    root = "live-1"
+    files = {
+        f"{root}/mediamtx.yml": "paths:\n  all:\n    record: yes\n",
+        f"{root}/backend/app/migrations/0001_initial.py": "class Migration: pass\n",
+        f"{root}/src/app.py": "print(1)\n",
+        f"{root}/docs/a.md": "문서\n",
+        f"{root}/tests/test_app.py": "def test_x(): pass\n",
+    }
+
+    assert _selected_paths(_zip(files)) == {
+        f"{root}/mediamtx.yml",
+        f"{root}/backend/app/migrations/0001_initial.py",
+        f"{root}/src/app.py",
+    }
 
 
 def test_what_did_not_fit_is_reported():
     root = "big"
     files = {f"{root}/src/mod_{i:03}.py": "x = 1\n" * 1900 for i in range(40)}  # 40 × 11.4KB — 예산 경계가 파일 중간에 온다
-    files[f"{root}/docs/guide.md"] = "문서\n"
+    files[f"{root}/config/app.yml"] = "a: 1\n"
 
     selected, omission = select_source_files_with_omission([(1, "저장소", _zip(files))])
 
@@ -143,7 +237,6 @@ def test_what_did_not_fit_is_reported():
     assert omission.omitted_files == 41 - len(selected)
     assert omission.truncated_files == 1
     assert omission.truncated_code_files == 1
-    assert omission.app_code_cut
     assert omission.omitted_bytes > 0
 
 
@@ -153,22 +246,15 @@ def test_nothing_is_reported_when_everything_fits():
     assert not omission.any
 
 
-def test_what_did_not_fit_outside_app_code_does_not_count_as_app_code_cut():
-    files = {"r/src/a.py": "x = 1\n"} | {f"r/docs/d-{i}.md": "문서\n" * 3000 for i in range(5)}
+def test_config_that_did_not_fit_is_an_omission_too():
+    """보류 기준은 「무엇이든 빠졌는가」다(보탬 4) — 규칙 뒤 남은 설정도 구현 근거다."""
+
+    files = {"r/src/a.py": "x = 1\n"} | {f"r/config/c-{i}.yml": "a: 1\n" * 3000 for i in range(5)}
 
     _selected, omission = select_source_files_with_omission([(1, "저장소", _zip(files))], max_bytes=20_000)
 
     assert omission.any
-    assert not omission.app_code_cut
-
-
-def test_low_priority_files_can_be_excluded_outright(monkeypatch):
-    """대장 결정 대기(#986) — 맨 뒤 차례를 아예 빼는 선택지가 스위치 하나다."""
-
-    monkeypatch.setattr(source_selection, "EXCLUDE_LOW_PRIORITY", True)
-    files = {"r/src/a.py": "x\n", "r/tests/test_a.py": "x\n", "r/docs/a.md": "x\n", "r/README.md": "x\n"}
-
-    assert _selected_paths(_zip(files)) == {"r/src/a.py", "r/README.md"}
+    assert omission.omitted_code_files == 0
 
 
 @pytest.mark.parametrize(
