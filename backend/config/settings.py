@@ -109,10 +109,10 @@ PAID_CONTEST_PRODUCT_ENABLED = _env_bool("CODEMIT_PAID_CONTEST_PRODUCT_ENABLED",
 PRIVACY_POLICY_EFFECTIVE_DATE = date(2026, 11, 6)
 
 # 플랫폼 채점(공모전 채점·완성도)을 Claude(Anthropic)로 돌려도 되는 날(#994). 지금 방침 5·6항은 Anthropic
-# 이전을 「강사가 Claude 키로 연결한 클래스」로만 적고 공모전 채점은 적지 않았다 — 그래서 **없음(None)이고,
+# 이전을 「강사가 Claude 키로 연결한 클래스」로만 적고 공모전 채점은 적지 않았다 — 그래서 **없음(None)이었고,
 # 없으면 운영 설정의 채점 벤더에 anthropic 을 저장할 수 없다**(`core.privacy_policy.platform_anthropic_scoring_open`).
-# 방침에 공모전 채점의 Anthropic 이전을 더하는 개정이 공지되면 그 시행일(KST 0시)을 넣는다.
-PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE: date | None = None
+# 방침에 공모전 채점의 Anthropic 이전을 더한 개정(#997)의 시행일(KST 0시) — 화면 `EFFECTIVE_ISO` 와 같은 값이다.
+PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE: date | None = date(2026, 11, 27)
 
 # production인데 DEBUG=true로 뜨면 에러 페이지가 스택 트레이스·환경변수·SQL을 그대로
 # 노출한다(Django check --deploy의 security.W018과 같은 위협). DEBUG는 개별

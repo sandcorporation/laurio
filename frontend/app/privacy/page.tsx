@@ -32,16 +32,20 @@ export const metadata = {
   description: "Codemit 이 수집하는 개인정보 항목과 보유 기간, 위탁·국외 이전 상대를 밝힙니다.",
 };
 
-// 이 판(완성도 채점을 6항 이전 목적에 더한 개정, #897)의 시행일은 병합일(KST)+7일이다(방침 12항의
+// 이 판(공모전 제출물의 Anthropic 채점을 5·6항에 더한 개정, #997)의 시행일은 병합일(KST)+7일이다(방침 12항의
 // 7일 전 공지). 시행일 전에는 머리에 「개정 예정 · 시행일 …」이 뜨고 시행일부터 저절로 내린다(#892).
-const EFFECTIVE_ISO = "2026-11-12";
+// 백엔드 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 와 같은 값이다(시험이 지킨다).
+const EFFECTIVE_ISO = "2026-11-27";
 const EFFECTIVE_DATE = koreanDate(EFFECTIVE_ISO);
 
 // Anthropic, PBC 이전을 더한 개정(#803)의 시행일 — 이 판의 시행일이 아니다. 백엔드 설정
 // `PRIVACY_POLICY_EFFECTIVE_DATE` 와 같은 값이어야 하고(Claude 키 저장 잠금의 기준일이다 — 이 값을 옮기면
 // 열린 키 저장이 다시 잠긴다), `backend/tests/test_privacy_policy_lock.py` 가 아래 한 줄을 읽어 지킨다.
 const ANTHROPIC_TRANSFER_EFFECTIVE_ISO = "2026-11-06";
-const PREVIOUS_EFFECTIVE_DATE = koreanDate(ANTHROPIC_TRANSFER_EFFECTIVE_ISO);
+
+// 종전 방침(완성도 채점을 6항 이전 목적에 더한 개정, #897)의 시행일 — 부칙 ②.
+const PREVIOUS_EFFECTIVE_ISO = "2026-11-12";
+const PREVIOUS_EFFECTIVE_DATE = koreanDate(PREVIOUS_EFFECTIVE_ISO);
 
 function Article({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -190,8 +194,8 @@ export default function PrivacyPolicyPage() {
           <Items>
             <li>OpenAI, L.L.C. — 제출물의 채점(위탁 항목: 제출한 소스코드와 자가 응답)</li>
             <li>
-              Anthropic, PBC — 강사가 Claude 키로 채점을 연결한 클래스의 제출물 채점(위탁 항목:
-              제출한 소스코드)
+              Anthropic, PBC — 공모전 제출물의 채점, 강사가 Claude 키로 채점을 연결한 클래스의
+              제출물 채점(위탁 항목: 제출한 소스코드)
             </li>
             <li>Oracle Corporation — 제출 파일과 이미지의 보관(위탁 항목: 제출물 파일)</li>
           </Items>
@@ -218,7 +222,10 @@ export default function PrivacyPolicyPage() {
             <li>이전받는 자: Anthropic, PBC</li>
             <li>이전되는 국가: 미국</li>
             <li>이전 일시와 방법: 채점할 때마다 정보통신망을 통해 전송</li>
-            <li>이전 항목: 강사가 Claude 키로 채점을 연결한 클래스에서 제출한 소스코드</li>
+            <li>
+              이전 항목: 공모전에 제출한 소스코드, 강사가 Claude 키로 채점을 연결한 클래스에서
+              제출한 소스코드
+            </li>
             <li>이전 목적: 요구사항 충족 여부의 자동 채점, 완성도 채점과 그 근거 생성</li>
             <li>
               보유·이용 기간: 이전받는 자가 받은 날부터 30일 이내에 삭제(이용 정책 위반으로
@@ -229,7 +236,8 @@ export default function PrivacyPolicyPage() {
             채점 결과에 함께 표시되는 판정 근거에는 제출한 소스의 일부가 인용될 수 있습니다.
             클래스의 채점은 강사가 등록한 키로 이루어지며, 강사가 OpenAI 키를 등록한 클래스는
             OpenAI, L.L.C. 로, Claude(Anthropic) 키를 등록한 클래스는 Anthropic, PBC 로 이전되고
-            이전 항목은 위와 같습니다.
+            이전 항목은 위와 같습니다. 공모전 제출물의 채점은 운영 설정에 따라 OpenAI, L.L.C. 또는
+            Anthropic, PBC 로 이전됩니다.
           </p>
           <p>
             정보주체는 국외 이전을 거부할 수 있습니다. 다만 거부하는 경우 제출물의 채점을 이용할

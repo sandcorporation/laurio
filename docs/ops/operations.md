@@ -24,9 +24,8 @@
 
 **공모전 채점 벤더(OpenAI·Claude)도 「운영 설정」에서 고른다**(#994) — `LLM_SCORING_VENDOR`(값이 없으면 `openai`)와
 `ANTHROPIC_API_KEY`·`LLM_ANTHROPIC_MODEL`(기본 `claude-sonnet-5-5`). 고른 벤더의 키가 비면 OpenAI 키가 없을 때와
-같이 채점 시도를 남기지 않고 실패한다. **`anthropic` 은 지금 저장되지 않는다** — 방침 6절의 Anthropic 이전이 강의실
-클래스 키만 적어서다. 방침에 공모전 채점의 이전을 더한 개정을 공지하고 그 시행일을
-`settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 에 넣으면 열린다.
+같이 채점 시도를 남기지 않고 실패한다. **`anthropic` 은 2026-11-27 0시(KST)부터 저장된다**(#997) — 방침 5·6절이 공모전 제출물의 Anthropic 이전을
+적은 개정의 시행일이 `settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 이고, 그 전에는 거절된다. 기본값은 계속 `openai` 다.
 
 데이터는 이렇게 훑는다:
 
