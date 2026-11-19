@@ -544,7 +544,7 @@ def test_deployed_compose_runs_the_grader_and_no_scoring_worker(target):
     assert "celery-scoring" not in services
     assert grader["command"] == "python manage.py grader"
     assert grader["image"] == services["backend"]["image"]
-    assert grader["mem_limit"] == "1g"  # 상한이 없으면 같은 호스트의 DB 까지 OOM 에 휘말린다
+    assert grader["mem_limit"] == "2g"  # 상한이 없으면 같은 호스트의 DB 까지 OOM 에 휘말린다
     # 따뜻한 종료가 벤더를 기다리는 채점(임대 시간까지)을 마저 끝낼 시간.
     grace_minutes = int(grader["stop_grace_period"].rstrip("m"))
     assert grace_minutes * 60 >= classroom_scoring.SCORING_LEASE.total_seconds()
