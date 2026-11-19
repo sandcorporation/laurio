@@ -271,6 +271,22 @@ class ContestComparisonOut(Schema):
     requirements: list[RequirementComparisonOut]
 
 
+class RosterEntryOut(Schema):
+    """제출 명단 한 줄(#956, ADR-0079) — 표시 이름과 낸 시각뿐이다.
+
+    제출 id·developer id 는 싣지 않는다 — 명단이 상세 열람의 길잡이가 되지 않게 한다.
+    탈퇴로 이름이 지워졌으면(ADR-0025) null 이다.
+    """
+
+    display_name: str | None
+    submitted_at: datetime
+
+
+class ContestRosterOut(Schema):
+    contest_id: int
+    entries: list[RosterEntryOut]
+
+
 class ScoredAssetOut(Schema):
     """채점에 실제로 쓰인 자산 하나 (#191, ADR-0027).
 

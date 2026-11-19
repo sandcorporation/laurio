@@ -184,6 +184,15 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
           지표 보기
         </Link>
 
+        {/* 제출 명단(#956, ADR-0079)도 지표처럼 상태를 타지 않는다 — 마감 전에도 열린다. */}
+        <Link
+          className="text-sm underline"
+          href={`/console/contests/${row.contest_id}/roster`}
+          data-testid={`my-contest-row-${row.contest_id}-roster`}
+        >
+          제출 명단
+        </Link>
+
         {/* 「결제해야 공개됩니다」가 갈 곳이 없었다(#86) — draft 인 채로 두면
             아무 일도 일어나지 않는데, 이 화면이 유일하게 그 사실을 말하는 자리다.
             canJudge와 같은 이유로 `next_action`을 직접 비교하지 않고 번역표를

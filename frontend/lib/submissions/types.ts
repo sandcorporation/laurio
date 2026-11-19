@@ -59,3 +59,7 @@ export const ASSET_KIND_LABELS: Record<string, string> = {
   demo_url: "데모 URL",
   repository: "GitHub 저장소",
 };
+
+// 개최자의 제출 명단(#956, ADR-0079) — 표시 이름·낸 시각뿐이다. 제출 id 가 없어
+// 상세 열람으로 이어지지 않는다.
+export type ContestRosterOut = components["schemas"]["ContestRosterOut"];
