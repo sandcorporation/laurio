@@ -1094,7 +1094,10 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 - 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 은 방침 시행일
   (2026-11-27) 전에 거절된다(#995·#997).
 - **강의실**(#1036)은 클래스가 「에이전트」를 고르면(`Class.scoring_method`·`quality_method`) 판정 채점·완성도 검사가
-  같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(OpenAI 키 → Codex, Claude 키 → Claude Code),
+  같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(Claude 키 → Claude Code). **에이전트를 고를 수 있는
+  벤더는 `AGENT_VERIFIED_VENDORS` 한 곳이 정하고 지금은 Anthropic 뿐이다** — OpenAI 키(Codex)는 운영 실측(#1681)에서 예산에 끊겨
+  판정을 못 내 막았다(까닭 코드 `agent_vendor_unverified`, 호환 서버는 `compatible_server`; 클래스 응답의
+  `grading_method_options` 와 PATCH 422 가 같은 코드를 싣는다. 이미 고른 값은 두고 한 번 호출로 돈다).
   모델은 문제의 채점 모델, 키는 그 클래스 키, 박제본은 채점 준비가 읽은 zip(아니면 보류). 기록은 `ClassroomAgentRun`
   (공모전 `AgentRun` 과 같은 꼴). 판정 보류는 시도 기록 머리 `AgentScoringHold:` 로 채점 대기에서 빠지고 실패 상한에
   세지 않는다(0% 로 굳히지 않는다). 완성도 보류는 「보류(…)」 실패 한 번으로 남는다(영구 아님, #1699). grader 는 에이전트 실행을 제 스레드에서

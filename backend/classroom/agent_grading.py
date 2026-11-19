@@ -4,7 +4,8 @@
 대신 공모전과 같은 길을 탄다: `core.agent_scoring.run_agent_job` → `agent-grader` → `llm-proxy`.
 
 - **벤더·모델**: 벤더는 클래스의 채점 연결(OpenAI 키 → Codex, Claude 키 → Claude Code), 모델은 문제의 채점 모델
-  (`Problem.effective_model`). 호환 서버 연결은 에이전트를 고를 수 없다(`unavailable_reason`).
+  (`Problem.effective_model`). 호환 서버 연결과 아직 확인되지 않은 벤더(지금은 OpenAI — `AGENT_VERIFIED_VENDORS`,
+  #1681)는 에이전트를 고를 수 없다(`unavailable_reason`).
 - **키**: 실행 토큰의 키 출처가 이 클래스다(`ClassKey`) — 프록시가 이 클래스의 키를 풀어 벤더에만 붙인다
   (`scoring_connection.agent_vendor_key`). 실행기·CLI·기록·로그에는 실행 토큰만 간다.
 - **상한**: 실행당 예산은 공모전과 같다($1). 플랫폼 하루 상한에는 세지 않는다(`core.agent_run_tokens`).
@@ -49,8 +50,13 @@ from .models import Class, ClassroomAgentRun, ClassroomSubmission
 from .pending_scoring import AGENT_SCORING_HOLD_ERROR_PREFIX
 from .scoring_connection import agent_vendor_of
 
-#: 에이전트를 고를 수 없는 까닭 코드 — 화면이 이 값으로 선택지를 끈다.
-UnavailableReason = Literal["compatible_server"]
+#: 에이전트를 고를 수 없는 까닭 코드 — 화면이 이 값으로 선택지를 끈다. 호환 서버는 에이전트 CLI 가 부를 수 없고,
+#: `agent_vendor_unverified` 는 연결 벤더가 아직 에이전트로 확인되지 않았다(`AGENT_VERIFIED_VENDORS` 밖).
+UnavailableReason = Literal["compatible_server", "agent_vendor_unverified"]
+
+#: 에이전트 방식을 고를 수 있는 벤더 — 막는 자리는 여기 한 곳이다. Codex(OpenAI)는 운영 실측(#1681)에서 낱말 검색
+#: 106건·요청 173건을 헤매다 실행당 예산에 끊겨 구조화 출력을 내지 못했고 대표가 멈췄다. 확인되면 여기에 더해 연다.
+AGENT_VERIFIED_VENDORS: frozenset[str] = frozenset({"anthropic"})
 
 Purpose = Literal["scoring", "quality"]
 
@@ -63,12 +69,18 @@ AGENT_LEASE = timedelta(seconds=AGENT_JOB_MAX_SECONDS + 120)
 def unavailable_reason(class_obj: Class) -> UnavailableReason | None:
     """이 클래스가 「에이전트」를 고를 수 없는 까닭 — 고를 수 있으면 `None`."""
 
-    return "compatible_server" if agent_vendor_of(class_obj) is None else None
+    vendor = agent_vendor_of(class_obj)
+    if vendor is None:
+        return "compatible_server"
+    if vendor not in AGENT_VERIFIED_VENDORS:
+        return "agent_vendor_unverified"
+    return None
 
 
 def uses_agent(class_obj: Class, purpose: Purpose) -> bool:
     """이번 채점(또는 완성도 검사)이 에이전트로 도는가 — 고른 값이 「에이전트」이고 지금 연결이 받을 때만.
-    고른 뒤 연결을 호환 서버로 바꿨으면 한 번 호출로 돈다(저장된 값은 그대로 두어 화면이 사유를 보인다)."""
+    고른 뒤 연결을 호환 서버(또는 확인되지 않은 벤더)로 바꿨으면 한 번 호출로 돈다(저장된 값은 그대로 두어 화면이
+    사유를 보인다)."""
 
     chosen = class_obj.scoring_method if purpose == "scoring" else class_obj.quality_method
     return chosen == Class.GradingMethod.AGENT and unavailable_reason(class_obj) is None
