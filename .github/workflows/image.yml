@@ -1,5 +1,5 @@
-# 배포 이미지(#938, ADR-0077): main 의 커밋마다 여섯 이미지를 GitHub 호스팅 arm64 실행기에서 네이티브로 굽고 ghcr 에 올린다.
-# main push 에서는 release.yml 이 검사(PR 검사와 같은 pr-check.yml)와 나란히 workflow_call 로 부른다. 여섯이 모두 오르면
+# 배포 이미지(#938, ADR-0077): main 의 커밋마다 일곱 이미지를 GitHub 호스팅 arm64 실행기에서 네이티브로 굽고 ghcr 에 올린다.
+# main push 에서는 release.yml 이 검사(PR 검사와 같은 pr-check.yml)와 나란히 workflow_call 로 부른다. 일곱이 모두 오르면
 # release.yml 이 production 을 이 sha 로 승격하고, Jenkins `codemit/deploy` 는 Actions 가 올린 production 머리 이미지를 받아
 # (jenkins-shared sandcorpDeploy deployFrom) oracle 에 배포한다. Jenkins 에서는 이미지를 굽지 않는다.
 #
@@ -39,7 +39,7 @@ jobs:
       fail-fast: false
       matrix:
         # 같은 목록이 scripts/ci/image_context.py 의 SERVICES 와 Jenkinsfile 의 images 에 있다(시험이 셋을 견준다).
-        service: [backend, frontend, operator, classroom, search, pgbouncer]
+        service: [backend, frontend, operator, classroom, search, pgbouncer, agent-grader]
     env:
       CODEMIT_IMAGES_SERVICES: ${{ matrix.service }}
       CODEMIT_IMAGES_PARALLEL: "0"

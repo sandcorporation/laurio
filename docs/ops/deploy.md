@@ -137,7 +137,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    병합한다**(`gh pr merge <N> --squash`). **`main` 에 직접 push 하지 않는다** — 그러면 PR 검사 없이 release 가 돈다.
 2. **`main` → `production`**(GitHub Actions `release.yml`, `push: main` 만). 세 잡이 차례로 돈다:
    - **check** — `pr-check.yml` 을 `workflow_call` 로 그대로 부른다(PR 과 같은 검사). main 실행이라 이미지 층 캐시를 저장한다(#932).
-   - **image** — `image.yml`: 여섯 서비스마다 `ubuntu-24.04-arm` 실행기 하나(matrix)가 `scripts/ci/images.sh arm64` 로 굽거나
+   - **image** — `image.yml`: 일곱 서비스마다 `ubuntu-24.04-arm` 실행기 하나(matrix)가 `scripts/ci/images.sh arm64` 로 굽거나
      건너뛰고(문맥 해시 — 아래), 이번에 구운 앱의 **부팅 가드**(`deploy-guard.sh`, arm64 그대로), 초록이면 **문맥 태그**
      (`images-ctx.sh`), 끝으로 같은 매니페스트에 접미사 없는 `<sha>` 태그를 더한다(라이브러리가 기다리는 이름).
      `packages: write` 는 이 잡에만, 로그인은 `GITHUB_TOKEN`.
@@ -148,7 +148,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    **굽지도 검사하지도 않는다**(라이브러리 README 「승격 브랜치에서 배포」가 원문):
    - **배포할 커밋 확인**(built-in) — production 머리가 직전 성공 빌드의 sha 와 같으면 `NOT_BUILT`, 배포하기로 하면 그
      커밋에 GitHub 상태 `sandcorp/deploy` = pending.
-   - **이미지 기다리기** — 여섯 `ghcr.io/sandcorporation/codemit-<서비스>:<sha>` 가 ghcr 에 보일 때까지(상한 5분, 승격 전에
+   - **이미지 기다리기** — 일곱 `ghcr.io/sandcorporation/codemit-<서비스>:<sha>` 가 ghcr 에 보일 때까지(상한 5분, 승격 전에
      이미 올라가 있다). 못 찾으면 교체 전에 실패한다.
    - **배포**(에이전트 `oracle`) — `scripts/ci/deploy-prod.sh` 가 `deploy.sh prod <명령>` 을 Preflight → 변경 계획 → 이미지
      받기 → 교체(마이그레이션이 있으면 migrate 전에 덤프, #839; backend·events 는 겹쳐 바꾸기) → 확인 → 배포 표식 →
@@ -167,7 +167,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    **e2e 대조는 걷었다**(#938). 예전에는 PR 검사(Jenkins)가 e2e 가 본 arm64 digest 에 `e2e-<트리>-arm64` 태그를 붙이고 배포가
    떠 있는 이미지와 견줬다(`deploy.sh prod e2e-digest`, #729). Actions PR 검사는 이미지를 올리지 않아 태그가 생기지 않으므로
    그 대조와 `images-e2e.sh` 를 지웠다. 「배포되는 것은 검사가 통과한 커밋」은 release 의 promote 가
-   check·image 를 둘 다 기다리는 것이 지킨다(check·image 는 병렬) — production 은 그 커밋의 check 와 여섯 이미지가 모두 초록일 때만 움직인다.
+   check·image 를 둘 다 기다리는 것이 지킨다(check·image 는 병렬) — production 은 그 커밋의 check 와 일곱 이미지가 모두 초록일 때만 움직인다.
 
    **자동 롤백은 없다**(`autoRollback: false`) — `deploy.sh` 는 배포 표식 기준으로 바꿀 서비스를 정해서, 같은 스크립트를 옛
    sha 로 다시 부르면 아무것도 되돌리지 않는다. 교체 뒤 실패(종료 2)는 운영을 사람이 봐야 한다는 뜻이다.
@@ -204,8 +204,8 @@ buildx 가 있어야 한다 — 없으면 Dockerfile 의 `RUN --mount` 에서 �
 **이미지는 GitHub Actions `image.yml` 이 굽는다 — prod 서버는 받기만 한다**(2026-09-17 ghcr, 2026-10-15 Jenkins —
 #705, ADR-0061, 2026-11-09 Actions — #938, ADR-0077). 예전에는 배포마다 각 서버가 다시 구웠다 — prod(oracle)는
 배포마다 제 CPU 로 Next 빌드 셋을 돌렸다. 지금은 `main` 에 들어온 커밋마다 release 의 image 잡이 서비스마다
-`ubuntu-24.04-arm` 실행기에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`)에 여섯 전부 `codemit-<서비스>:<sha>-arm64` 로 올린다 — backend·세 앱·search(#450/#451)·pgbouncer
-(#453/#458). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 예전에는 home 가 같은 여섯을 `-amd64` 로도 구웠다(2026-10-30 에 걷었다, #840·#841). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
+`ubuntu-24.04-arm` 실행기에서 `scripts/ci/images.sh arm64` 를 돌려 ghcr(`ghcr.io/sandcorporation/codemit-*`)에 일곱 전부 `codemit-<서비스>:<sha>-arm64` 로 올린다 — backend·세 앱·search(#450/#451)·pgbouncer
+(#453/#458)·agent-grader(#999). 노드가 제 아키텍처로 굽는다 — 에뮬레이션이 없다. 예전에는 home 가 같은 여섯을 `-amd64` 로도 구웠다(2026-10-30 에 걷었다, #840·#841). 레지스트리 캐시(`codemit-buildcache:<서비스>-<태그>`)
 를 함께 쓰고, 노드에는 buildx 빌더 `codemit-images`(docker-container 드라이버 — docker 드라이버는 캐시를
 내보내지 못한다)가 남아 제 캐시를 20GB 까지 둔다. 예전에는 GitHub 호스티드(그 전 셀프호스티드 mac, 그
 전 home)가 커밋마다 열둘을 다 구웠다.
@@ -310,7 +310,7 @@ ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle �
 `production` 브랜치가 남아 있으면 그 끝도 남긴다 — #873 뒤로 움직이지 않는다) — 바뀌지 않은 서비스는 옛 버전에 커밋
 태그만 더해지므로 배포 중인 이미지가 오래전에 만든 버전일 수 있다. 순서는 태그가 붙은 때(`updated_at`)로
 센다. `ctx-` 태그만 남은 버전은 다른 버전처럼 순서대로 지워지고, 그러면 그 문맥을 다음에 한 번 다시 굽는다. **빌드 캐시는
-이름으로 가른다**(#727): 지금 이름(`<서비스>-arm64`, 여섯)은 늘 남기고, 옛 이름(`<앱>-prod`·`<서비스>-amd64` 등)은 늘 지우고,
+이름으로 가른다**(#727): 지금 이름(`<서비스>-arm64`, 일곱)은 늘 남기고, 옛 이름(`<앱>-prod`·`<서비스>-amd64` 등)은 늘 지우고,
 캐시 10 은 태그 없는 버전에만 센다 — 순서로만 자르면 (당시 amd64 까지) 살아 있는 태그 열둘이 10 을 넘어 드물게 굽는 search·pgbouncer 의
 캐시가 지워졌다. **병합되지 않은 커밋의 이미지는 순서보다 먼저 지운다**(#729): PR 검사는 브랜치 커밋 sha 로
 이미지를 올리는데(열차 시절에는 쌓은 묶음 sha) squash 병합이라 그 sha 는 main 에 오지 않아, 순서로만 자르면 이것들이 12 를 채워
@@ -471,6 +471,38 @@ search·pgbouncer 는 `service_definition_changed <서비스>` 가 직전 배포
 다시 만들지도 않는다. 이미지가 바뀌는 길(`search.Dockerfile`·`pgbouncer.Dockerfile`, 문맥 해시)과
 없는 컨테이너는 그대로 바꾼다. #950 이 워커 healthcheck 만 더했는데 운영 search 가 다시 만들어진
 것이 계기였다. 되돌리려면 `compose.prod.yaml` 변경 블록의 두 `service_definition_changed` 를 `BUILD_* = true` 로 바꾼다.
+
+**에이전트 채점 실행기 `agent-grader`(#999)는 따로 받고, 부르는 쪽이 없으면 놀기만 한다.** 이미지
+`codemit-agent-grader`(`docker/agent-grader.Dockerfile`)는 Claude Code·Codex CLI 를 고정 버전으로 담고(버전은
+`backend/scoring/agent_runner.py` 의 상수 한 자리), 실행 틀 파일 하나만 문맥에 든다 — 그 파일과 Dockerfile 이 바뀐 커밋만 다시
+굽는다. 키·자격증명이 없고 네트워크는 `agent`(internal) 하나라 벤더에는 `llm-proxy`(#998)를 거쳐서만 닿는다. 채점기(#1000)가
+부르기 전에는 HTTP 요청을 기다릴 뿐 CLI 를 띄우지 않는다. `plan` 은 문맥 해시·없는 컨테이너·`compose.prod.yaml` 변경으로 계획에
+넣고(`BUILD_AGENT_GRADER`), `up` 은 맨 끝에 `--no-deps` 로 띄운다 — 정의·이미지가 그대로면 다시 만들지 않는다. 실행 중에
+바뀌면 그 실행이 끊기고 부르는 쪽이 일시 실패로 센다. **seccomp 는 자기 프로필을 쓰는 유일한 서비스다**
+(`docker/agent-grader-seccomp.json`): docker 기본 프로필(moby/profiles seccomp v0.2.4)에 Codex `--sandbox read-only` 의
+bubblewrap 이 사용자 네임스페이스 안에서 샌드박스를 세우는 데 쓰는 다섯 — `clone`(CLONE_NEWUSER 가 있을 때만)·`unshare`·
+`mount`·`umount2`·`pivot_root` — 만 더했다. 하나라도 빼면 bwrap 이 그 단계에서 멈춘다. 능력 전부 제거·no-new-privileges·읽기
+전용 루트·비루트라 사용자 네임스페이스 밖에서는 여전히 EPERM 이다. 프로필 내용만 바뀐 배포는 `plan` 이
+`AGENT_GRADER_RECREATE` 로 컨테이너를 다시 만든다(compose 는 경로 글자만 본다). 운영 호스트(AppArmor 없음)는 사용자
+네임스페이스가 열려 있어 호스트 sysctl 은 건드리지 않는다 — PR 검사 실행기(Ubuntu)만 AppArmor 제한을 끄고 푼다.
+
+**agent-grader 샌드박스 확인**(배포 뒤 한 번, 배포 체크아웃 루트에서, `<tag>` 는 배포된 이미지 태그). 벤더·키·네트워크
+없이 Codex 샌드박스만 운영과 같은 제한으로 띄워 빈 폴더를 읽고 끝난다. PR 검사의 `agent-grader` 잡
+(`scripts/ci/agent-grader-check.sh`)이 이미지 자리만 바꾼 같은 줄을 돌린다 — 실행기(Ubuntu)에서는 AppArmor 가 있어
+`--security-opt apparmor=unconfined` 하나를 더 붙인다.
+
+```sh
+docker run --rm --read-only --tmpfs /work:size=768m,mode=0700,uid=10001,gid=10001 --tmpfs /tmp:size=64m,mode=1777 --cap-drop ALL --security-opt no-new-privileges:true --security-opt seccomp=docker/agent-grader-seccomp.json --memory 1536m --pids-limit 512 --network none --entrypoint sh ghcr.io/sandcorporation/codemit-agent-grader:<tag>-arm64 -c 'mkdir -p /work/probe/home /work/probe/empty && cd /work/probe/empty && HOME=/work/probe/home codex sandbox -- ls -A /work/probe/empty && echo agent-grader-sandbox-ok'
+```
+
+| 출력 | 뜻 |
+| --- | --- |
+| `agent-grader-sandbox-ok` 한 줄 | 된다 |
+| `bwrap: No permissions to create a new namespace, …` | 프로필이 안 걸렸다(docker 기본 seccomp) 또는 커널이 사용자 네임스페이스를 막는다(`user.max_user_namespaces=0`) |
+| `bwrap: unshare user ns`·`Failed to make / slave`·`unmount old root`·`pivot_root: Operation not permitted` | 프로필이 그 syscall 을 막는다 — 낡은 프로필 |
+| `bwrap: loopback: Failed RTM_NEWADDR` | AppArmor 의 사용자 네임스페이스 제한(Ubuntu 호스트) |
+| `bwrap: Failed to make / slave: Permission denied` | AppArmor 의 docker 기본 프로필이 mount 를 막는다(Ubuntu 호스트) |
+| `opening seccomp profile (…) failed: … no such file` | 체크아웃 루트가 아닌 곳에서 돌렸다 |
 
 **이벤트 서비스가 없어도 배포는 실패로 끝나지 않는다 — 다만 헬스 체크는 있다.**
 `events` 는 `backend`·`celery-worker` 와 같은 무게로 받고 바꿔

@@ -349,8 +349,8 @@ class ChangedServices(unittest.TestCase):
     FILES = (
         ".dockerignore", "backend/app.py", "frontend/page.tsx", "operator/page.tsx", "classroom/page.tsx",
         "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
-        "docker/pgbouncer/entry.sh",
-        *(f"docker/{name}.Dockerfile" for name in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer")),
+        "docker/pgbouncer/entry.sh", "backend/scoring/agent_runner.py",
+        *(f"docker/{name}.Dockerfile" for name in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer", "agent-grader")),
     )
 
     def setUp(self) -> None:

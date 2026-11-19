@@ -7,14 +7,15 @@
 ```
 PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
    → release.yml(push: main): verify(이미 검사한 트리인가) → check(pr-check.yml 그대로, workflow_call — 증명되면 건너뜀)
-                              ‖ image(image.yml, ubuntu-24.04-arm 여섯) → promote(production fast-forward)
+                              ‖ image(image.yml, ubuntu-24.04-arm 일곱) → promote(production fast-forward)
    → Jenkins `codemit/deploy`(*/production): 굽지도 검사하지도 않고 ghcr `codemit-<서비스>:<sha>` 를 받아 oracle 에 배포
 ```
 
 - **PR 검사**는 `.github/workflows/pr-check.yml` 하나다(#930·#932, ADR-0076 — Jenkins PR 검사 `codemit/ci-pr` 는 꺼졌다).
   `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만, 공개 위생
   `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
-  amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`) →
+  amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`)·`agent-grader`(`agent-grader-check.sh` — `ubuntu-24.04-arm`
+  에서 에이전트 채점 실행기 이미지를 굽고 운영과 같은 격리 설정(seccomp 프로필 포함)으로 Codex 샌드박스 한 줄과 가짜 벤더에 두 CLI 를 돌린다. 실행기의 AppArmor 사용자 네임스페이스 제한은 끄고 돈다 — 운영 호스트에는 AppArmor 가 없다, #999) →
   `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
   **PR 에서는 `guard` 를 건너뛰고 `e2e` 는 PR·release 어디서도 돌지 않는다**(#1015, 줄 서기 단축 — e2e 둘이 PR 시간의 37%였다).
   `guard` 는 `plan` 잡 출력 `guard`(PR 이벤트면 빔)를 `if` 가 본다. 잡 이름·`결과` 는 그대로다.
@@ -28,7 +29,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
     PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `ci-red` 이슈(제목 「release 검사 실패 — production 승격·배포 멈춤」)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.
 - **main 에서는 `release.yml` 이 같은 pr-check.yml 을 `workflow_call` 로 부른다**(`push: main` 트리거는 pr-check.yml 에서 뺐다 —
   검사가 두 번 돌지 않는다). 그 실행의 `github.event_name`·`github.ref` 는 부른 쪽의 push·main 이라 아래 캐시 저장이 그대로 돈다.
-  check 가 초록이어야 image(`image.yml`)가 여섯 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서),
+  check 가 초록이어야 image(`image.yml`)가 일곱 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서),
   둘 다 초록이어야 promote 가 `production` 을 그 sha 로 앞당긴다(`scripts/ci/promote.sh ff`). 실행은
   `gh run list --workflow release.yml`.
 - 보안(공개 저장소, `scripts/test_public_repo.py`): `pull_request_target`·self-hosted 없음, secrets 없음(`github.token` 하나), 워크플로
@@ -65,7 +66,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   시험 파일을 정렬한 순번 % 4)·`web`(단위 시험·typecheck). 인자 없이는 전부 돈다(로컬 길). `e2e` 는 `CODEMIT_E2E_TARGETS` 로
   `public operator`·`classroom` 두 실행기(일꾼 1개 그대로). Playwright `--shard` 대신 프로젝트 단위로 나눈 까닭은 `e2e-two-pass.sh` 의
   `@exclusive` 패스가 시험 순번 shard 와 섞이면 일꾼 하나 보장이 깨지기 때문이다. 실패 결과물은 `checks-test-results-<묶음>`·`e2e-test-results-<이름>`.
-  동시 잡은 plan 1 + checks 6 + guard 3 + e2e 2 + celery 1 + 결과 1 = 14(공개 저장소 한도 20 안). 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
+  동시 잡은 plan 1 + checks 6 + guard 3 + e2e 2 + celery 1 + agent-grader 1 + 결과 1 = 15(공개 저장소 한도 20 안). 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
 - **pnpm 저장소**·**Playwright 브라우저**(`e2e` 잡 호스트 설치, 키는 lockfile 해시·Playwright 버전)도 같은 규칙이다.
 - **10GB**: 키가 lockfile·Dockerfile 해시라 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터 지운다.
   `gh cache list` 합계를 가끔 본다.

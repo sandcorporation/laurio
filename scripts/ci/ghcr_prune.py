@@ -49,7 +49,15 @@ import urllib.error
 import urllib.request
 
 ORG = "sandcorporation"
-IMAGES = ["codemit-backend", "codemit-frontend", "codemit-operator", "codemit-classroom", "codemit-search", "codemit-pgbouncer"]
+IMAGES = [
+    "codemit-backend",
+    "codemit-frontend",
+    "codemit-operator",
+    "codemit-classroom",
+    "codemit-search",
+    "codemit-pgbouncer",
+    "codemit-agent-grader",
+]
 CACHE = "codemit-buildcache"
 API = "https://api.github.com"
 

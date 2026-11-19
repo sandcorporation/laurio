@@ -13,7 +13,7 @@
 #
 #   preflight           env 파일과 compose 설정을 확인한다
 #   plan                무엇을 바꿔 끼울지 정해 계획 파일(.jenkins-<대상>-plan)에 적는다
-#   image <서비스>       backend|frontend|operator|classroom|search|pgbouncer 하나의 이미지를 준비한다
+#   image <서비스>       backend|frontend|operator|classroom|search|pgbouncer|agent-grader 하나의 이미지를 준비한다
 #                       (아래 이미지 출처에 따라 pull 또는 build)
 #   pull <서비스>        ghcr 에서 그 커밋의 이미지를 받는다
 #   build <서비스>       이 호스트에서 직접 굽는다(비상용)
@@ -67,6 +67,10 @@
 #                                                                    backend 코드와 무관하게 갈린다)
 #   docker/pgbouncer.Dockerfile, docker/pgbouncer/ -> pgbouncer      (#453/#458 — 연결 풀러
 #                                                                    이미지 자체만 바뀐다)
+#   docker/agent-grader.Dockerfile, backend/scoring/agent_runner.py -> agent-grader
+#   docker/agent-grader-seccomp.json -> agent-grader(이미지는 그대로, 컨테이너만 다시 만든다)
+#                                                                   (#999 — 에이전트 채점 실행기. 실행 틀 파일
+#                                                                    하나와 CLI 고정 버전으로만 갈린다)
 #   docker/*.Dockerfile / compose.<target>.yaml -> 그 파일이 짓는 것 전부
 #
 # **검색이나 backend 를 바꾼 뒤에는 전체 재색인을 한 번 돌린다**(부모 #444 스펙) —
@@ -209,8 +213,8 @@ $svc
 compose_services() {
   case "$1" in
     backend) echo "backend celery-worker events grader llm-proxy" ;;
-    frontend|operator|classroom|search|pgbouncer) echo "$1" ;;
-    *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search|pgbouncer)" >&2; return 2 ;;
+    frontend|operator|classroom|search|pgbouncer|agent-grader) echo "$1" ;;
+    *) echo "알 수 없는 빌드 대상: $1 (backend|frontend|operator|classroom|search|pgbouncer|agent-grader)" >&2; return 2 ;;
   esac
 }
 
@@ -368,6 +372,8 @@ cmd_plan() {
   BUILD_CLASSROOM=false
   BUILD_SEARCH=false
   BUILD_PGBOUNCER=false
+  BUILD_AGENT_GRADER=false
+  AGENT_GRADER_RECREATE=false
 
   if [ "$EVERYTHING" = true ]; then
     BUILD_BACKEND=true
@@ -376,6 +382,7 @@ cmd_plan() {
     BUILD_CLASSROOM=true
     BUILD_SEARCH=true
     BUILD_PGBOUNCER=true
+    BUILD_AGENT_GRADER=true
   else
     # **이미지 문맥 해시로 고른다**(#712). 이미지 잡(`scripts/ci/images.sh`)이 굽기·건너뛰기를 정하는 바로
     # 그 해시(`scripts/ci/image_context.py` — Dockerfile 이 읽는 경로 중 `.dockerignore` 가 빼지 않는 것)를
@@ -393,6 +400,7 @@ cmd_plan() {
           classroom) BUILD_CLASSROOM=true ;;
           search) BUILD_SEARCH=true ;;
           pgbouncer) BUILD_PGBOUNCER=true ;;
+          agent-grader) BUILD_AGENT_GRADER=true ;;
         esac
       done
     else
@@ -429,6 +437,19 @@ cmd_plan() {
       if touched '^docker/pgbouncer\.Dockerfile$|^docker/pgbouncer/'; then
         BUILD_PGBOUNCER=true
       fi
+
+      # 에이전트 채점 실행기(#999) — 실행 틀 파일 하나와 이 Dockerfile 로만 갈린다.
+      if touched '^docker/agent-grader\.Dockerfile|^backend/scoring/agent_runner\.py$'; then
+        BUILD_AGENT_GRADER=true
+      fi
+    fi
+
+    # agent-grader 의 seccomp 프로필(#999) — compose 는 `seccomp:<경로>` 글자만 보고 파일 내용은 보지 않는다. 내용만
+    # 바뀌면 `up -d` 가 컨테이너를 그대로 두므로 이 계획이 다시 만들게 한다(`AGENT_GRADER_RECREATE`).
+    if touched '^docker/agent-grader-seccomp\.json$'; then
+      log "agent-grader 의 seccomp 프로필이 바뀌었다 — agent-grader 를 다시 만든다."
+      BUILD_AGENT_GRADER=true
+      AGENT_GRADER_RECREATE=true
     fi
 
     # compose 파일 자체가 바뀌면 어느 서비스의 환경이 바뀌었는지 알 수 없다.
@@ -461,6 +482,9 @@ cmd_plan() {
       else
         log "풀러(pgbouncer)의 정의는 그대로다 — 풀러는 바꾸지 않는다."
       fi
+      # 에이전트 실행기(#999)는 계획에 넣기만 한다 — 정의·이미지가 그대로면 `up -d` 가 다시 만들지 않는다(풀러처럼
+      # 내렸다 올리는 길이 없다). 설정 해시를 따로 비교하지 않는 것은 계획 단계를 가볍게 두려는 것이다.
+      BUILD_AGENT_GRADER=true
     fi
   fi
 
@@ -496,6 +520,10 @@ cmd_plan() {
   if missing pgbouncer; then
     log "pgbouncer 컨테이너가 없다 — 굽는다."
     BUILD_PGBOUNCER=true
+  fi
+  if missing agent-grader; then
+    log "agent-grader 컨테이너가 없다 — 굽는다."
+    BUILD_AGENT_GRADER=true
   fi
 
   # 세 앱의 실행 env 가 바뀌었는가 (#711, 옛 #112 코드리뷰 지적 3의 토스 키 회전 감지를 넓혔다).
@@ -616,10 +644,11 @@ cmd_plan() {
     BUILD_CLASSROOM=false
     BUILD_SEARCH=false
     BUILD_PGBOUNCER=false
+    BUILD_AGENT_GRADER=false
   fi
 
   ANY=false
-  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ] || [ "$BUILD_PGBOUNCER" = true ]; then
+  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ] || [ "$BUILD_PGBOUNCER" = true ] || [ "$BUILD_AGENT_GRADER" = true ]; then
     ANY=true
   fi
 
@@ -633,6 +662,8 @@ cmd_plan() {
     echo "BUILD_CLASSROOM=$BUILD_CLASSROOM"
     echo "BUILD_SEARCH=$BUILD_SEARCH"
     echo "BUILD_PGBOUNCER=$BUILD_PGBOUNCER"
+    echo "BUILD_AGENT_GRADER=$BUILD_AGENT_GRADER"
+    echo "AGENT_GRADER_RECREATE=$AGENT_GRADER_RECREATE"
     echo "ROLLING_BACKEND=$ROLLING_BACKEND"
     echo "PLANNED_COMMIT=$($GIT rev-parse HEAD)"
   } > "$PLAN_FILE"
@@ -647,6 +678,7 @@ cmd_plan() {
   echo "  classroom                                     : $(plan_word "$BUILD_CLASSROOM")"
   echo "  search                                        : $(plan_word "$BUILD_SEARCH")"
   echo "  pgbouncer                                     : $(plan_word "$BUILD_PGBOUNCER")"
+  echo "  agent-grader                                  : $(plan_word "$BUILD_AGENT_GRADER")"
   if [ "$BUILD_BACKEND" = true ]; then
     if [ "$ROLLING_BACKEND" = true ] && [ "$MIGRATIONS" = true ]; then
       echo "  backend·events 교체 방식                      : 마이그레이션을 먼저 돌리고 겹쳐 바꾼다(끊김 없음)"
@@ -716,7 +748,7 @@ build_planned_in_background() {
   BUILD_LOGS=$(mktemp -d)
   PIDS=""
   LABELS=""
-  for label in backend frontend operator classroom search pgbouncer; do
+  for label in backend frontend operator classroom search pgbouncer agent-grader; do
     case "$label" in
       backend) wanted=$BUILD_BACKEND ;;
       frontend) wanted=$BUILD_FRONTEND ;;
@@ -724,6 +756,7 @@ build_planned_in_background() {
       classroom) wanted=$BUILD_CLASSROOM ;;
       search) wanted=$BUILD_SEARCH ;;
       pgbouncer) wanted=$BUILD_PGBOUNCER ;;
+      agent-grader) wanted=${BUILD_AGENT_GRADER:-false} ;;
     esac
     [ "$wanted" = true ] || continue
     cmd_image "$label" > "${BUILD_LOGS}/${label}.log" 2>&1 &
@@ -1122,6 +1155,16 @@ cmd_up() {
   if [ "$BUILD_OPERATOR" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS operator; fi
   # shellcheck disable=SC2086
   if [ "$BUILD_CLASSROOM" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS classroom; fi
+  # 에이전트 채점 실행기(#999) — 부르는 쪽(#1000)이 없으면 요청을 기다리기만 한다. 실행 중에 바꾸면 그 실행이
+  # 끊기고 부르는 쪽이 일시 실패로 센다(재시도 1회).
+  # shellcheck disable=SC2086
+  # seccomp 프로필 내용만 바뀐 배포는 정의가 그대로라 `--force-recreate` 로 다시 만든다(plan 의 AGENT_GRADER_RECREATE).
+  if [ "${BUILD_AGENT_GRADER:-false}" = true ]; then
+    recreate=""
+    if [ "${AGENT_GRADER_RECREATE:-false}" = true ]; then recreate="--force-recreate"; fi
+    # shellcheck disable=SC2086
+    $COMPOSE up -d --no-deps $UP_FLAGS $recreate agent-grader
+  fi
   log "바꿔 끼웠다"
 }
 
@@ -1131,7 +1174,7 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker events grader llm-proxy frontend operator classroom search pgbouncer; do
+  for svc in backend celery-worker events grader llm-proxy frontend operator classroom search pgbouncer agent-grader; do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
     if [ -z "$cid" ]; then
       echo "[$svc] 컨테이너가 없다"
@@ -1298,7 +1341,7 @@ case "$COMMAND" in
   preflight) cmd_preflight ;;
   plan) cmd_plan ;;
   image|pull|build)
-    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom|search|pgbouncer)"; exit 2; }
+    [ -n "$ARG" ] || { echo "$COMMAND 에는 서비스가 필요하다 (backend|frontend|operator|classroom|search|pgbouncer|agent-grader)"; exit 2; }
     compose_services "$ARG" >/dev/null
     case "$COMMAND" in
       image) cmd_image "$ARG" ;;

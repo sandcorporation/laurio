@@ -58,8 +58,8 @@ while IFS='=' read -r key value; do
   case "$key" in DEPLOY_ANY|BUILD_[A-Z]*) plan[$key]=$value ;; esac
 done < .jenkins-prod-plan
 pulls=""
-for svc in backend frontend operator classroom search; do
-  flag="BUILD_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')"
+for svc in backend frontend operator classroom search agent-grader; do
+  flag="BUILD_$(printf '%s' "$svc" | tr '[:lower:]-' '[:upper:]_')"
   [ "${plan[$flag]:-false}" = true ] && pulls="$pulls $svc"
 done
 echo "계획: 교체 ${plan[DEPLOY_ANY]:-false} · 받을 이미지:${pulls:- 없음}"
@@ -69,8 +69,8 @@ if [ "${plan[DEPLOY_ANY]:-false}" = true ]; then
   # 받기는 서비스마다 나란히 — 하나가 실패해도 나머지를 끝까지 받아 실패 원인을 한 번에 본다.
   pids=()
   names=()
-  for svc in backend frontend operator classroom search; do
-    flag="BUILD_$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')"
+  for svc in backend frontend operator classroom search agent-grader; do
+    flag="BUILD_$(printf '%s' "$svc" | tr '[:lower:]-' '[:upper:]_')"
     if [ "${plan[$flag]:-false}" = true ]; then
       run image "$svc" &
       pids+=("$!")

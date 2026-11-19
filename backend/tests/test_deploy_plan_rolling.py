@@ -247,6 +247,25 @@ def test_compose_change_to_the_db_the_pooler_relies_on_leaves_the_pooler_alone(d
 
 # 이미지 문맥 해시로 고른다(#712, codemit-deploy-staging #474) — 문맥 밖 파일만 바뀐 커밋은 그 앱을 다시 띄우지 않는다.
 @pytest.fixture
+def agent_grader_seccomp_changed(tmp_path):
+    # compose 는 그대로, agent-grader 의 seccomp 프로필 내용만 바뀐다(#999) — compose 는 파일 내용을 보지 않는다.
+    return _prepare(tmp_path, lambda compose: compose, touch=("docker/agent-grader-seccomp.json",))
+
+
+def test_seccomp_profile_change_recreates_only_the_agent_grader(agent_grader_seccomp_changed):
+    plan = _plan(agent_grader_seccomp_changed)
+
+    assert plan["BUILD_AGENT_GRADER"] == "true"
+    assert plan["AGENT_GRADER_RECREATE"] == "true"
+    assert plan["BUILD_BACKEND"] == "false"
+    assert plan["BUILD_PGBOUNCER"] == "false"
+
+
+def test_other_changes_do_not_force_recreate_the_agent_grader(search_dockerfile_changed):
+    assert _plan(search_dockerfile_changed)["AGENT_GRADER_RECREATE"] == "false"
+
+
+@pytest.fixture
 def playwright_config_only(tmp_path):
     return _prepare(tmp_path, lambda compose: compose, touch=("frontend/playwright.config.ts",))
 
