@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 import copy
-import sys
-from pathlib import Path
 
 import pytest
 from celery.schedules import crontab
@@ -200,13 +198,6 @@ def test_the_alert_is_a_warning_with_a_fingerprint_per_kind_and_a_name_triage_sk
     name, level, fingerprint, tags = captured[0]
     assert (name, level, fingerprint) == ("PriceDriftAlert", "warning", ["price-drift", "drift"])
     assert tags["alert"] == "price-drift"
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-    try:
-        import glitchtip_pick
-    finally:
-        sys.path.pop(0)
-    assert name in glitchtip_pick.DELIBERATE_EXCEPTION_TYPES
 
 
 def test_beat_runs_it_daily_at_0410():

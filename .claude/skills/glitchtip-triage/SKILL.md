@@ -17,8 +17,8 @@ GitHub Issues 에 있는 것은 **티켓**이다. 「이슈 10번」처럼 쓰�
   **진단만 한다** — 지시서가 이 스킬의 1·2단계만 따르라고 한다. 3단계 이후(재현·수정·티켓·커밋·PR)는 하지
   않고, 결과는 대장 메일함(switchboard)으로 보고한다. 아래 절차에서 3~9단계와 「사람이 직접 부를 때」라고
   적힌 것은 이 모드에 해당하지 않는다.
-- **사람이 직접 부를 때.** 이 스킬의 전체 절차(1~9단계)를 따른다. 상태 파일은 저장소 사본
-  `scripts/glitchtip_pick.py` 가 쓰는 `~/.codemit/glitchtip-current.json` 이다.
+- **사람이 직접 부를 때.** 이 스킬의 전체 절차(1~9단계)를 따른다. 상태 파일은 공용판
+  `ops-shared/glitchtip/pick.py` 가 쓰는 `~/.sandcorp/glitchtip/codemit/current.json` 이다.
 
 **집히는 일은 이미 끝나 있다.** 당신이 고를 것은 없다 — **`current.json` 이 말하는 오류 하나**만
 본다(자동화는 `~/.sandcorp/glitchtip/codemit/current.json`, 사람이 부르면 아래 파일).
