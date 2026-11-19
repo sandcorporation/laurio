@@ -31,7 +31,17 @@ def sync_beat_schedule() -> dict:
 
     from core.scans import beat_schedule
 
-    app.conf.beat_schedule = {**beat_schedule(), **SCHEDULED_JOBS}
+    schedule = {**beat_schedule(), **SCHEDULED_JOBS}
+    # CI 의 celery 잡만 세팅한다(docker/compose.ci.yaml, #1020) — 첫 발사를 60초 기다리지 않게 주기(초) 스캔의 간격을 줄인다.
+    # 운영·dev 는 이 값이 없어 그대로 60초다. 벽시계 시각 작업(crontab)은 건드리지 않는다.
+    ci_interval = os.environ.get("CODEMIT_CI_BEAT_INTERVAL_SECONDS")
+    if ci_interval:
+        seconds = float(ci_interval)
+        schedule = {
+            name: {**entry, "schedule": seconds} if isinstance(entry["schedule"], (int, float)) else entry
+            for name, entry in schedule.items()
+        }
+    app.conf.beat_schedule = schedule
     return app.conf.beat_schedule
 
 

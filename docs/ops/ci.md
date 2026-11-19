@@ -24,6 +24,8 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   - PR 에 skipped 가 있으니 `verified_tree.py` 는 그 PR 을 「이미 초록」으로 치지 않는다 → release 의 `verify` 는 늘 skip=0, release `check` 는 전부 다시 돈다.
   - **e2e 는 `e2e.yml` 이 main 을 매시(07분) 돈다**(`schedule`) — 직전 성공 실행이 같은 sha 면 건너뛴다. 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다. 화면을 크게 바꾸는 PR 은 병합 전에 `gh workflow run e2e.yml --ref <브랜치>`(`workflow_dispatch`, 늘 돈다·이슈는 만들지 않는다)로 직접 돌려 본다.
   - **release 를 끈 뒤 켜면**(그동안 병합된 main 머리는 다음 push 까지 안 나간다) `gh workflow run release.yml --ref main` 으로 한 번 돌린다(`workflow_dispatch`, #1018). main 이 아닌 ref 는 `main_only` 잡이 실패시켜 뒤 잡(승격 포함)이 모두 멈춘다.
+  - **알림 시험**: `gh workflow run e2e.yml --ref main -f simulate=fail`(이슈를 연다) → `-f simulate=ok`(복구됨 댓글 후 닫는다). e2e 는 돌지 않고 제목에 「(알림 시험)」이 붙어 실제 이슈·gate·직전 초록 판정을 흐리지 않는다. 시험 이슈는 닫힌 채 기록으로 남는다(#1020).
+  - **celery 잡**(#1020)은 `celery-worker` 와 그 의존(db·redis·minio·backend)만 띄운다 — Next 앱 셋·events·grader 는 굽지 않는다. beat 간격은 `compose.ci.yaml` 의 `CODEMIT_CI_BEAT_INTERVAL_SECONDS=10`(`config/celery.py` 가 주기 스캔에만 적용, 운영·dev 는 그대로 60초).
   - **빨강 알림 = 라벨 `ci-red` 이슈**(`scripts/ci/ci-issue.sh`, release `notify`·e2e `notify` 잡, `issues: write` 하나): 종류(「release 검사 실패」·「e2e 실패」)마다 열린 이슈는 하나, 이미 있으면 댓글. 본문에 실패 sha·run 링크·실패한 잡·직전 초록…이번 sha compare 링크. 다시 초록이면 「복구됨 <sha>」 댓글 후 닫는다 — **열린 `ci-red` 이슈 = 지금 빨강**이다. 라벨이 없으면 workflow 가 만든다.
   - **release 에서 guard 가 실패하면**: `check` 실패 → `promote` 가 돌지 않는다 → production 이 승격되지 않는다 → **배포가 없다**(이미지는 ghcr 에 오를 수 있다).
     PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `ci-red` 이슈(제목 「release 검사 실패 — production 승격·배포 멈춤」)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.

@@ -34,6 +34,10 @@
 #
 # 대신 **잡이 번호를 읽어야 한다** — `docker compose port <service> <container-port>`.
 services:
+  # celery 잡(#1020)만 쓴다 — beat 첫 발사를 10초로 당긴다(config/celery.py 가 이 값을 읽는다). 운영 일정은 그대로다.
+  celery-worker:
+    environment:
+      CODEMIT_CI_BEAT_INTERVAL_SECONDS: "10"
   db:
     # 호스트에서 Postgres 에 붙는 CI 잡이 없다 (#194). 마지막 사용처였던 e2e 의
     # 서브프로세스 시드 둘이 HTTP 로 옮겨졌다 — pytest 는 이 스택을 쓰지 않고
