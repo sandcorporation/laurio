@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { achievementTone, describeAchievementRate, formatAchievementRate } from "./achievement";
+import { achievementTone, describeAchievementRate, formatAchievementRate, formatPassedPerfect } from "./achievement";
 
 describe("달성률 표시 문구", () => {
   it("참여자가 있으면 「비율 · 통과/전체명」으로 쓴다", () => {
@@ -31,5 +31,17 @@ describe("achievementTone (#633)", () => {
     expect(achievementTone(0)).toBe("attention");
     expect(achievementTone(0.3)).toBe("ink");
     expect(achievementTone(0.59)).toBe("ink");
+  });
+});
+
+describe("formatPassedPerfect (#964)", () => {
+  it("완벽 수가 있으면 「통과 n명 · 완벽 n명」", () => {
+    expect(formatPassedPerfect({ passed_count: 5, perfect_count: 2 })).toBe("통과 5명 · 완벽 2명");
+    expect(formatPassedPerfect({ passed_count: 0, perfect_count: 0 })).toBe("통과 0명 · 완벽 0명");
+  });
+
+  it("심화 항목이 없는 문제(null·없음)는 「완벽」을 빼고 통과만", () => {
+    expect(formatPassedPerfect({ passed_count: 5, perfect_count: null })).toBe("통과 5명");
+    expect(formatPassedPerfect({ passed_count: 5 })).toBe("통과 5명");
   });
 });

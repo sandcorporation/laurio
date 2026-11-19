@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { DueInline } from "@/app/components/DueLabel";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
-import { achievementTone } from "@/lib/problems/achievement";
+import { achievementTone, formatPassedPerfect } from "@/lib/problems/achievement";
 import type { ProblemRow } from "@/lib/problems/api";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 
@@ -248,7 +248,22 @@ export function ProblemsTable({
                   <RateCell problem={problem} />
                 </td>
                 <td className="hidden px-3 py-3 text-right font-mono text-[13px] text-ink/60 md:table-cell">
-                  {problem.status === "draft" || problem.member_count === 0 ? "—" : `${problem.passed_count}/${problem.member_count}`}
+                  {problem.status === "draft" || problem.member_count === 0 ? (
+                    "—"
+                  ) : (
+                    <>
+                      <span data-testid={`problem-row-${problem.id}-passed`}>{`${problem.passed_count}/${problem.member_count}`}</span>
+                      {problem.perfect_count == null ? null : (
+                        <span
+                          data-testid={`problem-row-${problem.id}-perfect`}
+                          title={formatPassedPerfect(problem)}
+                          className="mt-0.5 block text-[11px] text-advanced"
+                        >
+                          완벽 {problem.perfect_count}
+                        </span>
+                      )}
+                    </>
+                  )}
                 </td>
                 <td className="hidden whitespace-nowrap px-3 py-3 text-right text-[12.5px] text-ink/45 lg:table-cell">
                   {formatRelativeTime(problem.last_submitted_at)}

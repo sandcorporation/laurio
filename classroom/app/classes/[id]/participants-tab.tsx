@@ -12,6 +12,7 @@
 // 확인 대화가 말한다.
 import { useEffect, useRef, useState } from "react";
 
+import { Stamp } from "@/app/components/Stamp";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
@@ -35,7 +36,7 @@ const STATUS_LABEL: Record<GridCellStatus, string> = {
 /** 셀 하나의 모양. 리터럴 hex 없이 토큰 유틸리티로만 그린다. */
 function cellLabel(cell: GridCell): string {
   const entry = gridEntryLabel(cell.contest_entry ?? null);
-  const parts = [STATUS_LABEL[cell.status], entry, lateLabel(cell.late)].filter(Boolean);
+  const parts = [cell.status === "passed" && cell.perfect === true ? "완벽" : STATUS_LABEL[cell.status], entry, lateLabel(cell.late)].filter(Boolean);
   return parts.join(" · ");
 }
 
@@ -61,7 +62,13 @@ function LateMark({ late, inline = false }: { late: Exclude<LateStatus, null>; i
   );
 }
 
-function StatusMark({ status }: { status: GridCellStatus }) {
+function StatusMark({ status, perfect = false }: { status: GridCellStatus; perfect?: boolean }) {
+  if (status === "passed" && perfect)
+    return (
+      <span data-mark="perfect" className="mx-auto block w-fit">
+        <Stamp kind="perfect" size="sm" />
+      </span>
+    );
   if (status === "passed") return <span className="mx-auto block h-[15px] w-[15px] bg-success" />;
   if (status === "attempted_not_passed")
     return <span className="mx-auto block h-[15px] w-[15px] border border-error" />;
@@ -248,6 +255,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
 
   const { problems, members } = state.grid;
   const hasContestEntries = members.some((member) => member.cells.some((cell) => cell.contest_entry));
+  const hasPerfect = members.some((member) => member.cells.some((cell) => cell.status === "passed" && cell.perfect === true));
   const hasLate = members.some((member) => member.cells.some((cell) => cell.late));
 
   if (members.length === 0) {
@@ -332,13 +340,14 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                     className={CELL}
                     data-testid={`participant-cell-${member.id}-${cell.problem_id}`}
                     data-status={cell.status}
+                    data-perfect={cell.perfect === true ? "true" : undefined}
                     data-contest-entry={cell.contest_entry ?? undefined}
                     data-late={cell.late || undefined}
                     aria-label={cellLabel(cell)}
                     title={cellLabel(cell)}
                   >
                     <span className="relative mx-auto block w-fit">
-                      <StatusMark status={cell.status} />
+                      <StatusMark status={cell.status} perfect={cell.perfect === true} />
                       {cell.contest_entry ? <ContestEntryMark entry={cell.contest_entry} /> : null}
                       {cell.late ? <LateMark late={cell.late} /> : null}
                     </span>
@@ -410,6 +419,11 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
               {STATUS_LABEL[status]}
             </li>
           ))}
+          {hasPerfect ? (
+            <li data-testid="participants-legend-perfect" className="flex items-center gap-2 text-[12px] text-ink/60">
+              <Stamp kind="perfect" size="sm" />
+            </li>
+          ) : null}
         </ul>
         {hasLate ? (
           <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">

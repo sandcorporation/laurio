@@ -82,3 +82,58 @@ test("제출 현황: 통계 바·참여자별 최신 시도·판정 펼치기·�
     `/classes/${classId}?tab=participants`,
   );
 });
+
+// #964 — 강사 제출 현황: 심화 항목을 다 채운 시도는 완벽 도장, 통계 바에 「완벽 n/N」.
+test("제출 현황: 완벽 시도는 완벽 도장 하나만, 통계 바에 완벽 칸", async ({ page }) => {
+  const seed = `submissions-perfect-${test.info().workerIndex}-${Date.now()}`;
+  const req = `codemit-e2e-req-${test.info().workerIndex}-${Date.now()}`;
+  const adv = `codemit-e2e-adv-${test.info().workerIndex}-${Date.now()}`;
+
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const classId = (
+    await (
+      await api.post("/api/backend/classroom/classes", {
+        data: { name: `완벽 현황 ${Date.now()}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  expect(
+    (await api.put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } })).ok(),
+  ).toBeTruthy();
+  const problemId = (
+    await (
+      await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+        data: { title: "심화 있음", submission_formats: ["repository"] },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}/problems/${problemId}`;
+  await api.post(`${base}/checklist-items`, { data: { label: req, required: true } });
+  await api.post(`${base}/checklist-items`, { data: { label: adv, required: false } });
+  await api.post(`${base}/open`);
+  const joinCode = (await (await api.get(`/api/backend/classroom/classes/${classId}`)).json()).join_code as string;
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-a`);
+  await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "서지우" } });
+  const r = await api.post(`${base}/submissions`, {
+    data: { value: `https://github.com/octocat/${req}-${adv}`, submission_format: "repository" },
+  });
+  expect(r.ok()).toBeTruthy();
+  await expect
+    .poll(async () => (await (await api.get(`${base}/mine`)).json()).submissions.every((s: { status: string }) => s.status === "scored"), {
+      timeout: 2_500,
+    })
+    .toBe(true);
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  await page.goto(`/classes/${classId}/problems/${problemId}/submissions`);
+
+  await expect(page.getByTestId("submissions-stat-passed")).toContainText("1/1");
+  await expect(page.getByTestId("submissions-stat-perfect")).toContainText("1/1");
+  const list = page.getByTestId("problem-submissions-list");
+  await expect(list.locator('[data-stamp="perfect"]')).toHaveCount(1);
+  await expect(list.locator('[data-stamp="passed"]')).toHaveCount(0);
+});
