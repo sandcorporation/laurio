@@ -143,6 +143,9 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   e2e 시드에는 걸린다** — 스캔이 잠금을 5초 넘게 기다리면 500 이고 태스크는 재시도하지 않아 다음
   beat 로 밀린다. 그게 정상인 스캔은 지금 없다(#747). 값은
   `CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS`·`CODEMIT_REQUEST_LOCK_TIMEOUT_MS`).
+  같은 접두가 **`jit = off`** 도 건다(#958) — 한 번도 ANALYZE 되지 않은 작은 표 탓에 계획 비용
+  추정이 부풀면 몇 ms 짜리 문이 실행마다 JIT 컴파일에 2초를 썼다(「내 공모전」 2행에 2.2초).
+  요청 밖(celery 태스크 본체·관리 명령)은 서버 기본값(`jit = on`) 그대로다.
   끊긴 요청은 500 이고 GlitchTip 에 `OperationalError: canceling statement due to statement
   timeout`(잠금이면 `… due to lock timeout`)으로 잡힌다. 10초를 넘긴 요청 수는
   `sum(rate(codemit_http_request_duration_seconds_count[5m])) - sum(rate(codemit_http_request_duration_seconds_bucket{le="10.0"}[5m]))`

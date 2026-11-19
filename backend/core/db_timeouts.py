@@ -1,4 +1,4 @@
-"""요청 경로의 DB 한도 — gthread 에서 걸린 요청을 거두는 장치(#745).
+"""요청 경로의 DB 한도 — gthread 에서 걸린 요청을 거두는 장치(#745), 그리고 JIT 끄기(#958).
 
 **왜.** gunicorn gthread 의 주 루프는 1초마다 하트비트를 보내므로 `timeout = 30` 이 걸린
 요청을 죽이지 않는다(#742). 행 잠금 대기나 느린 쿼리 하나가 스레드를 영구히 쥐면 그 워커는
@@ -47,6 +47,17 @@ psycopg3 기본 커서(`ClientCursor`)가 인자를 클라이언트에서 합쳐
 통과시킨다 — DB 를 다른 스레드에서 쓰고, 스트림은 원래 길게 열린다. `executemany`, 스트리밍
 응답 본문을 만드는 동안의 문, 서버측 커서(배포는 풀러 때문에 꺼 둔다)에도 걸리지 않는다.
 
+**JIT 를 끈다(#958).** 같은 접두에 `SET LOCAL jit = off` 도 싣는다. PostgreSQL 은 계획 비용이
+`jit_above_cost`(기본 10만)를 넘으면 실행마다 그 문을 LLVM 으로 컴파일하고, 50만을 넘으면 인라인·
+최적화까지 한다. 요청의 문은 몇 ms 짜리라 컴파일이 얻는 것이 없는데, 비용 **추정**은 실제 행 수가
+아니라 통계를 따른다 — 한 번도 ANALYZE 되지 않은 작은 표(autovacuum 은 바뀐 행이 50 을 넘어야
+분석한다)는 기본 크기로 추정돼 조인·GROUP BY 를 거치며 부풀어 오른다. 운영(2026-11-19)에서
+「내 공모전」 목록은 실제 2행인데 추정 2,235만 행·비용 800만이 나와, 실행 2,183ms 중 JIT 가
+2,159ms 였다(aarch64). 데이터가 자라 통계가 생기면 사라지는 문제가 아니라 표마다 통계가 생기는
+순서에 따라 계획이 문턱을 넘나드는 문제여서(그 목록은 `contests_contest` 가 처음 분석된 뒤부터
+느려졌다), 경로마다 질의 모양을 고치지 않고 요청 경로 전체에서 끈다. celery 태스크 본체·관리
+명령에는 걸리지 않는다 — 앞의 한도와 같은 범위다.
+
 **끊기면.** psycopg 의 `QueryCanceled`(`canceling statement due to statement timeout`)
 또는 `LockNotAvailable`(`canceling statement due to lock timeout`)이 Django 의
 `OperationalError` 로 올라와 500 이 되고 GlitchTip 에 잡힌다. 값은 settings 의
@@ -63,12 +74,18 @@ from django.db import connections
 _ALIAS = "default"
 
 
+# 접두의 `SET` 문 수 — 실행 뒤 그 결과를 이만큼 넘겨 커서를 원문의 결과에 둔다.
+_PREFIX_STATEMENTS = 3
+
+
 def _prefix() -> str:
     statement_ms = int(settings.CODEMIT_REQUEST_STATEMENT_TIMEOUT_MS)
     lock_ms = int(settings.CODEMIT_REQUEST_LOCK_TIMEOUT_MS)
     return (
         f"SET LOCAL statement_timeout = {statement_ms}; "
         f"SET LOCAL lock_timeout = {lock_ms}; "
+        # JIT 는 요청 경로에서 끈다(#958) — 모듈 docstring 「JIT 를 끈다」.
+        "SET LOCAL jit = off; "
     )
 
 
@@ -88,11 +105,11 @@ def _limit_statement(execute, sql, params, many, context):
     prefix = _prefix()
     try:
         result = execute(prefix + sql, params, many, context)
-        # 앞의 두 SET 결과를 넘겨 커서를 마지막 문의 결과에 둔다. 뒤 문의 오류(IntegrityError
+        # 앞의 SET 결과들을 넘겨 커서를 마지막 문의 결과에 둔다. 뒤 문의 오류(IntegrityError
         # 등)는 여기까지 오지 않는다 — psycopg 가 `execute` 안에서 한 메시지의 결과 전부를 보고
         # 바로 던지고, Django 의 `_execute` 가 그것을 이미 Django 오류로 바꿔 올린다.
-        raw.nextset()
-        raw.nextset()
+        for _ in range(_PREFIX_STATEMENTS):
+            raw.nextset()
         return result
     finally:
         _hide_prefix(raw, prefix)
