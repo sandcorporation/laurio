@@ -5,7 +5,7 @@
 확인해 진짜 키를 붙인다(#992 보고서 6-4).
 
 - **발급**: `issue_run_token` — 채점기(신뢰 영역)가 실행마다 부른다. 묶인 값은 제출 id·용도·벤더·모델·
-  예산(기본 $1)·만료(15분).
+  예산(기본 $1)·만료(15분)·키 출처(플랫폼 / 강의실 클래스 id, #1036).
   단가를 모르는 모델은 상한을 걸 수 없으므로 발급하지 않는다.
 - **확인**: `authorize` — 프록시가 요청마다 부른다. 거절 이유는 `Refusal` 하나로 돌려준다.
 - **기록**: `record_usage` — 프록시가 응답을 다 흘려보낸 뒤 usage 와 비용을 그 토큰 행에 더한다.
@@ -17,6 +17,10 @@
 상한 검사는 요청 **전에** 지금까지 쓴 비용으로 한다. 응답 하나의 비용은 그 응답이 끝나야 알 수 있으므로
 마지막 요청 하나만큼은 넘칠 수 있다(동시 요청이면 그 수만큼). 하루 합계는 그날(KST 0시부터) 발급한 토큰의
 `spent_usd` 합이다 — 토큰은 15분이면 끝나므로 자정을 넘는 실행 하나의 몫만큼 어긋날 수 있다.
+
+**클래스 키 실행**(#1036, 키 출처가 클래스)은 그 클래스 소유자의 키로 나가므로 플랫폼 하루 상한
+(`agent_scoring_daily_limit_usd`)에 세지도, 그 상한으로 막히지도 않는다. 실행 예산은 같다. 클래스 몫의 하루
+합은 `spent_today_usd(key_class_id=…)` 로 따로 센다(상한은 두지 않는다).
 """
 
 from __future__ import annotations
@@ -96,6 +100,8 @@ class Grant:
     record_id: int
     vendor: ScoringVendor
     model: str
+    #: 키 출처 — `None` 이면 플랫폼 키, 아니면 그 강의실 클래스의 키(#1036).
+    key_class_id: int | None = None
 
 
 RefusalCode = Literal[
@@ -131,8 +137,10 @@ def issue_run_token(
     vendor: ScoringVendor,
     model: str,
     budget_usd: Decimal = DEFAULT_RUN_BUDGET_USD,
+    key_class_id: int | None = None,
 ) -> IssuedRunToken:
-    """실행 하나의 토큰을 발급한다. 방침이 덮지 않는 Anthropic·단가 모르는 모델·알 수 없는 용도는 거절한다."""
+    """실행 하나의 토큰을 발급한다. 방침이 덮지 않는 Anthropic·단가 모르는 모델·알 수 없는 용도는 거절한다.
+    `key_class_id` 를 주면 프록시가 플랫폼 키 대신 그 클래스의 채점 연결 키를 붙인다(#1036)."""
 
     if purpose not in _PURPOSES:
         raise RunTokenRefused(f"알 수 없는 용도: {purpose}")
@@ -150,6 +158,7 @@ def issue_run_token(
         purpose=purpose,
         vendor=vendor,
         model=model,
+        key_class_id=key_class_id,
         budget_usd=budget_usd,
         created_at=now,
         expires_at=now + RUN_TOKEN_TTL,
@@ -168,11 +177,14 @@ def _day_start(now: datetime) -> datetime:
     return timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def spent_today_usd(now: datetime | None = None) -> Decimal:
-    """오늘(KST 0시부터) 발급한 실행 토큰들이 쓴 비용 합."""
+def spent_today_usd(now: datetime | None = None, *, key_class_id: int | None = None) -> Decimal:
+    """오늘(KST 0시부터) 발급한 실행 토큰들이 쓴 비용 합 — 기본은 플랫폼 키 몫만(하루 상한이 보는 값),
+    `key_class_id` 를 주면 그 클래스 키 몫만(#1036)."""
 
     start = _day_start(now or Clock.now())
-    total = AgentRunToken.objects.filter(created_at__gte=start).aggregate(total=Sum("spent_usd"))["total"]
+    rows = AgentRunToken.objects.filter(created_at__gte=start)
+    rows = rows.filter(key_class_id__isnull=True) if key_class_id is None else rows.filter(key_class_id=key_class_id)
+    total = rows.aggregate(total=Sum("spent_usd"))["total"]
     return total or Decimal(0)
 
 
@@ -193,10 +205,12 @@ def authorize(token: str | None, *, vendor: ScoringVendor, model: str | None) ->
         return Refusal("wrong_model", 403, f"이 실행 토큰은 모델 {row.model} 만 부를 수 있다")
     if row.spent_usd >= row.budget_usd:
         return Refusal("run_budget", 429, f"실행 예산 ${row.budget_usd} 을 다 썼다")
-    limit = agent_scoring_daily_limit_usd()
-    if spent_today_usd(now) >= limit:
-        return Refusal("daily_limit", 429, f"오늘의 에이전트 채점 비용 상한 ${limit} 에 닿았다")
-    return Grant(record_id=row.pk, vendor=_vendor(row.vendor), model=row.model)
+    if row.key_class_id is None:
+        # 플랫폼 하루 상한은 플랫폼 키 실행만 본다 — 클래스 키 실행은 그 클래스 소유자의 돈이다(#1036).
+        limit = agent_scoring_daily_limit_usd()
+        if spent_today_usd(now) >= limit:
+            return Refusal("daily_limit", 429, f"오늘의 에이전트 채점 비용 상한 ${limit} 에 닿았다")
+    return Grant(record_id=row.pk, vendor=_vendor(row.vendor), model=row.model, key_class_id=row.key_class_id)
 
 
 def _price(price: ModelPrice, attr: str, multiplier: float) -> Decimal:

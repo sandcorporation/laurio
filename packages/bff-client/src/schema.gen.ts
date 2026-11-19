@@ -5412,6 +5412,11 @@ export interface components {
             default_model_is_reasoning: boolean;
             /** Default Reasoning Effort */
             default_reasoning_effort: string;
+            /**
+             * Grading Method Options
+             * @default []
+             */
+            grading_method_options: components["schemas"]["GradingMethodOptionOut"][];
             /** Has Openai Key */
             has_openai_key: boolean;
             /**
@@ -5451,6 +5456,11 @@ export interface components {
             problem_count: number;
             published_template?: components["schemas"]["PublishedTemplateSummaryOut"] | null;
             /**
+             * Quality Method
+             * @default single
+             */
+            quality_method: string;
+            /**
              * Role
              * @enum {string}
              */
@@ -5469,6 +5479,11 @@ export interface components {
             scoring_connection_kind: string;
             /** Scoring Connection Verified At */
             scoring_connection_verified_at?: string | null;
+            /**
+             * Scoring Method
+             * @default single
+             */
+            scoring_method: string;
             /**
              * Scoring Quota Exhausted
              * @default false
@@ -5503,6 +5518,10 @@ export interface components {
             instructor_display_name?: string | null;
             /** Name */
             name?: string | null;
+            /** Quality Method */
+            quality_method?: ("single" | "agent") | null;
+            /** Scoring Method */
+            scoring_method?: ("single" | "agent") | null;
         };
         /**
          * ClassTemplateListItemOut
@@ -7076,6 +7095,21 @@ export interface components {
             reason: string;
             /** Text */
             text: string;
+        };
+        /**
+         * GradingMethodOptionOut
+         * @description 채점·완성도 검사 방식의 선택지 하나(#1036) — 고를 수 없으면 까닭 코드를 싣는다.
+         */
+        GradingMethodOptionOut: {
+            /** Selectable */
+            selectable: boolean;
+            /** Unavailable Reason */
+            unavailable_reason?: "compatible_server" | null;
+            /**
+             * Value
+             * @enum {string}
+             */
+            value: "single" | "agent";
         };
         /** HandoverOut */
         HandoverOut: {

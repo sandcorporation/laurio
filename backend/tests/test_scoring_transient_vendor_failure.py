@@ -176,7 +176,8 @@ def test_agent_scans_run_in_the_worker_with_room_for_an_agent_job_and_its_retry(
     """#1686: 에이전트 한 건(시도 2회 × (CLI 상한 + HTTP 여유))이 행 시작 예산 뒤에도 워커 한도 안에 든다.
     완성도 리뷰도 워커 안에서 돈다 — 실행기는 celery-worker 가 붙은 `agent-call` 망에서만 닿는다."""
 
-    from scoring import agent_runner, agent_scoring
+    from core import agent_scoring
+    from scoring import agent_runner
 
     spec = scans.SCAN_REGISTRY[name]
     assert agent_scoring.ATTEMPT_TIMEOUT_SECONDS < agent_runner.RUN_TIMEOUT_SECONDS

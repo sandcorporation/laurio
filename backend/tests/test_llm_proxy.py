@@ -27,10 +27,11 @@ from core.agent_run_tokens import (
     RunTokenRefused,
     issue_run_token,
     run_usage,
+    spent_today_usd,
 )
 from core.clock import Clock
 from core.llm_proxy import Upstreams, build_app
-from core.models import ClockOverride
+from core.models import AgentRunToken, ClockOverride
 from policies.runtime_settings import agent_scoring_daily_limit_usd
 
 pytestmark = pytest.mark.django_db
@@ -252,6 +253,41 @@ def test_daily_limit_is_refused_with_429(monkeypatch):
 
     _run(vendor, body)
     assert len(vendor.requests) == 1
+
+
+def test_class_key_runs_are_neither_counted_in_nor_stopped_by_the_platform_daily_limit(monkeypatch):
+    """#1036: 클래스 키 실행은 그 클래스 소유자의 돈이다 — 플랫폼 하루 합계에 들지 않고 그 상한에 막히지 않는다."""
+
+    monkeypatch.setenv("AGENT_SCORING_DAILY_LIMIT_USD", "0.5")
+    # 이 클래스는 없다 — 프록시는 키를 못 찾아 503 이지만, 상한 검사는 그 앞에서 끝난다.
+    over = issue_run_token(submission_id=7, purpose="scoring", vendor="openai", model=GPT, key_class_id=987654)
+    AgentRunToken.objects.filter(pk=over.record_id).update(spent_usd=Decimal("0.9"))
+    platform = _issue(vendor="openai", model=GPT)
+
+    assert spent_today_usd() == 0
+    assert spent_today_usd(key_class_id=987654) == Decimal("0.9")
+    vendor = FakeVendor()
+
+    async def body(client: TestClient) -> None:
+        assert (await client.post("/v1/responses", **_codex(platform.token))).status == 200
+
+    _run(vendor, body)
+    assert len(vendor.requests) == 1
+
+
+def test_a_class_token_never_falls_back_to_the_platform_key():
+    """#1036: 클래스 키를 못 풀면(없는 클래스·다른 벤더 연결) 503 이다 — 플랫폼 키로 대신 나가지 않는다."""
+
+    issued = issue_run_token(submission_id=7, purpose="scoring", vendor="anthropic", model=SONNET, key_class_id=987654)
+    vendor = FakeVendor()
+
+    async def body(client: TestClient) -> None:
+        response = await client.post("/v1/messages", **_claude(issued.token))
+        assert response.status == 503
+        assert (await response.json())["error"]["type"] == "vendor_key_missing"
+
+    _run(vendor, body)
+    assert vendor.requests == []
 
 
 # --- 키 ------------------------------------------------------------------------------------------

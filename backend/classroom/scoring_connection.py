@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import Literal
 
 from urllib.parse import urlsplit
 
@@ -128,6 +129,32 @@ def connection_for(class_obj: Class) -> ScoringConnection | None:
         base_url=OPENAI_KEY_BASE_URL,
         _encrypted_auth=class_obj.openai_api_key_encrypted.strip(),
     )
+
+
+#: 에이전트 방식(#1036)이 쓰는 벤더 — 클래스 연결 종류에서 정한다. 호환 서버는 없다(에이전트 CLI 는
+#: OpenAI·Anthropic API 만 부른다).
+_AGENT_VENDOR_BY_KIND: dict[str, Literal["openai", "anthropic"]] = {
+    Class.ScoringConnectionKind.OPENAI_KEY: "openai",
+    Class.ScoringConnectionKind.ANTHROPIC_KEY: "anthropic",
+}
+
+
+def agent_vendor_of(class_obj: Class) -> Literal["openai", "anthropic"] | None:
+    """이 클래스의 에이전트 실행 벤더 — 연결이 호환 서버면 `None`(에이전트를 고를 수 없다)."""
+
+    return _AGENT_VENDOR_BY_KIND.get(class_obj.scoring_connection_kind)
+
+
+def agent_vendor_key(class_id: int, vendor: str) -> str:
+    """`llm-proxy` 가 클래스 키 실행(#1036)에 붙일 키 — 그 클래스의 연결이 바로 그 벤더 키일 때만 푼다.
+    클래스가 없거나·키가 없거나·연결이 다른 종류면 빈 문자열이다(프록시가 503 으로 답한다). 값은 벤더로
+    나가는 헤더에만 쓰인다 — 기록·로그·실행기에 남기지 않는다."""
+
+    class_obj = Class.objects.filter(pk=class_id).first()
+    if class_obj is None or agent_vendor_of(class_obj) != vendor:
+        return ""
+    connection = connection_for(class_obj)
+    return connection.auth_value().strip() if connection is not None else ""
 
 
 def mark_verified(class_id: int, connection: ScoringConnection) -> None:

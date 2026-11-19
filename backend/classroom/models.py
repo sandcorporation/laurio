@@ -121,6 +121,23 @@ class Class(models.Model):
     #: 암호화해 둔다 — 비워 둔 서버면 그 칸도 비어 있다(`has_scoring_key` 가 종류별로 가른다).
     scoring_server_url = models.CharField(max_length=500, blank=True, default="", db_default="")
 
+    class GradingMethod(models.TextChoices):
+        """채점·완성도 검사를 어떻게 돌리나(#1036, CONTEXT.md 「채점 방식」) — 「한 번 호출」은 소스를 프롬프트에
+        실어 채점 연결로 한 번 묻는다(지금까지의 길). 「에이전트」는 공모전과 같은 `agent-grader`·`llm-proxy` 길로
+        에이전트가 저장소를 읽게 하고, 벤더 키는 이 클래스의 키다. 호환 서버 연결은 에이전트를 고를 수 없다."""
+
+        SINGLE = "single", "한 번 호출"
+        AGENT = "agent", "에이전트"
+
+    #: 판정 채점의 방식(#1036). db_default: ADR-0053.
+    scoring_method = models.CharField(
+        max_length=10, choices=GradingMethod.choices, default=GradingMethod.SINGLE, db_default=GradingMethod.SINGLE
+    )
+    #: 완성도 검사의 방식(#1036). db_default: ADR-0053.
+    quality_method = models.CharField(
+        max_length=10, choices=GradingMethod.choices, default=GradingMethod.SINGLE, db_default=GradingMethod.SINGLE
+    )
+
     #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
     #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다
     #: (`classroom.scoring_model_catalog.get_scoring_model_catalog`로 검증).
@@ -1275,3 +1292,33 @@ class ConnectedAppWrite(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ConnectedAppWrite(id={self.pk}, tool={self.tool})"
+
+
+class ClassroomAgentRun(models.Model):
+    """강의실 에이전트 실행 하나의 기록(#1036) — 공모전 `scoring.AgentRun` 과 같은 꼴, 강의실 몫의 표(ADR-0037).
+
+    `record` 는 `core.agent_scoring.run_agent_job` 이 만든 원본이다: 시도마다 구조화 출력·usage·턴·도구 호출 수·
+    근거 검사 결과·거절 사유, 그리고 지침 sha256·벤더·모델·키 출처("class"). 키는 담기지 않는다.
+    """
+
+    class Outcome(models.TextChoices):
+        ACCEPTED = "accepted", "받아들임"
+        HELD = "held", "보류"
+
+    submission = models.ForeignKey(
+        ClassroomSubmission, related_name="classroom_agent_runs", on_delete=models.CASCADE
+    )
+    #: "scoring"(판정 채점) | "quality"(완성도 검사).
+    purpose = models.CharField(max_length=20)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    model_version = models.CharField(max_length=200)
+    reasons = models.JSONField(default=list, blank=True)
+    review = models.CharField(max_length=200, blank=True, default="")
+    record = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomAgentRun(submission={self.submission_id}, {self.purpose}, {self.outcome})"

@@ -38,6 +38,20 @@ class ClassPatchIn(Schema):
     #: 「호환 서버」의 기본 모델이 추론 모델인가 — 소유자의 「추론 모델」 스위치(#602). 켜면 채점
     #: 호출에 추론 강도가 실린다. 「OpenAI 키」 연결은 이름으로 판단해 이 값을 보지 않는다.
     default_model_is_reasoning: bool | None = None
+    #: 판정 채점의 방식(#1036) — "single"(한 번 호출)|"agent"(에이전트). 생략하면 바꾸지 않는다. 호환 서버
+    #: 연결은 "agent" 를 고를 수 없다(422, 까닭 코드 `compatible_server`).
+    scoring_method: Literal["single", "agent"] | None = None
+    #: 완성도 검사의 방식(#1036) — 위와 같은 값·규칙.
+    quality_method: Literal["single", "agent"] | None = None
+
+
+class GradingMethodOptionOut(Schema):
+    """채점·완성도 검사 방식의 선택지 하나(#1036) — 고를 수 없으면 까닭 코드를 싣는다."""
+
+    value: Literal["single", "agent"]
+    selectable: bool
+    #: 고를 수 없는 까닭 — "compatible_server"(호환 서버 연결). 고를 수 있으면 `None`.
+    unavailable_reason: Literal["compatible_server"] | None = None
 
 
 class PublishedTemplateSummaryOut(Schema):
@@ -93,6 +107,13 @@ class ClassOut(Schema):
     openai_key_masked: str | None = None
     #: 채점 연결의 종류(#601) — "openai_key" | "compatible_server".
     scoring_connection_kind: str = "openai_key"
+    #: 판정 채점의 방식(#1036) — "single"|"agent". 고른 값 그대로다(연결이 호환 서버로 바뀌었으면 그 사이
+    #: 채점은 한 번 호출로 돈다 — `grading_method_options` 의 까닭이 그것을 말한다).
+    scoring_method: str = "single"
+    #: 완성도 검사의 방식(#1036) — "single"|"agent".
+    quality_method: str = "single"
+    #: 두 칸이 함께 쓰는 선택지와 고를 수 없는 까닭(#1036).
+    grading_method_options: list[GradingMethodOptionOut] = []
     #: 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일(KST 0시) 전에는 거짓이고
     #: 화면이 그 선택지를 보이지 않는다(저장 API 도 거절한다). 시행일이 지나면 저절로 참이다.
     anthropic_key_selectable: bool = False

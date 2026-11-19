@@ -104,7 +104,7 @@ from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import pending_scoring, scoring_cost
+from . import agent_grading, pending_scoring, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
@@ -480,7 +480,10 @@ def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
     """`scoring.services._scoring_cap_reached`와 같은 판정이되 마감 유예가 없다
     (모듈 docstring)."""
 
-    counts = submission.classroom_scoring_attempts.aggregate(
+    counts = submission.classroom_scoring_attempts.exclude(
+        # 에이전트 채점 보류(#1036)는 실패가 아니다 — 공모전과 같이 상한에 세지 않는다.
+        error__startswith=pending_scoring.AGENT_SCORING_HOLD_ERROR_PREFIX
+    ).aggregate(
         total=Count("id", filter=models.Q(rate_limited=False)),
         permanent=Count("id", filter=models.Q(permanent=True)),
     )
@@ -748,6 +751,10 @@ class PreparedScoring:
     scoring_input: ScoringInput
     syntax_check: SyntaxCheckPass
     pause_recheck: bool
+    #: 에이전트 방식으로 채점하는가(#1036, `classroom.agent_grading.uses_agent`).
+    agent: bool = False
+    #: 에이전트에게 줄 박제본 — 준비가 읽은 소스 바이트(zip 일 때만, 에이전트 방식일 때만).
+    snapshot: agent_grading.Snapshot | None = None
 
 
 @dataclass
@@ -762,6 +769,8 @@ class Concluded:
 class VendorOutcome:
     output: ScoringOutput | None = None
     error: LLMAdapterError | None = None
+    #: 에이전트 방식이면 그 실행 결과(#1036) — 받아들였으면 `output` 도 차 있고, 보류면 `output` 이 비어 있다.
+    agent: agent_grading.AgentResult | None = None
 
 
 def _concluded(result: dict) -> Concluded:
@@ -942,6 +951,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         source_files=source_files,
         requirements=requirements,
     )
+    uses_agent = agent_grading.uses_agent(class_obj, "scoring")
     return PreparedScoring(
         submission=submission,
         owner=owner,
@@ -955,6 +965,8 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         scoring_input=scoring_input,
         syntax_check=syntax_check,
         pause_recheck=head.pause_recheck,
+        agent=uses_agent,
+        snapshot=agent_grading.snapshot_of(source.raw, asset.id) if uses_agent else None,
     )
 
 
@@ -968,9 +980,35 @@ def _build_adapter(prepared: PreparedScoring, *, asynchronous: bool = False) -> 
     )
 
 
+def _call_agent(prepared: PreparedScoring) -> VendorOutcome:
+    """에이전트 방식(#1036) — `run_agent_job` 길로 이 클래스 키를 써서 판정을 받는다. 동기다(몇 분까지 걸린다)."""
+
+    requirements = prepared.scoring_input.requirements
+    try:
+        result = agent_grading.run_scoring(
+            prepared.submission,
+            prepared.class_obj,
+            model=prepared.model,
+            requirements=requirements,
+            snapshot=prepared.snapshot,
+        )
+    except LLMAdapterError as exc:
+        return VendorOutcome(error=exc)
+    if isinstance(result, agent_grading.AgentHeld):
+        return VendorOutcome(agent=result)
+    output = ScoringOutput(
+        verdicts=agent_grading.scoring_verdicts(result, requirements),
+        model_version=result.model_version,
+        total_tokens=result.used_tokens,
+    )
+    return VendorOutcome(output=output, agent=result)
+
+
 def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
     """벤더 호출(동기) — 시험·즉시 채점 시임이 쓴다. 어댑터가 던진 `LLMAdapterError` 를 값으로 돌려준다."""
 
+    if prepared.agent:
+        return _call_agent(prepared)
     try:
         return VendorOutcome(output=_build_adapter(prepared).score(prepared.scoring_input))
     except LLMAdapterError as exc:
@@ -979,8 +1017,10 @@ def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
 
 async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
     """벤더 호출(비동기, #584) — grader 가 쓴다. 기다리는 동안 DB 도 스레드도 쥐지 않는다.
-    어댑터를 만드는 일(키 복호화)은 코루틴 밖의 짧은 동기 일이다."""
+    어댑터를 만드는 일(키 복호화)은 코루틴 밖의 짧은 동기 일이다. 에이전트 방식은 제 스레드에서 돈다."""
 
+    if prepared.agent:
+        return await agent_grading.run_in_own_thread(_call_agent, prepared)
     try:
         adapter = _build_adapter(prepared, asynchronous=True)
         return VendorOutcome(output=await adapter.score_async(prepared.scoring_input))
@@ -1042,8 +1082,18 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             submission, checklist_items, error=str(exc), status_if_not_capped="failed"
         )
 
+    if isinstance(outcome.agent, agent_grading.AgentHeld):
+        # 두 번 다 받아들이는 조건을 어겼다(#1036) — 공모전과 같이 0% 로 굳히지 않고 보류한다: 실행 기록을 남기고,
+        # 보류 표식을 단 시도 기록으로 채점 대기에서 뺀다(실패 상한에는 세지 않는다).
+        agent_grading.record_run(submission.id, "scoring", outcome.agent)
+        message = agent_grading.held_message(outcome.agent)
+        logger.warning("ClassroomSubmission(pk=%s) %s", submission.id, message)
+        _record_scoring_attempt(submission, error=message)
+        return {"submission_id": submission.id, "status": "held", "error": message}
     output = outcome.output
     assert output is not None
+    if isinstance(outcome.agent, agent_grading.AgentAccepted):
+        agent_grading.record_run(submission.id, "scoring", outcome.agent)
     used_tokens, estimated = output.total_tokens, False
     if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 사용량이 비니 예상
@@ -1238,20 +1288,22 @@ def is_lock_timeout(exc: BaseException) -> bool:
     return isinstance(exc, OperationalError) and isinstance(exc.__cause__, psycopg_errors.LockNotAvailable)
 
 
-def extend_lease(submission_id: int, *, owner: str, as_of) -> bool:
+def extend_lease(submission_id: int, *, owner: str, as_of, agent: bool = False) -> bool:
     """벤더를 부르기 직전에 임대를 다시 `SCORING_LEASE` 만큼 늘린다(#584 점검) — **내 임대일 때만**
     (조건부 UPDATE 하나). 소스 준비(저장소 clone)·스레드 대기가 길어 임대가 거의 다 닳았어도 벤더를
     기다리는 180초는 늘 임대 안이다. 임대가 이미 다른 grader 에게 넘어갔으면 `False` — 그때는
     벤더를 부르지 않는다(벤더 이중 호출 방지). 행이 다른 연결에 잠겨 있으면 짧게만 기다리고
-    `False` 다(임대는 만료 뒤 다시 줍힌다) — DB 스레드를 길게 붙잡지 않는다."""
+    `False` 다(임대는 만료 뒤 다시 줍힌다) — DB 스레드를 길게 붙잡지 않는다. 에이전트 방식(#1036)이면
+    실행 전체를 덮는 `agent_grading.AGENT_LEASE` 만큼 늘린다."""
 
+    lease = agent_grading.AGENT_LEASE if agent else SCORING_LEASE
     try:
         with transaction.atomic():
             _short_lock_timeout()
             return (
                 ClassroomSubmission.objects.filter(pk=submission_id, scoring_lease_owner=owner)
                 .filter(~models.Exists(ClassroomScore.objects.filter(submission_id=models.OuterRef("pk"))))
-                .update(scoring_lease_until=as_of + SCORING_LEASE)
+                .update(scoring_lease_until=as_of + lease)
                 == 1
             )
     except OperationalError as exc:

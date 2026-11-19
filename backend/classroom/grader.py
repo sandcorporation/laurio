@@ -222,7 +222,7 @@ class Grader:
             if isinstance(prepared, quality.QualityConcluded):
                 result = await self._write(quality.conclude, submission_id, owner=owner, apply=prepared.apply)
             elif not await self._db(
-                lambda: quality.extend_lease(submission_id, owner=owner, as_of=Clock.now())
+                lambda: quality.extend_lease(submission_id, owner=owner, as_of=Clock.now(), agent=prepared.agent)
             ):
                 result = {"submission_id": submission_id, "status": "lease_lost"}
             else:
@@ -247,6 +247,9 @@ class Grader:
 
     @staticmethod
     async def _quality_vendor(prepared: quality.PreparedQuality) -> quality.QualityOutcome:
+        if prepared.agent:
+            # 에이전트 실행(#1036)은 실행기 쪽 한도(실행당 10분·재실행 1회)가 끊는다 — 벤더 한도로 자르지 않는다.
+            return await quality.call_vendor_async(prepared)
         try:
             return await asyncio.wait_for(quality.call_vendor_async(prepared), timeout=VENDOR_OUTER_TIMEOUT_SECONDS)
         except TimeoutError:
@@ -270,7 +273,7 @@ class Grader:
                     apply=prepared.apply,
                     events_out=events,
                 )
-            elif not await self._db(self._extend, submission_id):
+            elif not await self._db(self._extend, submission_id, prepared.agent):
                 # 준비가 너무 길어 임대가 다른 grader 에게 넘어갔다 — 벤더를 부르지 않는다.
                 result = {"submission_id": submission_id, "status": "lease_lost"}
             else:
@@ -314,11 +317,14 @@ class Grader:
         await ops_recorder.beat_async("grader")
         await ops_recorder.record_in_flight_async(product="classroom", count=llm_metrics.async_in_flight("classroom"))
 
-    def _extend(self, submission_id: int) -> bool:
-        return scoring.extend_lease(submission_id, owner=self.owner, as_of=Clock.now())
+    def _extend(self, submission_id: int, agent: bool = False) -> bool:
+        return scoring.extend_lease(submission_id, owner=self.owner, as_of=Clock.now(), agent=agent)
 
     @staticmethod
     async def _vendor(prepared: PreparedScoring) -> VendorOutcome:
+        if prepared.agent:
+            # 에이전트 실행(#1036)은 실행기 쪽 한도(실행당 10분·재실행 1회)가 끊는다 — 벤더 한도로 자르지 않는다.
+            return await scoring.call_vendor_async(prepared)
         try:
             return await asyncio.wait_for(
                 scoring.call_vendor_async(prepared), timeout=VENDOR_OUTER_TIMEOUT_SECONDS
@@ -410,7 +416,7 @@ def grade_inline(submission_id: int) -> dict | None:
         prepared = scoring.prepare_claimed_attempt(submission_id, owner=owner, as_of=as_of)
         if isinstance(prepared, Concluded):
             return scoring.conclude_scoring(submission_id, owner=owner, apply=prepared.apply)
-        if not scoring.extend_lease(submission_id, owner=owner, as_of=Clock.now()):
+        if not scoring.extend_lease(submission_id, owner=owner, as_of=Clock.now(), agent=prepared.agent):
             return {"submission_id": submission_id, "status": "lease_lost"}
         outcome = scoring.call_vendor_sync(prepared)
         return scoring.finish_scoring(prepared, outcome)

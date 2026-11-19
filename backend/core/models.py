@@ -220,9 +220,12 @@ class AgentRunToken(models.Model):
     에이전트 컨테이너에는 진짜 벤더 키 대신 이 토큰만 들어간다. 프록시가 토큰을 확인해
     진짜 키를 붙인다. 토큰 자체는 저장하지 않고 SHA-256 해시만 둔다.
 
-    **묶인 값**: 제출 id·용도(채점/완성도)·벤더·모델·실행 예산(USD)·만료. **쌓이는 값**:
+    **묶인 값**: 제출 id·용도(채점/완성도)·벤더·모델·실행 예산(USD)·만료·키 출처. **쌓이는 값**:
     벤더 응답의 usage 합과 그 비용 — 채점 시도 기록에 그대로 붙일 수 있다. 하루 합계 상한은
-    이 행들의 `spent_usd` 를 그날(KST) 발급분만 더해 본다."""
+    이 행들의 `spent_usd` 를 그날(KST) 발급분만 더해 본다.
+
+    **키 출처**(#1036): `key_class_id` 가 비면 플랫폼 키(운영 설정), 차 있으면 그 강의실 클래스의 채점
+    연결 키다. 클래스 키 실행은 플랫폼 하루 상한에 세지 않는다(실행 예산은 같다)."""
 
     PURPOSE_SCORING = "scoring"
     PURPOSE_QUALITY = "quality"
@@ -233,6 +236,8 @@ class AgentRunToken(models.Model):
     purpose = models.CharField(max_length=16, choices=PURPOSE_CHOICES)
     vendor = models.CharField(max_length=16)
     model = models.CharField(max_length=100)
+    #: 키 출처 — 비면 플랫폼 키, 차 있으면 그 클래스(`classroom.Class`)의 채점 연결 키(#1036).
+    key_class_id = models.PositiveBigIntegerField(null=True, blank=True)
     budget_usd = models.DecimalField(max_digits=12, decimal_places=6)
     created_at = models.DateTimeField(db_index=True)
     expires_at = models.DateTimeField()

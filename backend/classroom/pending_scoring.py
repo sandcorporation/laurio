@@ -24,6 +24,11 @@ from .models import Class, ClassroomScoringAttempt, ClassroomSubmission, Problem
 
 #: 참여자·강사 화면의 `pending_reason` 값(#346, #403) — 순서가 곧 우선순위다.
 NO_API_KEY = "no_api_key"
+
+#: 에이전트 채점 보류 표식(#1036) — 공모전(`scoring.services.AGENT_SCORING_HOLD_ERROR_PREFIX`)과 같은 값. 이 머리를
+#: 단 시도 기록(`ClassroomScoringAttempt.error`)이 있는 시도는 채점 대기에서 빠지고, 그 기록은 실패 상한에
+#: 세지 않는다 — 받아들이는 조건이 두 번 다 어긋났다는 것이지 제출물이 실패한 것이 아니다. 0% 로 굳히지 않는다.
+AGENT_SCORING_HOLD_ERROR_PREFIX = "AgentScoringHold:"
 MODEL_REJECTED = "model_rejected"
 REASONS = (NO_API_KEY, MODEL_REJECTED)
 
@@ -98,6 +103,7 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
 
     attempt_count = (
         ClassroomScoringAttempt.objects.filter(submission=models.OuterRef("pk"), rate_limited=False)
+        .exclude(error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX)
         .order_by()
         .values("submission")
         .annotate(count=Count("id"))
@@ -121,6 +127,14 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
         .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(problem__classroom__scoring_quota_exhausted_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         .exclude(problem__classroom__scoring_server_unreachable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
+        # 에이전트 채점 보류(#1036) — 다시 돌려 예산을 쓰지 않는다. 공모전 보류와 같다.
+        .exclude(
+            models.Exists(
+                ClassroomScoringAttempt.objects.filter(
+                    submission=models.OuterRef("pk"), error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX
+                )
+            )
+        )
         .annotate(attempt_count=models.functions.Coalesce(models.Subquery(attempt_count), 0))
         .select_related("problem", "problem__classroom", "member")
     )

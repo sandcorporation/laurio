@@ -49,7 +49,7 @@ from policies.runtime_settings import SCORING_METHOD_AGENT, contest_quality_revi
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
 from .agent_runner import AgentGraderBusy
-from .agent_scoring import AGENT_JOB_MAX_SECONDS
+from core.agent_scoring import AGENT_JOB_MAX_SECONDS
 from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
 from .quality_agent import QualityReviewHeld, review_with_agent
 

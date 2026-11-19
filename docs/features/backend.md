@@ -259,7 +259,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | --- | --- |
 | `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내가 강사인 것만 본다 — 소유한 것과 공동 강사인 것, 어느 쪽인지 `role` 이 말한다(#561) |
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
-| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도·「추론 모델」 스위치(`default_model_is_reasoning`, 호환 서버만 뜻이 있다, #602)를 고친다(#402) — 소유자의 강사 이름 칸은 소유자만. 채점 상한 칸은 없다(#629, ADR-0060) — 응답의 `token_usage_total`·`token_usage_estimated` 가 누적 사용량이다. 호환 서버에서 모델이나 스위치가 바뀌면 시험 호출(`classroom.scoring_model_probe`)이 채점과 같은 `json_schema` 판정 하나를 받아 보고, 못 지키면 이유 문장의 422. 통과는 (연결, 모델, 추론 여부) 단위로 하루 캐시한다 |
+| `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도·「추론 모델」 스위치(`default_model_is_reasoning`, 호환 서버만 뜻이 있다, #602)를 고친다(#402) — 소유자의 강사 이름 칸은 소유자만. 채점 상한 칸은 없다(#629, ADR-0060) — 응답의 `token_usage_total`·`token_usage_estimated` 가 누적 사용량이다. 호환 서버에서 모델이나 스위치가 바뀌면 시험 호출(`classroom.scoring_model_probe`)이 채점과 같은 `json_schema` 판정 하나를 받아 보고, 못 지키면 이유 문장의 422. 통과는 (연결, 모델, 추론 여부) 단위로 하루 캐시한다. 채점 방식 두 칸 `scoring_method`·`quality_method`(`single`·`agent`, #1036) — 호환 서버 연결이면 `agent` 는 422(까닭 코드 `compatible_server`). 읽기 응답은 두 칸과 `grading_method_options`(선택지마다 `selectable`·`unavailable_reason`)를 싣는다 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 채점 키를 저장한다 — 마스킹된 값만 돌려준다(#284). 채점 연결이 「OpenAI 키」가 되고 호환 서버 주소는 지워진다(#601) |
 | `PUT /api/classroom/classes/{id}/anthropic-key` | 채점 연결을 「Claude(Anthropic) 키」로 저장한다(#795, ADR-0066) — 소유자 전용, 몸통은 `openai-key` 와 같은 `{"api_key": …}`. 저장 전 `GET https://api.anthropic.com/v1/models`(`x-api-key`·`anthropic-version: 2023-06-01`)로 한 번 확인해 401·403 만 422, 닿지 못하면 「미검증」으로 저장(#681). 키 칸·끝 네 자리(`openai_key_masked`)·상태는 OpenAI 키와 같은 칸이고 `scoring_connection_kind="anthropic_key"`. 기본 모델이 OpenAI 이름이면 `claude-haiku-5-5` 로 옮긴다(Claude 키에서 OpenAI 키로 돌아가면 `gpt-4.1-mini`). 채점은 `core.llm_scoring_anthropic` — 네이티브 Messages API(`POST /v1/messages`)에 구조화 출력(`output_config.format` json_schema, 같은 판정 스키마)과 추론 강도(`output_config.effort`)를 싣는다. 모델 목록은 `/v1/models` 의 `line`(haiku·sonnet)·`capabilities`(structured_outputs·effort)로 거르고 Haiku 가 먼저, 조회 실패면 Haiku 5.5·Sonnet 5.5 두 줄. 예상 비용은 Claude 단가(`classroom.scoring_cost.PRICES`)로 원화다 연결 종류를 OpenAI↔Claude 로 바꿔 저장하면 문제마다 따로 고른 모델 중 새 연결이 받지 않는 벤더의 것은 같은 트랜잭션에서 클래스 기본으로 되돌린다(#796). **방침 개정 시행일(`settings.PRIVACY_POLICY_EFFECTIVE_DATE`, 한국 시간 0시, #803) 전에는 422 로 거절한다** — 판정은 `core.privacy_policy.anthropic_key_connection_open()`(`Clock`), 클래스 응답의 `anthropic_key_selectable` 이 화면에 그 결과를 준다. 시행일이 지나면 저절로 열린다 |
 | `PUT /api/classroom/classes/{id}/compatible-server` | 채점 연결을 「호환 서버」로 저장한다(#601, ADR-0058) — 소유자 전용. 주소(https·공인)와 `Authorization: Bearer` 값(비워 둘 수 있다). 저장 전에 `core.safe_outbound` 로 그 서버의 `…/models` 를 한 번 받아 보고, 거부·실패는 이유별 한 문장의 422(https 아님·공인 주소 아님·이름 못 찾음·인증서·닿지 않음·리다이렉트·인증 실패). 인증 값은 키 칸에 암호화해 두고 끝 네 자리만 소유자에게 보인다. 공동 강사의 `ClassOut` 에는 종류와 호스트만 실린다. `ClassOut.scoring_connection_verified_at` 은 연결이 마지막으로 실제로 닿은 시각이다(#671) — 키 저장 때 벤더가 받았을 때·호환 서버 저장·호환 서버 모델 시험 호출 통과·채점 성공이 찍고, 벤더에 닿지 못한 키 저장과 소유권 이전이 지운다(벤더를 기다리는 사이 연결이 바뀌었으면 찍지 않는다). 강사 누구나 읽고, 연결된 앱의 `get_class` 에는 싣지 않는다 |
@@ -531,7 +531,7 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 부른다). 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
 필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/scoring/agent-runs` 가 보인다. Score 의
 `model_version` 은 `agent:<벤더>:<모델>`, 판정 이유는 「이유 근거: 경로:줄, …」(충족만, 근거 5개, 2000자)다. 지침·스키마는
-`scoring.agent_prompt`(공모전 3 재채점의 규칙 일곱). 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
+`core.agent_prompt`(공모전 3 재채점의 규칙 일곱). 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
 채점한다.
 
 **zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
@@ -1056,7 +1056,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 은 방침이 공모전 채점의 Anthropic 이전을 적은 개정의 시행일(`PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` = 2026-11-27, #997) 0시(KST) 전에는 저장되지 않는다(422 `privacy_not_covered`) |
-| `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`scoring.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
+| `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
@@ -1073,7 +1073,10 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 만료(15분)가 묶이고, Anthropic 은 방침이 덮을 때만, 단가표(`classroom.scoring_cost.PRICES`)에 없는 모델은 발급하지
 않는다. 요청마다 토큰 없음·모름·만료(401), 다른 벤더·다른 모델·방침 닫힘(403), 실행 예산·하루 합계(429)를 본다.
 응답의 usage 와 그 비용이 토큰 행에 쌓인다(`run_usage`). 벤더 오류 응답은 진짜 키·키 꼴 문자열을 가려 돌려준다.
-**토큰은 에이전트 채점기(`scoring.agent_scoring`, #1000)만 발급한다** — `CONTEST_SCORING_METHOD=agent` 가 아니면 발급하는 곳이 없어 떠 있어도 모든 요청이 401 이고 벤더로는 아무것도 나가지 않는다.
+**토큰은 에이전트 채점기(`core.agent_scoring`, #1000)만 발급한다** — `CONTEST_SCORING_METHOD=agent` 도, 에이전트를 고른 강의실 클래스도 없으면 발급하는 곳이 없어 떠 있어도 모든 요청이 401 이고 벤더로는 아무것도 나가지 않는다.
+토큰은 **키 출처**를 든다(`key_class_id`, #1036) — 비면 플랫폼 키, 차 있으면 그 강의실 클래스의 채점 연결 키를
+프록시가 풀어 붙인다(`classroom.scoring_connection.agent_vendor_key` — 연결이 그 벤더 키가 아니면 503, 플랫폼 키로
+대신하지 않는다). 클래스 키 실행은 하루 합계 상한에 세지도 막히지도 않는다(`spent_today_usd(key_class_id=…)` 로 따로 센다).
 
 **에이전트 채점**(#999·#1000·#1001, ADR-0082) — 채점(`submission-scoring`)의 받아들이는 조건·보류·시도 기록은 위 「제출」
 절의 에이전트 채점 단락이 말한다. 여기는 실행 구조다. `agent-grader` 서비스(`scoring.agent_runner.request_run`)가 마감 커밋의
@@ -1086,7 +1089,13 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   기록의 `model_version` 은 `agent:<벤더>:<모델>`.
 - 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 은 방침 시행일
   (2026-11-27) 전에 거절된다(#995·#997).
-- 강의실 채점은 이 길을 타지 않는다.
+- **강의실**(#1036)은 클래스가 「에이전트」를 고르면(`Class.scoring_method`·`quality_method`) 판정 채점·완성도 검사가
+  같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(OpenAI 키 → Codex, Claude 키 → Claude Code),
+  모델은 문제의 채점 모델, 키는 그 클래스 키, 박제본은 채점 준비가 읽은 zip(아니면 보류). 기록은 `ClassroomAgentRun`
+  (공모전 `AgentRun` 과 같은 꼴). 판정 보류는 시도 기록 머리 `AgentScoringHold:` 로 채점 대기에서 빠지고 실패 상한에
+  세지 않는다(0% 로 굳히지 않는다). 완성도 보류는 「보류(…)」 실패로 남는다. grader 는 에이전트 실행을 제 스레드에서
+  돌리고 임대를 실행 전체(`AGENT_LEASE`, 14분)로 늘린다. 실행기와 실행 코드는 공유층(`core.agent_scoring`·
+  `core.agent_prompt`·`core.quality_review_agent`)에 있고, 공모전 박제본 받기만 `scoring.agent_snapshot` 에 있다.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |

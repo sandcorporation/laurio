@@ -35,6 +35,9 @@ from django.db import close_old_connections, connection
 from core.agent_run_tokens import Grant, Refusal, Usage, authorize, record_usage
 from policies.runtime_settings import ScoringVendor, setting_value
 
+# APP-BOUNDARY-EXCEPTION: 클래스 키 실행(#1036)의 키는 강의실 채점 연결(`classroom.scoring_connection`)이 쥔 암호문이다 — 복호화를 그 모듈 한 곳에 둔다
+from classroom.scoring_connection import agent_vendor_key
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8002
@@ -222,8 +225,18 @@ async def _authorize(token: str | None, vendor: ScoringVendor, model: str | None
     return await sync_to_async(_authorize_sync)(token, vendor, model)
 
 
-async def _real_key(vendor: ScoringVendor) -> str:
-    return (await sync_to_async(setting_value)(_KEY_SETTING[vendor]) or "").strip()
+def _real_key_sync(vendor: ScoringVendor, key_class_id: int | None) -> str:
+    """토큰의 키 출처에 맞는 벤더 키 — 플랫폼이면 운영 설정, 클래스면 그 클래스의 채점 연결 키(#1036).
+    클래스 연결이 그 벤더 키가 아니면(호환 서버로 바꿨다 등) 빈 값이다 — 플랫폼 키로 대신하지 않는다."""
+
+    _fresh_connection()
+    if key_class_id is not None:
+        return agent_vendor_key(key_class_id, vendor)
+    return (setting_value(_KEY_SETTING[vendor]) or "").strip()
+
+
+async def _real_key(vendor: ScoringVendor, key_class_id: int | None) -> str:
+    return await sync_to_async(_real_key_sync)(vendor, key_class_id)
 
 
 def build_app(upstreams: Upstreams | None = None) -> web.Application:
@@ -269,7 +282,7 @@ async def _relay(
     if isinstance(verdict, Refusal):
         logger.info("llm-proxy: refused vendor=%s code=%s", vendor, verdict.code)
         return _refusal_response(verdict)
-    key = await _real_key(vendor)
+    key = await _real_key(vendor, verdict.key_class_id)
     if not key:
         logger.warning("llm-proxy: no vendor key vendor=%s run=%s", vendor, verdict.record_id)
         return web.json_response(
