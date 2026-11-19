@@ -68,6 +68,10 @@ class ScanSpec:
     # 평가한다 — 재기동 없이 설정이 곧바로 반영되고(override_settings로 테스트하기
     # 위한 목적도 있다), tick·beat·`/scans/{name}` 직접 호출이 전부 같은 문을 본다.
     enabled: Callable[[], bool] | None = None
+    # `enabled` 가 꺼져도 beat 일정에 남기는가(#991). 화면에서 바꾸는 런타임 스위치는 beat 가 뜬 뒤에
+    # 켜질 수 있다 — 일정에서 빼 두면 beat 를 다시 띄울 때까지 켜도 돌지 않는다. 남겨 두면
+    # `core.tasks.run_scan` 이 실행마다 `enabled` 를 보고 꺼졌으면 부르지 않고 건너뛴다.
+    keep_scheduled_when_disabled: bool = False
 
 
 SCAN_REGISTRY: dict[str, ScanSpec] = {}
@@ -224,7 +228,7 @@ def beat_schedule() -> dict:
             "args": [name],
         }
         for name, spec in SCAN_REGISTRY.items()
-        if is_scan_active(name)
+        if spec.keep_scheduled_when_disabled or is_scan_active(name)
     }
 
 

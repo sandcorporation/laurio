@@ -273,6 +273,14 @@ def _reset_fake_storage_adapter():
 
 
 @pytest.fixture(autouse=True)
+def _contest_ai_scoring_on(monkeypatch):
+    """공모전 AI 채점 스위치(#991)는 값이 없으면 꺼짐이다 — 시험은 지금까지처럼 켠 채로 돈다.
+    꺼진 동작을 보는 시험은 `monkeypatch.delenv("CONTEST_AI_SCORING")` 로 끈다."""
+
+    monkeypatch.setenv("CONTEST_AI_SCORING", "on")
+
+
+@pytest.fixture(autouse=True)
 def _reset_runtime_settings():
     """운영 설정(#922)의 프로세스 캐시와 흉내 버전 저장소는 모듈 전역이다 — DB 는 시험마다
     되감기는데 캐시가 남으면 앞 시험이 저장한 값이 다음 시험의 어댑터에 보인다."""

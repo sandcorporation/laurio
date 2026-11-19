@@ -69,6 +69,10 @@ def run_scan(name: str) -> dict:
 
     tag_error_scope("scan", scan=name)
     spec = SCAN_REGISTRY.get(name)
+    if spec is not None and spec.enabled is not None and not spec.enabled():
+        # 런타임 스위치로 꺼진 스캔(#991, `keep_scheduled_when_disabled`) — beat 일정에는 남아 있지만
+        # 엔드포인트를 부르지 않는다(부르면 404 를 실패로 남긴다).
+        return {"scan": name, "skipped": "disabled"}
     # 스캔마다 자기 HTTP 한도(#986) — 등록부 밖의 이름은 기본값으로 불러 엔드포인트가 404 로 거부한다.
     timeout = spec.request_timeout_seconds if spec is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
     return call_internal(f"/api/internal/scans/{name}", timeout=timeout)

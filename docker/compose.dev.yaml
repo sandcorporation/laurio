@@ -221,6 +221,8 @@ services:
       SESSION_REDIS_URL: redis://redis:6379/1
       # 운영 지표 1분 집계(#827) — 같은 Redis 의 DB 3.
       OPS_METRICS_REDIS_URL: redis://redis:6379/3
+      # 공모전 AI 채점 스위치(#991) — 운영 설정에 값이 없으면 꺼짐이다. dev 는 지금까지처럼 켠다.
+      CONTEST_AI_SCORING: "on"
       # 운영 경보(#830)의 디스코드 웹훅 — 비면 보내지 않고 상태만 기록한다.
       OPS_ALERT_DISCORD_WEBHOOK_URL: ${OPS_ALERT_DISCORD_WEBHOOK_URL:-}
       # 강의실 채점은 `grader` 서비스가 한다(#584, ADR-0059) — 이 컨테이너는 큐에 넣는 시각만

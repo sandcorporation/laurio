@@ -43,7 +43,7 @@ from core.crypto import DecryptionError, decrypt, encrypt
 logger = logging.getLogger(__name__)
 
 Source = Literal["db", "env", "none"]
-Kind = Literal["secret", "text", "float"]
+Kind = Literal["secret", "text", "float", "switch"]
 ProbeResult = Literal["ok", "invalid_key", "unavailable"]
 
 FALLBACK_TTL_SECONDS = 30.0
@@ -62,6 +62,12 @@ class SettingSpec:
     min_value: float | None = None
     max_value: float | None = None
 
+
+#: 공모전 AI 채점 스위치의 키(#991) — `contest_ai_scoring_enabled`.
+CONTEST_AI_SCORING = "CONTEST_AI_SCORING"
+
+_SWITCH_ON = {"on", "true", "1", "yes"}
+_SWITCH_OFF = {"off", "false", "0", "no"}
 
 #: 화면으로 옮긴 설정. 무엇을 넣고 무엇을 뺐는지와 그 이유는 ADR-0075 에 있다.
 SPECS: dict[str, SettingSpec] = {
@@ -85,6 +91,10 @@ SPECS: dict[str, SettingSpec] = {
             min_value=0.0,
             max_value=2.0,
         ),
+        # #991: 공모전 AI 채점(`submission-scoring`·`submission-quality-review` 스캔)만 끄는 스위치.
+        # **값이 없으면 꺼짐** — 처리기를 다시 켜는 배포가 공모전 채점까지 켜지 않게 했다. 켜려면 화면에서
+        # 「on」을 저장한다(dev·시험은 환경변수로 켠다).
+        SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점 (on/off)", "switch", default="off", max_length=3),
     )
 }
 
@@ -291,6 +301,18 @@ def setting_value(key: str, *, reader: RuntimeSettingsReader | None = None) -> s
     return os.environ.get(key) or None
 
 
+def switch_on(key: str, *, reader: RuntimeSettingsReader | None = None) -> bool:
+    """`switch` 설정이 켜졌는가 — 값이 없거나 알 수 없는 값이면 꺼짐이다(#991)."""
+
+    return (setting_value(key, reader=reader) or "").strip().lower() in _SWITCH_ON
+
+
+def contest_ai_scoring_enabled() -> bool:
+    """공모전 AI 채점 스캔이 지금 도는가(#991) — 스캔의 `enabled` 콜백이라 호출마다 다시 읽는다."""
+
+    return switch_on(CONTEST_AI_SCORING)
+
+
 # --- 화면에 보일 모양 ----------------------------------------------------------
 
 
@@ -379,6 +401,13 @@ def _normalize(spec: SettingSpec, raw: str) -> str:
         if any(ch.isspace() for ch in value) or not value.isascii() or not value.isprintable():
             raise RuntimeSettingError("공백이나 영문·숫자·기호 밖의 글자가 들어 있습니다.", "invalid_value")
         return value
+    if spec.kind == "switch":
+        lowered = value.lower()
+        if lowered in _SWITCH_ON:
+            return "on"
+        if lowered in _SWITCH_OFF:
+            return "off"
+        raise RuntimeSettingError("on 또는 off 만 쓸 수 있습니다.", "invalid_value")
     if spec.kind == "text":
         if not _MODEL_PATTERN.match(value):
             raise RuntimeSettingError("영문·숫자·「. _ : / -」만 쓸 수 있습니다.", "invalid_value")

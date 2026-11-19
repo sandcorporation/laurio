@@ -41,6 +41,7 @@ from core.quality_review import (
     records,
 )
 from core.scans import ScanSpec
+from policies.runtime_settings import contest_ai_scoring_enabled
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
 from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
@@ -161,13 +162,16 @@ def _review_one(submission, as_of, ctx):
         }
 
 
-#: 무료·유료 모두 대상이라 제품 스위치(`enabled`)를 걸지 않는다 — `submission-scoring` 과 같은 공용 스캔.
+#: 무료·유료 모두 대상이라 유료 제품 스위치는 걸지 않는다 — 대신 공모전 AI 채점 스위치(#991,
+#: 기본 꺼짐)를 `submission-scoring` 과 같이 건다: 둘 다 공모전 벤더 호출이다.
 #: 정렬은 Score 스캔과 같다: 덜 시도한 것이 먼저, 같으면 id.
 SUBMISSION_QUALITY_SCAN = ScanSpec(
     name="submission-quality-review",
     candidates=_pending_quality,
     handle_row=_review_one,
     order_by=("attempt_count", "id"),
+    enabled=contest_ai_scoring_enabled,
+    keep_scheduled_when_disabled=True,
 )
 
 

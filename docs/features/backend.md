@@ -1036,6 +1036,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_OPENAI_MODEL` | 모델 이름 | 같은 셋 | `gpt-4o-mini` |
 | `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
+| `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·완성도 리뷰(`submission-quality-review`) 스캔 | **off** — 두 스캔이 돌지 않는다 |
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |
