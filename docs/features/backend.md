@@ -1062,6 +1062,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·완성도 리뷰(`submission-quality-review`) 스캔 | **off** — 두 스캔이 돌지 않는다 |
+| `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 
 **에이전트 채점 키 프록시 `llm-proxy`**(#998) — backend 이미지의 별도 프로세스(`manage.py llm_proxy`,
 `core.llm_proxy`, aiohttp, 8002). 에이전트 실행기에 진짜 벤더 키 대신 **실행 토큰**을 주고, 이 프로세스가 토큰을
@@ -1072,6 +1073,19 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 않는다. 요청마다 토큰 없음·모름·만료(401), 다른 벤더·다른 모델·방침 닫힘(403), 실행 예산·하루 합계(429)를 본다.
 응답의 usage 와 그 비용이 토큰 행에 쌓인다(`run_usage`). 벤더 오류 응답은 진짜 키·키 꼴 문자열을 가려 돌려준다.
 **토큰은 에이전트 채점기(`scoring.agent_scoring`, #1000)만 발급한다** — `CONTEST_SCORING_METHOD=agent` 가 아니면 발급하는 곳이 없어 떠 있어도 모든 요청이 401 이고 벤더로는 아무것도 나가지 않는다.
+
+**에이전트 채점**(#999·#1000·#1001, ADR-0082) — 채점(`submission-scoring`)의 받아들이는 조건·보류·시도 기록은 위 「제출」
+절의 에이전트 채점 단락이 말한다. 여기는 실행 구조다. `agent-grader` 서비스(`scoring.agent_runner.request_run`)가 마감 커밋의
+박제본 zip 을 실행마다 읽기 전용 디렉터리에 풀고(경로 검사·0444), 빈 HOME 으로 CLI(Claude Code 또는 Codex)를 띄워 필요한
+파일만 읽게 한다 — 참가자 코드는 실행하지 않고, 진짜 키는 없고(실행 토큰만), 네트워크는 `llm-proxy` 뿐이다. 동시 실행 2,
+실행당 10분. 채점·완성도 리뷰는 같은 `run_agent_job` 을 쓰고(`AgentJob.purpose` 가 `scoring`·`quality`) 한 실행으로 묶지
+않는다. 결과는 같은 `Score`·`SubmissionQualityReview` 이고 화면·알림·순위·박제는 그대로다.
+
+- **완성도**(#1001)는 `CONTEST_SCORING_METHOD=agent` 일 때 같은 박제본을 읽고 항목마다 0~5 와 근거 `경로:줄` 을 받는다.
+  기록의 `model_version` 은 `agent:<벤더>:<모델>`.
+- 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 은 방침 시행일
+  (2026-11-27) 전에 거절된다(#995·#997).
+- 강의실 채점은 이 길을 타지 않는다.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |
