@@ -76,6 +76,16 @@ def _safe_daytime_at_or_after(at):
     return candidate
 
 
+def _base_now():
+    """마감·심사 종료 같은 값을 만들 기준 시각 — 실제 벽시계 `timezone.now()` 대신 **그 뒤의 첫 KST 14:00**.
+
+    벽시계에서 곧장 파생하면 시험이 도는 시각(야간·낮)에 따라 마감과 고정 시계(`_freeze`)의 상대 위치가
+    달라진다. 이 기준은 언제 돌려도 같은 모양(낮 14시 + 몇 시간)이고 항상 지금 이후라 제출 마감 검사도 통과한다.
+    """
+
+    return _safe_daytime_at_or_after(timezone.now())
+
+
 def _login(client, uid="dev-1", email=None):
     email = email or f"{uid}@example.com"
     response = client.post(
@@ -139,7 +149,7 @@ def _publish_contest(
         **_auth_header(sponsor["access"]),
     )
     assert profile_resp.status_code == 200, profile_resp.content
-    deadline_at = deadline_at or (timezone.now() + timedelta(hours=1))
+    deadline_at = deadline_at or (_base_now() + timedelta(hours=1))
 
     response = client.post(
         CONTESTS_URL,
@@ -279,6 +289,18 @@ def _exhaust_after_first_fanout():
     return _monotonic
 
 
+def _patched_scan_clock():
+    """`core.scans` 가 보는 `time` 만 대역으로 바꾼다. `time.monotonic` 자체를 패치하면 DB 드라이버·잠금·
+    다른 스레드의 호출까지 호출 횟수를 먹어, 「①② 는 0초」 순서가 환경마다 어긋난다."""
+
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    return patch.object(
+        scans_module, "time", SimpleNamespace(monotonic=_exhaust_after_first_fanout())
+    )
+
+
 def _run_lifecycle_scan(client) -> dict:
     """다섯 lifecycle 스캔을 순서대로 한 번씩 돌리고 결과 행을 합친다 — 예전 단일 엔드포인트와
     같은 관찰면(`results`)을 유지해 시나리오 테스트가 스캔 이름을 몰라도 된다(#138)."""
@@ -341,7 +363,7 @@ def landing_type(db):
 def test_deadline_reminder_notifies_sponsor_and_participating_developer(
     client, category, landing_type
 ):
-    deadline = timezone.now() + timedelta(hours=2)
+    deadline = _base_now() + timedelta(hours=2)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -402,7 +424,7 @@ def test_deadline_reminder_notifies_sponsor_and_participating_developer(
 
 @pytest.mark.django_db
 def test_deadline_reminder_does_not_fire_before_lead_window(client, category, landing_type):
-    deadline = timezone.now() + timedelta(days=5)
+    deadline = _base_now() + timedelta(days=5)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
@@ -434,7 +456,7 @@ def test_deadline_reminder_lead_time_follows_policy_change_not_a_hardcoded_defau
         pk=1, defaults={"deadline_reminder_lead_hours": 72}
     )
 
-    deadline = timezone.now() + timedelta(days=5)
+    deadline = _base_now() + timedelta(days=5)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
@@ -457,7 +479,7 @@ def test_deadline_reminder_lead_time_follows_policy_change_not_a_hardcoded_defau
 
 @pytest.mark.django_db
 def test_judging_end_reminder_notifies_sponsor(client, category, landing_type):
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
@@ -496,7 +518,7 @@ def test_distribution_final_warning_states_amount_and_is_sent_at_constructed_day
     그대로 물려받지 않고, 항상 낮(NOTIFICATION_DAYTIME_HOUR)으로 구성됨을 증명한다.
     """
 
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -570,7 +592,7 @@ def test_distribution_final_warning_states_amount_and_is_sent_at_constructed_day
 def test_distribution_final_warning_is_not_sent_once_distribution_already_happened(
     client, category, landing_type
 ):
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -605,7 +627,7 @@ AWARDS_URL = "/api/contests"
 
 @pytest.mark.django_db
 def test_award_sends_result_notice_to_winning_developer(client, category, landing_type):
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -645,7 +667,7 @@ def test_award_sends_result_notice_to_winning_developer(client, category, landin
 def test_distribution_sends_result_notice_with_amount_to_qualifying_developer(
     client, category, landing_type
 ):
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -697,7 +719,7 @@ def test_distribution_still_executes_when_every_notification_channel_fails(
     from ledger.services import contest_balance
     from payouts.models import Payout
 
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -785,7 +807,7 @@ def test_notification_history_requires_authentication(client):
 
 @pytest.mark.django_db
 def test_notification_history_only_shows_own_notifications(client, category, landing_type):
-    deadline = timezone.now() + timedelta(hours=2)
+    deadline = _base_now() + timedelta(hours=2)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
@@ -831,7 +853,7 @@ def test_extension_clears_judging_end_reminder_flag_so_a_second_warning_can_fire
     맞는다.
     """
 
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client, category=category, deliverable_type=landing_type, deadline_at=deadline
     )
@@ -910,7 +932,7 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
     from unittest.mock import patch
 
 
-    deadline = timezone.now() + timedelta(hours=2)
+    deadline = _base_now() + timedelta(hours=2)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -934,7 +956,7 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
     # 확인(여기서 예산 초과로 멈춘다). 첫 행은 예산과 무관하게 시도되므로 행 사이 확인은
     # 없다. 이어지는 네 스캔은 각자 자기 마감을 새로 계산하고(④~) 아주 작은 간격만 흘려
     # 20초 예산을 절대 넘기지 않는다.
-    with patch.object(scans_module.time, "monotonic", side_effect=_exhaust_after_first_fanout()):
+    with _patched_scan_clock():
         budget_exceeded_scan = _run_lifecycle_scan(client)
 
     # 예산 초과로 멈췄으므로 이 Contest는 "완료"로 보고되지 않는다.
@@ -952,7 +974,11 @@ def test_deadline_reminder_scan_yields_to_time_budget_mid_fanout_and_recovers_ne
             for n in _my_notifications(client, dev["access"])
         )
     )
-    assert notified_count == 1
+    assert notified_count == 1, [
+        (n["notification_type"], n["status"])
+        for dev in devs
+        for n in _my_notifications(client, dev["access"])
+    ]
 
     # 다음 스캔(시간 제약 없이)이 나머지 수신자만 안전하게 마저 보낸다.
     recovery_scan = _run_lifecycle_scan(client)
@@ -992,7 +1018,7 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
     # 두 Contest를 만들고 제출까지 전부 "지금"(고정 시각 없음) 끝내 둔다 —
     # 아래에서 Award 시나리오를 완성하려고 시계를 앞으로 넘기면, 그 뒤에
     # 만드는 Contest의 deadline_at 계산이 이미 지나간 시각이 될 수 있다.
-    award_deadline = timezone.now() + timedelta(hours=1)
+    award_deadline = _base_now() + timedelta(hours=1)
     award_sponsor, award_contest = _publish_contest(
         client,
         category=category,
@@ -1009,7 +1035,7 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
     # 아래 Award 시나리오가 /tick 을 쏘는데, 그 tick 은 이제 lifecycle 스캔까지 한 바퀴 돈다
     # (#137 run_all). 그 시점(약 한 시간 뒤)에 이 Contest 의 마감 임박이 아직 도래하지 않도록
     # 리드타임보다 넉넉히 뒤에 마감을 잡는다 — 그래야 예산 초과 시나리오가 실제로 실행된다.
-    reminder_deadline = timezone.now() + timedelta(
+    reminder_deadline = _base_now() + timedelta(
         hours=current_policy().deadline_reminder_lead_hours + 3
     )
     _reminder_sponsor, reminder_contest = _publish_contest(
@@ -1059,7 +1085,7 @@ def test_award_result_notice_recovery_is_not_starved_when_an_earlier_scan_exhaus
 
     # 마감 임박 스캔이 참가자 둘 중 하나만 보내고 예산을 다 쓰게 만든다 — 그 뒤의 스캔은
     # 각자 자기 마감을 새로 계산한다(#138 — 예전에는 다섯이 한 엔드포인트 안에서 몫을 나눴다).
-    with patch.object(scans_module.time, "monotonic", side_effect=_exhaust_after_first_fanout()):
+    with _patched_scan_clock():
         combined_scan = _run_lifecycle_scan(client)
 
     # 마감 임박 스캔은 예산을 넘겨 중단됐다 — 이 Contest는 "완료"로 보고되지
@@ -1101,7 +1127,7 @@ def test_deadline_reminder_recovers_remaining_developers_after_mid_fanout_crash(
     from unittest.mock import patch
 
 
-    deadline = timezone.now() + timedelta(hours=2)
+    deadline = _base_now() + timedelta(hours=2)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -1188,7 +1214,7 @@ def test_award_result_notice_is_recovered_after_crash_before_completion(
 
     from awards.models import Award
 
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
@@ -1264,7 +1290,7 @@ def test_distribution_result_notice_is_recovered_after_crash_before_completion(
 
     from distributions.models import DistributionShare
 
-    deadline = timezone.now() + timedelta(hours=1)
+    deadline = _base_now() + timedelta(hours=1)
     sponsor, contest = _publish_contest(
         client,
         category=category,
