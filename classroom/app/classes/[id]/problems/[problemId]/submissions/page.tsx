@@ -41,12 +41,14 @@ import {
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
+import { Stamp } from "@/app/components/Stamp";
+import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { withLate } from "@/lib/problems/due-dates";
 import { instructorEntryBadge } from "@/lib/submissions/contest-entry";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
 
-function StatBar({ stats }: { stats: ReturnType<typeof submissionStats> }) {
+function StatBar({ stats, perfect }: { stats: ReturnType<typeof submissionStats>; perfect: number | null }) {
   const cells: { key: string; label: string; value: string; tone?: string }[] = [
     {
       key: "passed",
@@ -54,6 +56,9 @@ function StatBar({ stats }: { stats: ReturnType<typeof submissionStats> }) {
       value: `${stats.passed}/${stats.participants ?? "—"}`,
       tone: "text-success",
     },
+    ...(perfect === null
+      ? []
+      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: "text-advanced" }]),
     { key: "attempts", label: "시도", value: String(stats.attempts) },
     { key: "scoring", label: "채점 중", value: String(stats.scoring) },
     { key: "waiting", label: "채점 대기", value: String(stats.waiting) },
@@ -80,6 +85,14 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
       <Badge tone={submission.pending_reason ? "attention" : "neutral"}>
         {withLate(submission.pending_reason ? "채점 대기" : "채점 중", submission.late)}
       </Badge>
+    );
+  }
+  const stamp = stampKind(submission.passed, submission.perfect);
+  if (stamp) {
+    return (
+      <Stamp kind={stamp} size="sm">
+        {withLate(STAMP_LABEL[stamp], submission.late)}
+      </Stamp>
     );
   }
   return (
@@ -247,6 +260,11 @@ export default function ProblemSubmissionsPage() {
     gridState.status === "ready" ? participantIdsOf(gridState.grid) : null;
   const submissions = participantAttempts(state.submissions, participantIds);
   const stats = submissionStats(submissions, participantIds ? participantIds.size : null);
+  // 완벽 수는 격자 응답의 문제 집계 값이다(#962) — 심화 항목이 없으면 null 이라 「완벽」 칸이 없다.
+  const perfectCount =
+    gridState.status === "ready"
+      ? (gridState.grid.problems.find((p) => p.id === problemId)?.perfect_count ?? null)
+      : null;
   const submittedMembers = new Set(submissions.map((s) => s.member_id));
   const notSubmitted = participantIds
     ? [...participantIds].filter((id) => !submittedMembers.has(id)).length
@@ -296,7 +314,7 @@ export default function ProblemSubmissionsPage() {
       />
 
       <div className="flex flex-col gap-4">
-        <StatBar stats={stats} />
+        <StatBar stats={stats} perfect={perfectCount} />
 
         {blockedByMissingKey ? (
           <MissingScoringKeyNote

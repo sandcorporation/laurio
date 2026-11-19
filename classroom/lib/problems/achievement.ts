@@ -34,3 +34,9 @@ export function achievementTone(rate: number): "verified" | "attention" | "ink" 
   if (pct < 30) return "attention";
   return "ink";
 }
+
+/** 「통과 n명 · 완벽 n명」(#964) — 완벽 수가 null(심화 항목 없는 문제)이면 「완벽」을 빼고 「통과 n명」만. */
+export function formatPassedPerfect(counts: { passed_count: number; perfect_count?: number | null }): string {
+  const passed = `통과 ${counts.passed_count}명`;
+  return counts.perfect_count == null ? passed : `${passed} · 완벽 ${counts.perfect_count}명`;
+}

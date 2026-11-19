@@ -1362,6 +1362,8 @@ spec #474, #475·#476)가 든 이름은 가입 때와 같은 규칙으로 거절
 
 **판정 도장(#963, spec #960)** — 참여자 화면의 통과·완벽은 살짝 기운 테두리 도장 하나로 찍는다(통과 success · 완벽 advanced 색, `app/components/Stamp.tsx`). 완벽이면 완벽 도장 하나만 찍고 통과 도장을 겹치지 않는다. 자리는 시도 행·체크리스트 머리(그 시도의 판정), 문제 머리·문제 목록(문제 기준, 작은 도장 — 한 번이라도 완벽이면 완벽)이다. 처음 볼 때 한 번 찍히는 220ms 움직임은 시도 도장에만 있고, 「처음」은 그 브라우저의 localStorage 에 `codemit:stamp-seen:submission-<id>:<판정>` 이 없을 때다(`lib/design/stamp.ts`). `prefers-reduced-motion` 이면 움직이지 않는다. 심화 항목 배지는 「심화」(advanced 색)로 보인다 — 공모전 화면은 「선택」 그대로.
 
+**강사 화면의 통과·완벽(#964, spec #960)** — 제출 현황(`/classes/{id}/problems/{problemId}/submissions`)의 참여자 줄은 그 시도의 판정을 같은 도장(작은 크기, 움직임 없음)으로 보인다 — 완벽이면 완벽 도장 하나만. 통계 바는 「통과 n/N」 옆에 「완벽 n/N」 칸이 더해지고(격자 응답의 `perfect_count`, 심화 항목이 없는 문제는 null 이라 칸이 없다), 달성률은 통과 기준 그대로다. 문제 목록의 「통과」 열은 「n/N」 아래에 「완벽 n」을 작게 보이고(`perfect_count` 가 null 이면 없다), 참여자 탭 격자는 한 번이라도 완벽을 받은 칸을 완벽 도장으로, 통과만이면 기존 success 사각형으로 그린다(범례에는 완벽 도장이 하나라도 있을 때만 더해진다). 「통과 n명 · 완벽 n명」 문구는 `lib/problems/achievement.ts` 의 `formatPassedPerfect` 가 만들어 툴팁에 쓴다. 백엔드·질의 수는 바뀌지 않았다.
+
 ## `/classes/{id}/problems/{problemId}/submit` 참여자 제출(#286/#287/#288)
 
 참여자가 열린 문제를 보고 소스 또는 저장소로 낸다 — 시도 횟수 상한이 없어 낼 때마다
