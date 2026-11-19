@@ -113,7 +113,7 @@ EXCLUDED_DIR_FRAGMENTS = (
 #: 변환 플러그인에게 넘기는 파일 하나의 상한 — 그보다 큰 파일은 묻지 않고 버린다.
 #: 저장소 zip 다운로드 상한(`core.repository_adapters._MAX_CLONE_DOWNLOAD_BYTES`)과
 #: 같은 값이다: 그 이상은 어차피 한 제출 안에 들어오지 않는다.
-MAX_CONVERTER_INPUT_BYTES = 20_000_000
+MAX_CONVERTER_INPUT_BYTES = 100_000_000
 
 #: 변환 플러그인 하나가 파일 하나에 쓸 수 있는 시간. 넘기면 그 파일만 버리고 선별을
 #: 계속한다 — 워커가 플러그인 하나에 붙잡히지 않게.

@@ -376,9 +376,9 @@ SIGKILL 로 끊긴 채점은 임대(240초)가 만료된 뒤 다른(새) grader 
 하나(`grader-db`)에서만 하고 그 스레드가 Django 연결 하나를 계속 쥔다(작업 전에 죽은 연결을 걷고, 연결
 오류면 닫고 한 번 다시 한다). 그 스레드에는 짧은 DB 일만 있다 — 알림이 내는 실시간 신호(Redis)는 모아
 두었다 다른 작은 풀에서 보낸다. 나머지 19 는 backend(gunicorn 워커 넷 × 스레드 넷)·celery-worker(beat 포함)·events 의
-몫이다. 소스 읽기(저장소 clone 최대 20MB·
+몫이다. 소스 읽기(저장소 clone 최대 100MB(#996 — 임시 파일로 받아 한 벌만 든다, 스레드 8개 최악 800MB)·
 스토리지·문법 검사)는 **DB 를 쓰지 않는 따로 둔 스레드 풀**(`CLASSROOM_GRADER_SOURCE_THREADS` 기본
-8)에서 돌아 DB 일을 막지 않고 DB 연결도 쥐지 않는다(시험이 DB 스레드 밖 쿼리 0번을 못 박는다). grader 컨테이너에는 **`mem_limit: 1g`** 가 있다 —
+8)에서 돌아 DB 일을 막지 않고 DB 연결도 쥐지 않는다(시험이 DB 스레드 밖 쿼리 0번을 못 박는다). grader 컨테이너에는 **`mem_limit: 2g`** 가 있다(#996 — 저장소 100MB 상한 전엔 1g) —
 64건의 요청·응답과 소스를 들고 있어도 호스트의 DB 까지 OOM 에 끌어들이지 않게 한다. 벤더(특히 강사의
 호환 서버) 응답 본문은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES`(기본 2MB)까지만 읽고 넘으면 끊는다(닿았으나
 실패한 시도로 센다), 연결 단계는 `SAFE_OUTBOUND_CONNECT_TIMEOUT_SECONDS`(기본 10초)에 포기한다 — 응답
