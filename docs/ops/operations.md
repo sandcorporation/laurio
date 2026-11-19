@@ -483,12 +483,32 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
 하나로 묶인다). 다 맞으면 로그 한 줄뿐이다. 오류 수집기가 꺼진 dev·CI 에서는 바깥에 나가지 않는다. **표는
 자동으로 고치지 않는다** — 사람이 공식 가격 페이지를 보고 고친다. 자동 진단은 예외 이름으로 이것을 거른다.
 
-**그 오류를 에이전트가 집어 진단한다**(2026-09-18). Orca automation 「GlitchTip prod 오류
-진단」이 매분 `scripts/glitchtip_pick.py` 를 precheck 로 돌려 **prod 의 미해결·미클레임
-오류 하나**를 고르고(프로젝트 slug 가 `codemit-` 인 것만 — 같은 GlitchTip 조직에 2026-10-16 부터
-`daypage`·`daypage-frontend` 도 있어 한때 남의 오류로 세션이 떴다, `GLITCHTIP_PROJECT_PREFIX`), 집힌 것이 있을 때만 이 머신에 세션을 띄운다(워크트리는 실행마다
-새로, `origin/main` 기준). 세션이 따르는 절차는 `.claude/skills/glitchtip-triage/` 다 —
-재현 루프를 먼저 만들고, **재현되지 않으면 고치지 않고 멈춘다**.
+**그 오류를 에이전트가 집어 진단한다**(2026-09-18, 지금 모양은 2026-11-07·11-19).
+Orca automation 「GlitchTip prod 오류 진단」이 매분 precheck 를 돌려 **prod 의 미해결·미클레임
+오류 하나**를 고르고(프로젝트 slug 가 `codemit-` 인 것만 — 같은 GlitchTip 조직에 다른 서비스의
+프로젝트도 있다), 집힌 것이 있을 때만 이 머신에 세션을 띄운다(워크트리는 실행마다 새로,
+`origin/main` 기준). **지금 도는 것은 저장소 밖에 있다**(`orca automations list` 로 실측, 2026-11-19):
+
+| | 지금 도는 것 | 저장소 |
+| --- | --- | --- |
+| precheck | `ops-shared/glitchtip/pick.py --service codemit --project-prefix codemit- --repo <주 체크아웃>` (서비스 공용, 같은 조직의 다른 서비스 자동화 여섯도 이것을 쓴다) | `scripts/glitchtip_pick.py` 는 **이 자동화가 부르지 않는다** — 2026-11-07 공용판이 이것을 서비스 이름 인자로 옮긴 사본이다 |
+| 지시서 | automation 의 프롬프트(`ops-shared/glitchtip/codemit-prompt.md` 와 같은 꼴) | `.claude/skills/glitchtip-triage/` — 지시서가 1·2단계만 따르라고 한다 |
+| 상태 자리 | `~/.sandcorp/glitchtip/codemit/` 의 `current.json`·`regressions.json`·`reported.json`(세션이 쓰는 24시간 묶기 장부)·`lock` | 옛 `~/.codemit/glitchtip-*` |
+| 보고 | 대장 메일함 `sandcorp/boss`(switchboard) — **GitHub 티켓은 열지 않는다** | 옛 모드는 티켓 |
+
+**대장 경유 모드**(2026-11-07 대표 결정): 자동화 세션은 **진단만** 한다 — 스킬의 1단계(이벤트 읽기)와
+2단계(영역이 무엇으로 정해졌는지 읽기)만 따르고, 코드 수정·커밋·push·PR·티켓·GlitchTip 상태 변경·운영 쓰기를
+하지 않는다. 수정 지시는 대장이 조율자에게 따로 내린다. 아래 불릿은 **고르는 규칙·토큰·재발 판정**의 근거(공용
+`pick.py` 도 그대로 쓴다)와, **사람이 직접 스킬을 부를 때의 옛 전 단계 모드**(재현·수정·티켓·PR)를 함께 말한다 —
+「세션」이 고치고 티켓을 연다는 서술은 후자다.
+
+**`scripts/glitchtip_pick.py` 와 `ops-shared` 판의 차이**(diff 로 확인, 2026-11-19): 판정 규칙(클레임 코멘트·재발·
+잠금·의도된 예외)은 같다. 공용판이 더한 것은 `--service`(상태 자리)·`--projects`/`--project-prefix`·`--repo`
+(없으면 재발·워크트리 청소를 하지 않는다), 쓰기 토큰을 `~/.sandcorp/glitchtip/automation.env` 에서 읽는 것,
+그리고 **방치 재발생**(2026-11-18) — 클레임됐는데 수정 커밋이 없고 아직 미해결이며 마지막 댓글 뒤 24시간이
+지났고 그 뒤로 이벤트가 늘었으면 같은 이슈를 24시간에 한 번 다시 집는다. 이 저장소의 사본은 자동화에서
+빠졌지만 `scripts/test_glitchtip_pick.py`(PR 검사 `GlitchTip precheck 청소 판정`)가 아직 고정한다 — 공용판과
+어긋나는 변경의 정본은 `ops-shared` 쪽이다.
 
 - **고르는 쪽과 판단하는 쪽을 가른다.** 이슈 제목·스택트레이스는 공개 DSN 으로 누구나
   넣을 수 있는 값이다. 무엇을 집을지와 GlitchTip 쓰기는 스크립트가 끝내고, 세션에는
@@ -548,8 +568,13 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   한국어라 바뀌면 조용히 샌다. 목록은 `DELIBERATE_EXCEPTION_TYPES` 한 자리다.
   `PriceDriftAlert`(#798, 아래 「모델 단가 표 대조」)도 같은 목록에 있다.
   **느린 경로 경고(#971)는 이 목록에 없다 — 집히는 것이 목적이다.** 예외가 아니라 메시지라 `metadata.type`
-  이 없고, precheck 는 `is:unresolved` 만 걸고 등급을 보지 않는다(`glitchtip_pick.py` `_pick`). 세션은
-  스킬의 「느린 경로 경고」 절을 따른다 — 재현 대신 운영 DB 읽기 전용 `EXPLAIN`·통계로 원인을 찾아 티켓으로 넘긴다.
+  이 없고, precheck 는 `is:unresolved` 만 걸고 등급을 보지 않는다. 자동화 세션은 스킬의 「느린 경로 경고」 절의
+  1~3단계(이벤트 맥락·경로 코드·운영 DB 읽기 전용 확인)로 원인을 추정해 **대장 메일함으로 보고**한다.
+  재현·수정·티켓은 사람이 직접 부를 때 몫이다.
+  **시험 경고도 보고가 나간다**(`slow_route_sample=1` 태그, `manage.py slow_routes --send-sample`): 배달 경로를
+  확인하는 것이 시험의 목적이라 보고 없이 끝내면 시험이 되지 않는다. 원인 분석 없이 「[시험]」으로 보낸다.
+  실측(2026-11-19, 시험 이슈 GlitchTip 126·`CODEMIT-BACKEND-1T`, warning): 20:23:12 KST `--send-sample` →
+  20:23:49 자동화가 집음 → 20:24:20 대장 메일 #1311, 약 70초. 126 은 미해결로 둔다.
 - **해결 표시는 PR 병합이 한다**(2026-10-02). 세션은 커밋 메시지 마지막 줄에
   `GlitchTip: <id>` 를 적고 **분기를 push 해 PR 을 연다**(`main` 에 직접 넣지 않는다). Actions PR 검사가
   시험하고, 초록이면 세션이 squash 로 병합한다(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train`
@@ -596,12 +621,12 @@ ssh oracle 'docker exec codemit-prod-backend-1 python manage.py sentry_smoke'
   rebase 병합해 `main` 의 커밋 sha 가 분기와 달라서, 옛 `merge-base --is-ancestor` 판정으로는
   병합된 자동 진단 분기가 하나도 걷히지 않았다. 지금은 `git cherry` 로 분기 커밋이 전부 같은
   변경으로 `main` 에 들어갔는지 본다(`scripts/test_glitchtip_pick.py` 가 고정한다).
-- **precheck 는 주 체크아웃의 스크립트를 돈다 — 그 체크아웃은 저절로 앞서 나가지 않는다.**
-  automation 의 precheck 가 `/home/sandring/workspace/codemit/scripts/glitchtip_pick.py` 를 절대
-  경로로 부르고 토큰도 그 체크아웃의 `.env` 에서 읽는다. 2026-10-02 부터 `main` 은 PR 로만
-  들어가 주 체크아웃에서 커밋하는 사람이 없으므로, 이 스크립트를 고친 PR 이 병합돼도 **주
-  체크아웃을 `git pull` 하기 전까지 스케줄러는 옛 스크립트를 돈다.** (세션 쪽 스킬은 실행마다
-  `origin/main` 에서 새 워크트리를 만들어 늘 최신이다.)
+- **precheck 는 `ops-shared` 의 스크립트를 돈다 — 저장소를 고쳐도 자동화는 안 바뀐다.** 절대 경로로
+  `/home/sandring/workspace/ops-shared/glitchtip/pick.py` 를 부른다(`--repo` 로 이 저장소의 주 체크아웃을 가리켜
+  재발 판정에 쓴다). 그래서 `scripts/glitchtip_pick.py` 를 고치는 PR 은 자동화에 닿지 않고, 지시서(프롬프트)도
+  automation 이 들고 있어 저장소 문서를 바꿔도 따라오지 않는다 — 둘 다 대장 몫이다. 스킬은 실행마다
+  `origin/main` 에서 새 워크트리를 만들어 늘 최신이다(`--repo` 체크아웃은 재발 판정의 `git` 조회에만 쓰이고
+  저절로 앞서 나가지 않는다).
 - **GlitchTip 을 눈으로 읽을 때는 `scripts/glitchtip_get.py` 를 쓴다 — `curl` 로 치지
   않는다.** GlitchTip 의 오류 응답은 `{"detail": "Permission denied"}`·`{"detail":
   "Not Found"}` 라서, 그대로 파싱해 필드를 찾으면 **빈 값이 나오고 그것을 「값이 없다」로
