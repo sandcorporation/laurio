@@ -66,7 +66,7 @@ export function ContestEntryFields({
       {state.on ? (
         <div className="flex flex-col gap-3">
           {form.has_entry ? (
-            <Note tone="attention">
+            <Note tone="warning">
               <label className="flex items-start gap-2">
                 <input
                   type="checkbox"
@@ -144,7 +144,7 @@ function RequirementEntry({
     <div data-testid={testId} className="flex flex-col gap-2 border border-rule bg-surface p-3">
       <div className="flex items-start justify-between gap-3">
         <span className="flex items-start gap-2 text-[13px] leading-relaxed">
-          <Badge tone={required ? "attention" : "neutral"}>{required ? "필수" : "선택"}</Badge>
+          <Badge tone={required ? "warning" : "neutral"}>{required ? "필수" : "선택"}</Badge>
           {text}
         </span>
         <label className="flex shrink-0 items-center gap-1 text-[12.5px]">

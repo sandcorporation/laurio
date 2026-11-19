@@ -128,10 +128,10 @@ export function ProblemSettingsForm({
         <CardHeader title="채점 모델" />
         <div className="flex flex-col gap-2.5 p-4">
           {modelRejection ? (
-            <Note tone="attention">
+            <Note tone="error">
               <div data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
-                  <Badge tone="attention">모델 거부</Badge>
+                  <Badge tone="error">모델 거부</Badge>
                 </div>
                 <button
                   type="button"

@@ -326,7 +326,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
       <div className={ROW}>
         <span className="text-[13.5px]">삭제</span>
         <span data-testid="delete-class-blocked">
-          <Badge tone="attention">제출이 있어 지울 수 없습니다</Badge>
+          <Badge tone="warning">제출이 있어 지울 수 없습니다</Badge>
         </span>
       </div>
     );
@@ -351,7 +351,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
       <div className="flex flex-col gap-3 px-4 pb-4 empty:hidden">
         {!confirming ? null : (
           <div className="flex flex-col gap-3">
-            <Note tone="attention">
+            <Note tone="warning">
               <div className="flex flex-col gap-1">
                 <span data-testid="delete-class-warning">
                   지우면 문제 {problemCount}개, 체크리스트 항목 {checklistItemCount}개,

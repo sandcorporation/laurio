@@ -12,14 +12,14 @@ const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: stri
   passed: { label: "통과", className: "text-success" },
   attempted_not_passed: { label: "미통과", className: "text-ink/60" },
   scoring: { label: "채점 중", className: "text-ink/45" },
-  needs_setup: { label: "설정 필요", className: "text-error" },
+  needs_setup: { label: "설정 필요", className: "text-warning" },
 };
 
 function AttemptMark({ status }: { status: RecentAttemptStatus }) {
   const size = "h-[14px] w-[14px] shrink-0";
   if (status === "passed") return <span className={`${size} bg-success`} />;
   if (status === "attempted_not_passed") return <span className={`${size} border border-error`} />;
-  if (status === "needs_setup") return <span className={`${size} border border-dashed border-error`} />;
+  if (status === "needs_setup") return <span className={`${size} border border-dashed border-warning`} />;
   return (
     <span
       className={`${size} border border-rule bg-[repeating-linear-gradient(45deg,var(--color-rule)_0_2px,transparent_2px_4px)]`}
