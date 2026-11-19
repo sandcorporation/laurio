@@ -19,7 +19,7 @@ const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", 
 const TONE_TEXT = { verified: "text-success", attention: "text-warning", ink: "text-ink" } as const;
 const TONE_BAR = { verified: "bg-success", attention: "bg-warning", ink: "bg-ink" } as const;
 
-const TH = "px-3 py-2.5 text-[11px] font-normal tracking-[0.06em] text-ink/45";
+const TH = "whitespace-nowrap px-3 py-2.5 text-[11px] font-normal tracking-[0.06em] text-ink/45";
 const LINK_BUTTON =
   "whitespace-nowrap px-2 py-1.5 text-xs text-ink/60 underline underline-offset-[3px] hover:text-ink";
 
@@ -225,11 +225,11 @@ export function ProblemsTable({
             return (
               <tr key={problem.id} data-testid={`problem-row-${problem.id}`} className="border-b border-rule last:border-b-0">
                 <td className="px-2 py-3 font-mono text-[12px] text-ink/30 sm:px-3">{index + 1}</td>
-                <td className={`px-3 py-3 text-[14px] ${dimmed}`}>
+                <td className={`min-w-0 px-3 py-3 text-[14px] ${dimmed}`}>
                   <Link
                     href={`/classes/${classId}/problems/${problem.id}`}
                     data-testid={`problem-row-${problem.id}-link`}
-                    className="whitespace-nowrap hover:underline"
+                    className="[overflow-wrap:anywhere] hover:underline"
                   >
                     {problem.title}
                   </Link>

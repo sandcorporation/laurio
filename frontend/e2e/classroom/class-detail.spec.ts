@@ -85,3 +85,48 @@ test("문제와 참여자가 생기면 표와 채점 카드가 들어오고, 키
   await page.getByTestId("join-link-regenerate").click();
   await expect(page.getByTestId("join-link")).not.toHaveText(before);
 });
+
+test("긴 제목의 문제 표는 390px 에서 가로로 넘치지 않고, 중간 폭에서 옆 칸 밑으로 들어가지 않는다 (#983)", async ({ page }) => {
+  const seed = `class-detail-width-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+
+  const created = await api.post("/api/backend/classroom/classes", {
+    data: { name: `폭 확인용 클래스 ${Date.now()}`, instructor_display_name: "강사" },
+  });
+  const classId = (await created.json()).id as number;
+  const titles = [
+    "로그인과 회원가입 화면을 구현하고 세션 관리를 직접 작성하는 아주 긴 제목의 문제",
+    "EmailVerificationAndPasswordResetFlowImplementationWithoutSpacesAtAll",
+  ];
+  for (const title of titles) {
+    const response = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+      data: { title, submission_formats: ["repository"] },
+    });
+    const problemId = (await response.json()).id as number;
+    await api.post(`/api/backend/classroom/classes/${classId}/problems/${problemId}/open`);
+  }
+
+  for (const width of [390, 1024, 1280, 1320, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto(`/classes/${classId}`);
+    await expect(page.getByTestId("problems-list")).toBeVisible();
+    const measured = await page.evaluate(() => {
+      const root = document.documentElement;
+      const table = document.querySelector("[data-testid=problems-list]")!.closest("table")!;
+      const side = table.closest(".min-w-0")?.nextElementSibling ?? null;
+      const sideStyle = side ? getComputedStyle(side) : null;
+      return {
+        docOverflow: root.scrollWidth - window.innerWidth,
+        tableRight: table.getBoundingClientRect().right,
+        // 옆 칸이 한 열로 쌓이면(좁은 폭) 왼쪽 끝을 견줄 필요가 없다.
+        sideLeft: side && sideStyle && side.getBoundingClientRect().top < table.getBoundingClientRect().bottom ? side.getBoundingClientRect().left : null,
+      };
+    });
+    expect(measured.docOverflow, `${width}px 문서 가로 넘침`).toBeLessThanOrEqual(0);
+    expect(measured.tableRight, `${width}px 표 오른쪽 끝`).toBeLessThanOrEqual(width);
+    if (measured.sideLeft !== null) {
+      expect(measured.tableRight, `${width}px 표가 옆 칸을 넘음`).toBeLessThanOrEqual(measured.sideLeft);
+    }
+  }
+});
