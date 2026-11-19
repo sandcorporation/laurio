@@ -6,12 +6,18 @@
 // 렌더되므로, 여기 나오는 숫자는 항상 실제 조회 결과다(조회 실패 시의
 // 자리표시자가 아니다). 숫자는 고정폭(font-mono)으로 자릿수를 맞춘다.
 import { POLICY_FIELDS, POLICY_FIELD_LABELS } from "./types";
-import type { PlatformPolicy } from "./types";
+import type { PlatformPolicy, PolicyField } from "./types";
 
-export function PolicyValuesTable({ policy }: { policy: PlatformPolicy }) {
+export function PolicyValuesTable({
+  policy,
+  fields = POLICY_FIELDS,
+}: {
+  policy: PlatformPolicy;
+  fields?: readonly PolicyField[];
+}) {
   return (
     <div data-testid="policy-values-table" className="border border-rule bg-surface">
-      {POLICY_FIELDS.map((field, i) => (
+      {fields.map((field, i) => (
         <div
           key={field}
           data-testid={`policy-value-row-${field}`}

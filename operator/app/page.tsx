@@ -231,7 +231,7 @@ export default function OperatorHome() {
           meta="바꾼 사람과 시각이 남는다 — 지울 수 없다"
           actions={
             <Link
-              href="/policy"
+              href="/settings?tab=fees"
               data-testid="policy-nav-link"
               className="text-[12px] text-ink/62 hover:text-ink"
             >

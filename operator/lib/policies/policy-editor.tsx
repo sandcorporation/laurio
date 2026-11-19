@@ -36,11 +36,14 @@ function toInputs(policy: PlatformPolicy): FieldInputs {
 
 export function PolicyEditor({
   policy,
+  fields = POLICY_FIELDS,
   onSaved,
   onNeedsReload,
   onSessionExpired,
 }: {
   policy: PlatformPolicy;
+  /** 이 폼이 다루는 칸(#1041) — 그 밖의 칸은 보내지 않는다. */
+  fields?: readonly PolicyField[];
   onSaved: () => void;
   onNeedsReload: () => void;
   onSessionExpired: () => void;
@@ -69,7 +72,7 @@ export function PolicyEditor({
     setError(null);
 
     const changes: Partial<Record<PolicyField, number>> = {};
-    for (const field of POLICY_FIELDS) {
+    for (const field of fields) {
       const current = policy[field];
       // `Number("")`가 NaN이 아니라 0이라는 함정 때문에(코드리뷰 지적, 같은
       // 함정이 DeliverableType 화면 두 곳과 겹쳐 한 곳에 모았다) 이 판정을
@@ -128,7 +131,7 @@ export function PolicyEditor({
     >
       <h2 className="text-[15px] font-semibold tracking-[-0.01em]">정책값 바꾸기</h2>
       <div className="flex flex-col gap-2">
-        {POLICY_FIELDS.map((field) => (
+        {fields.map((field) => (
           <div key={field} className="flex items-center justify-between gap-4">
             <label htmlFor={`policy-input-${field}`} className="min-w-0 text-[13px] text-ink/62">
               {POLICY_FIELD_LABELS[field]}
