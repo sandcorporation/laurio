@@ -113,7 +113,7 @@ SPECS: dict[str, SettingSpec] = {
             max_length=20,
             choices=(VENDOR_OPENAI, VENDOR_ANTHROPIC),
         ),
-        # #1000: 공모전 채점을 한 번 호출(`single_call`)로 할지 CLI 에이전트(`agent`, `scoring.agent_scoring`)로 할지.
+        # #1000: 공모전 채점을 한 번 호출(`single_call`)로 할지 CLI 에이전트(`agent`, `core.agent_scoring`)로 할지.
         # 벤더는 위 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정을 따른다.
         SettingSpec(
             CONTEST_SCORING_METHOD,

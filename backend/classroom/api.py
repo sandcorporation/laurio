@@ -98,6 +98,7 @@ from .schemas import (
     ChecklistReorderIn,
     ClassIn,
     ClassOut,
+    GradingMethodOptionOut,
     ClassPatchIn,
     ClassroomChecklistVerdictOut,
     ClassroomHiddenSummaryOut,
@@ -156,7 +157,7 @@ from .schemas import (
 )
 from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
-from . import pending_scoring, quality
+from . import agent_grading, pending_scoring, quality
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -271,6 +272,9 @@ def _serialize_class(
         ),
         openai_key_status=class_obj.openai_api_key_status if has_key else None,
         scoring_connection_kind=class_obj.scoring_connection_kind,
+        scoring_method=class_obj.scoring_method,
+        quality_method=class_obj.quality_method,
+        grading_method_options=_grading_method_options(class_obj),
         anthropic_key_selectable=(
             privacy_policy.anthropic_key_connection_open() if claude_selectable is None else claude_selectable
         ),
@@ -296,6 +300,14 @@ def _serialize_class(
         pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
         **row_stats,
     )
+
+
+def _grading_method_options(class_obj: Class) -> list[GradingMethodOptionOut]:
+    reason = agent_grading.unavailable_reason(class_obj)
+    return [
+        GradingMethodOptionOut(value="single", selectable=True),
+        GradingMethodOptionOut(value="agent", selectable=reason is None, unavailable_reason=reason),
+    ]
 
 
 def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> PendingOwnershipTransferOut | None:

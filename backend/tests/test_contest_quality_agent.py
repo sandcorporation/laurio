@@ -1,6 +1,6 @@
 """공모전 완성도 에이전트 판(#1001) — `CONTEST_SCORING_METHOD=agent` 면 박제본을 에이전트로 읽어 0~5 와 근거를 매긴다.
 
-실행·받아들이는 조건은 `scoring.agent_scoring.run_agent_job`(#1000) 몫이라 여기서는 그 함수를 patch 한다.
+실행·받아들이는 조건은 `core.agent_scoring.run_agent_job`(#1000) 몫이라 여기서는 그 함수를 patch 한다.
 흉내는 실물처럼 두 번 다 어긋나면 `AgentRunHeld` 를, 실행기가 바쁘면 `AgentGraderBusy` 를 던진다.
 """
 
@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from scoring import agent_scoring
+from core import agent_scoring
 from scoring.agent_runner import AgentGraderBusy
-from scoring.agent_scoring import AgentJob, AgentJobOutcome, AgentRunHeld
+from core.agent_scoring import AgentJob, AgentJobOutcome, AgentRunHeld
 from scoring.models import QualityReviewAttempt, Score, SubmissionQualityReview
 from scoring.quality import HELD_ERROR_PREFIX
 from scoring.quality_agent import agent_response_schema, needs_evidence
@@ -45,7 +45,7 @@ class _FakeAgent:
 
 @pytest.fixture
 def agent(monkeypatch):
-    """`scoring.agent_scoring.run_agent_job` 자리에 흉내를 둔다. 방식 설정은 시험마다 켠다."""
+    """`core.agent_scoring.run_agent_job` 자리에 흉내를 둔다. 방식 설정은 시험마다 켠다."""
 
     fake = _FakeAgent()
     monkeypatch.setattr(agent_scoring, "run_agent_job", fake.run)

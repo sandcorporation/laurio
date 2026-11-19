@@ -94,8 +94,8 @@ from submissions.scoring_basis import (
     PLATFORM_FAILURE_MODEL_VERSION,
 )
 
-from .agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
-from .agent_scoring import AGENT_JOB_MAX_SECONDS, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
+from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
+from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
 from .agent_runner import AgentGraderBusy, AgentGraderError
 from .models import AgentRun, Score, ScoringAttempt
 from core.model_context import source_budget_bytes

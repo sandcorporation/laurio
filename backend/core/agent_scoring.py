@@ -1,8 +1,9 @@
-"""에이전트 실행 하나를 받아들이거나 보류한다(#1000) — 공모전 채점(#1000)과 완성도 리뷰(#1001)가 같이 쓴다.
+"""에이전트 실행 하나를 받아들이거나 보류한다(#1000) — 공모전 채점(#1000)·완성도 리뷰(#1001)와 강의실 채점·
+완성도 검사(#1036)가 같이 쓴다. 두 제품이 함께 쓰므로 공유층(`core`)에 있다(ADR-0037, #1036 에서 `scoring` 에서 옮겼다).
 
 `run_agent_job` 이 하는 일:
-  1. 박제본(채점 커밋의 zip) 확보 — 부르는 쪽이 이미 쥔 것(`provided_snapshot`)이 있으면 그것, 없으면 저장소
-     자산의 마지막 `RepositorySnapshot` 커밋(없으면 고정 커밋)을 받는다. 저장소가 없으면 zip 소스 자료.
+  1. 박제본(채점 커밋의 zip) 확보 — 부르는 쪽이 이미 쥔 것(`provided_snapshot`)이 있으면 그것, 없으면 부르는 쪽이
+     준 `AgentJob.load_snapshot`(공모전: `scoring.agent_snapshot.contest_snapshot`).
   2. 실행 토큰 발급(`core.agent_run_tokens.issue_run_token`, 예산 $1) → `agent-grader` 실행(`request_run`).
   3. 스트림 해석(Claude stream-json·Codex `--json`) → **받아들이는 조건**:
      - Claude: init 도구에 Read·Grep·Glob 이 다 있고, 인증 출처가 `ANTHROPIC_API_KEY`(= 실행 토큰)다.
@@ -13,6 +14,10 @@
 
 `AgentGraderBusy`·`RunTokenRefused`·`AgentGraderError`(닿지 못함)는 그대로 위로 던진다 — 재시도·보류는 부르는
 쪽의 기존 흐름이 정한다. 참가자 코드는 실행하지 않는다 — 박제본은 텍스트로 줄 수만 센다.
+
+강의실(#1036)도 같은 길을 탄다 — `AgentJob.class_key` 를 주면 벤더·모델은 그 클래스의 채점 연결과 문제의 모델을
+따르고, 실행 토큰의 키 출처가 그 클래스가 된다(프록시가 그 클래스 키를 붙인다). 기록의 `key_source` 는
+"platform"·"class" 만 남긴다 — 키는 어디에도 남지 않는다.
 
 계약은 이슈 #1000 의 댓글(2026-11-20)이다. `AgentJob`·`AgentJobOutcome`·`AgentRunHeld`·`run_agent_job` 의
 서명을 바꾸려면 #1001 과 먼저 맞춘다.
@@ -33,15 +38,21 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Literal, TypedDict
 
-from contests.models import ContestSubmission
 from core.agent_run_tokens import issue_run_token, run_usage
-from core.repository_adapters import get_github_adapter
 from policies.runtime_settings import VENDOR_ANTHROPIC, scoring_vendor, setting_value
-from repositories.models import RepositorySnapshot
-from scoring.agent_runner import CLAUDE_TOOLS, RunRejected, RunResult, RunSpec, Vendor, request_run
-from storage.adapters import get_storage_adapter
-from submissions.models import SubmissionAsset
-from submissions.repository_pins import clone_repository_asset
+# APP-BOUNDARY-EXCEPTION: 실행기(`agent-grader`)는 이미지가 이 파일 하나를 그대로 COPY 하는 표준 라이브러리 모듈이다(agent-grader.Dockerfile·deploy.sh 가 경로를 안다) — 계약(RunSpec·RunResult·request_run·오류)만 쓴다 (#1036)
+from scoring.agent_runner import (  # noqa: F401 - 오류·한도는 강의실이 여기서 받는다(강의실은 scoring 을 못 부른다)
+    CLAUDE_TOOLS,
+    RUN_TIMEOUT_SECONDS,
+    AgentGraderBusy,
+    AgentGraderError,
+    RunRejected,
+    RunResult,
+    RunSpec,
+    Vendor,
+    request_run,
+)
+from submissions.models import Submission
 
 #: JSON 값 — 구조화 출력·스키마는 모양을 정적으로 모른다(쓰기 전에 좁힌다).
 JSON = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
@@ -66,8 +77,17 @@ _SEARCH_TOOLS = ("Grep", "Glob")
 
 
 @dataclass(frozen=True)
+class ClassKey:
+    """강의실 클래스 키로 도는 실행(#1036) — 벤더는 그 클래스의 채점 연결, 모델은 문제의 채점 모델이다."""
+
+    class_id: int
+    vendor: Vendor
+    model: str
+
+
+@dataclass(frozen=True)
 class AgentJob:
-    submission: ContestSubmission
+    submission: Submission  # 공모전·강의실 제출 모두(자산은 바탕 `Submission` 에 붙는다)
     purpose: Literal["scoring", "quality"]  # issue_run_token 의 purpose 로 간다
     prompt: str  # 지침 전문(호출자가 만든다)
     output_schema: dict  # JSON 스키마(호출자가 만든다) — 계약 서명 그대로(#1000 댓글)
@@ -75,6 +95,8 @@ class AgentJob:
     items_key: str  # 응답에서 항목 배열의 키 (채점 "verdicts", 리뷰 "items" 등)
     id_key: str  # 항목의 id 키 ("requirement_id" 등)
     evidence_required: Callable[[dict], bool]  # 이 항목에 근거 `경로:줄` 이 있어야 하나
+    class_key: ClassKey | None = None  # 비면 플랫폼 키(운영 설정의 벤더·모델), 있으면 그 클래스 키(#1036)
+    load_snapshot: Callable[[], Snapshot] | None = None  # 박제본을 받는 길(`provided_snapshot` 이 없을 때)
 
 
 @dataclass(frozen=True)
@@ -123,30 +145,6 @@ class SnapshotUnavailable(Exception):
     """에이전트에게 줄 박제본이 없다 — 저장소 자산도 zip 소스 자료도 없다."""
 
 
-def _acquire_snapshot(submission: ContestSubmission) -> Snapshot:
-    provided = _provided.get()
-    if provided is not None and provided[0] == submission.id:
-        return provided[1]
-    repo_assets = list(
-        submission.assets.filter(kind=SubmissionAsset.Kind.REPOSITORY).order_by("order", "id")
-    )
-    for asset in repo_assets:
-        github = get_github_adapter()
-        snap = RepositorySnapshot.objects.filter(asset=asset).order_by("-cloned_at").first()
-        cloned = (
-            github.clone(asset.value, commit_sha=snap.commit_sha)
-            if snap is not None
-            else clone_repository_asset(asset, github)
-        )
-        return Snapshot(zip_bytes=cloned.zip_bytes, commit_sha=cloned.commit_sha, asset_id=asset.id)
-    storage = get_storage_adapter()
-    for asset in submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE).order_by("order", "id"):
-        raw = storage.read_object(asset.value)
-        if raw is not None and zipfile.is_zipfile(io.BytesIO(raw)):
-            return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.id)
-    raise SnapshotUnavailable("저장소 자산도 zip 소스 자료도 없다")
-
-
 class _LineIndex:
     """박제본 안 파일의 줄 수 — 근거 `경로:줄` 이 실재하는지 본다. 파일은 물을 때만 센다."""
 
@@ -171,6 +169,15 @@ class _LineIndex:
             data = self._zip.read(info)
             self._counts[name] = data.count(b"\n") + (0 if data.endswith(b"\n") or not data else 1)
         return self._counts[name]
+
+
+def _acquire_snapshot(job: AgentJob) -> Snapshot:
+    provided = _provided.get()
+    if provided is not None and provided[0] == job.submission.id:
+        return provided[1]
+    if job.load_snapshot is None:
+        raise SnapshotUnavailable("박제본을 받을 길이 없다")
+    return job.load_snapshot()
 
 
 # ── 스트림 해석 ─────────────────────────────────────────────────────────────────────────────────────────
@@ -443,7 +450,12 @@ def agent_model(vendor: Vendor) -> str:
 
 def _attempt(job: AgentJob, *, vendor: Vendor, model: str, snapshot: Snapshot, index: _LineIndex) -> tuple[list[str], dict[str, JSON], JSON]:
     issued = issue_run_token(
-        submission_id=job.submission.id, purpose=job.purpose, vendor=vendor, model=model, budget_usd=RUN_BUDGET_USD
+        submission_id=job.submission.id,
+        purpose=job.purpose,
+        vendor=vendor,
+        model=model,
+        budget_usd=RUN_BUDGET_USD,
+        key_class_id=job.class_key.class_id if job.class_key is not None else None,
     )
     spec = RunSpec(
         vendor=vendor,
@@ -502,17 +514,21 @@ def _budget_spent(attempt: JSON) -> bool:
 
 
 def run_agent_job(job: AgentJob) -> AgentJobOutcome:
-    vendor: Vendor = scoring_vendor()
-    model = agent_model(vendor)
+    if job.class_key is not None:
+        vendor, model = job.class_key.vendor, job.class_key.model
+    else:
+        vendor = scoring_vendor()
+        model = agent_model(vendor)
     record: dict[str, JSON] = {
         "purpose": job.purpose,
         "vendor": vendor,
         "model": model,
+        "key_source": "class" if job.class_key is not None else "platform",
         "prompt_sha256": hashlib.sha256(job.prompt.encode("utf-8")).hexdigest(),
         "attempts": [],
     }
     try:
-        snapshot = _acquire_snapshot(job.submission)
+        snapshot = _acquire_snapshot(job)
     except SnapshotUnavailable as exc:
         raise AgentRunHeld([f"박제본 없음: {exc}"], record) from exc
     record["commit_sha"] = snapshot.commit_sha

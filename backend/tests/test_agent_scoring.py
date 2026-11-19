@@ -1,6 +1,6 @@
 """#1000: 공모전 에이전트 채점 — 가짜 실행기(`agent-grader` 자리)로 받아들이는 조건과 보류를 본다.
 
-시임은 HTTP(채점 스캔)다. 실행기 서비스 호출(`scoring.agent_scoring.request_run`)만 가짜로 바꾸고, 실행 토큰
+시임은 HTTP(채점 스캔)다. 실행기 서비스 호출(`core.agent_scoring.request_run`)만 가짜로 바꾸고, 실행 토큰
 발급·스트림 해석·근거 검사·보류 기록은 실제로 돈다. 시험 제출은 zip 소스 하나(`app.py` 한 줄)라 근거
 `app.py:1` 만 실재한다.
 """
@@ -15,7 +15,8 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from core.models import AgentRunToken
-from scoring import agent_scoring, services
+from core import agent_scoring
+from scoring import services
 from scoring.agent_runner import AgentGraderBusy
 from scoring.models import AgentRun, Score, ScoringAttempt
 from tests.test_scoring import (  # noqa: F401 - fixture 들을 이 모듈에도 등록한다.
@@ -391,7 +392,7 @@ def test_scoring_prompt_carries_the_strict_rules():
     """#1686 — Haiku 측정에 쓴 엄격 규칙 8~10 이 운영 지침에 있다."""
 
     from core.llm_scoring import RequirementInput
-    from scoring.agent_prompt import build_scoring_prompt
+    from core.agent_prompt import build_scoring_prompt
 
     prompt = build_scoring_prompt([RequirementInput(requirement_id=1, text="로그인", grade="required", self_reported_met=False)])
     assert "8. 충족으로 판정하기 전에 그 기능을 실제로 수행하는 코드 줄을 Read 로 직접 열어 확인" in prompt

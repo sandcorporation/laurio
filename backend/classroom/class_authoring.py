@@ -22,6 +22,7 @@ from ninja.errors import HttpError
 
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
+from . import agent_grading
 from .models import Class, ClassTemplate, ProblemTemplate, _generate_join_code
 from .problem_authoring import (
     reject_banned_public_text,
@@ -88,6 +89,10 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
         validate_scoring_model_choice(class_obj, payload.default_model, current_value=class_obj.default_model)
     if payload.default_reasoning_effort is not None:
         validate_reasoning_effort(payload.default_reasoning_effort)
+    if Class.GradingMethod.AGENT in (payload.scoring_method, payload.quality_method):
+        reason = agent_grading.unavailable_reason(class_obj)
+        if reason is not None:
+            raise HttpError(422, f"이 채점 연결로는 에이전트 방식을 고를 수 없습니다({reason}).")
     next_model = payload.default_model if payload.default_model is not None else class_obj.default_model
     next_marked = (
         payload.default_model_is_reasoning
@@ -131,6 +136,12 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
     if payload.default_model_is_reasoning is not None:
         class_obj.default_model_marked_reasoning = payload.default_model_is_reasoning
         update_fields.append("default_model_marked_reasoning")
+    if payload.scoring_method is not None:
+        class_obj.scoring_method = payload.scoring_method
+        update_fields.append("scoring_method")
+    if payload.quality_method is not None:
+        class_obj.quality_method = payload.quality_method
+        update_fields.append("quality_method")
     if update_fields:
         class_obj.save(update_fields=update_fields)
     return class_obj

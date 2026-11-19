@@ -50,7 +50,7 @@ from core.quality_review import (
 )
 from submissions.models import SubmissionAsset
 
-from . import pending_scoring, scoring, scoring_cost
+from . import agent_grading, pending_scoring, scoring, scoring_cost
 from .grading_guidelines import effective_grading_guideline_text
 from .instructors import active_participant_q
 from .models import (
@@ -67,6 +67,9 @@ from .models import (
 from .scoring_connection import ScoringConnection, connection_for, mark_verified
 
 logger = logging.getLogger(__name__)
+
+#: 에이전트 완성도 검사 보류(#1036)의 실패 머리 — 공모전(`scoring.quality.HELD_ERROR_PREFIX`)과 같은 값.
+HELD_ERROR_PREFIX = "보류(받아들이는 조건 불일치): "
 
 #: 판정 채점과 같은 임대 길이(벤더 180초 + 여유 60초).
 QUALITY_LEASE = scoring.SCORING_LEASE
@@ -411,13 +414,14 @@ def claim(submission_id: int, *, owner: str, as_of) -> bool:
     return True
 
 
-def extend_lease(submission_id: int, *, owner: str, as_of) -> bool:
+def extend_lease(submission_id: int, *, owner: str, as_of, agent: bool = False) -> bool:
+    lease = agent_grading.AGENT_LEASE if agent else QUALITY_LEASE
     try:
         with transaction.atomic():
             scoring._short_lock_timeout()
             return (
                 ClassroomQualityJob.objects.filter(submission_id=submission_id, lease_owner=owner).update(
-                    lease_until=as_of + QUALITY_LEASE
+                    lease_until=as_of + lease
                 )
                 == 1
             )
@@ -458,12 +462,18 @@ class PreparedQuality:
     reasoning_effort: str | None
     prompt: str
     quality_input: QualityInput
+    #: 에이전트 방식으로 검사하는가(#1036, `classroom.agent_grading.uses_agent`).
+    agent: bool = False
+    #: 에이전트에게 줄 박제본 — 준비가 읽은 소스 바이트(zip 일 때만, 에이전트 방식일 때만).
+    snapshot: agent_grading.Snapshot | None = None
 
 
 @dataclass(frozen=True)
 class QualityOutcome:
     output: QualityOutput | None = None
     error: LLMAdapterError | None = None
+    #: 에이전트 방식이면 그 실행 결과(#1036) — 보류면 `output` 이 비어 있다.
+    agent: agent_grading.AgentResult | None = None
 
 
 def _fail(submission_id: int, message: str) -> Callable[[], dict]:
@@ -532,6 +542,7 @@ def prepare_tail(head: QualityHead) -> PreparedQuality | QualityConcluded:
         items=items,
         submission_text=source.text,
     )
+    uses_agent = agent_grading.uses_agent(head.class_obj, "quality")
     return PreparedQuality(
         submission=head.submission,
         owner=head.owner,
@@ -543,6 +554,8 @@ def prepare_tail(head: QualityHead) -> PreparedQuality | QualityConcluded:
         reasoning_effort=_effort(head.connection, problem),
         prompt=prompt,
         quality_input=QualityInput(submission_id=sid, prompt=prompt, items=tuple(items), source_text=source.text),
+        agent=uses_agent,
+        snapshot=agent_grading.snapshot_of(source.raw, head.asset.id) if uses_agent else None,
     )
 
 
@@ -559,7 +572,31 @@ def _adapter(prepared: PreparedQuality, *, asynchronous: bool) -> QualityReviewA
     return adapter
 
 
+def _call_agent(prepared: PreparedQuality) -> QualityOutcome:
+    """에이전트 방식(#1036) — 공모전 완성도 에이전트와 같은 지침·스키마, 이 클래스의 키."""
+
+    items = prepared.quality_input.items
+    try:
+        result = agent_grading.run_quality(
+            prepared.submission,
+            prepared.class_obj,
+            model=prepared.model,
+            title=prepared.problem.title,
+            items=items,
+            snapshot=prepared.snapshot,
+        )
+        if isinstance(result, agent_grading.AgentHeld):
+            return QualityOutcome(agent=result)
+        scores = agent_grading.quality_scores(result, items, submission_id=prepared.submission.id)
+    except LLMAdapterError as exc:
+        return QualityOutcome(error=exc)
+    output = QualityOutput(scores=tuple(scores), model_version=result.model_version, total_tokens=result.used_tokens)
+    return QualityOutcome(output=output, agent=result)
+
+
 def call_vendor_sync(prepared: PreparedQuality) -> QualityOutcome:
+    if prepared.agent:
+        return _call_agent(prepared)
     try:
         return QualityOutcome(output=_adapter(prepared, asynchronous=False).review_quality(prepared.quality_input))
     except LLMAdapterError as exc:
@@ -567,6 +604,8 @@ def call_vendor_sync(prepared: PreparedQuality) -> QualityOutcome:
 
 
 async def call_vendor_async(prepared: PreparedQuality) -> QualityOutcome:
+    if prepared.agent:
+        return await agent_grading.run_in_own_thread(_call_agent, prepared)
     try:
         adapter = _adapter(prepared, asynchronous=True)
         return QualityOutcome(output=await adapter.review_quality_async(prepared.quality_input))
@@ -589,8 +628,17 @@ def _apply_outcome(prepared: PreparedQuality, outcome: QualityOutcome) -> dict:
             scoring._mark_scoring_paused(class_obj, scoring.SERVER_UNREACHABLE_AT)
         return _fail(sid, str(exc))()
 
+    if isinstance(outcome.agent, agent_grading.AgentHeld):
+        # 두 번 다 받아들이는 조건을 어겼다(#1036) — 0~5 를 지어내지 않는다. 공모전과 같이 실패로 남겨 다시 돌지
+        # 않는다(강사가 다시 돌리면 그때 다시 본다).
+        agent_grading.record_run(sid, "quality", outcome.agent)
+        message = HELD_ERROR_PREFIX + "; ".join(outcome.agent.reasons)
+        logger.warning("ClassroomSubmission(pk=%s) 완성도 에이전트 검사 보류: %s", sid, message)
+        return _fail(sid, message)()
     output = outcome.output
     assert output is not None
+    if isinstance(outcome.agent, agent_grading.AgentAccepted):
+        agent_grading.record_run(sid, "quality", outcome.agent)
     used_tokens, estimated = output.total_tokens, False
     if used_tokens <= 0 and prepared.connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
