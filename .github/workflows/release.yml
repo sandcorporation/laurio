@@ -16,7 +16,7 @@
 #
 # 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다):
 #   - push: main 만. pull_request·pull_request_target 없음. GitHub 호스팅 실행기만. 액션은 SHA 고정. secrets 없음.
-#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만.
+#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만, issues: write 는 notify 잡에만.
 #   - GITHUB_TOKEN 의 push 는 다른 워크플로를 깨우지 않는다(production push 로 Actions 가 다시 돌지 않는다).
 #     저장소 웹훅(Jenkins)은 깨운다.
 name: release
@@ -64,6 +64,27 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  # check 가 붉으면 승격이 없다 = 배포가 없다 — 아무도 모르고 지나가지 않게 이슈를 연다(#1015). 같은 제목 이슈가 열려 있으면 댓글만.
+  notify:
+    needs: check
+    if: ${{ !cancelled() && needs.check.result == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: 실패 알림 이슈
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="release 검사 실패 — production 승격·배포 멈춤"
+          body="main \`${SHA}\` 의 release 검사(check)가 실패했다. 승격이 돌지 않아 이 커밋은 배포되지 않는다. 실행: ${RUN_URL}"
+          n=$(gh issue list --state open --search "\"$title\" in:title" --json number,title -q "[.[]|select(.title==\"$title\")][0].number // empty")
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$body"; else gh issue create --title "$title" --body "$body"; fi
 
   promote:
     needs: [verify, check, image]

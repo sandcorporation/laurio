@@ -16,6 +16,13 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
   amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`e2e`(`e2e.sh`, 스택을 여기서 굽는다)·`celery`(`celery-broker.sh`) →
   `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
+  **PR 에서는 `guard` 를 건너뛴다**(#1015, 줄 서기 단축) — `plan` 잡 출력 `guard` 가 PR 이벤트면 비고, `guard` 잡 `if` 가 그것을 본다
+  (PR 에서 뺄 잡을 고르는 한 곳. e2e 를 뺄 때도 같은 꼴로 한 줄). 잡 이름·`결과` 는 그대로, skipped 는 `결과` 가 받아 준다.
+  - **PR 검사 잡**: plan · checks(static·pytest 4·web) · e2e · celery · 결과.
+  - **release 검사 잡**(main push, `workflow_call` 이라 `github.event_name` 은 부른 쪽 push): 위에 **guard(frontend·operator·classroom)** 가 더해진다.
+  - PR 에 skipped 가 있으니 `verified_tree.py` 는 그 PR 을 「이미 초록」으로 치지 않는다 → release 의 `verify` 는 늘 skip=0, release `check` 는 전부 다시 돈다.
+  - **release 에서 guard 가 실패하면**: `check` 실패 → `promote` 가 돌지 않는다 → production 이 승격되지 않는다 → **배포가 없다**(이미지는 ghcr 에 오를 수 있다).
+    PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `release.yml` 의 `notify` 잡이 연 이슈(제목 「release 검사 실패 — production 승격·배포 멈춤」, 열려 있으면 댓글)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.
 - **main 에서는 `release.yml` 이 같은 pr-check.yml 을 `workflow_call` 로 부른다**(`push: main` 트리거는 pr-check.yml 에서 뺐다 —
   검사가 두 번 돌지 않는다). 그 실행의 `github.event_name`·`github.ref` 는 부른 쪽의 push·main 이라 아래 캐시 저장이 그대로 돈다.
   check 가 초록이어야 image(`image.yml`)가 여섯 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서),
