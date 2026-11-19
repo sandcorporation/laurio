@@ -4,7 +4,7 @@
 #   plan    문서(.md·docs/)만 바뀌었나(`changed.sh`) — 그러면 ADR 상태 검사만
 #   checks  `sub-checks.sh` — Django check·check --deploy·pytest 전체·생성물·문서 검사·단위 시험·타입 검사
 #   guard   (PR 에서는 건너뜀, release 에서만 — #1015) 세 앱 prod 이미지(amd64)를 여기서 굽고 `deploy-guard.sh` — 설정 없이는 죽고, 완전한 설정으로는 뜬다
-#   e2e     `e2e.sh` — 스택을 여기서 굽고(`up --build`) 세 프로젝트
+#   (e2e 는 PR·release 에서 빠졌다 — e2e.yml 이 main 을 매시 돈다, #1015)
 #   celery  `celery-broker.sh` — 실제 Redis 브로커로 beat → worker
 #   결과    위가 모두 초록(또는 문서만이라 건너뜀)이면 초록 — 브랜치 보호의 필수 검사로 걸 이름 하나
 #
@@ -52,7 +52,6 @@ jobs:
       tests: ${{ steps.plan.outputs.tests }}
       # PR 에서 뺄 잡을 고르는 한 곳(#1015) — PR 이 아닐 때만 '1'. release.yml 이 workflow_call 로 부르면 github.event_name 은
       # 부른 쪽 이벤트(push)다(GitHub 문서 「Reusing workflows」: the github context is the same as the caller) — 그래서 배포 전에는 돈다.
-      # 나중에 e2e 를 PR 에서 빼려면 `e2e:` 한 줄을 같은 꼴로 더하고 e2e 잡 if 에 `&& needs.plan.outputs.e2e == '1'` 만 붙인다.
       guard: ${{ github.event_name != 'pull_request' && '1' || '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -171,110 +170,6 @@ jobs:
         with:
           path: /tmp/bk/${{ matrix.app }}
           key: bk-${{ matrix.app }}-${{ hashFiles(format('docker/{0}.Dockerfile', matrix.app), 'pnpm-lock.yaml') }}
-  e2e:
-    name: e2e ${{ matrix.name }}
-    needs: plan
-    if: needs.plan.outputs.tests == '1'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        # 실행기마다 스택을 따로 굽고 프로젝트를 나눠 돈다(#932). 일꾼은 그대로 1개
-        include:
-          - {name: public-operator, targets: public operator}
-          - {name: classroom, targets: classroom}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
-      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
-      - id: bk-backend
-        name: 이미지 층 캐시 복원(backend)
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: /tmp/bk/backend
-          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
-          restore-keys: bk-backend-
-      - id: bk-frontend
-        name: 이미지 층 캐시 복원(frontend)
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: /tmp/bk/frontend
-          key: bk-frontend-${{ hashFiles('docker/frontend.Dockerfile','pnpm-lock.yaml') }}
-          restore-keys: bk-frontend-
-      - id: bk-operator
-        name: 이미지 층 캐시 복원(operator)
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: /tmp/bk/operator
-          key: bk-operator-${{ hashFiles('docker/operator.Dockerfile','pnpm-lock.yaml') }}
-          restore-keys: bk-operator-
-      - id: bk-classroom
-        name: 이미지 층 캐시 복원(classroom)
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: /tmp/bk/classroom
-          key: bk-classroom-${{ hashFiles('docker/classroom.Dockerfile','pnpm-lock.yaml') }}
-          restore-keys: bk-classroom-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22
-      - id: pnpm-store
-        name: pnpm 저장소 경로·Playwright 버전
-        run: |
-          corepack enable
-          echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
-          echo "pw=$(grep -o '@playwright/test@[0-9.]*' pnpm-lock.yaml | head -1 | cut -d@ -f3)" >>"$GITHUB_OUTPUT"
-      - id: bk-pnpm
-        name: pnpm 저장소 복원
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: pnpm-store-
-      - id: bk-pw
-        name: Playwright 브라우저 복원
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.pnpm-store.outputs.pw }}
-      - name: pnpm 과 Playwright 의존 라이브러리
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir frontend exec playwright install --with-deps chromium
-      - name: e2e(e2e.sh)
-        env:
-          # 호스팅 실행기는 코어가 적어(비공개 2·공개 4) 앱 셋·백엔드와 일꾼 둘이 다투면 3초 한도를 넘는다
-          CODEMIT_E2E_WORKERS: 1
-          CODEMIT_E2E_TARGETS: ${{ matrix.targets }}
-        run: bash scripts/ci/e2e.sh
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
-        name: 이미지 층 캐시 저장(backend, main push 만)
-        run: rm -rf /tmp/bk/backend && mv /tmp/bk-new/backend /tmp/bk/backend
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: /tmp/bk/backend
-          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pnpm.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pw.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.pnpm-store.outputs.pw }}
-      - if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: e2e-test-results-${{ matrix.name }}
-          path: test-results/
-          retention-days: 7
-
   celery:
     needs: plan
     if: needs.plan.outputs.tests == '1'
@@ -316,21 +211,39 @@ jobs:
           restore-keys: bk-classroom-
       - name: celery 브로커(celery-broker.sh)
         env:
-          CODEMIT_BK_CACHE_SAVE: ""  # 저장은 e2e·guard 잡이 한다 — 같은 키를 두 잡이 쓰지 않는다
+          CODEMIT_BK_CACHE_SAVE: ""  # 저장은 guard 잡(과 e2e.yml)이 한다 — 같은 키를 두 잡이 쓰지 않는다
         run: bash scripts/ci/celery-broker.sh
 
   result:
     name: 결과
-    needs: [plan, checks, guard, e2e, celery]
+    needs: [plan, checks, guard, celery]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: 모두 초록인가
+      # skipped 를 통과로 세지 않는다(#1015) — 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어져도 초록이 되던 구멍.
+      # 돌아야 할 잡은 이벤트·plan 이 정한다: plan 이 시험 없음(문서만)이면 나머지는 skipped 여야 하고,
+      # 아니면 checks·celery 는 success, guard 는 PR 이 아닐 때(plan 출력 guard=1) success 이고 PR 에서만 skipped.
+      - name: 돌아야 할 잡이 success 인가
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          PLAN: ${{ needs.plan.result }}
+          TESTS: ${{ needs.plan.outputs.tests }}
+          GUARD_ON: ${{ needs.plan.outputs.guard }}
+          CHECKS: ${{ needs.checks.result }}
+          GUARD: ${{ needs.guard.result }}
+          CELERY: ${{ needs.celery.result }}
         run: |
-          echo "잡 결과: $RESULTS"
-          for r in $RESULTS; do
-            case "$r" in success|skipped) ;; *) exit 1 ;; esac
+          echo "plan=$PLAN tests=$TESTS guard_on=$GUARD_ON checks=$CHECKS guard=$GUARD celery=$CELERY"
+          [ "$PLAN" = success ] || { echo "plan 이 success 가 아니다"; exit 1; }
+          if [ "$TESTS" = 1 ]; then
+            want_checks=success; want_celery=success
+            if [ "$GUARD_ON" = 1 ]; then want_guard=success; else want_guard=skipped; fi
+          else
+            want_checks=skipped; want_celery=skipped; want_guard=skipped
+          fi
+          bad=0
+          for pair in "checks:$CHECKS:$want_checks" "guard:$GUARD:$want_guard" "celery:$CELERY:$want_celery"; do
+            IFS=: read -r name got want <<<"$pair"
+            [ "$got" = "$want" ] || { echo "$name: $got (기대 $want)"; bad=1; }
           done
+          exit $bad
