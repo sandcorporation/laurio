@@ -23,9 +23,15 @@ ID_KEY = "requirement_id"
 def agent_response_schema() -> dict[str, object]:
     """`response_schema()` 의 항목마다 `evidence: list[str]` 를 더한다(원본은 건드리지 않는다)."""
 
+    from .agent_scoring import EVIDENCE_PATTERN  # 기본(single_call) 경로가 실행기 모듈을 미리 import 하지 않게
+
     schema = copy.deepcopy(response_schema())
     item = schema["properties"]["scores"]["items"]  # type: ignore[index]  # 위 함수가 만든 고정 모양
-    item["properties"]["evidence"] = {"type": "array", "items": {"type": "string"}, "maxItems": EVIDENCE_MAX}
+    item["properties"]["evidence"] = {
+        "type": "array",
+        "items": {"type": "string", "pattern": EVIDENCE_PATTERN},
+        "maxItems": EVIDENCE_MAX,
+    }
     item["required"] = [*item["required"], "evidence"]
     return schema
 

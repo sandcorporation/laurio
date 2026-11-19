@@ -14,7 +14,7 @@ from core import agent_scoring
 from scoring.agent_runner import AgentGraderBusy
 from core.agent_scoring import AgentJob, AgentJobOutcome, AgentRunHeld
 from scoring.models import QualityReviewAttempt, Score, SubmissionQualityReview
-from scoring.quality import HELD_ERROR_PREFIX
+from scoring.quality import HELD_ERROR_PREFIX, QUALITY_FAILURE_LIMIT
 from scoring.quality_agent import agent_response_schema, needs_evidence
 from tests.test_contest_quality import _run_quality, category, closed, landing_type  # noqa: F401 - 픽스처
 
@@ -79,18 +79,22 @@ def test_agent_method_reviews_from_the_snapshot_with_evidence(client, closed, ag
 
 
 @pytest.mark.django_db
-def test_agent_held_is_recorded_as_held_and_not_picked_again(client, closed, agent, monkeypatch):  # noqa: F811
+def test_agent_held_counts_as_one_failure_up_to_the_limit(client, closed, agent, monkeypatch):  # noqa: F811
+    """#1699 — 보류는 영구 제외가 아니라 실패 한 번이다. 상한(`QUALITY_FAILURE_LIMIT`)에 닿으면 더 집지 않는다."""
+
     monkeypatch.setenv("CONTEST_SCORING_METHOD", "agent")
     agent.mode = "held"
     score_before = Score.objects.get(submission_id=closed["a"]).percentage
 
-    assert {r["status"] for r in _run_quality(client)["rows"]} == {"held"}
+    for _ in range(QUALITY_FAILURE_LIMIT):
+        assert {r["status"] for r in _run_quality(client)["rows"]} == {"held"}
     assert _run_quality(client)["rows"] == []
 
     assert not SubmissionQualityReview.objects.exists()
-    attempt = QualityReviewAttempt.objects.get(submission_id=closed["a"])
-    assert attempt.permanent and attempt.error.startswith(HELD_ERROR_PREFIX)
-    assert "src/none.py:3" in attempt.error
+    attempts = QualityReviewAttempt.objects.filter(submission_id=closed["a"])
+    assert attempts.count() == QUALITY_FAILURE_LIMIT
+    assert all(not a.permanent and a.error.startswith(HELD_ERROR_PREFIX) for a in attempts)
+    assert "src/none.py:3" in attempts.first().error
     assert Score.objects.get(submission_id=closed["a"]).percentage == score_before
 
 

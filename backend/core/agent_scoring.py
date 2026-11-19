@@ -68,8 +68,10 @@ ATTEMPT_HTTP_TIMEOUT_SECONDS = ATTEMPT_TIMEOUT_SECONDS + 60
 AGENT_JOB_MAX_SECONDS = MAX_ATTEMPTS * ATTEMPT_HTTP_TIMEOUT_SECONDS
 MAX_EVIDENCE = 5
 STDOUT_TAIL_CHARS = 4000  # 기록(AgentRun.attempts)에 남기는 CLI stdout 꼬리
-EVIDENCE_PATTERN = r"^[^:\n]+:[1-9][0-9]*(-[1-9][0-9]*)?$"
-_EVIDENCE_RE = re.compile(r"^(?P<path>[^:\n]+):(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?$")
+#: 근거 「경로:줄」·「경로:줄-줄」, 또는 줄 없이 「경로」(파일 전체 — 마이그레이션 SQL·작은 설정 파일). 지침은 줄을
+#: 달라고 하지만 파일만 댄 근거 하나로 리뷰 전체를 보류하지 않는다(#1699). 그 파일이 박제본에 있는지는 그대로 본다.
+EVIDENCE_PATTERN = r"^[^:\n]+(:[1-9][0-9]*(-[1-9][0-9]*)?)?$"
+_EVIDENCE_RE = re.compile(r"^(?P<path>[^:\n]+)(?::(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?)?$")
 _OPENAI_DEFAULT_MODEL = "gpt-4o-mini"  # `core.llm_scoring._OPENAI_DEFAULT_MODEL` 과 같은 값
 _ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-5-5"  # `core.llm_scoring_anthropic.PLATFORM_DEFAULT_MODEL`
 _READ_TOOLS = ("Read",)
@@ -379,11 +381,14 @@ def _check_evidence(
                 report["bad"].append(f"{item_id}:{ref[:120]}(형식)")
                 continue
             lines = index.line_count(prefix, match["path"])
-            start = int(match["start"])
-            end = int(match["end"] or start)
             if lines is None:
                 report["bad"].append(f"{item_id}:{match['path'][:120]}(없음)")
-            elif not (start <= end <= lines):
+                continue
+            if match["start"] is None:
+                continue  # 파일 전체
+            start = int(match["start"])
+            end = int(match["end"] or start)
+            if not (start <= end <= lines):
                 report["bad"].append(f"{item_id}:{ref[:120]}(>{lines})")
     return report
 

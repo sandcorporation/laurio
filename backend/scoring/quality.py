@@ -13,8 +13,9 @@
   데이터라 `core.quality_review.build_prompt` 가 `neutralize_untrusted` 로 무력화해 경계 안에 넣는다.
 - **키**: `core.llm_scoring.get_adapter()` — Score 와 같은 플랫폼 어댑터다.
 - **에이전트 판(#1001)**: `CONTEST_SCORING_METHOD=agent` 면 위 「무엇을 읽나」 대신 `scoring.quality_agent` 가
-  박제본을 채점과 같은 격리·프록시로 읽는다. 두 번 다 받아들이는 조건을 어기면 **보류** — 영구 실패 이력
-  (`HELD_ERROR_PREFIX`)만 남기고 0~5 를 지어내지 않는다. 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않는다.
+  박제본을 채점과 같은 격리·프록시로 읽는다. 두 번 다 받아들이는 조건을 어기면 **보류** — 실패 이력
+  (`HELD_ERROR_PREFIX`) 한 줄을 남기고 0~5 를 지어내지 않는다. 영구 제외가 아니라 실패 한 번으로 세어
+  `QUALITY_FAILURE_LIMIT` 안에서 다시 집는다(#1699 — 근거 한 곳 때문에 첫 실패에 영구 제외됐다). 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않는다.
 - **실패**: `QualityReviewAttempt` 에 남긴다. 영구 실패(`LLMAdapterPermanentError`)가 하나라도 있거나
   `QUALITY_FAILURE_LIMIT` 번 실패하면 더 집지 않는다. 0% 같은 대체값을 지어내지 않는다 — 완성도는 상금과
   무관하니 「없음」으로 남겨도 아무것도 막지 않는다.
@@ -167,11 +168,10 @@ def _review_one(submission, as_of, ctx):
         # 실행기가 바쁘거나 오늘 예산이 찼다 — 제출 탓이 아니니 실패로 세지 않고 다음 스캔에 다시 집는다.
         return {"submission_id": submission.id, "status": "deferred", "error": f"{type(exc).__name__}: {exc}"}
     except QualityReviewHeld as exc:
-        # 두 번 다 받아들이는 조건을 어겼다 — 보류. 0~5 를 지어내지 않고, 다시 돌려 예산을 쓰지 않도록 더 집지 않는다.
+        # 두 번 다 받아들이는 조건을 어겼다 — 보류. 0~5 를 지어내지 않는다. 실패 한 번으로 세어 상한 안에서 다시 집는다
+        # (#1699 — 영구로 두었더니 근거 한 곳의 형식 때문에 첫 실패에 빠졌다; 상한이 예산을 막는다).
         logger.warning("Submission(pk=%s) 완성도 에이전트 리뷰 보류: %s", submission.id, exc)
-        QualityReviewAttempt.objects.create(
-            submission_id=submission.id, error=f"{HELD_ERROR_PREFIX}{exc}"[:2000], permanent=True
-        )
+        QualityReviewAttempt.objects.create(submission_id=submission.id, error=f"{HELD_ERROR_PREFIX}{exc}"[:2000])
         return {"submission_id": submission.id, "status": "held", "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - 한 건의 실패가 배치를 막지 않는다.
         if not isinstance(exc, LLMAdapterError):
