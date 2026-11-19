@@ -18,8 +18,8 @@ ADR-0014의 소비: "대형 프로젝트의 소스는 채점 컨텍스트 비용
    허용 목록은 `.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는
    `README` 를 조용히 버렸고, staging 의 `octocat/Hello-World` 는 그 때문에
    「채점할 파일 0개」가 됐다(ADR-0031). 바이너리는 3번이 따로 거른다.
-2. 예산은 앱 코드부터 채운다(#986, `selection_tier`) — 앱 코드 → 시험·README → 그 밖의 텍스트 →
-   문서·스크래치·생성물·배포·CI. 경로 이름 순 하나로 채우던 때는 앞 글자 폴더(`.scratch/`·
+2. 예산은 앱 코드부터 채운다(#986, `selection_tier`) — 앱 코드 → README → 그 밖의 텍스트 →
+   시험·문서·스크래치·생성물·배포·CI(`EXCLUDE_LOW_PRIORITY` 면 맨 뒤 차례는 뺀다). 경로 이름 순 하나로 채우던 때는 앞 글자 폴더(`.scratch/`·
    `deploy/`·`backend/.sqlx/`)가 예산을 다 써 앱 코드가 0파일인 제출이 0%를 받았다. 예산 밖으로
    빠진 양은 `SelectionOmission` 으로 돌려준다.
    전체 선택량이 `MAX_SOURCE_BYTES`를 넘지 않도록 예산을 두고, 예산이 바닥나면 그
@@ -152,10 +152,10 @@ CODE_SUFFIXES = (
     ".html", ".htm", ".css", ".scss", ".sass", ".less", ".sql", ".sh", ".gd",
 )
 
-#: 경로에 이 조각이 있으면 맨 뒤로 민다(소문자 비교, 경로 앞에 「/」를 붙여 본다) — 사람이 쓴
-#: 앱 코드가 아니거나(문서·스크래치·실험·생성물·배포·CI) 채점 근거로 약한 것들이다. 빼지는
-#: 않는다: 예산이 남으면 담긴다. 공모전 3에서 `.scratch/`·`deploy/`·`docs/`, `backend/.sqlx/`
-#: 가 경로 이름 순으로 앞서 예산을 다 써 앱 코드가 0파일이었다(617·866·809).
+#: 경로에 이 조각이 있으면 맨 뒤 차례(`LOW_PRIORITY_TIER`)다(소문자 비교, 경로 앞에 「/」를 붙여 본다) —
+#: 사람이 쓴 앱 코드가 아니거나(문서·스크래치·실험·생성물·배포·CI) 채점 근거로 약한 것들이다.
+#: 공모전 3에서 `.scratch/`·`deploy/`·`docs/`, `backend/.sqlx/` 가 경로 이름 순으로 앞서 예산을
+#: 다 써 앱 코드가 0파일이었다(617·866·809).
 DEPRIORITIZED_DIR_FRAGMENTS = (
     "/docs/", "/doc/", "/.scratch/", "/scratch/", "/experiments/", "/examples/",
     "/.sqlx/", "/migrations/", "/fixtures/", "/__snapshots__/", "/deploy/", "/infra/",
@@ -164,13 +164,22 @@ DEPRIORITIZED_DIR_FRAGMENTS = (
 
 _TEST_DIR_FRAGMENTS = ("/test/", "/tests/", "/__tests__/", "/spec/", "/e2e/")
 
+#: 맨 뒤 차례 — 문서·스크래치·생성물·배포·CI·숨은 폴더와 **시험 코드**.
+LOW_PRIORITY_TIER = 3
+
+#: 맨 뒤 차례를 아예 빼는가(#986, 대장 결정 대기). False 면 예산이 남을 때만 실리고, True 면 후보에서
+#: 빠진다. 공모전과 강의실이 같이 따른다 — 바꾸면 `tests/test_source_selection_priority.py` 의
+#: 순서 시험이 그 결정을 따라 바뀐다.
+EXCLUDE_LOW_PRIORITY = False
+
 
 def selection_tier(path: str) -> int:
     """예산을 채우는 차례(작을수록 먼저, #986). 같은 차례 안에서는 경로 이름 순이라 결정적이다.
 
-    0 앱 코드 → 1 시험 코드·README → 2 그 밖의 텍스트(설정·`.md`·`.txt`·Dockerfile) →
-    3 문서·스크래치·생성물·배포·CI 폴더(`DEPRIORITIZED_DIR_FRAGMENTS`)와 숨은 폴더.
-    예전에는 경로 이름 순 하나였다 — 앞 글자 폴더가 크면 앱 코드가 예산 밖으로 밀렸다.
+    0 앱 코드 → 1 README → 2 그 밖의 텍스트(설정·`.md`·`.txt`·Dockerfile) →
+    3(`LOW_PRIORITY_TIER`) 시험 코드와 문서·스크래치·생성물·배포·CI 폴더
+    (`DEPRIORITIZED_DIR_FRAGMENTS`)·숨은 폴더. 예전에는 경로 이름 순 하나였다 — 앞 글자 폴더가
+    크면 앱 코드가 예산 밖으로 밀렸다.
     """
 
     lower = "/" + path.lower()
@@ -179,14 +188,14 @@ def selection_tier(path: str) -> int:
     if any(fragment in directory for fragment in DEPRIORITIZED_DIR_FRAGMENTS) or any(
         segment.startswith(".") for segment in directory.split("/") if segment
     ):
-        return 3
+        return LOW_PRIORITY_TIER
     if name.startswith("readme"):
         return 1
     if name.endswith(CODE_SUFFIXES):
         is_test = any(fragment in directory for fragment in _TEST_DIR_FRAGMENTS) or (
             name.startswith("test_") or ".test." in name or ".spec." in name or name.endswith("_test.go")
         )
-        return 1 if is_test else 0
+        return LOW_PRIORITY_TIER if is_test else 0
     return 2
 
 
@@ -287,6 +296,8 @@ def _zip_candidates(raw: bytes, stack: contextlib.ExitStack) -> list[_Candidate]
     for info in sorted(archive.infolist(), key=lambda i: (selection_tier(i.filename), i.filename)):
         if info.is_dir() or not _is_selectable(info.filename):
             continue
+        if EXCLUDE_LOW_PRIORITY and selection_tier(info.filename) == LOW_PRIORITY_TIER:
+            continue
 
         def _reader(budget: int, *, info=info) -> bytes:
             # archive.read(info)는 멤버 전체를 먼저 압축 해제한다 — 예산과 무관하게
@@ -317,10 +328,17 @@ class SelectionOmission:
     omitted_bytes: int = 0
     omitted_code_files: int = 0
     truncated_files: int = 0
+    truncated_code_files: int = 0
 
     @property
     def any(self) -> bool:
         return bool(self.omitted_files or self.truncated_files)
+
+    @property
+    def app_code_cut(self) -> bool:
+        """앱 코드(`selection_tier` 0)가 하나라도 빠지거나 잘렸는가 — 공모전 보류 기준(#986)."""
+
+        return bool(self.omitted_code_files or self.truncated_code_files)
 
 
 def select_source_files(
@@ -353,6 +371,7 @@ def select_source_files_with_omission(
     budget = max_bytes
     converters = registered_converters()
     truncated = 0
+    truncated_code = 0
 
     with contextlib.ExitStack() as stack:
         queues: list[tuple[int, str, collections.deque[_Candidate]]] = []
@@ -400,6 +419,8 @@ def select_source_files_with_omission(
                     budget -= len(content_bytes)
                     if candidate.size is not None and len(content_bytes) < candidate.size:
                         truncated += 1
+                        if candidate.convertible and selection_tier(candidate.path) == 0:
+                            truncated_code += 1
 
                 next_queues.append((asset_id, label, queue))
 
@@ -412,5 +433,6 @@ def select_source_files_with_omission(
         omitted_bytes=sum(c.size or 0 for c in left),
         omitted_code_files=sum(1 for c in left if c.convertible and selection_tier(c.path) == 0),
         truncated_files=truncated,
+        truncated_code_files=truncated_code,
     )
     return files, omission

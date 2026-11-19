@@ -10,7 +10,12 @@ from __future__ import annotations
 import io
 import zipfile
 
+import pytest
+
+from core import source_selection
+from core.model_context import DEFAULT_CONTEXT_WINDOW_TOKENS, context_window_tokens, source_budget_bytes
 from core.source_selection import (
+    LOW_PRIORITY_TIER,
     MAX_SOURCE_BYTES,
     select_source_files,
     select_source_files_with_omission,
@@ -108,21 +113,22 @@ def test_the_order_is_deterministic_and_app_code_comes_first():
     assert first == [
         f"{root}/src/app.py",
         f"{root}/README.md",
-        f"{root}/tests/test_app.py",
         f"{root}/package.json",
         f"{root}/.github/workflows/ci.yml",
         f"{root}/docs/a.md",
+        f"{root}/tests/test_app.py",
     ]
 
 
 def test_selection_tier_puts_generated_scratch_and_ci_last():
     assert selection_tier("r/src/main.py") == 0
-    assert selection_tier("r/tests/test_main.py") == 1
+    assert selection_tier("r/tests/test_main.py") == LOW_PRIORITY_TIER
+    assert selection_tier("r/web/src/App.test.tsx") == LOW_PRIORITY_TIER
     assert selection_tier("r/README.md") == 1
     assert selection_tier("r/Dockerfile") == 2
-    assert selection_tier("r/backend/.sqlx/query-1.json") == 3
-    assert selection_tier("r/backend/app/migrations/0001_initial.py") == 3
-    assert selection_tier("r/.scratch/a.py") == 3
+    assert selection_tier("r/backend/.sqlx/query-1.json") == LOW_PRIORITY_TIER
+    assert selection_tier("r/backend/app/migrations/0001_initial.py") == LOW_PRIORITY_TIER
+    assert selection_tier("r/.scratch/a.py") == LOW_PRIORITY_TIER
 
 
 def test_what_did_not_fit_is_reported():
@@ -136,6 +142,8 @@ def test_what_did_not_fit_is_reported():
     assert omission.omitted_code_files > 0
     assert omission.omitted_files == 41 - len(selected)
     assert omission.truncated_files == 1
+    assert omission.truncated_code_files == 1
+    assert omission.app_code_cut
     assert omission.omitted_bytes > 0
 
 
@@ -143,3 +151,40 @@ def test_nothing_is_reported_when_everything_fits():
     _selected, omission = select_source_files_with_omission([(1, "저장소", _zip({"r/src/a.py": "x\n"}))])
 
     assert not omission.any
+
+
+def test_what_did_not_fit_outside_app_code_does_not_count_as_app_code_cut():
+    files = {"r/src/a.py": "x = 1\n"} | {f"r/docs/d-{i}.md": "문서\n" * 3000 for i in range(5)}
+
+    _selected, omission = select_source_files_with_omission([(1, "저장소", _zip(files))], max_bytes=20_000)
+
+    assert omission.any
+    assert not omission.app_code_cut
+
+
+def test_low_priority_files_can_be_excluded_outright(monkeypatch):
+    """대장 결정 대기(#986) — 맨 뒤 차례를 아예 빼는 선택지가 스위치 하나다."""
+
+    monkeypatch.setattr(source_selection, "EXCLUDE_LOW_PRIORITY", True)
+    files = {"r/src/a.py": "x\n", "r/tests/test_a.py": "x\n", "r/docs/a.md": "x\n", "r/README.md": "x\n"}
+
+    assert _selected_paths(_zip(files)) == {"r/src/a.py", "r/README.md"}
+
+
+@pytest.mark.parametrize(
+    ("model", "window"),
+    [("gpt-4o-mini", 128_000), ("gpt-4.1", 1_047_576), ("claude-haiku-5-5", 1_000_000), ("모르는-모델", 128_000)],
+)
+def test_the_source_budget_follows_the_model_context(model, window):
+    assert context_window_tokens(model) == window
+    assert DEFAULT_CONTEXT_WINDOW_TOKENS == 128_000
+    budget = source_budget_bytes(model, instruction_bytes=10_000)
+    assert source_budget_bytes(model, instruction_bytes=0) - budget == 10_000
+    # 응답 몫을 남기고도 컨텍스트 안에 든다(바이트/토큰 3 기준).
+    assert budget // 3 < window
+
+
+def test_the_default_model_budget_is_close_to_the_old_fixed_budget():
+    """gpt-4o-mini 기준 예산은 옛 300KB 와 크게 다르지 않다 — 보류 기준이 갑자기 느슨해지거나 조이지 않는다."""
+
+    assert 250_000 < source_budget_bytes("gpt-4o-mini", instruction_bytes=8_000) < 360_000

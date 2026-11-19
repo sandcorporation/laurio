@@ -87,6 +87,7 @@ from submissions.scoring_basis import (
 )
 
 from .models import Score, ScoringAttempt
+from core.model_context import source_budget_bytes
 from core.source_selection import select_source_files_with_omission
 
 logger = logging.getLogger(__name__)
@@ -498,6 +499,16 @@ _TRANSIENT_VENDOR_FAILURE = (
 #: 따로 늘린다(아래 `SUBMISSION_SCORING_SCAN`).
 CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 60
 
+#: 채점 보류 표식(#986) — 앱 코드가 모델 컨텍스트에 다 들어가지 않는 제출의 `ScoringAttempt.error`
+#: 머리. 이 표식이 있는 제출은 채점 대기에서 빠지고(재시도·0% 확정 없음), `release_scoring_hold`
+#: 명령이 표식을 지워야 다시 고른다.
+SCORING_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
+
+#: 사람이 보류를 푼 표식(#986, `release_scoring_hold`) — 보류 기록의 머리를 이것으로 바꾼다. 이
+#: 표식이 있는 제출은 앱 코드가 넘쳐도 실린 만큼으로 채점한다. 두 표식 모두 실패 상한의 횟수에
+#: 세지 않는다 — 벤더를 부르지 않았고 제출물이 실패한 것도 아니다.
+SCORING_HOLD_RELEASED_ERROR_PREFIX = "SourceOverBudgetReleased:"
+
 
 def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """실패 상한(#222, ADR-0031)에 이르렀는가 — 영구 실패가 하나라도 있으면 유예 없이
@@ -513,7 +524,11 @@ def _scoring_cap_reached(submission: ContestSubmission, *, as_of) -> bool:
     """
 
     counts = submission.scoring_attempts.aggregate(
-        total=Count("id"),
+        total=Count(
+            "id",
+            filter=~Q(error__startswith=SCORING_HOLD_ERROR_PREFIX)
+            & ~Q(error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX),
+        ),
         permanent=Count("id", filter=Q(permanent=True)),
         transient=Count("id", filter=_TRANSIENT_VENDOR_FAILURE),
     )
@@ -722,18 +737,43 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
 
     try:
         requirements = _requirement_inputs(submission)
+        contest = submission.contest
+        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
+        # 예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
+        # 프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
+        instruction_bytes = len(
+            _build_prompt(contest=contest, requirements=requirements, source_files=[]).encode("utf-8")
+        )
+        source_budget = source_budget_bytes(
+            str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
+        )
         source_files, omission = select_source_files_with_omission(
             [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
             + [
                 (asset.id, _asset_label(asset), cloned.zip_bytes)
                 for asset, cloned in cloned_repositories
-            ]
+            ],
+            max_bytes=source_budget,
         )
+        if omission.app_code_cut and not submission.scoring_attempts.filter(
+            error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX
+        ).exists():
+            # 앱 코드가 모델 컨텍스트에 다 들어가지 않는다 — 잘린 소스로 채점하면 「없는 기능」으로
+            # 미달 판정이 나므로 벤더를 부르지 않고 보류한다(#986). 보류 표식이 있는 제출은
+            # `_pending_submissions` 가 빼므로 재시도도, 실패 상한의 0% 확정도 없다. 사람이
+            # `release_scoring_hold` 로 풀 때까지 그대로다.
+            reason = (
+                f"{SCORING_HOLD_ERROR_PREFIX} 앱 코드가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 "
+                f"(model={getattr(llm, 'model_version', '')} budget_bytes={source_budget} "
+                f"omitted_code_files={omission.omitted_code_files} "
+                f"truncated_code_files={omission.truncated_code_files} "
+                f"omitted_files={omission.omitted_files} omitted_bytes={omission.omitted_bytes})"
+            )
+            logger.warning("Submission(pk=%s) %s", submission.id, reason)
+            ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+            return {"submission_id": submission.id, "status": "held", "error": reason}
         if omission.any:
-            # 잘린 채 채점된 제출을 남긴다(#986) — 보류하지 않는다: 300KB 를 넘는 정상 저장소가
-            # 점수 없이 묶이면 ADR-0031 「반드시 끝난다」와 부딪힌다. 앱 코드가 먼저 담기므로
-            # (`selection_tier`) 빠지는 것은 대개 문서·설정 쪽이고, `omitted_code_files` 가 0이
-            # 아니면 앱 코드까지 넘친 제출이다.
+            # 앱 코드는 다 실렸고 뒤 차례(문서·설정·시험 등)만 빠졌다 — 채점하되 빠진 양을 남긴다.
             logger.warning(
                 "Submission(pk=%s) 소스가 예산을 넘어 일부만 채점에 실었다 "
                 "(omitted_files=%s omitted_bytes=%s omitted_code_files=%s truncated_files=%s)",
@@ -743,12 +783,10 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
                 omission.omitted_code_files,
                 omission.truncated_files,
             )
-        contest = submission.contest
         prompt = _build_prompt(
             contest=contest, requirements=requirements, source_files=source_files
         )
 
-        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
         scoring_input = ScoringInput(
             submission_id=submission.id,
             contest_id=contest.id,
@@ -987,6 +1025,14 @@ def _pending_submissions(as_of, ctx):
             contest__deadline_at__gt=as_of - _REPOSITORY_VISIBILITY_GRACE,
         )
         .annotate(attempt_count=Coalesce(Subquery(attempt_count), 0))
+        # 보류된 제출(#986, `SCORING_HOLD_ERROR_PREFIX`)은 사람이 풀 때까지 다시 고르지 않는다.
+        .exclude(
+            Exists(
+                ScoringAttempt.objects.filter(
+                    submission_id=OuterRef("pk"), error__startswith=SCORING_HOLD_ERROR_PREFIX
+                )
+            )
+        )
         .select_related("contest")
     )
 

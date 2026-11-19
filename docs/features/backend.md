@@ -511,15 +511,19 @@ llm_scoring`(#274)에 이어 `core.repository_adapters`(GitHub 저장소 clone·
 `dist` 등), 잠금 파일(`package-lock.json`·`uv.lock` 등), 압축 번들·소스맵(`.min.js`·
 `.map`), 이미지·아카이브·폰트 같은 바이너리 확장자, 맥 zip 의 `__MACOSX/`·`.DS_Store`
 만 빼고, 나머지는 NUL 바이트 없이 UTF-8 로 읽히면 **앱 코드부터**(#986, `selection_tier`:
-앱 코드 → 시험·README → 그 밖의 텍스트 → 문서·스크래치·생성물·배포·CI·숨은 폴더, 같은 차례 안은
+앱 코드 → README → 그 밖의 텍스트 → 시험·문서·스크래치·생성물·배포·CI·숨은 폴더, 같은 차례 안은
 경로 이름 순) 예산(`MAX_SOURCE_BYTES`, 약 300KB)까지 싣는다(NUL 이 프롬프트에 실리면 채점 결과 저장이
 PostgreSQL `DataError` 로 깨진다). 예전 허용 목록은
 `.txt`(Packet Tracer 장비 설정)·`Dockerfile`·확장자 없는 `README` 를 조용히 버렸다.
 공모전과 강의실 채점이 같은 모듈을 쓴다. 대가는 예산이다 — 앱 코드 확장자인 큰 파일
 (코드로 쓴 데이터 등)은 여전히 다른 코드의 몫을 먹는다; 그런 파일이 실제로 문제가 되면
-`EXCLUDED_FILE_NAMES`·`EXCLUDED_SUFFIXES` 에 한 줄 더한다. 예산을 넘은 공모전 제출은 보류하지
-않고 실린 만큼으로 채점하며, 빠진 양(파일 수·바이트·그중 앱 코드 수·잘린 파일 수)을 경고 로그
-「소스가 예산을 넘어 일부만 채점에 실었다」로 남긴다(`SelectionOmission`).
+`EXCLUDED_FILE_NAMES`·`EXCLUDED_SUFFIXES` 에 한 줄 더한다. 공모전 채점의 예산은 부를 모델의
+컨텍스트에서 정하고(`core.model_context.source_budget_bytes`, 모르는 모델은 128K), **앱 코드가 그 안에
+다 들어가지 않으면 벤더를 부르지 않고 보류한다** — 시도 기록이 `SourceOverBudgetHold:` 로 시작하고,
+재시도도 실패 상한의 0% 확정도 없다. `manage.py release_scoring_hold <제출 id…>` 로 풀면 실린 만큼으로
+채점한다(ADR-0027 개정). 앱 코드는 다 실리고 뒤 차례만 빠진 제출은 채점하되 빠진 양을 경고 로그
+「소스가 예산을 넘어 일부만 채점에 실었다」로 남긴다(`SelectionOmission`). 강의실은 `MAX_SOURCE_BYTES`
+로 잘라 그대로 채점한다.
 
 **zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
 `classroom.git_history_hint`). 위 제외 목록이 `.git/` 를 빼므로, 받는 형식에 소스(zip)가
