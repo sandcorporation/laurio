@@ -11,8 +11,8 @@ OpenAI·Anthropic 어느 쪽도 단가를 주는 공식 API 가 없다. 그래�
 - `fetch-failed`: 파일을 받지 못했다(시간 초과·비 200·크기 초과).
 - `format-changed`: 받았지만 JSON 객체가 아니거나 기대한 필드가 어느 모델에도 없다.
 
-알림은 GlitchTip 경고 이벤트 하나다. 예외 클래스 `PriceDriftAlert` 가 **`glitchtip_pick.py` 의
-`DELIBERATE_EXCEPTION_TYPES` 에 있어** 자동 진단이 코드 버그로 집지 않는다(사람이 가격 페이지를 보고
+알림은 GlitchTip 경고 이벤트 하나다. 예외 클래스 `PriceDriftAlert` 가 **공용판 `ops-shared/glitchtip/pick.py` 의
+`DELIBERATE_EXCEPTION_TYPES`(대장 몫) 에 있어** 자동 진단이 코드 버그로 집지 않는다(사람이 가격 페이지를 보고
 표를 고칠 일이다). 지문은 알림 종류 하나라 하루 한 번 같은 내용은 이슈 하나로 묶인다.
 
 바깥에 나가는 곳은 `LITELLM_PRICES_URL` 한 주소뿐이고, 받는 함수는 주입할 수 있다 — 시험·dev·CI 는
@@ -53,7 +53,7 @@ _ABOVE_INPUT = re.compile(r"^input_cost_per_token_above_(\d+)k_tokens$")
 
 class PriceDriftAlert(RuntimeError):
     """단가 대조 결과를 GlitchTip 으로 보내는 예외 — 사고가 아니다. 이 클래스 이름이
-    `scripts/glitchtip_pick.py` 의 `DELIBERATE_EXCEPTION_TYPES` 에 있다(이름을 바꾸면 거기도)."""
+    공용판 `ops-shared/glitchtip/pick.py` 의 `DELIBERATE_EXCEPTION_TYPES`(대장 몫) 에 있다 — 예외 이름을 바꾸면 대장에게."""
 
 
 class FetchFailed(Exception):
