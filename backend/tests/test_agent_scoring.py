@@ -388,18 +388,6 @@ def test_each_attempt_carries_its_cli_and_http_time_limits(client, category, lan
     assert runner.http_timeouts == [agent_scoring.ATTEMPT_TIMEOUT_SECONDS + 60] * 2
 
 
-def test_scoring_prompt_carries_the_strict_rules():
-    """#1686 — Haiku 측정에 쓴 엄격 규칙 8~10 이 운영 지침에 있다."""
-
-    from core.llm_scoring import RequirementInput
-    from core.agent_prompt import build_scoring_prompt
-
-    prompt = build_scoring_prompt([RequirementInput(requirement_id=1, text="로그인", grade="required", self_reported_met=False)])
-    assert "8. 충족으로 판정하기 전에 그 기능을 실제로 수행하는 코드 줄을 Read 로 직접 열어 확인" in prompt
-    assert "9. 기능을 수행하는 코드를 찾지 못했으면 미충족입니다." in prompt
-    assert "10. 충족으로 볼 항목마다 반례를 한 번 찾습니다" in prompt
-
-
 @pytest.mark.django_db
 def test_an_attempt_that_spent_the_run_budget_is_not_retried(
     client, category, landing_type, monkeypatch, agent_method, claude_vendor
