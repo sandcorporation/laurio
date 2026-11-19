@@ -5,6 +5,7 @@ import {
   canClear,
   canProbe,
   changeText,
+  choiceOptions,
   initialInput,
   inputAttributes,
   savePayload,
@@ -24,6 +25,7 @@ function setting(overrides: Partial<RuntimeSetting> = {}): RuntimeSetting {
     last4: "abcd",
     updated_at: "2026-11-05T12:00:00Z",
     updated_by: "su",
+    choices: null,
     ...overrides,
   };
 }
@@ -102,5 +104,34 @@ describe("변경 이력 문구", () => {
 
   it("지우기는 지운 값을 보인다", () => {
     expect(changeText({ ...base, action: "clear", before: "••••efgh", after: "" })).toBe("지우기 · ••••efgh");
+  });
+});
+
+describe("선택형 설정(#994)", () => {
+  const vendor = setting({
+    key: "LLM_SCORING_VENDOR",
+    label: "채점 벤더",
+    kind: "choice",
+    value: null,
+    default: "openai",
+    last4: null,
+    choices: ["openai", "anthropic"],
+  });
+
+  it("선택 상자는 「—」 다음에 받는 값을 이름으로 보인다", () => {
+    expect(choiceOptions(vendor)).toEqual([
+      { value: "", label: "—" },
+      { value: "openai", label: "OpenAI" },
+      { value: "anthropic", label: "Claude(Anthropic)" },
+    ]);
+  });
+
+  it("선택형이 아니면 선택 상자가 없다", () => {
+    expect(choiceOptions(setting())).toBeNull();
+  });
+
+  it("값이 없으면 기본값을 보이고 연결 시험이 없다", () => {
+    expect(valueSummary(vendor)).toBe("기본 openai");
+    expect(canProbe(vendor)).toBe(false);
   });
 });

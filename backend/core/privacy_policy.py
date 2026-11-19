@@ -36,3 +36,13 @@ def anthropic_key_connection_open() -> bool:
 def anthropic_key_connection_opens_label() -> str:
     d = effective_date()
     return f"{d.year}년 {d.month}월 {d.day}일"
+
+
+def platform_anthropic_scoring_open() -> bool:
+    """플랫폼 채점(공모전)을 Claude(Anthropic)로 돌려도 되는가(#994) — 방침이 그 이전을 적은 개정의
+    시행일(`settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`) 0시(KST) 이후만 참. 날짜가 없으면 거짓."""
+
+    opens_on = settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE
+    if opens_on is None:
+        return False
+    return Clock.now() >= datetime.combine(opens_on, time.min, tzinfo=_KST)

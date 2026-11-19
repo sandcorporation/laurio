@@ -45,7 +45,7 @@ import aiohttp
 import requests
 from django.conf import settings
 
-from core.adapters import resolve_adapter
+from core.adapters import is_fake_adapter_binding, resolve_adapter
 from core import quality_review
 from core.llm_metrics import observe_call, observe_call_async
 from core.safe_outbound import AsyncResponse, OutboundRefused, read_limited_async
@@ -1170,8 +1170,18 @@ def fake_probe_openai_key(api_key: str) -> Literal["ok", "invalid_key", "unavail
 
 def get_adapter(*, timeout: float | None = None) -> LLMScoringAdapter:
     """`timeout` 을 주면 실물 어댑터의 벤더 호출 한도로 넘긴다(#986 — 공모전 채점이
-    `scoring.services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS` 를 쓴다). fake 는 받지 않는다."""
+    `scoring.services.CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS` 를 쓴다). fake 는 받지 않는다.
 
+    실물 모드에서 운영 설정의 채점 벤더가 anthropic 이면 Claude 어댑터를 만든다(#994) — 같은 `timeout`
+    계약이다. 값이 없으면 openai 라 그 전과 같다(`LLM_ADAPTER_MODE` 의 dotted path)."""
+
+    if not is_fake_adapter_binding(settings.LLM_ADAPTER_MODE):
+        from policies.runtime_settings import VENDOR_ANTHROPIC, scoring_vendor
+
+        if scoring_vendor() == VENDOR_ANTHROPIC:
+            from core.llm_scoring_anthropic import platform_adapter
+
+            return platform_adapter(timeout=timeout)
     return resolve_adapter(
         factory_kwargs=None if timeout is None else {"timeout": timeout},
         mode=settings.LLM_ADAPTER_MODE,

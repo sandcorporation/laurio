@@ -22,6 +22,12 @@
 생기지 않는다. **값이 없으면 꺼짐**이라 운영·staging 은 화면에서 `on` 을 저장해야 공모전 채점이 돈다(「지우기」도
 꺼짐이다). beat 일정에는 남아 있어 재시작 없이 따른다. dev 는 compose 가 환경변수로 켠다.
 
+**공모전 채점 벤더(OpenAI·Claude)도 「운영 설정」에서 고른다**(#994) — `LLM_SCORING_VENDOR`(값이 없으면 `openai`)와
+`ANTHROPIC_API_KEY`·`LLM_ANTHROPIC_MODEL`(기본 `claude-sonnet-5-5`). 고른 벤더의 키가 비면 OpenAI 키가 없을 때와
+같이 채점 시도를 남기지 않고 실패한다. **`anthropic` 은 지금 저장되지 않는다** — 방침 6절의 Anthropic 이전이 강의실
+클래스 키만 적어서다. 방침에 공모전 채점의 이전을 더한 개정을 공지하고 그 시행일을
+`settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 에 넣으면 열린다.
+
 데이터는 이렇게 훑는다:
 
 ```bash

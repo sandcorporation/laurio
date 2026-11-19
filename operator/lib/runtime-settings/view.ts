@@ -44,6 +44,20 @@ export function inputAttributes(setting: RuntimeSetting): {
   return { type: "text", autoComplete: "off", inputMode: setting.kind === "float" ? "decimal" : "text" };
 }
 
+const CHOICE_LABELS: Record<string, string> = {
+  openai: "OpenAI",
+  anthropic: "Claude(Anthropic)",
+};
+
+/** 선택 상자의 항목(#994) — `choice` 가 아니면 null. 첫 항목 「—」는 고르지 않음(저장하지 않는다). */
+export function choiceOptions(setting: RuntimeSetting): { value: string; label: string }[] | null {
+  if (setting.kind !== "choice" || !setting.choices) return null;
+  return [
+    { value: "", label: "—" },
+    ...setting.choices.map((value) => ({ value, label: CHOICE_LABELS[value] ?? value })),
+  ];
+}
+
 /** 저장할 본문 — 비운 입력은 보내지 않는다(기존 값 유지). */
 export function savePayload(input: string): { value: string } | null {
   const value = input.trim();

@@ -39,7 +39,7 @@ API(`POST /v1/messages`)에 **구조화 출력**을 싣는다.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 import requests
@@ -72,6 +72,13 @@ _MODELS_PATH = "/models"
 SCORING_MAX_TOKENS = 32_000
 
 _REQUEST_TIMEOUT_SECONDS = 20
+
+#: 플랫폼 채점(#994)의 기본 모델 — 운영 설정 `LLM_ANTHROPIC_MODEL` 의 기본값과 같은지 시험이 본다.
+PLATFORM_DEFAULT_MODEL = "claude-sonnet-5-5"
+#: 플랫폼 채점의 추론 강도(#994). 공모전 채점 입력은 최대 약 31만 토큰이고 벤더 한도가 60초(채점)·20초
+#: (완성도)라 사고를 길게 하면 한도에 걸린다 — 판정은 요구사항마다 통과·실패와 짧은 근거라 `low` 로 둔다.
+#: (Sonnet 5.5 는 생략하면 `high` 다.) 입력은 1M 컨텍스트 안이고 출력 상한은 `SCORING_MAX_TOKENS` 그대로다.
+PLATFORM_SCORING_EFFORT = "low"
 
 #: 채점에 쓰는 계열 — Opus 는 비용 때문에 뺀다(#795).
 SCORING_MODEL_LINES = frozenset({"haiku", "sonnet"})
@@ -241,8 +248,9 @@ def parse_messages_response(
 
 
 class AnthropicScoringAdapter:
-    """Claude 로 채점하는 실물 어댑터(#795). 강의실의 「Claude(Anthropic) 키」 연결에서만 쓴다 —
-    `classroom.scoring._scoring_adapter` 가 연결 종류로 고른다. 공모전 경로는 이 어댑터를 모른다.
+    """Claude 로 채점하는 실물 어댑터(#795). 강의실의 「Claude(Anthropic) 키」 연결은
+    `classroom.scoring._scoring_adapter` 가 연결 종류로 고르고, 플랫폼 채점(공모전)은 운영 설정의 채점 벤더가
+    anthropic 일 때 `platform_adapter` 로 만든다(#994).
 
     인자는 `OpenAIScoringAdapter` 와 같은 모양으로 받는다(`_scoring_adapter` 가 한 벌의 인자로
     둘 중 하나를 만든다). `base_url`·`transport` 는 받기만 하고 쓰지 않는다 — 주소는 Anthropic 으로
@@ -539,3 +547,42 @@ __all__ = [
     "parse_messages_response",
     "scoring_model_ids_from",
 ]
+
+
+def platform_adapter(*, timeout: float | None = None) -> AnthropicScoringAdapter:
+    """플랫폼 채점(공모전 채점·완성도)의 Claude 어댑터(#994) — `core.llm_scoring.get_adapter` 가 운영 설정의
+    채점 벤더가 anthropic 일 때 부른다. 키·모델은 운영 설정(DB → env)에서 읽는다. 키가 비면 OpenAI 키
+    없음과 같은 `LLMAdapterError` 다. 방침이 덮지 않으면(env 로 벤더를 넣은 경우) 같은 갈래로 막는다."""
+
+    from policies.runtime_settings import setting_value
+
+    from core.privacy_policy import platform_anthropic_scoring_open
+
+    if not platform_anthropic_scoring_open():
+        raise LLMAdapterError("개인정보처리방침이 공모전 채점의 Anthropic 이전을 덮지 않아 Claude 로 채점하지 않는다.")
+    api_key = setting_value("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise LLMAdapterError("ANTHROPIC_API_KEY가 비어 있다 — 운영 설정 화면이나 환경변수로 넣는다.")
+    return AnthropicScoringAdapter(
+        api_key=api_key,
+        model=setting_value("LLM_ANTHROPIC_MODEL") or PLATFORM_DEFAULT_MODEL,
+        reasoning_effort=PLATFORM_SCORING_EFFORT,
+        timeout=_REQUEST_TIMEOUT_SECONDS if timeout is None else timeout,
+        product="contest",
+    )
+
+
+def probe_anthropic_key(api_key: str) -> Literal["ok", "invalid_key", "unavailable"]:
+    """운영 설정의 연결 시험(#994) — `check_key`(모델 목록 조회, 토큰을 쓰지 않는다)와 같은 왕복. 결과 낱말만."""
+
+    status = AnthropicScoringAdapter(api_key=api_key, model=PLATFORM_DEFAULT_MODEL).check_key()
+    return {
+        LLMKeyCheckStatus.VALID: "ok",
+        LLMKeyCheckStatus.REJECTED: "invalid_key",
+    }.get(status, "unavailable")
+
+
+def fake_probe_anthropic_key(api_key: str) -> Literal["ok", "invalid_key", "unavailable"]:
+    """흉내 — 실물 키 모양(`sk-ant-` 로 시작, 20자 이상)이 아니면 거절한다."""
+
+    return "ok" if api_key.startswith("sk-ant-") and len(api_key) >= 20 else "invalid_key"

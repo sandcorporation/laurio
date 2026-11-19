@@ -68,3 +68,17 @@ Status: Accepted (2026-11-05 결정)
 - 배포 직후 표는 비어 있고 공모전 AI 는 `.env` 키로 그대로 돈다.
 - 받아들임 시험: `backend/tests/test_runtime_settings.py`, `operator/lib/runtime-settings/view.test.ts`,
   `frontend/e2e/operator/runtime-settings.spec.ts`.
+
+## 개정 — 플랫폼 채점 벤더를 고른다 (#994, 2026-11-20)
+
+- 화면 설정 셋을 더했다: `LLM_SCORING_VENDOR`(선택형 `openai`·`anthropic`, **값이 없으면 `openai`** — 배포 뒤 동작은
+  그대로다), `ANTHROPIC_API_KEY`(비밀, 연결 시험은 모델 목록 조회), `LLM_ANTHROPIC_MODEL`(기본 `claude-sonnet-5-5`).
+  선택형(`kind="choice"`)은 받는 값 밖이면 저장을 거부한다(422 `invalid_value`, 입력을 되싣지 않는다).
+- `core.llm_scoring.get_adapter` 가 실물 모드에서 벤더를 읽어 `anthropic` 이면
+  `core.llm_scoring_anthropic.platform_adapter` 를 만든다 — 같은 `timeout` 계약, 추론 강도 `low`, 출력 상한은
+  `SCORING_MAX_TOKENS`. 공모전 채점·완성도·contests·distributions 가 모두 이 입구를 지난다. 강의실(클래스 키)·요구사항
+  대화는 이 값을 보지 않는다. fake 모드는 벤더와 무관하게 fake 다.
+- **개인정보 관문.** 방침 6절의 Anthropic 이전은 「강사가 Claude 키로 채점을 연결한 클래스」만 적는다. 그래서
+  `settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 가 없음(None)이고, 그동안 `anthropic` 은 저장되지 않으며(422
+  `privacy_not_covered`), env 로 넣어도 어댑터가 만들어지지 않는다. 방침 개정의 시행일을 그 설정에 넣으면 열린다.
+- 받아들임 시험: `backend/tests/test_platform_scoring_vendor.py`.
