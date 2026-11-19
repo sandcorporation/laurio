@@ -95,7 +95,7 @@ from submissions.scoring_basis import (
 )
 
 from .agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
-from .agent_scoring import AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
+from .agent_scoring import AGENT_JOB_MAX_SECONDS, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
 from .agent_runner import AgentGraderBusy, AgentGraderError
 from .models import AgentRun, Score, ScoringAttempt
 from core.model_context import source_budget_bytes
@@ -1241,7 +1241,9 @@ SUBMISSION_SCORING_SCAN = ScanSpec(
     handle_row=_score_one,
     order_by=("attempt_count", "id"),
     time_budget_seconds=60.0,
-    worker_time_limit_seconds=60.0 + CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS + 60.0,
+    # #1686: 에이전트 방식이면 한 건이 재시도까지 `AGENT_JOB_MAX_SECONDS`(2×360=720초)다 — 단일 호출 180초보다
+    # 길다. 한도는 둘 중 긴 쪽에 맞춘다(방식은 운영 설정이라 실행 중에 바뀐다). 잠금도 이 시간이다.
+    worker_time_limit_seconds=60.0 + max(CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS, AGENT_JOB_MAX_SECONDS) + 60.0,
     # #991: 공모전 AI 채점 스위치(운영 설정 `CONTEST_AI_SCORING`, 값이 없으면 꺼짐). 꺼지면 시도 기록·
     # 실패 상한 0%·「입력 없음」 0% 가 하나도 생기지 않는다 — 이 스캔이 통째로 돌지 않는다.
     enabled=contest_ai_scoring_enabled,

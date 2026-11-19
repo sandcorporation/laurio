@@ -49,6 +49,7 @@ from policies.runtime_settings import SCORING_METHOD_AGENT, contest_quality_revi
 from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
 
 from .agent_runner import AgentGraderBusy
+from .agent_scoring import AGENT_JOB_MAX_SECONDS
 from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
 from .quality_agent import QualityReviewHeld, review_with_agent
 
@@ -194,6 +195,11 @@ SUBMISSION_QUALITY_SCAN = ScanSpec(
     candidates=_pending_quality,
     handle_row=_review_one,
     order_by=("attempt_count", "id"),
+    # #1686: celery 워커 안에서 돈다 — 에이전트 실행기(`agent-grader`)는 `agent-call` 망의 celery-worker 에서만
+    # 닿고(backend 는 그 망에 없다), 한 건이 수 분이라 내부 HTTP(30초)·gunicorn(30초)에 들지 않는다.
+    # 한도는 채점 스캔과 같은 셈: 행 시작 예산 + 에이전트 한 건 최장(재시도 포함) + 여유. 잠금도 이 시간이다.
+    time_budget_seconds=60.0,
+    worker_time_limit_seconds=60.0 + AGENT_JOB_MAX_SECONDS + 60.0,
     enabled=contest_quality_review_enabled,
     keep_scheduled_when_disabled=True,
 )

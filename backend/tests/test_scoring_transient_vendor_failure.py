@@ -171,6 +171,22 @@ def test_scoring_scan_runs_in_the_worker_with_room_for_the_vendor_timeout():
     assert entry["options"] == {"expires": spec.interval_seconds, "time_limit": spec.worker_time_limit_seconds}
 
 
+@pytest.mark.parametrize("name", ["submission-scoring", "submission-quality-review"])
+def test_agent_scans_run_in_the_worker_with_room_for_an_agent_job_and_its_retry(name):
+    """#1686: 에이전트 한 건(시도 2회 × (CLI 상한 + HTTP 여유))이 행 시작 예산 뒤에도 워커 한도 안에 든다.
+    완성도 리뷰도 워커 안에서 돈다 — 실행기는 celery-worker 가 붙은 `agent-call` 망에서만 닿는다."""
+
+    from scoring import agent_runner, agent_scoring
+
+    spec = scans.SCAN_REGISTRY[name]
+    assert agent_scoring.ATTEMPT_TIMEOUT_SECONDS < agent_runner.RUN_TIMEOUT_SECONDS
+    assert agent_scoring.AGENT_JOB_MAX_SECONDS == agent_scoring.MAX_ATTEMPTS * (agent_scoring.ATTEMPT_TIMEOUT_SECONDS + 60)
+    assert spec.worker_time_limit_seconds is not None
+    assert spec.time_budget_seconds + agent_scoring.AGENT_JOB_MAX_SECONDS < spec.worker_time_limit_seconds
+    assert agent_scoring.AGENT_JOB_MAX_SECONDS < 15 * 60  # 실행 토큰 TTL(`core.agent_run_tokens.RUN_TOKEN_TTL`) 안
+    assert scans.beat_schedule()[f"scan:{name}"]["options"]["time_limit"] == spec.worker_time_limit_seconds
+
+
 def test_run_scan_task_runs_worker_scans_in_process_and_others_over_http(monkeypatch):
     calls: list[tuple[str, float]] = []
     monkeypatch.setattr(
