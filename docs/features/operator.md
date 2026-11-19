@@ -191,7 +191,7 @@ Next.js + React. 공개 앱과 같은 3스테이지 이미지를 쓰지만 **다
 
 ## `/settings` 운영 설정 (#922, ADR-0075)
 
-내비 「기준」 묶음의 「운영 설정」. 공모전 AI 의 OpenAI API 키·모델·채점 벤더(#994, OpenAI·Claude(Anthropic) 선택 상자)·Anthropic API 키·Claude 모델·
+내비 「기준」 묶음의 「운영 설정」. 공모전 AI 의 OpenAI API 키·모델·채점 벤더(#994, OpenAI·Claude(Anthropic) 선택 상자)·공모전 채점 방식(#1000, `single_call`·`agent` 선택 상자)·Anthropic API 키·Claude 모델·
 채점 temperature·요구사항 대화 temperature·공모전 AI 채점 스위치 줄이다. 줄마다 라벨·키 이름·지금 값·출처 배지(DB·env·없음)·DB 값의 변경 시각과 변경자. 출처가 없으면
 어댑터가 쓰는 기본값을 「기본 0.7」처럼 보인다.
 

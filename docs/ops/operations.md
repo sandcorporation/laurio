@@ -24,13 +24,14 @@
 
 **공모전 채점 벤더(OpenAI·Claude)도 「운영 설정」에서 고른다**(#994) — `LLM_SCORING_VENDOR`(값이 없으면 `openai`)와
 `ANTHROPIC_API_KEY`·`LLM_ANTHROPIC_MODEL`(기본 `claude-sonnet-5-5`). 고른 벤더의 키가 비면 OpenAI 키가 없을 때와
-같이 채점 시도를 남기지 않고 실패한다. **`anthropic` 은 2026-11-27 0시(KST)부터 저장된다**(#997) — 방침 5·6절이 공모전 제출물의 Anthropic 이전을
+같이 채점 시도를 남기지 않고 실패한다. **채점 방식은 `CONTEST_SCORING_METHOD`**(#1000, 값이 없으면 `single_call`) — `agent` 면
+그 벤더의 CLI 에이전트(openai → Codex, anthropic → Claude Code)가 `agent-grader` 에서 박제본을 읽고 판정한다. **`anthropic` 은 2026-11-27 0시(KST)부터 저장된다**(#997) — 방침 5·6절이 공모전 제출물의 Anthropic 이전을
 적은 개정의 시행일이 `settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 이고, 그 전에는 거절된다. 기본값은 계속 `openai` 다.
 
 **에이전트 채점 키 프록시 `llm-proxy`**(#998)는 backend 계열과 함께 배포되는 상주 프로세스다(내부 전용, 포트를
 열지 않는다). 하루 비용 상한은 「운영 설정」의 `AGENT_SCORING_DAILY_LIMIT_USD`(값이 없으면 $20), 실행 하나의 예산은
 발급 때 정한다(기본 $1). 넘은 요청은 429 와 이유(`run_budget`·`daily_limit`)로 거절되고 로그에
-`llm-proxy: refused … code=…` 한 줄이 남는다. 토큰을 발급하는 채점기가 아직 없어 지금은 아무것도 중계하지 않는다.
+`llm-proxy: refused … code=…` 한 줄이 남는다. 토큰은 에이전트 채점기(#1000)만 발급하므로 `CONTEST_SCORING_METHOD` 가 `agent` 가 아니면(기본 `single_call`) 아무것도 중계하지 않는다.
 
 데이터는 이렇게 훑는다:
 
@@ -60,7 +61,10 @@ cd backend && uv run python manage.py create_operator <아이디> --superuser
 ```
 
 보류된 공모전 채점(#986 — 「코드 아님」을 뺀 소스가 모델 컨텍스트를 넘어 벤더를 부르지 않은 제출, 시도 기록이
-`SourceOverBudgetHold:` 로 시작한다)은 저절로 끝나지 않는다. 보고 정하면 풀어 실린 만큼으로 채점한다 —
+`SourceOverBudgetHold:` 로 시작한다 / #1000 — 에이전트 판정이 받아들이는 조건에 두 번 다 어긋난 제출, `AgentScoringHold:`)은
+저절로 끝나지 않는다. 에이전트 보류의 사유와, 받아들였지만 필수 전부 충족·전부 미충족이라 한 번 더 볼 판정은
+`GET /api/internal/scoring/agent-runs`(내부 인증)가 보인다. 보고 정하면 푼다 — 소스 보류는 실린 만큼으로 채점하고, 에이전트 보류는
+다음 스캔이 에이전트를 다시 부른다(조건은 그대로다). 다시 어긋나면 `CONTEST_SCORING_METHOD` 를 `single_call` 로 돌려 푼다 —
 Score 없는 제출은 배분 컷라인에서 빠지므로 심사기간 안에:
 
 ```bash

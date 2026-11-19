@@ -521,7 +521,17 @@ README → 그 밖(설정·마이그레이션·배포·숨은 폴더), 같은 �
 컨텍스트에서 정하고(`core.model_context.source_budget_bytes`, 모르는 모델은 128K), **남은 것이 하나라도 그
 안에 다 들어가지 않으면 벤더를 부르지 않고 보류한다** — 시도 기록이 `SourceOverBudgetHold:` 로 시작하고,
 재시도도 실패 상한의 0% 확정도 없다. `manage.py release_scoring_hold <제출 id…>` 로 풀면 실린 만큼으로
-채점하고 빠진 양을 경고 로그로 남긴다(ADR-0027 개정). 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
+채점하고 빠진 양을 경고 로그로 남긴다(ADR-0027 개정). **에이전트 채점(`CONTEST_SCORING_METHOD=agent`, #1000)은 이
+선별·예산을 거치지 않는다** — 에이전트가 박제본(clone 한 커밋의 zip, 또는 zip 소스 하나)을 Read·Grep·Glob(Claude)이나
+read-only 셸(Codex)로 필요한 만큼 읽는다. 실행 토큰(예산 $1) → `agent-grader` → 스트림 해석 뒤 **받아들이는 조건**을 본다:
+Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실행 토큰, Read ≥1·Grep/Glob ≥1, Codex 는 명령 실행 ≥1 /
+종료코드 0·스키마 일치·요구사항 id 가 빠짐도 남음도 없음 / 충족마다 근거 `경로:줄`(`경로:줄-줄`, 최대 5개)이 박제본에
+실재. 어긋나면 한 번 더 돌리고, 그래도면 **보류**다 — 시도 기록이 `AgentScoringHold:` 로 시작하고 소스 보류와 같이
+재시도도 0% 확정도 없으며 GlitchTip 에 한 건 간다. `release_scoring_hold` 가 같이 풀고(다음 스캔이 에이전트를 다시
+부른다). 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
+필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/scoring/agent-runs` 가 보인다. Score 의
+`model_version` 은 `agent:<벤더>:<모델>`, 판정 이유는 「이유 근거: 경로:줄, …」(충족만, 근거 5개, 2000자)다. 지침·스키마는
+`scoring.agent_prompt`(공모전 3 재채점의 규칙 일곱). 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
 채점한다.
 
 **zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
@@ -1046,6 +1056,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 은 방침이 공모전 채점의 Anthropic 이전을 적은 개정의 시행일(`PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` = 2026-11-27, #997) 0시(KST) 전에는 저장되지 않는다(422 `privacy_not_covered`) |
+| `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`scoring.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
@@ -1060,7 +1071,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 만료(15분)가 묶이고, Anthropic 은 방침이 덮을 때만, 단가표(`classroom.scoring_cost.PRICES`)에 없는 모델은 발급하지
 않는다. 요청마다 토큰 없음·모름·만료(401), 다른 벤더·다른 모델·방침 닫힘(403), 실행 예산·하루 합계(429)를 본다.
 응답의 usage 와 그 비용이 토큰 행에 쌓인다(`run_usage`). 벤더 오류 응답은 진짜 키·키 꼴 문자열을 가려 돌려준다.
-**지금 토큰을 발급하는 운영 코드가 없다** — 떠 있어도 모든 요청이 401 이고 벤더로는 아무것도 나가지 않는다.
+**토큰은 에이전트 채점기(`scoring.agent_scoring`, #1000)만 발급한다** — `CONTEST_SCORING_METHOD=agent` 가 아니면 발급하는 곳이 없어 떠 있어도 모든 요청이 401 이고 벤더로는 아무것도 나가지 않는다.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |

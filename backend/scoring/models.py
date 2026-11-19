@@ -134,6 +134,39 @@ class ScoringAttempt(models.Model):
         return f"ScoringAttempt(submission={self.submission_id}, at={self.attempted_at})"
 
 
+class AgentRun(models.Model):
+    """에이전트 실행 하나의 기록(#1000) — 받아들였든 보류했든 시도 원본을 남긴다.
+
+    `record` 는 `scoring.agent_scoring.run_agent_job` 이 만든 원본이다: 시도마다 구조화 출력·usage·턴·
+    도구 호출 수·근거 검사 결과·거절 사유, 그리고 지침 sha256·벤더·모델·박제본 커밋.
+    `review` 는 받아들였지만 사람이 한 번 더 볼 것(필수 전부 충족·전부 미충족)이다 — 운영자 조회
+    (`/api/internal/scoring/agent-runs`)가 보류와 함께 보여 준다.
+    """
+
+    class Outcome(models.TextChoices):
+        ACCEPTED = "accepted", "받아들임"
+        HELD = "held", "보류"
+
+    submission = models.ForeignKey(
+        "submissions.Submission", related_name="agent_runs", on_delete=models.CASCADE
+    )
+    purpose = models.CharField(max_length=20)
+    outcome = models.CharField(max_length=20, choices=Outcome.choices)
+    model_version = models.CharField(max_length=200)
+    reasons = models.JSONField(default=list, blank=True)
+    review = models.CharField(max_length=200, blank=True, default="")
+    record = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "에이전트 실행 기록"
+        verbose_name_plural = "에이전트 실행 기록"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"AgentRun(submission={self.submission_id}, {self.purpose}, {self.outcome})"
+
+
 class SubmissionQualityReview(AppendOnlyModel):
     """공모전 제출 하나의 완성도 기록(#884, ADR-0072) — `Requirement` 마다 0~5 와 근거, 가중 점수, 완성도.
 
