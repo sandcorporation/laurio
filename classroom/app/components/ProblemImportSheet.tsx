@@ -552,7 +552,7 @@ export function ProblemImportSheet({
                         >
                           <span className="flex-1">{item.label}</span>
                           {item.required ? (
-                            <Badge tone="attention">필수</Badge>
+                            <Badge tone="warning">필수</Badge>
                           ) : (
                             <Badge tone="neutral">선택</Badge>
                           )}

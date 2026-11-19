@@ -30,7 +30,7 @@ export function MissingScoringKeyNote({
   settingsAnchor?: string;
 }) {
   return (
-    <Note tone="attention">
+    <Note tone="warning">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span data-testid={noteTestId} className="flex-1">
           {message}

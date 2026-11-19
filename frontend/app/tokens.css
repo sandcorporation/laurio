@@ -37,10 +37,11 @@
 
   /* 팔레트 역할 — MUI 꼴(#961, ADR-0080). 바탕 3단·괘선은 중립색이라 위 이름을 그대로 둔다.
    * 역할은 일곱이다: primary·secondary·info·success·warning·error·advanced.
-   * **이 티켓은 보이는 색을 바꾸지 않았다** — 옛 값을 새 이름으로 옮기기만 했다.
+   * **#961 은 보이는 색을 바꾸지 않았다**(옛 값을 새 이름으로 옮기기만 했다). #965 가 error 만 갈랐다.
    *   success  = 옛 verified (충족·검증)
-   *   error·warning·advanced = 옛 attention 의 붉은 주황. 셋이 아직 같은 값이다 —
-   *     심화(advanced)가 이 값을 계속 쓰고 error·warning 이 갈라지는 것은 후속 티켓이다(spec #960).
+   *   warning·advanced = 옛 attention 의 붉은 주황(#c4442b / #e5694f). 둘은 아직 같은 값이다.
+   *   error = 심화와 겹치지 않는 장미빛 붉은색(#b01e4a / #ff7a99, #965 — ADR-0080 Amended).
+   *     오류·실패·검증 오류만 쓴다. 주의·마감 지남은 warning, 심화는 advanced.
    *   primary·secondary·info = 아직 색상이 없다. 지금 화면의 주 동작·보조·안내는 잉크로 그려지므로
    *     잉크 값을 가리킨다. 색을 입히는 날 이 한 줄만 고친다.
    * 새 역할을 더할 때는 brand-guard·contrast 의 이름 목록도 함께 늘린다. */
@@ -49,7 +50,7 @@
   --color-info: light-dark(#17160f, #ece8dc);
   --color-success: light-dark(#2e6a4c, #62b489);
   --color-warning: light-dark(#c4442b, #e5694f);
-  --color-error: light-dark(#c4442b, #e5694f);
+  --color-error: light-dark(#b01e4a, #ff7a99);
   --color-advanced: light-dark(#c4442b, #e5694f);
 
   /* 옛 이름(별칭) — operator 앱(자체 tokens.css, 이번 범위 밖)과 공유 마크다운 패키지가

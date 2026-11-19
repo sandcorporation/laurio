@@ -46,13 +46,15 @@ describe("디자인 토큰은 공개 앱과 한 벌이다 (#298)", () => {
     expect(fs.readFileSync(a).equals(fs.readFileSync(b))).toBe(true);
   });
 
-  // 팔레트 틀(#961, ADR-0080)은 보이는 색을 바꾸지 않는다 — 옛 토큰 값을 새 역할 이름으로
-  // 옮기기만 했다. 옛 값을 여기에 얼려 두고 계산된 값으로 대조한다(밝은·어두운 둘 다).
-  // 값을 일부러 바꾸는 후속 티켓(오류·경고 가르기, 심화 색)은 이 표를 함께 고친다.
-  describe("팔레트 역할은 옛 색을 그대로 가리킨다 (#961)", () => {
+  // 팔레트 틀(#961, ADR-0080)은 옛 토큰 값을 새 역할 이름으로 옮기기만 했고, #965 가 error 만
+  // 바꿨다. 값을 여기에 얼려 두고 계산된 값으로 대조한다(밝은·어두운 둘 다).
+  // 값을 일부러 바꾸는 티켓은 이 표를 함께 고친다.
+  describe("팔레트 역할은 얼린 값을 가리킨다 (#961·#965)", () => {
     const css = fs.readFileSync(CLASSROOM, "utf8");
     const ink = ["#17160f", "#ece8dc"];
     const attention = ["#c4442b", "#e5694f"];
+    // #965 — error 만 심화와 겹치지 않는 장미빛 붉은색으로 갈랐다(ADR-0080 Amended).
+    const error = ["#b01e4a", "#ff7a99"];
     const verified = ["#2e6a4c", "#62b489"];
     const EXPECTED: Record<string, string[]> = {
       primary: ink,
@@ -60,11 +62,11 @@ describe("디자인 토큰은 공개 앱과 한 벌이다 (#298)", () => {
       info: ink,
       success: verified,
       warning: attention,
-      error: attention,
+      error,
       advanced: attention,
     };
 
-    it.each(Object.entries(EXPECTED))("%s 는 옛 값 그대로다", (role, [light, dark]) => {
+    it.each(Object.entries(EXPECTED))("%s 는 얼린 값 그대로다", (role, [light, dark]) => {
       const m = new RegExp(
         `--color-${role}:\\s*light-dark\\(\\s*(#[0-9a-fA-F]{6})\\s*,\\s*(#[0-9a-fA-F]{6})\\s*\\)`,
       ).exec(css);

@@ -88,7 +88,7 @@ function InstructorRow({
         <span data-testid="class-instructor-role">
           <Badge>{owner ? "소유자" : "공동 강사"}</Badge>
         </span>
-        {transferPending ? <Badge tone="attention">소유권 이전 대기</Badge> : null}
+        {transferPending ? <Badge tone="warning">소유권 이전 대기</Badge> : null}
         {instructor.is_me ? (
           <span className="text-[12px] text-ink/45">나</span>
         ) : instructor.accepted_at ? (

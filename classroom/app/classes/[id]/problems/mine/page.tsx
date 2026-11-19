@@ -39,12 +39,12 @@ import { useMyProblems } from "@/lib/submissions/use-my-problems";
 
 const STATUS_BADGE: Record<
   ProblemListItem["status"],
-  { label: string; tone: "neutral" | "attention" | "verified" }
+  { label: string; tone: "neutral" | "error" | "warning" | "verified" }
 > = {
   passed: { label: "통과", tone: "verified" },
-  attempted_not_passed: { label: "미통과", tone: "attention" },
+  attempted_not_passed: { label: "미통과", tone: "error" },
   scoring: { label: "채점 중", tone: "neutral" },
-  needs_setup: { label: "채점 대기", tone: "attention" },
+  needs_setup: { label: "채점 대기", tone: "warning" },
   not_submitted: { label: "미제출", tone: "neutral" },
 };
 

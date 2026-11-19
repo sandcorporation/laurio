@@ -203,7 +203,7 @@ export default function ProblemTemplatePreviewPage() {
                 <span className="flex-1">소스에 문법 오류가 없다</span>
                 <span className="flex shrink-0 gap-1.5">
                   <Badge>기본</Badge>
-                  <Badge tone="attention">필수</Badge>
+                  <Badge tone="warning">필수</Badge>
                 </span>
               </div>
             ) : null}
@@ -217,7 +217,7 @@ export default function ProblemTemplatePreviewPage() {
                   <li key={index} className="flex items-center gap-2.5 px-4 py-3 text-[13.5px]">
                     <span className="w-4 shrink-0 font-mono text-[11.5px] text-ink/30">{index + 1}</span>
                     <span className="flex-1">{item.label}</span>
-                    {item.required ? <Badge tone="attention">필수</Badge> : <Badge tone="neutral">선택</Badge>}
+                    {item.required ? <Badge tone="warning">필수</Badge> : <Badge tone="neutral">선택</Badge>}
                   </li>
                 ))}
               </ul>

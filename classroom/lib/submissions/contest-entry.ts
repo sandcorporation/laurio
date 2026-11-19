@@ -159,7 +159,7 @@ export function attemptEntryLabel(entry: { status: string; reason: string }): st
 // --- 강사가 보는 표시 (#550) ---------------------------------------------------
 // 강사에게는 「냈는지와 어느 시도인지」만 보인다 — 근거·공모전 점수·수상은 공모전 쪽의 것이다.
 
-export type InstructorEntryBadge = { label: string; tone: "verified" | "neutral" | "attention" };
+export type InstructorEntryBadge = { label: string; tone: "verified" | "neutral" | "warning" };
 
 /** 제출 현황의 시도 한 줄에 다는 표시. 공모전에 내지 않은 시도면 null. */
 export function instructorEntryBadge(row: {
@@ -170,7 +170,7 @@ export function instructorEntryBadge(row: {
   if (row.is_current_contest_entry) return { label: "지금 공모전 제출", tone: "verified" };
   if (row.contest_entry.status === "entered") return { label: "공모전에도 냈음", tone: "neutral" };
   if (row.contest_entry.status === "pending") return { label: "공모전에 내는 중", tone: "neutral" };
-  return { label: "공모전에는 못 냄", tone: "attention" };
+  return { label: "공모전에는 못 냄", tone: "warning" };
 }
 
 export type GridContestEntry = "current" | "entered" | null;

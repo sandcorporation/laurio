@@ -148,7 +148,7 @@ function InstructorViewingBanner({
 }) {
   return (
     <div data-testid="instructor-viewing-banner" className="flex flex-wrap items-center gap-2">
-      <Badge tone="attention">강사로 보는 중</Badge>
+      <Badge tone="warning">강사로 보는 중</Badge>
       {status === "draft" ? (
         <span data-testid="instructor-viewing-banner-draft">
           <Badge>초안</Badge>
@@ -294,7 +294,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
               <h2 className="text-[15px] font-semibold tracking-[-0.005em]">제출</h2>
               <span data-testid="submit-deadline-passed">
-                <Badge tone={passed === true ? "neutral" : "attention"}>마감 지남</Badge>
+                <Badge tone={passed === true ? "neutral" : "warning"}>마감 지남</Badge>
               </span>
             </div>
             {dueAt ? (
@@ -322,7 +322,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           className="flex flex-col gap-3.5 p-4"
         >
           {deadlinePassed && props.submitBlockedReason === null ? (
-            <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-error">
+            <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
               마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
             </p>
           ) : null}
@@ -362,7 +362,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 {stampKind(passed, perfect) ? (
                   <Stamp kind={stampKind(passed, perfect)!} />
                 ) : (
-                  <Badge tone="attention">아직 미통과</Badge>
+                  <Badge tone="error">아직 미통과</Badge>
                 )}
               </span>
             )}
@@ -452,7 +452,7 @@ function ChecklistWithVerdict({
                 </span>
               </>
             ) : (
-              <Badge tone="attention">
+              <Badge tone="error">
                 미통과 · 필수 {judgedSummary.met}/{judgedSummary.total}
               </Badge>
             )}
@@ -657,7 +657,7 @@ function AttemptRow({
                   {withLate(STAMP_LABEL[kind], submission.late)}
                 </Stamp>
               ) : (
-                <Badge tone="attention">{withLate("미통과", submission.late)}</Badge>
+                <Badge tone="error">{withLate("미통과", submission.late)}</Badge>
               );
             })()
           )}
@@ -699,7 +699,7 @@ function AttemptRow({
                 href={submission.value}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 text-error hover:underline"
+                className="shrink-0 text-primary hover:underline"
               >
                 저장소
               </a>
@@ -720,7 +720,7 @@ function AttemptRow({
             <a
               href={submission.download_url}
               data-testid={`submission-row-${submission.id}-download`}
-              className="shrink-0 text-error hover:underline"
+              className="shrink-0 text-primary hover:underline"
             >
               다운로드
             </a>
@@ -787,21 +787,21 @@ function InteractiveSubmissionForm(
   // 백엔드가 보관 → 내보냄 → 숨김 순서로 이유를 하나만 정해 주므로(#439, #941) 그대로 분기한다.
   if (submitBlockedReason === "archived") {
     return (
-      <p data-testid="class-archived-note" className="text-[13px] text-error">
+      <p data-testid="class-archived-note" className="text-[13px] text-warning">
         이 클래스는 보관되어 새 제출을 받지 않습니다.
       </p>
     );
   }
   if (submitBlockedReason === "expelled") {
     return (
-      <p data-testid="member-expelled-note" className="text-[13px] text-error">
+      <p data-testid="member-expelled-note" className="text-[13px] text-warning">
         이 클래스에서 내보내져 새로 제출할 수 없습니다.
       </p>
     );
   }
   if (submitBlockedReason === "hidden") {
     return (
-      <p data-testid="problem-hidden-note" className="text-[13px] text-error">
+      <p data-testid="problem-hidden-note" className="text-[13px] text-warning">
         강사가 숨긴 문제라 새로 낼 수 없습니다.
       </p>
     );
@@ -905,9 +905,9 @@ function InteractiveSubmissionForm(
       ) : (
         <div className="flex flex-col gap-2">
           {zipGitHistoryWarning ? (
-            <Note tone="attention">
+            <Note tone="warning">
               <div data-testid="zip-git-history-warning" className="flex flex-col gap-2">
-                <p className="text-error">
+                <p className="text-warning">
                   {submissionFormats.includes("repository")
                     ? "이 문제는 커밋 기록을 봅니다. zip 에는 Git 기록(.git)이 들어가지 않으니 저장소로 내세요."
                     : "이 문제는 커밋 기록을 봅니다. zip 에는 Git 기록(.git)이 들어가지 않아 그 항목은 충족되지 않습니다."}
@@ -931,7 +931,7 @@ function InteractiveSubmissionForm(
           )}
           {/* 드롭 칸 — 투명한 파일 입력이 칸 전체를 덮어 끌어다 놓기와 고르기를 함께 받는다. */}
           <div className="relative border border-dashed border-rule bg-paper px-5 py-6 text-center text-[13.5px] text-ink/60">
-            소스 zip 을 끌어다 놓거나 <span className="text-error">고르기</span>
+            소스 zip 을 끌어다 놓거나 <span className="text-primary">고르기</span>
             <div data-testid="source-file-max-size" className="mt-1 text-[11.5px] text-ink/45">
               최대 {formatMegabytes(maxSourceAssetBytes)}MB
             </div>

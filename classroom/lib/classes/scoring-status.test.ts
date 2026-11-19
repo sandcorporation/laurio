@@ -92,7 +92,7 @@ describe("scoringStatus — 보관된 클래스도 상태는 그대로, 톤만 �
 describe("settingsStatusBadges — 설정의 상태 한 줄은 카드와 같은 낱말이다(#669)", () => {
   it("키가 없으면 카드와 같은 「연결 없음」", () => {
     expect(settingsStatusBadges({ ...base, has_openai_key: false, openai_key_status: null })).toEqual([
-      { label: SCORING_STATUS_LABEL.missing, tone: "attention" },
+      { label: SCORING_STATUS_LABEL.missing, tone: "warning" },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe("settingsStatusBadges — 설정의 상태 한 줄은 카드와 같은 
         scoring_server_host: "llm.example.kr",
         scoring_server_unreachable: true,
       }),
-    ).toEqual([{ label: SCORING_STATUS_LABEL.unreachable, tone: "attention" }]);
+    ).toEqual([{ label: SCORING_STATUS_LABEL.unreachable, tone: "warning" }]);
   });
 
   it("보관된 클래스의 연결 없음은 문제 톤이 아니다", () => {

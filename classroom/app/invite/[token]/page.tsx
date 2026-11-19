@@ -102,7 +102,7 @@ export default function CoInstructorInvitePage() {
       </div>
 
       {info.status !== "pending" ? (
-        <Note tone="attention">
+        <Note tone="error">
           <span data-testid="invite-unusable">{info.status_message}</span>
         </Note>
       ) : info.already_instructor ? (

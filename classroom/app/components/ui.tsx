@@ -147,17 +147,18 @@ export function iconButtonClass(tone: ButtonTone = "secondary"): string {
   return `${BUTTON_BASE} ${BUTTON_TONE[tone]} p-2`;
 }
 
-/** 상태 표시. 넷뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
+/** 상태 표시. 중립·오류·주의·충족·심화 다섯이다 — 색은 팔레트 역할 이름(ADR-0080)을 따른다. */
 export function Badge({
   tone = "neutral",
   children,
 }: {
-  tone?: "neutral" | "attention" | "verified" | "advanced";
+  tone?: "neutral" | "error" | "warning" | "verified" | "advanced";
   children: ReactNode;
 }) {
   const cls = {
     neutral: "border-rule text-ink/60",
-    attention: "border-error text-error",
+    error: "border-error text-error",
+    warning: "border-warning text-warning",
     verified: "border-success text-success",
     advanced: "border-advanced text-advanced",
   }[tone];
@@ -199,9 +200,9 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 }
 
 /** 설명·주의를 담는 띠. 괘선 하나로 본문과 구별한다. */
-export function Note({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "attention" }) {
-  const border = tone === "attention" ? "border-error" : "border-rule";
-  const text = tone === "attention" ? "text-ink/75" : "text-ink/60";
+export function Note({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "error" | "warning" }) {
+  const border = tone === "error" ? "border-error" : tone === "warning" ? "border-warning" : "border-rule";
+  const text = tone === "neutral" ? "text-ink/60" : "text-ink/75";
   return (
     <div className={`border ${border} bg-surface px-4 py-3 text-[13px] leading-relaxed ${text}`}>
       {children}

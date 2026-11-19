@@ -30,7 +30,9 @@ describe("다크·라이트 토큰의 대비는 WCAG AA 를 넘는다 (#397)", (
     const ink = palette.ink[theme];
     const paper = palette.paper[theme];
     const surface = palette.surface[theme];
-    const attention = palette.error[theme];
+    const error = palette.error[theme];
+    const warning = palette.warning[theme];
+    const advanced = palette.advanced[theme];
     const verified = palette.success[theme];
     const dimInk = blendOver(ink, surface, DIM_ALPHA);
 
@@ -40,7 +42,10 @@ describe("다크·라이트 토큰의 대비는 WCAG AA 를 넘는다 (#397)", (
       ["흐린 글자 60% / 뜬 면 (ink/60 위 surface)", dimInk, surface],
       ["주 버튼 글자 / 바탕 (paper 글자, ink 바탕)", paper, ink],
       ["통과 초록 / 뜬 면 (verified/surface)", verified, surface],
-      ["주의 빨강 / 뜬 면 (attention/surface)", attention, surface],
+      ["오류 장미빛 붉은색 / 바탕 (error/paper)", error, paper],
+      ["오류 장미빛 붉은색 / 뜬 면 (error/surface)", error, surface],
+      ["주의 붉은 주황 / 뜬 면 (warning/surface)", warning, surface],
+      ["심화 붉은 주황 / 뜬 면 (advanced/surface)", advanced, surface],
     ];
 
     for (const [label, fg, bg] of combos) {

@@ -54,7 +54,7 @@ function QualityRow({
         </span>
         {row.bonus_needs_rerate ? (
           <span data-testid={`${testId}-bonus-rerate`} className="shrink-0">
-            <Badge tone="attention">가산 다시 매김 필요</Badge>
+            <Badge tone="warning">가산 다시 매김 필요</Badge>
           </span>
         ) : null}
         <span data-testid={`${testId}-completeness`} className="w-[96px] shrink-0 text-[13.5px]">
@@ -212,7 +212,7 @@ export function QualityRankingCard({
         ) : null}
         {board && board.failed_count > 0 ? (
           <span data-testid="quality-failed" className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink/60">
-            <Badge tone="attention">
+            <Badge tone="error">
               완성도 채점 실패 <Num>{board.failed_count}</Num>
             </Badge>
             {board.failed_names.join(", ")}

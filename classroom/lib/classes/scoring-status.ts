@@ -60,16 +60,16 @@ export function scoringStatus(c: StatusInput): ScoringStatus {
 
 /** 배지 톤 — 문제(연결 없음·거부·소진·연결 불가)는 attention, 연결됨은 verified, 보관 클래스의 그 넷은
  * 문제가 아니라 neutral(#676). 클래스 상세의 채점 카드와 설정의 상태 한 줄이 같이 쓴다(#669). */
-export function scoringStatusTone(status: ScoringStatus): "verified" | "attention" | "neutral" {
+export function scoringStatusTone(status: ScoringStatus): "verified" | "warning" | "neutral" {
   if (status.kind === "connected") return "verified";
   if (!status.problem) return "neutral";
-  return "attention";
+  return "warning";
 }
 
 /** 설정의 상태 한 줄(#669) — 카드와 같은 낱말·톤에, 아직 검증되지 않은 키(OpenAI·Claude)면 「미검증」만 덧붙인다. */
-export function settingsStatusBadges(c: StatusInput): { label: string; tone: "verified" | "attention" | "neutral" }[] {
+export function settingsStatusBadges(c: StatusInput): { label: string; tone: "verified" | "warning" | "neutral" }[] {
   const status = scoringStatus(c);
-  const badges: { label: string; tone: "verified" | "attention" | "neutral" }[] = [
+  const badges: { label: string; tone: "verified" | "warning" | "neutral" }[] = [
     { label: SCORING_STATUS_LABEL[status.kind], tone: scoringStatusTone(status) },
   ];
   if (status.kind === "connected" && c.scoring_connection_kind !== "compatible_server" && c.openai_key_status === "unverified") {

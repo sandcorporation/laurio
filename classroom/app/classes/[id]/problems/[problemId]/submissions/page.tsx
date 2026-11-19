@@ -82,7 +82,7 @@ function StatBar({ stats, perfect }: { stats: ReturnType<typeof submissionStats>
 function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
   if (submission.status === "pending") {
     return (
-      <Badge tone={submission.pending_reason ? "attention" : "neutral"}>
+      <Badge tone={submission.pending_reason ? "warning" : "neutral"}>
         {withLate(submission.pending_reason ? "채점 대기" : "채점 중", submission.late)}
       </Badge>
     );
@@ -96,7 +96,7 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
     );
   }
   return (
-    <Badge tone={submission.passed ? "verified" : "attention"}>
+    <Badge tone={submission.passed ? "verified" : "error"}>
       {withLate(submission.passed ? "통과" : "미통과", submission.late)}
     </Badge>
   );
@@ -298,7 +298,7 @@ export default function ProblemSubmissionsPage() {
         actions={
           <>
             <span data-testid="problem-submissions-status-badge">
-              <Badge tone={problemStatus === "open" ? "verified" : problemStatus === "hidden" ? "attention" : "neutral"}>
+              <Badge tone={problemStatus === "open" ? "verified" : problemStatus === "hidden" ? "warning" : "neutral"}>
                 {STATUS_LABEL[problemStatus] ?? problemStatus}
               </Badge>
             </span>

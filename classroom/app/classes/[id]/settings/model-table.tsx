@@ -51,7 +51,7 @@ export function DefaultModelTable({
         // 연결을 바꾼 뒤 저장된 값이 그 연결의 목록에 없으면(#601) 고를 수 없는 줄로 먼저 말한다.
         <div data-testid="class-default-model-unavailable" className="flex items-center gap-3 border-b border-rule px-4 py-2.5">
           <span className="font-mono text-[13.5px]">{savedModel}</span>
-          <Badge tone="attention">이 연결에서 쓸 수 없음</Badge>
+          <Badge tone="error">이 연결에서 쓸 수 없음</Badge>
         </div>
       )}
       {visible.map((model, index) => {

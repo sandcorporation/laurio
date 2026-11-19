@@ -184,7 +184,7 @@ function KeyForm({
         </p>
       ) : liveCheck === "invalid" ? (
         <p data-testid={`${provider}-key-live-check`}>
-          <Badge tone="attention">이 키는 쓸 수 없습니다</Badge>
+          <Badge tone="error">이 키는 쓸 수 없습니다</Badge>
         </p>
       ) : liveCheck === "unknown" ? (
         <p data-testid={`${provider}-key-live-check`}>
@@ -323,7 +323,7 @@ export function ScoringConnectionSection({
         <div className="flex flex-col gap-4 border-t border-rule pt-4">
           <KindChoice value={kind} onChange={setKind} claudeSelectable={classroom.anthropic_key_selectable} />
           {switching ? (
-            <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-error">
+            <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-warning">
               {`저장하면 지금의 ${currentLabel}${classroom.scoring_connection_kind === "compatible_server" ? " 주소와 인증 값" : ""}이 지워집니다.`}
             </p>
           ) : null}

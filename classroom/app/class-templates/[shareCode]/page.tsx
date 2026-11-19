@@ -176,13 +176,13 @@ export default function ClassTemplatePreviewPage() {
                           >
                             <span className="flex-1">소스에 문법 오류가 없다</span>
                             <Badge>기본</Badge>
-                            <Badge tone="attention">필수</Badge>
+                            <Badge tone="warning">필수</Badge>
                           </li>
                         ) : null}
                         {problem.checklist_items.map((item, itemIndex) => (
                           <li key={itemIndex} className="flex items-center gap-2 text-[12.5px] text-ink/60">
                             <span className="flex-1">{item.label}</span>
-                            {item.required ? <Badge tone="attention">필수</Badge> : <Badge tone="neutral">선택</Badge>}
+                            {item.required ? <Badge tone="warning">필수</Badge> : <Badge tone="neutral">선택</Badge>}
                           </li>
                         ))}
                       </ul>

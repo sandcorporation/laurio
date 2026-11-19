@@ -109,7 +109,7 @@ export function ScoringCard({ classroom }: { classroom: ClassRow }) {
         ) : null}
 
         {/* 갈 곳은 키를 바꿀 수 있는 소유자에게만 — 공동 강사에게는 갈 곳 없는 버튼을 보이지 않는다(#561). */}
-        {scoringStatusTone(status) === "attention" && isOwner ? (
+        {scoringStatusTone(status) === "warning" && isOwner ? (
           <div>
             <Link
               href={`${settings}#scoring-key`}

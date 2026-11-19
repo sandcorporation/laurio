@@ -102,7 +102,7 @@ describe("instructorEntryBadge (#550)", () => {
     ).toBe("공모전에도 냈음");
     expect(
       instructorEntryBadge({ contest_entry: { status: "rejected" }, is_current_contest_entry: false })?.tone,
-    ).toBe("attention");
+    ).toBe("warning");
   });
 });
 

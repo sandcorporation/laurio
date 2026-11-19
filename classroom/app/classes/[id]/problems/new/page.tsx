@@ -235,7 +235,7 @@ export default function NewProblemPage() {
     return (
       <PageShell>
         <PageHeader eyebrow="클래스 · 문제" title="새 문제" titleTestId="new-problem-heading" />
-        <Note tone="attention">
+        <Note tone="warning">
           <span data-testid="new-problem-archived-note">
             이 클래스는 보관되어 새 문제를 만들 수 없습니다 — 보관을 되돌린 뒤에 할 수 있습니다.
           </span>
@@ -489,7 +489,7 @@ export default function NewProblemPage() {
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >
           {!hasRequiredItem ? (
-            <Note tone="attention">
+            <Note tone="warning">
               <span data-testid="new-problem-preview-not-ready-notice">필수 항목이 없어 아직 열 수 없습니다.</span>
             </Note>
           ) : null}

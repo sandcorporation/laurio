@@ -61,8 +61,8 @@ function ClassActionLinks({
   );
 }
 
-const TONE_TEXT = { verified: "text-success", attention: "text-error", ink: "text-ink" } as const;
-const TONE_BAR = { verified: "bg-success", attention: "bg-error", ink: "bg-ink" } as const;
+const TONE_TEXT = { verified: "text-success", attention: "text-warning", ink: "text-ink" } as const;
+const TONE_BAR = { verified: "bg-success", attention: "bg-warning", ink: "bg-ink" } as const;
 
 // 행 오른쪽의 막대 — 가르치는 행은 「61% 달성률」, 참여 중 행은 「3/6 통과」(시안 v2 Home).
 // 보관 행은 색을 빼고 흐리게 한다. `ratio` 가 null 이면 빈 막대에 「—」다.
@@ -138,7 +138,7 @@ function ClassList({
                   {/* 나에게 온 소유권 이전 요청(#564) — 클래스 화면에서 답한다. */}
                   {classroom.pending_ownership_transfer?.recipient_is_me ? (
                     <span data-testid={`classroom-row-${classroom.id}-ownership-transfer-badge`}>
-                      <Badge tone="attention">소유권 이전 요청</Badge>
+                      <Badge tone="warning">소유권 이전 요청</Badge>
                     </span>
                   ) : null}
                 </div>
@@ -234,7 +234,7 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
                       알리기만 하고 링크는 그대로 열어 둔다. */}
                   {classroom.expelled ? (
                     <span data-testid={`classroom-joined-row-${classroom.id}-expelled-badge`}>
-                      <Badge tone="attention">내보내짐</Badge>
+                      <Badge tone="warning">내보내짐</Badge>
                     </span>
                   ) : null}
                 </div>

@@ -45,8 +45,8 @@ function ContestEntryMark({ entry, inline = false }: { entry: "current" | "enter
   return (
     <span
       aria-hidden
-      className={`${inline ? "block" : "absolute -right-1.5 -top-1.5"} h-[7px] w-[7px] border border-error ${
-        entry === "current" ? "bg-error" : "bg-surface"
+      className={`${inline ? "block" : "absolute -right-1.5 -top-1.5"} h-[7px] w-[7px] border border-warning ${
+        entry === "current" ? "bg-warning" : "bg-surface"
       }`}
     />
   );
@@ -57,7 +57,7 @@ function LateMark({ late, inline = false }: { late: Exclude<LateStatus, null>; i
   return (
     <span
       aria-hidden
-      className={`${inline ? "block" : "absolute -bottom-1 -right-1"} border border-surface ${late === "deadline" ? "h-[8px] w-[8px] bg-error" : "h-[6px] w-[6px] bg-ink"}`}
+      className={`${inline ? "block" : "absolute -bottom-1 -right-1"} border border-surface ${late === "deadline" ? "h-[8px] w-[8px] bg-warning" : "h-[6px] w-[6px] bg-ink"}`}
     />
   );
 }
@@ -76,7 +76,7 @@ function StatusMark({ status, perfect = false }: { status: GridCellStatus; perfe
     // 「설정 필요」는 강사가 키를 넣거나 모델을 바꾸기 전까지 절대 바뀌지
     // 않는다(#346, #403, #434) — 「채점 중」의 빗금과 달리 속이 빈 주의색
     // 테두리로 "멈춰 있다"를 그린다.
-    return <span className="mx-auto block h-[15px] w-[15px] border border-error border-dashed" />;
+    return <span className="mx-auto block h-[15px] w-[15px] border border-warning border-dashed" />;
   if (status === "scoring")
     // 「채점 중」은 채워지지도 비지도 않은 중간 상태 — 빗금으로 그 사이를 표현한다.
     return (
@@ -105,7 +105,7 @@ const CELL = "whitespace-nowrap border-b border-rule px-2.5 py-2 text-center";
 const STICKY_BASE = "sticky left-0 z-[1] whitespace-nowrap border-b border-rule px-4 py-2 text-left";
 const STICKY = `${STICKY_BASE} bg-surface`;
 const HEAD = "text-[11px] font-normal text-ink/45";
-const TONE_CLASS = { verified: "text-success", attention: "text-error", ink: "text-ink" } as const;
+const TONE_CLASS = { verified: "text-success", attention: "text-warning", ink: "text-ink" } as const;
 
 function RowMenu({ member, onExpel }: { member: GridMemberRow; onExpel: () => void }) {
   const [open, setOpen] = useState(false);
@@ -297,7 +297,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                       data-testid={`participants-header-problem-${problem.id}-${problem.status}-badge`}
                       className="ml-1.5 inline-block"
                     >
-                      <Badge tone={problem.status === "hidden" ? "attention" : "neutral"}>
+                      <Badge tone={problem.status === "hidden" ? "warning" : "neutral"}>
                         {PROBLEM_STATUS_LABEL[problem.status]}
                       </Badge>
                     </span>
@@ -322,7 +322,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                   ) : null}
                   {member.expelled ? (
                     <span data-testid={`participant-row-${member.id}-expelled-badge`} className="ml-2 inline-block">
-                      <Badge tone="attention">내보냄</Badge>
+                      <Badge tone="warning">내보냄</Badge>
                     </span>
                   ) : null}
                   {member.joined_at ? (

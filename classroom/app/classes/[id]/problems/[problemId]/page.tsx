@@ -403,7 +403,7 @@ export default function EditProblemPage() {
     });
   }
 
-  const statusTone = problem.status === "open" ? "verified" : problem.status === "hidden" ? "attention" : "neutral";
+  const statusTone = problem.status === "open" ? "verified" : problem.status === "hidden" ? "warning" : "neutral";
   const classLabel = classState.status === "ready" ? `${classState.classroom.name} › ` : "";
 
   return (
@@ -462,7 +462,7 @@ export default function EditProblemPage() {
 
       {isArchived ? (
         <div className="mb-5">
-          <Note tone="attention">
+          <Note tone="warning">
             <span data-testid="edit-problem-archived-note">{archivedReason}</span>
           </Note>
         </div>
@@ -513,7 +513,7 @@ export default function EditProblemPage() {
                       className="flex flex-wrap items-center gap-2 border-b border-rule bg-surface px-4 py-3"
                     >
                       <Badge>공모전 문제</Badge>
-                      <Badge tone={contest.accepts_entries ? "verified" : "attention"}>
+                      <Badge tone={contest.accepts_entries ? "verified" : "warning"}>
                         {contest.accepts_entries ? "공모전에 낼 수 있음" : "공모전 마감"}
                       </Badge>
                     </div>
@@ -585,9 +585,9 @@ export default function EditProblemPage() {
                 </Card>
 
                 {problem.zip_git_history_warning ? (
-                  <Note tone="attention">
+                  <Note tone="warning">
                     <div data-testid="zip-git-history-warning" className="flex flex-col gap-2.5">
-                      <p className="text-error">
+                      <p className="text-warning">
                         zip 제출에는 Git 기록이 들어가지 않습니다. 저장소로 낸 사람만 이 항목을 충족할 수 있습니다.
                       </p>
                       <ul className="flex flex-col gap-1.5">
@@ -722,7 +722,7 @@ export default function EditProblemPage() {
                           .map((item) => (
                             <li key={item.id} data-testid={`checklist-gradability-warning-${item.id}`} className="text-[13px]">
                               <span className="text-ink">{item.label}</span>
-                              <span className="block text-error">
+                              <span className="block text-warning">
                                 {gradabilityWarningLine(gradabilityWarnings[item.id].reason)}
                               </span>
                             </li>
@@ -779,7 +779,7 @@ export default function EditProblemPage() {
                     </div>
                     {confirmingHide ? (
                       // 숨기기 전 한 번 더 확인한다(#405 AC "결과를 알고 숨기기 위해서다").
-                      <Note tone="attention">
+                      <Note tone="warning">
                         <div className="flex flex-col gap-2.5">
                           <span data-testid="hide-problem-confirm-notice">
                             숨기면 참여자 목록에서 빠지고 새로 낼 수 없습니다. 이미 낸 참여자는 자기 시도와 판정을 계속 볼 수 있습니다.
@@ -895,7 +895,7 @@ export default function EditProblemPage() {
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >
           {problem.status !== "open" && !problem.checklist_items.some((item) => item.required) ? (
-            <Note tone="attention">
+            <Note tone="warning">
               <span data-testid="edit-problem-preview-not-ready-notice">필수 항목이 없어 아직 열 수 없습니다.</span>
             </Note>
           ) : null}
