@@ -135,7 +135,7 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 1. **브랜치 → PR → `main`.** GitHub Actions `PR 검사`(`pr-check.yml`)가 검사 묶음·amd64 이미지 부팅 가드·e2e·celery 를 돈다
    (Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서). 「결과」 잡이 초록(`gh pr checks <PR>`)이면 **작업자가 squash 로
    병합한다**(`gh pr merge <N> --squash`). **`main` 에 직접 push 하지 않는다** — 그러면 PR 검사 없이 release 가 돈다.
-2. **`main` → `production`**(GitHub Actions `release.yml`, `push: main` 만). 세 잡이 차례로 돈다:
+2. **`main` → `production`**(GitHub Actions `release.yml`, `push: main` 과 수동 실행 — release 를 끈 뒤 켜면 `gh workflow run release.yml --ref main` 으로 한 번 돌린다, main 밖 ref 는 `main_only` 잡이 막는다, #1018). 세 잡이 차례로 돈다:
    - **check** — `pr-check.yml` 을 `workflow_call` 로 그대로 부른다(PR 과 같은 검사). main 실행이라 이미지 층 캐시를 저장한다(#932).
    - **image** — `image.yml`: 여섯 서비스마다 `ubuntu-24.04-arm` 실행기 하나(matrix)가 `scripts/ci/images.sh arm64` 로 굽거나
      건너뛰고(문맥 해시 — 아래), 이번에 구운 앱의 **부팅 가드**(`deploy-guard.sh`, arm64 그대로), 초록이면 **문맥 태그**

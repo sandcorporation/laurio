@@ -142,6 +142,24 @@ class PublicRepoTest(unittest.TestCase):
                     if "uses:" in line and not LOCAL_WORKFLOW_USES.match(line):
                         self.assertRegex(line, PINNED_USES, "액션은 SHA 로 고정한다")
 
+    def test_release_triggers_and_only_runs_on_main(self) -> None:
+        """release 는 push(main)와 수동 실행뿐이고, main 밖 ref 로는 어느 잡도 돌지 않는다(#1018)."""
+        code = "\n".join(re.sub(r"(^|\s)#.*", "", l) for l in (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8").splitlines())
+        on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", code)
+        self.assertIsNotNone(on)
+        self.assertEqual(re.sub(r"\s+", " ", on.group(1)).strip(), "push: branches: [main] workflow_dispatch:")
+        jobs = {m.group(1): m.group(2) for m in re.finditer(r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", code.split("\njobs:\n", 1)[1])}
+        self.assertIn("main_only", jobs)
+        self.assertIn("refs/heads/main", jobs["main_only"])
+        self.assertIn("exit 1", jobs["main_only"])
+        for name, block in jobs.items():
+            if name == "main_only":
+                continue
+            with self.subTest(job=name):
+                self.assertRegex(block, r"needs:\s*(\[[^\]]*\bmain_only\b[^\]]*\]|main_only\b)", "main_only 를 기다린다")
+                if "!cancelled()" in block:  # 선행 잡이 실패해도 도는 if 는 main_only success 를 직접 요구한다
+                    self.assertIn("needs.main_only.result == 'success'", block)
+
     def test_permission_blocks_reads_top_and_job_levels(self) -> None:
         code = "permissions:\n  contents: read\njobs:\n  a:\n    permissions:\n      packages: write\n    runs-on: x\n"
         self.assertEqual(permission_blocks(code), [("", {"contents": "read"}), ("a", {"packages": "write"})])
