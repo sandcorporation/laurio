@@ -447,6 +447,11 @@ services:
       search:
         condition: service_started
     environment: *backend-env
+    # 에이전트 채점·완성도 리뷰(#1000·#1001)가 이 프로세스에서 `agent-grader` 를 부른다 — 실행기와 `agent-call`
+    # 에 함께 붙어야 그 이름이 풀린다(#1031). `agent`(프록시만 보이는 쪽)에는 붙지 않는다.
+    networks:
+      - default
+      - agent-call
     # 기본 큐(`celery`)만 소비한다 — 스캔·운영 지표·단가 대조. 강의실 채점은 Celery 가
     # 아니라 아래 `grader` 가 한다(#584, ADR-0059).
     #
@@ -810,6 +815,7 @@ services:
       AGENT_GRADER_PROXY_BASE_URL: http://llm-proxy:8002
     networks:
       - agent
+      - agent-call
     healthcheck:
       test: ["CMD", "python3", "/app/agent_runner.py", "health"]
       interval: 30s
@@ -822,6 +828,10 @@ services:
 # 함께 붙어, 실행기는 프록시를 거쳐서만 벤더에 닿는다.
 networks:
   agent:
+    internal: true
+  # 실행기를 부르는 쪽(#1031) — `celery-worker` 와 `agent-grader` 둘만. 이것도 `internal` 이라 실행기가 여기로 밖에
+  # 나가지 못한다. 부르는 쪽을 `agent` 에 넣지 않는 까닭: 그쪽은 「실행기에서 보이는 것은 프록시뿐」을 지키는 자리다.
+  agent-call:
     internal: true
 
 volumes:

@@ -30,6 +30,7 @@ services:
       AGENT_GRADER_PROXY_BASE_URL: http://llm-proxy:8002
     networks:
       - agent
+      - agent-call
     healthcheck:
       test: ["CMD", "python3", "/app/agent_runner.py", "health"]
       interval: 5s
@@ -46,6 +47,7 @@ services:
       - ../scripts/ci:/checks:ro
     networks:
       - agent
+      - default
     command: ["python3", "/checks/agent_grader_fake_vendor.py", "8002"]
 
   driver:
@@ -54,8 +56,11 @@ services:
     read_only: true
     volumes:
       - ../scripts/ci:/checks:ro
+    # 운영의 부르는 쪽(`celery-worker`)과 같은 자리 — `agent` 가 아니라 `agent-call` 로 실행기에 닿는다(#1031).
+    # default 는 가짜 벤더의 기록(`/_requests`)을 읽으려고.
     networks:
-      - agent
+      - default
+      - agent-call
     depends_on:
       agent-grader:
         condition: service_healthy
@@ -65,4 +70,6 @@ services:
 
 networks:
   agent:
+    internal: true
+  agent-call:
     internal: true

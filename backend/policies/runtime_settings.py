@@ -102,7 +102,7 @@ SPECS: dict[str, SettingSpec] = {
         SettingSpec("OPEN_AI_API_KEY", "OpenAI API 키", "secret", max_length=500),
         SettingSpec("LLM_OPENAI_MODEL", "OpenAI 모델", "text", default="gpt-4o-mini", max_length=100),
         # #994: 플랫폼 채점(공모전 채점·완성도, `core.llm_scoring.get_adapter`)의 벤더. 강의실(클래스 키)·
-        # 요구사항 대화는 이 값을 보지 않는다. anthropic 은 방침이 덮을 때만 저장된다(`_refuse_uncovered_vendor`).
+        # 요구사항 대화는 이 값을 보지 않는다.
         SettingSpec(
             LLM_SCORING_VENDOR,
             "채점 벤더",
@@ -559,19 +559,6 @@ def _normalize(spec: SettingSpec, raw: str) -> str:
     return format(number, "g")
 
 
-def _refuse_uncovered_vendor(key: str, value: str) -> None:
-    """방침이 덮지 않는 국외 이전을 만들지 않는다(#994) — 방침 5·6항의 Anthropic 이전은 강의실 클래스 키
-    채점만 적었다. 공모전 채점의 이전을 적은 개정이 시행되기 전에는 anthropic 을 저장하지 않는다."""
-
-    from core.privacy_policy import platform_anthropic_scoring_open
-
-    if key == LLM_SCORING_VENDOR and value == VENDOR_ANTHROPIC and not platform_anthropic_scoring_open():
-        raise RuntimeSettingError(
-            "개인정보처리방침의 Anthropic 국외 이전에 공모전 채점이 없어 저장할 수 없습니다.",
-            "privacy_not_covered",
-        )
-
-
 def _display(spec: SettingSpec, value: str, last4: str) -> str:
     return masked(last4) if spec.kind == "secret" else value
 
@@ -602,7 +589,6 @@ def save_setting(key: str, raw: str, *, operator: AbstractBaseUser) -> bool:
     if not raw.strip():
         return False
     value = _normalize(spec, raw)
-    _refuse_uncovered_vendor(key, value)
     secret = spec.kind == "secret"
     last4 = last4_of(value) if secret else ""
     now = Clock.now()
