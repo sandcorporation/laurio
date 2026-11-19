@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from classroom.models import ProblemTemplate
+
 TEMPLATES_URL = "/api/classroom/problem-templates"
 CLASSES_URL = "/api/classroom/classes"
 
@@ -136,9 +138,21 @@ def test_list_requires_login(client, db):
 def test_list_is_paginated(client, db):
     pair = _login(client)
     class_id = _create_class(client, pair["access"])
-    for i in range(25):
-        problem_id = _create_problem(client, pair["access"], class_id, f"문제 {i}")
-        _publish(client, pair["access"], class_id, problem_id)
+    # 페이지 크기(20)를 넘기려는 것이라 공개 경로는 한 번만 거치고(요청 수십 번이
+    # CPU 한도를 갉았다, #1014) 나머지 24개는 같은 모양의 행을 직접 만든다.
+    problem_id = _create_problem(client, pair["access"], class_id, "문제 0")
+    _publish(client, pair["access"], class_id, problem_id)
+    seed = ProblemTemplate.objects.get()
+    ProblemTemplate.objects.bulk_create(
+        ProblemTemplate(
+            published_by_id=seed.published_by_id,
+            publisher_display_name=seed.publisher_display_name,
+            title=f"문제 {i}",
+            description=seed.description,
+            submission_formats=seed.submission_formats,
+        )
+        for i in range(1, 25)
+    )
 
     first_page = client.get(TEMPLATES_URL, **_auth_header(pair["access"]))
     body = first_page.json()
