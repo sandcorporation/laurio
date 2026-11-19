@@ -24,7 +24,7 @@ function DueField({
 }) {
   const field =
     `border bg-surface px-2.5 py-1.5 font-mono text-[13px] text-ink focus:border-ink focus:outline-none ` +
-    `disabled:cursor-not-allowed disabled:bg-paper disabled:text-ink/60 ${invalid ? "border-attention" : "border-rule"}`;
+    `disabled:cursor-not-allowed disabled:bg-paper disabled:text-ink/60 ${invalid ? "border-error" : "border-rule"}`;
   return (
     <div data-testid={testId} className="flex flex-col gap-1.5 px-4 py-2.5">
       <div className="flex items-center text-[12px] text-ink/60">

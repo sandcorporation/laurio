@@ -83,7 +83,7 @@ function DemoVideoRetentionNote({
 }) {
   if (retentionExpired) {
     return (
-      <p className="text-xs text-attention" data-testid="demo-video-retention-expired">
+      <p className="text-xs text-error" data-testid="demo-video-retention-expired">
         보관 기간이 지나 파일이 삭제되었습니다. 자료와 확인 위치는 그대로 남아 있습니다.
       </p>
     );
@@ -117,21 +117,21 @@ function RepositoryBadge({
     // 비공개와 같은 줄의 새 상태 — 공개 저장소지만 낸 브랜치·커밋이 없다(오타·지워진 브랜치·
     // force push). 마감 전에 고치면 다시 확인된다. 기본 브랜치로 대신 채점하지 않는다.
     return (
-      <p className="text-xs text-attention" data-testid="repository-ref-missing-badge">
+      <p className="text-xs text-error" data-testid="repository-ref-missing-badge">
         {isCommit ? "커밋을 찾을 수 없음" : "브랜치를 찾을 수 없음"} — 채점에 반영되지 않습니다.
       </p>
     );
   }
   if (isPublic === true) {
     return (
-      <p className="text-xs text-verified" data-testid="repository-public-badge">
+      <p className="text-xs text-success" data-testid="repository-public-badge">
         공개 저장소 — 채점에 반영됩니다.
       </p>
     );
   }
   if (isPublic === false) {
     return (
-      <p className="text-xs text-attention" data-testid="repository-private-badge">
+      <p className="text-xs text-error" data-testid="repository-private-badge">
         비공개 저장소 — 채점에 반영되지 않습니다.
       </p>
     );
@@ -336,7 +336,7 @@ export function AssetKindSection({
                     // 그래서 순번이 이 화면에서 낼 수 있는 가장 구체적인
                     // 구별자다.
                     <p
-                      className="text-xs text-verified"
+                      className="text-xs text-success"
                       data-testid={`${testIdPrefix}-${index}-value`}
                     >
                       업로드됨: {row.label.trim() || `${title} 파일 ${index + 1}`}
@@ -376,7 +376,7 @@ export function AssetKindSection({
 
               {kind === "video_link" && row.value.trim() !== "" && !isSafeVideoLink(row.value) && (
                 <p
-                  className="text-xs text-attention"
+                  className="text-xs text-error"
                   data-testid={`${testIdPrefix}-${index}-invalid`}
                 >
                   {VIDEO_LINK_SHAPE_MESSAGE}
@@ -385,7 +385,7 @@ export function AssetKindSection({
 
               {repoInvalid && (
                 <p
-                  className="text-xs text-attention"
+                  className="text-xs text-error"
                   data-testid={`${testIdPrefix}-${index}-invalid`}
                 >
                   {repoInvalid.message}

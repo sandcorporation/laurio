@@ -40,7 +40,7 @@ function Step({
   return (
     <li data-testid={testId} data-done={done ? "true" : "false"} className="flex items-start gap-3.5 border-t border-rule px-4 py-3.5 first:border-t-0">
       {done ? (
-        <span aria-label="끝남" className="flex h-[22px] w-[22px] shrink-0 items-center justify-center bg-verified text-[12px] text-paper">
+        <span aria-label="끝남" className="flex h-[22px] w-[22px] shrink-0 items-center justify-center bg-success text-[12px] text-paper">
           ✓
         </span>
       ) : (

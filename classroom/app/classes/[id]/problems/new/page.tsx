@@ -372,7 +372,7 @@ export default function NewProblemPage() {
                         data-testid="syntax-check-enabled-input"
                         checked={syntaxCheckEnabled}
                         onChange={(event) => setSyntaxCheckEnabled(event.target.checked)}
-                        className="accent-attention"
+                        className="accent-error"
                       />
                       켜짐
                     </label>

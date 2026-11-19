@@ -95,7 +95,7 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
       <Card className="p-4">
       {/* 「다음 행동」이 제목보다 먼저 온다 — 이 화면에 온 이유가 그것이기 때문이다. */}
       <p
-        className={label.mine ? "font-semibold text-attention" : "text-ink/60"}
+        className={label.mine ? "font-semibold text-error" : "text-ink/60"}
         data-testid={`participation-row-${row.submission_id}-next-action`}
       >
         {label.mine ? `내 차례 · ${label.text}` : label.text}

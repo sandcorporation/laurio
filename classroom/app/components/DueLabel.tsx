@@ -7,7 +7,7 @@ const TONE_CLASS: Record<DueTone, string> = {
   normal: "text-ink",
   dim: "text-ink/60",
   faint: "text-ink/35",
-  attention: "text-attention",
+  attention: "text-error",
 };
 
 function Mark({ mark, testId }: { mark: DueMark; testId: string }) {

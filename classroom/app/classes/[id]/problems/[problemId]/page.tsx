@@ -587,7 +587,7 @@ export default function EditProblemPage() {
                 {problem.zip_git_history_warning ? (
                   <Note tone="attention">
                     <div data-testid="zip-git-history-warning" className="flex flex-col gap-2.5">
-                      <p className="text-attention">
+                      <p className="text-error">
                         zip 제출에는 Git 기록이 들어가지 않습니다. 저장소로 낸 사람만 이 항목을 충족할 수 있습니다.
                       </p>
                       <ul className="flex flex-col gap-1.5">
@@ -643,7 +643,7 @@ export default function EditProblemPage() {
                         checked={problem.syntax_check_enabled}
                         disabled={isArchived}
                         onChange={(event) => handleSyntaxCheckToggle(event.target.checked)}
-                        className="accent-attention"
+                        className="accent-error"
                       />
                       켜짐
                     </label>
@@ -722,7 +722,7 @@ export default function EditProblemPage() {
                           .map((item) => (
                             <li key={item.id} data-testid={`checklist-gradability-warning-${item.id}`} className="text-[13px]">
                               <span className="text-ink">{item.label}</span>
-                              <span className="block text-attention">
+                              <span className="block text-error">
                                 {gradabilityWarningLine(gradabilityWarnings[item.id].reason)}
                               </span>
                             </li>

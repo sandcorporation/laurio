@@ -231,7 +231,7 @@ export default function JudgeComparisonPage() {
             {contest.is_free ? "" : " · 미선정 시 마감 14일 뒤 자동 1/N 배분"}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-attention" data-testid="judging-not-started-notice">
+          <p className="mt-2 text-sm text-error" data-testid="judging-not-started-notice">
             아직 심사기간이 시작되지 않았습니다 — 마감 후에 비교할 수 있습니다.
           </p>
         )}
@@ -363,7 +363,7 @@ export default function JudgeComparisonPage() {
                           data-met={entry?.is_met ? "true" : "false"}
                         >
                           <div className="flex flex-col gap-1">
-                            <p className={entry?.is_met ? "text-verified" : "text-ink"}>
+                            <p className={entry?.is_met ? "text-success" : "text-ink"}>
                               {entry?.is_met ? "충족" : "미충족"}
                             </p>
                             {isLinked && (
@@ -461,7 +461,7 @@ export default function JudgeComparisonPage() {
       )}
 
       {award.status === "done" && (
-        <p data-testid="award-success" className="text-sm text-verified">
+        <p data-testid="award-success" className="text-sm text-success">
           제출물 #{award.result.submission_id}을(를) 선정했습니다. 이 제출작의
           소스코드에 접근할 수 있습니다.
         </p>
@@ -630,7 +630,7 @@ function SubmissionColumnHeader({
         ))}
 
       {isAwarded && (
-        <p className="text-xs font-semibold text-verified" data-testid={`awarded-badge-${submission.submission_id}`}>
+        <p className="text-xs font-semibold text-success" data-testid={`awarded-badge-${submission.submission_id}`}>
           선정됨
         </p>
       )}
@@ -641,7 +641,7 @@ function SubmissionColumnHeader({
               한다 — 그래서 이 안내는 버튼을 누르기 전부터 항상 보인다(조건부로
               클릭 후에만 나타나지 않는다). */}
           <p
-            className="text-xs text-attention"
+            className="text-xs text-error"
             data-testid={`award-source-notice-${submission.submission_id}`}
           >
             선정하면 이 제출작의 소스코드가 즉시 공개됩니다.

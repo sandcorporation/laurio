@@ -52,7 +52,7 @@ function StatBar({ stats }: { stats: ReturnType<typeof submissionStats> }) {
       key: "passed",
       label: "통과",
       value: `${stats.passed}/${stats.participants ?? "—"}`,
-      tone: "text-verified",
+      tone: "text-success",
     },
     { key: "attempts", label: "시도", value: String(stats.attempts) },
     { key: "scoring", label: "채점 중", value: String(stats.scoring) },

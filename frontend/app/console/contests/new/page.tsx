@@ -501,7 +501,7 @@ export default function NewContestGrillPage() {
         </label>
 
         {previewUnderfunded && quoteTotal !== null && (
-          <p role="status" data-testid="grill-brief-underfunded-preview" className="text-xs text-attention">
+          <p role="status" data-testid="grill-brief-underfunded-preview" className="text-xs text-error">
             최소 제안 상금 합계({formatPrize(quoteTotal)}원)보다 적습니다 — 등록하면 목록에 「상금미달」 배지가
             붙지만, 그래도 개최할 수 있습니다.
           </p>

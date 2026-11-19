@@ -82,7 +82,7 @@ export function ContestCard({ contest }: { contest: Contest }) {
 
         <div className="mt-auto flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-t border-rule pt-2">
           <span
-            className={`truncate font-mono text-base font-semibold ${underfundedBadge ? "text-attention" : ""}`}
+            className={`truncate font-mono text-base font-semibold ${underfundedBadge ? "text-error" : ""}`}
           >
             {/* 랜딩의 옛 "0" 표기 버그(spec #444 Problem Statement)가 이 카드로 옮겨 오면 안
                 된다 — 무료 공모전은 언제나 금액이 아니라 "무료"다. */}
@@ -90,7 +90,7 @@ export function ContestCard({ contest }: { contest: Contest }) {
           </span>
           <span
             data-testid="deadline"
-            className={`shrink-0 font-mono text-sm ${imminent ? "font-semibold text-attention" : "text-ink/70"}`}
+            className={`shrink-0 font-mono text-sm ${imminent ? "font-semibold text-error" : "text-ink/70"}`}
           >
             {remainingTimeLabel(contest.deadline_at)}
           </span>

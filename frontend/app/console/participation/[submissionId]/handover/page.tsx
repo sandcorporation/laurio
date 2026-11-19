@@ -197,7 +197,7 @@ export default function DeveloperBuildAssetsPage({
                 ))}
               </ul>
             ) : (
-              <p className="mt-2 text-attention">목록을 불러오지 못했습니다.</p>
+              <p className="mt-2 text-error">목록을 불러오지 못했습니다.</p>
             )}
           </section>
         </>

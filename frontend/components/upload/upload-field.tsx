@@ -90,19 +90,19 @@ export function UploadField({
           data-progress={state.progress}
           className="h-2 w-full max-w-xs overflow-hidden rounded-sm border border-rule"
         >
-          <div className="h-full bg-verified transition-[width]" style={{ width: `${state.progress}%` }} />
+          <div className="h-full bg-success transition-[width]" style={{ width: `${state.progress}%` }} />
         </div>
       )}
 
       {state.status === "done" && state.objectKey && (
-        <p className="text-sm text-verified" data-testid={`${testId}-done`}>
+        <p className="text-sm text-success" data-testid={`${testId}-done`}>
           업로드 완료: <span className="font-mono">{state.objectKey}</span>
         </p>
       )}
 
       {state.status === "error" && (
         <div className="flex items-center gap-3">
-          <p role="alert" className="text-sm text-attention" data-testid={`${testId}-error`}>
+          <p role="alert" className="text-sm text-error" data-testid={`${testId}-error`}>
             {state.error}
           </p>
           <button

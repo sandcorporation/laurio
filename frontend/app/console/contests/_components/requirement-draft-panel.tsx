@@ -261,7 +261,7 @@ function RequirementRow({
     >
       <span
         className={`shrink-0 pt-0.5 text-[10.5px] font-semibold ${
-          isRequired ? "text-attention" : "text-ink/60"
+          isRequired ? "text-error" : "text-ink/60"
         }`}
       >
         {requirementGradeLabel(requirement.grade)}
@@ -297,7 +297,7 @@ function RequirementRow({
           disabled={busy}
           onClick={() => void onDelete(requirement.id)}
           data-testid={`requirement-row-${requirement.id}-delete`}
-          className="text-xs text-attention hover:opacity-70"
+          className="text-xs text-error hover:opacity-70"
         >
           삭제
         </button>
@@ -395,7 +395,7 @@ export function RequirementDraftPanel({
             <p className="text-[11px] tracking-wide text-ink/50">상금</p>
             <div
               className={`flex items-center justify-between border px-3 py-2.5 ${
-                contest.is_underfunded ? "border-attention" : "border-rule"
+                contest.is_underfunded ? "border-error" : "border-rule"
               }`}
             >
               <span className="font-mono text-lg font-semibold" data-testid="grill-draft-prize">
@@ -407,7 +407,7 @@ export function RequirementDraftPanel({
               <p
                 role="status"
                 data-testid="grill-underfunded-badge"
-                className="flex items-start gap-2 text-xs leading-relaxed text-attention"
+                className="flex items-start gap-2 text-xs leading-relaxed text-error"
               >
                 <span>
                   합계보다{" "}

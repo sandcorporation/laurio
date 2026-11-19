@@ -16,8 +16,8 @@ import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
 
-const TONE_TEXT = { verified: "text-verified", attention: "text-attention", ink: "text-ink" } as const;
-const TONE_BAR = { verified: "bg-verified", attention: "bg-attention", ink: "bg-ink" } as const;
+const TONE_TEXT = { verified: "text-success", attention: "text-error", ink: "text-ink" } as const;
+const TONE_BAR = { verified: "bg-success", attention: "bg-error", ink: "bg-ink" } as const;
 
 const TH = "px-3 py-2.5 text-[11px] font-normal tracking-[0.06em] text-ink/45";
 const LINK_BUTTON =

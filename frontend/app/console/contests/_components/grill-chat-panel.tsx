@@ -103,7 +103,7 @@ export function GrillChatPanel({
                 <div className="flex flex-col gap-1">
                   <span
                     className={`w-fit text-[10.5px] font-semibold ${
-                      proposal.grade === "required" ? "text-attention" : "text-ink/60"
+                      proposal.grade === "required" ? "text-error" : "text-ink/60"
                     }`}
                   >
                     {requirementGradeLabel(proposal.grade)}
@@ -131,7 +131,7 @@ export function GrillChatPanel({
       )}
 
       {turnLimitReached && (
-        <p className="text-sm text-attention" data-testid="grill-chat-turn-limit">
+        <p className="text-sm text-error" data-testid="grill-chat-turn-limit">
           이 공모전의 AI 대화가 너무 길어졌습니다. 지금까지 나온 체크리스트로 진행해 주세요.
         </p>
       )}

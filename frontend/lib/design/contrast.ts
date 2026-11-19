@@ -44,11 +44,11 @@ export function blendOver(fg: Rgb, bg: Rgb, alpha: number): Rgb {
   };
 }
 
-export const TOKEN_COLOR_NAMES = ["ink", "paper", "surface", "rule", "attention", "verified"] as const;
+export const TOKEN_COLOR_NAMES = ["ink", "paper", "surface", "rule", "success", "error", "warning", "advanced", "primary", "secondary", "info"] as const;
 export type TokenColorName = (typeof TOKEN_COLOR_NAMES)[number];
 export type TokenPalette = Record<TokenColorName, { light: Rgb; dark: Rgb }>;
 
-/** `tokens.css` 텍스트에서 여섯 색의 `light-dark(...)` 값을 뽑는다. */
+/** `tokens.css` 텍스트에서 색의 `light-dark(...)` 값을 뽑는다. */
 export function parseTokenPalette(css: string): TokenPalette {
   const out = {} as TokenPalette;
   for (const name of TOKEN_COLOR_NAMES) {

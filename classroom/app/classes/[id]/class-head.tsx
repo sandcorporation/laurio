@@ -11,7 +11,7 @@ import { Badge, buttonClass } from "@/app/components/ui";
 import type { ClassRow } from "@/lib/classes/api";
 import { achievementTone } from "@/lib/problems/achievement";
 
-const TONE_TEXT = { verified: "text-verified", attention: "text-attention", ink: "text-ink" } as const;
+const TONE_TEXT = { verified: "text-success", attention: "text-error", ink: "text-ink" } as const;
 
 function Stat({ label, value, testId, valueClass = "" }: { label: string; value: string; testId: string; valueClass?: string }) {
   return (

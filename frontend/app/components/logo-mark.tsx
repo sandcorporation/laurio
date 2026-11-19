@@ -22,7 +22,7 @@ export function LogoMark({ className = "h-6 w-6" }: { className?: string }) {
         strokeLinecap="round"
         className="text-ink"
       />
-      <circle cx={23.07} cy={23.07} r={3.9} className="fill-verified" />
+      <circle cx={23.07} cy={23.07} r={3.9} className="fill-success" />
     </svg>
   );
 }

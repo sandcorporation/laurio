@@ -10,8 +10,8 @@
 // 가져다 쓴다 — 계약을 단위 테스트로 고정하려면 이 분리가 필요하다.
 //
 // 리터럴 hex 는 여기에도 없다 — 전부 `app/tokens.css`의 `@theme`가 만든
-// 유틸리티다. **이 브랜드의 색은 정확히 여섯**(ink·paper·surface·rule·
-// attention·verified)이고 액센트는 정확히 둘(attention·verified)이다 — 이
+// 유틸리티다. **이 브랜드의 색은 중립 넷**(ink·paper·surface·rule)**과
+// 팔레트 역할 일곱**(primary·secondary·info·success·warning·error·advanced, ADR-0080)이다 — 이
 // 파일이 그 목록 밖의 이름을 부르면 Tailwind 는 조용히 아무 것도 만들지
 // 않는다(#366 이 겪은 바로 그 실패). `classnames.test.ts`가 각 톤의 출력
 // 문자열을 그대로 고정해 그 실패를 다시 만들지 못하게 막는다.
@@ -28,10 +28,10 @@ const BUTTON_BASE =
 const BUTTON_TONE: Record<ButtonTone, string> = {
   primary: "bg-ink text-paper hover:bg-ink/85",
   secondary: "border border-rule bg-surface text-ink hover:bg-paper",
-  danger: "border border-attention bg-surface text-attention hover:bg-attention/5",
+  danger: "border border-error bg-surface text-error hover:bg-error/5",
   // 되돌릴 수 없는 행위 중, 확인을 이미 거친 최종 실행에만 쓴다(강의실의 같은
   // 규칙, #344/#298) — 입구·한 번에 끝나는 행위는 위 danger(테두리)를 쓴다.
-  dangerFilled: "bg-attention text-paper hover:bg-attention/85",
+  dangerFilled: "bg-error text-paper hover:bg-error/85",
 };
 
 const BUTTON_SIZE: Record<ButtonSize, string> = {
@@ -46,8 +46,8 @@ export function buttonClass(tone: ButtonTone = "secondary", size: ButtonSize = "
 
 const BADGE_TONE: Record<BadgeTone, string> = {
   neutral: "border-rule text-ink/60",
-  attention: "border-attention text-attention",
-  verified: "border-verified text-verified",
+  attention: "border-error text-error",
+  verified: "border-success text-success",
 };
 
 /** 상태 표시. 셋뿐이다 — 이 브랜드의 액센트가 둘이기 때문이다. */
@@ -66,7 +66,7 @@ export const INPUT_CLASS =
 
 const NOTE_TONE: Record<NoteTone, { border: string; text: string }> = {
   neutral: { border: "border-rule", text: "text-ink/60" },
-  attention: { border: "border-attention", text: "text-ink/75" },
+  attention: { border: "border-error", text: "text-ink/75" },
 };
 
 /** 설명·주의를 담는 띠의 클래스. 면을 칠하지 않는다 — 괘선 하나로 본문과 구별한다. */

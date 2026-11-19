@@ -27,7 +27,7 @@ export function SubmissionVerdictList({
           <span
             aria-hidden
             className={`mt-1 h-[13px] w-[13px] shrink-0 border ${
-              score.syntax_check.is_met ? "border-verified bg-verified" : "border-attention"
+              score.syntax_check.is_met ? "border-success bg-success" : "border-error"
             }`}
           />
           <span className="text-[13px] leading-relaxed">

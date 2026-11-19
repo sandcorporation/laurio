@@ -9,10 +9,10 @@ import {
   type ButtonTone,
 } from "./classnames";
 
-// 이 브랜드의 색은 정확히 여섯이다(app/tokens.css) — 이 파일이 그 밖의 이름을
+// 이 브랜드의 색 이름은 app/tokens.css 가 정한다 — 이 파일이 그 밖의 이름을
 // 부르면 Tailwind 는 조용히 아무 것도 만들지 않는다(#366). 유틸리티마다
 // "이름-토큰" 또는 "이름-토큰/투명도" 모양만 허용한다.
-const DEFINED_COLOR_TOKENS = ["ink", "paper", "surface", "rule", "attention", "verified"];
+const DEFINED_COLOR_TOKENS = ["ink", "paper", "surface", "rule", "primary", "secondary", "info", "success", "warning", "error", "advanced", "attention", "verified"];
 
 // bg-/text-/border- 뒤가 항상 색인 것은 아니다(text-sm 은 크기, border-b 는
 // 변(side) 축약이다) — 이 파일이 실제로 쓰는 비색 접미사만 허용 목록에 둔다.
@@ -53,9 +53,9 @@ describe("buttonClass", () => {
   });
 
   it("danger 는 테두리만, dangerFilled 는 배경까지 채운다", () => {
-    // hover:bg-attention/5 는 danger 에도 있다 — 기본(비-hover) bg-attention 토큰만 본다.
-    expect(buttonClass("danger").split(" ")).not.toContain("bg-attention");
-    expect(buttonClass("dangerFilled").split(" ")).toContain("bg-attention");
+    // hover:bg-error/5 는 danger 에도 있다 — 기본(비-hover) bg-error 토큰만 본다.
+    expect(buttonClass("danger").split(" ")).not.toContain("bg-error");
+    expect(buttonClass("dangerFilled").split(" ")).toContain("bg-error");
   });
 
   it("sm 은 md 보다 좁은 패딩을 쓴다", () => {
@@ -77,7 +77,7 @@ describe("badgeClass", () => {
 describe("noteClass", () => {
   it("neutral 과 attention 이 서로 다른 괘선색을 낸다", () => {
     expect(noteClass("neutral")).toContain("border-rule");
-    expect(noteClass("attention")).toContain("border-attention");
+    expect(noteClass("attention")).toContain("border-error");
   });
 
   it("두 톤 다 면을 칠하지 않는다 — 배경은 surface 뿐이다", () => {

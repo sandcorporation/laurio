@@ -23,7 +23,7 @@ export function verdictFromMet(met: boolean): VerdictValue {
 // 항목 앞 네모 표식 — 충족(채움) · 미충족(붉은 테두리) · 확인 불가(점선 잉크) · 아직 판정 없음(옅은 테두리).
 export function verdictMarkerClass(verdict: VerdictValue | null): string {
   if (verdict === null) return "border-rule";
-  if (verdict === "met") return "border-verified bg-verified";
+  if (verdict === "met") return "border-success bg-success";
   if (verdict === "unverifiable") return "border-dashed border-ink/45";
-  return "border-attention";
+  return "border-error";
 }
