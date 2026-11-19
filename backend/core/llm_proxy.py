@@ -321,11 +321,19 @@ async def _relay(
                 if name.lower() in _FORWARD_RESPONSE_HEADERS:
                     response.headers[name] = value
             await response.prepare(request)
-            async for chunk in upstream.content.iter_any():
-                meter.feed(chunk)
-                await response.write(chunk)
-            await settle(status)
-            await response.write_eof()
+            try:
+                async for chunk in upstream.content.iter_any():
+                    meter.feed(chunk)
+                    await response.write(chunk)
+                await settle(status)
+                await response.write_eof()
+            except ConnectionResetError:
+                transport = request.transport
+                if transport is not None and not transport.is_closing():
+                    raise  # 벤더 쪽 끊김이다 — 아래 upstream failed 로
+                # 끊은 쪽은 벤더가 아니라 CLI 다 — Codex 는 `response.completed` 를 받으면 남은 본문을 기다리지
+                # 않고 연결을 닫는다(#1681). 실패로 적지 않는다. 비용은 finally 의 settle 이 기록한다.
+                logger.info("llm-proxy: client closed vendor=%s run=%s status=%s", vendor, verdict.record_id, status)
             return response
     except (aiohttp.ClientError, TimeoutError) as error:
         logger.warning("llm-proxy: upstream failed vendor=%s run=%s error=%s", vendor, verdict.record_id, type(error).__name__)

@@ -373,6 +373,31 @@ def test_an_api_error_result_keeps_its_text_and_the_stdout_tail(
 
 
 @pytest.mark.django_db
+def test_an_attempt_that_spent_the_run_budget_is_not_retried(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor
+):
+    """#1681 — 예산을 다 쓰고 끊긴 시도를 다시 돌리면 같은 길을 헤매며 예산을 한 번 더 쓴다."""
+    import dataclasses
+
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    runner = _use(monkeypatch, _FakeRunner(_claude_stream(None), exit_code=1))
+    real = agent_scoring.run_usage
+    monkeypatch.setattr(
+        agent_scoring,
+        "run_usage",
+        lambda record_id: dataclasses.replace(real(record_id), spent_usd=agent_scoring.RUN_BUDGET_USD),
+    )
+
+    rows = _run_pending(client)["rows"]
+
+    assert rows[0]["status"] == "held"
+    assert len(runner.specs) == 1
+    run = AgentRun.objects.get(submission_id=submission_id)
+    assert len(run.record["attempts"]) == 1
+    assert "실행 예산 소진 — 재실행하지 않는다" in AgentRun.objects.get(submission_id=submission_id).reasons
+
+
+@pytest.mark.django_db
 def test_a_held_submission_is_not_retried_nor_finalized_as_zero(
     client, category, landing_type, monkeypatch, agent_method, claude_vendor
 ):

@@ -482,6 +482,17 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, snapshot: Snapshot, i
     return problems, record, parsed.structured_output
 
 
+def _budget_spent(attempt: JSON) -> bool:
+    """프록시가 센 이 시도의 비용이 실행 예산에 닿았는가."""
+
+    usage = attempt.get("proxy_usage") if isinstance(attempt, dict) else None
+    spent = usage.get("spent_usd") if isinstance(usage, dict) else None
+    try:
+        return spent is not None and Decimal(str(spent)) >= RUN_BUDGET_USD
+    except ArithmeticError:
+        return False
+
+
 def run_agent_job(job: AgentJob) -> AgentJobOutcome:
     vendor: Vendor = scoring_vendor()
     model = agent_model(vendor)
@@ -513,5 +524,9 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
         if not problems and isinstance(output, dict):
             record["accepted"] = True
             return AgentJobOutcome(structured_output=output, model_version=f"agent:{vendor}:{model}", record=record)
+        if _budget_spent(attempt):
+            # 실행 예산을 다 쓰고 끊긴 시도는 다시 돌려도 같은 길을 헤맨다 — 재실행하면 예산을 한 번 더 쓴다(#1681).
+            problems = [*problems, "실행 예산 소진 — 재실행하지 않는다"]
+            break
     record["accepted"] = False
     raise AgentRunHeld(problems, record)
