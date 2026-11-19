@@ -11,17 +11,30 @@ const iso = (name: string) => new RegExp(`const ${name} = "(\\d{4}-\\d{2}-\\d{2}
 describe("개인정보처리방침 시행일 표시", () => {
   const effective = iso("EFFECTIVE_ISO");
 
-  it("현재 판 시행일은 병합일(2026-11-05)+7일이다", () => {
-    expect(effective).toBe("2026-11-12");
+  it("현재 판 시행일은 병합일(2026-11-20)+7일이다", () => {
+    expect(effective).toBe("2026-11-27");
   });
 
   it("시행일 전에는 개정 예정, 시행일 0시(KST)부터는 시행일만", () => {
-    expect(effectiveNotice(effective, new Date("2026-11-11T14:59:00Z"))).toBe("개정 예정 · 시행일 2026년 11월 12일");
-    expect(effectiveNotice(effective, new Date("2026-11-11T15:00:00Z"))).toBe("시행일 2026년 11월 12일");
+    expect(effectiveNotice(effective, new Date("2026-11-26T14:59:00Z"))).toBe("개정 예정 · 시행일 2026년 11월 27일");
+    expect(effectiveNotice(effective, new Date("2026-11-26T15:00:00Z"))).toBe("시행일 2026년 11월 27일");
   });
 
   it("Anthropic 이전 개정의 시행일(키 잠금 기준)은 따로 2026-11-06 이다", () => {
     expect(iso("ANTHROPIC_TRANSFER_EFFECTIVE_ISO")).toBe("2026-11-06");
+  });
+
+  it("종전 방침 시행일은 부칙 ②에 2026-11-12 로 적힌다", () => {
+    expect(iso("PREVIOUS_EFFECTIVE_ISO")).toBe("2026-11-12");
+  });
+
+  it("5항·6항 ②가 공모전 제출물의 Anthropic 채점을 적는다", () => {
+    expect(page).toContain("공모전 제출물의 채점, 강사가 Claude 키로 채점을 연결한 클래스의");
+    expect(page).toContain("이전 항목: 공모전에 제출한 소스코드, 강사가 Claude 키로 채점을 연결한 클래스에서");
+  });
+
+  it("6항 꼬리 문단이 공모전 채점의 벤더가 운영 설정에 따른다고 적는다", () => {
+    expect(page).toContain("공모전 제출물의 채점은 운영 설정에 따라 OpenAI, L.L.C. 또는");
   });
 
   it("6항 두 줄(OpenAI·Anthropic)이 완성도 채점을 이전 목적에 적는다", () => {

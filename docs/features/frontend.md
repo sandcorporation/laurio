@@ -258,6 +258,11 @@ CTA 가 상태에 따라 갈린다 — 아직 안 낸 사람에게는 「제출�
 `PRIVACY_POLICY_EFFECTIVE_DATE`(2026-11-06)는 화면의 별도 상수 `ANTHROPIC_TRANSFER_EFFECTIVE_ISO` 와 같은 값으로 시험이
 지킨다.
 
+**방침 공모전 Anthropic 채점 개정(#997)** — 5항 Anthropic 줄에 「공모전 제출물의 채점」을, 6항 ② 이전 항목에 「공모전에 제출한
+소스코드」를 더했다(자가 응답은 Anthropic 에 보내지 않아 넣지 않았다). 현재 판 시행일 **2026년 11월 27일**(`EFFECTIVE_ISO`,
+백엔드 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` 와 같은 값 — `test_privacy_policy_lock.py` 가 지킨다). 부칙 ②의 종전 판은
+11월 12일(`PREVIOUS_EFFECTIVE_ISO`, #897 판)이다. 키 잠금 기준일 `ANTHROPIC_TRANSFER_EFFECTIVE_ISO`(11월 6일)는 그대로다.
+
 **유료 공모전 전용 항목(본인확인·결제·환불·배분·지급·인수인계, 사업자 정보와
 통신판매중개자 고지)은 채우지 않고 자리만 남겼다** — 유료 공모전 스위치가 꺼져
 있어 그 경로 자체가 없고(`core.contest_switch`), 사업자 등록도 저장소 밖의

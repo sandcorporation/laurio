@@ -86,3 +86,23 @@ def test_the_lock_date_stays_nov_6_2026():
     """잠금 기준일은 방침 화면의 현재 판 시행일을 따라 옮기지 않는다 — 옮기면 열린 키 저장이 다시 잠긴다."""
 
     assert config_settings.PRIVACY_POLICY_EFFECTIVE_DATE == date(2026, 11, 6)
+
+
+def test_the_policy_page_effective_date_is_the_platform_anthropic_scoring_date():
+    """현재 판(공모전 제출물의 Anthropic 채점을 5·6항에 더한 개정, #997)의 시행일 = 플랫폼 채점 개방일."""
+
+    page = (Path(django_settings.BASE_DIR).parent / "frontend/app/privacy/page.tsx").read_text(encoding="utf-8")
+    match = re.search(r'const EFFECTIVE_ISO = "(\d+)-(\d+)-(\d+)";', page)
+    assert match, "privacy/page.tsx 의 EFFECTIVE_ISO 를 찾지 못했다"
+    on_page = date(*(int(g) for g in match.groups()))
+    assert on_page == config_settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE == date(2026, 11, 27)
+
+
+def test_platform_anthropic_scoring_opens_at_midnight_kst_nov_27(settings, db):
+    from core.privacy_policy import platform_anthropic_scoring_open
+
+    settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE = config_settings.PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE
+    _now(datetime(2026, 11, 26, 14, 59, tzinfo=timezone.utc))  # 11-26 23:59 KST
+    assert platform_anthropic_scoring_open() is False
+    _now(datetime(2026, 11, 26, 15, 0, tzinfo=timezone.utc))  # 11-27 00:00 KST
+    assert platform_anthropic_scoring_open() is True
