@@ -89,6 +89,7 @@ if want static; then
   step "백엔드 오류 문구 언어" python3 scripts/check_backend_error_language.py
   step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
   step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py
+  step "dev-server 메모리 여유 검사" python3 scripts/test_dev_server.py
 fi
 if want web; then
   for pkg in packages/bff-shared packages/markdown packages/banned-words; do
