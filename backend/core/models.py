@@ -211,3 +211,40 @@ class ConnectedAppConfirmation(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ConnectedAppConfirmation(id={self.pk}, tool={self.tool})"
+
+
+class AgentRunToken(models.Model):
+    """에이전트 채점 실행 하나가 `llm-proxy` 에 내는 일회용 실행 토큰(#998).
+
+    채점기(신뢰 영역)가 실행마다 `core.agent_run_tokens.issue_run_token` 으로 발급하고,
+    에이전트 컨테이너에는 진짜 벤더 키 대신 이 토큰만 들어간다. 프록시가 토큰을 확인해
+    진짜 키를 붙인다. 토큰 자체는 저장하지 않고 SHA-256 해시만 둔다.
+
+    **묶인 값**: 제출 id·용도(채점/완성도)·벤더·모델·실행 예산(USD)·만료. **쌓이는 값**:
+    벤더 응답의 usage 합과 그 비용 — 채점 시도 기록에 그대로 붙일 수 있다. 하루 합계 상한은
+    이 행들의 `spent_usd` 를 그날(KST) 발급분만 더해 본다."""
+
+    PURPOSE_SCORING = "scoring"
+    PURPOSE_QUALITY = "quality"
+    PURPOSE_CHOICES = [(PURPOSE_SCORING, "채점"), (PURPOSE_QUALITY, "완성도")]
+
+    token_hash = models.CharField(max_length=64, unique=True)
+    submission_id = models.PositiveBigIntegerField(db_index=True)
+    purpose = models.CharField(max_length=16, choices=PURPOSE_CHOICES)
+    vendor = models.CharField(max_length=16)
+    model = models.CharField(max_length=100)
+    budget_usd = models.DecimalField(max_digits=12, decimal_places=6)
+    created_at = models.DateTimeField(db_index=True)
+    expires_at = models.DateTimeField()
+    request_count = models.PositiveIntegerField(default=0)
+    input_tokens = models.PositiveBigIntegerField(default=0)
+    output_tokens = models.PositiveBigIntegerField(default=0)
+    cache_read_tokens = models.PositiveBigIntegerField(default=0)
+    cache_write_tokens = models.PositiveBigIntegerField(default=0)
+    spent_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"AgentRunToken(id={self.pk}, submission={self.submission_id}, purpose={self.purpose})"

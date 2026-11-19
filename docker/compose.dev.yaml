@@ -310,6 +310,38 @@ services:
     command: >
       sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --reload"
 
+  # 에이전트 채점 키 프록시(#998) — `agent` 프로필이라 기본 기동에 없다(`--profile agent up -d llm-proxy`).
+  # 벤더 주소는 `LLM_PROXY_*_BASE_URL` 로 흉내 서버를 가리킬 수 있다. 키는 런타임 설정(.env 의 키는 잔고 0원이다).
+  llm-proxy:
+    profiles: ["agent"]
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *default-postgres-env
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-insecure-key
+      DJANGO_ALLOWED_HOSTS: "*"
+      SESSION_REDIS_URL: redis://redis:6379/1
+      LLM_PROXY_ANTHROPIC_BASE_URL: ${LLM_PROXY_ANTHROPIC_BASE_URL:-}
+      LLM_PROXY_OPENAI_BASE_URL: ${LLM_PROXY_OPENAI_BASE_URL:-}
+    networks:
+      - default
+      - agent
+    ports:
+      - "${CODEMIT_LLM_PROXY_PORT:-58002}:8002"
+    volumes:
+      - ../backend:/app
+    command: python manage.py llm_proxy --port 8002
+
   # 강의실 채점 grader(#584, ADR-0059) — 운영과 같은 길이다: dev·CI(e2e)도 제출이 「큐에 넣은
   # 시각」만 찍고 이 상주 프로세스가 채점한다(흉내 어댑터라 빠르다). 큐를 0.5초마다 읽어
   # 제출 뒤 채점이 3초(e2e 시험 하나 한도) 안에 끝난다. 기본 기동에 들어 있다 — beat 와 달리
@@ -597,6 +629,11 @@ services:
     command: >
       sh -c "cd /app && CI=true pnpm install --filter codemit-classroom... --frozen-lockfile --force &&
              cd /app/classroom && pnpm dev"
+
+# 에이전트 실행기 전용 내부 네트워크(#998) — 밖으로 나가는 길이 없다. llm-proxy 만 이쪽과 default 에 함께 붙는다.
+networks:
+  agent:
+    internal: true
 
 volumes:
   codemit-dev-redis:

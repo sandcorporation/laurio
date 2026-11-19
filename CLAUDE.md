@@ -24,6 +24,7 @@ scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400�
 | 운영자 앱(`operator/`, #63) | `53001` | 3000 | `CODEMIT_OPERATOR_WEB_PORT` |
 | 강의실 앱(`classroom/`, #276) | `53002` | 3000 | `CODEMIT_CLASSROOM_WEB_PORT` |
 | 이벤트 서비스(`events`, #379, ADR-0046) | `58001` | 8001 | `CODEMIT_EVENTS_PORT` |
+| 에이전트 채점 키 프록시(`llm-proxy`, dev `agent` 프로필, #998) | `58002` | 8002 | `CODEMIT_LLM_PROXY_PORT` |
 | 검색 엔진(`search`, dev `search` 프로필, #450) | `19200` | 9200 | `CODEMIT_SEARCH_PORT` |
 | 연결 풀러(`pgbouncer`, dev `pgbouncer` 프로필, #453/#457) | `16432` | 6432 | `CODEMIT_PGBOUNCER_PORT` |
 
