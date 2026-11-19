@@ -77,8 +77,8 @@ VENDOR_ANTHROPIC: ScoringVendor = "anthropic"
 
 #: 공모전 채점 방식의 키(#1000) — `contest_scoring_method`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
 CONTEST_SCORING_METHOD = "CONTEST_SCORING_METHOD"
-SCORING_METHOD_SINGLE_CALL = "single_call"
-SCORING_METHOD_AGENT = "agent"
+SCORING_METHOD_SINGLE_CALL: Literal["single_call"] = "single_call"
+SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 
 _SWITCH_ON = {"on", "true", "1", "yes"}
 _SWITCH_OFF = {"off", "false", "0", "no"}
@@ -386,7 +386,7 @@ def scoring_vendor() -> ScoringVendor:
     return VENDOR_ANTHROPIC if value == VENDOR_ANTHROPIC else VENDOR_OPENAI
 
 
-def contest_scoring_method() -> str:
+def contest_scoring_method() -> Literal["single_call", "agent"]:
     """공모전 채점 방식(#1000) — `agent` 일 때만 에이전트, 그 밖(없음·알 수 없는 값)은 `single_call`."""
 
     value = (setting_value(CONTEST_SCORING_METHOD) or "").strip().lower()
