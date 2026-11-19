@@ -14,8 +14,18 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 - **PR 검사**는 `.github/workflows/pr-check.yml` 하나다(#930·#932, ADR-0076 — Jenkins PR 검사 `codemit/ci-pr` 는 꺼졌다).
   `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만, 공개 위생
   `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
-  amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`e2e`(`e2e.sh`, 스택을 여기서 굽는다)·`celery`(`celery-broker.sh`) →
+  amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`) →
   `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
+  **PR 에서는 `guard` 를 건너뛰고 `e2e` 는 PR·release 어디서도 돌지 않는다**(#1015, 줄 서기 단축 — e2e 둘이 PR 시간의 37%였다).
+  `guard` 는 `plan` 잡 출력 `guard`(PR 이벤트면 빔)를 `if` 가 본다. 잡 이름·`결과` 는 그대로다.
+  - **`결과` 는 skipped 를 통과로 세지 않는다**: plan 이 시험 없음(문서만)이면 나머지가 skipped, 아니면 checks·celery 는 success, guard 는 PR 이 아닐 때 success(PR 에서만 skipped)여야 통과다. 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어도 초록이던 구멍을 막는다.
+  - **PR 검사 잡**: plan · checks(static·pytest 4·web) · celery · 결과(guard 는 skipped).
+  - **release 검사 잡**(main push, `workflow_call` 이라 `github.event_name` 은 부른 쪽 push): 위에 **guard(frontend·operator·classroom)** 가 더해진다.
+  - PR 에 skipped 가 있으니 `verified_tree.py` 는 그 PR 을 「이미 초록」으로 치지 않는다 → release 의 `verify` 는 늘 skip=0, release `check` 는 전부 다시 돈다.
+  - **e2e 는 `e2e.yml` 이 main 을 매시(07분) 돈다**(`schedule`) — 직전 성공 실행이 같은 sha 면 건너뛴다. 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다. 화면을 크게 바꾸는 PR 은 병합 전에 `gh workflow run e2e.yml --ref <브랜치>`(`workflow_dispatch`, 늘 돈다·이슈는 만들지 않는다)로 직접 돌려 본다.
+  - **빨강 알림 = 라벨 `ci-red` 이슈**(`scripts/ci/ci-issue.sh`, release `notify`·e2e `notify` 잡, `issues: write` 하나): 종류(「release 검사 실패」·「e2e 실패」)마다 열린 이슈는 하나, 이미 있으면 댓글. 본문에 실패 sha·run 링크·실패한 잡·직전 초록…이번 sha compare 링크. 다시 초록이면 「복구됨 <sha>」 댓글 후 닫는다 — **열린 `ci-red` 이슈 = 지금 빨강**이다. 라벨이 없으면 workflow 가 만든다.
+  - **release 에서 guard 가 실패하면**: `check` 실패 → `promote` 가 돌지 않는다 → production 이 승격되지 않는다 → **배포가 없다**(이미지는 ghcr 에 오를 수 있다).
+    PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `ci-red` 이슈(제목 「release 검사 실패 — production 승격·배포 멈춤」)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.
 - **main 에서는 `release.yml` 이 같은 pr-check.yml 을 `workflow_call` 로 부른다**(`push: main` 트리거는 pr-check.yml 에서 뺐다 —
   검사가 두 번 돌지 않는다). 그 실행의 `github.event_name`·`github.ref` 는 부른 쪽의 push·main 이라 아래 캐시 저장이 그대로 돈다.
   check 가 초록이어야 image(`image.yml`)가 여섯 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서),

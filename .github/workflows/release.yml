@@ -5,7 +5,7 @@
 #   verify  scripts/ci/verified_tree.py(#959) — 이 커밋의 트리를 PR 검사가 이미 초록으로 돌았나. 증명하면 skip=1.
 #           증명 = 병합(squash) 커밋 트리 == PR 검사가 돈 refs/pull/N/merge 커밋의 트리(plan 잡 「검사한 커밋」 단계 이름).
 #           그사이 main 이 움직였거나·문서만이라 시험을 건너뛴 PR 이거나·캐시 키 파일을 바꿨거나·API 가 실패하면 skip=0.
-#   check   pr-check.yml(workflow_call) — PR 과 같은 검사(정적·pytest·web·guard·e2e·celery). 깨지면 이미지도 승격도 없다.
+#   check   pr-check.yml(workflow_call) — PR 검사 + guard(정적·pytest·web·guard·celery; e2e 는 e2e.yml 이 매시, #1015). 깨지면 이미지도 승격도 없다.
 #           verify 가 skip=1 이라고 할 때만 건너뛴다(verify 가 죽어도 돈다). main 실행이라 이미지 층 캐시를 저장한다(#932).
 #   image   check 와 나란히 돈다(needs 없음 — check 산출물에 기대지 않는다, 캐시는 레지스트리 것). image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>).
 #   promote needs verify·check·image — image 초록 + (check 초록 또는 verify 가 증명해 건너뜀)일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
@@ -16,7 +16,7 @@
 #
 # 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다):
 #   - push: main 만. pull_request·pull_request_target 없음. GitHub 호스팅 실행기만. 액션은 SHA 고정. secrets 없음.
-#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만.
+#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만, issues: write 는 notify 잡에만.
 #   - GITHUB_TOKEN 의 push 는 다른 워크플로를 깨우지 않는다(production push 로 Actions 가 다시 돌지 않는다).
 #     저장소 웹훅(Jenkins)은 깨운다.
 name: release
@@ -64,6 +64,42 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+  # check 가 붉으면 승격이 없다 = 배포가 없다 — 아무도 모르고 지나가지 않게 ci-red 이슈를 연다(#1015). 초록이 되면 「복구됨」 댓글로 닫는다.
+  notify:
+    needs: check
+    if: ${{ !cancelled() && (needs.check.result == 'failure' || needs.check.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: 결과를 이슈로
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ needs.check.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="release 검사 실패 — production 승격·배포 멈춤"
+          if [ "$RESULT" = success ]; then
+            bash scripts/ci/ci-issue.sh ok "$title" "복구됨 ${SHA} — ${RUN_URL}"
+            exit 0
+          fi
+          # 직전 초록 = production 머리(마지막으로 승격된 sha)
+          green=$(gh api "repos/${GH_REPO}/git/ref/heads/production" -q .object.sha || true)
+          jobs=$(gh run view ${{ github.run_id }} --json jobs -q '[.jobs[]|select(.conclusion=="failure")|.name]|join(", ")' || true)
+          body="main \`${SHA}\` 의 release 검사(check)가 실패했다. 실패한 잡: ${jobs:-?}. 승격이 돌지 않아 이 커밋은 배포되지 않는다. 실행: ${RUN_URL}"
+          if [ -n "$green" ] && [ "$green" != "$SHA" ]; then
+            body="${body}"$'\n\n'"직전 초록(production) \`${green}\` … 이번 \`${SHA}\`: https://github.com/${GH_REPO}/compare/${green}...${SHA}"
+          fi
+          bash scripts/ci/ci-issue.sh fail "$title" "$body"
 
   promote:
     needs: [verify, check, image]

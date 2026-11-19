@@ -1,0 +1,194 @@
+# e2e — main 을 매시 한 번 돈다(#1015). PR 검사·release 검사에서는 뺐다(PR 당 시간의 37%) — 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다.
+#   schedule           매시 정각 — main 기준. 직전 성공 실행이 같은 sha 를 이미 돌았으면 건너뛴다(`gate` 잡).
+#   workflow_dispatch  `gh workflow run e2e.yml --ref <브랜치>` — 브랜치에서도 돈다, 늘 돈다, 이슈는 만들지 않는다.
+# main 에서 붉으면 고정 제목 이슈를 열거나 댓글을 달고(직전 초록 sha … 이번 sha 비교 링크와 그 사이 커밋 포함), 초록이 되면 댓글을 달고 닫는다.
+# 보안(공개 저장소): secrets 없음(github.token 하나), 호스팅 실행기, 액션 SHA 고정, 쓰기 권한은 notify 잡의 issues 하나.
+name: e2e
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CODEMIT_CI_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+  BUILDX_BAKE_ENTITLEMENTS_FS: "0"
+  CODEMIT_BK_CACHE: /tmp/bk
+  CODEMIT_BK_CACHE_NEW: /tmp/bk-new
+  # 이미지 층·pnpm·Playwright 캐시 저장은 main 실행만(#932)
+  CODEMIT_BK_CACHE_SAVE: ${{ github.ref == 'refs/heads/main' && '1' || '' }}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        name: 바뀐 것이 있는가
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          run=1
+          if [ "$EVENT" = schedule ]; then
+            last=$(gh run list --workflow e2e.yml --event schedule --branch main --status completed --limit 20 \
+              --json conclusion,headSha -q '[.[]|select(.conclusion=="success" or .conclusion=="failure")][0] | "\(.conclusion) \(.headSha)"' || true)
+            echo "직전 실행: ${last:-없음}"
+            [ "$last" = "success $SHA" ] && run=0
+          fi
+          echo "run=$run" >>"$GITHUB_OUTPUT"
+
+  e2e:
+    name: e2e ${{ matrix.name }}
+    needs: gate
+    if: needs.gate.outputs.run == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # 실행기마다 스택을 따로 굽고 프로젝트를 나눠 돈다(#932). 일꾼은 그대로 1개
+        include:
+          - {name: public-operator, targets: public operator}
+          - {name: classroom, targets: classroom}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - id: bk-backend
+        name: 이미지 층 캐시 복원(backend)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/backend
+          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
+          restore-keys: bk-backend-
+      - id: bk-frontend
+        name: 이미지 층 캐시 복원(frontend)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/frontend
+          key: bk-frontend-${{ hashFiles('docker/frontend.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-frontend-
+      - id: bk-operator
+        name: 이미지 층 캐시 복원(operator)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/operator
+          key: bk-operator-${{ hashFiles('docker/operator.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-operator-
+      - id: bk-classroom
+        name: 이미지 층 캐시 복원(classroom)
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/classroom
+          key: bk-classroom-${{ hashFiles('docker/classroom.Dockerfile','pnpm-lock.yaml') }}
+          restore-keys: bk-classroom-
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - id: pnpm-store
+        name: pnpm 저장소 경로·Playwright 버전
+        run: |
+          corepack enable
+          echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
+          echo "pw=$(grep -o '@playwright/test@[0-9.]*' pnpm-lock.yaml | head -1 | cut -d@ -f3)" >>"$GITHUB_OUTPUT"
+      - id: bk-pnpm
+        name: pnpm 저장소 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+      - id: bk-pw
+        name: Playwright 브라우저 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.pnpm-store.outputs.pw }}
+      - name: pnpm 과 Playwright 의존 라이브러리
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir frontend exec playwright install --with-deps chromium
+      - name: e2e(e2e.sh)
+        env:
+          # 호스팅 실행기는 코어가 적어(비공개 2·공개 4) 앱 셋·백엔드와 일꾼 둘이 다투면 3초 한도를 넘는다
+          CODEMIT_E2E_WORKERS: 1
+          CODEMIT_E2E_TARGETS: ${{ matrix.targets }}
+        run: bash scripts/ci/e2e.sh
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
+        name: 이미지 층 캐시 저장(backend, main push 만)
+        run: rm -rf /tmp/bk/backend && mv /tmp/bk-new/backend /tmp/bk/backend
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/backend
+          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pnpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pw.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.pnpm-store.outputs.pw }}
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-test-results-${{ matrix.name }}
+          path: test-results/
+          retention-days: 7
+
+  notify:
+    needs: [gate, e2e]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.gate.outputs.run == '1' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: 결과를 이슈로
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ needs.e2e.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # 직전 초록 = 이 실행 앞의 가장 새 성공 실행의 sha(건너뛴 실행도 같은 sha 라 그대로 맞다)
+          green=$(gh run list --workflow e2e.yml --branch main --status success --limit 10 --json databaseId,headSha \
+            -q "[.[]|select(.databaseId != ${{ github.run_id }})][0].headSha // empty" || true)
+          title="e2e 실패 — main 의 화면이 깨졌을 수 있다"
+          if [ "$RESULT" = success ]; then
+            bash scripts/ci/ci-issue.sh ok "$title" "복구됨 ${SHA} — ${RUN_URL}"
+            exit 0
+          fi
+          jobs=$(gh run view ${{ github.run_id }} --json jobs -q '[.jobs[]|select(.conclusion=="failure")|.name]|join(", ")' || true)
+          body="main \`${SHA}\` 의 e2e 가 실패했다. 실패한 잡: ${jobs:-?}. 실행: ${RUN_URL}"
+          if [ -n "$green" ] && [ "$green" != "$SHA" ]; then
+            body="${body}"$'\n\n'"직전 초록 \`${green}\` … 이번 \`${SHA}\`: https://github.com/${GH_REPO}/compare/${green}...${SHA}"
+            body="${body}"$'\n\n'"그 사이 커밋:"$'\n'"$(gh api "repos/${GH_REPO}/compare/${green}...${SHA}" -q '.commits[]|"- \(.sha[0:8]) \(.commit.message|split("\n")[0])"' || true)"
+          fi
+          bash scripts/ci/ci-issue.sh fail "$title" "$body"
