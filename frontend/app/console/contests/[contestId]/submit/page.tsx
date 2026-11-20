@@ -12,7 +12,7 @@ import { useParams } from "next/navigation";
 import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 import type { components } from "@codemit/bff-client/schema";
 
-import { ErrorNote, PageHeader, PageShell, SectionHeading, buttonClass } from "@/app/components/ui";
+import { ErrorNote, Note, PageHeader, PageShell, SectionHeading, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { formatSubmitCountdown } from "@/lib/contest-format";
@@ -158,6 +158,8 @@ export default function SubmitPage() {
     Record<number, RequirementFieldState>
   >({});
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
+  // 저장 응답에만 실리는 참고 알림(#989 B) — 막지 않는다. 판정은 채점 때 한다.
+  const [scoringSizeWarning, setScoringSizeWarning] = useState(false);
   // 직전 저장에서 서버가 연결을 푼 근거 수 (#195) — 자료를 지우면 그것을 가리키던
   // 근거의 연결이 함께 풀린다는 것을 참가자에게 알린다.
   const [unlinkedEvidenceCount, setUnlinkedEvidenceCount] = useState(0);
@@ -613,6 +615,7 @@ export default function SubmitPage() {
     }
 
     const submission = saved.data;
+    setScoringSizeWarning(submission.scoring_size_warning ?? false);
     setLoad((prev) => (prev.status === "ready" ? { ...prev, submission } : prev));
     applySubmissionAssets(submission);
 
@@ -972,6 +975,13 @@ export default function SubmitPage() {
             <p data-testid="submit-success" className="text-sm text-success">
               저장되었습니다. 마감 전까지 몇 번이든 다시 수정할 수 있습니다.
             </p>
+          )}
+          {saveState.status === "done" && scoringSizeWarning && (
+            <Note tone="attention">
+              <span data-testid="scoring-size-warning">
+                올린 소스코드가 채점 한도를 넘어 채점되지 않을 수 있습니다.
+              </span>
+            </Note>
           )}
           {/* 자료를 지우면 그것을 가리키던 근거의 연결이 함께 풀린다(#195) —
               말해주지 않으면 참가자는 다음에 화면을 열어서야 안다. 근거 자체는

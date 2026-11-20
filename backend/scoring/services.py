@@ -73,6 +73,7 @@ from core.llm_scoring import (
     RequirementInput,
     RequirementVerdict,
     ScoringInput,
+    SourceFile,
     get_adapter,
 )
 from core.prompt_safety import neutralize_untrusted as _neutralize_untrusted
@@ -112,7 +113,7 @@ from core.agent_scoring import (
 from .agent_runner import AgentGraderBusy, AgentGraderError
 from .models import AgentRun, Score, ScoringAttempt
 from core.model_context import source_budget_bytes
-from core.source_selection import select_source_files_with_omission
+from core.source_selection import SelectionOmission, select_source_files_with_omission
 
 logger = logging.getLogger(__name__)
 
@@ -622,6 +623,88 @@ def _contest_already_settled(contest: Contest) -> bool:
     return hasattr(contest, "award") or hasattr(contest, "distribution")
 
 
+def _measure_source_fit(
+    llm: object,
+    *,
+    submission_id: int,
+    contest: Contest,
+    requirements: list[RequirementInput],
+    sources: list[tuple[int, str, bytes]],
+) -> tuple[list[SourceFile], SelectionOmission, int]:
+    """이번에 부를 모델의 예산으로 소스를 고른다 — 채점(`score_submission_once`)과 제출 때의 참고 판정
+    (`upload_source_over_budget`, #989 B)이 같은 판정을 쓰도록 한 곳에 둔다.
+
+    예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
+    프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
+    지시문 몫은 어댑터가 보낼 요청을 그대로 재서 정한다(#989, `request_bytes`) — 시스템 지시문·
+    응답 스키마까지 든다. 흉내 어댑터처럼 잴 줄 모르면 프롬프트만 잰다.
+    """
+
+    instruction_prompt = _build_prompt(contest=contest, requirements=requirements, source_files=[])
+    instruction_bytes = _request_bytes(
+        llm,
+        ScoringInput(
+            submission_id=submission_id,
+            contest_id=contest.id,
+            prompt=instruction_prompt,
+            source_files=[],
+            requirements=requirements,
+        ),
+    )
+    source_budget = source_budget_bytes(
+        str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
+    )
+    source_files, omission = select_source_files_with_omission(sources, max_bytes=source_budget)
+    return source_files, omission, source_budget
+
+
+def upload_source_over_budget(submission: ContestSubmission) -> bool:
+    """제출·수정 저장 때의 참고 판정(#989 B) — 올린 소스가 채점 때 모델 컨텍스트에 다 들어가지 않겠는가.
+
+    채점 시점의 판정(`score_submission_once` 의 보류)과 같은 선택기·예산으로 잰다. 다만 저장소는 재지
+    않는다 — 채점 때 내려받고 마감까지 바뀔 수 있어 지금 재면 어림일 뿐이고, 받는 비용이 든다(대장 확정).
+    그래서 업로드만으로 넘칠 때만 참이다. 저장소가 더해지면 채점 때는 더 넘칠 뿐이다.
+
+    에이전트 채점이 이 업로드 하나(zip)를 통째로 읽는 경우는 예산 판정을 지나지 않으므로 거짓이다
+    (`_agent_snapshot` 과 같은 조건). 막지 않는 알림이라 재다가 무엇이 실패하든 거짓이다 — 저장을 막지 않는다.
+    """
+
+    try:
+        source_assets = list(
+            submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE).order_by("order", "id")
+        )
+        if not source_assets:
+            return False
+        has_repository = submission.assets.filter(kind=SubmissionAsset.Kind.REPOSITORY).exists()
+        storage_adapter = get_storage_adapter()
+        readable_sources = [
+            (asset, raw)
+            for asset in source_assets
+            if (raw := storage_adapter.read_object(asset.value)) is not None
+        ]
+        if not readable_sources:
+            return False
+        if (
+            contest_scoring_method() == SCORING_METHOD_AGENT
+            and not has_repository
+            and len(readable_sources) == 1
+            and zipfile.is_zipfile(io.BytesIO(readable_sources[0][1]))
+        ):
+            return False
+        llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
+        _files, omission, _budget = _measure_source_fit(
+            llm,
+            submission_id=submission.id,
+            contest=submission.contest,
+            requirements=_requirement_inputs(submission),
+            sources=[(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources],
+        )
+        return omission.any
+    except Exception:  # 참고 알림이다 — 재지 못하면 알리지 않고 저장은 그대로 끝난다.
+        logger.warning("Submission(pk=%s) 제출 때 채점 크기를 재지 못했다", submission.id, exc_info=True)
+        return False
+
+
 def _agent_snapshot(
     readable_sources: list[tuple[SubmissionAsset, bytes]],
     cloned_repositories: list[tuple[SubmissionAsset, ClonedRepository]],
@@ -923,31 +1006,16 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
             ]
         else:
             llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
-            # 예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
-            # 프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
-            # 지시문 몫은 어댑터가 보낼 요청을 그대로 재서 정한다(#989, `request_bytes`) — 시스템 지시문·
-            # 응답 스키마까지 든다. 흉내 어댑터처럼 잴 줄 모르면 프롬프트만 잰다.
-            instruction_prompt = _build_prompt(contest=contest, requirements=requirements, source_files=[])
-            instruction_bytes = _request_bytes(
+            source_files, omission, source_budget = _measure_source_fit(
                 llm,
-                ScoringInput(
-                    submission_id=submission.id,
-                    contest_id=contest.id,
-                    prompt=instruction_prompt,
-                    source_files=[],
-                    requirements=requirements,
-                ),
-            )
-            source_budget = source_budget_bytes(
-                str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
-            )
-            source_files, omission = select_source_files_with_omission(
-                [(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
+                submission_id=submission.id,
+                contest=contest,
+                requirements=requirements,
+                sources=[(asset.id, _asset_label(asset), raw) for asset, raw in readable_sources]
                 + [
                     (asset.id, _asset_label(asset), cloned.zip_bytes)
                     for asset, cloned in cloned_repositories
                 ],
-                max_bytes=source_budget,
             )
             if omission.any and not submission.scoring_attempts.filter(
                 error__startswith=SCORING_HOLD_RELEASED_ERROR_PREFIX
