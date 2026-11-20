@@ -8,6 +8,14 @@ import { apiRequest, bffClient } from "@/lib/bff/client";
 // 이 클래스를 원본으로 하는, 지금 살아 있는(내리지 않은) 클래스 템플릿
 // (#333) — 없으면 `null`이다. 클래스 설정 화면이 새로고침 뒤에도 공개 상태를
 // 정확히 가른다.
+export type GradingMethod = "single" | "agent";
+
+export type GradingMethodOption = {
+  value: GradingMethod;
+  selectable: boolean;
+  unavailable_reason: "compatible_server" | "agent_vendor_unverified" | null;
+};
+
 export type PublishedClassTemplateSummary = {
   share_code: string;
   publisher_display_name: string;
@@ -44,6 +52,11 @@ export type ClassRow = {
   scoring_connection_verified_at: string | null;
   // 채점 연결의 종류(#601) — 「OpenAI 키」 또는 「호환 서버」.
   scoring_connection_kind: "openai_key" | "anthropic_key" | "compatible_server";
+  // 채점·완성도 검사 방식(#1036) — "single"(한 번 호출) | "agent"(에이전트).
+  scoring_method: GradingMethod;
+  quality_method: GradingMethod;
+  // 방식 선택지 — 고를 수 없으면 까닭 코드가 함께 온다.
+  grading_method_options: GradingMethodOption[];
   // 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일 전에는 false, 지나면 백엔드가 true 로 준다.
   anthropic_key_selectable: boolean;
   // 호환 서버의 호스트 — 공동 강사도 읽는다.
@@ -129,6 +142,8 @@ export function updateClass(
     default_reasoning_effort: string;
     // 「호환 서버」의 「추론 모델」 스위치(#602) — OpenAI 키 연결은 서버가 이름으로 판단한다.
     default_model_is_reasoning: boolean;
+    scoring_method: GradingMethod;
+    quality_method: GradingMethod;
   }>,
 ): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);
