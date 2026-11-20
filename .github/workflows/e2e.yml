@@ -184,6 +184,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
           SHA: ${{ github.sha }}
           SIM: ${{ inputs.simulate || 'none' }}
           RESULT: ${{ needs.e2e.result }}
