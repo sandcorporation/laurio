@@ -40,6 +40,12 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
 작업자는 전역 에이전트 `issue-worker` 다.
 일반 절차는 그쪽이 들고 있고, 이 저장소에만 해당하는 것은 여기 있다.
 
+- **티켓 본문에 「건드리는 앱」 줄.** 앱 이름은 `backend/config/settings.py` 의 로컬 앱, 프런트는
+  `frontend`·`operator`·`classroom`·`packages` 다. 조율자는 이 줄이 겹치지 않는 티켓만 동시에 띄우고,
+  겹치면 앞 티켓이 main 에 들어간 뒤에 띄운다.
+- **작업자의 끝은 「main 에 들어감」이다.** PR 이 튕기면(충돌·검사 실패) 같은 작업자가 `origin/main` 위로 rebase 해
+  다시 시도해 main 도착까지 간다. 끝 보고는 병합 sha 다. 병합 대기열이 본 저장소에 들어오면 대기열에서 빠진 PR 도
+  같은 길로 다룬다.
 - **워크트리와 포트.** `git worktree add ../codemit-<이름> -b <브랜치> origin/main` 으로 만들고,
   `sh docker/dev-env.sh | head -1` 이 지시서가 준 오프셋과 같은지 본다. 새 오프셋의 DB 는 `migrate` 부터.
 - **compose 는 언제나 `-p codemit-dev-<오프셋>`, 필요한 컨테이너만.** 공유 스택 `codemit-dev`(오프셋 0)와 남의
