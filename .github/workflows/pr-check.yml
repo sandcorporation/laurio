@@ -52,6 +52,10 @@ jobs:
     timeout-minutes: 5
     outputs:
       tests: ${{ steps.plan.outputs.tests }}
+      # 바뀐 경로가 고르는 묶음(#1082, changed.sh) — back: pytest·celery·agent-grader, front: web, matrix: checks 잡의 조각
+      back: ${{ steps.plan.outputs.back }}
+      front: ${{ steps.plan.outputs.front }}
+      matrix: ${{ steps.plan.outputs.matrix }}
       # PR 에서 뺄 잡을 고르는 한 곳(#1015) — PR 이 아닐 때만 '1'. release.yml 이 workflow_call 로 부르면 github.event_name 은
       # 부른 쪽 이벤트(push)다(GitHub 문서 「Reusing workflows」: the github context is the same as the caller) — 그래서 배포 전에는 돈다.
       guard: ${{ github.event_name != 'pull_request' && '1' || '' }}
@@ -71,7 +75,18 @@ jobs:
           # main push 는 기준이 HEAD 자신이라 「바뀐 것 없음」→ 전부 돈다(changed.sh)
           plan=$(bash scripts/ci/changed.sh "$base")
           echo "돌릴 것: $plan (기준 ${base:0:12})"
-          echo "tests=${plan#TESTS=}" >>"$GITHUB_OUTPUT"
+          tests=$(sed -n 's/^TESTS=//p' <<<"$plan"); back=$(sed -n 's/^BACK=//p' <<<"$plan"); front=$(sed -n 's/^FRONT=//p' <<<"$plan")
+          # static 은 시험이 있으면 늘 돈다(schema.gen.ts 최신성 포함). pytest 는 백엔드, web 은 프런트가 바뀌었을 때만.
+          matrix='{"include":[{"name":"static","args":"static"}'
+          if [ "$back" = 1 ]; then
+            for i in 1 2 3 4; do matrix+=",{\"name\":\"pytest-${i}of4\",\"args\":\"pytest ${i}/4\"}"; done
+          fi
+          if [ "$front" = 1 ]; then matrix+=',{"name":"web","args":"web"}'; fi
+          matrix+=']}'
+          echo "tests=$tests" >>"$GITHUB_OUTPUT"
+          echo "back=$back" >>"$GITHUB_OUTPUT"
+          echo "front=$front" >>"$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
       - name: ADR 상태
         run: python3 scripts/check_adr_status.py
       - name: 공개해도 되는 HEAD 인가(내부 호스트·OCI 실값·워크플로 보안)
@@ -79,6 +94,7 @@ jobs:
       - name: 승격 흐름(워크플로 셋·Jenkinsfile 이미지 목록·promote.sh)
         run: |
           python3 scripts/test_release_flow.py
+          python3 scripts/test_changed_paths.py
           bash scripts/ci/promote_test.sh
 
   checks:
@@ -90,14 +106,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # sub-checks.sh 의 묶음(#932) — pytest 는 시험 파일을 넷으로 나눈다
-        include:
-          - {name: static, args: static}
-          - {name: pytest-1of4, args: pytest 1/4}
-          - {name: pytest-2of4, args: pytest 2/4}
-          - {name: pytest-3of4, args: pytest 3/4}
-          - {name: pytest-4of4, args: pytest 4/4}
-          - {name: web, args: web}
+        # sub-checks.sh 의 묶음(#932) — pytest 는 시험 파일을 넷으로 나눈다. 어느 묶음을 돌지는 plan 이 바뀐 경로로 고른다(#1082)
+        include: ${{ fromJSON(needs.plan.outputs.matrix).include }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -174,7 +184,7 @@ jobs:
           key: bk-${{ matrix.app }}-${{ hashFiles(format('docker/{0}.Dockerfile', matrix.app), 'pnpm-lock.yaml') }}
   celery:
     needs: plan
-    if: needs.plan.outputs.tests == '1'
+    if: needs.plan.outputs.tests == '1' && needs.plan.outputs.back == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -218,7 +228,7 @@ jobs:
 
   agent-grader:
     needs: plan
-    if: needs.plan.outputs.tests == '1'
+    if: needs.plan.outputs.tests == '1' && needs.plan.outputs.back == '1'
     # 운영 호스트와 같은 arm64 — Codex 의 bubblewrap 샌드박스가 이 커널·docker 에서 도는지까지 본다.
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -248,16 +258,19 @@ jobs:
         env:
           PLAN: ${{ needs.plan.result }}
           TESTS: ${{ needs.plan.outputs.tests }}
+          BACK: ${{ needs.plan.outputs.back }}
           GUARD_ON: ${{ needs.plan.outputs.guard }}
           CHECKS: ${{ needs.checks.result }}
           GUARD: ${{ needs.guard.result }}
           CELERY: ${{ needs.celery.result }}
           AGENT_GRADER: ${{ needs.agent-grader.result }}
         run: |
-          echo "plan=$PLAN tests=$TESTS guard_on=$GUARD_ON checks=$CHECKS guard=$GUARD celery=$CELERY agent_grader=$AGENT_GRADER"
+          echo "plan=$PLAN tests=$TESTS back=$BACK guard_on=$GUARD_ON checks=$CHECKS guard=$GUARD celery=$CELERY agent_grader=$AGENT_GRADER"
           [ "$PLAN" = success ] || { echo "plan 이 success 가 아니다"; exit 1; }
           if [ "$TESTS" = 1 ]; then
-            want_checks=success; want_celery=success; want_agent_grader=success
+            # checks 는 static 이 늘 있어 success. celery·agent-grader 는 백엔드·공통 경로가 바뀌었을 때만 돈다(#1082)
+            want_checks=success
+            if [ "$BACK" = 1 ]; then want_celery=success; want_agent_grader=success; else want_celery=skipped; want_agent_grader=skipped; fi
             if [ "$GUARD_ON" = 1 ]; then want_guard=success; else want_guard=skipped; fi
           else
             want_checks=skipped; want_celery=skipped; want_guard=skipped; want_agent_grader=skipped

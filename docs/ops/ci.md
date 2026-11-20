@@ -12,7 +12,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 ```
 
 - **PR 검사**는 `.github/workflows/pr-check.yml` 하나다(#930·#932, ADR-0076 — Jenkins PR 검사 `codemit/ci-pr` 는 꺼졌다).
-  `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만, 공개 위생
+  `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만·프런트만·백엔드만이면 해당 잡만, 공개 위생
   `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
   amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`)·`agent-grader`(`agent-grader-check.sh` — `ubuntu-24.04-arm`
   에서 에이전트 채점 실행기 이미지를 굽고 운영과 같은 격리 설정(seccomp 프로필 포함)으로 Codex 샌드박스 한 줄과 가짜 벤더에 두 CLI 를 돌린다. 실행기의 AppArmor 사용자 네임스페이스 제한은 끄고 돈다 — 운영 호스트에는 AppArmor 가 없다, #999) →
@@ -20,7 +20,17 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   **PR 에서는 `guard` 를 건너뛰고 `e2e` 는 PR·release 어디서도 돌지 않는다**(#1015, 줄 서기 단축 — e2e 둘이 PR 시간의 37%였다).
   `guard` 는 `plan` 잡 출력 `guard`(PR 이벤트면 빔)를 `if` 가 본다. 잡 이름·`결과` 는 그대로다.
   - **`결과` 는 skipped 를 통과로 세지 않는다**: plan 이 시험 없음(문서만)이면 나머지가 skipped, 아니면 checks·celery 는 success, guard 는 PR 이 아닐 때 success(PR 에서만 skipped)여야 통과다. 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어도 초록이던 구멍을 막는다.
-  - **PR 검사 잡**: plan · checks(static·pytest 4·web) · celery · 결과(guard 는 skipped).
+  - **PR 검사 잡**: plan · checks(static·pytest 4·web) · celery · agent-grader · 결과(guard 는 skipped). 어느 잡이 도는지는 `changed.sh` 가 바뀐 경로로 고른다(#1082):
+
+    | 바뀐 경로 | 도는 잡 | 건너뛰는 잡 |
+    | --- | --- | --- |
+    | 문서만(`*.md`·`docs/`) | plan 의 검사만 | checks·celery·agent-grader |
+    | 프런트만(`frontend/`·`operator/`·`classroom/`·`packages/`) | checks static·web | pytest 4조각·celery·agent-grader |
+    | 백엔드만(`backend/`·`docker/`) | checks static·pytest 4조각·celery·agent-grader | web (`schema.gen.ts` 최신성은 static 에 남는다) |
+    | 둘 다, 또는 그 밖(`.github/`·`scripts/`·루트 설정·`pnpm-lock.yaml`) | 전부 | — |
+
+    `결과` 는 위 표대로 돌아야 할 잡이 success, 건너뛰어야 할 잡이 skipped 일 때만 초록이다. main push(release)는 바뀐 파일이 없다고 보아 늘 전체다.
+    경로 표는 `scripts/test_changed_paths.py` 가 고정한다. 일부만 돈 PR 실행은 release verify 가 「같은 트리 증명」으로 받지 않는다(guard 말고 skipped 가 있다) — release 는 전체 check 를 돈다.
   - **release 검사 잡**(main push, `workflow_call` 이라 `github.event_name` 은 부른 쪽 push): 위에 **guard(frontend·operator·classroom)** 가 더해진다.
   - PR 에 skipped 가 있으니 `verified_tree.py` 는 그 PR 을 「이미 초록」으로 치지 않는다 → release 의 `verify` 는 늘 skip=0, release `check` 는 전부 다시 돈다.
   - **e2e 는 `e2e.yml` 이 main 을 매시(07분) 돈다**(`schedule`) — 직전 성공 실행이 같은 sha 면 건너뛴다. 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다. 화면을 크게 바꾸는 PR 은 병합 전에 `gh workflow run e2e.yml --ref <브랜치>`(`workflow_dispatch`, 늘 돈다·이슈는 만들지 않는다)로 직접 돌려 본다.
