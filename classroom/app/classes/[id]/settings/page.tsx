@@ -49,6 +49,7 @@ import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
+import { GradingMethodSection } from "../grading-method-section";
 import { DefaultModelTable } from "./model-table";
 import { SettingsToc, type SettingsSection } from "./settings-toc";
 
@@ -571,6 +572,7 @@ export default function ClassSettingsPage() {
       : null;
   const sections: SettingsSection[] = [
     { id: "scoring-key", label: "채점 연결" },
+    { id: "scoring-method", label: "채점 방식" },
     { id: "scoring-model", label: "기본 모델" },
     { id: "token-usage", label: "사용량" },
     { id: "class-names", label: "이름" },
@@ -607,6 +609,10 @@ export default function ClassSettingsPage() {
                 reloadCost();
               }}
             />
+          </SettingsCard>
+
+          <SettingsCard id="scoring-method" title="채점 방식">
+            <GradingMethodSection classId={classId} classroom={classroom} onSaved={reload} />
           </SettingsCard>
 
           <SettingsCard id="scoring-model" title="기본 모델">

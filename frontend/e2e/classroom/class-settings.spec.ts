@@ -145,3 +145,24 @@ test("보관된 클래스 상세에서 설정 링크 한 번이면 복사에 닿
   await expect(page).toHaveURL(/\/classes\/\d+$/);
   expect(page.url()).not.toContain(`/classes/${classId}`);
 });
+
+test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호출」이 켜져 있고 「에이전트」는 꺼진 채 까닭이 툴팁이며, 건당 비용이 곁에 선다", async ({
+  page,
+}) => {
+  const { classId } = await newClass(page, "method");
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
+  await page.getByTestId("openai-key-submit").click();
+  await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
+
+  for (const id of ["scoring-method", "quality-method"]) {
+    await expect(page.getByTestId(`${id}-single`)).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId(`${id}-agent`)).toBeDisabled();
+    await expect(page.getByTestId(`${id}-agent`)).toHaveAttribute("title", "OpenAI 키는 확인 전");
+    await expect(page.getByTestId(`${id}-vendor`)).toHaveText("OpenAI");
+    await expect(page.getByTestId(`${id}-cost`)).toContainText("건당 ");
+  }
+
+  await page.reload();
+  await expect(page.getByTestId("scoring-method-single")).toHaveAttribute("aria-checked", "true");
+});
