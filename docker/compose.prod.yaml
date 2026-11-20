@@ -96,6 +96,9 @@ x-backend-env: &backend-env
   # 릴리스는 deploy.sh 가 배포하는 커밋 SHA 를 넘긴다.
   SENTRY_DSN: ${SENTRY_DSN_BACKEND:-}
   SENTRY_RELEASE: ${SENTRY_RELEASE:-}
+  # 방침에 싣는 문의 주소 — 프런트 서비스가 읽는 것과 같은 `.env.prod` 의 `SUPPORT_EMAIL` 줄이다.
+  # 백엔드·celery 가 만드는 알림 문구(`notifications/rendering.py`)에 실린다(#1077).
+  CODEMIT_PUBLIC_SUPPORT_EMAIL: ${SUPPORT_EMAIL:?방침에 싣는 문의 주소를 .env.prod 의 SUPPORT_EMAIL 에 설정하라}
 
   # 공모전 제품 스위치 — 「공모전 / 유료 공모전」 둘 (#271/#413, `core.contest_switch`,
   # ADR-0048). 기본값은 둘 다 켜짐(config/settings.py)이지만, prod 도

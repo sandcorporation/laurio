@@ -217,6 +217,8 @@ services:
       DJANGO_DEBUG: "true"
       DJANGO_SECRET_KEY: dev-only-insecure-key
       DJANGO_ALLOWED_HOSTS: "*"
+      # 알림 문구에 싣는 문의 주소(#1077) — 프런트 서비스의 같은 이름 값과 같다.
+      CODEMIT_PUBLIC_SUPPORT_EMAIL: dev@example.test
       # Operator 세션(#43). Celery 브로커가 db 0 을 쓰므로 세션은 1 을 쓴다.
       SESSION_REDIS_URL: redis://redis:6379/1
       # 운영 지표 1분 집계(#827) — 같은 Redis 의 DB 3.
