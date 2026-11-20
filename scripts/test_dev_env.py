@@ -13,15 +13,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parent.parent / "docker" / "dev-env.sh"
-ROOT = SCRIPT.parent.parent
+SRC = Path(__file__).resolve().parent.parent / "docker" / "dev-env.sh"
 
 
 class DevOffset(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
-        self.bin = Path(self._tmp.name)
+        self.bin = Path(self._tmp.name) / "bin"
+        self.bin.mkdir()
+        # CI 의 검사 컨테이너에는 .git 이 없다 — 임시 저장소에 복사해 돌린다(주 워크트리 = 그 저장소).
+        self.root = Path(self._tmp.name).resolve() / "repo"
+        (self.root / "docker").mkdir(parents=True)
+        self.script = self.root / "docker" / "dev-env.sh"
+        self.script.write_text(SRC.read_text())
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
 
     def fake_docker(self, owner: str) -> None:
         d = self.bin / "docker"
@@ -33,7 +39,7 @@ class DevOffset(unittest.TestCase):
         env.pop("CODEMIT_DEV_OFFSET", None)
         if offset is not None:
             env["CODEMIT_DEV_OFFSET"] = offset
-        return subprocess.run(["sh", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=60)
+        return subprocess.run(["sh", str(self.script)], capture_output=True, text=True, env=env, timeout=60)
 
     def test_explicit_offset(self) -> None:
         self.fake_docker("")
@@ -70,7 +76,7 @@ class DevOffset(unittest.TestCase):
         self.assertIn("/somewhere/else/docker", r.stderr)
 
     def test_own_checkout_owns_offset(self) -> None:
-        self.fake_docker(str(ROOT / "docker"))
+        self.fake_docker(str(self.root / "docker"))
         r = self.run_env("4")
         self.assertEqual(r.returncode, 0, r.stderr)
 
