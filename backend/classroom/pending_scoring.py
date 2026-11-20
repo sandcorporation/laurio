@@ -19,6 +19,7 @@ from datetime import timedelta
 
 from django.db import models
 from django.db.models import Count, QuerySet
+from django.db.models.functions import Concat
 
 from .models import Class, ClassroomScoringAttempt, ClassroomSubmission, Problem
 
@@ -29,6 +30,28 @@ NO_API_KEY = "no_api_key"
 #: 단 시도 기록(`ClassroomScoringAttempt.error`)이 있는 시도는 채점 대기에서 빠지고, 그 기록은 실패 상한에
 #: 세지 않는다 — 받아들이는 조건이 두 번 다 어긋났다는 것이지 제출물이 실패한 것이 아니다. 0% 로 굳히지 않는다.
 AGENT_SCORING_HOLD_ERROR_PREFIX = "AgentScoringHold:"
+
+#: 「크기 초과」 보류 표식(#989) — 공모전(`scoring.services.SCORING_HOLD_ERROR_PREFIX`)과 같은 값. 채점 요청이 그 모델
+#: 컨텍스트에 들어가지 않았다. 기록은 `size_hold_error` 꼴(머리 뒤에 ` model=<모델> `)이라, 그 시도는 **같은 모델**인
+#: 동안만 채점 대기에서 빠진다 — 강사가 문제·클래스 모델을 바꾸면 다음 스캔이 다시 집는다. 실패 상한에 세지 않는다.
+SIZE_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
+
+#: 실패 상한·시도 횟수에 세지 않는 보류 표식.
+HOLD_PREFIXES = (AGENT_SCORING_HOLD_ERROR_PREFIX, SIZE_HOLD_ERROR_PREFIX)
+
+
+def size_hold_error(model: str, detail: str) -> str:
+    """「크기 초과」 보류 기록의 `error` — 머리와 모델을 앞에 둔다(`pending_submissions` 가 머리로 거른다)."""
+
+    return f"{SIZE_HOLD_ERROR_PREFIX} model={model} {detail}"
+
+
+def exclude_holds(queryset: QuerySet) -> QuerySet:
+    """`error` 가 보류 표식으로 시작하는 시도 기록을 뺀다 — 실패 상한·시도 횟수가 쓴다."""
+
+    for prefix in HOLD_PREFIXES:
+        queryset = queryset.exclude(error__startswith=prefix)
+    return queryset
 MODEL_REJECTED = "model_rejected"
 REASONS = (NO_API_KEY, MODEL_REJECTED)
 
@@ -102,8 +125,7 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
     """
 
     attempt_count = (
-        ClassroomScoringAttempt.objects.filter(submission=models.OuterRef("pk"), rate_limited=False)
-        .exclude(error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX)
+        exclude_holds(ClassroomScoringAttempt.objects.filter(submission=models.OuterRef("pk"), rate_limited=False))
         .order_by()
         .values("submission")
         .annotate(count=Count("id"))
@@ -132,6 +154,26 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
             models.Exists(
                 ClassroomScoringAttempt.objects.filter(
                     submission=models.OuterRef("pk"), error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX
+                )
+            )
+        )
+        # 「크기 초과」 보류(#989) — 그 모델이 지금도 이 문제의 채점 모델이면 다시 돌리지 않는다.
+        .annotate(
+            scoring_model=models.Case(
+                models.When(problem__model="", then=models.F("problem__classroom__default_model")),
+                default=models.F("problem__model"),
+            )
+        )
+        .exclude(
+            models.Exists(
+                ClassroomScoringAttempt.objects.filter(
+                    submission=models.OuterRef("pk"),
+                    error__startswith=Concat(
+                        models.Value(f"{SIZE_HOLD_ERROR_PREFIX} model="),
+                        models.OuterRef("scoring_model"),
+                        models.Value(" "),
+                        output_field=models.TextField(),
+                    ),
                 )
             )
         )

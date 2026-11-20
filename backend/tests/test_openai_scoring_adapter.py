@@ -409,16 +409,18 @@ def test_a_400_without_the_model_not_found_code_does_not_raise_model_rejected_er
     아니다 — 사유 구분이 상태 코드가 아니라 벤더가 준 고정 라벨 하나에만
     의존해야 오분류가 없다."""
 
-    from core.llm_scoring import LLMAdapterModelRejectedError
+    from core.llm_scoring import LLMAdapterInputTooLargeError, LLMAdapterModelRejectedError
 
     error_body = {"error": {"message": "context length exceeded", "code": "context_length_exceeded"}}
     monkeypatch.setattr("scoring.adapters.requests.post", lambda *a, **k: _FakeResponse(400, error_body))
 
     adapter = OpenAIScoringAdapter()
-    with pytest.raises(LLMAdapterPermanentError) as exc_info:
+    # 컨텍스트 초과는 영구 실패가 아니라 「크기 초과」다(#989) — 0% 로 굳히지 않고 보류한다.
+    with pytest.raises(LLMAdapterInputTooLargeError) as exc_info:
         adapter.score(_scoring_input(requirement_ids=[10]))
 
     assert not isinstance(exc_info.value, LLMAdapterModelRejectedError)
+    assert not isinstance(exc_info.value, LLMAdapterPermanentError)
 
 
 def test_401_does_not_raise_model_rejected_error(monkeypatch):

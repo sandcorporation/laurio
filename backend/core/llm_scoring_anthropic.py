@@ -49,6 +49,7 @@ from core.llm_metrics import observe_call, observe_call_async
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
+    LLMAdapterInputTooLargeError,
     LLMAdapterModelRejectedError,
     LLMAdapterPermanentError,
     LLMAdapterQuotaExhaustedError,
@@ -57,6 +58,8 @@ from core.llm_scoring import (
     LLMKeyCheckStatus,
     ScoringInput,
     ScoringOutput,
+    ensure_request_fits,
+    request_size_bytes,
     verdicts_from_content,
 )
 
@@ -88,6 +91,10 @@ _MODEL_REJECTED_STATUS = 404
 _BILLING_STATUS = 402
 _RATE_LIMIT_STATUSES = frozenset({429, 529})
 _SPEND_CAP_ERROR_CODE = "enforced_spend_limit_reached"
+#: 입력이 컨텍스트를 넘었다는 400(#989) — Anthropic 은 이것에 고정 코드를 주지 않고 `invalid_request_error`
+#: 에 「prompt is too long: N tokens > M maximum」 문구만 준다. 크레딧 문구(아래)와 같이 소문자 문구로 가른다.
+_CONTEXT_EXCEEDED_MESSAGE_MARKER = "prompt is too long"
+
 #: 400 의 `error.message` 가운데 「충전·한도를 올려야 풀린다」를 뜻하는 머리말 — 소문자로 견준다.
 _QUOTA_MESSAGE_MARKERS = (
     "you have reached your specified api usage limits",
@@ -149,6 +156,8 @@ def _pick_error(status: int, error_type: str, error_code: str, message: str) -> 
         return LLMAdapterQuotaExhaustedError
     if status in _RATE_LIMIT_STATUSES:
         return LLMAdapterRateLimitedError
+    if status == 400 and _CONTEXT_EXCEEDED_MESSAGE_MARKER in message:
+        return LLMAdapterInputTooLargeError
     if 400 <= status < 500:
         return LLMAdapterPermanentError
     return LLMAdapterError
@@ -306,6 +315,18 @@ class AnthropicScoringAdapter:
             "output_config": output_config,
         }
 
+    def request_bytes(self, scoring_input: ScoringInput) -> int:
+        """이 입력으로 보낼 요청의 크기(#989) — `OpenAIScoringAdapter.request_bytes` 와 같다."""
+
+        return request_size_bytes(self._payload(scoring_input))
+
+    def _fitting_payload(self, scoring_input: ScoringInput) -> dict:
+        """보낼 페이로드 — 모델 컨텍스트에 들어가지 않으면 벤더를 부르기 전에 던진다(#989)."""
+
+        payload = self._payload(scoring_input)
+        ensure_request_fits(self._model, payload)
+        return payload
+
     def _output(self, response: Any, scoring_input: ScoringInput) -> ScoringOutput:
         try:
             body = response.json()
@@ -336,13 +357,14 @@ class AnthropicScoringAdapter:
         }
 
     def score(self, scoring_input: ScoringInput) -> ScoringOutput:
+        payload = self._fitting_payload(scoring_input)
         with observe_call(**self._observe_args(scoring_input)) as call:
             response = _round_trip(
                 "POST",
                 ANTHROPIC_API_BASE_URL + _MESSAGES_PATH,
                 api_key=self._api_key,
                 timeout=self._timeout,
-                json_body=self._payload(scoring_input),
+                json_body=payload,
                 context=f"submission={scoring_input.submission_id}",
             )
             output = self._output(response, scoring_input)
@@ -350,13 +372,14 @@ class AnthropicScoringAdapter:
             return output
 
     async def score_async(self, scoring_input: ScoringInput) -> ScoringOutput:
+        payload = self._fitting_payload(scoring_input)
         async with observe_call_async(**self._observe_args(scoring_input)) as call:
             response = await _round_trip_async(
                 "POST",
                 ANTHROPIC_API_BASE_URL + _MESSAGES_PATH,
                 api_key=self._api_key,
                 timeout=self._timeout,
-                json_body=self._payload(scoring_input),
+                json_body=payload,
                 context=f"submission={scoring_input.submission_id}",
                 transport=self._async_transport,
             )
