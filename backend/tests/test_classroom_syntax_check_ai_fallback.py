@@ -318,3 +318,32 @@ def test_grammar_not_prefetched_falls_back_to_ai_without_downloading(client, db,
     assert mine["submissions"][0]["score"]["syntax_check"]["judged_by"] == "ai"
     # 캐시가 비어 있던 자리에 문법을 받아 오지 않았다.
     assert not any(tmp_path.rglob("*.so"))
+
+
+def test_a_keyed_vendor_response_with_the_syntax_check_item_scores_the_submission(client, db, monkeypatch):
+    """#1059: 응답이 requirement_id 를 키로 한 객체(#986)일 때도 문법 검사 AI 대체 항목의 키 `"-1"`
+    이 정수로 돌아와 채점이 점수로 끝난다 — 이 회귀로 운영 강의실 제출 873·874 가 매번 실패했다."""
+
+    import json
+
+    from tests.classroom_scenarios import FakeVendorResponse, openai_verdicts_body
+
+    ctx = _setup(client, files={"index.php": _PHP_VALID})
+    body = openai_verdicts_body([])
+    body["choices"][0]["message"]["content"] = json.dumps(
+        {
+            "verdicts": {
+                str(ctx["item_id"]): {"verdict": "met", "is_met": True, "reasoning": "충족"},
+                "-1": {"verdict": "met", "is_met": True, "reasoning": "PHP 파일에 구문 오류가 없습니다."},
+            }
+        }
+    )
+    monkeypatch.setattr("core.llm_scoring.requests.post", lambda *a, **kw: FakeVendorResponse(200, body))
+
+    result = _run_scan_with_files(client, {"index.php": _PHP_VALID})
+
+    assert result["count"] == 1
+    score = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])["submissions"][0]["score"]
+    assert score["syntax_check"]["is_met"] is True
+    assert score["syntax_check"]["judged_by"] == "ai"
+    assert [r["checklist_item_id"] for r in score["reasoning"]] == [ctx["item_id"]]

@@ -688,3 +688,37 @@ def test_a_keyed_response_with_a_non_numeric_key_is_rejected(monkeypatch):
 
     with pytest.raises(LLMAdapterError, match="정수가 아니다"):
         OpenAIScoringAdapter().score(_scoring_input(requirement_ids=[10]))
+
+
+# --- #1059: 음수 id(문법 검사 AI 대체 항목 -1)도 키 객체 응답에서 정수로 돌아온다 ---------------------
+
+
+def test_a_keyed_response_with_the_syntax_check_item_minus_one_is_accepted():
+    """강의실의 문법 검사 AI 대체 항목은 id 가 -1 이라 키가 `"-1"` 이다 — `isdigit()` 로 되돌리던
+    #986 파서가 이 키를 문자열로 남겨 매번 「정수가 아니다」로 실패했다."""
+
+    from scoring.adapters import _parse_openai_scoring_response
+
+    body = _chat_completion_body(
+        {
+            "10": {"verdict": "met", "is_met": True, "reasoning": "확인됨"},
+            "-1": {"verdict": "met", "is_met": True, "reasoning": "구문 오류 없음"},
+        }
+    )
+
+    output = _parse_openai_scoring_response(
+        body, requirement_ids=[10, -1], submission_id=1, allow_unverifiable=True
+    )
+
+    assert [(v.requirement_id, v.is_met) for v in output.verdicts] == [(10, True), (-1, True)]
+
+
+def test_a_keyed_response_with_a_negative_key_that_was_not_asked_is_still_rejected():
+    from scoring.adapters import _parse_openai_scoring_response
+
+    body = _chat_completion_body(
+        {"10": {"is_met": True, "reasoning": "a"}, "-2": {"is_met": True, "reasoning": "b"}}
+    )
+
+    with pytest.raises(LLMAdapterError, match="정수가 아니다"):
+        _parse_openai_scoring_response(body, requirement_ids=[10, -1], submission_id=1)

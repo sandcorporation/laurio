@@ -307,3 +307,35 @@ def test_with_unverifiable_the_schema_asks_for_three_verdicts_and_reads_them(mon
     assert item["required"] == ["verdict", "reasoning"]
     assert item["properties"]["verdict"]["enum"] == ["met", "unmet", "unverifiable"]
     assert [(v.is_met, v.verdict) for v in output.verdicts] == [(True, "met"), (False, "unverifiable")]
+
+
+def _keyed_messages_body(verdicts: dict) -> dict:
+    body = messages_body()
+    body["content"][-1]["text"] = json.dumps({"verdicts": verdicts}, ensure_ascii=False)
+    return body
+
+
+def test_a_keyed_response_with_the_syntax_check_item_minus_one_is_accepted():
+    """#1059: 문법 검사 AI 대체 항목(id -1)의 키 `"-1"` 도 정수 -1 로 돌아온다."""
+
+    body = _keyed_messages_body(
+        {
+            "11": {"verdict": "met", "is_met": True, "reasoning": "README 가 있다."},
+            "-1": {"verdict": "unmet", "is_met": False, "reasoning": "구문 오류가 있다."},
+        }
+    )
+
+    output = anthropic.parse_messages_response(
+        body, requirement_ids=[11, -1], submission_id=7, allow_unverifiable=True
+    )
+
+    assert [(v.requirement_id, v.is_met) for v in output.verdicts] == [(11, True), (-1, False)]
+
+
+def test_a_keyed_response_with_an_unknown_key_is_still_rejected():
+    body = _keyed_messages_body(
+        {"11": {"is_met": True, "reasoning": "a"}, "-2": {"is_met": True, "reasoning": "b"}}
+    )
+
+    with pytest.raises(LLMAdapterError, match="정수가 아니다"):
+        anthropic.parse_messages_response(body, requirement_ids=[11, -1], submission_id=7)
