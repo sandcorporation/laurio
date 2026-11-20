@@ -116,8 +116,10 @@ class ReleaseSkipsAlreadyCheckedTreeTest(unittest.TestCase):
     TREE = "a" * 40
     X = "b" * 40
 
-    def run_(self, tree: str | None = TREE, conclusion: str = "success", tests: str = "success") -> Run:
+    def run_(self, tree: str | None = TREE, conclusion: str = "success", tests: str = "success", guard: str = "skipped") -> Run:
         jobs = (
+            Job("guard (frontend)", guard, ()),
+            Job("guard (classroom)", guard, ()),
             Job("plan", "success", ("Set up job", f"검사한 커밋 {self.X}", "무엇을 돌릴지")),
             Job("checks static", tests, ()),
             Job("e2e classroom", tests, ()),
@@ -128,6 +130,11 @@ class ReleaseSkipsAlreadyCheckedTreeTest(unittest.TestCase):
     def test_same_tree_from_a_full_green_run_skips(self) -> None:
         decision = decide(self.TREE, 1, ["backend/app.py"], [self.run_()])
         self.assertTrue(decision.skip, decision.reason)
+
+    def test_guard_skipped_on_pr_is_green_but_any_other_skipped_job_is_not(self) -> None:
+        self.assertTrue(decide(self.TREE, 1, ["backend/app.py"], [self.run_(guard="skipped")]).skip)
+        self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(guard="failure")]).skip)
+        self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(tests="skipped")]).skip)
 
     def test_main_moved_between_check_and_merge_runs_full_check(self) -> None:
         self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(tree="c" * 40)]).skip)

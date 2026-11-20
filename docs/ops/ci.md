@@ -45,6 +45,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   - 왜: release check 가 PR 검사를 그대로 다시 돌아(병합 5건 모두 같은 트리였다) 병합→승격이 7~11분이었다. 시간의 대부분은 check 의 e2e 다.
   - 증명(`scripts/ci/verified_tree.py`, GITHUB_TOKEN 읽기 권한만): 병합 커밋 → 그 PR(`commits/<sha>/pulls`) → PR head 의 초록
     PR 검사 실행 → plan 잡의 단계 이름 `검사한 커밋 <refs/pull/N/merge sha>` → 그 커밋의 트리 == 병합 커밋 트리면 `skip=1`.
+    PR 검사의 `guard` 잡은 늘 skipped 라(#1015) 그것만 초록으로 받는다 — 다른 잡의 skipped 는 거절한다(#1080). check 를 생략하면 amd64 guard 는 release 에서 안 돌고, arm64 prod 이미지 부팅 가드는 `image.yml` 이 따로 돈다.
   - 전체 check 를 도는 때: 트리가 다르다(그사이 main 이 움직였다 — ruleset strict 가 꺼져 있어 두 PR 의 조합은 여기서만 잡힌다),
     PR 검사가 시험을 건너뛰었다(문서만), 이미지 층 캐시 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이
     바뀌었다(캐시 저장은 main check 만 한다), squash 가 아니다, API 실패. 판정과 까닭은 verify 잡 로그·요약에 한 줄로 남는다.

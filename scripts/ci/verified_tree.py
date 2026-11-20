@@ -32,6 +32,8 @@ TESTED_STEP = re.compile(r"^검사한 커밋 ([0-9a-f]{40})$")
 # pr-check.yml 의 hashFiles(...) 입력 — 캐시 키가 바뀌는 파일
 CACHE_KEY_FILES = ("docker/*.Dockerfile", "backend/uv.lock", "pnpm-lock.yaml")
 RESULT_JOB = "결과"
+# PR 검사에서 guard(matrix: `guard (frontend)` …)는 늘 skipped 다(#1015, plan 출력 guard=''). 이것만 초록으로 받는다.
+GUARD_JOB = re.compile(r"^guard( \(.*\))?$")
 
 
 @dataclass(frozen=True)
@@ -72,9 +74,13 @@ def run_is_full_green(run: Run) -> str | None:
     names = {job.name for job in run.jobs}
     if RESULT_JOB not in names:
         return f"실행 {run.run_id} 에 「{RESULT_JOB}」 잡이 없다"
-    not_green = sorted(f"{job.name}={job.conclusion}" for job in run.jobs if job.conclusion != "success")
+    not_green = sorted(
+        f"{job.name}={job.conclusion}"
+        for job in run.jobs
+        if job.conclusion != "success" and not (job.conclusion == "skipped" and GUARD_JOB.match(job.name))
+    )
     if not_green:
-        # skipped 도 받지 않는다 — 문서만이라 시험을 건너뛴 실행은 그때 base 에 기댄 판단이다
+        # guard 말고는 skipped 도 받지 않는다 — 문서만이라 시험을 건너뛴 실행은 그때 base 에 기댄 판단이다
         return f"실행 {run.run_id} 에 초록이 아닌 잡: {', '.join(not_green)}"
     return None
 
