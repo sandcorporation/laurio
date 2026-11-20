@@ -49,3 +49,24 @@ describe("sortByQuality", () => {
     expect(orderSubmissions(rows, "quality").map((r) => r.submission_id)).toEqual([2, 1]);
   });
 });
+
+describe("rankingRows", () => {
+  it("등수 오름차순·같으면 제출 순서·기록 없는 제출은 맨 아래, 가산 k/n", async () => {
+    const { rankingRows } = await import("./quality");
+    const withRank = (raw: number, rank: number) => ({ ...q(raw), rank });
+    const rows = rankingRows(
+      [
+        { submission_id: 1, developer_display_name: "가", quality: withRank(3, 4), bonus_scores: [] },
+        { submission_id: 2, developer_display_name: "나", quality: null },
+        { submission_id: 3, developer_display_name: "다", quality: withRank(9, 1), bonus_scores: [{ requirement_id: 7, rated: true }, { requirement_id: 8, rated: false }, { requirement_id: 99, rated: true }] },
+        { submission_id: 4, developer_display_name: "라", quality: withRank(6, 2) },
+        { submission_id: 5, developer_display_name: "마", quality: withRank(6, 2) },
+      ],
+      [7, 8, 9],
+    );
+    expect(rows.map((r) => r.submissionId)).toEqual([3, 4, 5, 1, 2]);
+    expect(rows[0]).toMatchObject({ bonusScored: 1, bonusTotal: 3 });
+    expect(rows[1].bonusScored).toBe(0);
+    expect(rankingRows([{ submission_id: 1, developer_display_name: "가" }], [])[0].bonusScored).toBeNull();
+  });
+});

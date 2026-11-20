@@ -143,6 +143,11 @@ test("배점을 고치면 「n / 만점점」과 「완성도순」이 곧바로
     await expect(page.getByTestId(`quality-${a.id}`)).toContainText("4.8 / 12점");
     await expect(page.getByTestId(`quality-${b.id}`)).toContainText("8.0 / 12점");
     await expect(page.getByTestId(`quality-item-${optionalId}-${b.id}`)).toContainText("6.0 / 10점");
+    // #1073 — 「완성도 순위」 묶음도 새로고침 없이 같이 바뀐다.
+    await expect(page.getByTestId(`ranking-total-${a.id}`)).toHaveText("4.8 / 12점");
+    await expect(page.getByTestId(`ranking-total-${b.id}`)).toHaveText("8.0 / 12점");
+    await expect(page.getByTestId(`ranking-rank-${b.id}`)).toHaveText("1등");
+    await expect(page.locator('[data-testid^="ranking-row-"]').first()).toHaveAttribute("data-testid", `ranking-row-${b.id}`);
     await page.reload();
     await expect(page.getByTestId(`requirement-${optionalId}-points`)).toHaveValue("10");
     await expect(page.getByTestId(`quality-${a.id}`)).toContainText("4.8 / 12점");

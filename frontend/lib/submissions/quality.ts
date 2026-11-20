@@ -39,3 +39,39 @@ export function orderSubmissions<T extends { submission_id: number; quality?: Co
 ): T[] {
   return order === "quality" ? sortByQuality(submissions) : [...submissions];
 }
+
+export type RankingRow = {
+  submissionId: number;
+  name: string;
+  quality: ComparisonQuality | null;
+  /** 가산을 매긴 수 — 가산 항목이 없으면 null. */
+  bonusScored: number | null;
+  bonusTotal: number;
+};
+
+/** 「완성도 순위」 줄 — 서버 등수 오름차순, 같으면 제출 id 순, 완성도 기록이 없는 제출은 맨 아래. */
+export function rankingRows(
+  submissions: readonly {
+    submission_id: number;
+    developer_display_name: string;
+    quality?: ComparisonQuality | null;
+    bonus_scores?: readonly { requirement_id: number; rated: boolean }[];
+  }[],
+  bonusRequirementIds: readonly number[],
+): RankingRow[] {
+  const bonusIds = new Set(bonusRequirementIds);
+  return submissions
+    .map((s) => ({
+      submissionId: s.submission_id,
+      name: s.developer_display_name,
+      quality: s.quality ?? null,
+      bonusScored: bonusIds.size === 0 ? null : (s.bonus_scores ?? []).filter((b) => b.rated && bonusIds.has(b.requirement_id)).length,
+      bonusTotal: bonusIds.size,
+    }))
+    .sort((a, b) => {
+      const ra = a.quality?.rank ?? Number.POSITIVE_INFINITY;
+      const rb = b.quality?.rank ?? Number.POSITIVE_INFINITY;
+      if (ra !== rb) return ra < rb ? -1 : 1;
+      return a.submissionId - b.submissionId;
+    });
+}
