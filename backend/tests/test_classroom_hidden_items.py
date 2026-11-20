@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from classroom.models import ChecklistItem, ClassroomScore
@@ -21,13 +23,47 @@ HIDDEN_BONUS = "HIDDENBON8e4f 숨은 가산 항목"
 SECRETS = ("HIDDENREQ5b2d", "HIDDENBON8e4f")
 
 
+#: 체크리스트 항목을 가리키는 키 — 어느 객체에 있든 숨은 항목 id 면 샌 것이다
+ITEM_REF_KEYS = ("item_id", "checklist_item_id")
+
+
+def _item_ids(node: object, under_items: bool = False) -> list[int]:
+    """응답 JSON 에서 체크리스트 항목 id 로 나가는 값. `id` 는 이름이 `items` 로 끝나는 목록 안 객체의 것만 센다 —
+    문제·클래스 같은 다른 객체의 `id` 는 다른 표의 번호라 숨은 항목 id 와 우연히 같을 수 있다."""
+
+    out: list[int] = []
+    if isinstance(node, dict):
+        if under_items and isinstance(node.get("id"), int):
+            out.append(node["id"])
+        for key, value in node.items():
+            if key in ITEM_REF_KEYS and isinstance(value, int):
+                out.append(value)
+            out += _item_ids(value, key.endswith("items"))
+    elif isinstance(node, list):
+        for value in node:
+            out += _item_ids(value, under_items)
+    return out
+
+
 def _assert_no_leak(body: bytes, hidden_ids: tuple[int, ...]) -> None:
     text = body.decode()
     for secret in SECRETS:
         assert secret not in text, f"숨은 항목 문구가 샜다: {secret}"
-    for hidden_id in hidden_ids:
-        for key in ("id", "item_id", "checklist_item_id"):
-            assert f'"{key}": {hidden_id},' not in text and f'"{key}":{hidden_id},' not in text
+    leaked = sorted(set(_item_ids(json.loads(text))) & set(hidden_ids))
+    assert not leaked, f"숨은 항목 id 가 샜다: {leaked}"
+
+
+def test_leak_check_ignores_other_objects_with_the_same_number():
+    # 문제 id 가 숨은 항목 id 와 우연히 같아도(다른 표의 시퀀스) 샌 것이 아니다 — 대기열에서 35 == 35 로 빨갛던 꼴.
+    body = json.dumps({"problem": {"id": 35, "checklist_items": [{"id": 33}]}, "submissions": [{"id": 36}]}).encode()
+    _assert_no_leak(body, (35, 36))
+    for leaked in (
+        {"problem": {"id": 1, "checklist_items": [{"id": 35}]}},
+        {"items": [{"item_id": 36}]},
+        {"score": {"checks": [{"checklist_item_id": 35}]}},
+    ):
+        with pytest.raises(AssertionError):
+            _assert_no_leak(json.dumps(leaked).encode(), (35, 36))
 
 
 def _add_item(client, world: dict, label: str, grade: str, *, hidden: bool) -> int:
@@ -72,6 +108,8 @@ def test_instructor_sees_hidden_items_and_they_count_for_pass(client, hidden_wor
     # 유출 검사가 찾는 머리가 강사 응답에는 실제로 있다(검사가 헛돌지 않는다는 대조).
     assert all(secret.encode() in raw for secret in SECRETS)
     problem = _get(client, hidden_world, "").json()
+    # id 검사도 헛돌지 않는다 — 강사 응답의 실제 모양에서 숨은 항목 id 를 찾아낸다.
+    assert set(hidden_world["hidden_ids"]) <= set(_item_ids(problem))
     hidden = [i for i in problem["checklist_items"] if i["hidden"]]
     assert [(i["label"], i["grade"]) for i in hidden] == [(HIDDEN_REQUIRED, "required"), (HIDDEN_BONUS, "bonus")]
     # AI 는 숨은 필수를 판정한다 — 프롬프트에 있고, 통과를 가른다.
