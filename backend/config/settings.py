@@ -425,6 +425,11 @@ SESSION_COOKIE_SAMESITE = "Lax"
 # 조립한다(dev·테스트).
 OPERATOR_WEB_ORIGIN = _env("CODEMIT_OPERATOR_ORIGIN", "")
 
+# 방침에 싣는 문의 주소(#1077) — 공개 앱이 읽는 것과 같은 이름·같은 값(운영 `.env.prod` 의
+# `SUPPORT_EMAIL`)이다. 알림 문구(`notifications/rendering.py`)가 「문의처(주소)」로 싣고,
+# 비어 있으면 주소 없이 「문의처」만 말한다.
+PUBLIC_SUPPORT_EMAIL = _env("CODEMIT_PUBLIC_SUPPORT_EMAIL", "")
+
 # 강의실 앱의 공개 오리진(ADR-0052, #512) — 연결된 앱의 OAuth·MCP 메타데이터가 issuer·
 # resource 로 내보내는 주소다. backend 는 배포에서 호스트 포트가 없어 바깥에서는 강의실
 # 도메인으로만 닿는다. 비어 있으면(dev·테스트) 강의실 BFF 가 실어 보낸 자기 오리진을,

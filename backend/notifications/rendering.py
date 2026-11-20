@@ -8,6 +8,8 @@ LMS로 보낼지의 판단은 렌더링이 아니라 어댑터(`notifications.ad
 
 from __future__ import annotations
 
+from django.conf import settings
+
 from .models import Notification, NotificationType
 
 _BRAND_PREFIX = "[Codemit]"
@@ -67,14 +69,16 @@ def render_message(notification: Notification) -> str:
         )
 
     if notification_type == NotificationType.SCORING_HELD_SIZE:
-        # 대장 확정 #1446 의 문구. 무료 공모전에는 이의가 없어 문의처를 안내한다 — 이메일 주소는
-        # 공개 앱 설정값(`CODEMIT_PUBLIC_SUPPORT_EMAIL`)에만 있어 문자에는 자리만 말한다.
+        # 대장 확정 #1446 의 문구. 무료 공모전에는 이의가 없어 문의처를 안내한다 — 주소는
+        # 설정값(`PUBLIC_SUPPORT_EMAIL`, 공개 앱과 같은 환경 값)이 있으면 「문의처(주소)」로, 없으면 「문의처」만.
+        support = getattr(settings, "PUBLIC_SUPPORT_EMAIL", "")
+        contact = f"문의처({support})" if support else "codemit 개인정보 처리방침의 문의처"
         ends = _judging_end_label(context.get("judging_ends_at"))
         head = f"{_BRAND_PREFIX} 제출하신 '{contest_title}' Contest의 제출 크기가 채점 한도를 넘어 채점이 보류되었습니다. "
         if context.get("is_free"):
             return (
                 head + f"심사 종료({ends}) 때 0점으로 처리됩니다. 채점 결과에 문제가 있다고 생각하면 "
-                "codemit 개인정보 처리방침의 문의처로 알려 주세요."
+                f"{contact}로 알려 주세요."
             )
         return (
             head + f"심사 종료({ends}) 때 필수 요건 전체 미달(0점)로 처리됩니다. 그 전까지 이의를 신청할 수 있습니다."

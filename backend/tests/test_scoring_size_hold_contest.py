@@ -67,7 +67,9 @@ def test_the_participant_is_told_once_when_the_hold_is_decided(client, category,
     assert "이의를 신청할 수 있습니다" in message
 
 
-def test_free_contest_hold_message_points_to_the_contact_not_an_appeal():
+def test_free_contest_hold_message_points_to_the_contact_not_an_appeal(settings):
+    settings.PUBLIC_SUPPORT_EMAIL = ""
+
     note = Notification(
         notification_type=NotificationType.SCORING_HELD_SIZE,
         context={"contest_title": "무료전", "is_free": True, "judging_ends_at": "2026-11-30T09:00:00+00:00"},
@@ -155,3 +157,13 @@ def test_hold_becomes_an_automatic_zero_when_judging_ends(client, category, land
     assert not Notification.objects.filter(
         recipient_id=dev["user_id"], notification_type=NotificationType.SCORING_COMPLETE
     ).exists()
+
+
+def test_free_contest_hold_message_carries_the_support_address_when_configured(settings):
+    settings.PUBLIC_SUPPORT_EMAIL = "help@example.test"
+    note = Notification(
+        notification_type=NotificationType.SCORING_HELD_SIZE,
+        context={"contest_title": "무료전", "is_free": True, "judging_ends_at": "2026-11-30T09:00:00+00:00"},
+    )
+
+    assert "문의처(help@example.test)로 알려 주세요" in render_message(note)
