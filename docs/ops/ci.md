@@ -62,7 +62,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   - **건너뜀을 받는 조건(#1097)**: PR 실행의 skipped 묶음이 병합 커밋 diff(`sha^..sha`)에 `changed.sh <sha^> <sha>` 를 돌려 나온 계획과 정확히 같고(더 건너뛰었거나 더 돌았으면 거절), **부모 커밋의 release 실행이 success** 다(부모가 아직 도는 중이어도 거절). 앞 조건만 있으면 부모 release 가 빨강일 때 건너뛴 쪽(예: 프런트만 PR 의 백엔드)이 어디서도 검사 없이 승격된다.
   - 판정 규칙은 `scripts/test_release_flow.py` 가 고정한다. 되돌리기: release.yml 의 check 에서 `if:` 를 빼면(또는 verify 잡을
     지우고 promote 조건을 `needs: [check, image]` 로) 늘 전체 check 다.
-- **워크플로 문법 검사(#1105)**: `plan` 잡의 「워크플로 문법(actionlint…)」 단계가 `.github/workflows/**` 가 바뀐 PR 에서만 `scripts/ci/actionlint.sh` 로 actionlint(1.7.12, linux amd64 tarball 을 sha256 고정으로 내려받음)를 돌린다. 빈 `env:` 처럼 파싱이 깨진 워크플로는 검사가 아예 뜨지 않아 이유가 PR 에 안 보였다. 새 잡이 아니라 기존 `plan` 안의 단계라 필수 「결과」 집계·잡 이름은 그대로다. 로컬: `scripts/ci/actionlint.sh --all`.
+- **워크플로 문법 검사(#1105)**: `workflow-lint.yml`(별도 파일 — pr-check.yml 자체가 파싱 안 되면 그 안의 어떤 잡도 안 뜨기 때문)이 `.github/workflows/**` 가 바뀐 PR 에서만 `scripts/ci/actionlint.sh --all` 로 actionlint(1.7.12, linux amd64 tarball 을 sha256 고정으로 내려받음)를 돌린다. 필수 검사(「결과」·ruleset)에는 넣지 않는다 — PR 에 빨강으로 보이는 것이 목적이다. `.githooks/pre-commit` 도 워크플로가 staged 일 때 같은 스크립트를 건다(로컬에 actionlint 가 있을 때). 로컬: `scripts/ci/actionlint.sh --all`.
 - **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 표와 글은 꺼진 검사의 기록이다.** Jenkins 이미지 빌드 비상 길도 제거했다. 검사와 이미지 빌드는 GitHub Actions만 수행한다.
 
 ### Actions 의 캐시 — main 이 저장하고 PR 은 복원만 한다(#932)

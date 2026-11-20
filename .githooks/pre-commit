@@ -56,6 +56,15 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
+# 워크플로가 staged 일 때만 actionlint(#1105) — 파싱이 깨진 워크플로는 push 뒤 PR 검사가 아예 뜨지 않는다.
+# actionlint 가 없으면(판이 다르면) 내려받는 길은 CI 몫이라 훅은 건너뛴다.
+if git diff --cached --name-only | grep -qE '^\.github/workflows/' && command -v actionlint >/dev/null 2>&1; then
+  if ! bash scripts/ci/actionlint.sh --all; then
+    echo "pre-commit: actionlint 가 워크플로 오류를 찾았다 — 커밋을 거절한다." >&2
+    exit 1
+  fi
+fi
+
 # backend/**/*.py 가 staged 일 때만 재생성한다 — 문서만 고친 커밋은 2.1초를 안 낸다.
 if git diff --cached --name-only | grep -qE '^backend/.*\.py$'; then
   echo "pre-commit: backend 변경 감지 — API 타입을 재생성한다 (pnpm --dir frontend generate:api)."

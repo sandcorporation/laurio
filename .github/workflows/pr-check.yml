@@ -89,8 +89,6 @@ jobs:
             echo "front=$front"
             echo "matrix=$matrix"
           } >>"$GITHUB_OUTPUT"
-      - name: 워크플로 문법(actionlint, 워크플로가 바뀐 PR 만)
-        run: bash scripts/ci/actionlint.sh "$(git merge-base origin/main HEAD 2>/dev/null || true)"
       - name: ADR 상태
         run: python3 scripts/check_adr_status.py
       - name: 공개해도 되는 HEAD 인가(내부 호스트·OCI 실값·워크플로 보안)
