@@ -242,7 +242,7 @@ award_submission`이 무료 공모전이면 `Award`만 만들고 `Handover`를 �
 Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover[/accept]`·
 `POST/GET .../payout`이 그 공모전에 대해 자연스럽게 404다("이 공모전은 아직
 선정되지 않아 인수 정보가 없습니다" — Handover 행이 없다는 사실 그대로다).
-심사기간이 무응답으로 끝나도 `distributions.services.distribution_due_q`가
+심사기간이 무응답으로 끝나도 `contests.models.distribution_due_q`가
 `is_free=False`를 조건에 넣어 `Distribution`을 만들지 않는다 — 나눠 줄 돈이
 없다. 이의제기(`POST /submissions/{id}/appeal`)도 무료 공모전이면 404다.
 유료 심사기간 연장(`.../extend-judging-period`)도 유료 스위치가 켜져 있어도
@@ -356,12 +356,12 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 가리키지 않게).
 공동 강사가 부르면 403이다(클래스는 보이므로 404 가 아니다, `classroom.instructor_scope` 의
 `owner=True`). 강사 전용 라우트 전부를 세 사람(소유자·공동 강사·남)으로 훑는 표가
-`tests/test_classroom_co_instructor_permissions.py` 에 있다. 달성률 분모·명단·격자에서 빠지는
+`classroom/tests/test_classroom_co_instructor_permissions.py` 에 있다. 달성률 분모·명단·격자에서 빠지는
 「강사」는 지금 강사인 사람 전원이다 — 참여자였다가 공동 강사가 된 사람도 빠지고, 그 사람의
 지난 시도는 남는다. 공동 강사와 소유자의 시도만 있는 문제는 지울 수 있다. 강사용 실시간
 신호(참여자의 새 시도·채점 완료)도 강사 전원에게 간다. 채점 키 알림(키 거부·크레딧 소진·서버 연결 불가)은
 **소유자에게만** 간다 — 바꿀 수 있는 사람이 소유자뿐이고, 소유권이 넘어가면 새 소유자에게 간다(#566,
-`tests/test_classroom_co_instructor_signals.py`).
+`classroom/tests/test_classroom_co_instructor_signals.py`).
 
 **공동 강사 초대는 1회용이다**(#561, `classroom.co_instructors`). 수락은 한 트랜잭션에서
 초대 행을 잠그고 「아직 대기인가」를 다시 본 뒤에야 공동 강사 행을 만든다 — 같은 링크를 둘이
@@ -708,7 +708,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 환경변수에서만, 어림 500원 상한)로 실제 모델에서 잰다.
 
 강의실 화면(사람이 직접 쓸 때)도 같은 안내를 받는다(#810). 항목 입력칸 아래 한 줄은 `GRADABILITY_FORM_NOTE`
-(강의실 `lib/problems/gradability.ts` 에 같은 문장이 있고 `tests/test_classroom_gradability_hint.py` 가 같음을 지킨다),
+(강의실 `lib/problems/gradability.ts` 에 같은 문장이 있고 `classroom/tests/test_classroom_gradability_hint.py` 가 같음을 지킨다),
 저장 뒤 경고는 REST 응답의 `gradability_warnings` — 항목 만들기·고치기(`ChecklistItemSavedOut`, 문구를 고친 때만)와
 문제 만들기(`ProblemOut`)가 MCP 와 **같은 `gradability_warnings()`** 로 방금 쓴 항목만 가려 싣는다. 저장은 막지 않는다.
 
@@ -744,7 +744,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 소유자일 때만이고 아니면 화면과 같은 문장으로 거절된다. 강사마다 자기 강사 이름은 `rename_my_instructor_name`
 으로 바꾼다(#576). 공동 강사 초대·내보내기·소유권 이전 도구는 없다.
 공동 강사의 앱이 공동 강사인 클래스를 목록에서 보고 문제를 만들고 고치되 클래스 삭제·소유자의 강사 이름은 거절되는 것을
-`tests/test_classroom_mcp_co_instructor.py` 가 본다(#566). 구조 테스트(`tests/test_classroom_instructor_scope_structure.py`)가
+`classroom/tests/test_classroom_mcp_co_instructor.py` 가 본다(#566). 구조 테스트(`tests/test_classroom_instructor_scope_structure.py`)가
 도구 모듈에 `Class.instructor` 직접 참조가 없고 소유자 확인이 그 두 도구에만 있음을 지킨다.
 
 **클래스 도구도 같다**(#516). 화면 라우트와 같은 범위를 같은 `write` 값으로 연다 — 설정·복사·
@@ -799,7 +799,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 **보관**(`Contest.archived_at`, `contests.archiving`): 초안·끝난 공모전·제출 0건인 공개 공모전만.
 보관하면 공개 목록(`GET /api/contests`)·상세(소유자 말고는 404)·검색·홈 큐레이션·강의실 들여오기
 목록에서 빠진다. 상태는 바뀌지 않는다. 「내 공모전」과 운영자 무료 목록은 그대로 보인다.
-시험은 `tests/test_contest_mcp.py`.
+시험은 `tests/integration/test_contest_mcp.py`.
 
 ### 스토리지와 알림
 
@@ -956,10 +956,10 @@ cd backend && uv run python manage.py print_contest_transition_diagram
 ```
 
 CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글자 그대로 비교한다
-(`tests/test_contest_transition_graph.py`) — 선언과 이 문서가 갈리면 그 자리에서
+(`contests/tests/test_contest_transition_graph.py`) — 선언과 이 문서가 갈리면 그 자리에서
 빨개진다.
 
-**그래프 자체의 모순도 테스트가 잡는다**(`tests/test_contest_transition_graph.py`,
+**그래프 자체의 모순도 테스트가 잡는다**(`contests/tests/test_contest_transition_graph.py`,
 #257): 어느 간선으로도, 생성으로도 닿지 않는 상태(도달 불가능), 시각이 지나면
 일어나야 하는데 스캔 등록부에 없는 전이, 끝 상태가 아닌데 나가는 간선이 없는
 상태(갇힌 상태) 셋이다. 끝 상태(`AWARDED`·`JUDGING_ENDED`·`ASSIGNMENT_CLOSED`)는

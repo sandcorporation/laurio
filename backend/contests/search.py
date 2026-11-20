@@ -41,7 +41,7 @@ reindex`)은 이 파일이 아니라 각각 `contests/search_opensearch.py`·
 `FakeContestSearchAdapter._indexed`는 `core.events.FakeEventBus._queues`와 같은
 이유로 **클래스 레벨**이다 — `get_search_adapter()`가 호출마다 새 인스턴스를
 만들어도(`resolve_adapter`의 `fake_factory`) 인덱싱 요청과 검색 요청이 서로 다른
-HTTP 요청(그래서 서로 다른 인스턴스)일 수 있기 때문이다. `tests/conftest.py`의
+HTTP 요청(그래서 서로 다른 인스턴스)일 수 있기 때문이다. `conftest.py`의
 autouse 픽스처가 매 테스트 전후로 비운다.
 """
 
@@ -160,7 +160,7 @@ class FakeContestSearchAdapter:
             status__in=Contest.Status.PUBLICLY_VISIBLE.statuses, archived_at__isnull=True
         ).values_list("id", flat=True)
         # 클래스 레벨 dict 자체를 다른 객체로 바꿔치지 않고 제자리에서 비우고
-        # 채운다 — `tests/conftest.py`가 들고 있는 것과 같은 참조를 계속 가리킨다.
+        # 채운다 — `conftest.py`가 들고 있는 것과 같은 참조를 계속 가리킨다.
         FakeContestSearchAdapter._indexed.clear()
         FakeContestSearchAdapter._indexed.update({contest_id: True for contest_id in visible_ids})
 

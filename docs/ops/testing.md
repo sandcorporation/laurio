@@ -12,6 +12,25 @@
 
 시간은 시임이 아니라 주입 가능한 의존성이다(티켓 02, ADR-0003).
 
+**시험은 앱 폴더에 산다**(#1087). 세 자리다:
+
+| 자리 | 무엇 | 주소(`ROOT_URLCONF`) |
+| --- | --- | --- |
+| `backend/<앱>/tests/` | 닿는 앱이 그 앱과 그 앱이 쓰는 아래 앱(`app_deps.toml` 의 `uses` 닫힘)뿐인 시험 | `<앱>.tests.urls` — 그 앱과 아래 앱의 라우터만 |
+| `backend/tests/integration/` | 옆 앱·위 앱에 닿는 앱 사이 흐름 | 전체(`config.urls`) |
+| `backend/tests/` | 저장소 구조 시험(경계·배포 구성 등)과 전체 주소에 기대는 시험, 그리고 헬퍼 | 전체 |
+
+- 앱 시험의 주소는 `backend/conftest.py` 의 모듈 픽스처가 바꾼다 — 강의실 시험이 로그인(accounts)을 부르는 것은
+  되고, 위 앱·옆 앱의 주소는 404 다. 404 가 나면 그 시험은 통합이다.
+- 라우터·뷰가 어느 주소에 붙는지는 `backend/config/routes.py` 표 하나다. `config/api.py`·`config/urls.py` 와
+  `tests/app_urls.py`(앱 시험 주소)가 같은 표를 읽는다. 라우터를 더하면 이 표에 더한다.
+- 픽스처·훅은 `backend/conftest.py`(루트)에 있고, 한 앱의 여러 파일이 같은 몸으로 쓰는 픽스처는 그 앱의
+  `tests/conftest.py` 에 둔다(autouse 가 아닌 것으로 — 켜는 파일이 `usefixtures` 로 고른다). 헬퍼(`tests/classroom_scenarios.py` 등)는 `from tests.… import`
+  로 그대로 쓴다.
+- 자리는 `python3 scripts/tests_layout.py plan` 이 정하고 `apply` 가 옮긴다 — 본 저장소를 당겨 `backend/tests/` 에
+  새 시험이 생기면 다시 돌린다. 닿는 앱은 import(헬퍼·다른 시험 파일을 거친 것 포함)와 부르는 주소로 센다. 손으로
+  정할 파일은 스크립트의 `OVERRIDES` 에 적는다.
+
 **`backend` pytest를 dev 컨테이너 안에서 돌리지 마라.** `docker compose -f
 docker/compose.dev.yaml exec backend uv run pytest`(또는 컨테이너 안 셸에서 직접)로
 돌리면 12건 안팎이 실패한다 — 회귀가 아니라 어댑터 불일치다. 테스트는
@@ -165,7 +184,7 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 이고, CI 는 둘 다 건너뛴다. 돌릴 때는 `scripts/test.sh backend tests/test_pgbouncer_live.py -m live_infra`
 처럼 표식을 직접 준다.
 
-**시험 하나는 CPU 1초를 넘지 못한다**(2026-10-02). `tests/conftest.py` 가 시험 본문(call
+**시험 하나는 CPU 1초를 넘지 못한다**(2026-10-02). `backend/conftest.py` 가 시험 본문(call
 단계)의 CPU 시간 — 자식 프로세스 몫 포함 — 을 재서 넘으면 실패로 바꾼다. 한도는
 `CODEMIT_TEST_CPU_LIMIT`(로컬 기본 1.0, CI 의 `test` 잡은 1.5, 0 이면 끈다). 벽시계가
 아니라 CPU 로 재는 이유는 붐비는 러너에서 한도 근처의 시험이 빌드마다 번갈아 떨어지지
@@ -228,35 +247,46 @@ ADR-0018 은 **운영**에서 세션이 Redis 에 산다고 정한 것이고, �
 scripts/test.sh backend tests/test_x.py   # db 하나만 띄우고(스크립트가 한다) 그 위에서 돈다
 ```
 
-**앱 경계는 테스트가 지킨다**(#269, ADR-0037). `tests/test_app_boundaries.py` 가 백엔드
-소스를 AST 로 훑어 앱 사이의 참조를 본다. 규칙이 둘이고 **강도가 다르다**:
+**앱 경계는 선언 표와 테스트가 지킨다**(#1086, 처음은 #269·ADR-0037). `backend/app_deps.toml` 이 앱마다
+`group`(shared·contest·classroom)과 두 칸을 적는다 — `uses`(부르는 아래 앱), `plugs`(제 구현을 올리는 아래 앱:
+`Slot`·`Slots.register`·`register_*()`·시그널 `connect`·`@receiver`·`sender=`, 아래 앱이 읽는 설정의 dotted path 가
+이 앱을 가리키는 것). `tests/test_app_boundaries.py` 가 `scripts/app_deps.py` 로 코드를 훑어
+(import 는 함수 안까지, `"app.Model"`·다른 앱 모듈의 dotted path·celery 작업 이름 문자열, 설정 이름, ORM 경로) 표와
+맞댄다:
 
-- **강의실 ↮ 공모전 가족은 양방향으로 막힌다 — 예외가 없다.** 최상단이든 함수 안이든,
-  `import` 든 Django 가 import 없이 앱을 묶는 길(`ForeignKey("contests.Contest")` 꼴
-  문자열·`apps.get_model`)이든 걸린다. 표시로 열 수 있는 문이 하나라도 있으면 마감에
-  몰린 사람이 그 문을 쓴다.
-- **공유층**(`accounts`·`core`·`policies`·`storage`·`notifications`·`submissions`·`ops_metrics`,
-  #270 이 `submissions` 를, #827 이 운영 지표 집계를 더했다)**이 기능 앱을 부르면 막히되, 같은 줄이나 바로 앞 줄의
-  `APP-BOUNDARY-EXCEPTION: <이유>` 로 열린다** — **이유가 비면 표시 자체가
-  실패한다**(`scripts/check_screen_language.py` 와 같은 관용구). 지금 **25줄**이 나오는데
-  그중 **9줄은 검사 파일 자신**(독스트링·정규식·오류 문구·합성 픽스처)이고 실제 표시는
-  **16곳**이다(2026-09-20 확인, #465·#470). 시드·백필 관리 명령이 달던 예외 13곳은
-  그 명령을 내용이 속한 공모전 가족 앱(`appeals`·`contests`)으로 옮기며 전부
-  사라졌다 — 등록부(`core.e2e_seeds`)가 명령의 위치를 모르므로 이름은 그대로다.
-  공모전 수명주기 알림(`notifications.lifecycle` → `contests.lifecycle_notifications`)도
-  같은 이유로 옮겨 3곳이 사라졌다. 남은 16곳은 대부분 순환을 끊으려 일부러 함수
-  안에 넣은 지연 import 라, 지우지 않고 사유를 적어 세어지게만 했다 — 탈퇴·휴면
-  신원 파기는 이제 `verification.purge.purge_identity` 한 곳만 부르지만(#470),
-  그 호출 자체도 공유층(`accounts`)이 기능 앱(`verification`)을 부르는 것이라
-  표시는 남는다(`accounts/dormancy.py`·`accounts/withdrawal.py`).
-  `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 로 나오는 숫자가 경계의 건강
-  지표다 — 늘면 공유층이 기능으로 오염되는 중이라는 뜻이다. **그 grep 은 지금
-  27줄인데 실제 표시는 위 16곳이다** — 나머지는 검사기 자신이 들고 있는 문자열
-  (`tests/test_app_boundaries.py`)과 같은 관용구를 설명하는 문장이라, 세려면
-  검사기와 문서를 뺀다.
+- 코드의 결합이 표에 없으면 빨갛고, **표의 선언이 코드에 없어도 빨갛다** — 선언은 좁게 둔다.
+- `uses`·`plugs` 가 순환이면 빨갛다(둘 다 위 → 아래).
+- 아래 앱이 Django 역관계로 **위** 앱의 행을 걷는 ORM 경로(`select_related("score")`)도 빨갛다 — 적을 칸이 없다
+  (`uses` 면 순환). 위 앱이 관계 이름과 판정 함수를 아래 앱의 자리에 올린다(#1102): 「다음 행동」은
+  `contests.ports` 의 `NEXT_ACTION_RELATIONS`·`IS_SCORED`·`APPEAL_STATE`·`AWARDED_SUBMISSION_ID`, 저장소 스캔은
+  `repositories.ports.STILL_TO_SCORE`, 휴면 판정은 `verification.ports.LAST_ACTIVITY`. 관계를 같이 올려야 목록이
+  행마다 조회하지 않는다 — 쿼리 수는 `tests/integration/test_participation_query_counts.py` 가 못 박는다.
+- 공유층(`group = "shared"`)은 어느 칸으로도 기능 앱에 묶이지 않는다 — 기능 앱이 공유층 자리에 꽂는다. 강의실 ↮
+  공모전 가족은 어느 칸으로도 막힌다(ADR-0037).
+- **`APP-BOUNDARY-EXCEPTION` 표식은 받지 않는다**(이유가 있어도). 마지막 표식(`accounts/middleware.py`, 공유층끼리라
+  처음부터 필요 없던 것)을 #1086 이 지웠다. 결합은 표에 적거나 `core.registry` 자리로 뒤집는다.
 
-**`INSTALLED_APPS` 에 앱을 더하면 그 표에 분류를 적기 전까지 빨갛다.** 한 방향으로만
-그렇다 — 표는 아직 설치되지 않은 앱(`classroom`)을 미리 이름 지을 수 있다.
+고칠 때는 `python3 scripts/app_deps.py check`(Django 없이 — ORM 경로만 빼고 같은 판정), `draft`(지금 코드가 말하는
+표). **바뀐 파일 → 다시 돌 앱**은 `python3 scripts/app_deps.py affected <파일…>`(`-` 면 표준 입력): 바뀐 앱과 그 앱을
+쓰는·읽는 앱(닫힘), 그리고 그 앱들이 꽂힌 앱(한 단계 — 모두가 꽂히는 `core` 등록부에서 번지면 늘 전부가 된다).
+`backend/` 안 앱 밖(`config/`·`tests/`·`pyproject.toml`·이 표)이 바뀌면 `ALL`, `backend/` 밖은 고르지 않는다.
+
+**공개 모듈**(#1086). 다른 앱이 부르는 자리는 그 앱의 최상위 모듈 중 이름이 `_` 로 시작하지 않는 것이다 —
+`models`(읽기·FK), `ports`(그 앱이 위 앱에게 여는 등록 자리, `core.registry.Slot`·`Slots`), `signals`, 그리고 쓰는
+앱이 실제로 부르는 서비스 모듈. 아래 앱이 위 앱 코드를 돌려야 하면 import 하지 않고 `ports` 에 자리를 두고 위 앱이
+`AppConfig.ready()` 에서 올린다(`plugs`). `_` 로 시작하는 모듈·`management/`·`migrations/`·`tests/` 는 그 앱 안에서만
+쓴다. 새 앱 사이 부름은 먼저 표에 한 칸을 더하는 것으로 시작한다 — 그 칸이 순환이나 무리 규칙에 걸리면 부름의
+방향이 틀린 것이다.
+
+**앱 import 순환은 `python3 scripts/app_import_cycles.py` 로 센다**(#1085, spec #1079) — 모듈 최상단 import 만
+세어 강결합 덩어리(서로 닿는 앱 묶음)의 크기와 구성을 보이고, `--edges` 는 덩어리마다 그 안의 import 자리를
+파일:줄로 보인다. `--all` 은 함수 안 import 와 `"app.Model"` 문자열까지 넣는다. 공유층이 기능 앱을 부르던 자리는
+`core.agent_ports`·`core.ops_ports`·`accounts.ports`·`submissions.resolvers.TARGET_SHAPES` 자리로, 공모전 가족의
+아래가 위를 부르던 자리는 `contests.ports`·`awards.ports` 자리로 뒤집었다. 공모전 가족의 층은 아래부터
+contests → payments·scoring·appeals → awards → handovers → distributions → payouts 이다.
+`tests/test_shared_layer_ports.py` 가 자리가 올라 있음과 `--all` 순환이 없음을 지킨다.
+
+**`INSTALLED_APPS` 에 앱을 더하면 표에 적기 전까지 빨갛다.**
 
 `scripts/` 의 스크립트가 아니라 테스트인 이유는 **로컬 게이트**다(아래 「티켓을 닫는
 기준」) — `scripts/` 검사는 그 셋 중 어디에도 안 걸려 push 해야만 결과를 안다. import
@@ -306,4 +336,4 @@ checks_profanity=False, exempt_reason="...")` 로 적는다 — 둘 다 거짓�
 없던 자리였다: 클래스 템플릿을 가져올 때 새로 붙이는 이름, 채점 지침 `"custom"` 문장
 (만들 때·고칠 때), 공모전 요구사항 문구(만들 때 인라인·따로 추가·수정), 개최자·개발자
 공개 소개글(`bio`). 면제 대신 실제 검사를 걸었다 — `core.banned_word_rules` 모듈
-docstring 과 `tests/test_banned_word_gap_fields.py` 가 경위와 HTTP 검증을 남긴다.
+docstring 과 `tests/integration/test_banned_word_gap_fields.py` 가 경위와 HTTP 검증을 남긴다.

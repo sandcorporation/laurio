@@ -1,7 +1,7 @@
 #!/bin/bash
 # pytest 조각의 시간 기록(scripts/ci/pytest-durations.json)을 다시 쓴다(#1083). 사람이 돌리고 결과를 커밋한다.
 #
-#   pytest-durations-update.sh            main 의 가장 최근 초록 release 실행에서
+#   pytest-durations-update.sh            가장 최근 초록 병합 대기열 실행(전부를 돈다, #1090)에서
 #   pytest-durations-update.sh RUN_ID     그 실행(PR 검사 실행도 된다)에서
 #
 # PR 검사의 pytest 조각 잡은 junit 을 산출물 `pytest-junit-<조각>` 으로 늘 올린다(14일). 넷을 받아 파일별 시간을 합친다.
@@ -12,8 +12,8 @@ cd "$(dirname "$0")/../.."
 repo="${CODEMIT_GH_REPO:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 run="${1:-}"
 if [ -z "$run" ]; then
-  run=$(gh run list --repo "$repo" --workflow release.yml --branch main --status success -L 1 --json databaseId -q '.[0].databaseId')
-  [ -n "$run" ] || { echo "main 의 초록 release 실행이 없다"; exit 1; }
+  run=$(gh run list --repo "$repo" --workflow pr-check.yml --event merge_group --status success -L 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$run" ] || { echo "초록 병합 대기열 실행이 없다"; exit 1; }
 fi
 
 dir=$(mktemp -d)

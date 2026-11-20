@@ -33,10 +33,10 @@ from contests.lifecycle_notifications import notify_award_result
 from contests.models import Contest, ContestSubmission
 from contests.transitions import claim_contest_transition
 from core.clock import Clock
-from handovers.models import Handover
 from policies.scope import current_policy
 
 from .models import Award
+from .ports import OPEN_HANDOVER
 from .schemas import AwardIn, AwardOut
 
 router = Router(tags=["awards"])
@@ -112,11 +112,7 @@ def award_contest_submission(contest: Contest, submission_id: int):
         # — 무료 공모전에 지급·인수인계 절차가 없다는 사실을 별도 분기 없이
         # 그대로 드러낸다.
         if not contest.is_free:
-            Handover.objects.create(
-                award=award,
-                release_deadline_at=now
-                + timedelta(days=current_policy().handover_acceptance_period_days),
-            )
+            OPEN_HANDOVER.get()(award, now)
 
     # 트랜잭션이 커밋된 뒤에만 알린다 — notify_award_result는 내부에서 모든 예외를
     # 삼키므로(#19 AC, ADR-0009) 이 응답이 알림 실패로 막히는 일은 없다.

@@ -342,9 +342,9 @@ def _award(grant: ConnectedApp, arguments: dict) -> WriteResult | Preview:
 
 
 def contest_api_award(contest: Contest, submission_id: int) -> None:
-    from awards.api import award_contest_submission  # 공모전 가족 — awards 는 contests 를 쓴다.
+    from .ports import AWARD_SUBMISSION  # awards.apps 가 올린다(#1086)
 
-    award_contest_submission(contest, submission_id)
+    AWARD_SUBMISSION.get()(contest, submission_id)
 
 
 def _archive(grant: ConnectedApp, arguments: dict) -> WriteResult | Preview:

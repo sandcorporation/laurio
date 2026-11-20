@@ -54,7 +54,7 @@ import requests
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from .adapters import PaymentRequestResult, PGError, PGTimeoutError
+from ledger.pg import PaymentRequestResult, PGError, PGTimeoutError
 
 logger = logging.getLogger(__name__)
 

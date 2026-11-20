@@ -1,4 +1,4 @@
-"""시험 DB 가 템플릿에서 복제돼 서는지(#755, `tests/db_template.py`·`tests/conftest.py`).
+"""시험 DB 가 템플릿에서 복제돼 서는지(#755, `tests/db_template.py`·`conftest.py`).
 
 워커마다 마이그레이션을 전부 도는 대신, 한 워커가 템플릿 DB 를 만들고 나머지는
 `CREATE DATABASE … TEMPLATE` 로 복제한다. 여기서는 그 결과 — 지금 붙어 있는 DB 가

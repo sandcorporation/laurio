@@ -13,7 +13,7 @@ from django.core.checks import Error
 
 from core.adapters import check_adapter_mode
 
-from .adapters import PGAdapter
+from ledger.pg import PGAdapter
 
 
 def check_payment_adapter_mode(app_configs: Any, **kwargs: Any) -> list[Error]:

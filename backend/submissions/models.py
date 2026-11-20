@@ -32,6 +32,8 @@ Award·DistributionShare·Handover·Appeal)가 전부 이 테이블을 그대로
 시연 영상·데모 URL·테스트 계정은 선택이며 채움률 지표로만 쓰인다. 각 `Requirement`
 자가 응답(`RequirementResponse`)에는 `Evidence`를 연결할 수 있다 — 연결되지 않아도
 제출 자체는 거부되지 않고, "미연결"로 표시될 뿐이다(#12가 채점에서 미달로 본다).
+두 모델은 공모전 요구사항에 대한 응답이라 `contests.models` 에 있다(#1086) — 이 앱은
+`submission.requirement_responses` 관계로만 닿는다.
 """
 
 from __future__ import annotations
@@ -41,6 +43,8 @@ from dataclasses import dataclass
 
 from django.conf import settings
 from django.db import models
+
+from core.github_repo_url import GITHUB_REPO_URL_PATTERN
 
 
 class Submission(models.Model):
@@ -70,14 +74,7 @@ class Submission(models.Model):
         return f"Submission(id={self.pk}, product={self.product})"
 
 
-# `kind=repository`의 `value`가 받는 유일한 모양. 임의의 git URL을 받으면 플랫폼
-# 서버가 참가자가 지정한 주소로 나가게 되어(SSRF) 내부 네트워크 탐색 경로가 생긴다
-# — 저장소를 실제로 clone하는 것은 #193이지만, 그때 받아들일 수 있는 값만 지금부터
-# 저장한다. GitLab·Bitbucket은 어댑터 구현을 하나 더하는 일이라 나중에 열어도 늦지
-# 않다(ADR-0027).
-GITHUB_REPO_URL_PATTERN = re.compile(
-    r"^https://github\.com/[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}/?$"
-)
+# 저장소 URL 의 유일한 모양은 `core.github_repo_url` 에 있다(#1086 — `core` 가 이 앱을 import 하지 않게).
 
 # 제출이 받는 세 모양(#777, ADR-0065) — 저장소 · `/tree/<ref>` · `/commit/<sha>`. `/tree/` 뒤는
 # **나머지 전체**가 브랜치 이름이다(`release/2024` 처럼 슬래시 포함) — 디렉터리 경로와 구분하지
@@ -336,71 +333,3 @@ class SubmissionAsset(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"SubmissionAsset(submission={self.submission_id}, kind={self.kind})"
-
-
-class RequirementResponse(models.Model):
-    """한 Requirement에 대한 Developer의 자가 응답."""
-
-    submission = models.ForeignKey(
-        Submission, related_name="requirement_responses", on_delete=models.CASCADE
-    )
-    requirement = models.ForeignKey(
-        "contests.Requirement", related_name="responses", on_delete=models.CASCADE
-    )
-    is_met = models.BooleanField(default=False)
-    note = models.CharField(max_length=1000, blank=True)
-
-    class Meta:
-        ordering = ["requirement__order", "requirement_id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["submission", "requirement"], name="unique_response_per_requirement"
-            ),
-        ]
-
-    def __str__(self) -> str:  # pragma: no cover
-        return f"RequirementResponse(submission={self.submission_id}, requirement={self.requirement_id})"
-
-
-class Evidence(models.Model):
-    """자가 응답 하나를 뒷받침하는 근거 (CONTEXT.md의 Evidence)."""
-
-    class Kind(models.TextChoices):
-        VIDEO_TIMESTAMP = "video_timestamp", "영상 타임스탬프"
-        SCREENSHOT = "screenshot", "스크린샷"
-        DEMO_PATH = "demo_path", "데모 내 경로"
-        SOURCE_LOCATION = "source_location", "소스 위치"
-
-    response = models.ForeignKey(
-        RequirementResponse, related_name="evidence_items", on_delete=models.CASCADE
-    )
-    kind = models.CharField(max_length=20, choices=Kind.choices)
-    value = models.CharField(max_length=500)
-
-    # 이 근거가 가리키는 자료 (#190). 데모·영상이 여럿이 되는 순간 "데모 내 경로"나
-    # "영상 타임스탬프"가 어느 대상의 것인지 알 수 없어지고, 채점 프롬프트는 그
-    # 값을 그대로 LLM에 넘기므로 AI가 근거를 못 찾아 미달 판정이 는다. 자료를
-    # 지우면 그것을 가리키던 근거도 함께 사라진다 — 가리킬 곳이 없는 근거는
-    # 근거가 아니다. null은 "자료를 특정하지 않은 근거"이고 그대로 허용된다
-    # (기존 행 전부가 그렇다).
-    asset = models.ForeignKey(
-        "submissions.SubmissionAsset",
-        related_name="evidence_items",
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        # **순서를 명시한다** (#195 리뷰). 이 모델에는 `Meta` 자체가 없었고, 그래서
-        # `response.evidence_items.all()` 이 정렬 없는 SELECT 였다 — 순서가 우연히
-        # 삽입 순이었을 뿐이다. `_replace_requirement_responses` 가 저장할 때마다
-        # 이전 행을 전부 지우고 다시 만들므로 힙 재사용으로 순서가 뒤집힐 수 있고,
-        # 그러면 참가자가 적어 둔 근거가 화면에서 자리를 바꾼다. 형제인
-        # `RequirementResponse`·`SubmissionAsset` 은 둘 다 `ordering` 을 갖는다.
-        ordering = ["id"]
-
-    def __str__(self) -> str:  # pragma: no cover
-        return f"Evidence({self.kind}={self.value!r})"

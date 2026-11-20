@@ -42,8 +42,9 @@ from contests.images import (
     reorder_image as reorder_contest_image_for,
     request_upload_url as request_contest_image_upload_url_for,
 )
+from contests.ports import has_refunded_payment, sync_requested_payment_prize
 from contests.search import search_contests
-from contests.sponsorship import sponsored_contest_queryset
+from contests.ports import SPONSORED_CONTEST_QUERYSET
 from accounts.models import SponsorProfile
 from accounts.sanitize import sanitize_free_text
 from core.banned_words import BannedWordViolation, find_banned_word_violation
@@ -55,9 +56,8 @@ from core.contest_switch import (
     require_paid_contest_product_enabled,
 )
 from core.keyset import decode_cursor, keyset_page
-from payments.adapters import PGError, get_adapter
-from payments.charges import settle_charge
-from payments.models import Payment
+from ledger.charges import settle_charge
+from ledger.pg import PGError, get_adapter
 from policies.scope import current_policy
 from verification.models import Verification
 
@@ -727,7 +727,7 @@ def list_my_sponsored_contests(request: HttpRequest, after: str | None = None):
     policy = current_policy()
 
     contests = (
-        sponsored_contest_queryset(
+        SPONSORED_CONTEST_QUERYSET.get()(
             Contest.objects.filter(sponsor=profile),
             as_of=as_of,
             policy=policy,
@@ -1040,9 +1040,7 @@ def apply_contest_update(contest: Contest, payload: ContestUpdateIn) -> ContestO
             # 않는다 — PAID가 존재한다는 것 자체가 이 Contest가 더 이상 DRAFT가
             # 아니라는 뜻이라 이 분기에 도달하지도 않는다(위에서 이미 prize를
             # 거절했다).
-            Payment.objects.filter(
-                contest=contest, status=Payment.Status.REQUESTED
-            ).update(prize_amount=contest.prize)
+            sync_requested_payment_prize(contest)
 
     if after:
         _record_contest_change(contest, ContestChange.Action.UPDATED, before=before, after=after)
@@ -1156,7 +1154,7 @@ def reopen_contest(request: HttpRequest, contest_id: int, payload: ContestReopen
             # 어느 status 가 해당하는지는 Contest.Status.REOPENABLE 이 답한다(#141).
             raise HttpError(409, "마감된 공모전만 재개최할 수 있습니다.")
 
-        if not Payment.objects.filter(contest=original, status=Payment.Status.REFUNDED).exists():
+        if not has_refunded_payment(original):
             # CLOSED이지만 환불되지 않았다 — 참여자가 있어 정상적으로 마감됐거나
             # (Escrow: "참가자가 한 명이라도 있으면 Sponsor에게 되돌아가지 않는다"),
             # 아직 환불 스캔(#17)이 돌지 않았다. 어느 쪽이든 재개최 대상이 아니다.
@@ -1344,7 +1342,7 @@ def initiate_judging_period_extension(
 def confirm_judging_period_extension(
     request: HttpRequest, contest_id: int, order_id: UUID, payload: ConfirmJudgingExtensionIn
 ):
-    """연장 결제를 동기 확인한다 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
+    """연장 결제를 동기 확인한다 — Charge 확정 경로 하나(`ledger.charges.settle_charge`).
 
     PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어나고, 타임아웃이면 `query_status`
     로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의

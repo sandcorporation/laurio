@@ -35,11 +35,11 @@ from typing import Literal
 from django.db.models import F, Sum
 from django.utils import timezone
 
-# APP-BOUNDARY-EXCEPTION: 모델 단가표가 강의실 비용 어림(`classroom.scoring_cost`)에 있다 — 프록시 상한이 같은 표를 쓴다 (#998)
-from classroom.scoring_cost import ModelPrice, price_for
+# 모델 단가표는 강의실 비용 어림(`classroom.scoring_cost`)에 있다 — 프록시 상한이 같은 표를 쓴다(#998). 강의실이 등록한다(#1085).
+from core.agent_ports import ModelPrice, price_for
 from core.clock import Clock
 from core.models import AgentRunToken
-from policies.runtime_settings import ScoringVendor, agent_scoring_daily_limit_usd
+from core.runtime_settings_port import ScoringVendor, agent_scoring_daily_limit_usd
 
 #: 실행 하나의 기본 예산(USD) — 공모전 3 실측 1건 $0.09~0.21 의 다섯 배쯤.
 DEFAULT_RUN_BUDGET_USD = Decimal("1")

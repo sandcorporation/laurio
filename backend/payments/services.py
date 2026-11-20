@@ -27,13 +27,13 @@ from ledger.services import LineInput, post_journal_entry
 from core.contest_switch import paid_contest_product_enabled
 from core.scans import ScanSpec, scan_params
 
-from .adapters import PGError, PGTimeoutError, get_adapter
+from ledger.pg import PGError, PGTimeoutError, get_adapter
 from .models import Payment
 
 
 # --- 참여자 0명 전액 환불 (#17, ADR-0004) ------------------------------------
 #
-# Charge 확정(payments.charges.apply_vendor_outcome)과 같은 조건부 UPDATE 규율을 그대로 반복하되, 절대
+# Charge 확정(ledger.charges.apply_vendor_outcome)과 같은 조건부 UPDATE 규율을 그대로 반복하되, 절대
 # 되돌아가지 않는다는 규율까지 함께 지킨다:
 #
 # 1) request_refund가 PAID -> REFUND_REQUESTED로 조건부 전이시켜 "이 스캔이 이
@@ -320,6 +320,16 @@ def _reconcile(payment, as_of, ctx):
 # `enabled=paid_contest_product_enabled`(#413) — 유료 공모전 스위치가 꺼지면 이 둘은
 # 등록부에서 사라진 것처럼 군다. 환불은 상금이 있는 유료 공모전에만 존재하므로 이
 # 스위치가 유일하게 지키려는 "돈이 실제 결제 대행사로 나가는 경로" 그 자체다.
+def sync_requested_payment_prize(contest: Contest) -> None:
+    """초안으로 돌아간 공모전의 상금이 바뀌면 진행 중(REQUESTED) 결제의 상금 스냅샷을 맞춘다 — `contests.ports`."""
+    Payment.objects.filter(contest=contest, status=Payment.Status.REQUESTED).update(prize_amount=contest.prize)
+
+
+def has_refunded_payment(contest: Contest) -> bool:
+    """환불된(REFUNDED) 결제가 있나 — 재개최 자격(#141) 판정에 쓴다. `contests.ports`."""
+    return Payment.objects.filter(contest=contest, status=Payment.Status.REFUNDED).exists()
+
+
 REFUND_SCANS = (
     ScanSpec(
         name="payment-refund-request",

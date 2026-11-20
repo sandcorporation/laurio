@@ -135,8 +135,10 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 1. **브랜치 → PR → `main`.** GitHub Actions `PR 검사`(`pr-check.yml`)가 검사 묶음·amd64 이미지 부팅 가드·e2e·celery 를 돈다
    (Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서). 「결과」 잡이 초록(`gh pr checks <PR>`)이면 **작업자가 squash 로
    병합한다**(`gh pr merge <N> --squash`). **`main` 에 직접 push 하지 않는다** — 그러면 PR 검사 없이 release 가 돈다.
-2. **`main` → `production`**(GitHub Actions `release.yml`, `push: main` 과 수동 실행 — release 를 끈 뒤 켜면 `gh workflow run release.yml --ref main` 으로 한 번 돌린다, main 밖 ref 는 `main_only` 잡이 막는다, #1018). 세 잡이 차례로 돈다:
-   - **check** — `pr-check.yml` 을 `workflow_call` 로 그대로 부른다(PR 과 같은 검사). main 실행이라 이미지 층 캐시를 저장한다(#932).
+   **배포 가능 판정은 병합 대기열 한 번이다**(#1090): release 는 검사하지 않으므로 main 이 대기열로만 움직여야 한다(포크는 ruleset
+   `main-merge-queue` 로 그렇다 — 대기열이 없는 저장소에 이 꼴을 옮기기 전에 대기열부터, 「CI」 문서).
+2. **`main` → `production`**(GitHub Actions `release.yml`, `push: main` 과 수동 실행 — release 를 끈 뒤 켜면 `gh workflow run release.yml --ref main` 으로 한 번 돌린다, main 밖 ref 는 `main_only` 잡이 막는다, #1018). 검사는 돌지 않는다(#1090) — 두 잡이 차례로 돈다(PR 검사의 캐시를 채우는
+   `cache`·`cache-node` 는 곁에서 돌고 승격은 기다리지 않는다):
    - **image** — `image.yml`: 일곱 서비스마다 `ubuntu-24.04-arm` 실행기 하나(matrix)가 `scripts/ci/images.sh arm64` 로 굽거나
      건너뛰고(문맥 해시 — 아래), 이번에 구운 앱의 **부팅 가드**(`deploy-guard.sh`, arm64 그대로), 초록이면 **문맥 태그**
      (`images-ctx.sh`), 끝으로 같은 매니페스트에 접미사 없는 `<sha>` 태그를 더한다(라이브러리가 기다리는 이름).
@@ -169,8 +171,31 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    그 대조와 `images-e2e.sh` 를 지웠다. 「배포되는 것은 검사가 통과한 커밋」은 release 의 promote 가
    check·image 를 둘 다 기다리는 것이 지킨다(check·image 는 병렬) — production 은 그 커밋의 check 와 일곱 이미지가 모두 초록일 때만 움직인다.
 
-   **자동 롤백은 없다**(`autoRollback: false`) — `deploy.sh` 는 배포 표식 기준으로 바꿀 서비스를 정해서, 같은 스크립트를 옛
-   sha 로 다시 부르면 아무것도 되돌리지 않는다. 교체 뒤 실패(종료 2)는 운영을 사람이 봐야 한다는 뜻이다.
+   **배포 뒤 확인·자동 되돌리기(#1092)는 스위치 뒤에 있고, 기본은 꺼져 있다.** 라이브러리의 되돌리기(`autoRollback: false`)는
+   그대로 끈다 — `deploy.sh` 는 배포 표식 기준으로 바꿀 서비스를 정해서, 같은 스크립트를 옛 sha 로 다시 부르면 아무것도
+   되돌리지 않는다. 되돌리기는 `deploy-prod.sh` 안에서 한다. 스위치는 oracle 의 `docker/.env.prod` 의 `CODEMIT_POSTDEPLOY=` 한 줄
+   (환경변수가 먼저)이다:
+
+   | 값 | 하는 일 |
+   | --- | --- |
+   | `off`(없으면) | 지금 그대로 — 확인도 되돌리기도 없다. 교체 뒤 실패(종료 2)는 사람이 본다 |
+   | `check` | reindex 뒤 `scripts/ci/post-deploy-check.sh` — 실패면 표식을 옮기지 않고 2 로 끝난다 |
+   | `rollback` | 교체 뒤 실패(up·verify·health·reindex·확인 어디서든)면 직전 배포 표식의 이미지로 되돌리고 2 로 끝난다 |
+
+   확인은 한도 `CODEMIT_POSTDEPLOY_SECONDS`(기본 60초) 안에서 셋을 본다 — **준비**(backend 안 `/api/health?scope=ready`),
+   **작업자**(backend 안 `/api/health` 가 작업자 생존 신호까지 200 이고 celery-worker 안 `celery inspect ping` 에 답이 있다),
+   **핵심 경로**(`CODEMIT_POSTDEPLOY_URLS` 의 주소마다 2xx·3xx, 쉼표나 빈칸으로 가른다). 주소는 `.env.prod` 에만 둔다 —
+   켰는데 비어 있으면 확인이 실패한다. 되돌리기는 `deploy.sh prod rollback-plan` 이 실패한 계획을 표식 커밋으로 고치고
+   (같은 서비스, 겹쳐 바꾸기), `post-deploy-rollback.sh`(임시 사본으로 돈다)가 그 커밋을 체크아웃해 `image`·`up`·`verify`·
+   `health`·`reindex`·확인을 다시 돈다. 스키마는 되돌리지 않는다 — 직전 판 코드가 새 스키마에서 도는 것은
+   [마이그레이션 호환 검사](migrations.md)가 지킨다. 표식은 옮기지 않고, 잡은 빨갛게 끝난다(그것이 알림이다). 뒤로 가는 배포
+   (`ROLLBACK_SHA`)는 되돌리지 않는다. 직전 커밋의 이미지는 ghcr 에 최근 24개가 남아 있어 받을 수 있다(`ghcr_prune.py`).
+   **켜는 것은 2026-11-26 14:59Z 뒤**(spec #1079) — `check` 로 며칠 보고 `rollback` 으로 올린다.
+
+   시연: `bash scripts/ci/post-deploy-drill.sh` — 로컬 dev 스택(따로 띄우는 `codemit-drill-6`)에서 일부러 깨진 backend
+   이미지로 바꿔 끼우면 확인이 실패하고, 직전 이미지로 되돌리면 다시 통과한다. 되돌리기의 순서는
+   `backend/tests/test_deploy_postdeploy.py` 가 본다(꺼진 상태의 순서가 스위치를 넣기 전과 같다는 것도).
+
    **prod 를 멈추려면 Jenkins 에서 `codemit/deploy` 를 「Disable」한다.**
 
    **되돌리기는 둘이다.** ① **정석: `main` 에 revert PR** — 병합되면 release 가 그 커밋을 검사·굽고 production 을 앞으로
@@ -414,7 +439,8 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   **마이그레이션은 뒤로 호환되어야 한다**(삭제·이름 바꾸기·NOT NULL 은 다음 배포로 나눈다).
   예: 채점 상한 칸 셋은 `classroom.0029` 가 상태에서만 지우고, 그 배포가 prod 에 닿은 뒤
   `classroom.0032` 가 `RunSQL` 로 DB 칸을 지운다(#629·#665).
-  `backend/tests/test_migration_rolling_safety.py` 가 표식 없는 위험 연산을 막는다. 예전에는
+  PR 검사의 `scripts/ci/migration_compat.py` 가 base 코드와 호환되지 않는 마이그레이션을 거절한다 — 규칙과
+  두 단계 절차는 [마이그레이션](migrations.md)(#1091). 예전에는
   마이그레이션이 든 배포가 전부 내리고 올렸고, 2026-10-02 prod 에서 그 창이 공개 앱 재시도
   예산보다 길어 `/contests` 가 500 을 냈다(`0014_connected_apps`, GlitchTip 75·83).
 - **prod 는 적용할 마이그레이션이 있으면 migrate 전에 DB 를 덤프한다**(#839, 우산 #836 §7 — 배포 전에 마이그레이션을
@@ -432,9 +458,8 @@ TABLE 이 줄을 서면 `classroom_classroomsubmission` 의 뒤 쿼리가 전부
   `docker compose … exec -T db sh -c 'pg_restore --clean --if-exists --no-owner -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < <덤프>`
   ([운영](operations.md)의 02:00 백업 복원과 같은 줄이다).
   `backend/tests/test_deploy_predeploy_dump.py` 가 가짜 docker 로 판정·멈춤·보관·권한을 본다.
-- **물러서는 배포가 셋이다** — 배포 범위의 마이그레이션에 `# ROLLING-DEPLOY-UNSAFE: <이유>`
-  표식이 있을 때, 풀러를 바꿀 때(「풀러를 바꿔 끼울 때는」), 겹칠 옛 컨테이너가 없을 때(직전
-  배포 표식이 없을 때 포함). 그때는 넷을 먼저 내리고 migrate 를 돌린 뒤 올린다. 그동안 backend
+- **물러서는 배포가 둘이다** — 풀러를 바꿀 때(「풀러를 바꿔 끼울 때는」), 겹칠 옛 컨테이너가 없을 때(직전
+  배포 표식이 없을 때 포함). 옛 `# ROLLING-DEPLOY-UNSAFE:` 표식 길은 지웠다(#1092 — 호환 검사에 예외가 없어 닿지 않았다). 그때는 넷을 먼저 내리고 migrate 를 돌린 뒤 올린다. 그동안 backend
   가 없고, 그 창은 공개 앱 재시도 예산보다 길 수 있다. migrate 가 실패하면 내렸던 옛
   컨테이너를 다시 켠다. `deploy.sh plan` 이 어느 쪽인지와 이유를 출력한다.
 - **그래서 호스트 포트가 없다** — 같은 서비스 둘이 한 호스트 포트를 잡을 수 없다. 쓰는 곳이
@@ -631,7 +656,7 @@ SEARCH_ADAPTER_MODE=contests.search_opensearch.OpenSearchContestSearch \
 단일 노드·JVM 힙 1GB·컨테이너 메모리 한도 2GB(`mem_limit`)이고 보안 플러그인은
 끈다. **호스트의 `vm.max_map_count`가 262144 이상이어야 뜬다**(OpenSearch
 공식 권장값, 커널 전역이라 컨테이너 안에서 올릴 수 없다) — `sysctl
-vm.max_map_count`로 먼저 확인한다. `tests/test_contest_search_opensearch_live.py`
+vm.max_map_count`로 먼저 확인한다. `contests/tests/test_contest_search_opensearch_live.py`
 (`@live_infra`, `OPENSEARCH_URL`이 있을 때만 돈다, CI는 건너뛴다)가 이 실물
 어댑터를 실제로 친다 — 한국어 조사가 달라도 찾아지는지, 제목 가중이 설명보다
 높은지, 재색인(`rebuild`) 중에도 검색이 끊기지 않는지(별칭 원자적 교체) 확인한다.

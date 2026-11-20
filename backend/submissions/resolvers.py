@@ -12,7 +12,10 @@ target_ref 형식은 `submissions.target_refs`에 있다: 이 리졸버는 그 �
 **형식이 접두어로 둘로 갈린다**(#286, ADR-0039). `"submission:..."`은 공모전
 모양(`contests.submission_target_refs`)이고, `"classroom-submission:..."`은
 강의실 모양(`classroom.submission_target_refs`)이다 — 강의실은 마감도 Award도
-Sponsor도 없어 `본인만`이라는 훨씬 단순한 규칙 하나로 끝난다.
+Sponsor도 없어 `본인만`이라는 훨씬 단순한 규칙 하나로 끝난다. 두 모양의 판정은
+각 앱(`contests.submission_target_state`·`classroom.submission_target_state`)에 있고
+`TARGET_SHAPES` 에 올라온다(#1085). 빌드 자산의 content-type 은 `handovers.apps` 가
+`BUILD_ASSET_CONTENT_TYPE` 에 올린다.
 
 "마감"은 Contest.status가 아니라 `deadline_at`과 `core.clock.Clock.now()`를 직접
 비교한다 — Contest 상태 전이 자체(#11, 스케줄러 틱)를 기다리지 않는다. 이 티켓은
@@ -28,10 +31,9 @@ Contest)는 예외를 던지지 않고 소유자 없는 private으로 fail-close
 — 자산이 곧 정체성이 아니라 **object_key가** 정체성이라, target_ref는 보지 않고
 object_key로만 찾는다(한 target_ref/슬롯 아래 여러 오브젝트가 쌓일 수 있어
 target_ref만으로는 어느 것인지 가릴 수 없다 — `submissions.target_refs`의
-BUILD_ASSET_SLOT 설명 참고). `handovers.models`를 함수 안에서 지역 임포트하는
-이유는 순환 임포트를 피하기 위해서다 — `handovers`가 이미 `submissions.models`를
-임포트하므로, 모듈 최상단에서 반대 방향으로 임포트하면 두 앱이 서로를 참조하게
-된다.
+BUILD_ASSET_SLOT 설명 참고). 빌드 자산 쪽 조회는 `handovers` 가 올린다
+(`BUILD_ASSET_CONTENT_TYPE`, #1085) — `handovers` 가 이미 `submissions.models` 를
+임포트하므로 반대 방향 import 는 두 앱을 서로 묶는다.
 
 **`SubmissionMaxUploadSizeResolver`(#261)도 별도 확장점이다.** target_ref의
 슬롯(소스·시연 영상·빌드 자산)마다 PlatformPolicy의 종류별 바이트 상한(#263)을
@@ -41,128 +43,41 @@ BUILD_ASSET_SLOT 설명 참고). `handovers.models`를 함수 안에서 지역 �
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from django.conf import settings
 
-# APP-BOUNDARY-EXCEPTION: 공모전 모양(contest_id를 품는다) target_ref를 판정하려면 Award 존재 여부를 봐야 한다(ADR-0039)
-from awards.services import sponsor_user_id_if_awarded
-# APP-BOUNDARY-EXCEPTION: 강의실 모양(problem_id를 품는다) target_ref를 판정하려면 그 Problem이 실제로 있는지, 그 참여자가 지금 낼 수 있는지 확인해야 한다(#286, #439, ADR-0039)
-from classroom.models import ClassMember, Problem as ClassroomProblem
-# APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — 그 사람이 이 클래스의 강사인가를 여기서 다시 판정하지 않고 강의실의 판정에 묻는다(#559)
-from classroom.instructors import is_instructor
-# APP-BOUNDARY-EXCEPTION: 위와 같은 이유 — 낼 수 있는가(보관·내보냄·숨김)를 여기서 다시 판정하지 않고 참여 정책 모듈에 묻는다(#439)
-from classroom.participation import can_submit, instructor_can_submit
-# APP-BOUNDARY-EXCEPTION: 위 awards와 같은 이유 — Award 존재 여부로 Handover 가시성을 판정하려면 지금은 Contest를 직접 조회해야 한다
-from contests.models import Contest
-from core.clock import Clock
+from core.registry import Slot, Slots
 from policies.scope import current_policy
 from storage.policy import TargetState, Visibility
 
 from .models import SubmissionAsset
 from .target_refs import BUILD_ASSET_SLOT, DEMO_VIDEO_SLOT, SCREENSHOT_SLOT, SOURCE_SLOT
 
-_DENY = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
+DENY_TARGET = TargetState(visibility=Visibility.PRIVATE, owner_id=None)
+
+
+#: target_ref 모양 하나(첫 조각)의 판정 — `target_ref.split(":")` 네 조각을 받는다.
+TargetShapeResolver = Callable[[list[str]], TargetState]
+
+#: 모양(접두어) → 판정. 공모전(`"submission"`)은 `contests.apps`, 강의실(`"classroom-submission"`)은 `classroom.apps` 가
+#: 올린다(#1085) — 이 공유층이 두 기능 앱을 최상단에서 import 하지 않게. 올라오지 않은 모양은 fail-closed.
+TARGET_SHAPES: Slots[TargetShapeResolver] = Slots("target_ref 모양")
+
+#: object_key → 빌드 자산의 content-type(모르면 None) — 빌드 자산(`BuildAsset`)은 handovers 소유라 `handovers.apps` 가
+#: 올린다(#241, #1085). 소스·시연 영상(이 앱의 `SubmissionAsset`)에 없을 때만 묻는다.
+BUILD_ASSET_CONTENT_TYPE: Slot[Callable[[str], str | None]] = Slot("빌드 자산 content-type", "handovers.apps")
 
 
 class SubmissionTargetStateResolver:
     def resolve(self, target_ref: str) -> TargetState:
         parts = target_ref.split(":")
         if len(parts) != 4:
-            return _DENY
-
-        if parts[0] == "classroom-submission":
-            return self._resolve_classroom(parts)
-        if parts[0] != "submission":
-            return _DENY
-
-        _, contest_id_raw, developer_id_raw, slot = parts
-        try:
-            contest_id = int(contest_id_raw)
-            developer_user_id = int(developer_id_raw)
-        except ValueError:
-            return _DENY
-
-        contest = Contest.objects.filter(id=contest_id).select_related("sponsor").first()
-        if contest is None:
-            return _DENY
-
-        if slot in (SOURCE_SLOT, BUILD_ASSET_SLOT):
-            # Handover(#14): Award 즉시 Sponsor에게 소스 접근 권한이 열린다 —
-            # 오브젝트는 옮기지 않고(ADR-0005) DB 상태(Award 존재 여부)만으로
-            # 판정한다. Award되지 않은 Submission의 소스는 여전히 Developer 본인만
-            # 볼 수 있다. 빌드 자산(BUILD_ASSET_SLOT)도 같은 규율을 따른다 — Award된
-            # Submission의 개발자만 올릴 수 있고(owner_id), Award된 뒤에만 Sponsor가
-            # 볼 수 있다(additional_viewer_ids).
-            sponsor_user_id = sponsor_user_id_if_awarded(contest_id, developer_user_id)
-            if sponsor_user_id is None:
-                return TargetState(visibility=Visibility.PRIVATE, owner_id=developer_user_id)
-            return TargetState(
-                visibility=Visibility.PRIVATE,
-                owner_id=developer_user_id,
-                additional_viewer_ids=frozenset({sponsor_user_id}),
-            )
-
-        # 데모·영상·스크린샷(#264) 등 그 외 슬롯: 마감 전엔 Developer 본인 + Sponsor,
-        # 마감 후 전면 공개.
-        # owner_id는 두 분기 모두에서 채운다 — PUBLIC은 "누구나 다운로드 가능"이라는
-        # 뜻이지 "누구나 업로드 가능"이라는 뜻이 아니다(#10 리뷰). 업로드 권한은
-        # storage.policy.authorize_upload가 owner_id만으로 판단하므로, 마감이 지나도
-        # 이 target_ref의 진짜 소유자가 누구인지는 계속 밝혀둔다.
-        if Clock.now() >= contest.deadline_at:
-            return TargetState(visibility=Visibility.PUBLIC, owner_id=developer_user_id)
-
-        return TargetState(
-            visibility=Visibility.PRIVATE,
-            owner_id=developer_user_id,
-            additional_viewer_ids=frozenset({contest.sponsor.user_id}),
-        )
-
-    def _resolve_classroom(self, parts: list[str]) -> TargetState:
-        """강의실 모양(#286) — 마감도 Award도 Sponsor도 없어 "본인만"이 끝이다.
-
-        `SOURCE_SLOT` 뿐이라 시연 영상·스크린샷·빌드 자산 분기가 아예 없다.
-        Problem 존재를 확인하는 이유는 공모전 분기의 `Contest.objects.filter(...)`와
-        같다 — 형식만 맞고 가리키는 대상이 없는 target_ref는 소유자 없는
-        private로 fail-closed한다.
-
-        **낼 수 있는 사람만 업로드 주소를 받는다**(#439) — Problem이 있어도
-        그 사람이 지금 이 클래스·문제에 새로 낼 수 없으면(보관·내보냄·숨김,
-        `classroom.participation.can_submit`) 같은 이유로 fail-closed한다.
-        참여자가 아니면(`ClassMember` 행이 없으면) 애초에 판정할 자격이 없어
-        역시 거절한다 — **다만 그 클래스의 강사는 예외다**(2026-09-17, #429
-        개정): 강사는 상태(초안·열림·숨김)와 무관하게 자기 문제를 내 보므로,
-        참여자 행이 아직 없어도(첫 제출이 그때 만든다) 업로드 주소를 받는다.
-        보관된 클래스만 막는다. 안 그러면 소스 형식 문제에만 강사가 못 내는
-        비대칭이 생긴다."""
-
-        _, problem_id_raw, user_id_raw, slot = parts
-        if slot != SOURCE_SLOT:
-            return _DENY
-
-        try:
-            problem_id = int(problem_id_raw)
-            user_id = int(user_id_raw)
-        except ValueError:
-            return _DENY
-
-        problem = ClassroomProblem.objects.select_related("classroom").filter(id=problem_id).first()
-        if problem is None:
-            return _DENY
-
-        if is_instructor(problem.classroom, user_id):
-            # 강사는 참여자 행이 있든 없든 강사 기준으로 본다(2026-09-17) —
-            # 상태(초안·열림·숨김)는 보지 않고 보관만 막는다. 행이 있다고
-            # 참여자 규칙(숨김 403)에 걸리면 같은 사람이 같은 문제에 대해
-            # 어제와 오늘 다른 답을 받는다.
-            if not instructor_can_submit(problem.classroom, problem):
-                return _DENY
-        else:
-            member = ClassMember.objects.filter(
-                classroom=problem.classroom, user_id=user_id
-            ).first()
-            if member is None or not can_submit(problem.classroom, member, problem):
-                return _DENY
-
-        return TargetState(visibility=Visibility.PRIVATE, owner_id=user_id)
+            return DENY_TARGET
+        resolver = TARGET_SHAPES.get(parts[0])
+        if resolver is None:
+            return DENY_TARGET
+        return resolver(parts)
 
 
 class SubmissionDownloadTTLResolver:
@@ -209,15 +124,7 @@ class SubmissionContentTypeResolver:
         if content_type:
             return content_type
 
-        # APP-BOUNDARY-EXCEPTION: 빌드 자산의 content-type은 handovers 소유다 — object_key 하나로 소스·시연영상(submissions)과 빌드 자산(handovers) 두 테이블을 모두 찾아야 하는 이 리졸버의 태생적 결합이다(#241)
-        from handovers.models import BuildAsset
-
-        return (
-            BuildAsset.objects.filter(object_key=object_key)
-            .exclude(content_type="")
-            .values_list("content_type", flat=True)
-            .first()
-        )
+        return BUILD_ASSET_CONTENT_TYPE.get()(object_key)
 
 
 # target_ref의 슬롯(마지막 세그먼트) -> PlatformPolicy의 종류별 바이트 상한 필드

@@ -40,7 +40,7 @@ class ParsedSource:
 
 
 def parse_python_sources(root: Path = BACKEND_ROOT) -> list[ParsedSource]:
-    """`python_sources()` 전부를 읽고 파싱한 것 — `tests/conftest.py` 의 세션 픽스처
+    """`python_sources()` 전부를 읽고 파싱한 것 — `conftest.py` 의 세션 픽스처
     `backend_sources` 가 워커마다 한 번 부른다(2026-10-02). 구조 시험마다 소스
     전체를 다시 파싱하던 때는 그것만으로 시험 하나가 CPU 0.8~0.9초를 썼다(시험 하나
     1초 한도)."""

@@ -6,9 +6,7 @@
 // 공유하는 것을 로컬에서 흉내 내는 유일한 길이다.
 import type { APIRequestContext, APIResponse, Page } from "@playwright/test";
 
-function publicOrigin(): string {
-  return new URL(process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
-}
+import { publicOrigin } from "../../lib/session";
 
 // `new URL(...).origin` 으로 정규화한다 — baseURL 끝의 슬래시가 Origin 헤더에 섞이면
 // 같은 오리진인데도 검사에 걸린다(공개 앱 `e2e/lib/session.ts` 와 같은 이유).

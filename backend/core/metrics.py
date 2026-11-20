@@ -67,10 +67,10 @@ class MetricsMiddleware:
     더하기만 하고(0.5µs 남짓) Redis 로는 배경 스레드가 몇 초마다 보낸다. 요청 경로에는 Redis 왕복이 없다."""
 
     def __init__(self, get_response):
-        from ops_metrics.request_buffer import record_request
+        from .ops_ports import REQUEST_RECORDER  # `ops_metrics.apps` 가 올린다(#1086)
 
         self.get_response = get_response
-        self._record = record_request
+        self._record = REQUEST_RECORDER.get().record_request
 
     def __call__(self, request):
         started = time.perf_counter()

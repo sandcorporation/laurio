@@ -41,8 +41,17 @@ elif [ "$target" = classroom ]; then
   second+=(--pass-with-no-tests)
 fi
 
+# E2E_TIMINGS_DIR(절대 경로)가 있으면 패스마다 Playwright JSON 리포트를 `<대상>[-exclusive].json` 으로 남긴다(#1112) —
+# scripts/ci/e2e_durations.py 가 읽어 e2e 조각을 시간으로 나누는 기록을 만든다.
+first_json=""; second_json=""
+if [ -n "${E2E_TIMINGS_DIR:-}" ]; then
+  mkdir -p "$E2E_TIMINGS_DIR"
+  first_json="$E2E_TIMINGS_DIR/$target.json"
+  second_json="$E2E_TIMINGS_DIR/$target-exclusive.json"
+fi
+
 # macos 노드의 /bin/bash 는 3.2 라 `set -u` 아래 빈 배열을 펼치면 죽는다 — `${a[@]+…}` 로 감싼다.
 status=0
-pnpm exec playwright test ${project[@]+"${project[@]}"} "${first[@]}" "$@" || status=$?
-pnpm exec playwright test ${project[@]+"${project[@]}"} "${second[@]}" "$@" || status=$?
+PLAYWRIGHT_JSON_OUTPUT_FILE=$first_json pnpm exec playwright test ${project[@]+"${project[@]}"} "${first[@]}" "$@" || status=$?
+PLAYWRIGHT_JSON_OUTPUT_FILE=$second_json pnpm exec playwright test ${project[@]+"${project[@]}"} "${second[@]}" "$@" || status=$?
 exit "$status"

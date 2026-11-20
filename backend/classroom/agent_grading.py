@@ -42,10 +42,9 @@ from core.quality_review import QualityItemInput, QualityItemScore, parse_conten
 
 from core import agent_scoring
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
+from core.agent_ports import agent_grader
 from core.agent_scoring import (
     AGENT_JOB_MAX_SECONDS,
-    AgentGraderBusy,
-    AgentGraderError,
     AgentVendorRefused,
     Snapshot,
     SnapshotUnavailable,
@@ -150,6 +149,7 @@ def _run(job: agent_scoring.AgentJob) -> AgentResult:
     """`run_agent_job` 을 돌려 받아들임/보류로 돌려준다. 실행기·토큰 쪽 실패는 강의실 어댑터 오류로 옮긴다 —
     다음 걸음(`_apply_vendor_outcome` 등)이 한 번 호출과 같은 규율로 기록한다."""
 
+    grader = agent_grader()  # 실행기 오류 클래스는 scoring 이 등록한 실행 틀의 것이다(#1085)
     try:
         outcome = agent_scoring.run_agent_job(job)
     except agent_scoring.AgentRunHeld as held:
@@ -158,13 +158,13 @@ def _run(job: agent_scoring.AgentJob) -> AgentResult:
         # 클래스 키의 계정 쪽 거절(#1052, 사용 한도·빈도 제한·크레딧) — 참여자 탓이 아니다. 크레딧 소진(#586)과 같은
         # 자리로 보낸다: 시도 기록 없이 그 클래스의 채점을 멈추고, 다시 확인 간격마다 한 건만 다시 쳐 본다.
         raise LLMAdapterQuotaExhaustedError(f"벤더가 이 클래스 키를 계정 쪽으로 거절했다: {exc.reason}") from exc
-    except AgentGraderBusy as exc:
+    except grader.AgentGraderBusy as exc:
         # 실행기가 꽉 찼다 — 제출 탓이 아니다. 빈도 제한과 같은 자리(몇 번은 세지 않는다).
         raise LLMAdapterRateLimitedError(f"에이전트 실행기가 바쁘다: {exc}") from exc
     except RunTokenRefused as exc:
         # 단가를 모르는 모델 등 — 다시 해도 같다.
         raise LLMAdapterPermanentError(f"에이전트 실행 토큰을 받지 못했다: {exc}") from exc
-    except AgentGraderError as exc:
+    except grader.AgentGraderError as exc:
         raise LLMAdapterError(f"에이전트 실행기에 닿지 못했다: {exc}") from exc
     return AgentAccepted(
         structured_output=outcome.structured_output,

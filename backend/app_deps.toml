@@ -1,0 +1,106 @@
+# 앱 의존 선언 표 — 앱마다 「내가 쓰는 앱」과 「내가 꽂히는 앱」(#1086, spec #1079).
+#
+#   group  shared(두 제품이 나눠 쓰는 층) · contest(공모전 가족) · classroom(강의실)
+#   uses   이 앱이 부르는 아래 앱 — import(함수 안 포함), "app.Model" 문자열, dotted path·celery 작업 이름 문자열, 설정
+#   plugs  이 앱이 제 구현을 올리는 아래 앱 — Slot·Slots.register, register_*(), 시그널 connect·@receiver, sender=,
+#          아래 앱이 읽는 설정의 dotted path 가 이 앱을 가리키는 것. 아래 앱이 돌 때 이 앱 코드가 돈다.
+#
+# uses·plugs 는 모두 위 → 아래다. 순환이면, 코드에 없는 결합을 적었으면, 코드의 결합을 빠뜨렸으면 경계 시험
+# (backend/tests/test_app_boundaries.py)이 빨갛다. 공유층은 기능 앱을 적을 수 없고 강의실 ↮ 공모전 가족이다.
+# 고칠 때: `python3 scripts/app_deps.py check`(무엇이 어긋났는가), `draft`(지금 코드가 말하는 표).
+# 다시 돌 앱: `python3 scripts/app_deps.py affected <바뀐 파일…>` — 선택 실행(#1088)이 이 표만 읽는다.
+
+[accounts]
+group = "shared"
+uses = ["core"]
+plugs = []
+
+[appeals]
+group = "contest"
+uses = ["accounts", "contests", "core", "ledger", "notifications", "scoring", "submissions"]
+plugs = ["contests"]
+
+[awards]
+group = "contest"
+uses = ["accounts", "contests", "core", "ledger", "policies", "scoring", "storage", "submissions", "verification"]
+plugs = ["contests", "core"]
+
+[classroom]
+group = "classroom"
+uses = ["accounts", "core", "notifications", "ops_metrics", "policies", "storage", "submissions"]
+plugs = ["accounts", "core", "submissions"]
+
+[contests]
+group = "contest"
+uses = ["accounts", "core", "ledger", "notifications", "policies", "storage", "submissions", "verification"]
+plugs = ["accounts", "core", "submissions", "verification"]
+
+[core]
+group = "shared"
+uses = []
+plugs = []
+
+[distributions]
+group = "contest"
+uses = ["accounts", "appeals", "contests", "core", "ledger", "policies", "scoring", "submissions"]
+plugs = ["appeals", "contests", "core"]
+
+[handovers]
+group = "contest"
+uses = ["accounts", "awards", "contests", "core", "ledger", "policies", "submissions"]
+plugs = ["awards", "core", "submissions"]
+
+[ledger]
+group = "contest"
+uses = ["core"]
+plugs = []
+
+[notifications]
+group = "shared"
+uses = ["accounts", "core", "storage"]
+plugs = ["core"]
+
+[ops_metrics]
+group = "shared"
+uses = ["core"]
+plugs = ["core"]
+
+[payments]
+group = "contest"
+uses = ["accounts", "contests", "core", "ledger", "policies", "verification"]
+plugs = ["contests", "core"]
+
+[payouts]
+group = "contest"
+uses = ["accounts", "appeals", "awards", "contests", "core", "distributions", "handovers", "ledger", "notifications", "payments", "policies", "scoring", "storage", "submissions", "verification"]
+plugs = ["accounts", "contests", "core"]
+
+[policies]
+group = "shared"
+uses = ["core"]
+plugs = ["core"]
+
+[repositories]
+group = "contest"
+uses = ["contests", "core", "submissions"]
+plugs = ["core"]
+
+[scoring]
+group = "contest"
+uses = ["contests", "core", "ledger", "notifications", "policies", "repositories", "storage", "submissions"]
+plugs = ["contests", "core", "repositories"]
+
+[storage]
+group = "shared"
+uses = ["core"]
+plugs = []
+
+[submissions]
+group = "shared"
+uses = ["core", "policies", "storage"]
+plugs = ["storage"]
+
+[verification]
+group = "contest"
+uses = ["accounts", "core"]
+plugs = ["accounts", "core"]

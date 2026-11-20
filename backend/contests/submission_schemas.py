@@ -387,7 +387,9 @@ class OwnScoreOut(Schema):
     @staticmethod
     def resolve_quality(obj):
         from core.quality_review import mask_hidden_items, quality_view
-        from scoring.quality import bonus_scores, points_by_requirement
+        from .ports import BONUS_SCORES, POINTS_BY_REQUIREMENT  # scoring.apps 가 올린다(#1086)
+
+        bonus_scores, points_by_requirement = BONUS_SCORES.get(), POINTS_BY_REQUIREMENT.get()
 
         review = getattr(obj.submission, "quality_review", None)
         if review is None:

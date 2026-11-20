@@ -70,7 +70,9 @@ class RealTreeTest(unittest.TestCase):
     def test_backend_has_test_files_and_four_shards_cover_them(self) -> None:
         files = test_files()
         self.assertGreater(len(files), 100)
-        self.assertTrue(all(f.startswith("tests/") and f.endswith(".py") for f in files))
+        self.assertTrue(all("/tests/" in f"/{f}" and f.endswith(".py") for f in files))
+        # 앱 폴더로 옮긴 시험(#1087)도 잡는다 — 빠지면 그 조각이 시험 없이 초록이다
+        self.assertTrue(any(not f.startswith("tests/") for f in files))
         out = shards(files, {}, 4)
         self.assertEqual(sum(len(s) for s in out), len(files))
 

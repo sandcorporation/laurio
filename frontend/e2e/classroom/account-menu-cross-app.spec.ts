@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { publicOrigin } from "../lib/session";
 import { establishClassroomSession } from "./lib/cross-app-session";
 
 // 두 앱 계정 메뉴에서 서로의 앱으로 건너간다 (#375·#376, spec #371). 두 앱의
@@ -18,10 +19,6 @@ import { establishClassroomSession } from "./lib/cross-app-session";
 // 링크를 그대로 따라가면 `chrome-error://` 로 끝난다(이 스펙이 처음 CI 에서 그렇게
 // 빨갛게 났다, afedb5b). 오리진이 배포 설정을 따르는지는 이 스택에서 잴 수 없고,
 // staging 을 걸어 확인했다(#375·#376 통합 시점).
-function publicOrigin(): string {
-  return new URL(process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
-}
-
 function pathOf(href: string): string {
   const url = new URL(href);
   return `${url.pathname}${url.search}`;

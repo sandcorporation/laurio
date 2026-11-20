@@ -45,12 +45,12 @@ from accounts.middleware import jwt_auth
 from contests.models import ContestSubmission, Requirement
 from contests.scoring_hold import is_size_held
 from core.clock import Clock
-from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
 from submissions.scored_assets import resolve_scored_assets
 from submissions.scoring_basis import scoring_basis_for
 
 from .models import Appeal, SourceReading
+from .ports import is_holding_distribution
 from .schemas import (
     AppealCreateIn,
     AppealDetailOut,

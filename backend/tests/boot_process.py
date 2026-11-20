@@ -17,7 +17,7 @@
 
 **자식이 쓴 CPU 는 시험 몫으로 센다.** 자식은 forkserver 의 자식이라 시험
 프로세스의 `RUSAGE_CHILDREN` 에 잡히지 않는다 — 그대로 두면 한도 검사
-(`tests/conftest.py`)가 비용을 못 본다. 자식이 자기 사용량을 돌려주고
+(`conftest.py`)가 비용을 못 본다. 자식이 자기 사용량을 돌려주고
 `charged_cpu_seconds()` 가 그 합을 낸다.
 """
 

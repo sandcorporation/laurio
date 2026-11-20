@@ -106,7 +106,7 @@ def _compute_amounts(prize_amount: int, policy: PlatformPolicy) -> tuple[int, in
 
 
 def get_or_create_payout(target: PayoutTarget) -> Payout:
-    """이 지급 사유(Handover 또는 DistributionShare 의 `payout_target()`)에 대한 활성
+    """이 지급 사유(`Handover.payout_target()` 또는 `distribution_payouts.share_payout_target`)에 대한 활성
     Payout 을 멱등하게 만든다.
 
     활성(REQUESTED/CONFIRMED_IDENTITY_PENDING/CONFIRMED_SELLER_PENDING/CONFIRMED)이 이미

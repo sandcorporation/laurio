@@ -1,5 +1,5 @@
 # 배포 이미지(#938, ADR-0077): main 의 커밋마다 일곱 이미지를 GitHub 호스팅 arm64 실행기에서 네이티브로 굽고 ghcr 에 올린다.
-# main push 에서는 release.yml 이 검사(PR 검사와 같은 pr-check.yml)와 나란히 workflow_call 로 부른다. 일곱이 모두 오르면
+# main push 에서는 release.yml 이 workflow_call 로 부른다(검사는 병합 대기열에서 끝났다, #1090). 일곱이 모두 오르면
 # release.yml 이 production 을 이 sha 로 승격하고, Jenkins `codemit/deploy` 는 Actions 가 올린 production 머리 이미지를 받아
 # (jenkins-shared sandcorpDeploy deployFrom) oracle 에 배포한다. Jenkins 에서는 이미지를 굽지 않는다.
 #
@@ -33,6 +33,8 @@ concurrency:
 jobs:
   build:
     name: build (${{ matrix.service }})
+    # 포크(#1084)에서는 돌지 않는다 — 운영 이미지 저장소·production 을 건드리지 않게. 본 저장소에서는 늘 참이라 무해하다.
+    if: github.repository == 'sandcorporation/laurio'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 40
     strategy:

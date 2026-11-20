@@ -340,13 +340,12 @@ _DIRECT_REFERENCE_FILES = sorted(
         for path in (BACKEND_ROOT / "classroom").glob("*.py")
         if path.name not in _DIRECT_REFERENCE_SKIPPED
     ]
-    + [Path("submissions/resolvers.py"), Path("accounts/withdrawal.py")]
+    + [Path("submissions/resolvers.py")]
 )
 
 #: 이 이름의 변수는 ConnectedApp 이다 — 그 `instructor`/`instructor_id` 는 연결된 앱의 주인(계정)이다.
 _CONNECTED_APP_RECEIVERS = {"grant"}
 
-_CONNECTED_APP_OWNER = "ConnectedApp 의 주인(계정)을 고른다 — Class 의 강사가 아니다(연결된 앱의 주인은 계정, #560)."
 
 #: (파일, 함수 이름) → 왜 소유자 자체를 뜻하는가.
 DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
@@ -365,8 +364,8 @@ DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
     Path("classroom/ownership_transfers.py"): {
         "accept": "소유권 이전 수락이 소유자 자체를 바꾼다(CONTEXT.md 「소유권 이전」, #564) — 넘긴 사람을 읽어 공동 강사로 남기고 받는 사람을 소유자로 쓴다.",
     },
-    Path("accounts/withdrawal.py"): {
-        "_instructor_has_class_in_progress": "탈퇴 차단은 **소유한** 클래스만 센다(CONTEXT.md 「공동 강사」) — 공동 강사 자리는 탈퇴로 빠진다.",
+    Path("classroom/withdrawal.py"): {
+        "instructor_has_class_in_progress": "탈퇴 차단은 **소유한** 클래스만 센다(CONTEXT.md 「공동 강사」) — 공동 강사 자리는 탈퇴로 빠진다.",
     },
     Path("classroom/connected_app_writes.py"): {
         "record_write": "쓰기 기록의 주인은 연결된 앱의 주인(계정)이다 — 어느 클래스의 강사인가와 무관하다.",

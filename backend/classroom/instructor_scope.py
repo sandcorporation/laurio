@@ -21,7 +21,7 @@
 라우트는 전부 쓰기 범위를 지난다」를 지킨다 — 새 쓰기 라우트가 `write=True`
 호출을 빠뜨리면(또는 이 모듈을 거치지 않고 `Class.objects`를 직접 두드리면)
 그 검사가 빨개진다. 명시적으로 보관을 확인하지 않기로 한 자리는 그 테스트의
-`ALLOWLIST`에 이유와 함께 올라 있다 — `APP-BOUNDARY-EXCEPTION`과 같은 관용구다.
+`ALLOWLIST`에 이유와 함께 올라 있다.
 
 **이 모듈이 하지 않는 일 — ADR-0050.** 문제를 지금 지울 수 있는가
 (`classroom.api._problem_deletable`)는 "이 문제 × 강사 자신의 시도"라는 전혀

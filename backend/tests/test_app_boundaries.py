@@ -1,365 +1,297 @@
-"""강의실과 공모전이 서로를 부르지 못한다는 것을 정적으로 고정한다 (#269, ADR-0037).
+"""앱 사이 결합이 선언 표(`backend/app_deps.toml`) 안에 있고, 그 표가 한 방향 층이다 — #1086(처음은 #269, ADR-0037).
 
-**ADR-0037 이 Classroom 을 별도 서비스로 가르지 않기로 하면서 진 빚이 이것이다.**
-프로세스가 갈려 있으면 잘못된 import 는 애초에 컴파일되지 않는다. 한 프로세스 안에서는
-`from contests.models import Contest` 한 줄이 그냥 돌아가고, 그 한 줄은 리뷰에서 가장 안
-읽히는 종류다 — 특히 **함수 안 지연 import** 는 파일 최상단만 봐서는 존재조차 안 보인다.
-그래서 기계가 매 커밋 확인한다.
+**ADR-0037 이 Classroom 을 별도 서비스로 가르지 않기로 하면서 진 빚이 이것이다.** 프로세스가 갈려 있으면 잘못된
+import 는 애초에 컴파일되지 않는다. 한 프로세스 안에서는 `from contests.models import Contest` 한 줄이 그냥 돌아가고,
+함수 안 지연 import·`"contests.Contest"` 문자열·시그널 연결·설정의 dotted path 는 리뷰에서 가장 안 읽힌다. 그래서
+기계가 매 커밋 확인한다.
 
-**왜 `scripts/` 가 아니라 여기인가.** 티켓을 닫는 로컬 게이트는 `pytest`·두 앱
-`typecheck`·브라우저 걷기 셋이다(`CLAUDE.md`). `scripts/` 검사는 그 셋 중 어디에도 안
-걸려 push 해야만 결과를 안다. import 경계는 **쓰는 순간** 막혀야 뜻이 있다. 그리고 이
-저장소에는 AST 게이트를 테스트로 두는 관용구가 이미 있다 — `ast_scan_support` 를
-`test_contest_kind_gates`·`test_contest_transitions`·
-`test_contest_status_writes_are_declared` 셋이 공유하고, `test_appeals.py` 에는 앱 간
-import 금지를 AST 로 보는 테스트가 이미 하나 있다.
+## 표가 말하는 것
 
-## 규칙이 둘이고 강도가 다르다
+앱마다 `group`(shared·contest·classroom)과 두 칸 — `uses`(부르는 아래 앱), `plugs`(제 구현을 올리는 아래 앱 —
+등록 자리·시그널·설정 dotted path). 아래 앱이 Django 역관계로 위 앱의 행을 걷는 ORM 경로는 받을 칸이 없다(#1102). 세는 법은
+`scripts/app_deps.py` 머리말이 들고 있다. 이 시험은 그 분석기에 ORM 경로(모델 관계가 있어야 걷는다)를 더해 맞댄다.
 
-- **규칙 A — 강의실 ↮ 공모전 가족. 양방향, 예외 없음.** 최상단이든 함수 안이든,
-  import 든 Django 의 문자열 참조(`ForeignKey("contests.Contest")`·`apps.get_model`)든
-  걸린다. 여기에는 예외 표시가 **듣지 않는다** — 표시로 열 수 있는 문이 있으면 마감에
-  몰린 사람이 그 문을 쓴다.
-- **규칙 B — 공유층은 기능 앱을 보지 않는다. 예외 표시로 열린다.** 지금 있는 것들은
-  순환을 끊으려고 일부러 함수 안에 넣은 지연 import 라 지우는 것이 이 티켓의 일이 아니다.
-  대신 사유를 적어 표시한다 — 붙는 순간 `grep -rn "APP-BOUNDARY-EXCEPTION" backend/` 한
-  줄로 세어지고, 그 숫자가 늘었는지 줄었는지가 이 경계의 건강 지표가 된다.
-
-표시의 모양은 `scripts/check_screen_language.py` 의 관용구를 그대로 따른다 — 같은 줄이나
-바로 앞 줄에 `APP-BOUNDARY-EXCEPTION: <이유>`, **이유가 비면 예외 자체가 실패한다.** 이유
-없는 예외는 「일부러 남긴 것」과 「그냥 걸린 것」을 구별하지 못하게 만든다.
-
-## 표가 `INSTALLED_APPS` 와 어긋나면 실패한다
-
-한 방향으로만 그렇다 — 설치된 앱은 전부 분류돼 있어야 하지만, 표는 아직 설치되지 않은
-앱을 미리 이름 지을 수 있다(`classroom` 이 #275 전까지 그런 자리였다). 그 한 방향이
-새 앱을 만드는 사람에게 분류를 강제하는 장치다: 앱을 하나 더하면 표에 적기 전까지
-빨갛다.
+- 코드의 결합이 표에 없으면 빨강, 표의 선언이 코드에 없으면 빨강(선언은 좁게 — 선택 실행 #1088 이 이 표만 읽는다).
+- `uses`·`plugs` 가 순환이면 빨강.
+- 공유층은 기능 앱에 묶이지 않는다. 강의실 ↮ 공모전 가족(ADR-0037) — 어느 칸으로도.
+- `APP-BOUNDARY-EXCEPTION` 표식은 받지 않는다. 문이 있으면 마감에 몰린 사람이 그 문을 쓴다 — 결합은 표에 적거나
+  `core.registry` 자리로 뒤집는다.
 """
 
 from __future__ import annotations
 
-import ast
-import re
-from dataclasses import dataclass
+import importlib.util
+import sys
 from pathlib import Path
 
+import pytest
 from django.conf import settings
 
-from tests.ast_scan_support import BACKEND_ROOT
-
-#: 두 제품이 나눠 쓰는 층. 여기서 기능 앱으로 내려가는 것이 규칙 B 가 막는 방향이다.
-#: `submissions`가 #270(ADR-0039)로 여기 합류했다 — `Submission`(부모)이 공모전을
-#: 몰라야 강의실이 두 번째 자식(`ProblemSubmission`)을 붙일 수 있다. 공모전 전용
-#: 코드(자식 모델·제출 API·「다음 행동」 판정·target_ref 조립·파기 스캔)는
-#: `contests.submission_*`로 옮겨갔다 — 이 앱에는 부모·자료·근거·자가 응답과 그
-#: 규칙만 남는다.
-#: `ops_metrics`(#827)는 운영 지표의 1분 집계 — `core.llm_metrics` 가 부르고 기능 앱을 모른다.
-SHARED = frozenset({"accounts", "core", "policies", "storage", "notifications", "submissions", "ops_metrics"})
-
-#: 공모전 제품. `verification`(본인확인)과 `payments`·`ledger`·`payouts` 계열이 여기 있는
-#: 이유는 강의실이 본인확인도 결제도 쓰지 않기로 했기 때문이다(ADR-0037).
-CONTEST_FAMILY = frozenset(
-    {
-        "contests",
-        "scoring",
-        "repositories",
-        "awards",
-        "appeals",
-        "payments",
-        "ledger",
-        "payouts",
-        "distributions",
-        "handovers",
-        "verification",
-    }
-)
-
-#: 강의실. #275 로 섰다 — 모델은 아직 없다.
-CLASSROOM = frozenset({"classroom"})
-
-FEATURE_APPS = CONTEST_FAMILY | CLASSROOM
-CLASSIFIED_APPS = SHARED | FEATURE_APPS
-
-EXCEPTION_RE = re.compile(r"APP-BOUNDARY-EXCEPTION:\s*(.*)$")
-
-#: Django 가 import 없이 앱을 묶는 길 — `ForeignKey("contests.Contest")` 꼴. 점 하나로
-#: 갈리고 양쪽이 식별자인 것만 본다. 긴 docstring 안의 `contests.models.Contest` 같은
-#: 언급은 문자열 전체가 이 모양이 아니라 저절로 빠진다.
-MODEL_REF_RE = re.compile(r"^([a-z_][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$")
+_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "app_deps.py"
 
 
-@dataclass(frozen=True)
-class Reference:
-    """한 파일이 다른 앱을 가리키는 한 지점."""
-
-    line: int
-    app: str
-    detail: str
-    #: import 가 아니라 문자열로 가리키는 것 — 규칙 A 만 이것을 본다.
-    by_string: bool = False
+def _load():
+    spec = importlib.util.spec_from_file_location("app_deps", _SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def _module_app(module: str) -> str:
-    return module.split(".", 1)[0]
+deps = _load()
+D = deps.Declared
+
+#: 두 제품이 나눠 쓰는 층 — 다른 구조 시험(`test_runtime_settings_port`)이 이 이름으로 읽는다
+SHARED = frozenset(app for app, d in deps.load_table().items() if d.group == "shared")
 
 
-def references(source: str, tree: ast.AST | None = None) -> list[Reference]:
-    """소스 하나가 다른 앱을 가리키는 지점 전부. 파일을 읽지 않는다 — 합성 소스로
-    빨강을 고정할 수 있어야 하기 때문이다(한 번도 빨개지지 않는 검사는 통과하는 검사와
-    구별되지 않는다)."""
+@pytest.fixture(scope="module")
+def repository():
+    """저장소 전체를 한 번 읽고 센다 — 모듈 픽스처라 시험 하나의 CPU 한도 밖이다."""
 
-    tree = tree if tree is not None else ast.parse(source)
-    found: list[Reference] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                app = _module_app(alias.name)
-                if app in CLASSIFIED_APPS:
-                    found.append(Reference(node.lineno, app, f"import {alias.name}"))
-        elif isinstance(node, ast.ImportFrom):
-            # `from .models import X` 는 같은 앱이다 — level > 0 이면 건너뛴다.
-            if node.level == 0 and node.module:
-                app = _module_app(node.module)
-                if app in CLASSIFIED_APPS:
-                    found.append(Reference(node.lineno, app, f"from {node.module} import ..."))
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            m = MODEL_REF_RE.match(node.value)
-            if m and m.group(1) in CLASSIFIED_APPS:
-                found.append(
-                    Reference(node.lineno, m.group(1), f'문자열 참조 "{node.value}"', by_string=True)
-                )
-        elif isinstance(node, ast.Call):
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "get_model" and node.args:
-                first = node.args[0]
-                if isinstance(first, ast.Constant) and first.value in CLASSIFIED_APPS:
-                    found.append(
-                        Reference(
-                            node.lineno,
-                            first.value,
-                            f'get_model("{first.value}", ...)',
-                            by_string=True,
-                        )
-                    )
-
-    return found
-
-
-def _exception_markers(source: str) -> tuple[dict[int, str], dict[int, str]]:
-    """(표시가 적힌 줄 → 사유, 그 표시가 덮는 줄 → 사유).
-
-    둘을 가르는 이유는 사유가 빈 표시를 **표시가 적힌 줄에서 한 번만** 보고하기
-    위해서다 — 덮는 줄까지 세면 표시 하나가 실패 둘로 보인다.
-    """
-
-    markers: dict[int, str] = {}
-    covers: dict[int, str] = {}
-    for i, line in enumerate(source.split("\n"), 1):
-        m = EXCEPTION_RE.search(line)
-        if m is None:
-            continue
-        reason = m.group(1).strip()
-        markers[i] = reason
-        covers[i] = reason
-        covers.setdefault(i + 1, reason)
-    return markers, covers
-
-
-def app_of(path: Path) -> str | None:
-    """이 파일이 어느 앱의 것인가. `config/` 나 `manage.py` 처럼 앱이 아닌 것은 None —
-    조립 지점은 모두를 알아야 하므로 경계의 대상이 아니다."""
-
-    parts = path.relative_to(BACKEND_ROOT).parts
-    return parts[0] if len(parts) > 1 and parts[0] in CLASSIFIED_APPS else None
-
-
-def violations(source: str, *, app: str, tree: ast.AST | None = None) -> list[str]:
-    """`app` 에 속한 소스 하나의 경계 위반 전부. 사람이 읽을 문장으로 돌려준다."""
-
-    markers, covers = _exception_markers(source)
-    problems: list[str] = []
-
-    for line in sorted(line for line, reason in markers.items() if not reason):
-        problems.append(f"{line}줄: 예외 표시에 이유가 없다 — `APP-BOUNDARY-EXCEPTION: <이유>`")
-
-    for ref in references(source, tree):
-        if ref.app == app:
-            continue
-
-        crosses_rule_a = (app in CLASSROOM and ref.app in CONTEST_FAMILY) or (
-            app in CONTEST_FAMILY and ref.app in CLASSROOM
-        )
-        if crosses_rule_a:
-            problems.append(
-                f"{ref.line}줄: 강의실과 공모전은 서로를 부를 수 없다 — "
-                f"{app} → {ref.app} ({ref.detail}). "
-                f"예외 표시로 열리지 않는다: 공유층으로 옮기거나 각자 갖는다 (ADR-0037)"
-            )
-            continue
-
-        if ref.by_string:
-            # 문자열 참조는 규칙 A 만 본다 — 공유층 전반에 걸면 오탐이 늘어 규칙이
-            # 신뢰를 잃는다.
-            continue
-
-        if app in SHARED and ref.app in FEATURE_APPS:
-            if covers.get(ref.line):
-                continue
-            problems.append(
-                f"{ref.line}줄: 공유층이 기능 앱을 부른다 — {app} → {ref.app} ({ref.detail}). "
-                f"정말 어쩔 수 없으면 같은 줄이나 앞 줄에 "
-                f"`APP-BOUNDARY-EXCEPTION: <이유>` 를 남긴다"
-            )
-
-    return problems
-
-
-def _scan_repository(sources) -> list[str]:
-    """`sources` 는 세션 픽스처 `backend_sources`(이미 읽고 파싱한 소스 전부)다."""
-
-    reported: list[str] = []
-    for source in sources:
-        app = app_of(BACKEND_ROOT / source.relative)
-        if app is None:
-            continue
-        for problem in violations(source.text, app=app, tree=source.tree):
-            reported.append(f"{source.relative}:{problem}")
-    return reported
+    table = deps.load_table()
+    sources = deps.app_sources()
+    raw, marked = deps.repository_couplings(sources)
+    found = deps.classify(raw, table) + deps.orm_couplings(sources, table, deps.django_resolver())
+    return table, found, marked
 
 
 # --- 저장소 전체 -----------------------------------------------------------------
 
 
-def test_the_boundary_holds_across_the_repository(backend_sources):
-    """지금 저장소가 이 표를 지킨다. 실패 메시지가 어느 파일 어느 줄인지와 무엇을 해야
-    하는지를 말한다 — 규칙만 있고 길이 없으면 다음 사람이 표에서 규칙을 지운다."""
+def test_the_declared_table_matches_the_code(repository):
+    """실패 문구가 어느 파일 어느 줄인지와 무엇을 할지를 말한다 — 규칙만 있고 길이 없으면 다음 사람이 규칙을 지운다."""
 
-    problems = _scan_repository(backend_sources)
-    assert not problems, "앱 경계 위반:\n" + "\n".join(problems)
-
-
-def test_every_installed_app_is_classified():
-    """앱을 하나 더하면 표에 적기 전까지 빨갛다 — 이것이 강의실을 만드는 사람에게 분류를
-    강제하는 장치다. 반대 방향은 보지 않는다: 표는 아직 설치되지 않은 앱을 미리 이름
-    지을 수 있다."""
-
-    installed = {
-        app for app in settings.INSTALLED_APPS if not app.startswith("django.contrib.")
-    }
-    unclassified = sorted(installed - CLASSIFIED_APPS)
-    assert not unclassified, (
-        f"이 앱들이 어느 쪽인지 정해지지 않았다: {unclassified} — "
-        f"tests/test_app_boundaries.py 의 SHARED·CONTEST_FAMILY·CLASSROOM 중 하나에 적는다"
-    )
+    table, found, marked = repository
+    installed = {app for app in settings.INSTALLED_APPS if not app.startswith("django.")}
+    problems = deps.problems(table, found, marked, installed)
+    assert not problems, "앱 의존 선언과 코드가 어긋난다:\n" + "\n".join(problems)
 
 
-def test_the_three_groups_do_not_overlap():
-    assert not (SHARED & CONTEST_FAMILY)
-    assert not (SHARED & CLASSROOM)
-    assert not (CONTEST_FAMILY & CLASSROOM)
+def test_the_script_reads_installed_apps_like_django():
+    """선택 실행은 Django 없이 표만 읽는다 — 그 스크립트가 보는 설치 앱이 Django 의 것과 같아야 한다."""
+
+    assert deps.installed_apps() == {app for app in settings.INSTALLED_APPS if not app.startswith("django.")}
 
 
 def test_classroom_is_actually_installed():
-    """#275 — 미리 분류만 해 두던 이름이 실제 앱으로 섰다. 이제부터는 규칙 A 가
-    합성 소스가 아니라 저장소 자체에서도 발효된다."""
+    """#275 — 미리 분류만 해 두던 이름이 실제 앱으로 섰다. 강의실 ↮ 공모전 규칙이 저장소에서 발효된다."""
 
     assert "classroom" in settings.INSTALLED_APPS
 
 
 # --- 합성 소스로 빨강을 고정한다 ---------------------------------------------------
 #
-# 한 번도 빨개지지 않는 검사는 통과하는 검사와 구별되지 않는다. 아래가 이 게이트가 실제로
-# 문이라는 증거다.
+# 한 번도 빨개지지 않는 검사는 통과하는 검사와 구별되지 않는다. 아래가 이 게이트가 실제로 문이라는 증거다.
+
+KNOWN = frozenset({"core", "accounts", "storage", "submissions", "contests", "scoring", "classroom"})
+CTX = deps.Context(
+    known=KNOWN,
+    settings_apps={"STORAGE_TARGET_RESOLVER": frozenset({"submissions"})},
+    task_apps={"scoring.rescore": "scoring"},
+)
+TABLE = {
+    "core": D("shared"),
+    "accounts": D("shared", uses=frozenset({"core"})),
+    "storage": D("shared", uses=frozenset({"core"})),
+    "submissions": D("shared", uses=frozenset({"core", "storage"})),
+    "contests": D("contest", uses=frozenset({"core", "accounts", "submissions"})),
+    "scoring": D("contest", uses=frozenset({"core", "contests"})),
+    "classroom": D("classroom", uses=frozenset({"core"})),
+}
 
 
-def test_classroom_cannot_import_the_contest_family_at_module_level():
-    assert violations("from contests.models import Contest\n", app="classroom")
+def _problems(source: str, app: str, table=TABLE, orm=()) -> list[str]:
+    found = deps.classify(deps.file_couplings(source, app=app, path=f"{app}/x.py", ctx=CTX), table)
+    return deps.problems(table, [*found, *orm], deps.markers(source), set(), orm_counted=False)
 
 
-def test_classroom_cannot_hide_the_import_inside_a_function():
+def _couplings(source: str, app: str) -> set[tuple[str, str, str]]:
+    found = deps.classify(deps.file_couplings(source, app=app, path=f"{app}/x.py", ctx=CTX), TABLE)
+    return {(c.src, c.dst, c.kind) for c in found}
+
+
+def test_a_declared_import_passes():
+    assert not _problems("from submissions.models import Submission\n", "contests")
+
+
+def test_an_undeclared_import_is_red_even_inside_a_function():
     source = "def grade():\n    from scoring.services import score\n    return score\n"
-    assert violations(source, app="classroom")
+    assert any("contests → scoring" in p for p in _problems(source, "contests"))
 
 
-def test_the_contest_family_cannot_import_classroom_either():
-    """양방향이다 — 한쪽만 막으면 반대쪽에서 새고, 그쪽이 더 눈에 안 띈다."""
+def test_an_import_under_type_checking_is_not_a_coupling():
+    source = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from scoring.models import Score\n"
+    assert not _problems(source, "contests")
 
-    assert violations("import classroom.models\n", app="contests")
 
-
-def test_classroom_cannot_bind_to_a_contest_model_by_string():
-    """import 없이 두 도메인이 스키마 수준에서 영구히 묶이는 유일한 길."""
-
+def test_a_model_string_is_a_coupling():
     source = 'contest = models.ForeignKey("contests.Contest", on_delete=models.CASCADE)\n'
-    assert violations(source, app="classroom")
+    assert any("classroom → contests" in p for p in _problems(source, "classroom"))
 
 
-def test_classroom_cannot_reach_a_contest_model_through_get_model():
-    assert violations('apps.get_model("contests", "Contest")\n', app="classroom")
+def test_a_dotted_path_to_another_apps_module_is_a_coupling():
+    assert ("submissions", "contests", "uses") in _couplings('HANDLER = "contests.models.Contest"\n', "submissions")
 
 
-def test_the_contest_family_cannot_bind_to_a_classroom_model_by_string_either():
-    """오늘 실제로 열려 있는 방향은 이쪽이다 — 강의실 앱은 아직 없고, 공모전 코드가
-    먼저 그쪽을 가리킬 수 있다."""
-
-    source = 'problem = models.ForeignKey("classroom.Problem", on_delete=models.CASCADE)\n'
-    assert violations(source, app="contests")
+def test_a_logger_name_and_a_slot_owner_are_not_couplings():
+    source = 'log = logging.getLogger("contests.models")\nSLOT = Slot("이름", "contests.apps")\n'
+    assert not _couplings(source, "submissions")
 
 
-def test_the_shared_layer_needs_a_marker_for_classroom_too():
-    """규칙 B 는 공모전 가족뿐 아니라 강의실에도 걸린다 — 공유층은 어느 제품도 모른다."""
-
-    assert violations("from classroom.models import Class\n", app="core")
+def test_a_celery_task_name_is_a_coupling():
+    assert ("contests", "scoring", "uses") in _couplings('app.send_task("scoring.rescore")\n', "contests")
 
 
-def test_an_exception_marker_does_not_open_the_classroom_boundary():
-    """규칙 A 에는 문이 없다. 표시가 있어도 실패한다."""
-
-    source = "from contests.models import Contest  # APP-BOUNDARY-EXCEPTION: 급해서\n"
-    assert violations(source, app="classroom")
+def test_registering_into_a_slot_plugs_into_the_owner():
+    source = "from core.ports import SLOT\nSLOT.register(handler)\n"
+    assert ("contests", "core", "plugs") in _couplings(source, "contests")
 
 
-def test_the_shared_layer_cannot_reach_a_feature_app_without_a_marker():
-    assert violations("from contests.models import Contest\n", app="accounts")
+def test_a_register_function_plugs_into_its_app():
+    source = "from core.scans import register_scan\nregister_scan(SPEC)\n"
+    assert ("contests", "core", "plugs") in _couplings(source, "contests")
 
 
-def test_a_marker_with_a_reason_opens_the_shared_layer_rule():
-    source = "from contests.models import Contest  # APP-BOUNDARY-EXCEPTION: 탈퇴 자격 검사\n"
-    assert not violations(source, app="accounts")
+def test_connecting_to_a_signal_plugs_into_the_signal_owner():
+    source = "from accounts.signals import user_withdrawn\nuser_withdrawn.connect(leave)\n"
+    assert ("contests", "accounts", "plugs") in _couplings(source, "contests")
 
 
-def test_a_marker_on_the_preceding_line_also_counts():
+def test_a_receiver_decorator_plugs_into_the_signal_owner():
+    source = "from accounts.signals import user_withdrawn\n@receiver(user_withdrawn)\ndef leave(**kw):\n    pass\n"
+    assert ("contests", "accounts", "plugs") in _couplings(source, "contests")
+
+
+def test_hooking_another_apps_model_saves_plugs_into_it():
+    source = "from accounts.models import User\npost_save.connect(sync, sender=User)\n"
+    assert ("contests", "accounts", "plugs") in _couplings(source, "contests")
+
+
+def test_a_setting_read_below_that_points_above_is_a_plug_from_above():
+    """`storage` 가 읽는 설정이 `submissions` 의 해석기를 가리키면, 저장소가 돌 때 제출 코드가 돈다."""
+
+    assert ("submissions", "storage", "plugs") in _couplings("path = settings.STORAGE_TARGET_RESOLVER\n", "storage")
+    assert any("submissions → storage" in p for p in _problems("p = settings.STORAGE_TARGET_RESOLVER\n", "storage"))
+
+
+def test_an_undeclared_plug_is_red():
+    source = "from core.scans import register_scan\nregister_scan(SPEC)\n"
+    assert any("contests → core" in p for p in _problems(source, "contests"))
+
+
+def test_an_exception_marker_is_red_even_with_a_reason():
+    source = "from core.clock import Clock  # APP-BOUNDARY-EXCEPTION: 급해서\n"
+    assert any("APP-BOUNDARY-EXCEPTION" in p for p in _problems(source, "contests"))
+
+
+def test_mentioning_the_marker_in_prose_is_not_a_marker():
+    assert not deps.markers('"""`APP-BOUNDARY-EXCEPTION` 과 같은 관용구다."""\n')
+
+
+def test_a_cycle_is_red():
+    table = {**TABLE, "core": D("shared", uses=frozenset({"accounts"}))}
+    assert any(p.startswith("순환:") for p in deps.problems(table, [], [], set(), orm_counted=False))
+
+
+def test_a_plug_upward_closes_a_cycle_too():
+    """`plugs` 도 위 → 아래다 — 아래 앱이 위 앱에 꽂으면 층이 뒤집힌다."""
+
+    table = {**TABLE, "core": D("shared", plugs=frozenset({"accounts"}))}
+    assert any(p.startswith("순환:") for p in deps.problems(table, [], [], set(), orm_counted=False))
+
+
+def test_the_shared_layer_cannot_declare_a_feature_app():
+    table = {**TABLE, "accounts": D("shared", uses=frozenset({"core", "contests"}))}
+    assert any("공유층이 기능 앱" in p for p in deps.problems(table, [], [], set(), orm_counted=False))
+
+
+def test_classroom_and_the_contest_family_cannot_declare_each_other_in_any_column():
+    for column in ("uses", "plugs"):
+        table = {**TABLE, "classroom": D("classroom", **{column: frozenset({"contests"})})}
+        assert any("강의실과 공모전" in p for p in deps.problems(table, [], [], set(), orm_counted=False)), column
+
+
+def test_a_declaration_the_code_does_not_back_is_red():
+    found = [deps.Coupling("contests", "core", "uses", "contests/x.py", 1, "import")]
+    table = {"core": D("shared"), "contests": D("contest", uses=frozenset({"core", "accounts"})), "accounts": D("shared")}
+    assert any("contests.uses 의 accounts" in p for p in deps.problems(table, found, [], set()))
+
+
+def test_an_installed_app_missing_from_the_table_is_red():
+    assert any("newapp: 표에 없다" in p for p in deps.problems(TABLE, [], [], {"newapp"}, orm_counted=False))
+
+
+def test_an_orm_path_up_the_layers_is_red_and_has_no_column_to_hide_in():
+    """아래 앱이 역관계로 위 앱의 행을 걷는다 — 안 적으면 선언 밖, uses 에 적으면 순환이다(#1102). 위 앱이 관계를 올린다."""
+
+    orm = [deps.Coupling("contests", "scoring", "orm", "contests/x.py", 3, "ORM 경로 score")]
+    red = _problems("", "contests", orm=orm)
+    assert any("contests → scoring" in p and "NEXT_ACTION_RELATIONS" in p for p in red)
+    table = {**TABLE, "contests": D("contest", uses=TABLE["contests"].uses | {"scoring"}, plugs=TABLE["contests"].plugs)}
+    assert any(p.startswith("순환:") and "scoring" in p for p in _problems("", "contests", table=table, orm=orm))
+    with pytest.raises(TypeError):
+        D("contest", reads=frozenset({"scoring"}))  # type: ignore[call-arg]
+
+
+def test_the_table_has_no_reads_column():
+    assert all(set(entry) <= {"group", "uses", "plugs"} for entry in deps.tomllib.loads(deps.TABLE.read_text()).values())
+
+
+def test_orm_paths_are_found_in_lookups_and_relation_arguments():
+    import ast
+
     source = (
-        "# APP-BOUNDARY-EXCEPTION: 탈퇴 자격 검사\n"
-        "from contests.models import Contest\n"
+        'qs.filter(user__sponsor_profile__contests__created_at__lt=t)\n'
+        'qs.select_related("score", "contest__award")\n'
+        'Q(distribution__isnull=True)\n'
     )
-    assert not violations(source, app="accounts")
+    paths = {p for p, _, _ in deps.orm_paths(ast.parse(source))}
+    assert {"user__sponsor_profile__contests__created_at__lt", "score", "contest__award", "distribution__isnull"} <= paths
 
 
-def test_a_marker_without_a_reason_fails_on_its_own():
-    """이유 없는 예외는 「일부러 남긴 것」과 「그냥 걸린 것」을 구별하지 못하게 만든다."""
+def test_the_head_of_a_queryset_chain_names_the_start_model():
+    import ast
 
-    source = "from contests.models import Contest  # APP-BOUNDARY-EXCEPTION:\n"
-    problems = violations(source, app="accounts")
-    assert any("이유가 없다" in p for p in problems)
-
-
-def test_the_shared_layer_may_use_the_shared_layer():
-    assert not violations("from core.clock import Clock\n", app="accounts")
+    source = 'ContestSubmission.objects.filter(contest=c).select_related("score")\n'
+    assert ("score", 1, "ContestSubmission") in deps.orm_paths(ast.parse(source))
 
 
-def test_a_feature_app_may_use_the_shared_layer():
-    assert not violations("from accounts.models import DeveloperProfile\n", app="contests")
+def test_an_orm_path_counts_only_apps_every_plausible_start_walks_through():
+    """`score__gte` 가 제 모델의 정수 칸일 수도 있으면 세지 않는다 — 오탐이 늘면 규칙이 신뢰를 잃는다."""
+
+    walks = {"own": set(), "other": {"scoring"}}
+
+    def resolve(starts, segs, root):
+        return set.intersection(*walks.values())
+
+    source = deps.Source("classroom", "classroom/x.py", "", __import__("ast").parse("qs.filter(score__gte=1)\n"))
+    assert not deps.orm_couplings([source], TABLE, resolve)
 
 
-def test_the_contest_family_may_still_call_itself():
-    """공모전 가족 내부는 검사하지 않는다 — 그 그물은 이미 촘촘하고 푸는 것이 이 경계의
-    목적이 아니다."""
-
-    assert not violations("from submissions.models import Submission\n", app="contests")
+# --- 바뀐 파일 → 다시 돌 앱 ---------------------------------------------------------
 
 
-def test_relative_imports_are_the_same_app():
-    assert not violations("from .models import Withdrawal\n", app="accounts")
+def test_a_change_reruns_the_app_and_everything_that_uses_it():
+    assert deps.affected(["backend/contests/models.py"], TABLE) == {"contests", "scoring"}
+
+
+def test_a_change_in_a_plugged_app_reruns_the_app_it_plugs_into():
+    """`submissions` 가 `storage` 에 꽂혀 있으면 저장소 시험이 제출 코드를 돈다."""
+
+    table = {**TABLE, "submissions": D("shared", uses=frozenset({"core"}), plugs=frozenset({"storage"}))}
+    assert {"submissions", "storage"} <= deps.affected(["backend/submissions/resolvers.py"], table)
+
+
+def test_a_plugged_app_reruns_alone_and_does_not_spread_to_its_users():
+    """모든 기능 앱이 `core` 등록부에 꽂힌다 — 거기서 더 번지면 무엇을 바꿔도 전부가 된다."""
+
+    table = {**TABLE, "scoring": D("contest", uses=TABLE["scoring"].uses, plugs=frozenset({"core"}))}
+    picked = deps.affected(["backend/scoring/services.py"], table)
+    assert "core" in picked and "accounts" not in picked
+
+
+def test_project_wide_files_rerun_everything_and_frontend_reruns_nothing():
+    assert deps.affected(["backend/config/settings.py"], TABLE) is None
+    assert deps.affected(["backend/app_deps.toml"], TABLE) is None
+    assert deps.affected(["frontend/app/page.tsx", "docs/ops/testing.md"], TABLE) == set()

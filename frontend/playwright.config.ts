@@ -82,7 +82,12 @@ export default defineConfig({
   // 늘리지 않고 원인을 줄인다 — 준비는 화면이 아니라 API 로, 기다림은 시간이 아니라
   // 사건으로 한다.
   timeout: 3_000,
-  reporter: process.env.CI ? [["github"], ["list"]] : "list",
+  // PLAYWRIGHT_JSON_OUTPUT_FILE 가 있으면 시험 시간 리포트도 남긴다(#1112) — e2e-two-pass.sh 가 패스마다 정한다.
+  // scripts/ci/e2e_durations.py 가 읽어 e2e 조각을 시간으로 나누는 기록을 만든다.
+  reporter: [
+    ...(process.env.CI ? ([["github"], ["list"]] as const) : ([["list"]] as const)),
+    ...(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE ? ([["json"]] as const) : []),
+  ],
   use: {
     // 재시도가 없으니 "on-first-retry" 는 영영 남지 않는다 — 실패한 시험의 것만 남긴다.
     trace: "retain-on-failure",

@@ -36,7 +36,7 @@
 | 스캔이 늘거나 줄었다, 주기가 바뀌었다 | `backend.md` 「스스로 도는 일」 |
 | 화면이 생기거나 사라졌다 | `frontend.md` / `operator.md` / `classroom.md` — 그 화면의 절을 더하거나 지운다 |
 | 화면이 하는 일이 바뀌었다 | 같은 세 문서의 **그 화면 절** |
-| 상태 값·전이 조건이 바뀌었다 | `backend.md` 「Contest 의 상태」의 표 **와** mermaid 다이어그램(`cd backend && uv run python manage.py print_contest_transition_diagram` 으로 재생성 — `tests/test_contest_transition_graph.py` 가 갈리면 CI 에서 잡는다) |
+| 상태 값·전이 조건이 바뀌었다 | `backend.md` 「Contest 의 상태」의 표 **와** mermaid 다이어그램(`cd backend && uv run python manage.py print_contest_transition_diagram` 으로 재생성 — `contests/tests/test_contest_transition_graph.py` 가 갈리면 CI 에서 잡는다) |
 | 정책 기본값이 바뀌었다 | `backend.md` 「정책 값」 |
 | 어댑터가 늘거나 바인딩이 바뀌었다 | `backend.md` 「바깥 세계」 |
 | 알림 종류가 늘었다 | `backend.md` 「알림」 |

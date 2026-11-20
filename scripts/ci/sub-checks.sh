@@ -25,13 +25,10 @@ rm -rf test-results && mkdir -p test-results
 
 echo "CI 이미지 굽는 중($image)…"
 # 층 캐시(GitHub Actions, #932): CODEMIT_BK_CACHE 가 있으면 복원한 층을 읽고(buildx 컨테이너 빌더라 --load),
-# main push 실행만(CODEMIT_BK_CACHE_SAVE=1) CODEMIT_BK_CACHE_NEW 로 내보낸다.
+# 저장은 release.yml 의 cache 잡이 한다(#1090).
 build_cache=()
 if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
   build_cache=(--load --cache-from "type=local,src=$CODEMIT_BK_CACHE/ci")
-  if [ -n "${CODEMIT_BK_CACHE_SAVE:-}" ]; then
-    build_cache+=(--cache-to "type=local,dest=$CODEMIT_BK_CACHE_NEW/ci,mode=max")
-  fi
 fi
 docker build -q -f docker/ci.Dockerfile ${build_cache[@]+"${build_cache[@]}"} -t "$image" . >/dev/null || { echo "CI 이미지를 굽지 못했다"; exit 1; }
 
@@ -46,8 +43,25 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 
+# 마이그레이션 호환 검사(#1091)의 base — 병합 대상 커밋의 backend 마이그레이션 경로 목록. 이미지에는 .git 이 없어
+# 여기서 뽑아 넣는다. CODEMIT_MIGRATION_BASE 는 pr-check.yml 이 준다(PR·대기열·main push 각각의 base). 없으면
+# origin/main 과의 merge-base(로컬). 얕은 클론이면 그 커밋 하나만 받는다.
+mounts=()
+case "${1:-all}" in
+  all|static)
+    base="${CODEMIT_MIGRATION_BASE:-$(git merge-base HEAD origin/main 2>/dev/null || true)}"
+    if [ -n "$base" ] && { git cat-file -e "$base^{commit}" 2>/dev/null || git fetch -q --no-tags --depth=1 origin "$base"; }; then
+      git ls-tree -r --name-only "$base" -- backend | grep -E '^backend/[^/]+/migrations/[^/]+\.py$' >test-results/base-migrations.txt || true
+      mounts=(-v "$PWD/test-results/base-migrations.txt:/tmp/base-migrations.txt:ro")
+    else
+      echo "마이그레이션 호환 검사의 base(${base:-없음})를 받지 못했다 — 그 단계가 실패한다"
+    fi
+    ;;
+esac
+
 status=0
-docker run --name "$box" --network "$net" --env-file scripts/ci/backend-test.env -e CI=true \
-  "$image" bash scripts/ci/sub-checks-inside.sh "$@" || status=$?
+# CODEMIT_PYTEST_FILES(#1088): PR 의 선택 실행이 고른 시험 파일 — 없으면 전부(pytest_shards.py)
+docker run --name "$box" --network "$net" --env-file scripts/ci/backend-test.env -e CI=true -e CODEMIT_PYTEST_FILES \
+  ${mounts[@]+"${mounts[@]}"} "$image" bash scripts/ci/sub-checks-inside.sh "$@" || status=$?
 docker cp "$box:/repo/test-results/." test-results/ >/dev/null 2>&1 || true
 exit "$status"

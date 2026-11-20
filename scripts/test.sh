@@ -2,7 +2,7 @@
 # 로컬 시험의 입구 (2026-10-02). 전체 시험은 여기서 돌리지 않는다 — 브랜치 PR 의 CI 가 돌린다.
 #
 #   scripts/test.sh backend [pytest 인자…]      예) scripts/test.sh backend tests/test_refunds.py -q
-#   scripts/test.sh e2e [playwright 인자…]      예) scripts/test.sh e2e --project=operator e2e/operator/appeals.spec.ts
+#   scripts/test.sh e2e [playwright 인자…]      예) scripts/test.sh e2e --project=operator e2e/operator/appeals/appeals.spec.ts
 #
 # - 기계 전체에서 동시에 둘까지 — 셋째부터는 빈 칸을 기다린다(flock, 워크트리가 달라도 같은 칸을 센다).
 # - 한 칸은 호스트 코어의 1/3 을 고정해서 쓴다(이 머신 12코어면 4) — pytest·Playwright 는 taskset,
