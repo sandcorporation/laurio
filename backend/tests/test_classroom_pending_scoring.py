@@ -104,12 +104,16 @@ def test_pending_reason_priority_is_key_then_model(client, db):
     assert mine_out["submissions"][0]["pending_reason"] == "no_api_key"
 
 
-def test_pending_reasons_are_only_key_and_model():
-    """누적 토큰 상한 사유는 없다(#629) — 누적 사용량은 채점을 멈추지 않는다."""
+def test_pending_reasons_are_key_model_and_size():
+    """누적 토큰 상한 사유는 없다(#629) — 누적 사용량은 채점을 멈추지 않는다. 크기 초과(#989)는 시도마다다."""
 
     from classroom import pending_scoring
 
-    assert pending_scoring.REASONS == (pending_scoring.NO_API_KEY, pending_scoring.MODEL_REJECTED)
+    assert pending_scoring.REASONS == (
+        pending_scoring.NO_API_KEY,
+        pending_scoring.MODEL_REJECTED,
+        pending_scoring.SIZE_HELD,
+    )
 
 
 def test_scan_skips_a_submission_whose_screen_reason_is_model_rejected(client, db, monkeypatch):

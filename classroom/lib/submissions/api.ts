@@ -136,8 +136,9 @@ export type SubmissionStatus = "pending" | "scored";
 
 // "no_api_key"(#346) | "model_rejected"(#403) | `null`. `status`가 "pending"일 때만
 // 채워진다 — 강사가 채점 키를 아직 넣지 않았으면 "no_api_key", 키는 있는데 이 문제의
-// 채점 모델을 그 키로 못 쓰면 "model_rejected"다(#629 로 사유가 둘이 됐다).
-export type PendingReason = "no_api_key" | "model_rejected" | null;
+// 채점 모델을 그 키로 못 쓰면 "model_rejected"다(#629 로 사유가 둘이 됐다). "size_held"(#989)는 이 시도의
+// 채점 요청이 지금 채점 모델의 컨텍스트를 넘어 보류됐다는 뜻이다 — 강사가 모델을 바꾸면 다시 채점된다.
+export type PendingReason = "no_api_key" | "model_rejected" | "size_held" | null;
 
 export type ClassroomSubmissionRow = {
   id: number;

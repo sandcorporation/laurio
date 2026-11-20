@@ -119,3 +119,38 @@ def test_a_vendor_context_rejection_is_held_until_the_model_changes(client, db, 
     result = _run_scan_with_files(client, files)
 
     assert ClassroomScore.objects.filter(submission_id=ctx["submission_id"]).exists(), result
+
+
+def test_screens_say_size_held_until_the_model_changes(client, db, monkeypatch):
+    from tests.test_classroom_syntax_check_ai_fallback import _mine
+
+    files = {"app.py": "print('print가 있다')\n"}
+    ctx = _setup(client, files=files)
+    rejected = {"error": {"message": "too long", "type": "invalid_request_error", "code": "context_length_exceeded"}}
+    monkeypatch.setattr("core.llm_scoring.requests.post", lambda *a, **k: FakeVendorResponse(400, rejected))
+    _run_scan_with_files(client, files)
+    instructor = _login(client, uid="instructor-1")
+
+    def instructor_rows():
+        response = client.get(
+            f"{CLASSES_URL}/{ctx['class_id']}/problems/{ctx['problem_id']}/submissions",
+            **_auth_header(instructor["access"]),
+        )
+        assert response.status_code == 200, response.content
+        return response.json()
+
+    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    assert mine["submissions"][0]["pending_reason"] == "size_held"
+    rows = instructor_rows()
+    rows = rows["submissions"] if isinstance(rows, dict) else rows
+    assert rows[0]["pending_reason"] == "size_held"
+
+    client.patch(
+        f"{CLASSES_URL}/{ctx['class_id']}/problems/{ctx['problem_id']}",
+        data={"model": "gpt-4.1"},
+        content_type="application/json",
+        **_auth_header(instructor["access"]),
+    )
+
+    mine = _mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])
+    assert mine["submissions"][0]["pending_reason"] is None

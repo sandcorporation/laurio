@@ -83,7 +83,14 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
   if (submission.status === "pending") {
     return (
       <Badge tone={submission.pending_reason ? "warning" : "neutral"}>
-        {withLate(submission.pending_reason ? "채점 대기" : "채점 중", submission.late)}
+        {withLate(
+          submission.pending_reason === "size_held"
+            ? "크기 초과 보류"
+            : submission.pending_reason
+              ? "채점 대기"
+              : "채점 중",
+          submission.late,
+        )}
       </Badge>
     );
   }
@@ -281,6 +288,9 @@ export default function ProblemSubmissionsPage() {
   // 경고는 한 곳에서 한 줄(#670) — 둘이 겹치면 CONTEXT.md 「채점 대기」의 순서대로 키만 말한다.
   const blockedByRejectedModel =
     !blockedByMissingKey && submissions.some((s) => s.pending_reason === "model_rejected");
+  // 채점 요청이 지금 채점 모델의 컨텍스트를 넘어 보류된 시도(#989) — 키·모델 사유가 없을 때만 말한다.
+  const heldBySize =
+    !blockedByMissingKey && !blockedByRejectedModel && submissions.some((s) => s.pending_reason === "size_held");
 
   const rows = showAll ? submissions : latestPerMember(submissions);
   const entryAttempts = showAll ? null : currentEntryAttemptByMember(submissions);
@@ -334,6 +344,17 @@ export default function ProblemSubmissionsPage() {
             message="이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
             noteTestId="submissions-model-rejected-note"
             settingsLinkTestId="submissions-model-rejected-settings-link"
+            actionLabel="채점 모델 바꾸기"
+            settingsAnchor="scoring-model"
+          />
+        ) : null}
+
+        {heldBySize ? (
+          <MissingScoringKeyNote
+            classId={classId}
+            message="채점 모델의 컨텍스트보다 큰 시도가 있어 채점을 보류했습니다 — 컨텍스트가 큰 모델로 바꾸면 다시 채점합니다."
+            noteTestId="submissions-size-held-note"
+            settingsLinkTestId="submissions-size-held-settings-link"
             actionLabel="채점 모델 바꾸기"
             settingsAnchor="scoring-model"
           />
