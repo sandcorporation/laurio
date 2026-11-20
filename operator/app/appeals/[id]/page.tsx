@@ -169,6 +169,17 @@ export default function AppealDetailPage() {
             </div>
           </section>
 
+          {appeal.score === null ? (
+            // 「크기 초과」 보류 중에 낸 이의(#989 A2) — 채점이 없었다. 심사 종료 때 자동 0% 가 생긴다.
+            <section data-testid="appeal-detail-size-hold" className="border border-rule bg-surface">
+              <div className="border-b border-rule px-4 py-3 text-[14px] font-semibold">채점 결과</div>
+              <p className="px-4 py-3 text-[13.5px]">
+                <Badge tone="attention">채점 보류(크기 초과)</Badge>{" "}
+                제출 크기가 채점 모델의 컨텍스트를 넘어 AI가 채점하지 않았습니다 — 심사 종료 때 자동 0%가 됩니다.
+              </p>
+            </section>
+          ) : (
+          <>
           <section data-testid="appeal-detail-score" className="border border-rule bg-surface">
             <div className="border-b border-rule px-4 py-3 text-[14px] font-semibold">
               채점 결과
@@ -262,6 +273,8 @@ export default function AppealDetailPage() {
               }
             />
           </section>
+          </>
+          )}
         </div>
 
         <div className="flex flex-col gap-[18px] lg:w-[420px] lg:shrink-0">

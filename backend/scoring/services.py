@@ -62,6 +62,7 @@ from django.db.models import Count, Exists, OuterRef, Q, Subquery
 from django.db.models.functions import Coalesce
 
 from contests.models import Contest, ContestSubmission, Requirement
+from contests.scoring_hold import SIZE_HOLD_ERROR_PREFIX, is_size_held, size_held_filter  # noqa: F401 - 재노출
 from contests.submission_target_refs import source_target_ref
 from core.clock import Clock
 from core.llm_scoring import (
@@ -93,6 +94,7 @@ from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import (
     NO_SCORING_INPUT_MODEL_VERSION,
     PLATFORM_FAILURE_MODEL_VERSION,
+    SOURCE_TOO_LARGE_MODEL_VERSION,
 )
 
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
@@ -301,8 +303,12 @@ def _finalize_score(
     repository_snapshots: list[tuple[SubmissionAsset, str]] = (),
     repository_reachability_check: list[dict] = (),
     archived_source_assets: list[dict] = (),
+    notify: bool = True,
 ) -> dict:
     """Score(+RepositorySnapshot(+박제 소스 자료))를 한 트랜잭션으로 만들고 통지한다.
+
+    `notify=False` 는 「크기 초과」 자동 0%(#989 A2) 하나만 쓴다 — 보류가 정해질 때 이미 알렸고, 0% 가
+    생기는 심사 종료 시각에는 이의 창이 닫혀 「이의 기간이 시작됩니다」가 거짓이 된다.
 
     AI가 실제로 채점한 경우, #218의 자동 미달(채점 입력 0건), #222의 자동 미달
     (채점 실패 상한 도달)이 이 지점을 공유한다 — "Score 하나가 정확히 한 번
@@ -351,7 +357,8 @@ def _finalize_score(
     # 알림 실패가 채점을 되돌리면 안 된다. 이 함수는 절대 예외를 밖으로 던지지
     # 않는다는 계약을 갖고 있고(모듈 docstring), `_notify_scored` 가 그 계약을
     # 지킨다 — notifications 쪽의 `_safe_notify` 와 같은 규율이다.
-    _notify_scored(submission)
+    if notify:
+        _notify_scored(submission)
 
     return {"submission_id": submission.id, "status": "scored", "percentage": str(percentage)}
 
@@ -528,7 +535,7 @@ CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS = 180
 #: 채점 보류 표식(#986) — 앱 코드가 모델 컨텍스트에 다 들어가지 않는 제출의 `ScoringAttempt.error`
 #: 머리. 이 표식이 있는 제출은 채점 대기에서 빠지고(재시도·0% 확정 없음), `release_scoring_hold`
 #: 명령이 표식을 지워야 다시 고른다.
-SCORING_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
+SCORING_HOLD_ERROR_PREFIX = SIZE_HOLD_ERROR_PREFIX
 
 #: 사람이 보류를 푼 표식(#986, `release_scoring_hold`) — 보류 기록의 머리를 이것으로 바꾼다. 이
 #: 표식이 있는 제출은 앱 코드가 넘쳐도 실린 만큼으로 채점한다. 두 표식 모두 실패 상한의 횟수에
@@ -960,6 +967,7 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
                 )
                 logger.warning("Submission(pk=%s) %s", submission.id, reason)
                 ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+                notify_size_held(submission)
                 return {"submission_id": submission.id, "status": "held", "error": reason}
             if omission.any:
                 # 사람이 보류를 풀었다(`release_scoring_hold`) — 잘린 채 채점하되 빠진 양을 남긴다.
@@ -991,6 +999,7 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
                 reason = f"{SCORING_HOLD_ERROR_PREFIX} 채점 요청이 모델 컨텍스트를 넘어 채점을 보류한다 ({too_large})"
                 logger.warning("Submission(pk=%s) %s", submission.id, reason)
                 ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+                notify_size_held(submission)
                 return {"submission_id": submission.id, "status": "held", "error": reason}
             percentage = _percentage(requirements=requirements, verdicts=output.verdicts)
             model_version = output.model_version
@@ -1166,6 +1175,78 @@ def _notify_scored(submission: ContestSubmission) -> None:
 # 가시성 스캔의 재확인 주기(`repositories.services._STALE_AFTER`, 1시간)보다
 # 넉넉히 잡아 정상적인 비동기 지연은 이 안에서 끝나게 한다.
 _REPOSITORY_VISIBILITY_GRACE = timedelta(hours=2)
+
+
+
+# ---------------------------------------------------------------------------
+# 「크기 초과」 보류의 뒤처리(#989 A2) — 알림, 판별, 심사 종료 때 자동 0%.
+# ---------------------------------------------------------------------------
+
+def notify_size_held(submission: ContestSubmission) -> None:
+    """보류가 정해진 시점에 참가자에게 알린다(#989 A2, 대장 확정 #1446) — 제출마다 한 번.
+
+    심사 종료 때 0% 로 바뀔 때 알리면 이의 창이 이미 닫혀 있다. 그래서 지금 알리고, 유료 공모전은
+    심사 종료 전까지 이의를 낼 수 있다(`appeals.api.create_appeal`). 어떤 예외도 채점 흐름에 던지지 않는다.
+    """
+
+    try:
+        from notifications.models import NotificationType
+        from notifications.services import notify_once
+
+        contest = submission.contest
+        notify_once(
+            recipient=submission.developer.user,
+            notification_type=NotificationType.SCORING_HELD_SIZE,
+            dedup_context={"submission_id": submission.id},
+            context={
+                "contest_id": submission.contest_id,
+                "contest_title": contest.title,
+                "is_free": contest.is_free,
+                "judging_ends_at": contest.judging_ends_at.isoformat() if contest.judging_ends_at else None,
+            },
+        )
+    except Exception:  # noqa: BLE001 - 알림 실패가 채점을 되돌리면 안 된다.
+        logger.exception("Submission(pk=%s) 「크기 초과」 보류 알림 실패 — 보류는 그대로다", submission.id)
+
+
+_SOURCE_TOO_LARGE_REASONING = (
+    "제출 크기가 채점 모델의 컨텍스트를 넘어 채점을 보류했고, 심사 종료까지 풀리지 않았다 — AI가 "
+    "판정하지 않았다(#989)."
+)
+
+
+def _size_hold_expiry_candidates(as_of, ctx):
+    return ContestSubmission.objects.filter(
+        size_held_filter(), contest__judging_ends_at__lte=as_of
+    ).select_related("contest")
+
+
+def _expire_size_hold(submission: ContestSubmission, as_of, ctx) -> dict | None:
+    """심사가 끝난 「크기 초과」 보류 제출에 자동 0% Score 를 남긴다(#989 A2).
+
+    `contest-judging-end` 전이와 같은 시각(`judging_ends_at`)에 돈다. 전이 스캔에 붙이지 않은 까닭은
+    개최자가 먼저 선정해 `AWARDED` 로 간 공모전은 그 전이를 지나지 않기 때문이다. Score 는 unique 라
+    두 번 돌아도 하나다(`_finalize_score` 의 IntegrityError 분기).
+    """
+
+    result = _finalize_score(
+        submission,
+        percentage=Decimal("0.00"),
+        model_version=SOURCE_TOO_LARGE_MODEL_VERSION,
+        prompt=_SOURCE_TOO_LARGE_REASONING,
+        reasoning_payload=_all_unmet_reasoning(submission, reasoning=_SOURCE_TOO_LARGE_REASONING),
+        scored_assets_payload=[],
+        notify=False,
+    )
+    return result if result.get("status") == "scored" else None
+
+
+SIZE_HOLD_EXPIRY_SCAN = ScanSpec(
+    name="scoring-size-hold-expiry",
+    candidates=_size_hold_expiry_candidates,
+    handle_row=_expire_size_hold,
+    batch_size=200,
+)
 
 
 def _pending_submissions(as_of, ctx):

@@ -21,8 +21,10 @@ import {
   useAppealPage,
   type Appeal,
   type OwnScore,
+  type ScoringHold,
   type SourceReading,
 } from "@/lib/appeals/use-appeal-page";
+import { supportEmail } from "@/lib/legal/contact";
 import { HiddenSummaryLine, modelLineOf } from "@/lib/submissions/score-summary";
 import { formatPoints, formatQualityTotal, type SubmissionQuality } from "@/lib/submissions/quality";
 import { badgeClass } from "@/lib/ui/classnames";
@@ -60,6 +62,18 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
         <ErrorNote>
           <span data-testid="appeal-error">채점 결과를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.</span>
         </ErrorNote>
+      ) : state.score === null && state.hold ? (
+        // 「크기 초과」 보류(#989 A2) — Score 는 심사 종료 때 자동 0% 로 생긴다. 유료 공모전은 그 전까지
+        // 이의를 낼 수 있다(대장 확정 #1446).
+        <>
+          <HeldSection hold={state.hold} />
+          {state.appeal ? (
+            <ExistingAppeal appeal={state.appeal} />
+          ) : state.hold.can_appeal ? (
+            <AppealForm submissionId={submissionId} onSubmitted={reload} />
+          ) : null}
+          <ReadingsSection readings={state.readings} failed={state.readingsFailed} />
+        </>
       ) : state.score === null ? (
         // 채점 전이다. 이의를 걸 대상이 아직 없다 — 실패가 아니라 순서다.
         <p className="mt-6" data-testid="appeal-not-scored">
@@ -72,6 +86,10 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
           {state.score.quality ? <QualitySection quality={state.score.quality} /> : null}
           {state.appeal ? (
             <ExistingAppeal appeal={state.appeal} />
+          ) : state.score.is_free && state.score.scoring_basis === "source_too_large" ? (
+            <p className="mt-8 text-ink/60" data-testid="appeal-size-hold-contact">
+              <ContactSentence />
+            </p>
           ) : state.score.is_free ? (
             // 무료 공모전(#417, ADR-0048)에는 이의제기 절차 자체가 없다 —
             // 「기한이 지났다」(아래 appeal-closed 분기)와는 다른 사실이라
@@ -81,6 +99,10 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
             </p>
           ) : state.score.can_appeal ? (
             <AppealForm submissionId={submissionId} onSubmitted={reload} />
+          ) : state.score.scoring_basis === "source_too_large" ? (
+            <p className="mt-8 text-ink/60" data-testid="appeal-closed">
+              이의 신청 기간은 심사 종료와 함께 끝났습니다.
+            </p>
           ) : (
             // **폼이 없는 이유를 말한다.** 버튼이 그냥 없으면 "왜 없지"가
             // 남고, 사용자는 자기 잘못인지 고장인지 모른다. 낼 수 있는지는
@@ -93,6 +115,37 @@ export default function AppealPage({ params }: { params: Promise<{ submissionId:
         </>
       )}
     </PageShell>
+  );
+}
+
+function ContactSentence() {
+  const email = supportEmail();
+  return <>채점 결과에 문제가 있다고 생각하면 {email ? `문의처(${email})` : "문의처"}로 알려 주세요.</>;
+}
+
+function HeldSection({ hold }: { hold: ScoringHold }) {
+  const ends = hold.judging_ends_at ? new Date(hold.judging_ends_at).toLocaleString("ko-KR") : "미정";
+  return (
+    <section className="mt-6 flex flex-col gap-2" data-testid="appeal-size-hold">
+      <p>
+        <span className={badgeClass("attention")} data-testid="appeal-size-hold-badge">
+          채점 보류(크기 초과)
+        </span>
+      </p>
+      <p data-testid="appeal-size-hold-text">
+        제출 크기가 채점 한도를 넘어 채점이 보류되었습니다.{" "}
+        {hold.is_free ? (
+          <>
+            심사 종료({ends}) 때 0점으로 처리됩니다. <ContactSentence />
+          </>
+        ) : (
+          <>
+            심사 종료({ends}) 때 필수 요건 전체 미달(0점)로 처리됩니다.
+            {hold.can_appeal ? " 그 전까지 이의를 신청할 수 있습니다." : null}
+          </>
+        )}
+      </p>
+    </section>
   );
 }
 

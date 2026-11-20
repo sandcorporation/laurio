@@ -15,8 +15,10 @@ class ScoringConfig(AppConfig):
         from core.scans import register_scan
 
         from .quality import SUBMISSION_QUALITY_SCAN
-        from .services import SUBMISSION_SCORING_SCAN
+        from .services import SIZE_HOLD_EXPIRY_SCAN, SUBMISSION_SCORING_SCAN
 
         register_scan(SUBMISSION_SCORING_SCAN)
+        # 「크기 초과」 보류가 심사 종료까지 풀리지 않으면 자동 0%(#989 A2).
+        register_scan(SIZE_HOLD_EXPIRY_SCAN)
         # 완성도 스캔(#884, ADR-0072) — Score 가 생긴 제출을 뒤따라 집는다. Score 흐름과 따로 돈다.
         register_scan(SUBMISSION_QUALITY_SCAN)

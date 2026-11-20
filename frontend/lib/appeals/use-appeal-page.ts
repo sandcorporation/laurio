@@ -20,6 +20,7 @@ import { bffClient } from "@/lib/bff/client";
 export type OwnScore = components["schemas"]["OwnScoreOut"];
 export type Appeal = components["schemas"]["AppealOut"];
 export type SourceReading = components["schemas"]["SourceReadingOut"];
+export type ScoringHold = components["schemas"]["ScoringHoldOut"];
 
 export type AppealPageState =
   | { status: "loading" }
@@ -28,6 +29,8 @@ export type AppealPageState =
       status: "ready";
       /** 채점 전이면 없다 — 그때는 이의를 제기할 것 자체가 없다. */
       score: OwnScore | null;
+      /** 채점 전인데 「크기 초과」 보류면(#989 A2) 그 사유 — 보류가 아니면 없다. */
+      hold: ScoringHold | null;
       /** 이미 제기했으면 그 이의. 없으면 폼을 준다. */
       appeal: Appeal | null;
       readings: SourceReading[];
@@ -60,14 +63,28 @@ export function useAppealPage(submissionId: string): {
         if (cancelled) return;
         // 404 는 실패가 아니다 — "아직 채점 안 됐다"·"아직 이의가 없다"는 둘 다 정상적인
         // 사실이다. 그 밖의 실패(403·500)는 화면 전체가 실패한 것이다.
-        if (!score.ok && score.status !== 404) return setState({ status: "error" });
-        if (!appeal.ok && appeal.status !== 404) return setState({ status: "error" });
-        setState({
-          status: "ready",
-          score: score.ok ? score.data : null,
-          appeal: appeal.ok ? appeal.data : null,
-          readings: readings.ok ? readings.data.items : [],
-          readingsFailed: !readings.ok,
+        if (!score.ok && score.status !== 404)
+          return setState({ status: "error" });
+        if (!appeal.ok && appeal.status !== 404)
+          return setState({ status: "error" });
+        // 채점 전이면 보류인지 묻는다(#989 A2) — 404 는 「보류도 아니다」(그냥 채점 대기)다.
+        const holdRequest: Promise<ApiResult<ScoringHold> | null> = score.ok
+          ? Promise.resolve(null)
+          : bffClient.get<ScoringHold>(
+              `/api/backend/submissions/${submissionId}/scoring-hold`,
+            );
+        void holdRequest.then((hold) => {
+          if (cancelled) return;
+          if (hold && !hold.ok && hold.status !== 404)
+            return setState({ status: "error" });
+          setState({
+            status: "ready",
+            hold: hold && hold.ok ? hold.data : null,
+            score: score.ok ? score.data : null,
+            appeal: appeal.ok ? appeal.data : null,
+            readings: readings.ok ? readings.data.items : [],
+            readingsFailed: !readings.ok,
+          });
         });
       },
     );
@@ -85,6 +102,9 @@ export async function submitAppeal(
   submissionId: string,
   reason: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const result = await bffClient.post(`/api/backend/submissions/${submissionId}/appeal`, { reason });
+  const result = await bffClient.post(
+    `/api/backend/submissions/${submissionId}/appeal`,
+    { reason },
+  );
   return result.ok ? { ok: true } : { ok: false, message: result.detail };
 }

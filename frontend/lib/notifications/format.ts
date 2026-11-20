@@ -6,9 +6,14 @@
 // 공유한다 — 문구 내용까지 공유하지 않는다.
 import type { NotificationOut } from "./types";
 
-export function describeNotification(notification: NotificationOut): string {
+/** `supportEmail` 은 무료 공모전 「크기 초과」 보류 문구의 문의처(#989 A2) — 화면이 `lib/legal/contact` 에서 준다. */
+export function describeNotification(
+  notification: NotificationOut,
+  { supportEmail = null }: { supportEmail?: string | null } = {},
+): string {
   const context = (notification.context ?? {}) as Record<string, unknown>;
-  const contestTitle = typeof context.contest_title === "string" ? context.contest_title : "";
+  const contestTitle =
+    typeof context.contest_title === "string" ? context.contest_title : "";
 
   switch (notification.notification_type) {
     case "deadline_reminder":
@@ -29,6 +34,19 @@ export function describeNotification(notification: NotificationOut): string {
       return `참가하신 '${contestTitle}' 공모전에서 수상하셨습니다!`;
     case "scoring_complete":
       return `제출하신 '${contestTitle}' 공모전 채점이 완료됐습니다 — 이의제기 기간이 시작됩니다.`;
+    case "scoring_held_size": {
+      // 대장 확정 #1446 의 문구(#989 A2). 무료 공모전에는 이의가 없어 문의처를 안내한다.
+      const endsAt =
+        typeof context.judging_ends_at === "string"
+          ? context.judging_ends_at
+          : null;
+      const ends = endsAt ? new Date(endsAt).toLocaleString("ko-KR") : "미정";
+      const head = `제출하신 '${contestTitle}' 공모전의 제출 크기가 채점 한도를 넘어 채점이 보류되었습니다.`;
+      if (context.is_free === true) {
+        return `${head} 심사 종료(${ends}) 때 0점으로 처리됩니다. 채점 결과에 문제가 있다고 생각하면 ${supportEmail ? `문의처(${supportEmail})` : "문의처"}로 알려 주세요.`;
+      }
+      return `${head} 심사 종료(${ends}) 때 필수 요건 전체 미달(0점)로 처리됩니다. 그 전까지 이의를 신청할 수 있습니다.`;
+    }
     case "contest_updated":
       return `참가하신 '${contestTitle}' 공모전의 내용이 바뀌었습니다 — 바뀐 조건을 확인해주세요.`;
     case "appeal_ruled":
@@ -36,11 +54,16 @@ export function describeNotification(notification: NotificationOut): string {
     case "new_contest_in_category":
       return `관심 카테고리에 새 공모전 '${contestTitle}'이(가) 등록됐습니다.`;
     case "payout_awaits_you": {
-      const message = typeof context.message === "string" ? context.message : "";
-      return message || "지급 절차에 확인이 필요합니다 — codemit에서 확인해주세요.";
+      const message =
+        typeof context.message === "string" ? context.message : "";
+      return (
+        message || "지급 절차에 확인이 필요합니다 — codemit에서 확인해주세요."
+      );
     }
     case "operator_notice":
-      return notification.title ? `운영팀 알림: ${notification.title}` : "운영팀 알림이 도착했습니다.";
+      return notification.title
+        ? `운영팀 알림: ${notification.title}`
+        : "운영팀 알림이 도착했습니다.";
     // 강의실 알림 둘(#301, #303)은 여기 나타나지 않는다 — 백엔드 `GET
     // /notifications/me`의 기본값(공개 앱이 쓰는 값)이 그 유형들을 아예
     // 빼고 준다(#345, `backend/notifications/api.py`의 `_scope_by_classroom`).

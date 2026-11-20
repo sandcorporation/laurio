@@ -47,7 +47,11 @@ from core.quality_review import (
 from core.scans import ScanSpec
 from core.agent_run_tokens import RunTokenRefused
 from policies.runtime_settings import SCORING_METHOD_AGENT, contest_quality_review_enabled, contest_scoring_method
-from submissions.scoring_basis import NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION
+from submissions.scoring_basis import (
+    NO_SCORING_INPUT_MODEL_VERSION,
+    PLATFORM_FAILURE_MODEL_VERSION,
+    SOURCE_TOO_LARGE_MODEL_VERSION,
+)
 
 from .agent_runner import AgentGraderBusy
 from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentVendorRefused, note_scan_refusal, scan_refusal
@@ -63,7 +67,11 @@ QUALITY_FAILURE_LIMIT = 5
 HELD_ERROR_PREFIX = "보류(받아들이는 조건 불일치): "
 
 #: AI 가 소스를 읽지 않은 자동 0% Score 들 — 완성도를 매기지 않는다.
-SKIPPED_SCORE_MODEL_VERSIONS = (NO_SCORING_INPUT_MODEL_VERSION, PLATFORM_FAILURE_MODEL_VERSION)
+SKIPPED_SCORE_MODEL_VERSIONS = (
+    NO_SCORING_INPUT_MODEL_VERSION,
+    PLATFORM_FAILURE_MODEL_VERSION,
+    SOURCE_TOO_LARGE_MODEL_VERSION,
+)
 
 #: 공모전엔 채점 지침 입력이 없다 — 지침 자리에 이 고정 문장을 둔다.
 _CONTEST_GUIDELINE = "별도 지침 없음 — 체크리스트 문구 그대로 판단한다."

@@ -302,6 +302,17 @@ class ScoredAssetOut(Schema):
     commit_sha: str | None = None
 
 
+class ScoringHoldOut(Schema):
+    """참가자 본인 제출의 「크기 초과」 채점 보류(#989 A2) — Score 가 없을 때 이의 화면이 묻는다."""
+
+    #: 지금은 하나뿐이다 — 제출 크기가 채점 모델의 컨텍스트를 넘었다.
+    reason: str = "size"
+    is_free: bool
+    #: 이 시각에 자동 0% 가 된다. 유료 공모전은 그 전까지 이의를 낼 수 있다.
+    judging_ends_at: datetime | None
+    can_appeal: bool
+
+
 class OwnScoreOut(Schema):
     """Developer 가 자기 Submission 의 채점 결과를 볼 때 받는 것 (#74).
 

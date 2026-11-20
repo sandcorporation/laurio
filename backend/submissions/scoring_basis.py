@@ -49,6 +49,10 @@ NO_SCORING_INPUT_MODEL_VERSION = "platform-auto (채점 입력 없음)"
 #: 주체가 위 값과 정반대다(참가자가 아니라 플랫폼).
 PLATFORM_FAILURE_MODEL_VERSION = "platform-auto (채점 실패 상한)"
 
+#: #989 A2 의 자동 미달 Score 가 남기는 값 — 제출 크기가 채점 모델의 컨텍스트를 넘어
+#: 채점을 보류했고(`scoring.services.SCORING_HOLD_ERROR_PREFIX`), 심사 종료까지 풀리지 않았다.
+SOURCE_TOO_LARGE_MODEL_VERSION = "platform-auto (채점 입력 크기 초과)"
+
 
 class ScoringBasis(str, Enum):
     """참가자 응답이 채점의 성격을 기계가 읽을 수 있는 값으로 말한다(#246 AC).
@@ -66,6 +70,8 @@ class ScoringBasis(str, Enum):
     NO_SCORING_INPUT = "no_scoring_input"
     #: 플랫폼 귀책(ADR-0031) — 채점이 반복 실패해 상한에 도달했다.
     PLATFORM_FAILURE = "platform_failure"
+    #: 크기 초과(#989 A2) — 제출이 채점 한도를 넘어 보류된 채 심사가 끝났다.
+    SOURCE_TOO_LARGE = "source_too_large"
 
 
 def scoring_basis_for(model_version: str) -> ScoringBasis:
@@ -77,6 +83,8 @@ def scoring_basis_for(model_version: str) -> ScoringBasis:
         return ScoringBasis.NO_SCORING_INPUT
     if model_version == PLATFORM_FAILURE_MODEL_VERSION:
         return ScoringBasis.PLATFORM_FAILURE
+    if model_version == SOURCE_TOO_LARGE_MODEL_VERSION:
+        return ScoringBasis.SOURCE_TOO_LARGE
     return ScoringBasis.AI_JUDGED
 
 
@@ -93,6 +101,10 @@ _PARTICIPANT_FACING_REASONING: dict[ScoringBasis, str] = {
         "채점이 반복적으로 실패해 플랫폼이 자동으로 미달 처리했습니다. AI가 이 "
         "제출을 심사하지 않았고, 참가자의 책임이 아닙니다. 이 결과에 이의를 "
         "제기할 수 있습니다."
+    ),
+    ScoringBasis.SOURCE_TOO_LARGE: (
+        "제출 크기가 채점 한도를 넘어 AI가 이 제출을 채점하지 못했고, 심사 종료와 함께 "
+        "필수 요건 전체 미달로 처리되었습니다."
     ),
 }
 

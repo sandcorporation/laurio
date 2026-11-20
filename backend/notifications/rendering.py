@@ -66,6 +66,20 @@ def render_message(notification: Notification) -> str:
             "이의제기 기간이 시작됩니다 — codemit에서 확인하세요."
         )
 
+    if notification_type == NotificationType.SCORING_HELD_SIZE:
+        # 대장 확정 #1446 의 문구. 무료 공모전에는 이의가 없어 문의처를 안내한다 — 이메일 주소는
+        # 공개 앱 설정값(`CODEMIT_PUBLIC_SUPPORT_EMAIL`)에만 있어 문자에는 자리만 말한다.
+        ends = _judging_end_label(context.get("judging_ends_at"))
+        head = f"{_BRAND_PREFIX} 제출하신 '{contest_title}' Contest의 제출 크기가 채점 한도를 넘어 채점이 보류되었습니다. "
+        if context.get("is_free"):
+            return (
+                head + f"심사 종료({ends}) 때 0점으로 처리됩니다. 채점 결과에 문제가 있다고 생각하면 "
+                "codemit 개인정보 처리방침의 문의처로 알려 주세요."
+            )
+        return (
+            head + f"심사 종료({ends}) 때 필수 요건 전체 미달(0점)로 처리됩니다. 그 전까지 이의를 신청할 수 있습니다."
+        )
+
     if notification_type == NotificationType.CONTEST_UPDATED:
         return (
             f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest의 내용이 바뀌었습니다. "
@@ -92,3 +106,18 @@ def render_message(notification: Notification) -> str:
             return f"{_BRAND_PREFIX} {message}"
 
     return f"{_BRAND_PREFIX} 새 알림이 있습니다. codemit에서 확인하세요."
+
+
+def _judging_end_label(value) -> str:
+    """심사 종료 시각(ISO 문자열)을 한국 시각 「11월 30일 18:00」으로 — 값이 없거나 읽을 수 없으면 「미정」."""
+
+    if not value:
+        return "미정"
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    try:
+        at = datetime.fromisoformat(str(value)).astimezone(ZoneInfo("Asia/Seoul"))
+    except ValueError:
+        return "미정"
+    return f"{at.month}월 {at.day}일 {at:%H:%M}"

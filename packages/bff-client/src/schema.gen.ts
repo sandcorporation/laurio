@@ -4803,6 +4803,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/submissions/{submission_id}/scoring-hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Scoring Hold
+         * @description Developer 가 자기 제출의 「크기 초과」 채점 보류를 본다(#989 A2).
+         *
+         *     `/score` 가 404(아직 채점되지 않았다)일 때 이의 화면이 이것을 묻는다 — 보류면 사유와 심사 종료
+         *     시각, 그리고 유료 공모전이면 이의를 낼 수 있는지를 준다. 보류가 아니면 404.
+         */
+        get: operations["contests_submission_api_get_own_scoring_hold"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/submissions/{submission_id}/source-readings": {
         parameters: {
             query?: never;
@@ -4994,7 +5017,7 @@ export interface components {
             ruling?: components["schemas"]["RulingOut"] | null;
             /** Ruling Note */
             ruling_note: string;
-            score: components["schemas"]["ScoreSnapshotOut"];
+            score: components["schemas"]["ScoreSnapshotOut"] | null;
             /** Status */
             status: string;
             /** Submission Id */
@@ -7789,7 +7812,7 @@ export interface components {
          * @description Developer 가 지금 무엇을 해야 하는가 — 또는 무엇을 기다리는가.
          * @enum {string}
          */
-        NextAction: "awaiting_scoring" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "awarded" | "retry_transfer" | "awaiting_transfer_resolution";
+        NextAction: "awaiting_scoring" | "scoring_held_size" | "awaiting_judging" | "awaiting_appeal_ruling" | "awaiting_distribution" | "awaiting_handover_release" | "awaiting_seller_registration" | "can_edit_submission" | "needs_reverification" | "can_appeal" | "request_payout" | "submit_tax_identity" | "not_selected" | "payout_complete" | "awarded" | "retry_transfer" | "awaiting_transfer_resolution";
         /** NotificationOut */
         NotificationOut: {
             /** Body */
@@ -7842,7 +7865,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -9402,7 +9425,7 @@ export interface components {
          *     `tsc --noEmit`이 프론트의 누락된 분기를 잡는다.
          * @enum {string}
          */
-        ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure";
+        ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure" | "source_too_large";
         /**
          * ScoringCostAttemptOut
          * @description 시도 1건의 어림(#591) — 원화와 그 시도가 사용량에 더할 토큰. 호환 서버는 원화가 `None`(#604).
@@ -9479,6 +9502,23 @@ export interface components {
             ratio_to_baseline?: number | null;
             /** Reasoning Effort */
             reasoning_effort?: string | null;
+        };
+        /**
+         * ScoringHoldOut
+         * @description 참가자 본인 제출의 「크기 초과」 채점 보류(#989 A2) — Score 가 없을 때 이의 화면이 묻는다.
+         */
+        ScoringHoldOut: {
+            /** Can Appeal */
+            can_appeal: boolean;
+            /** Is Free */
+            is_free: boolean;
+            /** Judging Ends At */
+            judging_ends_at: string | null;
+            /**
+             * Reason
+             * @default size
+             */
+            reason: string;
         };
         /**
          * ScoringModelCatalogOut
@@ -17221,6 +17261,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OwnScoreOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    contests_submission_api_get_own_scoring_hold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringHoldOut"];
                 };
             };
             /** @description Forbidden */
