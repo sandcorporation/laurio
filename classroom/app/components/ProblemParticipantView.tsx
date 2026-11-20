@@ -691,7 +691,16 @@ function AttemptRow({
         </span>
         <span data-testid={`submission-row-${submission.id}-status`}>
           {submission.status === "pending" ? (
-            <Badge>{withLate(submission.pending_reason ? "채점 대기" : "채점 중", submission.late)}</Badge>
+            <Badge>
+              {withLate(
+                submission.pending_reason === "size_held"
+                  ? "채점 보류(크기 초과)"
+                  : submission.pending_reason
+                    ? "채점 대기"
+                    : "채점 중",
+                submission.late,
+              )}
+            </Badge>
           ) : (
             (() => {
               const kind = stampKind(submission.passed, submission.perfect);
@@ -723,6 +732,11 @@ function AttemptRow({
             // 구별하지 않는다 — 강사가 설정을 고쳐야 풀리는 사유라 참여자에게는 같은 한 줄이다.
             <span data-testid={`submission-row-${submission.id}-no-api-key-note`} className="min-w-0 truncate">
               강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다
+            </span>
+          ) : null}
+          {submission.status === "pending" && submission.pending_reason === "size_held" ? (
+            <span data-testid={`submission-row-${submission.id}-size-held-note`} className="min-w-0 truncate">
+              강사가 확인합니다
             </span>
           ) : null}
           {scored ? (

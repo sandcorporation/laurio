@@ -53,7 +53,9 @@ def exclude_holds(queryset: QuerySet) -> QuerySet:
         queryset = queryset.exclude(error__startswith=prefix)
     return queryset
 MODEL_REJECTED = "model_rejected"
-REASONS = (NO_API_KEY, MODEL_REJECTED)
+#: 이 시도의 채점 요청이 지금 채점 모델의 컨텍스트를 넘어 보류됐다(#989) — 시도마다 다르다(위 둘은 클래스·문제 단위).
+SIZE_HELD = "size_held"
+REASONS = (NO_API_KEY, MODEL_REJECTED, SIZE_HELD)
 
 
 def blocking_reason(class_obj: Class, problem: Problem, *, ignore_pause: bool = False) -> str | None:
@@ -81,13 +83,42 @@ def can_be_scored(class_obj: Class, problem: Problem) -> bool:
     return blocking_reason(class_obj, problem) is None
 
 
-def pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
+def pending_reason(score, class_obj: Class, problem: Problem, *, size_held: bool = False) -> str | None:
     """참여자용 `.../mine`·강사용 제출 현황이 읽는 값(#346, #403) — 이미
-    채점됐으면(`score`가 있으면) 언제나 `None`이다."""
+    채점됐으면(`score`가 있으면) 언제나 `None`이다. `size_held` 는 그 시도가 「크기 초과」로 보류됐는가
+    (`with_size_held` 가 단 값, #989) — 키·모델 사유가 먼저다."""
 
     if score is not None:
         return None
-    return blocking_reason(class_obj, problem)
+    return blocking_reason(class_obj, problem) or (SIZE_HELD if size_held else None)
+
+
+def _size_held_exists() -> models.Exists:
+    """바깥 행(`ClassroomSubmission`, `held_scoring_model` 을 단)에 지금 채점 모델의 「크기 초과」 보류 기록이 있는가."""
+
+    return models.Exists(
+        ClassroomScoringAttempt.objects.filter(
+            submission=models.OuterRef("pk"),
+            error__startswith=Concat(
+                models.Value(f"{SIZE_HOLD_ERROR_PREFIX} model="),
+                models.OuterRef("held_scoring_model"),
+                models.Value(" "),
+                output_field=models.TextField(),
+            ),
+        )
+    )
+
+
+def with_size_held(queryset: QuerySet[ClassroomSubmission]) -> QuerySet[ClassroomSubmission]:
+    """시도마다 `size_held`(지금 채점 모델 — 문제 모델, 비면 클래스 기본 모델 — 로 「크기 초과」 보류됐는가)를
+    단다(#989). 스캔 후보(`pending_submissions`)와 화면(`pending_reason`)이 같은 식을 쓴다."""
+
+    return queryset.annotate(
+        held_scoring_model=models.Case(
+            models.When(problem__model="", then=models.F("problem__classroom__default_model")),
+            default=models.F("problem__model"),
+        )
+    ).annotate(size_held=_size_held_exists())
 
 
 def needs_setup(class_obj: Class, problem: Problem) -> bool:
@@ -133,9 +164,9 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
     )
 
     return (
-        ClassroomSubmission.objects.filter(
-            classroom_score__isnull=True,
-        )
+        with_size_held(ClassroomSubmission.objects.filter(classroom_score__isnull=True))
+        # 「크기 초과」 보류(#989) — 그 모델이 지금도 이 문제의 채점 모델이면 다시 돌리지 않는다.
+        .exclude(size_held=True)
         # 채점 연결이 없는 클래스 — `Class.has_scoring_key` 와 같은 기준(호환 서버는 주소로, #601).
         .exclude(
             models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)
@@ -154,26 +185,6 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
             models.Exists(
                 ClassroomScoringAttempt.objects.filter(
                     submission=models.OuterRef("pk"), error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX
-                )
-            )
-        )
-        # 「크기 초과」 보류(#989) — 그 모델이 지금도 이 문제의 채점 모델이면 다시 돌리지 않는다.
-        .annotate(
-            scoring_model=models.Case(
-                models.When(problem__model="", then=models.F("problem__classroom__default_model")),
-                default=models.F("problem__model"),
-            )
-        )
-        .exclude(
-            models.Exists(
-                ClassroomScoringAttempt.objects.filter(
-                    submission=models.OuterRef("pk"),
-                    error__startswith=Concat(
-                        models.Value(f"{SIZE_HOLD_ERROR_PREFIX} model="),
-                        models.OuterRef("scoring_model"),
-                        models.Value(" "),
-                        output_field=models.TextField(),
-                    ),
                 )
             )
         )

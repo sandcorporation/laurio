@@ -951,7 +951,7 @@ class ClassroomSubmissionOut(Schema):
     passed: bool = False
     #: 이 시도 하나가 「완벽」인가(#962) — 필수·심화 전부 충족. 심화 항목이 없는 문제는 `None`.
     perfect: bool | None = None
-    #: "no_api_key" | "model_rejected" | `None` — `classroom.pending_scoring.pending_reason`이
+    #: "no_api_key" | "model_rejected" | "size_held"(#989, 시도마다) | `None` — `classroom.pending_scoring.pending_reason`이
     #: 이 우선순위(키 → 모델)로 정한다(#434, #629). `status`가 "pending"일 때만 채워진다 —
     #: 강사가 채점 키를 아직 설정하지 않았으면(#346) "no_api_key", 키는 멀쩡한데 이 문제의
     #: 채점 모델을 그 키로 못 쓰면(#403) "model_rejected"다. 둘 다 참여자가 스스로 어쩔 수

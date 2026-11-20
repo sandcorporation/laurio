@@ -777,7 +777,7 @@ def _hidden_items_of(checklist_items) -> dict[int, str]:
     return {i.id: i.grade for i in checklist_items if i.hidden}
 
 
-def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
+def _pending_reason(score, class_obj: Class, problem: Problem, submission=None) -> str | None:
     """아직 채점되지 않은 시도가 왜 멈춰 있는지(#346, #355, #403, #434) —
     참여자·강사 화면 모두 이 값 하나를 읽어 다르게 그린다.
     `classroom.pending_scoring.pending_reason`에 그대로 맡긴다 — 스캔 후보
@@ -789,7 +789,10 @@ def _pending_reason(score, class_obj: Class, problem: Problem) -> str | None:
     — 강사의 계정·설정 문제가 참여자에게 새어 나가지 않는다, 강사 전용
     화면(설정·시도 목록·클래스 상세 배너)만 다르게 말한다."""
 
-    return pending_scoring.pending_reason(score, class_obj, problem)
+    # 「크기 초과」 보류(#989)는 시도마다다 — 질의가 `pending_scoring.with_size_held` 로 단 값을 읽는다.
+    return pending_scoring.pending_reason(
+        score, class_obj, problem, size_held=bool(getattr(submission, "size_held", False))
+    )
 
 
 def _serialize_classroom_submission(
@@ -805,7 +808,7 @@ def _serialize_classroom_submission(
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
     score = getattr(submission, "classroom_score", None)
-    pending_reason = _pending_reason(score, class_obj, problem)
+    pending_reason = _pending_reason(score, class_obj, problem, submission)
     if checklist_items is None:
         checklist_items = list(problem.checklist_items.all())
     # 참여자(그리고 「참여자로 보기」의 강사) 응답 — 숨은 항목은 근거 없이 개수·충족 수만(#906).
@@ -880,7 +883,7 @@ def _serialize_instructor_submission(
         score=_serialize_score(score) if score is not None else None,
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         perfect=_attempt_perfect(problem, score, checklist_items),
-        pending_reason=_pending_reason(score, class_obj, problem),
+        pending_reason=_pending_reason(score, class_obj, problem, submission),
         contest_entry=contest_entry_out(submission),
         is_current_contest_entry=marks is not None and submission.id in marks.current,
         late=problem.lateness(submission.created_at),
@@ -2467,7 +2470,7 @@ def _serialize_own_submissions(problem, member, user, checklist_items) -> list:
     if member is None:
         return []
     submissions = (
-        ClassroomSubmission.objects.filter(problem=problem, member=member)
+        pending_scoring.with_size_held(ClassroomSubmission.objects.filter(problem=problem, member=member))
         .select_related("classroom_score").defer(*_SCORE_PROMPT)
         .prefetch_related("assets")
         .order_by("-attempt_number")
@@ -2794,7 +2797,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
     checklist_items = list(problem.checklist_items.all())
 
     submissions = (
-        ClassroomSubmission.objects.filter(problem=problem)
+        pending_scoring.with_size_held(ClassroomSubmission.objects.filter(problem=problem))
         .select_related("classroom_score", "member")
         .prefetch_related("assets")
         .order_by("member__display_name", "-attempt_number")

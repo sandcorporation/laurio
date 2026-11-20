@@ -52,6 +52,7 @@ from core.source_selection import is_excluded_path
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 
+from . import pending_scoring
 from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pass_stats
 from .contest_entries import entry_marks
 from .instructor_scope import class_scope, problem_scope
@@ -116,7 +117,7 @@ def _latest_attempt(submission: ClassroomSubmission, class_obj, problem, checkli
         "late": problem.lateness(submission.created_at),
         "status": "scored" if score is not None else "pending",
         "passed": problem.is_score_passed(score, checklist_items=checklist_items),
-        "pending_reason": _pending_reason(score, class_obj, problem),
+        "pending_reason": _pending_reason(score, class_obj, problem, submission),
         "met_count": None,
         "item_count": None,
         "verdicts": [],
@@ -167,7 +168,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
     marks = entry_marks(problems)
     submissions_by_key: dict[tuple[int, int], list[ClassroomSubmission]] = {}
     for submission in (
-        ClassroomSubmission.objects.filter(problem__in=problems, member__in=members)
+        pending_scoring.with_size_held(ClassroomSubmission.objects.filter(problem__in=problems, member__in=members))
         .select_related("classroom_score")
         .order_by("-attempt_number")
     ):
