@@ -9794,6 +9794,11 @@ export interface components {
             next_action?: components["schemas"]["NextAction"] | null;
             /** Requirement Responses */
             requirement_responses: components["schemas"]["RequirementResponseOut"][];
+            /**
+             * Scoring Size Warning
+             * @default false
+             */
+            scoring_size_warning: boolean;
             /** Source Access Consent At */
             source_access_consent_at?: string | null;
             /**

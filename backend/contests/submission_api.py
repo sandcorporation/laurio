@@ -65,6 +65,7 @@ from policies.services import get_current_policy
 from core.quality_review import quality_view
 from scoring.models import SubmissionBonusScore
 from scoring.quality import bonus_scores, ranked_reviews
+from scoring.services import upload_source_over_budget
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename
 from storage.policy import get_download_ttl_resolver
@@ -999,6 +1000,12 @@ def _serialize(
 # --- 엔드포인트 ---------------------------------------------------------------
 
 
+def _scoring_size_warning(submission: ContestSubmission) -> bool:
+    """올린 소스가 채점 한도를 넘겠는가(#989 B) — 저장을 막지 않는 참고 알림이다."""
+
+    return upload_source_over_budget(submission)
+
+
 @router.post(
     "/contests/{contest_id}/submissions", response={201: SubmissionOut}, auth=jwt_auth
 )
@@ -1047,9 +1054,11 @@ def create_submission(request: HttpRequest, contest_id: int, payload: Submission
         raise HttpError(409, "이미 제출한 적이 있습니다.") from exc
 
     submission.refresh_from_db()
-    return 201, _serialize(
+    out = _serialize(
         submission, contest=contest, is_owner=True, is_sponsor=False, past_deadline=False
     )
+    out.scoring_size_warning = _scoring_size_warning(submission)
+    return 201, out
 
 
 @router.put(
@@ -1098,9 +1107,11 @@ def update_submission(request: HttpRequest, contest_id: int, payload: Submission
         )
 
     submission.refresh_from_db()
-    return 200, _serialize(
+    out = _serialize(
         submission, contest=contest, is_owner=True, is_sponsor=False, past_deadline=False
     )
+    out.scoring_size_warning = _scoring_size_warning(submission)
+    return 200, out
 
 
 @router.get(

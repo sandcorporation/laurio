@@ -64,6 +64,10 @@ class SubmissionOut(Schema):
     next_action: NextAction | None = None
     # 무료 공모전 소스 열람 동의 시각(#416) — 유료 공모전이면 항상 null이다.
     source_access_consent_at: datetime | None = None
+    # 제출·수정 저장 응답에만 실리는 참고 알림(#989 B) — 올린 소스가 채점 때 모델 컨텍스트에 다
+    # 들어가지 않겠다는 어림(`scoring.services.upload_source_over_budget`). 막지 않는다. 판정은
+    # 언제나 채점 시점이고, 저장소 자료는 재지 않는다. 조회(GET) 응답은 늘 false 다.
+    scoring_size_warning: bool = False
 
 
 class MyParticipationOut(Schema):
