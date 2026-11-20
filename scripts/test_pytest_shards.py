@@ -59,6 +59,12 @@ class JunitTest(unittest.TestCase):
                 durations_from_junit([one, two], self.FILES), {"tests/api/test_b.py": 2.0, "tests/test_a.py": 1.75}
             )
 
+    def test_file_with_no_cases_is_recorded_as_zero_not_average(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            one = Path(d, "1.xml")
+            one.write_text('<testsuite><testcase classname="tests.test_a.T" name="x" time="3"/></testsuite>')
+            self.assertEqual(durations_from_junit([one], self.FILES), {"tests/api/test_b.py": 0.0, "tests/test_a.py": 3.0})
+
 
 class RealTreeTest(unittest.TestCase):
     def test_backend_has_test_files_and_four_shards_cover_them(self) -> None:

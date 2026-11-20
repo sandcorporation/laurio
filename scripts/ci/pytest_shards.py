@@ -6,7 +6,7 @@
 
 조각은 파일 단위다. 시간이 긴 파일부터 지금까지 가장 가벼운 조각에 넣는다(같으면 앞 조각) — 같은
 파일 목록·기록이면 어느 실행기에서나 같은 조각이 나온다. 기록에 없는 파일(새 시험)은 기록된 파일의
-평균값으로 센다. 기록 갱신은 `scripts/ci/pytest-durations-update.sh`(main 실행의 junit 산출물을 받아
+평균값으로 센다(갱신 때 있던 파일은 junit 에 없으면 0). 기록 갱신은 `scripts/ci/pytest-durations-update.sh`(main 실행의 junit 산출물을 받아
 이 스크립트의 update 를 부른다)로 사람이 하고 커밋한다.
 """
 
@@ -53,7 +53,8 @@ def file_of(classname: str, files: set[str]) -> str | None:
 
 
 def durations_from_junit(paths: Iterable[Path], files: set[str]) -> dict[str, float]:
-    totals: dict[str, float] = {}
+    """파일별 시간 합. 지금 있는 파일인데 junit 에 없으면(기본 실행이 빼는 live 표식 시험 등) 0 — 평균으로 세지 않는다."""
+    totals: dict[str, float] = dict.fromkeys(files, 0.0)
     for path in paths:
         for case in ET.parse(path).getroot().iter("testcase"):
             f = file_of(case.get("classname", ""), files)
