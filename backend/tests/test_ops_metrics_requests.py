@@ -19,7 +19,7 @@ from ops_metrics import recorder, request_buffer
 from ops_metrics.flush import flush_closed_minutes, purge_old_minutes
 from ops_metrics.models import RequestMinute
 from ops_metrics.store import memory_store
-from tests.test_ops_metrics import OPS_URL, T0, _fields, _freeze, _operator_client
+from classroom.tests.test_ops_metrics import OPS_URL, T0, _fields, _freeze, _operator_client
 
 JOIN_ROUTE = "api/classroom/join/<join_code>"
 

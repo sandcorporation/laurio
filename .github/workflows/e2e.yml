@@ -1,7 +1,13 @@
-# e2e — main 을 매시 한 번 돈다(#1015). PR 검사·release 검사에서는 뺐다(PR 당 시간의 37%) — 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다.
-#   schedule           매시 정각 — main 기준. 직전 성공 실행이 같은 sha 를 이미 돌았으면 건너뛴다(`gate` 잡).
-#   workflow_dispatch  `gh workflow run e2e.yml --ref <브랜치>` — 브랜치에서도 돈다, 늘 돈다, 이슈는 만들지 않는다.
-# main 에서 붉으면 고정 제목 이슈를 열거나 댓글을 달고(직전 초록 sha … 이번 sha 비교 링크와 그 사이 커밋 포함), 초록이 되면 댓글을 달고 닫는다.
+# e2e 전부 — main 을 매시 한 번 돈다(#1111, 대표 결정 2026-11-20). PR 검사의 e2e 는 바뀐 앱의 것만 돌고 「결과」 필수,
+# 병합 대기열은 e2e 를 돌지 않는다 — 그 대가로 두 PR 이 함께 깨뜨린 화면은 최대 한 시간 main 에 있을 수 있다.
+# 본 저장소의 e2e.yml(#1015·#1020)을 되살린 꼴이다: gate(같은 sha 건너뜀)·알림 시험 입력·고정 제목 이슈(scripts/ci/ci-issue.sh).
+#   schedule           매시 — main 기준. 직전 schedule 실행이 같은 sha 를 초록으로 돌았으면 건너뛴다(`gate` 잡).
+#   workflow_dispatch  `gh workflow run e2e.yml --ref <브랜치>` — 브랜치에서도 돈다, 늘 돈다, 이슈는 만들지 않는다(main 의 알림 시험만).
+# 조각은 PR 검사와 같은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109). 이미지 층·pnpm 캐시는 복원만 한다(저장은 release.yml).
+# 이 워크플로가 저장하는 캐시는 e2e 조각 시간 기록(`e2e-durations-*`, durations 잡, #1112) 하나다.
+# main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」를 열거나 댓글을 달고(직전 초록 sha … 이번 sha 비교 링크와
+# 그 사이 커밋), 초록이 되면 「복구됨」 댓글을 달고 닫는다. **제목을 바꾸지 않는다** — 조율자 점검(stall-check.sh)이 이 제목으로 찾는다.
+# 실제 실패 이슈는 본 저장소에서만 만든다(포크 #1084 는 알림 시험만).
 # 보안(공개 저장소): secrets 없음(github.token 하나), 호스팅 실행기, 액션 SHA 고정, 쓰기 권한은 notify 잡의 issues 하나.
 name: e2e
 
@@ -29,9 +35,6 @@ env:
   CODEMIT_CI_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
   BUILDX_BAKE_ENTITLEMENTS_FS: "0"
   CODEMIT_BK_CACHE: /tmp/bk
-  CODEMIT_BK_CACHE_NEW: /tmp/bk-new
-  # 이미지 층·pnpm·Playwright 캐시 저장은 main 실행만(#932)
-  CODEMIT_BK_CACHE_SAVE: ${{ github.ref == 'refs/heads/main' && '1' || '' }}
 
 jobs:
   gate:
@@ -42,25 +45,42 @@ jobs:
       actions: read
     outputs:
       run: ${{ steps.gate.outputs.run }}
+      e2e_matrix: ${{ steps.gate.outputs.e2e_matrix }}
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # e2e 조각 시간 기록(#1112) — 매시 e2e.yml 의 durations 잡이 저장한 가장 새 것. 없으면 e2e_plan.py 가 씨앗 기록을 쓴다.
+      - name: e2e 시간 기록 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .e2e-durations/record.json
+          key: e2e-durations-latest
+          restore-keys: e2e-durations-
       - id: gate
-        name: 바뀐 것이 있는가
+        name: 바뀐 것이 있는가·조각
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
+          SIM: ${{ inputs.simulate || 'none' }}
         run: |
           run=1
           # 알림 시험이면 실제 e2e 는 돌리지 않는다
-          [ "${{ inputs.simulate || 'none' }}" = none ] || run=0
+          [ "$SIM" = none ] || run=0
           if [ "$EVENT" = schedule ]; then
             last=$(gh run list --workflow e2e.yml --event schedule --branch main --status completed --limit 20 \
               --json conclusion,headSha -q '[.[]|select(.conclusion=="success" or .conclusion=="failure")][0] | "\(.conclusion) \(.headSha)"' || true)
             echo "직전 실행: ${last:-없음}"
             [ "$last" = "success $SHA" ] && run=0
           fi
-          echo "run=$run" >>"$GITHUB_OUTPUT"
+          plan=$(python3 scripts/ci/e2e_plan.py --all --durations .e2e-durations/record.json)
+          echo "조각: $(sed -n 's/^MATRIX=//p' <<<"$plan")"
+          {
+            echo "run=$run"
+            echo "e2e_matrix=$(sed -n 's/^MATRIX=//p' <<<"$plan")"
+          } >>"$GITHUB_OUTPUT"
 
   e2e:
     name: e2e ${{ matrix.name }}
@@ -71,16 +91,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 실행기마다 스택을 따로 굽고 프로젝트를 나눠 돈다(#932). 일꾼은 그대로 1개
-        include:
-          - {name: public-operator, targets: public operator}
-          - {name: classroom, targets: classroom}
+        # PR 검사와 같은 조각(e2e_plan.py --all) — 조각마다 실행기가 하나라 스택을 따로 굽고 나란히 돈다(일꾼은 그대로 1개)
+        include: ${{ fromJSON(needs.gate.outputs.e2e_matrix).include }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
-      - run: mkdir -p /tmp/bk /tmp/bk-new && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - run: mkdir -p /tmp/bk && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
       - id: bk-backend
         name: 이미지 층 캐시 복원(backend)
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -113,11 +131,10 @@ jobs:
         with:
           node-version: 22
       - id: pnpm-store
-        name: pnpm 저장소 경로·Playwright 버전
+        name: pnpm 저장소 경로
         run: |
           corepack enable
           echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
-          echo "pw=$(grep -o '@playwright/test@[0-9.]*' pnpm-lock.yaml | head -1 | cut -d@ -f3)" >>"$GITHUB_OUTPUT"
       - id: bk-pnpm
         name: pnpm 저장소 복원
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -125,50 +142,78 @@ jobs:
           path: ${{ steps.pnpm-store.outputs.path }}
           key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
-      - id: bk-pw
-        name: Playwright 브라우저 복원
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.pnpm-store.outputs.pw }}
-      - name: pnpm 과 Playwright 의존 라이브러리
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm --dir frontend exec playwright install --with-deps chromium
+      # 브라우저·시스템 라이브러리는 설치하지 않는다(#1109) — Playwright 는 e2e.sh 가 공식 이미지에서 돌린다. 여기서는 node_modules 만.
+      - name: pnpm 의존
+        run: pnpm install --frozen-lockfile
       - name: e2e(e2e.sh)
         env:
+          # Playwright 를 scripts/ci/playwright-image(판·다이제스트 고정, 판 ≠ lockfile 이면 실패)에서 — apt·브라우저 CDN 없음(#1109)
+          CODEMIT_E2E_PLAYWRIGHT_IMAGE: 1
           # 호스팅 실행기는 코어가 적어(비공개 2·공개 4) 앱 셋·백엔드와 일꾼 둘이 다투면 3초 한도를 넘는다
           CODEMIT_E2E_WORKERS: 1
-          CODEMIT_E2E_TARGETS: ${{ matrix.targets }}
+          CODEMIT_E2E_TARGETS: ${{ matrix.project }}
+          CODEMIT_E2E_PATHS: ${{ matrix.paths }}
         run: bash scripts/ci/e2e.sh
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
-        name: 이미지 층 캐시 저장(backend, main push 만)
-        run: rm -rf /tmp/bk/backend && mv /tmp/bk-new/backend /tmp/bk/backend
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-backend.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: /tmp/bk/backend
-          key: bk-backend-${{ hashFiles('docker/backend.Dockerfile','backend/uv.lock') }}
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pnpm.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
-      - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-pw.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ steps.pnpm-store.outputs.pw }}
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: e2e-test-results-${{ matrix.name }}
           path: test-results/
           retention-days: 7
+      # 시험 시간 리포트(#1112) — 붉어도 올린다(통과한 파일은 잰 것이다). durations 잡이 모아 기록을 다시 쓴다.
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-timings-${{ matrix.name }}
+          path: test-results/timings/
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # e2e 조각 시간 기록(#1112) — 조각마다의 JSON 리포트를 직전 기록에 합쳐 Actions 캐시에 둔다. PR 검사·다음 시간의 계획 잡이
+  # 가장 새 것을 복원한다. 커밋하지 않는다(대기열·PR 에 쓰기 권한을 더하지 않는다). 캐시 키는 실행마다 새것 — 캐시는 덮어쓸 수 없다.
+  # main 에서 저장한 캐시만 PR 이 읽는다(브랜치 수동 실행이 저장한 것은 그 브랜치 몫). 씨앗 기록을 다시 쓸 때는 산출물 e2e-durations 를 커밋한다.
+  durations:
+    needs: [gate, e2e]
+    if: ${{ !cancelled() && needs.gate.outputs.run == '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # e2e 조각 시간 기록(#1112) — 매시 e2e.yml 의 durations 잡이 저장한 가장 새 것. 없으면 e2e_plan.py 가 씨앗 기록을 쓴다.
+      - name: e2e 시간 기록 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .e2e-durations/record.json
+          key: e2e-durations-latest
+          restore-keys: e2e-durations-
+      - name: 조각 리포트 받기
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: e2e-timings-*
+          path: .e2e-timings
+      - name: 기록 다시 쓰기
+        run: |
+          reports=()
+          while IFS= read -r f; do reports+=("$f"); done < <(find .e2e-timings -name '*.json' 2>/dev/null | sort)
+          python3 scripts/ci/e2e_durations.py update --from .e2e-durations/record.json --out .e2e-durations/next/record.json ${reports[@]+"${reports[@]}"}
+          mv .e2e-durations/next/record.json .e2e-durations/record.json
+      - name: e2e 시간 기록 저장
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .e2e-durations/record.json
+          key: e2e-durations-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-durations
+          path: .e2e-durations/record.json
+          retention-days: 30
 
   notify:
     needs: [gate, e2e]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && ((needs.gate.outputs.run == '1' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success')) || (inputs.simulate || 'none') != 'none') }}
+    # 실제 결과는 본 저장소 main 에서만 이슈로(포크는 알림 시험만, #1111). 알림 시험은 main 이면 어디서나.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && ((needs.gate.outputs.run == '1' && github.repository == 'sandcorporation/laurio' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success')) || (inputs.simulate || 'none') != 'none') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -188,23 +233,24 @@ jobs:
           SHA: ${{ github.sha }}
           SIM: ${{ inputs.simulate || 'none' }}
           RESULT: ${{ needs.e2e.result }}
+          RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # 직전 초록 = 이 실행 앞의 가장 새 성공 실행의 sha(건너뛴 실행도 같은 sha 라 그대로 맞다)
           # (schedule 실행만 본다 — 수동·알림 시험 실행은 e2e 를 안 돌았을 수 있다)
           green=$(gh run list --workflow e2e.yml --branch main --event schedule --status success --limit 10 --json databaseId,headSha \
-            -q "[.[]|select(.databaseId != ${{ github.run_id }})][0].headSha // empty" || true)
+            -q "[.[]|select(.databaseId != $RUN_ID)][0].headSha // empty" || true)
           title="e2e 실패 — main 의 화면이 깨졌을 수 있다"
           if [ "$SIM" != none ]; then
             title="${title} (알림 시험)"
             green=$(git rev-parse HEAD~1)   # 시험이니 바로 앞 커밋을 직전 초록으로 쓴다(compare 링크·커밋 목록 확인용)
-            [ "$SIM" = fail ] && RESULT=failure || RESULT=success
+            if [ "$SIM" = fail ]; then RESULT=failure; else RESULT=success; fi
           fi
           if [ "$RESULT" = success ]; then
             bash scripts/ci/ci-issue.sh ok "$title" "복구됨 ${SHA} — ${RUN_URL}"
             exit 0
           fi
-          jobs=$(gh run view ${{ github.run_id }} --json jobs -q '[.jobs[]|select(.conclusion=="failure")|.name]|join(", ")' || true)
+          jobs=$(gh run view "$RUN_ID" --json jobs -q '[.jobs[]|select(.conclusion=="failure")|.name]|join(", ")' || true)
           [ "$SIM" = none ] || jobs="(알림 시험 — 실제 실패 아님)"
           body="main \`${SHA}\` 의 e2e 가 실패했다. 실패한 잡: ${jobs:-?}. 실행: ${RUN_URL}"
           if [ -n "$green" ] && [ "$green" != "$SHA" ]; then

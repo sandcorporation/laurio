@@ -478,11 +478,11 @@ sentry.io 가 아니라 **우리가 띄운 GlitchTip**
   `X-Internal-Token` 을 모른다)와 프레임 변수를 보내기 직전에 한 번 더 지운다.
   잃은 진단 정보는 채점·스캔·제출 진입점이 **식별자만**(클래스·문제·제출 번호, 채점
   모델, 스캔 이름) 태그·컨텍스트로 메운다(`tag_error_scope`) — 그리고 `request_id` 태그로
-  Loki 로그를 찾는다. `backend/tests/test_observability_secrets.py` 가 운영과 같은 설정에
+  Loki 로그를 찾는다. `backend/core/tests/test_observability_secrets.py` 가 운영과 같은 설정에
   전송만 흉내 내 「보내질 이벤트에 키·토큰이 없다」를 고정한다. 세 앱의 Node SDK 는
   지역 변수를 기본으로 싣지 않는다(`includeLocalVariables` 기본 꺼짐). **의도한 4xx 도 보내지 않는다** — 422·404·
   403 은 우리가 일부러 내는 응답이라, 그걸 다 보내면 진짜 5xx 가 소음에 묻힌다
-  (`core.observability.drop_expected_error`, `backend/tests/test_observability.py` 가
+  (`core.observability.drop_expected_error`, `backend/core/tests/test_observability.py` 가
   그 규칙을 고정한다). **`manage.py shell` 로 손으로 친 명령의 예외도 보내지 않는다**
   (#893, GlitchTip 오류 107) — 이벤트 스택에 Django `shell` 명령 프레임이 있으면
   `drop_expected_error` 가 버린다. 다른 관리 명령·웹·celery 는 그대로 보낸다.

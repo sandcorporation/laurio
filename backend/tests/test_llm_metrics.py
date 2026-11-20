@@ -41,7 +41,7 @@ from tests.classroom_scenarios import (
     respond_with_transient_failure,
     respond_with_verdict,
 )
-from tests.test_classroom_grader import _class_with_open_problem, _submit, _submit_queued
+from classroom.tests.test_classroom_grader import _class_with_open_problem, _submit, _submit_queued
 
 SECRET_PROMPT = "비밀-프롬프트-SECRET-SOURCE-TEXT"
 SECRET_KEY = "sk-secret-key-value"

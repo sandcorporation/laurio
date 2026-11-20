@@ -9,7 +9,7 @@
 문제 등) 이를 호출한 쪽의 lifecycle 전이·Distribution 실행은 절대 막히지
 않는다. 그래서 이 모듈의 "결과 알림" 공개 함수(`notify_award_result`,
 `notify_distribution_shares`)는 내부에서 예외를 전부 잡고 로깅만 한다 —
-호출자에게 예외를 전파하지 않는다. 스캔 다섯(`LIFECYCLE_SCANS`, #138)은 core.scans
+호출자에게 예외를 전파하지 않는다. 스캔 셋(`LIFECYCLE_SCANS`, #138 — 복구 둘은 #1086 에서 awards·distributions 로)은 core.scans
 의 뼈대가 행 단위로 예외를 격리한다 — 한 행의 실패가 배치를 막지 않는다.
 
 리뷰 지적(#19) 이후의 두 번째 규율: **완료 표시는 실제로 다 보낸 뒤에만
@@ -21,7 +21,7 @@
 완료 표시를 남긴다 — 중간에 죽어도 다음 스캔이 "아직 못 받은 수신자만" 안전하게
 마저 처리한다.
 
-다섯 스캔은 각자 등록부 항목이라 **각자 자기 예산**으로 돈다(#138) — 예전에는 한
+스캔마다 등록부 항목이라 **각자 자기 예산**으로 돈다(#138) — 예전에는 한
 엔드포인트가 다섯을 고정 순서로 돌리며 예산을 나눠 썼고, 앞 스캔(마감 임박 팬아웃)이
 자기 몫을 넘길 때마다 뒤의 복구 스캔이 굶었다(#51 3차 코드리뷰 지적 4). 이제 그 구조
 자체가 없다. 팬아웃 **안쪽**의 예산 확인은 `core.scans.budget_exhausted(ctx)` 로 한다 —
@@ -58,6 +58,7 @@ from notifications.services import notify_safely as _safe_notify
 from policies.scope import current_policy
 
 from .models import Contest
+from .ports import NO_DISTRIBUTION_FILTER  # distributions.apps 가 올린다(#1102)
 
 logger = logging.getLogger(__name__)
 
@@ -226,8 +227,8 @@ def _final_warning_candidates(as_of, ctx):
         + timedelta(days=policy.distribution_final_warning_lead_days)
     )
     return Contest.objects.filter(
+        NO_DISTRIBUTION_FILTER.get()(),
         status__in=Contest.Status.AWAITING_DISTRIBUTION.statuses,
-        distribution__isnull=True,
         distribution_final_warning_sent_at__isnull=True,
         judging_ends_at__isnull=False,
         judging_ends_at__lte=cutoff,
@@ -269,47 +270,8 @@ def _send_final_warning(contest, as_of, ctx):
 
 # --- 결과 알림 복구: Award / Distribution -----------------------------------------
 #
-# awards.api.award_submission / distributions.services._create_distribution_for_contest 가
-# 커밋 직후 부르는 즉시 경로가 보통의 경우를 이미 처리한다 — 이 두 스캔은 그 즉시 경로가
-# 프로세스 강제종료 등으로 끝까지 완료되지 못하고 죽은 나머지만 쓸어담는 복구 경로다
-# (#19 리뷰 지적 3: "발송하고 잊어버리는" 방식이 아니라, 언젠가 누군가 실제로 재시도한다는
-# 보장이 있어야 한다). `result_notice_sent_at`이 비어 있는 행이 "아직 완료되지 않았다"는
-# 표식이다.
-
-
-def _pending_award_notices(as_of, ctx):
-    from awards.models import Award
-
-    return Award.objects.filter(result_notice_sent_at__isnull=True).select_related(
-        "submission__contestsubmission__developer__user", "contest"
-    )
-
-
-def _recover_award_notice(award, as_of, ctx):
-    notify_award_result(award)
-    award.refresh_from_db(fields=["result_notice_sent_at"])
-    if award.result_notice_sent_at is None:
-        return None
-    return {"event": "award_result_notice_recovered", "award_id": award.id}
-
-
-def _pending_share_notices(as_of, ctx):
-    from distributions.models import DistributionShare
-
-    return DistributionShare.objects.filter(result_notice_sent_at__isnull=True).select_related(
-        "submission__contestsubmission__developer__user", "distribution__contest"
-    )
-
-
-def _recover_share_notice(share, as_of, ctx):
-    # notify_distribution_shares 는 (distribution, [submission, ...]) 모양을 기대한다 —
-    # 몫 하나짜리 목록으로 그 함수를 그대로 재사용한다. 예산(ctx)도 넘겨 팬아웃에서도
-    # 지켜지게 한다.
-    notify_distribution_shares(share.distribution, [share.submission.contestsubmission], ctx=ctx)
-    share.refresh_from_db(fields=["result_notice_sent_at"])
-    if share.result_notice_sent_at is None:
-        return None
-    return {"event": "distribution_result_notice_recovered", "submission_id": share.submission_id}
+# 복구 스캔 둘(`award-result-notice-recovery`·`distribution-result-notice-recovery`)은 행을 가진 앱으로
+# 옮겼다(#1086) — `awards.notice_recovery`·`distributions.notice_recovery`. 보내는 함수는 여기 그대로다.
 
 
 # 배치 200 은 예전 BATCH_SIZE·RESULT_NOTICE_BATCH_SIZE 그대로다. 예산은 뼈대 기본(20초) —
@@ -335,18 +297,6 @@ LIFECYCLE_SCANS = (
         handle_row=_send_final_warning,
         batch_size=200,
         order_by=("judging_ends_at", "id"),
-    ),
-    ScanSpec(
-        name="award-result-notice-recovery",
-        candidates=_pending_award_notices,
-        handle_row=_recover_award_notice,
-        batch_size=200,
-    ),
-    ScanSpec(
-        name="distribution-result-notice-recovery",
-        candidates=_pending_share_notices,
-        handle_row=_recover_share_notice,
-        batch_size=200,
     ),
 )
 

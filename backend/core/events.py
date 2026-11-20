@@ -102,7 +102,7 @@ class FakeEventBus:
     레벨** 딕셔너리다 — `get_event_bus()`가 호출마다 새 인스턴스를 만들어도
     (`resolve_adapter`의 `fake_factory`가 매번 새 `FakeEventBus()`를 부른다)
     발행 요청과 구독 요청이 서로 다른 HTTP 요청(그래서 서로 다른 인스턴스)
-    이라 값을 공유해야 하기 때문이다. `tests/conftest.py`의 autouse
+    이라 값을 공유해야 하기 때문이다. `conftest.py`의 autouse
     픽스처가 매 테스트 전후로 비운다."""
 
     _queues: dict[int, list[Event]] = {}

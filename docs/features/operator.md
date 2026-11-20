@@ -442,6 +442,6 @@ GlitchTip 으로 보낸다(`app/error.tsx`). 레이아웃 자체가 터진 경�
 
 ## 테스트
 
-앱마다 시임이 하나다(ADR-0021). 운영자 앱 스펙은 `frontend/e2e/operator/*.spec.ts` 에 있고
+앱마다 시임이 하나다(ADR-0021). 운영자 앱 스펙은 `frontend/e2e/operator/<앱>/*.spec.ts` 에 있고
 Playwright 가 프로젝트 둘로 두 앱을 한 번에 친다. e2e 가 로그인할 운영자 계정은 멱등한 시드
 명령이 만든다 — 사람이 쓰는 부트스트랩 명령과 달리 반복 실행에 안전하다.

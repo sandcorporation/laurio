@@ -2299,7 +2299,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm Judging Period Extension
-         * @description 연장 결제를 동기 확인한다 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
+         * @description 연장 결제를 동기 확인한다 — Charge 확정 경로 하나(`ledger.charges.settle_charge`).
          *
          *     PG 호출은 어떤 `transaction.atomic()` 블록 밖에서 일어나고, 타임아웃이면 `query_status`
          *     로 확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 4, #125). 벤더의
@@ -4427,7 +4427,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm Payment
-         * @description 동기 승인 확인 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
+         * @description 동기 승인 확인 — Charge 확정 경로 하나(`ledger.charges.settle_charge`).
          *
          *     PG 호출은 어떤 `transaction.atomic()` 밖에서 일어나고, 타임아웃이면 `query_status` 로
          *     확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 3, #125). 벤더의 명시적

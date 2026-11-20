@@ -22,3 +22,11 @@ class PaymentsConfig(AppConfig):
 
         for spec in REFUND_SCANS:
             register_scan(spec)
+
+        # 공모전 API 가 묻는 결제 질의 둘(#1086) — `contests.ports`
+        from contests.ports import HAS_REFUNDED_PAYMENT, SYNC_REQUESTED_PAYMENT_PRIZE
+
+        from .services import has_refunded_payment, sync_requested_payment_prize
+
+        HAS_REFUNDED_PAYMENT.register(has_refunded_payment)
+        SYNC_REQUESTED_PAYMENT_PRIZE.register(sync_requested_payment_prize)

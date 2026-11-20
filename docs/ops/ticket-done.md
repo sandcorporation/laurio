@@ -7,8 +7,8 @@
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. GitHub
 Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 가드·e2e·celery 를 돈다(Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서).
 **GitHub Actions `PR 검사` 의 「결과」 잡(`gh pr checks <PR>`·`gh run watch`)이 초록이면(2026-11-09 #930 — Jenkins PR 검사는 기다리지 않는다) 작업자가 `gh pr merge <PR> --squash` 로
-병합한다**(2026-11-05 #873 — 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합 하나가 곧 승격 하나·prod 배포
-하나다**(2026-11-09 #938, ADR-0077): 병합하면 Actions `release.yml` 이 검사·이미지(병렬) → `production` 승격을 돌고(`gh run list
+병합 대기열에 넣는다**(2026-11-21 #1118 — 대기열이 머지 커밋으로 전부와 guard 를 다시 돌려 초록이면 squash 병합한다. 2026-11-05 #873 부터는 작업자가 바로 병합했고, 그 전에는 열차 `codemit/ci-train` 이 rebase 병합했다). **병합 하나가 곧 승격 하나·prod 배포
+하나다**(2026-11-09 #938, ADR-0077): 병합하면 Actions `release.yml` 이 이미지 → `production` 승격만 돌고(검사는 병합 대기열 한 번, #1090)(`gh run list
 --workflow release.yml`), `production` push 가 Jenkins 배포 잡(`codemit/deploy`)을 깨운다. 그다음
 `python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡의 GitHub 상태
 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록 — release 가 몇 분 걸리니 그만큼 늦게 시작한다).
@@ -44,7 +44,7 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
   `frontend`·`operator`·`classroom`·`packages` 다. 조율자는 이 줄이 겹치지 않는 티켓만 동시에 띄우고,
   겹치면 앞 티켓이 main 에 들어간 뒤에 띄운다.
 - **작업자의 끝은 「main 에 들어감」이다.** PR 이 튕기면(충돌·검사 실패) 같은 작업자가 `origin/main` 위로 rebase 해
-  다시 시도해 main 도착까지 간다. 끝 보고는 병합 sha 다. 병합 대기열이 본 저장소에 들어오면 대기열에서 빠진 PR 도
+  다시 시도해 main 도착까지 간다. 끝 보고는 병합 sha 다. 대기열에서 빠진 PR 도
   같은 길로 다룬다.
 - **워크트리와 포트.** `git worktree add ../codemit-<이름> -b <브랜치> origin/main` 으로 만들고,
   `sh docker/dev-env.sh | head -1` 이 지시서가 준 오프셋과 같은지 본다. 새 오프셋의 DB 는 `migrate` 부터.
@@ -78,8 +78,8 @@ e2e` 로 파일·프로젝트를 좁혀 돌린다. 그 스크립트들은 CI 가
 **이번엔 전부 이 머신에서 다시 쟀다** — 옛 표의 e2e 수치는 이전 머신(WSL) 것이었다.
 
 ```bash
-scripts/test.sh backend tests/test_payouts.py -q
-scripts/test.sh e2e --project=public e2e/payout.spec.ts -g "상금 그대로가"
+scripts/test.sh backend payouts/tests/test_payouts.py -q
+scripts/test.sh e2e --project=public e2e/payouts/payout.spec.ts -g "상금 그대로가"
 ```
 
 안쪽 고리에서 전체를 돌리면 **한 번의 red→green 이 4초가 아니라 7분**이 된다. 슬라이스

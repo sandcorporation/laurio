@@ -5,9 +5,9 @@
 **검사와 이미지는 GitHub Actions, 배포는 Jenkins 다**(2026-11-09 #938, ADR-0077 — sandcorp-metrics 와 같은 흐름).
 
 ```
-PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
-   → release.yml(push: main): verify(이미 검사한 트리인가) → check(pr-check.yml 그대로, workflow_call — 증명되면 건너뜀)
-                              ‖ image(image.yml, ubuntu-24.04-arm 일곱) → promote(production fast-forward)
+PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 → pr-check.yml(merge_group, 전부 + guard — 배포 가능 판정 한 번) → squash → main
+   → release.yml(push: main): image(image.yml, ubuntu-24.04-arm 일곱) → promote(production fast-forward)
+                              ‖ cache·cache-node(PR 검사의 캐시를 main 에 채운다 — 승격은 기다리지 않는다)
    → Jenkins `codemit/deploy`(*/production): 굽지도 검사하지도 않고 ghcr `codemit-<서비스>:<sha>` 를 받아 oracle 에 배포
 ```
 
@@ -17,55 +17,66 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`)·`agent-grader`(`agent-grader-check.sh` — `ubuntu-24.04-arm`
   에서 에이전트 채점 실행기 이미지를 굽고 운영과 같은 격리 설정(seccomp 프로필 포함)으로 Codex 샌드박스 한 줄과 가짜 벤더에 두 CLI 를 돌린다. 실행기의 AppArmor 사용자 네임스페이스 제한은 끄고 돈다 — 운영 호스트에는 AppArmor 가 없다, #999) →
   `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
-  **PR 에서는 `guard` 를 건너뛰고 `e2e` 는 PR·release 어디서도 돌지 않는다**(#1015, 줄 서기 단축 — e2e 둘이 PR 시간의 37%였다).
+  **PR 에서는 `guard` 를 건너뛴다**(#1015, 줄 서기 단축). **`e2e` 는 PR 에서만 바뀐 앱의 시험을 조각 나란히로 돌고 「결과」에 필수다. 병합 대기열(`merge_group`)은 e2e 를 돌지 않고, 전부는 매시 main 의 `e2e.yml` 이 돈다**(#1089·#1111).
   `guard` 는 `plan` 잡 출력 `guard`(PR 이벤트면 빔)를 `if` 가 본다. 잡 이름·`결과` 는 그대로다.
   - **`결과` 는 skipped 를 통과로 세지 않는다**: plan 이 시험 없음(문서만)이면 나머지가 skipped, 아니면 checks·celery 는 success, guard 는 PR 이 아닐 때 success(PR 에서만 skipped)여야 통과다. 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어도 초록이던 구멍을 막는다.
-  - **PR 검사 잡**: plan · checks(static·pytest 4·web) · celery · agent-grader · 결과(guard 는 skipped). 어느 잡이 도는지는 `changed.sh` 가 바뀐 경로로 고른다(#1082):
+  - **PR 검사 잡**: plan · checks(static·pytest 조각·web) · celery · agent-grader · 결과(guard 는 skipped). 어느 잡이 도는지는 `changed.sh` 가 바뀐 경로로 고른다(#1082):
 
     | 바뀐 경로 | 도는 잡 | 건너뛰는 잡 |
     | --- | --- | --- |
     | 문서만(`*.md`·`docs/`) | plan 의 검사만 | checks·celery·agent-grader |
-    | 프런트만(`frontend/`·`operator/`·`classroom/`·`packages/`) | checks static·web | pytest 4조각·celery·agent-grader |
-    | 백엔드만(`backend/`·`docker/`) | checks static·pytest 4조각·celery·agent-grader | web (`schema.gen.ts` 최신성은 static 에 남는다) |
+    | 프런트만(`frontend/`·`operator/`·`classroom/`·`packages/`) | checks static·web | pytest·celery·agent-grader |
+    | 백엔드만(`backend/`·`docker/`) | checks static·pytest(바뀐 앱만, 아래)·celery·agent-grader | web (`schema.gen.ts` 최신성은 static 에 남는다) |
     | 둘 다, 또는 그 밖(`.github/`·`scripts/`·루트 설정·`pnpm-lock.yaml`) | 전부 | — |
 
-    `결과` 는 위 표대로 돌아야 할 잡이 success, 건너뛰어야 할 잡이 skipped 일 때만 초록이다. main push(release)는 바뀐 파일이 없다고 보아 늘 전체다.
-    경로 표는 `scripts/test_changed_paths.py` 가 고정한다. 일부만 돈 PR 실행도 release verify 가 증명으로 받는다(#1097, 아래).
-  - **release 검사 잡**(main push, `workflow_call` 이라 `github.event_name` 은 부른 쪽 push): 위에 **guard(frontend·operator·classroom)** 가 더해진다.
-  - 건너뛴 잡이 있는 PR 실행은 `verified_tree.py` 가 「계획과 같은 건너뜀」일 때만 초록으로 친다(#1097, 아래).
-  - **e2e 는 `e2e.yml` 이 main 을 매시(07분) 돈다**(`schedule`) — 직전 성공 실행이 같은 sha 면 건너뛴다. 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다. 화면을 크게 바꾸는 PR 은 병합 전에 `gh workflow run e2e.yml --ref <브랜치>`(`workflow_dispatch`, 늘 돈다·이슈는 만들지 않는다)로 직접 돌려 본다.
+    `결과` 는 위 표대로 돌아야 할 잡이 success, 건너뛰어야 할 잡이 skipped 일 때만 초록이다.
+    경로 표는 `scripts/ci/paths.py` 하나다 — `changed.sh`·`e2e_plan.py`·`pytest_plan.py` 가 모두 이것을 읽는다. `scripts/test_changed_paths.py` 가 고정한다.
+  - **병합 대기열 잡**(`merge_group`): 경로와 상관없이 전부(pytest 6조각 — e2e 는 빼고, #1111) 돌고 위에 **guard(frontend·operator·classroom)** 가 더해진다 — 배포 가능 판정은 여기 한 번이다(#1090).
+  - **e2e 는 PR 검사의 `e2e` 잡(바뀐 앱, 필수)과 매시 main 의 `e2e.yml`(전부)이다**(#1089·#1111). 시험은 `frontend/e2e/<앱>/`(공개)·`frontend/e2e/operator/<앱>/`·`frontend/e2e/classroom/` 에 두고 **폴더 이름이 앱 표시다** — `backend/app_deps.toml` 의 앱 이름이거나 `frontend`(백엔드 앱이 없는 화면·BFF 시험). `plan` 잡이 `scripts/ci/e2e_plan.py` 로 조각을 낸다: PR 은 바뀐 백엔드 앱(`app_deps.py affected`)의 폴더, 앞단이 바뀌면 그 앱 시험 전부, 시험 폴더만 바뀌면 그 폴더만, 공유 도우미·설정·워크플로·그 밖은 전부. 매시 `e2e.yml` 은 늘 전부(`--all`). 시험 파일을 **기록된 시험 시간**으로 조각에 나눠 담고(#1112 — 조각 수는 시간 합 ÷ 25초, 프로젝트 수~5(#1116 — 층 캐시가 찬 뒤 조각 준비가 ~150초라 8조각은 끝 시각을 거의 줄이지 못하고 실행기 시간만 먹었다), 프로젝트마다 한 조각에서 시작해 조각당 시간이 가장 긴 프로젝트에 하나씩 더 준다) 조각마다 실행기 하나가 스택을 따로 굽는다(`CODEMIT_E2E_PATHS`, `e2e.sh`).
+    **e2e 시간 기록(#1112)**: `e2e.sh` 가 패스마다 Playwright JSON 리포트를 `test-results/timings/` 에 남기고, 매시 `e2e.yml` 의 `durations` 잡이 조각들의 것을 직전 기록에 합쳐(`scripts/ci/e2e_durations.py update` — 통과한 파일만 직전 값과 평균, 실패·못 잰 파일은 그대로, 지운 파일은 뺀다) Actions 캐시 `e2e-durations-<실행>` 으로 저장한다. PR 검사·`e2e.yml` 의 계획 잡은 가장 새 것을 복원해 `--durations` 로 넘긴다. **커밋하지 않는다** — 대기열·PR 에 쓰기 권한을 더하지 않고 매시 저절로 새로워진다. 캐시가 없으면(첫 실행, 7일 안 쓴 캐시가 지워졌을 때) 저장소의 씨앗 기록 `scripts/ci/e2e-durations.json` 을 쓴다 — 씨앗은 가끔 `durations` 잡의 산출물 `e2e-durations`(30일)를 받아 그대로 커밋해 새로 한다. 기록에 없는 새 시험은 기록 평균으로 센다. 규칙은 `scripts/test_e2e_plan.py` 가 고정한다. 조각 시간의 대부분은 시험 밖 준비다 — 층 캐시가 찬 뒤(#1116) 체크아웃·캐시 복원·굽기(23~43초)·띄우기·정리를 합쳐 121~187초, 시험은 조각당 12~25초. 병합 기준 `결과` 가 `e2e` 를 본다(조각이 있으면 success). 이미지 층 캐시는 release 의 `cache` 잡이 저장하고 PR 검사의 잡은 모두 복원만 한다(#1090). 매시 `e2e.yml` 이 저장하는 캐시는 e2e 시간 기록 하나다.
+  - **대기열에서 e2e 를 뺀 까닭(#1111, 대표 결정 2026-11-20)**: 대기열 시간의 대부분이 e2e 조각(4:20~9:29)이었는데, CI 의 e2e 가 11일 동안
+    막은 실제 버그는 0, 헛실패는 5였다. 대가: 각자 초록인 두 PR 이 함께 깨뜨린 화면은 대기열이 못 잡고 최대 한 시간 뒤 매시 e2e 가 잡는다.
+  - **매시 `e2e.yml`**: 본 저장소의 것(#1015·#1020)을 되살린 꼴 — `gate` 가 직전 schedule 실행이 같은 sha 를 초록으로 돌았으면 건너뛰고,
+    조각은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109). main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」
+    (라벨 `ci-red`, `scripts/ci/ci-issue.sh`)를 열거나 댓글을 달고, 초록이면 「복구됨」 댓글을 달고 닫는다. **제목을 바꾸지 않는다** — 조율자
+    점검(`stall-check.sh`)이 이 제목으로 찾는다. 실제 실패 이슈는 이 저장소에서만 만든다(notify 잡의 `github.repository` 조건).
+    알림 시험: `gh workflow run e2e.yml --ref main -f simulate=fail`(새 이슈, 한 번 더면 댓글)·`-f simulate=ok`(복구·닫기) — 제목에 「(알림 시험)」.
+  - **필수 검사 이름은 그대로 「결과」 하나다** — e2e 는 「결과」가 PR 에서 집계하고, 대기열에서는 plan 이 조각을 내지 않아 `skipped` 를 기대한다.
+  - **pytest 는 PR 에서는 바뀐 앱과 그 앱에 기대는 앱의 시험만, 병합 대기열에서는 전부를 조각 나란히로 돈다**(#1088). `plan` 잡이 `scripts/ci/pytest_plan.py` 로 고른다:
+    `backend/<앱>/…` → `app_deps.py affected` 가 고른 앱(바뀐 앱·그 앱을 쓰는·읽는 앱·그 앱들이 꽂힌 앱)의 `<앱>/tests/`, `backend/tests/**/test_*.py` 만 바뀌면 그 파일만,
+    그 밖의 backend(`config/`·`conftest.py`·시험 도우미·`pyproject.toml`·`uv.lock`)·`docker/`·`scripts/`·`.github/`·루트는 전부. 앱 사이 시험(`tests/integration/`)은
+    **닿는 앱**(import·주소 — `tests_layout.py` 가 그 파일의 자리를 정한 규칙, `touched()`)이 고른 앱과 겹칠 때만 돌고, 다 안 보이는 파일(전체 주소·`OVERRIDES`)은 늘 돈다.
+    구조·전체 주소 시험(`tests/` 바로 아래, 경계 시험 포함)은 pytest 가 돌면 늘 돈다. 조각 수는 고른 파일의 기록 시간 합 ÷ 120초(1~6) — 전부면 6조각이다.
+    고른 파일은 `CODEMIT_PYTEST_FILES` 로 조각 잡에 가고 `pytest_shards.py pick` 이 그 안에서 나눈다(없으면 전부). 규칙은 `scripts/test_pytest_plan.py` 가 고정한다.
+    시간 기록 산출물 `pytest-junit-<조각>` 은 **전부를 돈 실행만** 올린다 — 일부의 junit 으로 기록을 쓰면 안 돈 파일이 0초가 된다.
+    전부는 병합 대기열이 돈다 — 배포 판정은 그 한 번이다(#1090). 기록 갱신(`pytest-durations-update.sh`)도 최근 초록 대기열 실행에서 받는다.
   - **release 를 끈 뒤 켜면**(그동안 병합된 main 머리는 다음 push 까지 안 나간다) `gh workflow run release.yml --ref main` 으로 한 번 돌린다(`workflow_dispatch`, #1018). main 이 아닌 ref 는 `main_only` 잡이 실패시켜 뒤 잡(승격 포함)이 모두 멈춘다.
-  - **알림 시험**: `gh workflow run e2e.yml --ref main -f simulate=fail`(이슈를 연다) → `-f simulate=ok`(복구됨 댓글 후 닫는다). e2e 는 돌지 않고 제목에 「(알림 시험)」이 붙어 실제 이슈·gate·직전 초록 판정을 흐리지 않는다. 시험 이슈는 닫힌 채 기록으로 남는다(#1020).
   - **celery 잡**(#1020)은 `celery-worker` 와 그 의존(db·redis·minio·backend)만 띄운다 — Next 앱 셋·events·grader 는 굽지 않는다. beat 간격은 `compose.ci.yaml` 의 `CODEMIT_CI_BEAT_INTERVAL_SECONDS=10`(`config/celery.py` 가 주기 스캔에만 적용, 운영·dev 는 그대로 60초).
-  - **빨강 알림 = 라벨 `ci-red` 이슈**(`scripts/ci/ci-issue.sh`, release `notify`·e2e `notify` 잡, `issues: write` 하나): 종류(「release 검사 실패」·「e2e 실패」)마다 열린 이슈는 하나, 이미 있으면 댓글. 본문에 실패 sha·run 링크·실패한 잡·직전 초록…이번 sha compare 링크. 다시 초록이면 「복구됨 <sha>」 댓글 후 닫는다 — **열린 `ci-red` 이슈 = 지금 빨강**이다. 라벨이 없으면 workflow 가 만든다. **담당**: 저장소 변수 `CI_RED_ASSIGNEE`(GitHub 계정, 설정은 대장 몫)가 있으면 이슈를 연 뒤 따로 담당으로 지정하고(실패는 경고, 이슈는 열린다), 담당 없는 열린 이슈에 댓글을 달 때도 지정한다 — GitHub 가 담당자에게 알린다. 비어 있으면 잡 요약에 경고만 남는다.
-  - **release 에서 guard 가 실패하면**: `check` 실패 → `promote` 가 돌지 않는다 → production 이 승격되지 않는다 → **배포가 없다**(이미지는 ghcr 에 오를 수 있다).
-    PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `ci-red` 이슈(제목 「release 검사 실패 — production 승격·배포 멈춤」)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.
-- **main 에서는 `release.yml` 이 같은 pr-check.yml 을 `workflow_call` 로 부른다**(`push: main` 트리거는 pr-check.yml 에서 뺐다 —
-  검사가 두 번 돌지 않는다). 그 실행의 `github.event_name`·`github.ref` 는 부른 쪽의 push·main 이라 아래 캐시 저장이 그대로 돈다.
-  check 가 초록이어야 image(`image.yml`)가 일곱 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서),
-  둘 다 초록이어야 promote 가 `production` 을 그 sha 로 앞당긴다(`scripts/ci/promote.sh ff`). 실행은
-  `gh run list --workflow release.yml`.
+  - **빨강 알림 = 라벨 `ci-red` 이슈**(`scripts/ci/ci-issue.sh`, release `notify`·e2e `notify` 잡, `issues: write` 하나): 종류(「release 이미지 실패」·「e2e 실패」)마다 열린 이슈는 하나, 이미 있으면 댓글. 본문에 실패 sha·run 링크·실패한 잡·직전 초록…이번 sha compare 링크. 다시 초록이면 「복구됨 <sha>」 댓글 후 닫는다 — **열린 `ci-red` 이슈 = 지금 빨강**이다. 라벨이 없으면 workflow 가 만든다. **담당**: 저장소 변수 `CI_RED_ASSIGNEE`(GitHub 계정, 설정은 대장 몫)가 있으면 이슈를 연 뒤 따로 담당으로 지정하고(실패는 경고, 이슈는 열린다), 담당 없는 열린 이슈에 댓글을 달 때도 지정한다 — GitHub 가 담당자에게 알린다. 비어 있으면 잡 요약에 경고만 남는다.
+  - **release 에서 image 가 실패하면**(arm64 굽기·arm64 부팅 가드): `promote` 가 돌지 않는다 → production 이 승격되지 않는다 → **배포가 없다**.
+    PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `ci-red` 이슈(제목 「release 이미지 실패 — production 승격·배포 멈춤」)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.
+- **release 는 검사하지 않는다 — 이미지와 승격만**(#1090). `pr-check.yml` 은 `pull_request`·`merge_group` 으로만 돌고 `push: main`·`workflow_call`
+  트리거가 없다(같은 커밋을 PR·release 에서 두 번 검사하던 것을 걷었다). release 는 image(`image.yml`)가 일곱 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서)
+  초록이면 promote 가 `production` 을 그 sha 로 앞당긴다(`scripts/ci/promote.sh ff`). 실행은 `gh run list --workflow release.yml`.
 - 보안(공개 저장소, `scripts/test_public_repo.py`): `pull_request_target`·self-hosted 없음, secrets 없음(`github.token` 하나), 워크플로
   기본 권한 `contents: read`, **쓰기는 정해진 자리에만** — `packages: write` 는 image(image.yml·release.yml 의 image 잡), `contents: write`
   는 release.yml 의 promote 잡. 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
-- **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다. 배포되는 커밋이
-  검사를 통과했다는 것은 promote 가 check·image 둘 다를 기다리는 것이 지킨다(check·image 는 병렬로 돈다).
-- **production 승격 전에 그 커밋을 보증하는 것: 그 트리가 「결과」 초록을 받았다 — release 의 check 가 초록이거나, 같은 트리
-  해시를 PR 검사가 시험을 다 돌려 초록으로 받았다(verify 가 증명)**(#959).
-  - 왜: release check 가 PR 검사를 그대로 다시 돌아(병합 5건 모두 같은 트리였다) 병합→승격이 7~11분이었다. 시간의 대부분은 check 의 e2e 다.
-  - 증명(`scripts/ci/verified_tree.py`, GITHUB_TOKEN 읽기 권한만): 병합 커밋 → 그 PR(`commits/<sha>/pulls`) → PR head 의 초록
-    PR 검사 실행 → plan 잡의 단계 이름 `검사한 커밋 <refs/pull/N/merge sha>` → 그 커밋의 트리 == 병합 커밋 트리면 `skip=1`.
-    PR 검사의 `guard` 잡은 늘 skipped 라(#1015) 그것만 초록으로 받는다 — 다른 잡의 skipped 는 거절한다(#1080). check 를 생략하면 amd64 guard 는 release 에서 안 돌고, arm64 prod 이미지 부팅 가드는 `image.yml` 이 따로 돈다.
-  - 전체 check 를 도는 때: 트리가 다르다(그사이 main 이 움직였다 — ruleset strict 가 꺼져 있어 두 PR 의 조합은 여기서만 잡힌다),
-    PR 검사가 계획과 다르게 건너뛰었다, 이미지 층 캐시 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이
-    바뀌었다(캐시 저장은 main check 만 한다), squash 가 아니다, API 실패. 판정과 까닭은 verify 잡 로그·요약에 한 줄로 남는다.
-  - **건너뜀을 받는 조건(#1097)**: PR 실행의 skipped 묶음이 병합 커밋 diff(`sha^..sha`)에 `changed.sh <sha^> <sha>` 를 돌려 나온 계획과 정확히 같고(더 건너뛰었거나 더 돌았으면 거절), **부모 커밋의 release 실행이 success** 다(부모가 아직 도는 중이어도 거절). 앞 조건만 있으면 부모 release 가 빨강일 때 건너뛴 쪽(예: 프런트만 PR 의 백엔드)이 어디서도 검사 없이 승격된다.
-  - 판정 규칙은 `scripts/test_release_flow.py` 가 고정한다. 되돌리기: release.yml 의 check 에서 `if:` 를 빼면(또는 verify 잡을
-    지우고 promote 조건을 `needs: [check, image]` 로) 늘 전체 check 다.
+- **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다.
+- **production 승격 전에 그 커밋을 보증하는 것: main 은 병합 대기열로만 움직인다**(#1090 — #959 의 트리 비교 `verified_tree.py` 를 대신한다).
+  - ruleset `main-merge-queue`(기본 브랜치, `enforcement: active`, **bypass_actors 없음** — 관리자도 넘지 못한다): `merge_queue`(squash, `ALLGREEN`)와
+    필수 검사 「결과」. 대기열을 거치지 않은 push 는 거절되고, 대기열은 main 머리 위에 PR 을 얹은 머지 커밋으로 `pr-check.yml` 을 전부 돌려
+    「결과」가 초록일 때 그 커밋을 그대로 main 에 올린다. 그래서 **main 의 모든 커밋 = 대기열이 초록으로 돈 트리**이고, release 가 그것을
+    다시 증명(옛 verify)하거나 다시 돌(옛 check) 까닭이 없다. 두 PR 의 조합도 대기열이 main 머리 위에서 돈다(옛 「ruleset strict 꺼짐」 구멍이 없다).
+  - amd64 부팅 가드(guard)는 대기열에서, arm64 부팅 가드는 release 의 `image.yml` 에서 그대로 돈다.
+  - **이 보증은 대기열에 기댄다** — 대기열이 없는 저장소(본 저장소, 2026-11-20 지금)로 이 꼴을 옮기면 main 의 커밋이 아무 검사 없이 승격된다.
+    대기열을 먼저 걸거나 release 에 check 를 되살린다(되돌리기: `release.yml` 에 `check: uses: ./.github/workflows/pr-check.yml` 과
+    `pr-check.yml` 의 `workflow_call` 트리거를 되살리고 promote 를 `needs: [main_only, check, image]` 로).
+  - 배선은 `scripts/test_release_flow.py` 가 고정한다 — release 가 `pr-check.yml` 을 부르지 않는다, 잡 집합, promote 가 image 만 기다린다,
+    cache 잡 키 = pr-check.yml 의 복원 키.
 - **워크플로 문법 검사(#1105)**: `workflow-lint.yml`(별도 파일 — pr-check.yml 자체가 파싱 안 되면 그 안의 어떤 잡도 안 뜨기 때문)이 `.github/workflows/**` 가 바뀐 PR 에서만 `scripts/ci/actionlint.sh --all` 로 actionlint(1.7.12, linux amd64 tarball 을 sha256 고정으로 내려받음)를 돌린다. 필수 검사(「결과」·ruleset)에는 넣지 않는다 — PR 에 빨강으로 보이는 것이 목적이다. `.githooks/pre-commit` 도 워크플로가 staged 일 때 같은 스크립트를 건다(로컬에 actionlint 가 있을 때). 로컬: `scripts/ci/actionlint.sh --all`.
 - **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 표와 글은 꺼진 검사의 기록이다.** Jenkins 이미지 빌드 비상 길도 제거했다. 검사와 이미지 빌드는 GitHub Actions만 수행한다.
 
-### Actions 의 캐시 — main 이 저장하고 PR 은 복원만 한다(#932)
+### Actions 의 캐시 — main(release 의 cache 잡)이 저장하고 PR·대기열은 복원만 한다(#932·#1090)
 
 처음에는 캐시가 없어 PR 하나가 11분(646~665초)쯤 걸렸다. 잡 안쪽을 재 보니 시간은 **이미지 굽기**(`checks` 의 CI 이미지 약 107초,
 `guard` 92~112초, `e2e`·`celery` 의 스택 굽기 e2e 약 6분·celery 약 6분)와 **backend pytest 435초**에 몰려 있다. 앞의 것만 캐시로 줄인다 —
@@ -78,15 +89,25 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 - **CI 이미지의 node_modules 층도 캐시에서 온다(#1081)**: `ci.Dockerfile` 은 워크스페이스 매니페스트만 먼저 넣고 `pnpm install` 한 뒤
   소스를 넣는다 — 의존이 같으면 설치 층이 캐시 적중이다. 워크스페이스 패키지를 더하면 그 `package.json` COPY 도 더한다
   (`scripts/test_ci_images.py` 가 어긋나면 막는다). 이미지를 한 번 굽어 잡들이 나눠 받는 길은 재 보니 걸림 경로가 늘어 접었다(#1081 댓글).
-- **저장은 main 실행(release.yml 의 check)에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
-  10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
-  `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.
-- **병렬화(#932)**: `checks` 는 `sub-checks.sh <묶음>` 으로 여섯 실행기 — `static`(Django·생성물·문서·언어 검사)·`pytest I/N`(4조각,
+- **저장은 main 에서만, release.yml 의 `cache`·`cache-node` 잡이 한다**(#1090) — PR·대기열(`gh-readonly-queue/…` ref)에서 만든 캐시는 그 ref
+  안에서만 쓰여 다른 PR 에 소용이 없고 10GB 만 먹는다. 잡은 이름마다(ci·backend·frontend·operator·classroom) 정확한 키를 `lookup-only` 로 보고
+  **이미 있으면 받지도 굽지도 않는다** — 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이 바뀐 병합에서만 굽는다.
+  없으면 앞 세대(`bk-<이름>-` 접두사)를 복원해 `--output type=cacheonly` 로 층만 굽고 `/tmp/bk-new` 에 내보낸 뒤 복원 폴더 자리에 바꿔 끼워
+  저장한다(actions/cache 의 버전은 경로로 갈려 같은 경로여야 PR 이 받는다, 한 세대만 남는다). 저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
+  `type=gha` 는 쓰지 않는 까닭. 승격은 이 잡을 기다리지 않는다. 키는 `pr-check.yml` 의 복원 키와 같아야 한다(`test_release_flow.py`).
+- **병렬화(#932)**: `checks` 는 `sub-checks.sh <묶음>` 으로 여섯 실행기 — `static`(Django·마이그레이션 호환·생성물·문서·언어 검사)·`pytest I/N`(전부면 6조각, PR 은 고른 시험의 시간만큼,
   파일별 시간 기록으로 고르게 — `pytest_shards.py`, 기록 갱신은 `pytest-durations-update.sh`, #1083)·`web`(단위 시험·typecheck). 인자 없이는 전부 돈다(로컬 길). `e2e` 는 `CODEMIT_E2E_TARGETS` 로
   `public operator`·`classroom` 두 실행기(일꾼 1개 그대로). Playwright `--shard` 대신 프로젝트 단위로 나눈 까닭은 `e2e-two-pass.sh` 의
-  `@exclusive` 패스가 시험 순번 shard 와 섞이면 일꾼 하나 보장이 깨지기 때문이다. 실패 결과물은 `checks-test-results-<묶음>`·`e2e-test-results-<이름>`, pytest 조각의 junit 은 초록이어도 `pytest-junit-<조각>`(14일).
-  동시 잡은 plan 1 + checks 6 + guard 3 + e2e 2 + celery 1 + agent-grader 1 + 결과 1 = 15(공개 저장소 한도 20 안). 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
-- **pnpm 저장소**·**Playwright 브라우저**(`e2e` 잡 호스트 설치, 키는 lockfile 해시·Playwright 버전)도 같은 규칙이다.
+  `@exclusive` 패스가 시험 순번 shard 와 섞이면 일꾼 하나 보장이 깨지기 때문이다. 실패 결과물은 `checks-test-results-<묶음>`·`e2e-test-results-<이름>`, pytest 조각의 junit 은 전부를 돈 실행이면 초록이어도 `pytest-junit-<조각>`(14일).
+  동시 잡은 plan 1 + checks 최대 8(static·pytest 6·web) + guard 3 + e2e 조각 + celery 1 + agent-grader 1 + 결과 1 — 공개 저장소 한도 20 을 넘는 만큼은 줄을 선다. 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
+- **pnpm 저장소**(`e2e` 잡 호스트 설치, 키는 lockfile 해시)도 같은 규칙이다.
+- **e2e 의 Playwright 는 공식 이미지에서 돈다 — 잡이 apt 도 브라우저 CDN 도 부르지 않는다(#1109).** 예전에는 조각마다
+  `playwright install --with-deps chromium` 이 실행기 미러에서 글꼴·라이브러리를 apt 로 받았고, 미러가 느린 날 그 조각 하나가 5분을 넘겨 대기열 전체를 붙잡았다. 지금은 `e2e.sh` 가
+  `CODEMIT_E2E_PLAYWRIGHT_IMAGE=1` 일 때 `scripts/ci/playwright-image`(MCR `playwright:v<판>-noble`, 다이제스트 고정)를 스택 굽기와 겹쳐
+  받고, Playwright 만 그 안에서 `--network host`·호스트 사용자로 돌린다 — 스택은 호스트 compose 그대로, node_modules 는 호스트에서 깔아
+  같은 경로로 마운트한다. **이미지 판 ≠ lockfile 의 `@playwright/test` 면 시험 전에 실패한다**(`scripts/ci/playwright_image.py`, 시험
+  `scripts/test_playwright_image.py` 가 plan 잡에서 돈다). `@playwright/test` 를 올리는 PR 은 이 파일의 태그·다이제스트도 같이 고친다
+  (다이제스트 얻는 법은 스크립트 머리말). 로컬 `scripts/test.sh e2e` 는 그대로 호스트 Playwright 다.
 - **10GB**: 키가 lockfile·Dockerfile 해시라 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터 지운다.
   `gh cache list` 합계를 가끔 본다.
 - 보안 규칙(`scripts/test_public_repo.py`)은 그대로다 — 액션 SHA 고정, `permissions: contents: read`, secrets 없음.
@@ -98,8 +119,8 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 | 노드 고르기 | — | **macos 먼저**(`prefer: 'macos'`), 25분 안에 못 잡으면 home — e2e 가 macos 에서만 돌아 home 으로 넘어간 빌드는 ① 만 돌고 붉다 |
 | 검사 | macos | `scripts/ci/pr-check.sh`. 문서(`.md`·`docs/`)만 바뀌었으면(`changed.sh`, merge-base 와 견준다) ADR 검사만. 아니면 ① `sub-checks.sh`(파일 이름의 sub 는 옛 호스트 이름) — Django `check`·`check --deploy`, pytest 전체, 생성물 최신성 둘, ADR·화면 언어·고정 대기 검사, 단위 시험, 세 앱 typecheck ② `macos-sweep.sh` → `images.sh arm64`(prod 여섯을 이 커밋으로, 바뀌지 않은 문맥은 ctx 로 건너뜀, `ghcr-push-token`) ③ 이번에 구운 앱의 부팅 가드(`deploy-guard.sh`, #838) ④ **그 이미지를 받아** `e2e.sh`(세 프로젝트)·`celery-broker.sh` ⑤ 초록이면 ctx 태그(`images-ctx.sh`)와 e2e 태그(`images-e2e.sh`) |
 
-파괴적 migrate 검사(라이브러리)는 끈다(`migrationGuard: false`) — codemit 은 겹쳐 바꾸기 안전을 `ROLLING-DEPLOY-UNSAFE`
-표식과 `backend/tests/test_migration_rolling_safety.py` 로 지킨다(ADR-0053).
+파괴적 migrate 검사(라이브러리)는 끈다(`migrationGuard: false`) — codemit 은 마이그레이션 호환을 PR 검사 static 묶음의
+`scripts/ci/migration_compat.py` 로 지킨다([마이그레이션](migrations.md), #1091).
 
 **배포 이미지는 PR 검사가 굽고, 배포 잡은 대개 커밋 태그만 더한다.** PR 검사는 이 브랜치 머리로 여섯을 굽고
 커밋 태그 `<sha>-arm64` 로 올린다. e2e·celery 는 스택이 따로 굽지 않고 그 이미지를 받아 돈다
@@ -292,3 +313,13 @@ result.ts` 의 `normalizeDetail`)라 첫 스텝이 볼 수 없던 표면이다. 
 자리는 나중에 채운다」는 뜻으로만 쓰이는 토막만 담는다 —
 `scripts/test_check_screen_language.py` 가 「남은 자리가 없습니다」 같은 정상
 문구가 통과하는 것까지 고정한다.
+
+### 병합은 대기열로 — `gh pr merge <N> --squash` 가 대기열에 넣는다(#1090·#1118)
+
+`main` 은 ruleset 의 병합 대기열(squash)과 필수 검사 「결과」로만 들어간다. PR 의 「결과」가 초록이면
+`gh pr merge <N> --squash` 로 대기열에 넣는다(대기열이 있으면 이 명령이 곧바로 병합하지 않고 줄을 세운다 — 안 되면 graphql
+`enqueuePullRequest`). 대기열이 머지 커밋으로 `pr-check.yml`(`merge_group`, 전부 + guard)을 다시 돌려 「결과」가 초록이면
+squash 병합한다 — 이것이 배포 가능 판정 한 번이다. 대기열에서 빠진 PR 은 `origin/main` 위로 rebase 해 다시 넣는다.
+release 는 검사하지 않고 이미지·승격만 한다. 운영에 닿는 잡(`release.yml` 의 image·promote·notify, `image.yml` 의 build, 매시
+e2e 의 실패 이슈)은 `github.repository == 'sandcorporation/laurio'` 조건을 단다 — `scripts/test_release_flow.py` 가 이 조건과
+`merge_group` 트리거를 고정한다.

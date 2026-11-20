@@ -703,7 +703,7 @@ def _request_real_transfer(payout: Payout, seller, adapter, *, simulate: str | N
     만들지 않는다.
     """
 
-    from payments.charges import reconcile_after_timeout
+    from ledger.charges import reconcile_after_timeout
 
     from .adapters import PayoutError, PayoutTimeoutError, VendorResult
 
@@ -774,7 +774,7 @@ def advance(
     실이체 시도이고(`_request_real_transfer`), 아니면 수취인 없는 요청을 보내 벤더 규약대로 내부
     확정을 받는다. `confirmed_by_vendor`(웹훅)는 벤더가 이미 말해 준 결과다. True 면
     `UPDATE … WHERE status='requested'` 로 이긴 호출만 같은 트랜잭션에서 수수료·원천징수 공제
-    분개를 남기고(`payments.charges.claim_and_post`) 두 대기로 들어간다; False 면 FAILED 로
+    분개를 남기고(`ledger.charges.claim_and_post`) 두 대기로 들어간다; False 면 FAILED 로
     끝난다(원장에는 아무것도 없다 — 돈이 움직이지 않았다). pending 이면 확정하지 않는다.
 
     **두 대기 규칙(ADR-0020)**: Seller 가 READY 가 아니면 CONFIRMED_SELLER_PENDING. READY 면
@@ -791,7 +791,7 @@ def advance(
     전진시킨 것이니 아무것도 하지 않는다. adapter 는 주입받는다 — 없으면 설정의 것을 쓴다.
     """
 
-    from payments.charges import Outcome, claim_and_post, reconcile_after_timeout
+    from ledger.charges import Outcome, claim_and_post, reconcile_after_timeout
 
     from .adapters import PayoutTimeoutError, VendorResult, get_adapter
     from .models import TaxIdentity

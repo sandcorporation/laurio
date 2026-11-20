@@ -16,11 +16,10 @@ SIZE_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
 def size_held_filter() -> Q:
     """`ContestSubmission` 쿼리에 거는 「지금 크기 초과 보류」 조건 — Score 가 없고 풀리지 않은 보류 기록이 있다."""
 
-    from scoring.models import ScoringAttempt
+    # 보류 기록(`ScoringAttempt`)은 scoring 이 가진다 — `scoring.apps` 가 올린 조건을 꺼낸다(#1086, `contests.ports`).
+    from .ports import SIZE_HELD_FILTER
 
-    return Q(score__isnull=True) & Exists(
-        ScoringAttempt.objects.filter(submission_id=OuterRef("pk"), error__startswith=SIZE_HOLD_ERROR_PREFIX)
-    )
+    return SIZE_HELD_FILTER.get()()
 
 
 def is_size_held(submission) -> bool:

@@ -32,11 +32,11 @@ from aiohttp import web
 from asgiref.sync import sync_to_async
 from django.db import close_old_connections, connection
 
+# 클래스 키 실행(#1036)의 키는 강의실 채점 연결(`classroom.scoring_connection`)이 쥔 암호문이다 — 복호화를 그 모듈 한 곳에
+# 두고, 강의실이 등록한다(#1085).
+from core.agent_ports import class_vendor_key
 from core.agent_run_tokens import Grant, Refusal, Usage, authorize, record_usage
-from policies.runtime_settings import ScoringVendor, setting_value
-
-# APP-BOUNDARY-EXCEPTION: 클래스 키 실행(#1036)의 키는 강의실 채점 연결(`classroom.scoring_connection`)이 쥔 암호문이다 — 복호화를 그 모듈 한 곳에 둔다
-from classroom.scoring_connection import agent_vendor_key
+from core.runtime_settings_port import ScoringVendor, setting_value
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ def _real_key_sync(vendor: ScoringVendor, key_class_id: int | None) -> str:
 
     _fresh_connection()
     if key_class_id is not None:
-        return agent_vendor_key(key_class_id, vendor)
+        return class_vendor_key(key_class_id, vendor)
     return (setting_value(_KEY_SETTING[vendor]) or "").strip()
 
 

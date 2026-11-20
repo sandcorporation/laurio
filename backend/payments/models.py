@@ -4,7 +4,7 @@
 나타낸다. 실제 돈의 최종 진실은 원장(`ledger`)에만 있다 — 이 모델은 PG와의 대화
 상태(요청됨/완료/실패)만 들고, 완료로 전이하는 순간에만 원장에 분개를 남긴다.
 
-동시성·재전송에 안전한 이유는 `payments.charges.apply_vendor_outcome`이 ADR-0003과 같은
+동시성·재전송에 안전한 이유는 `ledger.charges.apply_vendor_outcome`이 ADR-0003과 같은
 조건부 `UPDATE ... WHERE status='requested'` 규율을 그대로 따르기 때문이다 — 이
 티켓은 그 일반 스케줄러 메커니즘(별도 브랜치에서 chain A가 만드는 것)을 가져오지
 않고, 같은 규율만 이 파일 안에서 반복한다.
@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from django.db import models
 
-from .charges import ChargeBase
+from ledger.charges import ChargeBase
 
 
 class Payment(ChargeBase):
     """Sponsor 의 Prize 예치 + 개최 등록비 결제 시도 하나 — Charge(CONTEXT.md)의 한 종류
-    (#127, #118). 뼈대(`payments.charges.ChargeBase`)는 심사 연장비와 같고, 이 종류에
+    (#127, #118). 뼈대(`ledger.charges.ChargeBase`)는 심사 연장비와 같고, 이 종류에
     고유한 것은 분개의 줄(`journal` — 예치금/미지급금/수수료 3줄), 확정에 딸려오는 부모
     전이(`on_paid` — Contest 공개), 그리고 환불 상태 셋이다.
     """
@@ -124,7 +124,7 @@ class Payment(ChargeBase):
         `now=` 를 넘기지 않는다 — `claim_contest_transition` 이 내부에서 `Clock.now()` 를
         한 번 더 부르는(SELECT 한 번) 대가를 문다. `on_paid()` 는 `ChargeBase` 가 여러
         Charge 종류(`Payment`·`JudgingExtensionPayment`)에 공통으로 요구하는 훅이고
-        `payments.charges.claim_and_post` 가 `on_claimed=lambda c: c.on_paid()` 로
+        `ledger.charges.claim_and_post` 가 `on_claimed=lambda c: c.on_paid()` 로
         인자 없이 부른다 — 이 자리 하나를 위해 그 훅의 시그니처에 `now` 를 얹으면
         나머지 Charge 종류·그 훅을 부르는 자리 전부가 그 인자를 알아야 한다. 결제
         확정은 요청당 한 번이라(스캔처럼 행마다 반복되지 않는다) SELECT 한 번의

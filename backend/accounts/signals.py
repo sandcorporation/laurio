@@ -14,5 +14,5 @@ from django.dispatch import Signal
 #: 탈퇴가 실행됐다(`accounts.withdrawal.execute_withdrawal`). 인자: `user`.
 user_withdrawn = Signal()
 
-#: 휴면으로 신원이 파기됐다(`accounts.dormancy`). 인자: `user`.
+#: 휴면으로 신원이 파기됐다(`verification.dormancy`). 인자: `user`.
 user_became_dormant = Signal()

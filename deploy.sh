@@ -25,6 +25,8 @@
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   recreate-infra      db·redis 를 compose 의 이미지(digest)대로 다시 만든다 — 사람이 손으로만(#790)
 #   mark                배포 표식을 지금 커밋으로 옮긴다
+#   rollback-plan       교체 뒤 실패한 계획을 배포 표식 커밋으로 되돌리는 계획으로 다시 쓴다 — 자동 되돌리기(#1092,
+#                       scripts/ci/post-deploy-rollback.sh)만 부른다. 고친 계획의 커밋을 표준출력 끝줄에 낸다
 #   all (기본값)         위를 순서대로 전부 — 사람이 손으로 배포할 때
 #
 # **이미지는 CI 가 굽고, 여기서는 받는다**(2026-09-17). main 에 push 하면 Jenkins `codemit/deploy` 잡의
@@ -152,11 +154,6 @@ PLAN_FILE=".jenkins-${TARGET}-plan"
 # 그때 git 이 "dubious ownership" 으로 멈추는데, 배포와 무관한 이유로 멈추는
 # 것이므로 이 저장소만 예외로 둔다.
 GIT="git -c safe.directory=$PWD"
-
-# 뒤로 호환되지 않는 마이그레이션의 표식(ADR-0053). 파일 어디든 이 모양의 주석 한 줄이면
-# 그 마이그레이션이 든 배포는 겹쳐 바꾸지 않는다. 같은 문자열을
-# `backend/tests/test_migration_rolling_safety.py` 가 읽는다 — 바꾸면 둘을 같이 고친다.
-UNSAFE_MIGRATION_MARKER='^[[:space:]]*#[[:space:]]*ROLLING-DEPLOY-UNSAFE:'
 
 log() { echo "[deploy:${TARGET}] $*"; }
 
@@ -599,38 +596,25 @@ cmd_plan() {
   # 컨테이너가 새 컨테이너와 몇 초 함께 요청을 받는다. 마이그레이션은 그 전에 새 이미지의
   # 일회성 컨테이너가 돌리므로(아래 run_migrations) **그 몇 초 동안 옛 코드가 새 스키마
   # 위에서 돈다** — 그래서 마이그레이션은 뒤로 호환되게 쓴다(ADR-0053: 추가는 그대로,
-  # 삭제·이름 바꾸기·NOT NULL 은 다음 배포로 나눈다). 지키지 못한 마이그레이션은 파일에
-  # `# ROLLING-DEPLOY-UNSAFE: <이유>` 를 달고, 그 표식이 배포 범위에 있으면 예전처럼
-  # 넷을 내리고 올린다(`backend/tests/test_migration_rolling_safety.py` 가 표식 없는 위험
-  # 연산을 막는다).
+  # 삭제·이름 바꾸기·NOT NULL 은 다음 배포로 나눈다 — docs/ops/migrations.md). PR 검사
+  # `scripts/ci/migration_compat.py`(#1091)가 base 코드와 호환되지 않는 마이그레이션을 거절한다.
+  # 예전의 「뒤로 호환되지 않음」 표식 길(넷을 내리고 올림)은 지웠다(#1092) — 그 검사에는 예외가
+  # 없어 닿지 않았고, 자동 되돌리기도 늘 옛 코드를 새 스키마 위에 올린다.
   #
   # 예전에는 **새 마이그레이션이 든 배포 전부가** 내리고 올렸다. 그 창이 공개 앱 재시도
   # 예산(약 15.8초)보다 길어 `/contests` 가 500 을 냈다(2026-10-02 prod, `0014_connected_apps`
   # — GlitchTip 75·83).
   #
-  # 직전 배포 표식이 없으면 범위를 몰라 표식을 찾을 수 없다. 풀러를 바꾸는 배포는 위에서
+  # 직전 배포 표식이 없으면 범위를 모른다. 풀러를 바꾸는 배포는 위에서
   # 넷을 먼저 내리므로 겹칠 옛 컨테이너가 없고, 없는 컨테이너도 겹칠 대상이 없다.
   MIGRATIONS=false
   if [ "$EVERYTHING" = true ] || touched '^backend/[^/]+/migrations/'; then
     MIGRATIONS=true
   fi
-  UNSAFE_MIGRATIONS=""
-  if [ "$EVERYTHING" = false ]; then
-    for f in $(grep -E '^backend/[^/]+/migrations/[^/]+\.py$' "$CHANGED_FILE" || true); do
-      # 지워진 파일(배포 범위 안에서 사라진 것)은 볼 것이 없다.
-      [ -f "$f" ] || continue
-      if grep -qE "$UNSAFE_MIGRATION_MARKER" "$f"; then
-        UNSAFE_MIGRATIONS="$UNSAFE_MIGRATIONS $f"
-      fi
-    done
-  fi
-
   ROLLING_BACKEND=true
   ROLLING_REASON=""
   if [ "$EVERYTHING" = true ]; then
-    ROLLING_BACKEND=false; ROLLING_REASON="직전 배포 표식이 없다(범위를 몰라 뒤로 호환되지 않는 마이그레이션을 찾을 수 없다)"
-  elif [ -n "$UNSAFE_MIGRATIONS" ]; then
-    ROLLING_BACKEND=false; ROLLING_REASON="뒤로 호환되지 않는 마이그레이션(ROLLING-DEPLOY-UNSAFE):${UNSAFE_MIGRATIONS}"
+    ROLLING_BACKEND=false; ROLLING_REASON="직전 배포 표식이 없다(범위를 모른다)"
   elif [ "$BUILD_PGBOUNCER" = true ]; then
     ROLLING_BACKEND=false; ROLLING_REASON="풀러를 바꾼다"
   elif missing backend || missing events; then
@@ -1290,6 +1274,46 @@ cmd_mark() {
   log "배포 표식: $(cat "$DEPLOYED")"
 }
 
+# 교체 뒤 실패한 배포를 직전 배포(배포 표식)로 되돌리는 계획(#1092). 지금 계획 파일은 실패한 커밋의 것이고,
+# 표식은 아직 옮겨지지 않아 직전 성공 배포를 가리킨다. 같은 서비스를 표식 커밋의 이미지로 다시 바꿔 끼우도록
+# `PLANNED_COMMIT` 만 표식 커밋으로 바꾸고 겹쳐 바꾸기로 둔다 — 그 커밋을 체크아웃한 뒤의 `image`·`up` 이 읽는다.
+#
+# 표식 커밋에서 `plan` 을 다시 돌리면 안 된다 — 표식과 같은 커밋이라 「바뀐 것 없음」이 나와 아무것도
+# 되돌리지 않는다(Jenkinsfile 의 `autoRollback: false` 가 꺼 둔 이유). 스키마는 그대로 두고 코드만 되돌린다 —
+# 직전 판 코드가 새 스키마에서 도는 것은 마이그레이션 호환 검사가 지킨다(docs/ops/migrations.md).
+# 계획 파일의 키는 `plan` 이 쓰는 것과 같다 — 옛 커밋의 deploy.sh 가 그대로 읽는다.
+cmd_rollback_plan() {
+  load_plan
+  if [ "$DEPLOY_ANY" != true ]; then
+    echo "실패한 계획에 바꿔 끼운 것이 없다 — 되돌릴 것이 없다."
+    exit 1
+  fi
+  target=$(cat "$DEPLOYED" 2>/dev/null || true)
+  if [ -z "$target" ] || ! $GIT cat-file -e "${target}^{commit}" 2>/dev/null; then
+    echo "배포 표식(${target:-없음})이 이 저장소의 커밋이 아니다 — 되돌릴 곳을 모른다."
+    exit 1
+  fi
+  if [ "$target" = "$PLANNED_COMMIT" ]; then
+    echo "배포 표식이 실패한 커밋과 같다 — 되돌릴 곳이 없다."
+    exit 1
+  fi
+  {
+    echo "DEPLOY_ANY=true"
+    echo "BUILD_BACKEND=$BUILD_BACKEND"
+    echo "BUILD_FRONTEND=$BUILD_FRONTEND"
+    echo "BUILD_OPERATOR=$BUILD_OPERATOR"
+    echo "BUILD_CLASSROOM=$BUILD_CLASSROOM"
+    echo "BUILD_SEARCH=$BUILD_SEARCH"
+    echo "BUILD_PGBOUNCER=$BUILD_PGBOUNCER"
+    echo "BUILD_AGENT_GRADER=$BUILD_AGENT_GRADER"
+    echo "AGENT_GRADER_RECREATE=$AGENT_GRADER_RECREATE"
+    echo "ROLLING_BACKEND=true"
+    echo "PLANNED_COMMIT=$target"
+  } > "$PLAN_FILE"
+  log "되돌리기 계획: $(echo "$PLANNED_COMMIT" | cut -c1-12) → $(echo "$target" | cut -c1-12)"
+  echo "$target"
+}
+
 # ------------------------------------------- 쓰이지 않는 이미지·캐시를 지운다
 
 # 배포가 끝나면 이 호스트의 도커 디스크를 비운다(2026-09-17). 커밋마다 ghcr 에서
@@ -1359,6 +1383,7 @@ case "$COMMAND" in
   predeploy-dump) dump_before_migrate ;;
   recreate-infra) cmd_recreate_infra ;;
   mark) cmd_mark ;;
+  rollback-plan) cmd_rollback_plan ;;
   prune) cmd_prune ;;
   all)
     cmd_preflight
@@ -1382,7 +1407,7 @@ case "$COMMAND" in
     cmd_prune
     ;;
   *)
-    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|predeploy-dump|recreate-infra|mark|prune|all)"
+    echo "알 수 없는 명령: $COMMAND (preflight|plan|image|pull|build|up|verify|health|reindex|predeploy-dump|recreate-infra|mark|rollback-plan|prune|all)"
     exit 2
     ;;
 esac

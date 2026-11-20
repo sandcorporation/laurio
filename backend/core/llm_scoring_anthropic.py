@@ -585,7 +585,7 @@ def platform_adapter(*, timeout: float | None = None) -> AnthropicScoringAdapter
     채점 벤더가 anthropic 일 때 부른다. 키·모델은 운영 설정(DB → env)에서 읽는다. 키가 비면 OpenAI 키
     없음과 같은 `LLMAdapterError` 다."""
 
-    from policies.runtime_settings import setting_value
+    from core.runtime_settings_port import setting_value
 
     api_key = setting_value("ANTHROPIC_API_KEY")
     if not api_key:

@@ -1,6 +1,6 @@
 """MCP 도구의 실제 응답이 자기 `outputSchema` 를 만족하는가 (#579).
 
-`tests.test_classroom_connected_apps._rpc` 가 성공한 `tools/call` 마다 이것을 부른다 — 그래서
+`classroom.tests.test_classroom_connected_apps._rpc` 가 성공한 `tools/call` 마다 이것을 부른다 — 그래서
 MCP 시험이 부르는 모든 도구 호출이 저절로 검사된다. 스키마는 `tools/list` 가 내놓는 것과 같은
 값(`Tool.describe()["outputSchema"]`)을 등록부에서 읽는다 — `tools/list` 를 다시 부르면 호출
 상한 시험이 흔들린다.

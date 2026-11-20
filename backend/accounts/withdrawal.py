@@ -39,7 +39,16 @@ from django.db import models, transaction
 
 from core.clock import Clock
 
-from .models import DeveloperProfile, PhoneContact, SponsorProfile, Withdrawal
+from .models import PhoneContact, Withdrawal
+from .ports import (
+    DEVELOPER_PAYOUT_IN_PROGRESS,
+    DEVELOPER_TRANSACTION_BASIS,
+    INSTRUCTOR_CLASS_IN_PROGRESS,
+    PURGE_IDENTITY,
+    SPONSOR_CONTEST_IN_PROGRESS,
+    SPONSOR_TRANSACTION_BASIS,
+    TransactionBasis,
+)
 from .signals import user_withdrawn
 
 
@@ -61,54 +70,7 @@ class WithdrawalBlockReason(models.TextChoices):
     )
 
 
-def _sponsor_has_contest_in_progress(sponsor_profile: SponsorProfile) -> bool:
-    """ADR-0025 "심사가 끝나기 전에는 탈퇴할 수 없다"(User Story 7) — 어느 status 가 「심사가 끝나기
-    전」인지는 Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL 이 답한다(#142). 예전의 status 별 if 사슬과
-    fail-closed 가지는 그 사상이 빠짐없음을 테스트로 강제하면서 사라졌다."""
-
-    # APP-BOUNDARY-EXCEPTION: 탈퇴 자격이 공모전 status 에 달려 있다 (ADR-0025)
-    from contests.models import Contest
-
-    # 필터(status__in)가 아니라 사상 조회다 — DB 에 enum 밖 값이 남는 마이그레이션 사고를 조용히
-    # 「막지 않음」으로 지나치지 않고 KeyError 로 드러낸다(#121).
-    statuses = set(Contest.objects.filter(sponsor=sponsor_profile).values_list("status", flat=True))
-    return any(Contest.Status.BLOCKS_SPONSOR_WITHDRAWAL(status) for status in statuses)
-
-
-def _developer_has_payout_in_progress(developer_profile: DeveloperProfile) -> bool:
-    """ADR-0025 "지급이 끝나기 전에는 탈퇴할 수 없다"(User Story 6) — Payout.Status.
-    BLOCKS_DEVELOPER_WITHDRAWAL 이 답한다(#142)."""
-
-    # APP-BOUNDARY-EXCEPTION: 탈퇴 자격이 지급 status 에 달려 있다 (ADR-0025)
-    from payouts.models import Payout
-
-    statuses = set(
-        Payout.objects.filter(
-            models.Q(handover__award__submission__contestsubmission__developer=developer_profile)
-            | models.Q(distribution_share__submission__contestsubmission__developer=developer_profile)
-        ).values_list("status", flat=True)
-    )
-    return any(Payout.Status.BLOCKS_DEVELOPER_WITHDRAWAL(status) for status in statuses)
-
-
-def _instructor_has_class_in_progress(user) -> bool:
-    """**소유한** 클래스(강의실의 Class.instructor) 중 보관되지 않은 것이 있는가
-    (#302). 공동 강사인 클래스는 세지 않는다 — 공동 강사는 탈퇴로 그 자리에서 빠지고
-    클래스는 소유자에게 남는다(CONTEXT.md 「공동 강사」, ADR-0055). 그래서 이 자리는
-    「강사인가」가 아니라 소유자 자체를 본다.
-
-    Sponsor/Developer 와 달리 강의실은 프로필을 두지 않고 계정(User)을
-    직접 가리킨다(ADR-0037, CONTEXT.md 「당사자」) — 그래서 여기는 profile 이 아니라
-    user 자체로 조회한다. 신원이 사라지면 참여자들이 새 문제를 열어 줄 사람도 명단을
-    손볼 사람도 없는 클래스에 남는다."""
-
-    # APP-BOUNDARY-EXCEPTION: 탈퇴 자격이 강의실 Class 의 보관 여부에 달려 있다 (#302)
-    from classroom.models import Class
-
-    return Class.objects.filter(instructor=user, archived_at__isnull=True).exists()
-
-
-def _transaction_basis(user) -> tuple[str, int] | None:
+def _transaction_basis(user) -> TransactionBasis | None:
     """이 계정에 결제나 지급 같은 금전 이동이 **있었던 적이 있는가**(끝났든 아니든),
     있다면 그 근거는 무엇인가 — `(RetainedIdentity.Reason, 그 거래의 PK)`.
 
@@ -117,12 +79,9 @@ def _transaction_basis(user) -> tuple[str, int] | None:
     근거(왜, 어느 거래) 양쪽의 유일한 판정처다 — 갈라 두면 언젠가 둘이 다른
     답을 하게 된다(이 저장소가 반복해 겪은 실패 모양).
 
-    - Sponsor: 결제된(=DRAFT를 벗어난 적이 있는) Contest를 하나라도 가졌으면
-      그 Contest가 근거다. `Contest.status`가 DRAFT를 벗어나는 유일한 경로가
-      결제 확인이라(`contests.models.Contest.Status.PUBLISHED`의 주석), 지금
-      상태가 무엇이든 DRAFT가 아니면 과거에 결제가 있었다는 뜻이다.
-    - Developer: 확정(CONFIRMED)된 Payout을 하나라도 받았으면 그 Payout이
-      근거다 — 원장에 실제로 돈이 움직인 기록이 남은 경우다.
+    - Sponsor: 결제된(=DRAFT를 벗어난 적이 있는) Contest — `contests.withdrawal.sponsor_transaction_basis`.
+    - Developer: 확정(CONFIRMED)된 Payout — `payouts.withdrawal.developer_transaction_basis`.
+    공유층이 두 앱을 import 하지 않도록 `accounts.ports` 의 자리로 묻는다(#1086).
 
     한 계정이 Sponsor·Developer 양쪽으로 거래했더라도 행은 하나(`RetainedIdentity`
     가 `user`에 대해 OneToOne)뿐이라 근거도 하나만 고른다 — Sponsor 쪽을 먼저
@@ -130,38 +89,17 @@ def _transaction_basis(user) -> tuple[str, int] | None:
     이 파기 결정의 정당성에 영향을 주지 않는다.
     """
 
-    # APP-BOUNDARY-EXCEPTION: Sponsor 쪽 거래 이력이 공모전에 있다 (#171)
-    from contests.models import Contest
-    # APP-BOUNDARY-EXCEPTION: Developer 쪽 거래 이력이 지급에 있다 (#171)
-    from payouts.models import Payout
-    # APP-BOUNDARY-EXCEPTION: 파기 대상이 본인확인 기록 자체다
-    from verification.models import RetainedIdentity
-
     sponsor_profile = getattr(user, "sponsor_profile", None)
     if sponsor_profile is not None:
-        contest = (
-            Contest.objects.filter(
-                sponsor=sponsor_profile, status__in=Contest.Status.REQUIRES_IDENTITY_RETENTION.statuses
-            )
-            .order_by("id")
-            .first()
-        )
-        if contest is not None:
-            return RetainedIdentity.Reason.SPONSOR_PAID_CONTEST, contest.id
+        basis = SPONSOR_TRANSACTION_BASIS.get()(sponsor_profile)
+        if basis is not None:
+            return basis
 
     developer_profile = getattr(user, "developer_profile", None)
     if developer_profile is not None:
-        payout = (
-            Payout.objects.filter(
-                models.Q(handover__award__submission__contestsubmission__developer=developer_profile)
-                | models.Q(distribution_share__submission__contestsubmission__developer=developer_profile),
-                status=Payout.Status.CONFIRMED,
-            )
-            .order_by("id")
-            .first()
-        )
-        if payout is not None:
-            return RetainedIdentity.Reason.DEVELOPER_CONFIRMED_PAYOUT, payout.id
+        basis = DEVELOPER_TRANSACTION_BASIS.get()(developer_profile)
+        if basis is not None:
+            return basis
 
     return None
 
@@ -184,14 +122,14 @@ def blocking_reasons(user) -> list[WithdrawalBlockReason]:
     reasons: list[WithdrawalBlockReason] = []
 
     sponsor_profile = getattr(user, "sponsor_profile", None)
-    if sponsor_profile is not None and _sponsor_has_contest_in_progress(sponsor_profile):
+    if sponsor_profile is not None and SPONSOR_CONTEST_IN_PROGRESS.get()(sponsor_profile):
         reasons.append(WithdrawalBlockReason.SPONSOR_CONTEST_IN_PROGRESS)
 
     developer_profile = getattr(user, "developer_profile", None)
-    if developer_profile is not None and _developer_has_payout_in_progress(developer_profile):
+    if developer_profile is not None and DEVELOPER_PAYOUT_IN_PROGRESS.get()(developer_profile):
         reasons.append(WithdrawalBlockReason.DEVELOPER_PAYOUT_IN_PROGRESS)
 
-    if _instructor_has_class_in_progress(user):
+    if INSTRUCTOR_CLASS_IN_PROGRESS.get()(user):
         reasons.append(WithdrawalBlockReason.INSTRUCTOR_CLASS_IN_PROGRESS)
 
     return reasons
@@ -227,13 +165,10 @@ def execute_withdrawal(user) -> Withdrawal:
         # 실명·생년월일을 지우기 **전에** 거래 이력을 확인해야 한다 — 순서를
         # 바꾸면 옮길 값이 이미 사라진 뒤에 옮기려는 꼴이 된다. 무엇을 비우고
         # 보존하는지는 여기서 모른다(#470) — `verification.purge.purge_identity`가
-        # 그 유일한 자리이고, 휴면 파기(`accounts.dormancy._purge_dormant_identity`)도
+        # 그 유일한 자리이고, 휴면 파기(`verification.dormancy._purge_dormant_identity`)도
         # 같은 함수를 부른다.
-        # APP-BOUNDARY-EXCEPTION: 파기 절차를 그 앱의 서비스 함수가 든다(#470)
-        from verification.purge import purge_identity
-
         basis = _transaction_basis(user)
-        purge_identity(verification, as_of=now, cause="withdrawal", transaction_basis=basis)
+        PURGE_IDENTITY.get()(verification, as_of=now, cause="withdrawal", transaction_basis=basis)
 
     # verification이 없어도(한 번도 본인확인하지 않은 계정) 전화번호는 지운다 —
     # purge_identity는 Verification이 있을 때만 불리므로 이 줄은 그 밖에 있다.

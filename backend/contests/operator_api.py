@@ -62,6 +62,7 @@ from .models import (
     HostingPermission,
     HostingPermissionChange,
 )
+from .ports import FREE_CONTEST_RELATIONS, FREE_CONTEST_WINNER, related
 from .schemas import (
     CategoryChangeOut,
     CategoryCreateIn,
@@ -436,10 +437,9 @@ def set_hosting_permission_endpoint(
 
 
 def _serialize_free_contest(contest: Contest) -> OperatorFreeContestOut:
-    award = getattr(contest, "award", None)
+    winner_user = FREE_CONTEST_WINNER.get()(contest)
     winner = None
-    if award is not None:
-        winner_user = award.submission.user
+    if winner_user is not None:
         winner = OperatorFreeContestWinnerOut(
             user_id=winner_user.id,
             email=winner_user.email,
@@ -459,7 +459,7 @@ def _serialize_free_contest(contest: Contest) -> OperatorFreeContestOut:
 def list_free_contests(request: HttpRequest):
     contests = (
         Contest.objects.filter(is_free=True)
-        .select_related("award__submission__user")
+        .select_related(*related(FREE_CONTEST_RELATIONS))
         .order_by("-created_at")
     )
     return 200, [_serialize_free_contest(contest) for contest in contests]

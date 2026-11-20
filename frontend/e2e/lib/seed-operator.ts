@@ -32,9 +32,7 @@ export const E2E_OPERATOR_PASSWORD = "e2e-operator-pw-9134-xyz";
  * `_own_title_prefix`). 예전에는 환경변수로 넘겼는데, HTTP 로 부르면 **부르는 쪽의
  * 환경변수가 백엔드 프로세스에 있을 리 없다.** 어긋나면 「매 호출이 서로 다른 토큰을 받아
  * 서로의 형제를 지우는」 조용한 사고가 된다. */
-async function runSeedCommand(name: string, options: Record<string, unknown> = {}): Promise<unknown> {
-  return runSeed(name, options);
-}
+const runSeedCommand = runSeed;
 
 export type SeedOperatorOptions = {
   username?: string;

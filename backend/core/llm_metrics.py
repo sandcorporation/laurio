@@ -225,12 +225,12 @@ def async_in_flight(product: str) -> int:
 
 
 def ops_recorder():
-    """1분 집계 기록기(`ops_metrics.recorder`, #827) — prometheus 와 **나란히** 쓴다. 지연 import 인 것은
-    그 모듈이 이 모듈의 경계 상수를 읽기 때문이다(순환을 끊는다)."""
+    """1분 집계 기록기(`ops_metrics.recorder`, #827) — prometheus 와 **나란히** 쓴다. 그 모듈이 이 모듈의 경계
+    상수를 읽으므로 import 하지 않고 `ops_metrics.apps` 가 올린 자리에서 꺼낸다(`core.ops_ports`, #1086)."""
 
-    from ops_metrics import recorder
+    from .ops_ports import OPS_RECORDER
 
-    return recorder
+    return OPS_RECORDER.get()
 
 
 def _minute_fields(call: "_Call") -> dict:

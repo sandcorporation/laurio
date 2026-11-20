@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 
-from core.observability import set_sentry_user_id  # APP-BOUNDARY-EXCEPTION: 공유층 core 의 오류 수집 도우미다
+from core.observability import set_sentry_user_id
 
 from .tokens import TokenError, decode_token
 

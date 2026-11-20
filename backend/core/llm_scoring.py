@@ -1280,7 +1280,7 @@ def _env_setting(key: str) -> str | None:
 
 def _runtime_setting(key: str) -> str | None:
     # 늦은 임포트 — policies 가 core 를 임포트한다(순환을 피한다). 둘 다 공유층이다.
-    from policies.runtime_settings import setting_value
+    from core.runtime_settings_port import setting_value
 
     return setting_value(key)
 
@@ -1315,7 +1315,7 @@ def get_adapter(*, timeout: float | None = None) -> LLMScoringAdapter:
     계약이다. 값이 없으면 openai 라 그 전과 같다(`LLM_ADAPTER_MODE` 의 dotted path)."""
 
     if not is_fake_adapter_binding(settings.LLM_ADAPTER_MODE):
-        from policies.runtime_settings import VENDOR_ANTHROPIC, scoring_vendor
+        from core.runtime_settings_port import VENDOR_ANTHROPIC, scoring_vendor
 
         if scoring_vendor() == VENDOR_ANTHROPIC:
             from core.llm_scoring_anthropic import platform_adapter

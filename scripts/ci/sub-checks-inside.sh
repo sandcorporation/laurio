@@ -44,8 +44,9 @@ deploy_check() {
 }
 
 # 어느 묶음을 돌릴지 — 인자 없이는 전부(로컬·한 번에 도는 길). GitHub Actions 는 matrix 로 나눠 부른다(#932):
-#   static          Django 검사·배포 구성 검사·생성물 최신성·문서/언어/고정 대기 검사(파이썬 스크립트)
-#   pytest [I/N]    백엔드 pytest — I/N 이면 시험 파일을 기록된 시간으로 고르게 N 개로 나눈 I번째(1부터) 조각(pytest_shards.py)
+#   static          Django 검사·배포 구성 검사·마이그레이션 호환·생성물 최신성·문서/언어/고정 대기 검사(파이썬 스크립트)
+#   pytest [I/N]    백엔드 pytest — I/N 이면 시험 파일을 기록된 시간으로 고르게 N 개로 나눈 I번째(1부터) 조각(pytest_shards.py).
+#                   CODEMIT_PYTEST_FILES 가 있으면 그 파일들만 나눈다(PR 선택 실행, #1088 — pytest_plan.py)
 #   web             단위 시험(packages·세 앱)과 세 앱 타입 검사
 group="${1:-all}"
 shard="${2:-}"
@@ -68,9 +69,16 @@ pytest_run() {
       --junitxml="/repo/test-results/backend-junit-${idx}of${total}.xml" $files )
 }
 
+# base(병합 대상) 코드가 새 스키마에서 도는가(#1091, docs/ops/migrations.md). base 목록은 sub-checks.sh 가 넣는다.
+migration_compat() {
+  [ -s /tmp/base-migrations.txt ] || { echo "base 마이그레이션 목록이 없다(/tmp/base-migrations.txt)"; return 1; }
+  cd backend && uv run python ../scripts/ci/migration_compat.py --base-list /tmp/base-migrations.txt
+}
+
 if want static; then
   step "Django 검사" bash -c 'cd backend && uv run python manage.py check --fail-level WARNING'
   step "배포 구성 검사(check --deploy)" deploy_check
+  step "마이그레이션 호환(base 코드가 새 스키마에서)" migration_compat
 fi
 if want pytest; then
   step "문법 검사 문법 받기" bash -c 'cd backend && uv run python manage.py prefetch_syntax_grammars --skip-checks'

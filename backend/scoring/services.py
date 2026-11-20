@@ -87,7 +87,7 @@ from policies.runtime_settings import (
 from repositories.adapters import ClonedRepository, GitHubRefNotFoundError, get_github_adapter
 from repositories.models import RepositorySnapshot
 from storage.adapters import StorageAdapterError, get_storage_adapter
-from submissions.models import RequirementResponse, SubmissionAsset
+from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 # 아래 두 상수는 재노출이다 — 원본은 `submissions.scoring_basis`에 있다(#246
 # 모듈 docstring 참고). 이름을 그대로 다시 import해 `scoring.services.
@@ -134,7 +134,8 @@ def _requirement_inputs(submission: ContestSubmission) -> list[RequirementInput]
         .order_by("order", "id")
     )
     self_reported = dict(
-        RequirementResponse.objects.filter(submission=submission).values_list("requirement_id", "is_met")
+        # 자가 응답 모델(contests)을 import 하지 않고 관계로 읽는다(#1086) — 같은 쿼리다.
+        submission.requirement_responses.values_list("requirement_id", "is_met")
     )
     return [
         RequirementInput(

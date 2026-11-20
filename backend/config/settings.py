@@ -174,11 +174,13 @@ INSTALLED_APPS = [
     "repositories",
     "awards",
     "handovers",
-    "payouts",
+    # distributions 가 payouts 앞이다(#1086) — 스캔 등록 순서 `distribution-create` → `distribution-share-payout`
+    # (`payouts.distribution_payouts`)를 지킨다.
     "distributions",
+    "payouts",
     "appeals",
     # 강의실(ADR-0037). 첫 삽 — 모델은 아직 없다(#275). 경계는 이 앱이 서는
-    # 순간부터 물게 하려고 `tests/test_app_boundaries.py` 의 분류표에 먼저
+    # 순간부터 물게 하려고 분류표(지금은 `app_deps.toml`, #1086)에 먼저
     # 이름을 적어 뒀다.
     "classroom",
     "ops_metrics",
@@ -278,7 +280,7 @@ def _default_test_db_name() -> str:
 #
 # 테스트가 실물 Redis 를 쓰면 두 가지가 따라온다.
 #
-# 1. `tests/conftest.py` 가 매 테스트 캐시를 비우는데 Django 의 RedisCache 는 그것을
+# 1. `conftest.py` 가 매 테스트 캐시를 비우는데 Django 의 RedisCache 는 그것을
 #    **FLUSHDB** 로 구현한다 — 키 접두어로는 막을 수 없다. 그래서 워커마다, 체인마다
 #    인덱스를 갈라 줘야 했고(Redis 기본 범위가 0~15 이라 금방 바닥난다) 잊으면 서로의
 #    세션을 지웠다.
@@ -363,7 +365,7 @@ DATABASES["monitor"] = {
 _DEV_REDIS_PORT = _env("CODEMIT_REDIS_PORT", "16379")
 # **동시에 두 pytest 를 돌린다면 이 값의 DB 인덱스를 서로 다르게 줘라.**
 #
-# `tests/conftest.py` 가 테스트마다 `caches["sessions"].clear()` 를 부르는데,
+# `conftest.py` 가 테스트마다 `caches["sessions"].clear()` 를 부르는데,
 # Django 의 RedisCache 는 그것을 **FLUSHDB** 로 구현한다 — 즉 키 접두어가 있든
 # 없든 **그 DB 전체**를 날린다. 그래서 두 체인이 같은 인덱스를 쓰면 한쪽의
 # 테스트 정리가 다른 쪽의 로그인 세션을 통째로 지우고, 피해자는 원인과 무관한
@@ -929,7 +931,7 @@ if _RUNNING_TESTS:
 # (2026-10-02). dev·CI·pytest 는 빠른 해셔로 새 해시를 만든다: 운영자 계정 시드 한
 # 번이 서버에서 1.06초, 운영자 앱을 거친 로그인 한 번이 0.55초라 그것만으로 e2e
 # 시험 하나 3초 한도를 넘었고, pytest 의 운영자 시험 대부분이 시험 하나 CPU 1초
-# 한도(`tests/conftest.py`)를 넘은 원인도 이것이었다. 시험이 보는 것은 「맞는
+# 한도(`conftest.py`)를 넘은 원인도 이것이었다. 시험이 보는 것은 「맞는
 # 비밀번호로만 들어간다」이지 해시 알고리즘의 강도가 아니다(Django 문서가 테스트에
 # 권하는 그대로). 판정은 다른 배포 가드와 같은 `IS_DEPLOYED_ENVIRONMENT` 라
 # prod 는 Django 기본값(PBKDF2)을 그대로 쓴다 — `tests/

@@ -8,7 +8,7 @@
   엔드포인트. 서명이 없거나 틀리면 거부한다(`payments.webhook_security`) — 인증이
   없는 엔드포인트라고 해서 검증까지 없는 건 아니다.
 
-두 확정 경로(confirm/webhook) 모두 `payments.charges.apply_vendor_outcome`이라는
+두 확정 경로(confirm/webhook) 모두 `ledger.charges.apply_vendor_outcome`이라는
 같은 조건부 UPDATE 관문을 통과한다 — 어느 쪽이 먼저 도착하든, 몇 번 재전송되든
 원장에는 정확히 한 번만 분개가 남는다.
 """
@@ -29,8 +29,8 @@ from contests.models import Contest
 from core.contest_switch import require_paid_contest_product_enabled
 from verification.models import Verification
 
-from .adapters import PGError, checkout_flow_for_current_mode, get_adapter
-from .charges import Outcome, apply_vendor_outcome, settle_charge
+from ledger.charges import Outcome, apply_vendor_outcome, settle_charge
+from ledger.pg import PGError, checkout_flow_for_current_mode, get_adapter
 from .models import Payment, WebhookDelivery
 from .schemas import (
     ConfirmPaymentIn,
@@ -175,7 +175,7 @@ def initiate_payment(request: HttpRequest, payload: InitiatePaymentIn):
     auth=jwt_auth,
 )
 def confirm_payment(request: HttpRequest, order_id: UUID, payload: ConfirmPaymentIn):
-    """동기 승인 확인 — Charge 확정 경로 하나(`payments.charges.settle_charge`).
+    """동기 승인 확인 — Charge 확정 경로 하나(`ledger.charges.settle_charge`).
 
     PG 호출은 어떤 `transaction.atomic()` 밖에서 일어나고, 타임아웃이면 `query_status` 로
     확정하며, 그 재확인마저 실패하면 미확정으로 남긴다(#87 지적 3, #125). 벤더의 명시적

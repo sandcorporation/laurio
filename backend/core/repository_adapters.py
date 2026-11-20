@@ -4,7 +4,7 @@
 공모전 가족이라(`tests/test_app_boundaries.py`), 강의실이 저장소 형식 문제를
 채점하려면 이 모듈을 부를 수 있어야 했고 그러려면 경계 규칙 A(강의실 ↮ 공모전,
 예외 없음)를 넘지 않는 자리에 있어야 했다. 이 모듈은 처음부터 `core.adapters`와
-`submissions.models.GITHUB_REPO_URL_PATTERN`(둘 다 공유층) 하나만 아는 완전
+`core.github_repo_url.GITHUB_REPO_URL_PATTERN`(둘 다 공유층) 하나만 아는 완전
 범용 코드였다 — `core.llm_scoring`(#274)이 그랬던 것과 같은 이동이다.
 
 **`repositories.adapters`는 그대로 남아 이 모듈을 재노출한다.** `GITHUB_ADAPTER_MODE`가
@@ -54,8 +54,8 @@ import requests
 from django.conf import settings
 
 from core.adapters import resolve_adapter
-from policies.runtime_settings import repository_download_limit_bytes
-from submissions.models import GITHUB_REPO_URL_PATTERN
+from core.runtime_settings_port import repository_download_limit_bytes
+from core.github_repo_url import GITHUB_REPO_URL_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class GitHubAdapter(Protocol):
 
 
 def _parse_github_url(url: str) -> tuple[str, str]:
-    """`submissions.models.GITHUB_REPO_URL_PATTERN`이 제출 시점에 이미 이 모양만
+    """`core.github_repo_url.GITHUB_REPO_URL_PATTERN`이 제출 시점에 이미 이 모양만
     받아들인다 — "GitHub 저장소 URL은 이렇게 생겼다"의 정의를 여기서 다시
     타이핑하지 않고 그 패턴을 그대로 재사용한다(#193 코드리뷰 지적). 두 벌로
     적으면 형식이 넓어질 때(예: 더 긴 저장소 이름) 한쪽만 고쳐져 제출 시점에

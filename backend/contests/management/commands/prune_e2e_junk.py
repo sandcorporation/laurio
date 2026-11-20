@@ -35,10 +35,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.db.models.deletion import ProtectedError
 
-from appeals.management.commands.seed_e2e_operator_queues import (
-    _refuse_in_deployed_environment,
-)
 from contests.models import Category, DeliverableType, DeliverableTypeChange
+from core.e2e_guard import refuse_in_deployed_environment
 from policies.models import PlatformPolicy
 from policies.services import UPDATABLE_FIELDS
 
@@ -60,7 +58,7 @@ class Command(BaseCommand):
     help = "e2e 가 남긴 Category·DeliverableType 을 지우고 플랫폼 정책을 기준값으로 되돌린다."
 
     def handle(self, *args, **options) -> None:
-        _refuse_in_deployed_environment("prune_e2e_junk")
+        refuse_in_deployed_environment("prune_e2e_junk")
 
         skipped: list[str] = []
         deliverable_types_deleted = self._prune(DeliverableType, skipped)

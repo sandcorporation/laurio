@@ -18,6 +18,11 @@
 # 종료 코드는 라이브러리 약속(README 「자동 롤백」)을 따른다: 0 성공 · 1 교체 전 실패(옛 서비스 그대로) ·
 # 2 교체 뒤 실패(되돌리지 않는다 — Jenkinsfile 의 `autoRollback: false`). `SANDCORP_ROLLBACK=1` 로 불리면 거절한다.
 #
+# **배포 뒤 확인·자동 되돌리기(#1092)는 스위치 `CODEMIT_POSTDEPLOY` 뒤에 있다 — 기본 off 는 위 순서 그대로다.**
+# check 면 reindex 뒤 `post-deploy-check.sh`(1분 한도)를 돌려 실패를 2 로 끝내고, rollback 이면 교체 뒤 실패(up 부터
+# 확인까지 어디서든)를 직전 배포 표식의 이미지로 되돌린 뒤 2 로 끝낸다(`deploy.sh rollback-plan` →
+# `post-deploy-rollback.sh`). 라이브러리의 되돌리기(`autoRollback`)는 그대로 끈다 — 되돌리기는 이 스크립트 안에서 한다.
+#
 # 라이브러리가 넘기는 `COMPOSE_PROJECT_NAME`·`COMPOSE_FILE` 은 지운다 — deploy.sh 는 `-f docker/compose.prod.yaml` 과
 # 그 파일의 `name: codemit-prod` 를 쓴다. 문맥 해시(`CODEMIT_CTX_*`)는 더 이상 Jenkins 배포 단계에서 만들거나 전달하지 않는다.
 set -uo pipefail
@@ -47,6 +52,28 @@ fi
 run() {
   echo "== deploy.sh prod $*"
   sh ./deploy.sh prod "$@"
+}
+
+# 스위치(off|check|rollback, 기본 off) — 확인 스크립트가 없는 옛 커밋(ROLLBACK_SHA)은 off 다.
+postdeploy=off
+if [ -f scripts/ci/post-deploy-check.sh ]; then
+  postdeploy=$(bash scripts/ci/post-deploy-check.sh --mode) || exit 1
+fi
+
+# 교체 뒤 실패 — off·check 는 지금처럼 2 로 끝내고, rollback 이면 직전 배포 표식으로 되돌린다. 뒤로 가는 배포
+# (ROLLBACK_SHA — 표식이 이 커밋보다 새것)는 되돌리지 않는다: 표식이 바로 피하려던 커밋이다.
+after_replace_failed() {
+  [ "$postdeploy" = rollback ] || exit 2
+  echo "교체 뒤 실패($1) — 직전 배포 표식으로 되돌린다"
+  if [ -z "$previous_deployed" ] || "${GIT[@]}" merge-base --is-ancestor "$sha" "$previous_deployed" 2>/dev/null; then
+    echo "되돌릴 곳이 없다(배포 표식 ${previous_deployed:-없음}) — 되돌리지 않는다"
+    exit 2
+  fi
+  run rollback-plan || exit 2
+  local tmp
+  tmp=$(mktemp -d) || exit 2
+  cp scripts/ci/post-deploy-rollback.sh scripts/ci/post-deploy-check.sh "$tmp/" || exit 2
+  exec bash "$tmp/post-deploy-rollback.sh" "$previous_deployed" "$sha" "$tmp/post-deploy-check.sh"
 }
 
 run preflight || exit 1
@@ -88,13 +115,17 @@ if [ "${plan[DEPLOY_ANY]:-false}" = true ]; then
 
   # 여기부터는 살아 있는 서비스를 바꾼다 — 실패하면 2(교체 뒤 실패).
   replaced=2
-  run up || exit 2
-  run verify || exit 2
-  run health backend || exit 2
-  run health events || exit 2
-  run health search || exit 2
+  run up || after_replace_failed up
+  run verify || after_replace_failed verify
+  run health backend || after_replace_failed "health backend"
+  run health events || after_replace_failed "health events"
+  run health search || after_replace_failed "health search"
   if [ "${plan[BUILD_SEARCH]:-false}" = true ] || [ "${plan[BUILD_BACKEND]:-false}" = true ]; then
-    run reindex || exit 2
+    run reindex || after_replace_failed reindex
+  fi
+  if [ "$postdeploy" != off ]; then
+    echo "== 배포 뒤 확인 ($postdeploy)"
+    bash scripts/ci/post-deploy-check.sh || after_replace_failed "배포 뒤 확인"
   fi
 else
   echo "바뀐 서비스가 없다(문서만 등) — 교체하지 않고 배포 표식만 옮긴다"

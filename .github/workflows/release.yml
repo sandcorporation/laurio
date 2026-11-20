@@ -1,17 +1,20 @@
-# main push → 검사·이미지(병렬) → production 승격(#938, ADR-0077). production 브랜치 머리 = 운영 버전.
+# main push → 이미지 → production 승격(#938, ADR-0077). production 브랜치 머리 = 운영 버전.
 # Jenkins `codemit/deploy` 는 production push 만 보고, 굽지도 검사하지도 않고 그 sha 의 이미지를 받아 oracle 에 배포한다
 # (Jenkinsfile → jenkins-shared sandcorpDeploy deployFrom: 'production').
 #
-#   verify  scripts/ci/verified_tree.py(#959) — 이 커밋의 트리를 PR 검사가 이미 초록으로 돌았나. 증명하면 skip=1.
-#           증명 = 병합(squash) 커밋 트리 == PR 검사가 돈 refs/pull/N/merge 커밋의 트리(plan 잡 「검사한 커밋」 단계 이름).
-#           그사이 main 이 움직였거나·문서만이라 시험을 건너뛴 PR 이거나·캐시 키 파일을 바꿨거나·API 가 실패하면 skip=0.
-#   check   pr-check.yml(workflow_call) — PR 검사 + guard(정적·pytest·web·guard·celery; e2e 는 e2e.yml 이 매시, #1015). 깨지면 이미지도 승격도 없다.
-#           verify 가 skip=1 이라고 할 때만 건너뛴다(verify 가 죽어도 돈다). main 실행이라 이미지 층 캐시를 저장한다(#932).
-#   image   check 와 나란히 돈다(needs 없음 — check 산출물에 기대지 않는다, 캐시는 레지스트리 것). image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>).
+# 배포 가능 판정은 병합 대기열 한 번이다(#1090) — release 는 검사하지 않는다. main 은 대기열로만 움직이고(ruleset: 대기열·
+# 필수 검사 「결과」, bypass 없음), 대기열이 돈 머지 커밋이 그대로 main 머리가 된다. 그래서 main 의 트리 = 대기열이 초록으로
+# 돈 트리이고, 그걸 다시 증명하던 verify(verified_tree.py, #959)와 다시 돌던 check(pr-check.yml)를 뺐다.
+# amd64 부팅 가드(guard)는 대기열의 PR 검사가 돈다. arm64 부팅 가드는 image.yml 이 그대로 돈다.
+#
+#   image   image.yml(workflow_call) — 여섯 이미지마다 matrix 잡 하나, ghcr codemit-<서비스>:<sha>-arm64(+ :<sha>), 부팅 가드(arm64).
+#   cache   PR 검사의 이미지 층 캐시(#932)를 main 에서 채운다 — 키(Dockerfile·lockfile 해시)가 없을 때만 굽는다.
+#           PR·대기열은 복원만 한다(대기열 ref 에서 저장한 캐시는 다른 PR 이 못 읽는다). 승격은 이 잡을 기다리지 않는다.
+#   cache-node  e2e 의 pnpm 저장소·Playwright 브라우저 캐시를 같은 까닭으로 main 에서 채운다.
 #   main_only 수동 실행(workflow_dispatch)의 ref 가 main 이 아니면 실패 — 아래 잡이 모두 이 잡 success 를 기다린다(#1018)
-#   promote needs verify·check·image — image 초록 + (check 초록 또는 verify 가 증명해 건너뜀)일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
+#   promote needs main_only·image — image 초록일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
 #           production 이 이미 더 새 판이면(옛 실행이 늦게 끝남) 실패가 아니라 건너뜀.
-#   check 가 붉어도 이미지는 ghcr 에 오를 수 있다 — 승격되지 않으니 배포되지 않는다(병렬로 돌려 병합→배포를 줄인 값).
+#   notify  image 가 붉으면 승격이 없다 = 배포가 없다 — ci-red 이슈를 연다(#1015). 초록이 되면 「복구됨」 댓글로 닫는다.
 # production 은 앞으로만 간다(ruleset: 강제 push·삭제 금지). 되돌리기는 main 에 revert PR — 이 흐름을 그대로 탄다.
 # 급하면 Jenkins 「Build with Parameters」의 ROLLBACK_SHA(production 은 그대로) — docs/ops/deploy.md 「되돌리기」.
 #
@@ -35,6 +38,8 @@ permissions:
 jobs:
   # 승격은 main 에서만(#1018) — 수동 실행으로 브랜치를 골라도 production 이 그 머리로 가지 않게, 모든 잡이 이 잡 success 를 기다린다
   main_only:
+    # 포크(#1084)에서는 돌지 않는다 — 운영 이미지 저장소·production 을 건드리지 않게. 본 저장소에서는 늘 참이라 무해하다.
+    if: github.repository == 'sandcorporation/laurio'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -44,37 +49,6 @@ jobs:
         run: |
           [ "$REF" = refs/heads/main ] || { echo "release 는 main 에서만 돈다(받은 ref: $REF)"; exit 1; }
 
-  verify:
-    needs: main_only
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    # GITHUB_TOKEN 읽기만 — 병합 커밋의 PR(pull-requests)·그 PR 검사 실행과 잡(actions)·커밋 트리(contents)
-    permissions:
-      contents: read
-      pull-requests: read
-      actions: read
-    outputs:
-      skip: ${{ steps.verify.outputs.skip }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 2 # 부모와 비교한다(바뀐 파일·부모 수)
-          persist-credentials: false
-      - id: verify
-        name: 이미 검사한 트리인가
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.sha }}
-        run: python3 scripts/ci/verified_tree.py "$SHA"
-
-  check:
-    needs: [main_only, verify]
-    # verify 가 실패·취소돼도(출력 없음) 돈다 — 건너뛰는 것은 증명했을 때뿐. main_only 가 success 여야만.
-    if: ${{ !cancelled() && needs.main_only.result == 'success' && needs.verify.outputs.skip != '1' }}
-    uses: ./.github/workflows/pr-check.yml
-    permissions:
-      contents: read
-
   image:
     needs: main_only
     uses: ./.github/workflows/image.yml
@@ -82,10 +56,110 @@ jobs:
       contents: read
       packages: write
 
-  # check 가 붉으면 승격이 없다 = 배포가 없다 — 아무도 모르고 지나가지 않게 ci-red 이슈를 연다(#1015). 초록이 되면 「복구됨」 댓글로 닫는다.
+  # PR 검사의 이미지 층 캐시(#932) — 키는 pr-check.yml 의 복원 키와 글자까지 같아야 한다(scripts/test_release_flow.py 가 견준다).
+  # 키가 이미 있으면 받지도 굽지도 않는다(lookup-only). 없으면 앞 세대를 복원해 굽고 새 키로 저장한다.
+  cache:
+    needs: main_only
+    # 포크(#1084·#1116)에는 main_only 가 건너뛰어져도 main push 면 돈다 — 저장하는 것은 이 저장소의 Actions 캐시뿐이라(쓰기 권한·이미지·승격 없음)
+    # 포크 PR 검사가 받을 층이 생긴다. 없으면 포크 e2e 조각마다 처음부터 굽는다. 본 저장소에서는 main_only success 그대로.
+    if: ${{ !cancelled() && (needs.main_only.result == 'success' || needs.main_only.result == 'skipped' && github.repository != 'sandcorporation/laurio' && github.ref == 'refs/heads/main') }}
+    name: cache ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ci, target: "" }
+          - { name: backend, target: "" }
+          - { name: frontend, target: runner }
+          - { name: operator, target: runner }
+          - { name: classroom, target: runner }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - id: key
+        name: 캐시 키
+        env:
+          KEY: >-
+            ${{ matrix.name == 'ci' && format('bk-ci-{0}', hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml'))
+            || matrix.name == 'backend' && format('bk-backend-{0}', hashFiles('docker/backend.Dockerfile','backend/uv.lock'))
+            || format('bk-{0}-{1}', matrix.name, hashFiles(format('docker/{0}.Dockerfile', matrix.name), 'pnpm-lock.yaml')) }}
+        run: echo "key=$KEY" >>"$GITHUB_OUTPUT"
+      - id: have
+        name: 이미 있나
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.name }}
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - if: steps.have.outputs.cache-hit != 'true'
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - if: steps.have.outputs.cache-hit != 'true'
+        name: 앞 세대 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.name }}
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: bk-${{ matrix.name }}-
+      - if: steps.have.outputs.cache-hit != 'true'
+        name: 층 굽기(amd64, 이미지는 버린다)
+        env:
+          NAME: ${{ matrix.name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p "/tmp/bk/$NAME"
+          docker buildx build -f "docker/$NAME.Dockerfile" ${TARGET:+--target "$TARGET"} \
+            --cache-from "type=local,src=/tmp/bk/$NAME" --cache-to "type=local,dest=/tmp/bk-new/$NAME,mode=max" \
+            --output type=cacheonly .
+          # 저장 경로는 복원 경로와 같아야 한다(actions/cache 의 버전이 경로로 갈린다) — 앞 세대를 버리고 새 세대를 그 자리에
+          rm -rf "/tmp/bk/$NAME" && mv "/tmp/bk-new/$NAME" "/tmp/bk/$NAME"
+      - if: steps.have.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.name }}
+          key: ${{ steps.key.outputs.key }}
+
+  # e2e 의 pnpm 저장소 캐시 — 위와 같은 까닭으로 main 에서 채운다. 키·경로는 pr-check.yml 의 e2e 잡과 같다.
+  # Playwright 브라우저는 캐시하지 않는다 — e2e 는 브라우저가 든 공식 이미지에서 돈다(#1109).
+  cache-node:
+    needs: main_only
+    # 포크(#1084·#1116)에는 main_only 가 건너뛰어져도 main push 면 돈다 — 저장하는 것은 이 저장소의 Actions 캐시뿐이라(쓰기 권한·이미지·승격 없음)
+    # 포크 PR 검사가 받을 층이 생긴다. 없으면 포크 e2e 조각마다 처음부터 굽는다. 본 저장소에서는 main_only success 그대로.
+    if: ${{ !cancelled() && (needs.main_only.result == 'success' || needs.main_only.result == 'skipped' && github.repository != 'sandcorporation/laurio' && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - id: pnpm-store
+        name: pnpm 저장소 경로
+        run: |
+          corepack enable
+          echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
+      - id: have-pnpm
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          lookup-only: true
+      - if: steps.have-pnpm.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.have-pnpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+
+  # image 가 붉으면 승격이 없다 = 배포가 없다 — 아무도 모르고 지나가지 않게 ci-red 이슈를 연다(#1015). 초록이 되면 「복구됨」 댓글로 닫는다.
   notify:
-    needs: [main_only, check]
-    if: ${{ !cancelled() && needs.main_only.result == 'success' && (needs.check.result == 'failure' || needs.check.result == 'success') }}
+    needs: [main_only, image]
+    if: ${{ !cancelled() && needs.main_only.result == 'success' && (needs.image.result == 'failure' || needs.image.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -102,10 +176,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
           CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
           SHA: ${{ github.sha }}
-          RESULT: ${{ needs.check.result }}
+          RESULT: ${{ needs.image.result }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title="release 검사 실패 — production 승격·배포 멈춤"
+          title="release 이미지 실패 — production 승격·배포 멈춤"
           if [ "$RESULT" = success ]; then
             bash scripts/ci/ci-issue.sh ok "$title" "복구됨 ${SHA} — ${RUN_URL}"
             exit 0
@@ -113,17 +187,15 @@ jobs:
           # 직전 초록 = production 머리(마지막으로 승격된 sha)
           green=$(gh api "repos/${GH_REPO}/git/ref/heads/production" -q .object.sha || true)
           jobs=$(gh run view ${{ github.run_id }} --json jobs -q '[.jobs[]|select(.conclusion=="failure")|.name]|join(", ")' || true)
-          body="main \`${SHA}\` 의 release 검사(check)가 실패했다. 실패한 잡: ${jobs:-?}. 승격이 돌지 않아 이 커밋은 배포되지 않는다. 실행: ${RUN_URL}"
+          body="main \`${SHA}\` 의 release 이미지(image)가 실패했다. 실패한 잡: ${jobs:-?}. 승격이 돌지 않아 이 커밋은 배포되지 않는다. 실행: ${RUN_URL}"
           if [ -n "$green" ] && [ "$green" != "$SHA" ]; then
             body="${body}"$'\n\n'"직전 초록(production) \`${green}\` … 이번 \`${SHA}\`: https://github.com/${GH_REPO}/compare/${green}...${SHA}"
           fi
           bash scripts/ci/ci-issue.sh fail "$title" "$body"
 
   promote:
-    needs: [main_only, verify, check, image]
-    if: >-
-      ${{ !cancelled() && needs.main_only.result == 'success' && needs.image.result == 'success' && (needs.check.result == 'success' ||
-      (needs.check.result == 'skipped' && needs.verify.result == 'success' && needs.verify.outputs.skip == '1')) }}
+    needs: [main_only, image]
+    if: ${{ !cancelled() && needs.main_only.result == 'success' && needs.image.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

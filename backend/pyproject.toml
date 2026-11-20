@@ -74,7 +74,7 @@ dev = [
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py"]
-testpaths = ["tests"]
+testpaths = ["."]
 # live_vendor(#83, ADR-0007): 벤더를 실제로 치는 선택적 테스트. 기본 실행에서
 # 제외한다 — 자격증명 없는 신선한 체크아웃이 이 때문에 빨개지면 안 된다.
 # `-m live_vendor`로만 선택 실행한다(tests/live.py 참고).

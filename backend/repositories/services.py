@@ -31,6 +31,7 @@ from submissions.models import Submission, SubmissionAsset
 from submissions.repository_pins import is_pinned, requested_ref, resolve_pinned_commit
 
 from .adapters import GitHubRefNotFoundError, get_github_adapter
+from .ports import STILL_TO_SCORE  # scoring.apps 가 올린다(#1102)
 
 # 마감 전 화면 배지가 참고할 값이라 아주 자주 다시 볼 필요는 없다 — 참가자가
 # 저장소를 공개로 바꾼 뒤 배지가 반영되기까지 이 값만큼 늦을 수 있다는 뜻이고,
@@ -48,17 +49,17 @@ def _pending_repository_assets(as_of, ctx):
     deadline_near = Q(
         submission__contestsubmission__contest__deadline_at__lte=as_of + _STALE_AFTER_PUBLIC
     )
+    assets = SubmissionAsset.objects.filter(
+        kind=SubmissionAsset.Kind.REPOSITORY,
+        # 강의실 제출물은 공모전 Score 가 영영 생기지 않아, 제품으로 가르지 않으면
+        # 한 시간마다 영원히 후보가 된다 — 쓰는 곳도 없는 값을 위해 GitHub 호출이
+        # 제출 수만큼 끝없이 쌓여 prod 의 API 한도를 막았다(GlitchTip 오류 80).
+        # 강의실 채점은 채점 시점에 `check_public` 을 직접 부른다.
+        submission__product=Submission.Product.CONTEST,
+    )
+    # Score 없음·영구 실패 아님은 채점 앱이 올린다(#1102) — 이 앱이 채점 행을 직접 걷지 않게.
     return (
-        SubmissionAsset.objects.filter(
-            kind=SubmissionAsset.Kind.REPOSITORY,
-            # 강의실 제출물은 공모전 Score 가 영영 생기지 않아, 제품으로 가르지 않으면
-            # 한 시간마다 영원히 후보가 된다 — 쓰는 곳도 없는 값을 위해 GitHub 호출이
-            # 제출 수만큼 끝없이 쌓여 prod 의 API 한도를 막았다(GlitchTip 오류 80).
-            # 강의실 채점은 채점 시점에 `check_public` 을 직접 부른다.
-            submission__product=Submission.Product.CONTEST,
-            submission__score__isnull=True,
-        )
-        .exclude(submission__scoring_attempts__permanent=True)
+        STILL_TO_SCORE.get()(assets)
         .filter(
             Q(is_public__isnull=True)
             | Q(is_public_checked_at__lt=as_of - _STALE_AFTER_PUBLIC)

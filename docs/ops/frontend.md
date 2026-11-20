@@ -27,8 +27,8 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 테스트 시임은 **앱마다 하나**다(ADR-0021·0026). `docker compose -f
 docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm --dir frontend test`
 로 Playwright 가 프로젝트 셋으로 세 앱을 한 번에 친다(공개 앱 스펙은
-`frontend/e2e/*.spec.ts`, 운영자 앱 스펙은 `frontend/e2e/operator/*.spec.ts`, 강의실
-스펙은 `frontend/e2e/classroom/*.spec.ts` — `playwright.config.ts` 가 프로젝트마다 다른
+`frontend/e2e/<앱>/*.spec.ts`, 운영자 앱 스펙은 `frontend/e2e/operator/<앱>/*.spec.ts`, 강의실
+스펙은 `frontend/e2e/classroom/*.spec.ts`(폴더 이름 = 앱 표시: `backend/app_deps.toml` 의 앱 또는 `frontend`, `scripts/test_e2e_plan.py` 가 지킨다) — `playwright.config.ts` 가 프로젝트마다 다른
 `testDir`·`baseURL` 을 준다). `CODEMIT_E2E_BASE_URL`/`CODEMIT_OPERATOR_E2E_BASE_URL`/
 `CODEMIT_CLASSROOM_E2E_BASE_URL` 로 각 프로젝트의 `baseURL` 을 바꿀 수 있다(기본값은 위
 포트 표와 같다). `pnpm --dir frontend typecheck`/`pnpm --dir operator typecheck`/
@@ -144,7 +144,7 @@ cd <worktree>
 같은 방식). `scripts/test.sh backend [pytest 인자]` · `scripts/test.sh e2e [playwright 인자]`.
 
 - **다른 길은 막혀 있다**(2026-10-02) — 스크립트가 칸을 잡은 뒤 `CODEMIT_TEST_ENTRY` 를 내보내고,
-  그 표식이 없으면(`CI` 도 없으면) `backend/tests/conftest.py`·`frontend/playwright.config.ts` 가
+  그 표식이 없으면(`CI` 도 없으면) `backend/conftest.py`·`frontend/playwright.config.ts` 가
   시작 전에 거절한다. 바로 친 `uv run pytest` 는 `-n auto` 로 코어를 전부 썼다.
 - **기계 전체에서 동시에 둘까지 돈다** — 셋째는 빈 칸을 기다린다(`/tmp/codemit-test-slots`
   의 flock, 워크트리가 달라도 같은 칸을 센다). 이 머신은 여러 에이전트와 다른 프로젝트가
@@ -152,7 +152,7 @@ cd <worktree>
 - **한 칸은 호스트 코어의 1/3 을 고정해 쓴다**(12코어면 4) — pytest·Playwright 는 `taskset`,
   e2e 스택 컨테이너는 `docker update --cpuset-cpus`. 몫 제한(`--cpus`)이 아니라 코어를 못
   박는다: 몫이 차면 0.1초씩 통째로 멈춰 시험이 흔들린다(web-rpg 실측).
-- **한 번에 400개를 넘게 돌리지 않는다** — pytest 는 `tests/conftest.py` 가 수집 단계에서,
+- **한 번에 400개를 넘게 돌리지 않는다** — pytest 는 `backend/conftest.py` 가 수집 단계에서,
   e2e 는 스크립트가 `--list` 로 미리 세어 거절한다. `CI` 환경변수가 있으면(=CI) 제한이 없고,
   로컬에서 정말 필요하면 `CODEMIT_FULL_TESTS=1`.
 - **전체 시험은 브랜치 PR 의 CI 로 본다** — 아래 「티켓을 닫는 기준」.

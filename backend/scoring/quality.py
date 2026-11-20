@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, OuterRef, Subquery
@@ -258,6 +259,18 @@ def review_total(
     않는다(ADR-0073)."""
 
     return quality_total(review.items, points, bonus or ())
+
+
+def save_bonus_score(
+    submission_id: int, requirement: Requirement, score: int, memo: str, rated_by_id: int, rated_at: datetime
+) -> None:
+    """개최자가 매긴 가산 하나를 덮어쓴다(#905, ADR-0073) — 검사는 부르는 쪽(`contests.submission_api.rate_bonus`)이 한다."""
+
+    SubmissionBonusScore.objects.update_or_create(
+        submission_id=submission_id,
+        requirement=requirement,
+        defaults={"score": score, "memo": memo, "rated_by_id": rated_by_id, "rated_at": rated_at},
+    )
 
 
 def ranked_reviews(

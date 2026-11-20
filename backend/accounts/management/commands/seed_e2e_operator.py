@@ -4,7 +4,7 @@
 는 이미 있는 이름이면 실패한다 — 사람이 한 번 쓰는 명령이라 그게 맞다. 하지만
 `frontend/e2e/lib/seed.ts`가 매 스펙 실행마다 같은 계정으로 로그인해야 하므로,
 여기서는 있으면 갱신하고 없으면 만드는 멱등한 버전을 따로 둔다
-(`backend/contests/management/commands/seed_e2e_contests.py`와 같은 원칙).
+(`backend/awards/management/commands/seed_e2e_contests.py`와 같은 원칙).
 
 **서로소 불변식(ADR-0018)은 여기서도 지켜야 한다**(코드리뷰 지적) — 처음에는
 "멱등 시드는 create_operator의 계약(이미 있으면 거부)에 안 맞으니 그 함수를

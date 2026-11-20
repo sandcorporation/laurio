@@ -185,8 +185,10 @@ def _run(name: str, spec: ScanSpec, *, as_of, ctx: dict | None, params: dict | N
 
     # 실행 하나 = PlatformPolicy 스코프 하나(#145) — 후보 쿼리·행 처리가 `current_policy()` 를 몇 번
     # 부르든 SELECT 는 한 번이다. run_all 은 스캔마다 새 스코프를 연다(각 실행이 그 시점의 정책).
-    from policies.scope import policy_scope
+    # `policies.apps` 가 올린 자리에서 꺼낸다 — core 는 policies 를 import 하지 않는다(#1086).
+    from .ops_ports import SCAN_SCOPE
 
+    policy_scope = SCAN_SCOPE.get()
     rows: list[dict] = []
     failed: list[dict] = []
     with policy_scope():

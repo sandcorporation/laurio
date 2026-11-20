@@ -27,3 +27,9 @@ def sponsor_user_id_if_awarded(contest_id: int, developer_user_id: int) -> int |
     if award is None:
         return None
     return award.contest.sponsor.user_id
+
+
+def is_submission_awarded(submission_id: int) -> bool:
+    """이 제출에 Award 가 있나 — 공모전 단건 조회가 Sponsor 에게 소스를 여는 판정(`contests.ports`)."""
+
+    return Award.objects.filter(submission_id=submission_id).exists()

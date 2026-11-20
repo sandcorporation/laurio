@@ -72,7 +72,7 @@ prod 배포(`docker/compose.prod.yaml`)만 유료
 - 그대로 등록됨(과제가 쓰거나 제품과 무관하거나, 무료 공모전도 필요로 한다):
   `submission-scoring`(scoring, 채점) · `repository-visibility`(repositories,
   저장소 가시성) · 알림 스캔들(notifications) · `identity-dormancy-purge`·
-  `retained-identity-purge`(accounts, 휴면·신원 파기) · `demo-video-retention-
+  `retained-identity-purge`(verification, 휴면·신원 파기) · `demo-video-retention-
   purge`(submissions) · `contest-close`·`contest-judging-end`·Contest 이미지
   최적화(contests — 전이는 돈을 옮기지 않고, 무료 공모전도 마감·심사종료·수상을
   거친다) — 이 넷은 **공모전 스위치**만 본다(`enabled=contest_product_enabled`인

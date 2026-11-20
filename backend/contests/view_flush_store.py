@@ -7,7 +7,7 @@
 뒤에 둔다: 운영은 그 캐시가 가리키는 것과 같은 Redis 인스턴스(`SESSION_REDIS_URL`, 키
 접두어만 나눈다 — `contests.view_tracking`이 이미 그 자리를 그렇게 나눠 쓰는 것과 같은
 이유로 새 Redis를 배선하지 않는다)를, 테스트는 클래스 레벨 메모리 집합을 쓴다
-(`core.events.FakeEventBus`와 같은 관용구 — `tests/conftest.py`의 autouse 픽스처가 매
+(`core.events.FakeEventBus`와 같은 관용구 — `conftest.py`의 autouse 픽스처가 매
 테스트 전후로 비운다).
 
 **떼어 내기는 원자적이다.** `pop_all`은 Lua 스크립트(`SMEMBERS` + `DEL`을 한 EVAL로)를

@@ -16,13 +16,13 @@ DB(`test_codemit_<해시>_tpl`)를 만들어 마이그레이션하고, 나머지
   컨트롤러가 한 번 만들어 `workerinput` 으로 워커에 준다(`-n 0` 이면 제 프로세스의 것).
   지난 실행이 남긴 템플릿은 표가 달라 다시 만든다 — `--reuse-db` 처럼 묵은 스키마를
   쓰는 일이 없다.
-- **xdist 컨트롤러가 워커를 띄우는 동안 미리 만든다**(`tests/conftest.py` 의 sessionstart,
+- **xdist 컨트롤러가 워커를 띄우는 동안 미리 만든다**(`conftest.py` 의 sessionstart,
   워커는 그동안 수집한다). 워커가 각자 잠금 앞에서 기다리면 그 기다림이 워커마다 첫 시험의
   setup 에 붙어 junit 이 여전히 「느린 시험 12건」을 보인다. `-n 0` 은 기다리는 워커가 없으니
   픽스처가 처음 쓰일 때 만든다 — DB 를 안 쓰는 실행이 값을 치르지 않는다. 워커의 픽스처도
   같은 길을 품고 있어 컨트롤러가 못 만든 경우(표가 없다)에도 선다.
 - 템플릿에 연결이 남아 있으면 복제가 거절되므로 만든 뒤 연결을 닫는다. 컨트롤러가 세션
-  끝에 템플릿을 지운다(`tests/conftest.py`) — 워커가 전부 내려간 뒤다.
+  끝에 템플릿을 지운다(`conftest.py`) — 워커가 전부 내려간 뒤다.
 - 두 체크아웃이 동시에 돌아도 템플릿 이름은 `_default_test_db_name()`(경로 해시)에서
   나오므로 겹치지 않는다 — 워커 DB 이름과 같은 꼴이다.
 """
@@ -107,7 +107,7 @@ def build_template(connections, template: str, *, verbosity: int) -> None:
 
 
 def prebuild_template(connections, *, token: str, verbosity: int) -> str:
-    """xdist 컨트롤러가 워커를 띄우는 동안 템플릿을 미리 만든다(`tests/conftest.py` 의 sessionstart).
+    """xdist 컨트롤러가 워커를 띄우는 동안 템플릿을 미리 만든다(`conftest.py` 의 sessionstart).
 
     워커가 각자 잠금 앞에서 기다리면 그 기다림이 워커마다 첫 시험의 setup 에 붙어, junit 이
     여전히 「느린 시험 12건」을 보인다. 컨트롤러가 먼저 만들면 워커의 몫은 복제(1초 미만)뿐이다.

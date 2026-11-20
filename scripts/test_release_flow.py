@@ -2,11 +2,12 @@
 
     python3 scripts/test_release_flow.py
 
-main push → release.yml: check(pr-check.yml) → image(image.yml) → promote(promote.sh) → production. Jenkins 는
-production 머리의 이미지를 받아 배포한다(Jenkinsfile 의 `deployFrom`). 셋이 어긋나면 조용히 깨진다:
+PR → 병합 대기열(pr-check.yml, 배포 가능 판정 한 번) → main push → release.yml: image(image.yml) → promote(promote.sh) →
+production. Jenkins 는 production 머리의 이미지를 받아 배포한다(Jenkinsfile 의 `deployFrom`). 셋이 어긋나면 조용히 깨진다:
 - 이미지 목록이 다르면 Jenkins 가 오지 않을 이미지를 기다리거나(배포 실패), 굽지 않은 이미지를 compose 가 찾는다.
-- pr-check.yml 이 main push 로도 돌면 검사가 두 번 돌고, workflow_call 이 없으면 release.yml 이 부르지 못한다.
+- pr-check.yml 이 main push 나 release 에서도 돌면 같은 커밋을 두 번 검사한다(#1090).
 - promote 가 image 를 기다리지 않으면 production 이 이미지보다 먼저 움직인다.
+- release 의 cache 잡 키가 pr-check.yml 의 복원 키와 다르면 PR 이 늘 차가운 캐시로 굽는다.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "ci"))
 
 from image_context import SERVICES  # noqa: E402
-from verified_tree import TESTED_STEP, Job, Run, decide, tested_commit  # noqa: E402
 
 WORKFLOWS = ROOT / ".github" / "workflows"
 
@@ -35,6 +35,22 @@ def job_block(code: str, job: str) -> str:
     return match.group(1)
 
 
+def resolve(key: str, name: str) -> str:
+    """캐시 키 식을 한 이름(matrix.app·matrix.name)으로 풀고 공백을 걷는다."""
+    key = re.sub(r"format\('docker/\{0\}\.Dockerfile', matrix\.(?:app|name)\)", f"'docker/{name}.Dockerfile'", key)
+    return re.sub(r"\s+", "", key.replace("${{ matrix.app }}", name))
+
+
+def release_key(expr: str, name: str) -> str:
+    """release.yml cache 잡의 KEY 식(이름별 format(...) 셋)에서 그 이름이 고르는 키를 pr-check.yml 꼴로 쓴다."""
+    special = dict(re.findall(r"format\('bk-(\w+)-\{0\}', (hashFiles\([^)]*\))\)", expr))
+    if name in special:
+        return resolve(f"bk-{name}-${{{{ {special[name]} }}}}", name)
+    default = re.search(r"format\('bk-\{0\}-\{1\}', matrix\.name, (hashFiles\(.*\))\) \}\}$", expr)
+    assert default, expr
+    return resolve(f"bk-{name}-${{{{ {default.group(1)} }}}}", name)
+
+
 class ReleaseFlowTest(unittest.TestCase):
     def test_image_lists_agree(self) -> None:
         image = read(WORKFLOWS / "image.yml")
@@ -47,34 +63,103 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertEqual(sorted(in_matrix), sorted(SERVICES))
         self.assertEqual(sorted(jenkins), sorted(SERVICES))
 
-    def test_pr_check_is_called_not_pushed(self) -> None:
+    def test_pr_check_runs_on_pr_and_queue_only(self) -> None:
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "pr-check.yml"))
         assert on
-        self.assertRegex(on.group(1), r"(?m)^  pull_request:")
-        self.assertRegex(on.group(1), r"(?m)^  workflow_call:")
-        self.assertNotRegex(on.group(1), r"(?m)^  push:")
+        self.assertEqual(sorted(re.findall(r"(?m)^  ([\w-]+):", on.group(1))), ["merge_group", "pull_request"])
 
-    def test_release_runs_check_and_image_then_promote_on_main_only(self) -> None:
+    def test_release_builds_and_promotes_without_checking(self) -> None:
         code = read(WORKFLOWS / "release.yml")
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", code)
         assert on
         self.assertEqual(re.sub(r"\s+", " ", on.group(1)).strip(), "push: branches: [main] workflow_dispatch:")
-        self.assertIn("uses: ./.github/workflows/pr-check.yml", job_block(code, "check"))
+        # 판정은 대기열 한 번(#1090) — release 는 PR 검사를 부르지도, 이미 검사했는지 따지지도 않는다
+        self.assertNotIn("pr-check.yml", code)
+        self.assertNotIn("verified_tree", code)
+        jobs = re.findall(r"(?m)^  ([\w-]+):\n", code.split("\njobs:\n", 1)[1])
+        self.assertEqual(sorted(jobs), ["cache", "cache-node", "image", "main_only", "notify", "promote"])
+        self.assertFalse((ROOT / "scripts" / "ci" / "verified_tree.py").exists())
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)
-        # check 와 image 는 병렬 — 승격만 둘을 기다린다.
         self.assertRegex(image, r"needs:\s*main_only\s*\n")
-        self.assertNotRegex(image, r"needs:.*(verify|check)")
         promote = job_block(code, "promote")
-        self.assertRegex(promote, r"needs:\s*\[main_only, verify, check, image\]")
-        # 건너뛴 check 로 승격하는 길은 verify 가 증명했을 때 하나뿐(#959)
+        self.assertRegex(promote, r"needs:\s*\[main_only, image\]")
         self.assertIn("needs.image.result == 'success'", promote)
-        self.assertIn(
-            "(needs.check.result == 'skipped' && needs.verify.result == 'success' && needs.verify.outputs.skip == '1')",
-            re.sub(r"\s+", " ", promote),
-        )
         self.assertIn('bash scripts/ci/promote.sh ff "$SHA"', promote)
         self.assertIn("fetch-depth: 0", promote)
+        # 캐시를 못 채워도 배포는 간다
+        self.assertNotIn("cache", re.search(r"needs:\s*(\[[^\]]*\]|\S+)", promote).group(1))
+
+    def test_release_saves_the_cache_keys_pr_check_restores(self) -> None:
+        pr = read(WORKFLOWS / "pr-check.yml")
+        self.assertNotIn("actions/cache/save", pr, "PR·대기열 ref 에서 저장한 캐시는 다른 PR 이 못 읽는다 — 저장은 release 에서만")
+        restored = set(re.findall(r"(?m)^          key: (bk-.+)$", pr))
+        release = read(WORKFLOWS / "release.yml")
+        cache = job_block(release, "cache")
+        names = re.findall(r"(?m)^          - \{ name: (\w+), target: [^}]*\}", cache)
+        self.assertEqual(sorted(names), ["backend", "ci", "classroom", "frontend", "operator"])
+        key_expr = re.sub(r"\s+", " ", re.search(r"(?ms)KEY: >-\n(.*?)\n        run:", cache).group(1)).strip()
+        for name in names:
+            with self.subTest(cache=name):
+                self.assertIn(release_key(key_expr, name), {resolve(k, name) for k in restored})
+        node = job_block(release, "cache-node")
+        for key in ("pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}",):
+            with self.subTest(cache=key):
+                self.assertIn(f"key: {key}", pr)
+                self.assertIn(f"key: {key}", node)
+
+    def test_fork_does_not_publish_promote_schedule_or_open_issues(self) -> None:
+        # 포크(#1084)에는 비밀값이 없지만 GITHUB_TOKEN 으로 운영 이미지 저장소에 올리고 production 을 옮기고 이슈를 열 수 있다.
+        # 본 저장소에서만 도는 조건이 그 잡들 머리에 있어야 한다(본 저장소에서는 늘 참).
+        only_upstream = "github.repository == 'sandcorporation/laurio'"
+        release = read(WORKFLOWS / "release.yml")
+        # 승격·이미지·알림은 모두 main_only success 를 기다린다 — main_only 하나를 막으면 다 멈춘다.
+        self.assertIn(f"if: {only_upstream}", job_block(release, "main_only"))
+        for job in ("image", "cache", "cache-node", "notify", "promote"):
+            self.assertRegex(job_block(release, job), r"needs:\s*(main_only|\[main_only)")
+        self.assertIn(f"if: {only_upstream}", job_block(read(WORKFLOWS / "image.yml"), "build"))
+        # 캐시 잡만은 포크 main 에서도 돈다(#1116) — 포크 PR 검사의 층 캐시가 비어 e2e 조각마다 처음부터 굽던 것.
+        # 저장하는 것은 Actions 캐시뿐이고, 본 저장소에서는 main_only success 를, 포크에서는 main ref 를 요구한다.
+        fork_cache = "needs.main_only.result == 'skipped' && github.repository != 'sandcorporation/laurio' && github.ref == 'refs/heads/main'"
+        for job in ("cache", "cache-node"):
+            with self.subTest(fork_cache=job):
+                block = job_block(release, job)
+                self.assertIn(fork_cache, block)
+                self.assertNotRegex(block, r"(?m)^\s+permissions:")
+        for job in ("image", "notify", "promote"):
+            with self.subTest(upstream_only=job):
+                self.assertNotIn("result == 'skipped'", job_block(release, job))
+        # 매시 e2e(#1111): 실제 실패 이슈는 본 저장소에서만 — 포크는 알림 시험만
+        self.assertIn("github.repository == 'sandcorporation/laurio'", job_block(read(WORKFLOWS / "e2e.yml"), "notify"))
+
+    def test_e2e_runs_on_prs_and_hourly_on_main_not_in_the_merge_queue(self) -> None:
+        # 대표 결정(#1111): PR 은 바뀐 앱의 e2e 가 「결과」 필수, 대기열은 e2e 없음, 전부는 매시 main
+        pr = read(WORKFLOWS / "pr-check.yml")
+        plan = job_block(pr, "plan")
+        self.assertIn("pull_request) e2e_plan=$(python3 scripts/ci/e2e_plan.py --base", plan)
+        self.assertNotIn("merge_group) e2e_plan", plan)
+        self.assertIn('"e2e:$E2E:$want_e2e"', job_block(pr, "result"))
+        hourly = read(WORKFLOWS / "e2e.yml")
+        on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", hourly)
+        assert on
+        self.assertRegex(on.group(1), r"(?m)^  schedule:")
+        self.assertRegex(on.group(1), r"(?m)^  workflow_dispatch:")
+        self.assertIn("e2e_plan.py --all", job_block(hourly, "gate"))
+        self.assertIn("CODEMIT_E2E_PLAYWRIGHT_IMAGE: 1", job_block(hourly, "e2e"))
+        # 조율자 점검(stall-check.sh)이 이 제목으로 찾는다 — 바꾸지 않는다
+        self.assertIn('title="e2e 실패 — main 의 화면이 깨졌을 수 있다"', job_block(hourly, "notify"))
+        # 이미지 층·pnpm 캐시 저장은 release 에서만 — 매시 e2e 가 저장하는 것은 조각 시간 기록(#1112) 하나다
+        saves = re.findall(r"uses: actions/cache/save@\S+[^\n]*\n\s+with:\n((?:\s{10}\S[^\n]*\n)+)", hourly)
+        self.assertEqual(len(saves), hourly.count("actions/cache/save"))
+        for block in saves:
+            self.assertRegex(block, r"key: e2e-durations-\$\{\{ github.run_id \}\}", "매시 e2e 가 저장하는 캐시는 시간 기록뿐")
+        self.assertIn("e2e_plan.py --all --durations .e2e-durations/record.json", job_block(hourly, "gate"))
+        self.assertIn("e2e_plan.py --base \"$base\" --durations .e2e-durations/record.json", plan)
+
+    def test_pr_check_also_judges_the_merge_queue(self) -> None:
+        on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "pr-check.yml"))
+        assert on
+        self.assertRegex(on.group(1), r"(?m)^  merge_group:")
 
     def test_image_is_only_built_from_main_or_by_hand(self) -> None:
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "image.yml"))
@@ -108,124 +193,6 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}(?:\s|$)")
 # 이 두 파일의 FROM 을 고치면 deploy.sh 가 그 이미지를 새로 구워 운영 search·pgbouncer 컨테이너를 바꿔 끼운다.
 # TODO(다음 의도적 교체 때 고정): 그때 digest 를 붙이고 이 목록에서 뺀다.
 FROM_PIN_DEFERRED = {"search.Dockerfile", "pgbouncer.Dockerfile"}
-
-
-class ReleaseSkipsAlreadyCheckedTreeTest(unittest.TestCase):
-    """#959 — release 는 PR 검사가 같은 트리를 초록으로 돌았다고 증명할 때만 check 를 건너뛴다."""
-
-    TREE = "a" * 40
-    X = "b" * 40
-
-    def run_(self, tree: str | None = TREE, conclusion: str = "success", tests: str = "success", guard: str = "skipped") -> Run:
-        jobs = (
-            Job("guard (frontend)", guard, ()),
-            Job("guard (classroom)", guard, ()),
-            Job("plan", "success", ("Set up job", f"검사한 커밋 {self.X}", "무엇을 돌릴지")),
-            Job("checks static", tests, ()),
-            Job("e2e classroom", tests, ()),
-            Job("결과", "success", ()),
-        )
-        return Run(1, conclusion, jobs, tree)
-
-    def test_same_tree_from_a_full_green_run_skips(self) -> None:
-        decision = decide(self.TREE, 1, ["backend/app.py"], [self.run_()])
-        self.assertTrue(decision.skip, decision.reason)
-
-    def test_guard_skipped_on_pr_is_green_but_any_other_skipped_job_is_not(self) -> None:
-        self.assertTrue(decide(self.TREE, 1, ["backend/app.py"], [self.run_(guard="skipped")]).skip)
-        self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(guard="failure")]).skip)
-        self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(tests="skipped")]).skip)
-
-    def partial_run(self, tests: str = "1", back: str = "1", front: str = "1", **overrides: str) -> Run:
-        """PR 검사가 계획대로 돈 실행(잡 이름은 pr-check.yml 의 것)."""
-        jobs = [Job("plan", "success", ("검사한 커밋 " + self.X,)), Job("결과", "success", ()), Job("guard", "skipped", ())]
-        if tests == "1":
-            jobs.append(Job("checks static", "success", ()))
-        if back == "1":
-            jobs += [Job(f"checks pytest-{i}of4", "success", ()) for i in (1, 2, 3, 4)]
-            jobs += [Job("celery", "success", ()), Job("agent-grader", "success", ())]
-        else:
-            jobs += [Job("celery", "skipped", ()), Job("agent-grader", "skipped", ())]
-        if front == "1":
-            jobs.append(Job("checks web", "success", ()))
-        if tests == "0":
-            jobs.append(Job("checks ${{ matrix.name }}", "skipped", ()))
-        jobs = [Job(j.name, overrides.get(j.name, j.conclusion), j.steps) for j in jobs]
-        return Run(1, "success", tuple(jobs), self.TREE)
-
-    def partial(self, plan: tuple[str, str, str], run: Run, released: bool = True) -> bool:
-        return decide(self.TREE, 1, ["x"], [run], plan, released).skip
-
-    def test_frontend_only_pr_is_accepted_when_the_plan_skips_the_same(self) -> None:
-        self.assertTrue(self.partial(("1", "0", "1"), self.partial_run(back="0")))
-
-    def test_backend_only_pr_is_accepted_when_the_plan_skips_the_same(self) -> None:
-        self.assertTrue(self.partial(("1", "1", "0"), self.partial_run(front="0")))
-
-    def test_docs_only_pr_is_accepted_when_the_plan_skips_everything(self) -> None:
-        self.assertTrue(self.partial(("0", "0", "0"), self.partial_run(tests="0", back="0", front="0")))
-
-    def test_pr_that_skipped_more_than_the_plan_is_rejected(self) -> None:
-        # 병합 커밋은 백엔드·프런트 둘 다 바꿨는데 PR 은 프런트만 돌았다
-        self.assertFalse(self.partial(("1", "1", "1"), self.partial_run(back="0")))
-        # 백엔드만 바뀌었는데 static 까지 건너뛰었다
-        run = self.partial_run(front="0")
-        self.assertFalse(self.partial(("1", "1", "0"), Run(1, "success", tuple(j for j in run.jobs if j.name != "checks static"), self.TREE)))
-        # 계획이 문서만인데 PR 은 시험을 돌았다 → 더 돈 것도 계획과 다르다
-        self.assertFalse(self.partial(("0", "0", "0"), self.partial_run()))
-
-    def test_partial_run_is_rejected_when_the_parent_was_not_released(self) -> None:
-        self.assertFalse(self.partial(("1", "0", "1"), self.partial_run(back="0"), released=False))
-
-    def test_unreadable_plan_keeps_the_strict_rule(self) -> None:
-        self.assertFalse(decide(self.TREE, 1, ["x"], [self.partial_run(back="0")], None, True).skip)
-
-    def test_red_job_in_the_part_that_ran_is_rejected(self) -> None:
-        self.assertFalse(self.partial(("1", "0", "1"), self.partial_run(back="0", **{"checks web": "failure"})))
-
-    def test_main_moved_between_check_and_merge_runs_full_check(self) -> None:
-        self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(tree="c" * 40)]).skip)
-
-    def test_docs_only_run_that_skipped_tests_is_not_proof(self) -> None:
-        self.assertFalse(decide(self.TREE, 1, ["docs/a.md"], [self.run_(tests="skipped")]).skip)
-
-    def test_red_or_unreadable_or_missing_runs_are_not_proof(self) -> None:
-        self.assertFalse(decide(self.TREE, 1, [], [self.run_(conclusion="failure")]).skip)
-        self.assertFalse(decide(self.TREE, 1, [], [self.run_(tree=None)]).skip)
-        self.assertFalse(decide(self.TREE, 1, [], []).skip)
-        no_result = Run(1, "success", (Job("plan", "success", ()),), self.TREE)
-        self.assertFalse(decide(self.TREE, 1, [], [no_result]).skip)
-
-    def test_any_matching_run_is_enough(self) -> None:
-        self.assertTrue(decide(self.TREE, 1, [], [self.run_(tree="c" * 40), self.run_()]).skip)
-
-    def test_cache_key_files_force_full_check_so_main_saves_the_cache(self) -> None:
-        for path in ("backend/uv.lock", "pnpm-lock.yaml", "docker/ci.Dockerfile", "docker/backend.Dockerfile"):
-            with self.subTest(path=path):
-                self.assertFalse(decide(self.TREE, 1, [path], [self.run_()]).skip)
-
-    def test_non_squash_commit_runs_full_check(self) -> None:
-        self.assertFalse(decide(self.TREE, 2, [], [self.run_()]).skip)
-
-    def test_tested_commit_is_read_from_the_plan_step_name(self) -> None:
-        self.assertEqual(tested_commit(self.run_().jobs), self.X)
-        self.assertIsNone(tested_commit((Job("plan", "success", ("검사한 커밋 ",)),)))
-
-    def test_pr_check_plan_names_the_step_the_way_verify_reads_it(self) -> None:
-        plan = job_block(read(WORKFLOWS / "pr-check.yml"), "plan")
-        names = re.findall(r"name:\s*(검사한 커밋 .*)", plan)
-        self.assertEqual(names, ["검사한 커밋 ${{ github.sha }}"])
-        self.assertTrue(TESTED_STEP.match(names[0].replace("${{ github.sha }}", self.X)))
-
-    def test_release_check_is_skipped_only_on_proof_and_verify_only_reads(self) -> None:
-        code = read(WORKFLOWS / "release.yml")
-        check = job_block(code, "check")
-        self.assertIn("needs: [main_only, verify]", check)
-        self.assertIn("if: ${{ !cancelled() && needs.main_only.result == 'success' && needs.verify.outputs.skip != '1' }}", check)
-        verify = job_block(code, "verify")
-        self.assertIn('python3 scripts/ci/verified_tree.py "$SHA"', verify)
-        scopes = dict(re.findall(r"(?m)^      ([\w-]+): (read|write)$", verify))
-        self.assertEqual(scopes, {"contents": "read", "pull-requests": "read", "actions": "read"})
 
 
 def unpinned_external_froms(dockerfile_texts: dict[str, str], deferred: set[str]) -> list[str]:

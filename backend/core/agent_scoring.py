@@ -39,24 +39,17 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import PurePosixPath
-from typing import Literal, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
+# 실행기(`agent-grader`)의 계약은 `scoring.agent_runner` 가 `core.agent_ports` 에 등록한다(#1085) — 그 파일은 이미지가 홀로
+# COPY 하는 표준 라이브러리 모듈이다(agent-grader.Dockerfile·deploy.sh 가 경로를 안다).
+from core.agent_ports import RunResult, RunSpec, Vendor, agent_grader
 from core.agent_refusal_alert import report_account_refusal
 from core.agent_run_tokens import issue_run_token, run_usage
-from policies.runtime_settings import VENDOR_ANTHROPIC, scoring_vendor, setting_value
-# APP-BOUNDARY-EXCEPTION: 실행기(`agent-grader`)는 이미지가 이 파일 하나를 그대로 COPY 하는 표준 라이브러리 모듈이다(agent-grader.Dockerfile·deploy.sh 가 경로를 안다) — 계약(RunSpec·RunResult·request_run·오류)만 쓴다 (#1036)
-from scoring.agent_runner import (  # noqa: F401 - 오류·한도는 강의실이 여기서 받는다(강의실은 scoring 을 못 부른다)
-    CLAUDE_TOOLS,
-    RUN_TIMEOUT_SECONDS,
-    AgentGraderBusy,
-    AgentGraderError,
-    RunRejected,
-    RunResult,
-    RunSpec,
-    Vendor,
-    request_run,
-)
-from submissions.models import Submission
+from core.runtime_settings_port import VENDOR_ANTHROPIC, scoring_vendor, setting_value
+
+if TYPE_CHECKING:
+    from submissions.models import Submission
 
 #: JSON 값 — 구조화 출력·스키마는 모양을 정적으로 모른다(쓰기 전에 좁힌다).
 JSON = dict[str, "JSON"] | list["JSON"] | str | int | float | bool | None
@@ -68,6 +61,12 @@ MAX_ATTEMPTS = 2  # 최초 + 1회 재실행
 ATTEMPT_TIMEOUT_SECONDS = 300
 #: 실행기 HTTP 를 기다리는 시간 — CLI 상한 + 박제본 풀기·결과 전송 여유.
 ATTEMPT_HTTP_TIMEOUT_SECONDS = ATTEMPT_TIMEOUT_SECONDS + 60
+
+
+def request_run(spec: RunSpec, repo_zip: bytes, *, timeout: float) -> RunResult:
+    """실행기에 실행 하나를 맡긴다 — 등록된 `scoring.agent_runner.request_run`(#1085). 시험이 이 이름을 바꿔 끼운다."""
+
+    return agent_grader().request_run(spec, repo_zip, timeout=timeout)
 #: 에이전트 한 건(재시도 포함)의 최장 — 이 일을 부르는 스캔의 워커 한도가 이보다 커야 한다.
 AGENT_JOB_MAX_SECONDS = MAX_ATTEMPTS * ATTEMPT_HTTP_TIMEOUT_SECONDS
 MAX_EVIDENCE = 5
@@ -458,7 +457,7 @@ def acceptance_problems(
     problems: list[str] = []
     if vendor == VENDOR_ANTHROPIC:
         tools = parsed.init_tools or []
-        if not set(CLAUDE_TOOLS) <= set(tools):
+        if not set(agent_grader().CLAUDE_TOOLS) <= set(tools):
             problems.append(f"도구 빠짐: init 도구 {tools}")
         if parsed.api_key_source != "ANTHROPIC_API_KEY":
             problems.append(f"인증 출처가 실행 토큰이 아님: {parsed.api_key_source}")
@@ -605,7 +604,7 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
     for _ in range(MAX_ATTEMPTS):
         try:
             problems, attempt, output = _attempt(job, vendor=vendor, model=model, prompt=prompt, snapshot=snapshot, index=index)
-        except RunRejected as exc:
+        except agent_grader().RunRejected as exc:
             # 실행 전에 거절됐다(박제본이 너무 크다 등) — 다시 보내도 같다.
             attempts.append({"rejected": exc.reason})
             raise AgentRunHeld([f"실행 거절: {exc.reason}"], record) from exc

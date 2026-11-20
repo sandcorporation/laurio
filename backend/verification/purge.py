@@ -1,7 +1,7 @@
 """신원 파기 절차 — 탈퇴와 휴면 파기가 공유하는 유일한 자리 (#470).
 
 지금까지 탈퇴(`accounts.withdrawal.execute_withdrawal`)와 휴면 파기
-(`accounts.dormancy._purge_dormant_identity`)가 같은 8개 `Verification` 필드를
+(`verification.dormancy._purge_dormant_identity`)가 같은 8개 `Verification` 필드를
 각자 같은 순서로 비우고, 보존이 필요하면(`transaction_basis`) `RetainedIdentity`를
 만드는 거의 같은 블록을 따로 갖고 있었다 — 필드가 하나 늘 때 한쪽을 빠뜨리면
 조용한 개인정보 유출이다. 이 함수가 그 유일한 자리다: 호출부는 어떤 필드가

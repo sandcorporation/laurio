@@ -2,6 +2,7 @@
 """백엔드 pytest 를 시험 시간 기준으로 조각낸다(#1083).
 
     pytest_shards.py pick I N                 I번째(1부터) 조각의 시험 파일(backend/ 기준)을 한 줄씩
+                                              (CODEMIT_PYTEST_FILES 가 있으면 그 파일들만 나눈다 — PR 의 선택 실행, #1088)
     pytest_shards.py update JUNIT.xml...      junit 결과로 시간 기록(pytest-durations.json)을 다시 쓴다
 
 조각은 파일 단위다. 시간이 긴 파일부터 지금까지 가장 가벼운 조각에 넣는다(같으면 앞 조각) — 같은
@@ -13,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Mapping
@@ -24,8 +26,22 @@ RECORD = Path(__file__).resolve().parent / "pytest-durations.json"
 
 
 def test_files(backend: Path = BACKEND) -> list[str]:
-    """backend/ 기준 시험 파일 — pytest 설정(testpaths=tests, python_files=test_*.py)과 같은 범위."""
-    return sorted(p.relative_to(backend).as_posix() for p in (backend / "tests").rglob("test_*.py"))
+    """backend/ 기준 시험 파일 — `tests/`(통합·구조)와 앱마다 `<앱>/tests/`(#1087). python_files=test_*.py."""
+    found = [*(backend / "tests").rglob("test_*.py"), *backend.glob("*/tests/**/test_*.py")]
+    return sorted({p.relative_to(backend).as_posix() for p in found})
+
+
+def chosen_files(env: str | None = None) -> list[str]:
+    """나눌 시험 파일 — `CODEMIT_PYTEST_FILES`(pytest_plan.py 의 FILES, 빈칸으로)가 있으면 그것만, 없으면 전부."""
+    raw = os.environ.get("CODEMIT_PYTEST_FILES", "") if env is None else env
+    every = test_files()
+    if not raw.strip():
+        return every
+    wanted = set(raw.split())
+    missing = sorted(wanted - set(every))
+    if missing:
+        raise SystemExit(f"CODEMIT_PYTEST_FILES 에 없는 시험 파일: {', '.join(missing)}")
+    return sorted(wanted)
 
 
 def shards(files: Iterable[str], durations: Mapping[str, float], total: int) -> list[list[str]]:
@@ -76,7 +92,7 @@ def main(argv: list[str]) -> int:
         if not 1 <= idx <= total:
             print(f"조각 번호가 범위 밖이다: {idx}/{total}", file=sys.stderr)
             return 2
-        print("\n".join(shards(test_files(), read_record(), total)[idx - 1]))
+        print("\n".join(shards(chosen_files(), read_record(), total)[idx - 1]))
         return 0
     if len(argv) >= 2 and argv[0] == "update":
         record = durations_from_junit((Path(p) for p in argv[1:]), set(test_files()))

@@ -40,12 +40,12 @@ from django.db import IntegrityError, transaction
 from core.adapters import is_fake_adapter_binding
 from core.clock import Clock
 from core.crypto import DecryptionError, decrypt, encrypt
+from core.runtime_settings_port import VENDOR_ANTHROPIC, VENDOR_OPENAI, ScoringVendor
 
 logger = logging.getLogger(__name__)
 
 Source = Literal["db", "env", "none"]
 Kind = Literal["secret", "text", "float", "switch", "choice"]
-ScoringVendor = Literal["openai", "anthropic"]
 ProbeResult = Literal["ok", "invalid_key", "unavailable"]
 
 FALLBACK_TTL_SECONDS = 30.0
@@ -74,8 +74,6 @@ CONTEST_AI_QUALITY_REVIEW = "CONTEST_AI_QUALITY_REVIEW"
 
 #: 플랫폼 채점 벤더의 키(#994) — `scoring_vendor`. 값이 없으면 `openai`(그 전과 같다).
 LLM_SCORING_VENDOR = "LLM_SCORING_VENDOR"
-VENDOR_OPENAI: ScoringVendor = "openai"
-VENDOR_ANTHROPIC: ScoringVendor = "anthropic"
 
 #: 공모전 채점 방식의 키(#1000) — `contest_scoring_method`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
 CONTEST_SCORING_METHOD = "CONTEST_SCORING_METHOD"

@@ -62,7 +62,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import Callable
 
-from policies.runtime_settings import repository_download_limit_bytes
+from core.runtime_settings_port import repository_download_limit_bytes
 
 from core.llm_scoring import SourceFile
 from core.source_converters import (

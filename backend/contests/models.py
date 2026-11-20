@@ -24,7 +24,7 @@ from core.classification import Classification
 from core.clock import Clock
 from core.quality_review import GRADE_BONUS, GRADE_OPTIONAL, GRADE_REQUIRED, POINTS_MAX, POINTS_MIN, default_points
 
-from payments.charges import ChargeBase
+from ledger.charges import ChargeBase
 from submissions.models import Submission
 
 
@@ -224,8 +224,6 @@ class ContestQuerySet(models.QuerySet):
         return self.filter(Q(judging_ends_at__isnull=True) | Q(judging_ends_at__gt=now))
 
     def distribution_due(self, as_of, policy):
-        from distributions.services import distribution_due_q
-
         return self.filter(distribution_due_q(as_of, policy))
 
 
@@ -893,13 +891,13 @@ class JudgingExtensionPayment(ChargeBase):
     """심사기간 유료 연장 결제 시도 하나 (#13, #126, ADR-0004/0007/0008).
 
     Charge(CONTEXT.md)의 한 종류다 — `payments.models.Payment`(Prize 예치+개최비)와
-    같은 뼈대(`payments.charges.ChargeBase`)를 상속하고, 이 종류에 고유한 둘만 준다:
+    같은 뼈대(`ledger.charges.ChargeBase`)를 상속하고, 이 종류에 고유한 둘만 준다:
     분개의 줄(`journal`)과 확정에 딸려오는 부모 전이(`on_paid` — 심사기간 연장). `Payment`
     를 그대로 재사용하지 않는 이유: `Payment.unique_active_payment_per_contest`는 Contest
     당 결제가 평생 한 번(최초 예치)이라는 전제로 걸려 있는데, 연장은 같은 Contest에 대해
     여러 번 반복될 수 있는 별개의 결제 종류다.
 
-    동시성·재전송에 안전한 이유는 `payments.charges.apply_vendor_outcome` 이 조건부
+    동시성·재전송에 안전한 이유는 `ledger.charges.apply_vendor_outcome` 이 조건부
     `UPDATE ... WHERE status='requested'` 규율(ADR-0003)로 딱 한 번만 이기기 때문이다.
     """
 
@@ -1141,3 +1139,110 @@ class ContestConnectedAppWrite(models.Model):
     class Meta:
         ordering = ["-created_at", "-id"]
         indexes = [models.Index(fields=["user", "-created_at"], name="contests_capw_user_idx")]
+
+
+# --- 자가 응답·근거 (#1086) -----------------------------------------------------------------
+#
+# 자가 응답은 공모전 요구사항(`Requirement`)에 대한 응답이라 공모전 앱에 둔다. `submissions` 에 있을 때는
+# 공유층이 공모전 모델을 FK 로 가리켰다(역방향 DB 간선). 근거(`Evidence`)는 자가 응답을 가리키므로 함께 왔다.
+# 표·제약 이름은 그대로다 — 마이그레이션은 상태만 옮겼다(`contests/0015`, `submissions/0006`).
+
+
+class RequirementResponse(models.Model):
+    """한 Requirement에 대한 Developer의 자가 응답."""
+
+    submission = models.ForeignKey(
+        Submission, related_name="requirement_responses", on_delete=models.CASCADE
+    )
+    requirement = models.ForeignKey(
+        Requirement, related_name="responses", on_delete=models.CASCADE
+    )
+    is_met = models.BooleanField(default=False)
+    note = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        # 표 이름은 옮기기 전 그대로 — 소속 앱만 contests 로 옮겼다(#1086, 상태만 옮긴 마이그레이션).
+        db_table = "submissions_requirementresponse"
+        ordering = ["requirement__order", "requirement_id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["submission", "requirement"], name="unique_response_per_requirement"
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"RequirementResponse(submission={self.submission_id}, requirement={self.requirement_id})"
+
+
+class Evidence(models.Model):
+    """자가 응답 하나를 뒷받침하는 근거 (CONTEXT.md의 Evidence)."""
+
+    class Kind(models.TextChoices):
+        VIDEO_TIMESTAMP = "video_timestamp", "영상 타임스탬프"
+        SCREENSHOT = "screenshot", "스크린샷"
+        DEMO_PATH = "demo_path", "데모 내 경로"
+        SOURCE_LOCATION = "source_location", "소스 위치"
+
+    response = models.ForeignKey(
+        RequirementResponse, related_name="evidence_items", on_delete=models.CASCADE
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    value = models.CharField(max_length=500)
+
+    # 이 근거가 가리키는 자료 (#190). 데모·영상이 여럿이 되는 순간 "데모 내 경로"나
+    # "영상 타임스탬프"가 어느 대상의 것인지 알 수 없어지고, 채점 프롬프트는 그
+    # 값을 그대로 LLM에 넘기므로 AI가 근거를 못 찾아 미달 판정이 는다. 자료를
+    # 지우면 그것을 가리키던 근거도 함께 사라진다 — 가리킬 곳이 없는 근거는
+    # 근거가 아니다. null은 "자료를 특정하지 않은 근거"이고 그대로 허용된다
+    # (기존 행 전부가 그렇다).
+    asset = models.ForeignKey(
+        "submissions.SubmissionAsset",
+        related_name="evidence_items",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        # 표 이름은 옮기기 전 그대로 — 소속 앱만 contests 로 옮겼다(#1086, 상태만 옮긴 마이그레이션).
+        db_table = "submissions_evidence"
+        # **순서를 명시한다** (#195 리뷰). 이 모델에는 `Meta` 자체가 없었고, 그래서
+        # `response.evidence_items.all()` 이 정렬 없는 SELECT 였다 — 순서가 우연히
+        # 삽입 순이었을 뿐이다. `_replace_requirement_responses` 가 저장할 때마다
+        # 이전 행을 전부 지우고 다시 만들므로 힙 재사용으로 순서가 뒤집힐 수 있고,
+        # 그러면 참가자가 적어 둔 근거가 화면에서 자리를 바꾼다. 형제인
+        # `RequirementResponse`·`SubmissionAsset` 은 둘 다 `ordering` 을 갖는다.
+        ordering = ["id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"Evidence({self.kind}={self.value!r})"
+
+
+def distribution_due_q(as_of, policy) -> Q:
+    """「배분 시각이 왔다」는 조건 그 자체(#1086 에서 distributions.services 에서 옮겼다 — Contest 열만 본다) — **이의 보류를 적용하기 전의** 것이다.
+
+    조건을 `Q` 로 내주는 이유는 소비처가 셋이고 모양이 다르기 때문이다: 스캔은
+    이것으로 후보를 뽑고(그 뒤 이의 보류를 뺀다), 이의 쪽은 「이 이의가 배분을
+    막고 있다」를 이 조건에 **들어 있는가**로 판정하고(#74), 개최자 목록은 행마다
+    `Case/When` 으로 붙여 조회 없이 같은 것을 안다(#81).
+
+    조건을 세 벌로 쓰면 언젠가 갈라지고, 그러면 개최자 화면은 보류라는데 이의
+    큐는 아니라고 하는 날이 온다.
+
+    **`is_free=False`도 조건이다(#417, ADR-0048).** 무료 공모전은 상금·Escrow가
+    없으므로 「무응답 N일」이 지나도 배분할 돈 자체가 없다 — 심사 기간 안에
+    수상하지 않으면 그대로 수상 없이 끝난 상태로 남는다(더 옮겨 갈 다음 단계가
+    없다). 이 조건이 없으면 무료 공모전도 스캔 후보에 올라 `Distribution`(과
+    그 이하 `Payout`)을 만들려 시도하게 된다.
+    """
+
+    from .ports import NO_DISTRIBUTION_FILTER  # distributions.apps 가 올린다(#1102)
+
+    return Q(
+        NO_DISTRIBUTION_FILTER.get()(),
+        status__in=Contest.Status.AWAITING_DISTRIBUTION.statuses,
+        judging_ends_at__lte=as_of - timedelta(days=policy.distribution_wait_days),
+        is_free=False,
+    )

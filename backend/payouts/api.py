@@ -51,6 +51,7 @@ from policies.scope import current_policy
 
 logger = logging.getLogger(__name__)
 
+from .targets import handover_payout_target
 from .progress import (
     BLOCKED_ON_VALUES,
     Hold,
@@ -160,7 +161,7 @@ def request_payout(request: HttpRequest, contest_id: int):
     if handover.status != Handover.Status.RELEASED:
         raise HttpError(409, "아직 예치금이 해제되지 않아 지급을 요청할 수 없습니다.")
 
-    payout = get_or_create_payout(handover.payout_target())
+    payout = get_or_create_payout(handover_payout_target(handover))
 
     return 201, _serialize(payout)
 

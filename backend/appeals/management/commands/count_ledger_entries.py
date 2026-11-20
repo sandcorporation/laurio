@@ -28,10 +28,10 @@ import json
 
 from django.core.management.base import BaseCommand
 
+from core.e2e_guard import refuse_in_deployed_environment
 from contests.models import Contest
 from ledger.models import JournalEntry
 
-from .seed_e2e_operator_queues import _refuse_in_deployed_environment
 
 
 class Command(BaseCommand):
@@ -41,7 +41,7 @@ class Command(BaseCommand):
         parser.add_argument("--contest-id", type=int, required=True)
 
     def handle(self, *args, **options) -> None:
-        _refuse_in_deployed_environment("count_ledger_entries")
+        refuse_in_deployed_environment("count_ledger_entries")
 
         contest = Contest.objects.get(id=options["contest_id"])
         count = JournalEntry.objects.filter(contest_id=contest.ledger_id).count()
