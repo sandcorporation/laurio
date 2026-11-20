@@ -325,6 +325,7 @@ export default function JudgeComparisonPage() {
                     <SubmissionColumnHeader
                       submission={submission}
                       isAwarded={awardedSubmissionId === submission.submission_id}
+                      isFree={contest.is_free !== false}
                       awardLocked={award.status === "done"}
                       award={award}
                       onAwardClick={() =>
@@ -459,8 +460,8 @@ export default function JudgeComparisonPage() {
 
       {award.status === "done" && (
         <p data-testid="award-success" className="text-sm text-success">
-          제출물 #{award.result.submission_id}을(를) 선정했습니다. 이 제출작의
-          소스코드에 접근할 수 있습니다.
+          제출물 #{award.result.submission_id}을(를) 당선작으로 확정했습니다. 이 제출작의
+          소스코드는 개최자에게 열렸습니다.
         </p>
       )}
       {pointsError && (
@@ -504,6 +505,7 @@ function QualitySummary({ quality }: { quality: ComparisonQuality | null }) {
 function SubmissionColumnHeader({
   submission,
   isAwarded,
+  isFree,
   awardLocked,
   award,
   onAwardClick,
@@ -513,6 +515,7 @@ function SubmissionColumnHeader({
 }: {
   submission: ComparisonSubmissionOut;
   isAwarded: boolean;
+  isFree: boolean;
   awardLocked: boolean;
   award: AwardState;
   onAwardClick: () => void;
@@ -638,7 +641,7 @@ function SubmissionColumnHeader({
 
       {isAwarded && (
         <p className="text-xs font-semibold text-success" data-testid={`awarded-badge-${submission.submission_id}`}>
-          선정됨
+          당선 확정
         </p>
       )}
 
@@ -651,7 +654,7 @@ function SubmissionColumnHeader({
             className="text-xs text-error"
             data-testid={`award-source-notice-${submission.submission_id}`}
           >
-            선정하면 이 제출작의 소스코드가 즉시 공개됩니다.
+            확정하면 이 제출작의 소스코드가 개최자에게 열리며 되돌릴 수 없습니다.
           </p>
 
           {!isConfirming ? (
@@ -662,12 +665,13 @@ function SubmissionColumnHeader({
               data-testid={`award-button-${submission.submission_id}`}
               className={`w-fit ${buttonClass("danger", "sm")}`}
             >
-              이 제출물 선정
+              당선작으로 확정
             </button>
           ) : (
             <div className="flex flex-col gap-1">
               <p className="text-xs" data-testid={`award-confirm-notice-${submission.submission_id}`}>
-                정말 선정하시겠습니까? 소스코드가 즉시 공개되며 되돌릴 수 없습니다.
+                이 제출물을 당선작으로 확정하시겠습니까? 소스코드가 개최자에게 열리며 되돌릴 수 없습니다.
+                {!isFree && " 인수·정산이 시작됩니다."}
               </p>
               <div className="flex gap-2">
                 <button
@@ -677,7 +681,7 @@ function SubmissionColumnHeader({
                   data-testid={`award-confirm-${submission.submission_id}`}
                   className={buttonClass("dangerFilled", "sm")}
                 >
-                  {isSaving ? "선정 중..." : "확인 — 선정합니다"}
+                  {isSaving ? "확정 중..." : "확인 — 당선작으로 확정합니다"}
                 </button>
                 <button
                   type="button"

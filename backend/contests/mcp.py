@@ -45,7 +45,7 @@ INSTRUCTIONS = (
     "심사 종료(judging_ended) 순서로만 간다. 순서: list_contest_options 로 카테고리·산출물 번호를 고르고 "
     "create_free_contest 로 초안을 만든 뒤, 요구사항을 하나 이상 두고 publish_free_contest 로 공개한다. "
     "공개 중에는 마감 전까지 내용과 요구사항을 고칠 수 있고, 마감 뒤에는 고칠 수 없다. close_free_contest_now "
-    "는 마감을 지금으로 당긴다. 마감 뒤 심사 기간 안에 award_submission 으로 수상작 하나를 고른다. "
+    "는 마감을 지금으로 당긴다. 마감 뒤 심사 기간 안에 award_submission 으로 당선작 하나를 확정한다(소스는 개최자에게만 열린다). "
     "보관(archive)은 초안·끝난 공모전·제출이 없는 공개 공모전만 되고, 공개 목록에서 숨길 뿐 지우지 않는다. "
     "보관·해제·마감·선정은 되돌릴 수 없거나 참가자에게 닿으므로 두 단계다 — 먼저 확인 표 없이 불러 미리보기를 "
     "사용자에게 보여 주고, 동의를 받으면 같은 인자에 confirmation 을 더해 다시 부른다."
@@ -337,7 +337,7 @@ def _award(grant: ConnectedApp, arguments: dict) -> WriteResult | Preview:
         contest_api_award(contest, submission_id)
         return _result(grant, contest, f"수상작 선정: 제출 {submission_id}")
 
-    preview = {"contest_id": contest.id, "submission": _submission_view(submission), "effect": "이 제출물을 수상작으로 고르고 참가자에게 결과를 알린다. 되돌릴 수 없다."}
+    preview = {"contest_id": contest.id, "submission": _submission_view(submission), "effect": "이 제출물을 당선작으로 확정하고 참가자에게 결과를 알린다. 소스코드가 개최자에게 열리며 되돌릴 수 없다."}
     return _two_step(grant, "award_submission", arguments, preview, act)
 
 
@@ -553,7 +553,7 @@ TOOLS: dict[str, Tool] = {
         _write(
             "award_submission",
             "수상작 선정",
-            "마감 뒤 심사 기간 안에 제출물 하나를 수상작으로 고르고 결과를 알린다. 두 단계.",
+            "마감 뒤 심사 기간 안에 제출물 하나를 당선작으로 확정하고 결과를 알린다. 소스코드는 개최자에게만 열리며 되돌릴 수 없다. 두 단계.",
             {"type": "object", "properties": {"contest_id": _ID, "submission_id": _ID, CONFIRMATION_ARGUMENT: CONFIRMATION_SCHEMA}, "required": ["contest_id", "submission_id"], "additionalProperties": False},
             _award,
             output=_PREVIEW_OUT,
