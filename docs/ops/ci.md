@@ -30,9 +30,9 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
     | 둘 다, 또는 그 밖(`.github/`·`scripts/`·루트 설정·`pnpm-lock.yaml`) | 전부 | — |
 
     `결과` 는 위 표대로 돌아야 할 잡이 success, 건너뛰어야 할 잡이 skipped 일 때만 초록이다. main push(release)는 바뀐 파일이 없다고 보아 늘 전체다.
-    경로 표는 `scripts/test_changed_paths.py` 가 고정한다. 일부만 돈 PR 실행은 release verify 가 「같은 트리 증명」으로 받지 않는다(guard 말고 skipped 가 있다) — release 는 전체 check 를 돈다.
+    경로 표는 `scripts/test_changed_paths.py` 가 고정한다. 일부만 돈 PR 실행도 release verify 가 증명으로 받는다(#1097, 아래).
   - **release 검사 잡**(main push, `workflow_call` 이라 `github.event_name` 은 부른 쪽 push): 위에 **guard(frontend·operator·classroom)** 가 더해진다.
-  - PR 에 skipped 가 있으니 `verified_tree.py` 는 그 PR 을 「이미 초록」으로 치지 않는다 → release 의 `verify` 는 늘 skip=0, release `check` 는 전부 다시 돈다.
+  - 건너뛴 잡이 있는 PR 실행은 `verified_tree.py` 가 「계획과 같은 건너뜀」일 때만 초록으로 친다(#1097, 아래).
   - **e2e 는 `e2e.yml` 이 main 을 매시(07분) 돈다**(`schedule`) — 직전 성공 실행이 같은 sha 면 건너뛴다. 깨진 화면이 최대 한 시간 운영에 나가 있을 수 있다는 대가를 받아들였다. 화면을 크게 바꾸는 PR 은 병합 전에 `gh workflow run e2e.yml --ref <브랜치>`(`workflow_dispatch`, 늘 돈다·이슈는 만들지 않는다)로 직접 돌려 본다.
   - **release 를 끈 뒤 켜면**(그동안 병합된 main 머리는 다음 push 까지 안 나간다) `gh workflow run release.yml --ref main` 으로 한 번 돌린다(`workflow_dispatch`, #1018). main 이 아닌 ref 는 `main_only` 잡이 실패시켜 뒤 잡(승격 포함)이 모두 멈춘다.
   - **알림 시험**: `gh workflow run e2e.yml --ref main -f simulate=fail`(이슈를 연다) → `-f simulate=ok`(복구됨 댓글 후 닫는다). e2e 는 돌지 않고 제목에 「(알림 시험)」이 붙어 실제 이슈·gate·직전 초록 판정을 흐리지 않는다. 시험 이슈는 닫힌 채 기록으로 남는다(#1020).
@@ -57,8 +57,9 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
     PR 검사 실행 → plan 잡의 단계 이름 `검사한 커밋 <refs/pull/N/merge sha>` → 그 커밋의 트리 == 병합 커밋 트리면 `skip=1`.
     PR 검사의 `guard` 잡은 늘 skipped 라(#1015) 그것만 초록으로 받는다 — 다른 잡의 skipped 는 거절한다(#1080). check 를 생략하면 amd64 guard 는 release 에서 안 돌고, arm64 prod 이미지 부팅 가드는 `image.yml` 이 따로 돈다.
   - 전체 check 를 도는 때: 트리가 다르다(그사이 main 이 움직였다 — ruleset strict 가 꺼져 있어 두 PR 의 조합은 여기서만 잡힌다),
-    PR 검사가 시험을 건너뛰었다(문서만), 이미지 층 캐시 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이
+    PR 검사가 계획과 다르게 건너뛰었다, 이미지 층 캐시 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이
     바뀌었다(캐시 저장은 main check 만 한다), squash 가 아니다, API 실패. 판정과 까닭은 verify 잡 로그·요약에 한 줄로 남는다.
+  - **건너뜀을 받는 조건(#1097)**: PR 실행의 skipped 묶음이 병합 커밋 diff(`sha^..sha`)에 `changed.sh <sha^> <sha>` 를 돌려 나온 계획과 정확히 같고(더 건너뛰었거나 더 돌았으면 거절), **부모 커밋의 release 실행이 success** 다(부모가 아직 도는 중이어도 거절). 앞 조건만 있으면 부모 release 가 빨강일 때 건너뛴 쪽(예: 프런트만 PR 의 백엔드)이 어디서도 검사 없이 승격된다.
   - 판정 규칙은 `scripts/test_release_flow.py` 가 고정한다. 되돌리기: release.yml 의 check 에서 `if:` 를 빼면(또는 verify 잡을
     지우고 promote 조건을 `needs: [check, image]` 로) 늘 전체 check 다.
 - **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 표와 글은 꺼진 검사의 기록이다.** Jenkins 이미지 빌드 비상 길도 제거했다. 검사와 이미지 빌드는 GitHub Actions만 수행한다.
