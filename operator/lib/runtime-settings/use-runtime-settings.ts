@@ -4,17 +4,19 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { fetchRuntimeSettingChanges, fetchRuntimeSettings } from "./actions";
-import type { RuntimeSetting, RuntimeSettingChange } from "./types";
+import type { AccountRefusal, RuntimeSetting, RuntimeSettingChange } from "./types";
 
 export type Loadable<T> = { status: "loading" } | { status: "error" } | { status: "loaded"; data: T };
 
 export function useRuntimeSettings(enabled: boolean): {
   settings: Loadable<RuntimeSetting[]>;
   changes: Loadable<RuntimeSettingChange[]>;
+  lastRefusal: AccountRefusal | null;
   reload: () => void;
 } {
   const [settings, setSettings] = useState<Loadable<RuntimeSetting[]>>({ status: "loading" });
   const [changes, setChanges] = useState<Loadable<RuntimeSettingChange[]>>({ status: "loading" });
+  const [lastRefusal, setLastRefusal] = useState<AccountRefusal | null>(null);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
@@ -24,6 +26,7 @@ export function useRuntimeSettings(enabled: boolean): {
     void fetchRuntimeSettings().then((result) => {
       if (cancelled) return;
       setSettings(result.ok ? { status: "loaded", data: result.data.settings } : { status: "error" });
+      setLastRefusal(result.ok ? (result.data.last_account_refusal ?? null) : null);
     });
     void fetchRuntimeSettingChanges().then((result) => {
       if (cancelled) return;
@@ -34,5 +37,5 @@ export function useRuntimeSettings(enabled: boolean): {
     };
   }, [enabled, version]);
 
-  return { settings, changes, reload };
+  return { settings, changes, lastRefusal, reload };
 }

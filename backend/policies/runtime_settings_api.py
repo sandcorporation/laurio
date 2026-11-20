@@ -14,6 +14,7 @@ from __future__ import annotations
 from django.http import HttpRequest
 from ninja import Router
 
+from core.agent_refusal_alert import last_account_refusal
 from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
 
 from .models import RuntimeSettingChange
@@ -27,6 +28,7 @@ from .runtime_settings import (
     save_setting,
 )
 from .schemas import (
+    AccountRefusalOut,
     ErrorOut,
     RuntimeSettingChangeOut,
     RuntimeSettingOut,
@@ -69,7 +71,11 @@ def _error_status(exc: RuntimeSettingError) -> int:
 
 @runtime_settings_router.get("/runtime-settings", response={200: RuntimeSettingsOut})
 def list_runtime_settings(request: HttpRequest):
-    return 200, RuntimeSettingsOut(settings=[_out(v) for v in describe_settings()])
+    refusal = last_account_refusal()
+    return 200, RuntimeSettingsOut(
+        settings=[_out(v) for v in describe_settings()],
+        last_account_refusal=AccountRefusalOut(**refusal) if refusal else None,
+    )
 
 
 @runtime_settings_router.get(

@@ -263,6 +263,23 @@ def capture_handled_exception(exc: BaseException, **tags: str) -> None:
     sentry_sdk.capture_exception(exc, tags=tags or None)
 
 
+def capture_grouped_warning(exc: BaseException, *, fingerprint: list[str], **tags: str) -> None:
+    """`capture_handled_exception` 과 같되 지문을 고정하고 수준을 warning 으로 보낸다 — 같은 원인은 이슈 하나로 묶인다.
+
+    제출·요청마다 따로 이슈가 생기면 안 되는 반복 경보(계정 거절 #1058)가 쓴다. SDK 가 꺼져 있으면 무해하다."""
+
+    try:
+        import sentry_sdk
+    except ModuleNotFoundError:  # pragma: no cover - 의존성은 항상 설치된다
+        return
+    with sentry_sdk.new_scope() as scope:
+        scope.level = "warning"
+        scope.fingerprint = list(fingerprint)
+        for name, value in tags.items():
+            scope.set_tag(name, value)
+        sentry_sdk.capture_exception(exc)
+
+
 def set_sentry_user_id(user_id: int | str | None) -> None:
     """이 요청의 사용자를 내부 id 하나로만 표시한다. SDK 가 꺼져 있으면 무해하다."""
 

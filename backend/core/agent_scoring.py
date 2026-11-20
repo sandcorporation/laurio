@@ -41,6 +41,7 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Literal, TypedDict
 
+from core.agent_refusal_alert import report_account_refusal
 from core.agent_run_tokens import issue_run_token, run_usage
 from policies.runtime_settings import VENDOR_ANTHROPIC, scoring_vendor, setting_value
 # APP-BOUNDARY-EXCEPTION: 실행기(`agent-grader`)는 이미지가 이 파일 하나를 그대로 COPY 하는 표준 라이브러리 모듈이다(agent-grader.Dockerfile·deploy.sh 가 경로를 안다) — 계약(RunSpec·RunResult·request_run·오류)만 쓴다 (#1036)
@@ -124,22 +125,29 @@ class AgentVendorRefused(Exception):
 
 #: 계정 쪽 거절로 보는 문구(#1052) — 소문자로 견준다. 벤더 문구가 바뀌면 여기만 고친다. 견주는 곳은 CLI 결과의
 #: 오류 본문(`ParsedRun.error_detail`)뿐이다 — 받아들인 실행·도구 실패의 stderr 는 보지 않는다.
-ACCOUNT_REFUSAL_MARKERS = (
-    "usage limit",  # Anthropic 400 「You have reached your specified workspace API usage limits」(11-19 운영)
-    "credit balance is too low",  # Anthropic 크레딧 부족
-    "insufficient_quota",  # OpenAI 크레딧 부족
-    "rate_limit",  # Anthropic `rate_limit_error`·OpenAI `rate_limit_exceeded`
-    "api_error_status=429",
-)
+ACCOUNT_REFUSAL_KINDS: dict[str, tuple[str, ...]] = {
+    # 종류(경보 지문·태그·운영자 화면에 쓰는 이름) → 그 종류로 보는 문구
+    "usage_limit": ("usage limit",),  # Anthropic 400 「You have reached your specified workspace API usage limits」(11-19 운영)
+    "credit": ("credit balance is too low", "insufficient_quota"),  # Anthropic·OpenAI 크레딧 부족
+    "rate_limit": ("rate_limit", "api_error_status=429"),  # Anthropic `rate_limit_error`·OpenAI `rate_limit_exceeded`
+}
+ACCOUNT_REFUSAL_MARKERS = tuple(marker for markers in ACCOUNT_REFUSAL_KINDS.values() for marker in markers)
+
+
+def account_refusal_kind(error_detail: str) -> str | None:
+    """오류 본문이 계정 쪽 거절이면 그 종류 이름(`ACCOUNT_REFUSAL_KINDS` 의 키)을, 아니면 None."""
+
+    lowered = error_detail.lower()
+    for kind, markers in ACCOUNT_REFUSAL_KINDS.items():
+        if any(marker in lowered for marker in markers):
+            return kind
+    return None
 
 
 def account_refusal(error_detail: str) -> str | None:
     """오류 본문이 계정 쪽 거절이면 그 본문을, 아니면 None. 스키마 어긋남 같은 다른 400 은 None 이다."""
 
-    lowered = error_detail.lower()
-    if any(marker in lowered for marker in ACCOUNT_REFUSAL_MARKERS):
-        return error_detail.strip()
-    return None
+    return error_detail.strip() if account_refusal_kind(error_detail) is not None else None
 
 
 #: 스캔 한 번(`core.scans` 의 ctx)에 계정 거절을 받았다는 표시 — 그 스캔의 남은 행은 벤더를 부르지 않는다.
@@ -606,6 +614,7 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
         if isinstance(refusal, str):
             # 벤더 계정 쪽 거절(#1052) — 제출 탓이 아니고 다시 돌려도 같다. 받아들이는 조건 어긋남으로 세지 않는다.
             record["accepted"] = False
+            report_account_refusal(vendor, account_refusal_kind(refusal) or "unknown")
             raise AgentVendorRefused(refusal, record)
         if not problems and isinstance(output, dict):
             record["accepted"] = True
