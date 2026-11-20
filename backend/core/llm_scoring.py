@@ -761,10 +761,12 @@ def verdicts_from_content(
     raw_verdicts = parsed.get("verdicts") if isinstance(parsed, dict) else None
     if isinstance(raw_verdicts, dict):
         # requirement_id 를 키로 한 객체(#986, `_openai_verdict_response_schema(requirement_ids=…)`) —
-        # 배열 항목 모양으로 펴서 아래 같은 검사를 지나게 한다. 키가 정수 모양이 아니면 그대로 둬
-        # 아래 「정수가 아니다」로 떨어진다.
+        # 배열 항목 모양으로 펴서 아래 같은 검사를 지나게 한다. 키는 요청에 실은 id 의 문자열로만
+        # 되돌린다 — 음수 id(문법 검사 AI 대체 항목 -1, #1059)도 그대로 돌아온다. 모르는 키는 문자열
+        # 그대로 둬 아래 「정수가 아니다」로 떨어진다(int() 강제 변환은 하지 않는다 — #88).
+        id_by_key = {str(rid): rid for rid in requirement_ids}
         raw_verdicts = [
-            {**item, "requirement_id": int(key) if key.isdigit() else key}
+            {**item, "requirement_id": id_by_key.get(key, key)}
             if isinstance(item, dict)
             else item
             for key, item in raw_verdicts.items()
