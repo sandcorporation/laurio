@@ -28,7 +28,31 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(git -C "$script_dir" rev-parse --show-toplevel)
 main_worktree=$(git -C "$script_dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
 
-if [ "$root" = "$main_worktree" ]; then
+if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
+  # 사람이 오프셋을 직접 고른다(#1106). 0~9 의 한 자리 숫자만 받는다.
+  case "$CODEMIT_DEV_OFFSET" in
+    [0-9]) offset=$CODEMIT_DEV_OFFSET ;;
+    *)
+      echo "dev-env.sh: CODEMIT_DEV_OFFSET 은 0~9 여야 한다(받은 값: $CODEMIT_DEV_OFFSET)" >&2
+      exit 1
+      ;;
+  esac
+  # 그 오프셋의 compose 프로젝트가 다른 체크아웃 것이면 멈춘다 — 남의 스택에 붙지 않는다.
+  project=codemit-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$offset" )
+  if command -v docker >/dev/null 2>&1; then
+    owners=$(docker ps -a --filter "label=com.docker.compose.project=$project" \
+      --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null | sort -u || true)
+    for owner in $owners; do
+      case "$owner" in
+        "$root" | "$root"/*) ;;
+        *)
+          echo "dev-env.sh: 오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다" >&2
+          exit 1
+          ;;
+      esac
+    done
+  fi
+elif [ "$root" = "$main_worktree" ]; then
   offset=0
 else
   # 0 이 아닌 1~9 로 접는다 — 0 은 주 워크트리의 몫이다.
