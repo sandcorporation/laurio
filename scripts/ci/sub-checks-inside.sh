@@ -45,7 +45,7 @@ deploy_check() {
 
 # 어느 묶음을 돌릴지 — 인자 없이는 전부(로컬·한 번에 도는 길). GitHub Actions 는 matrix 로 나눠 부른다(#932):
 #   static          Django 검사·배포 구성 검사·생성물 최신성·문서/언어/고정 대기 검사(파이썬 스크립트)
-#   pytest [I/N]    백엔드 pytest — I/N 이면 정렬한 시험 파일을 순번 % N 으로 나눈 I번째(1부터) 조각
+#   pytest [I/N]    백엔드 pytest — I/N 이면 시험 파일을 기록된 시간으로 고르게 N 개로 나눈 I번째(1부터) 조각(pytest_shards.py)
 #   web             단위 시험(packages·세 앱)과 세 앱 타입 검사
 group="${1:-all}"
 shard="${2:-}"
@@ -60,7 +60,8 @@ pytest_run() {
     return
   fi
   idx="${shard%/*}"; total="${shard#*/}"
-  files=$(cd backend && find tests -name 'test_*.py' | LC_ALL=C sort | awk -v i="$idx" -v n="$total" '(NR - 1) % n == i - 1')
+  # 시험 시간 기록(scripts/ci/pytest-durations.json)으로 고르게 나눈다(#1083) — 기록 없는 새 파일은 평균값
+  files=$(python3 scripts/ci/pytest_shards.py pick "$idx" "$total")
   [ -n "$files" ] || { echo "조각 $shard 에 시험 파일이 없다"; return 1; }
   # shellcheck disable=SC2086
   ( cd backend && CODEMIT_TEST_CPU_LIMIT=1.5 uv run pytest -p no:cacheprovider \
@@ -89,6 +90,7 @@ if want static; then
   step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
   step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py
   step "dev-server 메모리 여유 검사" python3 scripts/test_dev_server.py
+  step "pytest 조각 나누기" python3 scripts/test_pytest_shards.py
 fi
 if want web; then
   for pkg in packages/bff-shared packages/markdown packages/banned-words; do
