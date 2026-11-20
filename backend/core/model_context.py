@@ -58,6 +58,25 @@ def context_window_tokens(model: str) -> int:
     )
 
 
+def is_known_model(model: str) -> bool:
+    """표에 컨텍스트가 있는 모델인가 — 없으면 `context_window_tokens` 는 기본값으로 본다."""
+
+    return model in KNOWN_OPENAI_CONTEXT_WINDOWS or model in KNOWN_CLAUDE_CONTEXT_WINDOWS
+
+
+def input_token_limit(model: str) -> int:
+    """`model` 한 번의 요청에 실을 수 있는 입력 토큰 — 컨텍스트에서 응답 몫을 뺀다(#989)."""
+
+    return context_window_tokens(model) - OUTPUT_RESERVE_TOKENS
+
+
+def request_tokens(size_bytes: int) -> int:
+    """요청 바이트를 토큰으로 어림한다(#989) — 소스 예산과 같은 비율(`BYTES_PER_TOKEN`)이고 올림한다.
+    바이트/3 은 문자/3 보다 언제나 크거나 같다(한글은 글자 하나가 3바이트라 글자 하나 = 토큰 하나)."""
+
+    return -(-size_bytes // BYTES_PER_TOKEN)
+
+
 def source_budget_bytes(model: str, *, instruction_bytes: int) -> int:
     """`model` 한 번의 요청에 소스로 실을 수 있는 바이트 — 컨텍스트에서 응답 몫을 빼고 바이트로
     바꾼 뒤, 소스 말고 프롬프트에 실리는 것(지시문·요구사항·자가 응답, `instruction_bytes`)을 뺀다."""

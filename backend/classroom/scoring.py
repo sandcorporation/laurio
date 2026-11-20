@@ -78,6 +78,7 @@ from core.events import collect_instead_of_publishing
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
+    LLMAdapterInputTooLargeError,
     LLMAdapterModelRejectedError,
     LLMAdapterPermanentError,
     LLMAdapterQuotaExhaustedError,
@@ -96,7 +97,8 @@ from core.observability import tag_error_scope
 from core.quality_review import QualityInput, QualityItemScore, QualityOutput
 from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
-from core.source_selection import select_source_files
+from core.model_context import source_budget_bytes
+from core.source_selection import select_source_files, select_source_files_with_omission
 from notifications.models import NotificationType
 from notifications.services import create_notification, notify_safely
 from storage.adapters import get_storage_adapter
@@ -436,12 +438,28 @@ def _read_raw_source(submission: ClassroomSubmission, asset: SubmissionAsset) ->
     return clone_repository_asset(asset, github).zip_bytes
 
 
+def _joined_source_text(files: list[SourceFile]) -> str:
+    return "\n\n".join(f"# {f.path}\n{f.content}" for f in files)
+
+
 def _source_text_for(raw: bytes, asset: SubmissionAsset) -> str:
     """LLM 프롬프트에 실을 소스 텍스트 — `core.source_selection.select_source_files`로
-    같은 예산·선별 규율을 받는다(ADR-0027과 같은 정신, 저장소도 소스와 같은 취급)."""
+    같은 예산·선별 규율을 받는다(ADR-0027과 같은 정신, 저장소도 소스와 같은 취급).
+    완성도 검사와 에이전트 채점이 쓴다 — 한 번 호출 채점은 `_scoring_source_text` 가 모델 예산으로 고른다."""
 
-    files = select_source_files([(asset.id, asset.label, raw)])
-    return "\n\n".join(f"# {f.path}\n{f.content}" for f in files)
+    return _joined_source_text(select_source_files([(asset.id, asset.label, raw)]))
+
+
+def _scoring_source_text(raw: bytes, asset: SubmissionAsset, *, model: str, instruction_bytes: int):
+    """한 번 호출 채점에 실을 소스 텍스트(#989) — 예산은 고정 300KB 가 아니라 이 모델의 컨텍스트에서 응답 몫과
+    지시문 몫을 뺀 값이다(`core.model_context.source_budget_bytes`, 공모전과 같다). 다 들어가지 않으면 자르지 않고
+    무엇이 빠졌는지를 함께 돌려준다 — 부르는 쪽이 「크기 초과」 보류로 둔다."""
+
+    files, omission = select_source_files_with_omission(
+        [(asset.id, asset.label, raw)],
+        max_bytes=source_budget_bytes(model, instruction_bytes=instruction_bytes),
+    )
+    return _joined_source_text(files), omission
 
 
 @dataclass(frozen=True)
@@ -480,10 +498,8 @@ def _scoring_cap_reached(submission: ClassroomSubmission) -> bool:
     """`scoring.services._scoring_cap_reached`와 같은 판정이되 마감 유예가 없다
     (모듈 docstring)."""
 
-    counts = submission.classroom_scoring_attempts.exclude(
-        # 에이전트 채점 보류(#1036)는 실패가 아니다 — 공모전과 같이 상한에 세지 않는다.
-        error__startswith=pending_scoring.AGENT_SCORING_HOLD_ERROR_PREFIX
-    ).aggregate(
+    # 보류(에이전트 #1036, 크기 초과 #989)는 실패가 아니다 — 공모전과 같이 상한에 세지 않는다.
+    counts = pending_scoring.exclude_holds(submission.classroom_scoring_attempts.all()).aggregate(
         total=Count("id", filter=models.Q(rate_limited=False)),
         permanent=Count("id", filter=models.Q(permanent=True)),
     )
@@ -705,6 +721,16 @@ def _record_scoring_attempt(
     ClassroomScoringAttempt.objects.create(submission=submission, error=error[:2000], permanent=permanent)
 
 
+def _record_size_hold(submission: ClassroomSubmission, *, model: str, detail: str) -> dict:
+    """「크기 초과」 보류(#989) — 보류 표식을 단 시도 기록 하나. 같은 모델인 동안 채점 대기에서 빠지고 실패
+    상한에 세지 않는다(`classroom.pending_scoring.SIZE_HOLD_ERROR_PREFIX`). 벤더를 다시 부르지 않는다."""
+
+    message = pending_scoring.size_hold_error(model, detail)
+    logger.warning("ClassroomSubmission(pk=%s) %s", submission.id, message)
+    _record_scoring_attempt(submission, error=message)
+    return {"submission_id": submission.id, "status": "held", "error": message}
+
+
 def _finalize_if_capped(
     submission: ClassroomSubmission, checklist_items: list[ChecklistItem]
 ) -> ClassroomScore | None:
@@ -912,10 +938,30 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         else None
     )
 
+    uses_agent = agent_grading.uses_agent(class_obj, "scoring")
+    source_text = source.text
+    if not uses_agent:
+        # 한 번 호출 채점(#989): 소스를 이 모델의 예산으로 고르고, 다 들어가지 않으면 자르지 않고 벤더를 부르지
+        # 않은 채 「크기 초과」 보류로 둔다. 지시문 몫에는 문법 검사 덧붙임(파서가 못 본 파일의 전문)이 든다.
+        instruction_bytes = len(
+            _build_prompt(
+                submission, checklist_items, "", asset_kind=asset.kind, syntax_check=syntax_check
+            ).encode("utf-8")
+        )
+        source_text, omission = _scoring_source_text(
+            source.raw, asset, model=model, instruction_bytes=instruction_bytes
+        )
+        if omission.any:
+            detail = (
+                f"소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 (omitted_files={omission.omitted_files} "
+                f"omitted_bytes={omission.omitted_bytes} truncated_files={omission.truncated_files})"
+            )
+            return Concluded(apply=lambda: _record_size_hold(submission, model=model, detail=detail))
+
     prompt = _build_prompt(
         submission,
         checklist_items,
-        source.text,
+        source_text,
         asset_kind=asset.kind,
         syntax_check=syntax_check,
     )
@@ -927,7 +973,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     source_files = [
         SourceFile(
             path=f"asset-{asset.id}",
-            content=source.text,
+            content=source_text,
             asset_id=asset.id,
             asset_label=asset.label,
         ),
@@ -951,7 +997,6 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         source_files=source_files,
         requirements=requirements,
     )
-    uses_agent = agent_grading.uses_agent(class_obj, "scoring")
     return PreparedScoring(
         submission=submission,
         owner=owner,
@@ -1068,6 +1113,10 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             # 몸통이 깨진 것은 이 예외가 아니라 아래 `LLMAdapterError`(실패 시도)로 간다.
             _mark_scoring_paused(class_obj, SERVER_UNREACHABLE_AT)
             return {"submission_id": submission.id, "status": "server_unreachable"}
+        if isinstance(exc, LLMAdapterInputTooLargeError):
+            # 보낼 요청이 모델 컨텍스트를 넘었다 — 어댑터가 재어 막았거나 벤더가 거절했다(#989). 제출물의 실패가
+            # 아니므로 미충족으로 굳히지 않고 「크기 초과」 보류로 둔다. 강사가 모델을 바꾸면 다시 집힌다.
+            return _record_size_hold(submission, model=prepared.model, detail=str(exc))
         if isinstance(exc, LLMAdapterRateLimitedError):
             return _record_rate_limited(submission, checklist_items, error=str(exc))
         if isinstance(exc, LLMAdapterPermanentError):

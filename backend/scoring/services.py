@@ -65,6 +65,7 @@ from contests.models import Contest, ContestSubmission, Requirement
 from contests.submission_target_refs import source_target_ref
 from core.clock import Clock
 from core.llm_scoring import (
+    LLMAdapterInputTooLargeError,
     LLMAdapterMissingVerdictError,
     LLMAdapterPermanentError,
     LLMAdapterTimeoutError,
@@ -548,6 +549,15 @@ _NOT_A_FAILURE_PREFIXES = _HOLD_PREFIXES + (
 )
 
 
+def _request_bytes(llm, scoring_input: ScoringInput) -> int:
+    """어댑터가 이 입력으로 보낼 요청의 크기(#989) — 잴 줄 모르는 어댑터(흉내)는 프롬프트 바이트."""
+
+    measure = getattr(llm, "request_bytes", None)
+    if callable(measure):
+        return int(measure(scoring_input))
+    return len(scoring_input.prompt.encode("utf-8"))
+
+
 def _startswith_any(prefixes: tuple[str, ...]) -> Q:
     query = Q()
     for prefix in prefixes:
@@ -908,8 +918,18 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
             llm = get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
             # 예산은 하드코딩 300KB 가 아니라 이번에 부를 모델의 컨텍스트에서 응답 몫과 소스 밖의
             # 프롬프트(지시문·요구사항·자가 응답)를 뺀 값이다(#986, `core.model_context`).
-            instruction_bytes = len(
-                _build_prompt(contest=contest, requirements=requirements, source_files=[]).encode("utf-8")
+            # 지시문 몫은 어댑터가 보낼 요청을 그대로 재서 정한다(#989, `request_bytes`) — 시스템 지시문·
+            # 응답 스키마까지 든다. 흉내 어댑터처럼 잴 줄 모르면 프롬프트만 잰다.
+            instruction_prompt = _build_prompt(contest=contest, requirements=requirements, source_files=[])
+            instruction_bytes = _request_bytes(
+                llm,
+                ScoringInput(
+                    submission_id=submission.id,
+                    contest_id=contest.id,
+                    prompt=instruction_prompt,
+                    source_files=[],
+                    requirements=requirements,
+                ),
             )
             source_budget = source_budget_bytes(
                 str(getattr(llm, "model_version", "")), instruction_bytes=instruction_bytes
@@ -963,7 +983,15 @@ def score_submission_once(submission: ContestSubmission, as_of) -> dict:
                 source_files=source_files,
                 requirements=requirements,
             )
-            output = llm.score(scoring_input)
+            try:
+                output = llm.score(scoring_input)
+            except LLMAdapterInputTooLargeError as too_large:
+                # 보낼 요청을 그대로 재어 넘쳤거나 벤더가 컨텍스트 초과로 거절했다(#989) — 소스가 넘친
+                # 보류와 같은 「크기 초과」 보류다(영구 실패로 0% 를 굳히지 않고, 재시도하지 않는다).
+                reason = f"{SCORING_HOLD_ERROR_PREFIX} 채점 요청이 모델 컨텍스트를 넘어 채점을 보류한다 ({too_large})"
+                logger.warning("Submission(pk=%s) %s", submission.id, reason)
+                ScoringAttempt.objects.create(submission=submission, error=reason[:2000])
+                return {"submission_id": submission.id, "status": "held", "error": reason}
             percentage = _percentage(requirements=requirements, verdicts=output.verdicts)
             model_version = output.model_version
             reasoning_payload = [

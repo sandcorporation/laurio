@@ -132,3 +132,73 @@ def test_config_left_out_is_held_too(client, category, landing_type, monkeypatch
     attempt = ScoringAttempt.objects.get(submission_id=submission_id)
     assert "omitted_files=1" in attempt.error
     assert "omitted_code_files=0" in attempt.error
+
+
+class _RequestTooLarge:
+    """보낼 요청이 모델 컨텍스트를 넘는다 — 어댑터가 재어 막았거나 벤더가 400 으로 거절했다(#989)."""
+
+    model_version = "gpt-4o-mini"
+    calls = 0
+
+    def __init__(self, *, timeout=None) -> None:
+        pass
+
+    def score(self, scoring_input):
+        from core.llm_scoring import LLMAdapterInputTooLargeError
+
+        type(self).calls += 1
+        raise LLMAdapterInputTooLargeError(
+            "채점 요청이 모델 컨텍스트를 넘는다(model=gpt-4o-mini request_tokens≈120000 limit_tokens=111616)",
+            model="gpt-4o-mini",
+        )
+
+
+@pytest.mark.django_db
+def test_a_request_over_the_model_context_is_held_not_failed(client, category, landing_type, monkeypatch):
+    """#989: 보낼 요청이 넘쳐도(벤더 400 컨텍스트 초과 포함) 영구 실패·0% 가 아니라 「크기 초과」 보류다."""
+
+    submission_id, deadline = _closed_submission(client, category, landing_type)
+    _RequestTooLarge.calls = 0
+    monkeypatch.setattr(services, "get_adapter", lambda *, timeout=None: _RequestTooLarge())
+
+    rows = _run_pending(client)["rows"]
+
+    assert rows[0]["status"] == "held"
+    attempt = ScoringAttempt.objects.get(submission_id=submission_id)
+    assert attempt.error.startswith(services.SCORING_HOLD_ERROR_PREFIX)
+    assert "limit_tokens=111616" in attempt.error
+    assert not attempt.permanent
+
+    _freeze(deadline + services.SCORING_TRANSIENT_FAILURE_GRACE + timedelta(hours=1))
+    assert _run_pending(client)["rows"] == []
+    assert _RequestTooLarge.calls == 1
+    assert not Score.objects.filter(submission_id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_the_source_budget_leaves_room_for_what_the_adapter_sends_besides_the_prompt(
+    client, category, landing_type, monkeypatch
+):
+    """#989: 지시문 몫은 어댑터가 보낼 요청을 그대로 잰 값이다(시스템 지시문·응답 스키마 포함)."""
+
+    from scoring.adapters import FakeLLMScoringAdapter
+
+    measured: list[int] = []
+
+    class _Measuring(FakeLLMScoringAdapter):
+        def request_bytes(self, scoring_input):
+            measured.append(len(scoring_input.prompt.encode("utf-8")) + 7_000)
+            return measured[-1]
+
+    seen: list[int] = []
+
+    def budget(model: str, *, instruction_bytes: int) -> int:
+        seen.append(instruction_bytes)
+        return 10_000_000
+
+    _closed_submission(client, category, landing_type)
+    monkeypatch.setattr(services, "get_adapter", lambda *, timeout=None: _Measuring())
+    monkeypatch.setattr(services, "source_budget_bytes", budget)
+
+    assert _run_pending(client)["rows"][0]["status"] == "scored"
+    assert seen == measured

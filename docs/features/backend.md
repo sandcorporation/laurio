@@ -520,7 +520,12 @@ README → 그 밖(설정·마이그레이션·배포·숨은 폴더), 같은 �
 프롬프트에 실리면 채점 결과 저장이 PostgreSQL `DataError` 로 깨진다). 공모전 채점의 예산은 부를 모델의
 컨텍스트에서 정하고(`core.model_context.source_budget_bytes`, 모르는 모델은 128K), **남은 것이 하나라도 그
 안에 다 들어가지 않으면 벤더를 부르지 않고 보류한다** — 시도 기록이 `SourceOverBudgetHold:` 로 시작하고,
-재시도도 실패 상한의 0% 확정도 없다. `manage.py release_scoring_hold <제출 id…>` 로 풀면 실린 만큼으로
+재시도도 실패 상한의 0% 확정도 없다. 지시문 몫은 어댑터가 보낼 요청(시스템 지시문·응답 스키마 포함)을 그대로
+잰 값이다. **벤더에 보내기 직전 어댑터가 그 요청 자체를 다시 재고**(#989, `core.llm_scoring.ensure_request_fits` —
+문자열 값의 UTF-8 바이트/3 을 토큰으로 올림, 한도는 컨텍스트 − 응답 몫 16,384) 넘으면 벤더를 부르지 않는다. 벤더가
+컨텍스트 초과로 거절해도(OpenAI `context_length_exceeded`, Anthropic 「prompt is too long」) 영구 실패가 아니라 같은
+「크기 초과」(`LLMAdapterInputTooLargeError`)다 — 공모전은 둘 다 `SourceOverBudgetHold:` 보류로 남긴다. 호환 서버의
+표에 없는 모델은 한도를 몰라 재지 않는다. `manage.py release_scoring_hold <제출 id…>` 로 풀면 실린 만큼으로
 채점하고 빠진 양을 경고 로그로 남긴다(ADR-0027 개정). **에이전트 채점(`CONTEST_SCORING_METHOD=agent`, #1000)은 이
 선별·예산을 거치지 않는다** — 에이전트가 박제본(clone 한 커밋의 zip, 또는 zip 소스 하나)을 Read·Grep·Glob(Claude)이나
 read-only 셸(Codex)로 필요한 만큼 읽는다. 실행 토큰(예산 $1) → `agent-grader` → 스트림 해석 뒤 **받아들이는 조건**을 본다:
@@ -545,8 +550,12 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 `core.agent_prompt`(공모전 3 재채점의 규칙 일곱에, 충족 전에 파일을 Read 로 열어 보고 근거는 Read 로 본 줄을 대라는
 규칙 8·9 — #1717, 모든 모델). **모델이 Haiku 계열(`claude-haiku-*`)이면 엄격 규칙 10~12 가 더 붙는다**(#1048 — 실제
 코드 줄을 Read 로 열고, 못 찾으면 미충족, 충족마다 빈 구현·미연결 반례를 Grep). 지침은 실행 모델이 정해진 뒤 `AgentJob.build_prompt(model)` 로 만들고, Score·리뷰의
-`prompt` 와 `AgentRun.record.prompt_sha256` 에는 CLI 에 넘긴 그 지침이 남는다. 강의실은 `MAX_SOURCE_BYTES`(약 300KB)로 잘라 그대로
-채점한다.
+`prompt` 와 `AgentRun.record.prompt_sha256` 에는 CLI 에 넘긴 그 지침이 남는다. 강의실의 한 번 호출 채점은
+공모전처럼 그 문제의 채점 모델 컨텍스트에서 예산을 정하고(지시문 몫에 문법 검사 덧붙임 — 파서가 못 본 파일의 전문 — 이
+든다), **다 들어가지 않거나 보낼 요청이 넘치면(벤더 거절 포함) 자르지도 미충족으로 굳히지도 않고 보류한다**(#989) —
+시도 기록이 `SourceOverBudgetHold: model=<모델> ` 으로 시작하고, **그 모델이 문제의 채점 모델인 동안만** 채점 대기에서
+빠진다(강사가 문제·클래스 모델을 바꾸면 다음 스캔이 다시 집는다). 실패 상한에 세지 않는다. 완성도 검사와 강의실 에이전트
+채점은 지금처럼 `MAX_SOURCE_BYTES`(약 300KB)로 고른다.
 
 **zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
 `classroom.git_history_hint`). 위 제외 목록이 `.git/` 를 빼므로, 받는 형식에 소스(zip)가

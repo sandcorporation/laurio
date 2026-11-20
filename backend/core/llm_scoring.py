@@ -206,6 +206,66 @@ class LLMAdapterUnreachableError(LLMAdapterError):
     닿았는데 늦거나 몸통이 깨진 것은 이 예외가 아니다(보통 `LLMAdapterError`)."""
 
 
+class LLMAdapterInputTooLargeError(LLMAdapterError):
+    """채점 요청이 모델 컨텍스트에 들어가지 않는다(#989) — 영구 실패도 일시 실패도 아닌 「크기 초과」다.
+
+    두 곳에서 난다: 어댑터가 보내기 직전 그 요청을 재어 넘치면(`ensure_request_fits`, 벤더를 부르지
+    않는다), 그리고 벤더가 컨텍스트 초과로 거절하면(OpenAI `context_length_exceeded`, Anthropic
+    「prompt is too long」). 같은 입력을 다시 보내도 같으므로 재시도하지 않고, 제출물이 실패한 것도
+    아니므로 0% 로 굳히지 않는다 — 공모전·강의실은 이것을 「크기 초과」 보류로 받는다.
+    `LLMAdapterPermanentError` 의 하위가 아니다(그쪽은 실패 상한을 즉시 채운다)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        model: str = "",
+        request_tokens: int | None = None,
+        limit_tokens: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.model = model
+        #: 어림한 요청 토큰과 한도 — 벤더가 거절한 경우엔 모른다(`None`).
+        self.request_tokens = request_tokens
+        self.limit_tokens = limit_tokens
+
+
+def request_size_bytes(payload: object) -> int:
+    """벤더에 보낼 요청 몸통(`json_body`)에 실린 글자의 UTF-8 바이트 — 문자열 값(지시문·프롬프트·
+    응답 스키마의 문구)만 센다. JSON 문법(따옴표·이스케이프)은 벤더가 토큰으로 세지 않으므로 뺀다."""
+
+    if isinstance(payload, str):
+        return len(payload.encode("utf-8"))
+    if isinstance(payload, dict):
+        return sum(request_size_bytes(value) for value in payload.values())
+    if isinstance(payload, (list, tuple)):
+        return sum(request_size_bytes(value) for value in payload)
+    return 0
+
+
+def ensure_request_fits(model: str, payload: object, *, custom_server: bool = False) -> None:
+    """보낼 요청(`payload`, 바로 이 객체를 보낸다)이 `model` 의 컨텍스트에 들어가는지 재고, 넘치면
+    `LLMAdapterInputTooLargeError` 를 던진다(#989). 어림은 보수적이다(바이트/3 ≥ 문자/3,
+    `core.model_context.request_tokens`) — 토크나이저가 없다.
+
+    호환 서버(`custom_server`)의 표에 없는 모델은 한도를 모르므로 재지 않는다 — 기본값(128K)으로
+    막으면 더 큰 로컬 모델을 쓰는 클래스가 멈춘다. 그 서버가 거절하면 그때 실패로 받는다."""
+
+    from core.model_context import input_token_limit, is_known_model, request_tokens
+
+    if custom_server and not is_known_model(model):
+        return
+    size = request_tokens(request_size_bytes(payload))
+    limit = input_token_limit(model)
+    if size > limit:
+        raise LLMAdapterInputTooLargeError(
+            f"채점 요청이 모델 컨텍스트를 넘는다(model={model} request_tokens≈{size} limit_tokens={limit})",
+            model=model,
+            request_tokens=size,
+            limit_tokens=limit,
+        )
+
+
 class LLMKeyCheckStatus(str, Enum):
     """저장 시점에 벤더에게 키를 확인해 본 결과(#354) — `classroom.models.
     Class.ScoringKeyStatus`로 저장되는 값과는 어휘가 다르다(이쪽은 "이번
@@ -366,6 +426,10 @@ _OPENAI_AUTH_HTTP_STATUSES = frozenset({401, 403})
 # 옵인 라이브 테스트가 있으면 그쪽에서 확인한다).
 _OPENAI_MODEL_REJECTION_HTTP_STATUSES = frozenset({400, 404})
 _OPENAI_MODEL_REJECTION_ERROR_CODES = frozenset({"model_not_found"})
+
+# 입력이 모델 컨텍스트를 넘었다(#989) — 같은 입력을 다시 보내도 같지만 제출물이 실패한 것은 아니라
+# 영구 실패가 아니라 「크기 초과」(`LLMAdapterInputTooLargeError`)로 올린다. `error.code` 로만 가른다.
+_OPENAI_CONTEXT_EXCEEDED_ERROR_CODES = frozenset({"context_length_exceeded"})
 
 # 크레딧 소진(#586) — 같은 429 라도 빈도 제한과 갈라야 한다. 판정은 `error.type`·`error.code`
 # (벤더가 고정된 값만 쓰는 라벨)로만 한다. OpenAI 는 `type=insufficient_quota` 에 `code` 를
@@ -542,6 +606,8 @@ def _pick_openai_error(status_code: int, error_type: str, error_code: str) -> ty
         if {error_type, error_code} & _OPENAI_QUOTA_EXHAUSTED_LABELS:
             return LLMAdapterQuotaExhaustedError
         return LLMAdapterRateLimitedError
+    if status_code == 400 and error_code in _OPENAI_CONTEXT_EXCEEDED_ERROR_CODES:
+        return LLMAdapterInputTooLargeError
     if status_code in _OPENAI_PERMANENT_HTTP_STATUSES:
         return LLMAdapterPermanentError
     return LLMAdapterError
@@ -993,14 +1059,29 @@ class OpenAIScoringAdapter:
             "context": context,
         }
 
+    def request_bytes(self, scoring_input: ScoringInput) -> int:
+        """이 입력으로 보낼 요청의 크기(#989, `request_size_bytes`) — 공모전이 소스 예산을 정할 때
+        지시문·응답 스키마 몫을 이것으로 잰다(보낼 때 재는 것과 같은 함수·같은 페이로드)."""
+
+        return request_size_bytes(self._scoring_payload(scoring_input))
+
+    def _fitting_scoring_payload(self, scoring_input: ScoringInput) -> dict:
+        """보낼 페이로드 — 모델 컨텍스트에 들어가지 않으면 벤더를 부르기 전에 던진다(#989). 잰 객체를
+        그대로 보낸다."""
+
+        payload = self._scoring_payload(scoring_input)
+        ensure_request_fits(self._model, payload, custom_server=self._base_url is not None)
+        return payload
+
     def score(self, scoring_input: ScoringInput) -> ScoringOutput:
+        payload = self._fitting_scoring_payload(scoring_input)
         with observe_call(**self._observe_args(scoring_input)) as call:
             response = _openai_round_trip(
                 "POST",
                 _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
                 api_key=self._api_key,
                 timeout=self._timeout,
-                json_body=self._scoring_payload(scoring_input),
+                json_body=payload,
                 context=f"submission={scoring_input.submission_id}",
                 transport=self._transport,
             )
@@ -1012,13 +1093,14 @@ class OpenAIScoringAdapter:
         """`score` 의 비동기 판(#584) — 같은 요청·같은 분류, 기다리는 동안 스레드를 쥐지 않는다.
         강의실 grader 가 쓴다(공모전은 `score` 그대로)."""
 
+        payload = self._fitting_scoring_payload(scoring_input)
         async with observe_call_async(**self._observe_args(scoring_input)) as call:
             response = await _openai_round_trip_async(
                 "POST",
                 _endpoint(self._base_url, _CHAT_COMPLETIONS_PATH),
                 api_key=self._api_key,
                 timeout=self._timeout,
-                json_body=self._scoring_payload(scoring_input),
+                json_body=payload,
                 context=f"submission={scoring_input.submission_id}",
                 transport=self._async_transport,
             )
