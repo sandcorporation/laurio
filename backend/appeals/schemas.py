@@ -108,7 +108,8 @@ class AppealRequirementOut(Schema):
 class AppealDetailOut(AppealOut):
     """운영자 전용 상세 — 이의제기 자체에 Score 스냅샷과 심판 기록을 얹는다."""
 
-    score: ScoreSnapshotOut
+    #: 「크기 초과」 보류 중에 낸 이의(#989 A2)면 None — Score 는 심사 종료 때 자동 0% 로 생긴다.
+    score: ScoreSnapshotOut | None
     ruling: RulingOut | None = None
     requirements: list[AppealRequirementOut] = []
 

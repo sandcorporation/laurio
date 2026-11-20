@@ -28,6 +28,7 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { Badge, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
+import { supportEmail } from "@/lib/legal/contact";
 import { useSession } from "@/lib/auth/use-session";
 import {
   CHANNEL_LABELS,
@@ -255,7 +256,7 @@ function NotificationRow({
     >
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm leading-relaxed">
-          {describeNotification(notification)}
+          {describeNotification(notification, { supportEmail: supportEmail() })}
           {hasBody && (
             <button
               type="button"

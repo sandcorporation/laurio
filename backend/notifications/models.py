@@ -18,6 +18,9 @@ class NotificationType(models.TextChoices):
     # 시작을 알리는 것까지가 같은 결정이다: 알리지 않으면 그 기한은 "들어와 본
     # 사람에게만 공정한" 규칙이 된다.
     SCORING_COMPLETE = "scoring_complete", "채점 완료"
+    # 제출 크기가 채점 한도를 넘어 채점이 보류됐다(#989 A2) — 심사 종료 때 0% 로 바뀌기 전에
+    # 알려야 유료 공모전 참가자가 이의를 낼 수 있다.
+    SCORING_HELD_SIZE = "scoring_held_size", "채점 보류(크기 초과)"
     # 이의가 심판됐다 — 인용이든 기각이든. 낸 사람이 결과를 알려면 들어와 봐야
     # 하는 상태를 없앤다. **심판자 개인의 이름은 담지 않는다**(#61 이 열람
     # 기록에 대해 세운 것과 같은 이유 — 운영자 신원을 참가자에게 흘리지 않는다).
@@ -153,6 +156,12 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 둘 다 거래성이다 — 참가자가 낸 것에 대한 처리 결과이지 광고가 아니므로
     # 옵트인이 필요 없다(ADR-0010).
     NotificationType.SCORING_COMPLETE: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
+    },
+    NotificationType.SCORING_HELD_SIZE: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

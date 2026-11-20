@@ -43,6 +43,7 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from contests.models import ContestSubmission, Requirement
+from contests.scoring_hold import is_size_held
 from core.clock import Clock
 from distributions.services import is_holding_distribution
 from core.operator_auth import OperatorAuth
@@ -117,7 +118,9 @@ def create_appeal(request: HttpRequest, submission_id: int, payload: AppealCreat
         # 이 버튼을 아예 감추는 것과 별개로(사고 예방) 여기서도 거절한다(방어).
         raise HttpError(404, "무료 공모전에는 이의제기 절차가 없습니다.")
 
-    if not hasattr(submission, "score"):
+    # 「크기 초과」 보류 중인 제출은 Score 가 없어도 받는다(#989 A2, 대장 확정 #1446) — 0% 는 심사
+    # 종료 때 생기는데 그때는 이의 창이 닫혀 있다. 보류를 알게 된 지금이 이의를 낼 유일한 때다.
+    if not hasattr(submission, "score") and not is_size_held(submission):
         raise HttpError(409, "아직 채점되지 않은 제출물은 이의제기할 수 없습니다.")
 
     if Appeal.objects.filter(submission=submission).exists():
@@ -219,7 +222,8 @@ def _serialize_ruling(ruling) -> RulingOut | None:
 
 
 def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
-    score = appeal.submission.score
+    # 「크기 초과」 보류 중에 낸 이의(#989 A2)는 Score 가 아직 없다 — 심사 종료 때 자동 0% 가 생긴다.
+    score = getattr(appeal.submission, "score", None)
     ruling = _ruling_of(appeal)
     return AppealDetailOut(
         id=appeal.id,
@@ -230,13 +234,17 @@ def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
         correction_amount=ruling.correction_amount if ruling else None,
         ruled_at=ruling.ruled_at if ruling else None,
         created_at=appeal.created_at,
-        score=ScoreSnapshotOut(
-            percentage=str(score.percentage),
-            model_version=score.model_version,
-            reasoning=score.reasoning,
-            created_at=score.created_at,
-            scored_assets=resolve_scored_assets(score.scored_assets),
-            scoring_basis=scoring_basis_for(score.model_version),
+        score=(
+            ScoreSnapshotOut(
+                percentage=str(score.percentage),
+                model_version=score.model_version,
+                reasoning=score.reasoning,
+                created_at=score.created_at,
+                scored_assets=resolve_scored_assets(score.scored_assets),
+                scoring_basis=scoring_basis_for(score.model_version),
+            )
+            if score is not None
+            else None
         ),
         ruling=_serialize_ruling(ruling),
         requirements=[
@@ -330,7 +338,10 @@ def reveal_appeal_source(request, appeal_id: int):
     """
 
     appeal = _get_appeal_or_404(appeal_id)
-    score = appeal.submission.score
+    score = getattr(appeal.submission, "score", None)
+    if score is None:
+        # 「크기 초과」 보류 중에 낸 이의(#989 A2) — 채점에 실린 소스가 없다(벤더를 부르지 않았다).
+        raise HttpError(404, "채점이 보류되어 채점에 쓰인 소스가 없습니다.")
 
     SourceReading.objects.create(
         submission_id=appeal.submission_id,

@@ -40,6 +40,9 @@ class NextAction(models.TextChoices):
 
     # --- 기다리는 중: 할 일이 없다 -------------------------------------------
     AWAITING_SCORING = "awaiting_scoring", "채점 대기"
+    # 제출 크기가 채점 한도를 넘어 채점이 보류됐다(#989 A2) — 심사 종료 때 자동 0%. 유료 공모전은
+    # 그 전까지 이의를 낼 수 있다(이의를 내면 아래 AWAITING_APPEAL_RULING).
+    SCORING_HELD_SIZE = "scoring_held_size", "채점 보류(크기 초과)"
     AWAITING_JUDGING = "awaiting_judging", "심사 대기"
     AWAITING_APPEAL_RULING = "awaiting_appeal_ruling", "이의 심판 대기"
     AWAITING_DISTRIBUTION = "awaiting_distribution", "배분 대기"
@@ -129,6 +132,13 @@ def next_action_for(submission) -> str:
         return NextAction.CAN_EDIT_SUBMISSION
 
     if not hasattr(submission, "score"):
+        from .scoring_hold import is_size_held
+
+        if is_size_held(submission):
+            appeal = getattr(submission, "appeal", None)
+            if appeal is not None and appeal.status == appeal.Status.PENDING:
+                return NextAction.AWAITING_APPEAL_RULING
+            return NextAction.SCORING_HELD_SIZE
         return NextAction.AWAITING_SCORING
 
     # 채점이 끝났다 — 이의가 여기서 갈린다.

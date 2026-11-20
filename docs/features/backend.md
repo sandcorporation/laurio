@@ -524,7 +524,7 @@ README → 그 밖(설정·마이그레이션·배포·숨은 폴더), 같은 �
 잰 값이다. **벤더에 보내기 직전 어댑터가 그 요청 자체를 다시 재고**(#989, `core.llm_scoring.ensure_request_fits` —
 문자열 값의 UTF-8 바이트/3 을 토큰으로 올림, 한도는 컨텍스트 − 응답 몫 16,384) 넘으면 벤더를 부르지 않는다. 벤더가
 컨텍스트 초과로 거절해도(OpenAI `context_length_exceeded`, Anthropic 「prompt is too long」) 영구 실패가 아니라 같은
-「크기 초과」(`LLMAdapterInputTooLargeError`)다 — 공모전은 둘 다 `SourceOverBudgetHold:` 보류로 남긴다. 호환 서버의
+「크기 초과」(`LLMAdapterInputTooLargeError`)다 — 공모전은 둘 다 `SourceOverBudgetHold:` 보류로 남긴다. **보류가 정해지면 참가자에게 한 번 알린다**(#989 A2, 알림 `scoring_held_size` — 유료는 「심사 종료 때 0점, 그 전까지 이의 가능」, 무료는 문의처). 유료 공모전은 보류 중(Score 없음)에도 심사 종료 전까지 이의를 받는다(`GET /submissions/{id}/scoring-hold` 가 사유·`can_appeal` 을 준다, 운영자 이의 상세의 `score` 는 null). 심사 종료(`judging_ends_at`)까지 풀리지 않은 보류는 `scoring-size-hold-expiry` 스캔이 자동 0% 로 남긴다 — `model_version` 「platform-auto (채점 입력 크기 초과)」, `scoring_basis` `source_too_large`, 채점 완료 알림 없음, 완성도 건너뜀. 호환 서버의
 표에 없는 모델은 한도를 몰라 재지 않는다. `manage.py release_scoring_hold <제출 id…>` 로 풀면 실린 만큼으로
 채점하고 빠진 양을 경고 로그로 남긴다(ADR-0027 개정). **에이전트 채점(`CONTEST_SCORING_METHOD=agent`, #1000)은 이
 선별·예산을 거치지 않는다** — 에이전트가 박제본(clone 한 커밋의 zip, 또는 zip 소스 하나)을 Read·Grep·Glob(Claude)이나
@@ -820,7 +820,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
-## 스스로 도는 일 — 스캔 30개
+## 스스로 도는 일 — 스캔 31개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고(beat 는 따로 뜨지 않고 celery-worker 안에서 `-B` 로 돈다, #859), 대부분 60초
@@ -829,7 +829,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
+| 채점 | `submission-scoring` · `scoring-size-hold-expiry`(#989 — 심사 종료까지 풀리지 않은 「크기 초과」 보류를 자동 0%) · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」·「크기 초과」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |

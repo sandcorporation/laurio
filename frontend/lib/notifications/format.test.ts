@@ -35,6 +35,23 @@ describe("describeNotification", () => {
     expect(text).toContain("채점이 완료됐습니다");
   });
 
+  it("「크기 초과」 보류 알림 — 유료는 이의, 무료는 문의처(#989 A2)", () => {
+    const context = { contest_title: "보류전", judging_ends_at: "2026-11-30T09:00:00Z" };
+    const paid = describeNotification(
+      row({ notification_type: "scoring_held_size", context: { ...context, is_free: false } }),
+    );
+    expect(paid).toContain("채점 한도를 넘어 채점이 보류되었습니다");
+    expect(paid).toContain("필수 요건 전체 미달(0점)");
+    expect(paid).toContain("이의를 신청할 수 있습니다");
+    const free = describeNotification(
+      row({ notification_type: "scoring_held_size", context: { ...context, is_free: true } }),
+      { supportEmail: "help@example.test" },
+    );
+    expect(free).toContain("0점으로 처리됩니다");
+    expect(free).toContain("문의처(help@example.test)");
+    expect(free).not.toContain("이의");
+  });
+
   it("공모전 내용 변경 알림을 그대로 렌더한다(#473)", () => {
     const text = describeNotification(
       row({ notification_type: "contest_updated", context: { contest_title: "473 공모전" } }),

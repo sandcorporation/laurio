@@ -91,6 +91,7 @@ from .models import Contest, ContestSubmission, Requirement
 from .submission_participation import next_action_for
 from .submission_retention import demo_video_destroy_at
 from .submission_schemas import (
+    ScoringHoldOut,
     ComparisonEntryOut,
     BonusScoreIn,
     BonusScoreOut,
@@ -1215,6 +1216,36 @@ def get_own_score(request: HttpRequest, submission_id: int):
         raise HttpError(404, "아직 채점되지 않았습니다.")
 
     return 200, score
+
+
+@router.get(
+    "/submissions/{submission_id}/scoring-hold",
+    response={200: ScoringHoldOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_own_scoring_hold(request: HttpRequest, submission_id: int):
+    """Developer 가 자기 제출의 「크기 초과」 채점 보류를 본다(#989 A2).
+
+    `/score` 가 404(아직 채점되지 않았다)일 때 이의 화면이 이것을 묻는다 — 보류면 사유와 심사 종료
+    시각, 그리고 유료 공모전이면 이의를 낼 수 있는지를 준다. 보류가 아니면 404.
+    """
+
+    from .scoring_hold import is_size_held
+
+    submission = _get_owned_submission(request, submission_id)
+    if not is_size_held(submission):
+        raise HttpError(404, "채점 보류 중인 제출물이 아닙니다.")
+    contest = submission.contest
+    can_appeal = (
+        not contest.is_free
+        and getattr(submission, "appeal", None) is None
+        and contest.appeal_window_open(Clock.now())
+    )
+    return 200, {
+        "is_free": contest.is_free,
+        "judging_ends_at": contest.judging_ends_at,
+        "can_appeal": can_appeal,
+    }
 
 
 def _get_owned_submission(request: HttpRequest, submission_id: int) -> ContestSubmission:

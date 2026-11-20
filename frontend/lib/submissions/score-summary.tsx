@@ -13,7 +13,7 @@ import Link from "next/link";
 // `model_version`도 생성 타입을 참조하지 않고 손으로 옮겨 적은 구조적
 // 인터페이스라(호출부 셋의 서로 다른 스키마를 하나로 받기 위해), 여기만
 // 생성 타입을 import하면 그 하나만 명목 타이핑이 섞인다.
-export type ScoringBasis = "ai_judged" | "no_scoring_input" | "platform_failure";
+export type ScoringBasis = "ai_judged" | "no_scoring_input" | "platform_failure" | "source_too_large";
 
 export interface ScoreSummaryData {
   percentage: string;
@@ -71,6 +71,8 @@ export function modelLineOf(score: ScoreSummaryData): string {
       return "AI가 판정하지 않았습니다 — 채점할 자료가 없었습니다";
     case "platform_failure":
       return "AI가 판정하지 않았습니다 — 채점이 반복 실패했습니다";
+    case "source_too_large":
+      return "AI가 판정하지 않았습니다 — 제출 크기가 채점 한도를 넘었습니다";
   }
 }
 

@@ -66,6 +66,8 @@ export const NEXT_ACTION_LABELS: Record<NextAction, NextActionLabel> = {
     payoutStage: false,
   },
   awaiting_scoring: { text: "채점을 기다리는 중입니다", mine: false, payoutStage: false },
+  // 제출 크기가 채점 한도를 넘어 채점이 보류됐다(#989 A2) — 심사 종료 때 0점.
+  scoring_held_size: { text: "채점 보류(크기 초과)", mine: false, payoutStage: false },
   awaiting_judging: { text: "발주자의 심사를 기다리는 중입니다", mine: false, payoutStage: false },
   awaiting_appeal_ruling: { text: "이의 심판을 기다리는 중입니다", mine: false, payoutStage: false },
   awaiting_distribution: { text: "상금 배분을 기다리는 중입니다", mine: false, payoutStage: false },
