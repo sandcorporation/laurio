@@ -314,11 +314,11 @@ result.ts` 의 `normalizeDetail`)라 첫 스텝이 볼 수 없던 표면이다. 
 `scripts/test_check_screen_language.py` 가 「남은 자리가 없습니다」 같은 정상
 문구가 통과하는 것까지 고정한다.
 
-### 병합은 대기열로 — `gh pr merge <N> --squash` 가 대기열에 넣는다(#1090·#1118)
+### 병합은 대기열로 — `bash scripts/ci/enqueue.sh <N>` 이 대기열에 넣는다(#1090·#1118)
 
 `main` 은 ruleset 의 병합 대기열(squash)과 필수 검사 「결과」로만 들어간다. PR 의 「결과」가 초록이면
-`gh pr merge <N> --squash` 로 대기열에 넣는다(대기열이 있으면 이 명령이 곧바로 병합하지 않고 줄을 세운다 — 안 되면 graphql
-`enqueuePullRequest`). 대기열이 머지 커밋으로 `pr-check.yml`(`merge_group`, 전부 + guard)을 다시 돌려 「결과」가 초록이면
+`bash scripts/ci/enqueue.sh <N>` 으로 대기열에 넣는다(graphql `enqueuePullRequest`, 저장소는 `gh repo view` 로 읽는다). 저장소의 자동 병합이
+꺼져 있어 `gh pr merge <N> --squash` 는 「Auto merge is not allowed」로 거절된다 — 저장소 설정은 바꾸지 않는다. 대기열이 머지 커밋으로 `pr-check.yml`(`merge_group`, 전부 + guard)을 다시 돌려 「결과」가 초록이면
 squash 병합한다 — 이것이 배포 가능 판정 한 번이다. 대기열에서 빠진 PR 은 `origin/main` 위로 rebase 해 다시 넣는다.
 release 는 검사하지 않고 이미지·승격만 한다. 운영에 닿는 잡(`release.yml` 의 image·promote·notify, `image.yml` 의 build, 매시
 e2e 의 실패 이슈)은 `github.repository == 'sandcorporation/laurio'` 조건을 단다 — `scripts/test_release_flow.py` 가 이 조건과
