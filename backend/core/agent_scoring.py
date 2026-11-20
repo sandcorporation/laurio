@@ -13,7 +13,10 @@
   4. 어긋나면 한 번 더 돌린다. 그래도 어긋나면 `AgentRunHeld` — 부르는 쪽이 보류한다(0% 로 굳히지 않는다).
 
 `AgentGraderBusy`·`RunTokenRefused`·`AgentGraderError`(닿지 못함)는 그대로 위로 던진다 — 재시도·보류는 부르는
-쪽의 기존 흐름이 정한다. 참가자 코드는 실행하지 않는다 — 박제본은 텍스트로 줄 수만 센다.
+쪽의 기존 흐름이 정한다. 벤더가 **계정 쪽**(사용 한도·빈도 제한·크레딧)으로 거절한 시도는 받아들이는 조건 어긋남이
+아니다 — 다시 돌리지 않고 `AgentVendorRefused` 로 던진다(#1052). 부르는 쪽은 실행기 바쁨처럼 미룬다: 보류·실패로
+세지 않고, 그 스캔의 나머지 제출은 벤더를 부르지 않는다(`note_scan_refusal`·`scan_refusal`). 어떤 문구를 계정
+거절로 보는지는 `ACCOUNT_REFUSAL_MARKERS` 한 곳이다. 참가자 코드는 실행하지 않는다 — 박제본은 텍스트로 줄 수만 센다.
 
 강의실(#1036)도 같은 길을 탄다 — `AgentJob.class_key` 를 주면 벤더·모델은 그 클래스의 채점 연결과 문제의 모델을
 따르고, 실행 토큰의 키 출처가 그 클래스가 된다(프록시가 그 클래스 키를 붙인다). 기록의 `key_source` 는
@@ -107,6 +110,51 @@ class AgentJobOutcome:
     model_version: str  # f"agent:{vendor}:{model}" — 리뷰·Score 기록에 그대로 쓴다
     record: dict  # 시도 기록 원본
     prompt: str  # CLI 에 넘긴 지침 전문 — 기록(`Score.prompt` 등)에 이것을 남긴다(#1048)
+
+
+class AgentVendorRefused(Exception):
+    """벤더가 계정 쪽으로 거절했다(#1052) — 제출 탓이 아니다. 다시 돌려도 같은 거절이라 재실행하지 않았다.
+    부르는 쪽은 실행기 바쁨(`AgentGraderBusy`)과 같이 미룬다 — 보류도 실패 횟수도 늘리지 않는다."""
+
+    def __init__(self, reason: str, record: dict) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.record = record
+
+
+#: 계정 쪽 거절로 보는 문구(#1052) — 소문자로 견준다. 벤더 문구가 바뀌면 여기만 고친다. 견주는 곳은 CLI 결과의
+#: 오류 본문(`ParsedRun.error_detail`)뿐이다 — 받아들인 실행·도구 실패의 stderr 는 보지 않는다.
+ACCOUNT_REFUSAL_MARKERS = (
+    "usage limit",  # Anthropic 400 「You have reached your specified workspace API usage limits」(11-19 운영)
+    "credit balance is too low",  # Anthropic 크레딧 부족
+    "insufficient_quota",  # OpenAI 크레딧 부족
+    "rate_limit",  # Anthropic `rate_limit_error`·OpenAI `rate_limit_exceeded`
+    "api_error_status=429",
+)
+
+
+def account_refusal(error_detail: str) -> str | None:
+    """오류 본문이 계정 쪽 거절이면 그 본문을, 아니면 None. 스키마 어긋남 같은 다른 400 은 None 이다."""
+
+    lowered = error_detail.lower()
+    if any(marker in lowered for marker in ACCOUNT_REFUSAL_MARKERS):
+        return error_detail.strip()
+    return None
+
+
+#: 스캔 한 번(`core.scans` 의 ctx)에 계정 거절을 받았다는 표시 — 그 스캔의 남은 행은 벤더를 부르지 않는다.
+_SCAN_REFUSAL_KEY = "agent_vendor_refused"
+
+
+def note_scan_refusal(ctx: dict, exc: AgentVendorRefused) -> None:
+    ctx[_SCAN_REFUSAL_KEY] = exc.reason
+
+
+def scan_refusal(ctx: dict) -> str | None:
+    """이번 스캔이 이미 계정 거절을 받았으면 그 사유."""
+
+    reason = ctx.get(_SCAN_REFUSAL_KEY)
+    return reason if isinstance(reason, str) else None
 
 
 class AgentRunHeld(Exception):
@@ -504,6 +552,8 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, prompt: str, snapshot
         "evidence_check": dict(evidence) if evidence is not None else None,
         "structured_output": parsed.structured_output,
         "problems": list(problems),
+        # 계정 쪽 거절이면 그 본문(#1052) — `run_agent_job` 이 재실행하지 않고 미룸으로 던진다.
+        "account_refusal": account_refusal(parsed.error_detail) if problems and parsed.error_detail else None,
     }
     return problems, record, parsed.structured_output
 
@@ -552,6 +602,11 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
             attempts.append({"rejected": exc.reason})
             raise AgentRunHeld([f"실행 거절: {exc.reason}"], record) from exc
         attempts.append(attempt)
+        refusal = attempt.get("account_refusal")
+        if isinstance(refusal, str):
+            # 벤더 계정 쪽 거절(#1052) — 제출 탓이 아니고 다시 돌려도 같다. 받아들이는 조건 어긋남으로 세지 않는다.
+            record["accepted"] = False
+            raise AgentVendorRefused(refusal, record)
         if not problems and isinstance(output, dict):
             record["accepted"] = True
             return AgentJobOutcome(

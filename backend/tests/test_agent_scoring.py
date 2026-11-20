@@ -569,3 +569,124 @@ def test_default_method_keeps_the_single_call_path(client, category, landing_typ
     assert not Score.objects.get(submission_id=submission_id).model_version.startswith("agent:")
     assert not AgentRun.objects.exists()
     assert not AgentRunToken.objects.exists()
+
+
+# ── 벤더 계정 거절은 미룸(#1052) ─────────────────────────────────────────────────────────────────────────
+
+#: 11-19 운영에서 받은 거절 원문 그대로.
+USAGE_LIMIT_MESSAGE = (
+    "API Error: 400 You have reached your specified workspace API usage limits. "
+    "You will regain access on 2026-12-01 at 00:00 UTC."
+)
+
+
+def _vendor_error_stream(status: int, message: str) -> str:
+    """CLI 가 벤더 거절을 결과로 감싼 꼴 — 도구는 하나도 부르지 못했다."""
+
+    events = [
+        {"type": "system", "subtype": "init", "tools": ["Read", "Grep", "Glob"], "apiKeySource": "ANTHROPIC_API_KEY"},
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "api_error_status": status,
+            "num_turns": 1,
+            "total_cost_usd": 0,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "result": message,
+        },
+    ]
+    return "\n".join(json.dumps(e, ensure_ascii=False) for e in events)
+
+
+def _two_closed_submissions(client, category, landing_type) -> list[int]:
+    from django.utils import timezone
+
+    from tests.test_scoring import _close_contest, _publish_contest, _submit_with_marker, _verified_user
+
+    deadline = timezone.now() + timedelta(hours=1)
+    _sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+    )
+    ids = [
+        _submit_with_marker(client, contest, contest["requirements"][0]["id"], _verified_user(client, f"dev-{n}", f"dev-ci-{n}"))
+        for n in (1, 2)
+    ]
+    _close_contest(client, contest, deadline=deadline)
+    return ids
+
+
+@pytest.mark.django_db
+def test_usage_limit_refusal_defers_without_hold_or_failure_and_is_picked_again(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor
+):
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    runner = _use(monkeypatch, _FakeRunner(_vendor_error_stream(400, USAGE_LIMIT_MESSAGE), exit_code=1))
+
+    [row] = _run_pending(client)["rows"]
+
+    assert row["status"] == "deferred"
+    assert "usage limits" in row["error"]
+    assert len(runner.specs) == 1  # 같은 거절이라 두 번째 시도를 하지 않는다
+    assert not ScoringAttempt.objects.exists()  # 보류도 실패 횟수도 늘지 않는다
+    assert not Score.objects.exists()
+    assert not AgentRun.objects.exists()
+
+    # 다음 스캔에 다시 집힌다 — 한도가 풀리면 그대로 채점된다.
+    runner.stdouts, runner.exit_code = [_claude_stream(_verdicts(_requirement_id(submission_id)))], 0
+    assert _run_pending(client)["rows"][0]["status"] == "scored"
+    assert len(runner.specs) == 2
+
+
+@pytest.mark.django_db
+def test_after_the_first_account_refusal_the_rest_of_the_scan_does_not_call_the_vendor(
+    client, category, landing_type, monkeypatch, agent_method, claude_vendor
+):
+    ids = _two_closed_submissions(client, category, landing_type)
+    runner = _use(
+        monkeypatch,
+        _FakeRunner(_vendor_error_stream(429, "API Error: 429 rate_limit_error: Number of request tokens has exceeded your per-minute rate limit"), exit_code=1),
+    )
+
+    rows = _run_pending(client)["rows"]
+
+    assert sorted(r["submission_id"] for r in rows) == sorted(ids)
+    assert {r["status"] for r in rows} == {"deferred"}
+    assert len(runner.specs) == 1
+    assert not ScoringAttempt.objects.exists()
+
+
+@pytest.mark.django_db
+def test_other_vendor_400_is_still_retried_and_held(client, category, landing_type, monkeypatch, agent_method, claude_vendor):
+    submission_id, _deadline = _closed_submission(client, category, landing_type)
+    message = "API Error: 400 invalid_request_error: output_format.schema: unsupported keyword"
+    runner = _use(monkeypatch, _FakeRunner(_vendor_error_stream(400, message), exit_code=1))
+
+    run = _held(client, submission_id, runner)
+
+    assert any("unsupported keyword" in r for r in run.reasons)
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        f"success api_error_status=400 {USAGE_LIMIT_MESSAGE}",
+        "success api_error_status=429 API Error: 429 rate_limit_error",
+        "success api_error_status=400 Your credit balance is too low to access the Anthropic API.",
+        "You exceeded your current quota (insufficient_quota)",
+    ],
+)
+def test_account_refusal_texts_are_recognised(detail):
+    assert agent_scoring.account_refusal(detail)
+
+
+@pytest.mark.parametrize(
+    "detail",
+    ["", "result 이벤트 없음", "success api_error_status=400 invalid_request_error: schema", "error_max_turns"],
+)
+def test_other_errors_are_not_account_refusals(detail):
+    assert agent_scoring.account_refusal(detail) is None

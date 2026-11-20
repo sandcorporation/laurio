@@ -12,7 +12,7 @@ import pytest
 
 from core import agent_scoring
 from scoring.agent_runner import AgentGraderBusy
-from core.agent_scoring import AgentJob, AgentJobOutcome, AgentRunHeld
+from core.agent_scoring import AgentJob, AgentJobOutcome, AgentRunHeld, AgentVendorRefused
 from scoring.models import QualityReviewAttempt, Score, SubmissionQualityReview
 from scoring.quality import HELD_ERROR_PREFIX, QUALITY_FAILURE_LIMIT
 from scoring.quality_agent import agent_response_schema, needs_evidence
@@ -39,6 +39,9 @@ class _FakeAgent:
             raise AgentRunHeld(["근거 경로가 박제본에 없다: src/none.py:3"], {"attempts": [{}, {}]})
         if self.mode == "busy":
             raise AgentGraderBusy("실행 중인 건이 있다(흉내)")
+        if self.mode == "refused":
+            # 실물(`run_agent_job`)이 벤더 계정 거절을 가른 꼴(#1052) — 시도 하나로 멈춘다.
+            raise AgentVendorRefused("API Error: 400 You have reached your specified workspace API usage limits.", {"attempts": [{}]})
         verdicts = [
             {"requirement_id": rid, "score": 4, "reasoning": "로그인 흐름을 구현했다.", "evidence": ["src/auth.py:10-24"]}
             for rid in sorted(job.expected_ids)
@@ -110,6 +113,24 @@ def test_busy_grader_defers_without_counting_a_failure(client, closed, agent, mo
     agent.mode = "busy"
 
     assert {r["status"] for r in _run_quality(client)["rows"]} == {"deferred"}
+    assert not QualityReviewAttempt.objects.exists()
+
+    agent.mode = "ok"
+    assert {r["status"] for r in _run_quality(client)["rows"]} == {"reviewed"}
+
+
+@pytest.mark.django_db
+def test_vendor_account_refusal_defers_and_skips_the_rest_of_the_scan(client, closed, agent, monkeypatch):  # noqa: F811
+    """#1052: 사용 한도 거절은 제출 탓이 아니다 — 보류·실패로 세지 않고, 같은 스캔의 나머지는 벤더를 부르지 않는다."""
+
+    monkeypatch.setenv("CONTEST_SCORING_METHOD", "agent")
+    agent.mode = "refused"
+
+    rows = _run_quality(client)["rows"]
+
+    assert {r["submission_id"] for r in rows} == {closed["a"], closed["b"]}
+    assert {r["status"] for r in rows} == {"deferred"}
+    assert len(agent.jobs) == 1
     assert not QualityReviewAttempt.objects.exists()
 
     agent.mode = "ok"

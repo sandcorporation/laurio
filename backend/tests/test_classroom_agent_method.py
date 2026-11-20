@@ -254,6 +254,42 @@ def test_held_agent_scoring_is_not_a_failure_and_leaves_the_queue(client, db, mo
     assert any("evidence" in r or "근거" in r for r in run.reasons), run.reasons
 
 
+def test_vendor_account_refusal_pauses_the_class_without_a_failure(client, db, monkeypatch):
+    """#1052: 클래스 키의 사용 한도 거절은 참여자 탓이 아니다 — 크레딧 소진과 같은 자리로 멈춘다(시도 기록 없음)."""
+
+    from classroom.models import Class, ClassroomScoringAttempt
+
+    _owner, participant, class_id, problem = _claude_key_class(client, monkeypatch)
+    refused = "\n".join(
+        json.dumps(e)
+        for e in (
+            {"type": "system", "subtype": "init", "tools": ["Read", "Grep", "Glob"], "apiKeySource": "ANTHROPIC_API_KEY"},
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": True,
+                "api_error_status": 400,
+                "result": "API Error: 400 You have reached your specified workspace API usage limits. "
+                "You will regain access on 2026-12-01 at 00:00 UTC.",
+            },
+        )
+    )
+    runner = _Runner(lambda: refused)
+    monkeypatch.setattr(agent_scoring, "request_run", runner)
+
+    submit_repository(client, participant["access"], class_id, problem.id)
+    run_scan(client)
+    run_scan(client)
+
+    assert len(runner.specs) == 1  # 재실행도, 다음 스캔의 호출도 없다(다시 확인 간격 동안 멈춤)
+    assert not ClassroomScore.objects.exists()
+    assert not ClassroomScoringAttempt.objects.exists()
+    assert not AgentRun.objects.exists()
+    assert Class.objects.get(pk=class_id).scoring_quota_exhausted_at is not None
+    [attempt] = mine(client, participant["access"], class_id, problem.id)["submissions"]
+    assert attempt["status"] == "pending"
+
+
 # --- 완성도 검사 -------------------------------------------------------------------------------
 
 
