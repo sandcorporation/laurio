@@ -263,17 +263,63 @@ export default function JudgeComparisonPage() {
               완성도순
             </button>
           </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] border-collapse" data-testid="comparison-matrix">
+        <div className="overflow-x-auto" data-testid="comparison-scroll">
+          <table className="border-separate border-spacing-0" data-testid="comparison-matrix">
             <thead>
               <tr>
-                <th className="border border-rule bg-surface p-3 text-left text-sm">
-                  요구사항
+                <th className="sm:sticky sm:left-0 sm:z-10 w-[240px] min-w-[240px] border border-rule bg-surface p-3 text-left text-sm sm:w-[280px] sm:min-w-[280px]">
+                  제출자
                 </th>
-                {columns.map((submission) => (
+                <th className="w-[120px] min-w-[120px] border border-l-0 border-rule bg-surface p-3 text-left text-sm">
+                  완성도
+                </th>
+                {comparison.requirements.map((requirement) => {
+                  const isRequired = requirement.grade === "required";
+                  return (
+                    <th
+                      key={requirement.requirement_id}
+                      scope="col"
+                      className="w-[200px] min-w-[200px] border border-l-0 border-rule bg-surface p-3 text-left align-top text-sm font-normal"
+                      data-testid={`requirement-row-${requirement.requirement_id}`}
+                    >
+                      <div className="flex flex-col items-start gap-2">
+                        <span
+                          className={`${badgeClass(isRequired ? "attention" : "neutral")} shrink-0 whitespace-nowrap`}
+                          data-testid={`requirement-${requirement.requirement_id}-grade`}
+                        >
+                          {requirementGradeLabel(requirement.grade)}
+                        </span>
+                        <span className="min-w-0 break-keep [overflow-wrap:anywhere]">{requirement.text}</span>
+                        <label className="flex items-center gap-2 text-xs text-ink/70">
+                          배점
+                          <select
+                            className="border border-rule bg-surface px-1 py-0.5 font-mono text-xs text-ink"
+                            value={requirement.points}
+                            disabled={savingPointsId === requirement.requirement_id}
+                            onChange={(event) =>
+                              void changePoints(requirement.requirement_id, Number(event.target.value))
+                            }
+                            data-testid={`requirement-${requirement.requirement_id}-points`}
+                          >
+                            {POINTS_OPTIONS.map((value) => (
+                              <option key={value} value={value}>
+                                {value}점
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {columns.map((submission) => (
+                <tr key={submission.submission_id} data-testid={`submission-row-${submission.submission_id}`}>
                   <th
-                    key={submission.submission_id}
-                    className="border border-rule bg-surface p-3 text-left text-sm"
+                    scope="row"
+                    className="sm:sticky sm:left-0 sm:z-10 w-[240px] min-w-[240px] border border-t-0 border-rule bg-surface p-3 text-left align-top text-sm font-normal sm:w-[280px] sm:min-w-[280px]"
                     data-testid={`submission-header-${submission.submission_id}`}
                   >
                     <SubmissionColumnHeader
@@ -289,171 +335,122 @@ export default function JudgeComparisonPage() {
                       playback={playback[submission.submission_id] ?? null}
                     />
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr data-testid="quality-row">
-                <th scope="row" className="border border-rule p-3 text-left align-top text-sm font-normal">
-                  완성도
-                </th>
-                {columns.map((submission) => (
                   <td
-                    key={submission.submission_id}
-                    className="border border-rule p-3 align-top text-sm"
+                    className="border border-l-0 border-t-0 border-rule p-3 align-top text-sm"
                     data-testid={`quality-${submission.submission_id}`}
                   >
                     <QualitySummary quality={submission.quality ?? null} />
                   </td>
-                ))}
-              </tr>
-              {comparison.requirements.map((requirement) => {
-                const isRequired = requirement.grade === "required";
-                const isBonus = requirement.grade === "bonus";
-                return (
-                  <tr key={requirement.requirement_id} data-testid={`requirement-row-${requirement.requirement_id}`}>
-                    <th
-                      scope="row"
-                      className="border border-rule p-3 text-left align-top text-sm font-normal"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={badgeClass(isRequired ? "attention" : "neutral")}
-                          data-testid={`requirement-${requirement.requirement_id}-grade`}
-                        >
-                          {requirementGradeLabel(requirement.grade)}
-                        </span>
-                        <span>{requirement.text}</span>
-                      </div>
-                      <label className="mt-2 flex items-center gap-2 text-xs text-ink/70">
-                        배점
-                        <select
-                          className="border border-rule bg-surface px-1 py-0.5 font-mono text-xs text-ink"
-                          value={requirement.points}
-                          disabled={savingPointsId === requirement.requirement_id}
-                          onChange={(event) =>
-                            void changePoints(requirement.requirement_id, Number(event.target.value))
-                          }
-                          data-testid={`requirement-${requirement.requirement_id}-points`}
-                        >
-                          {POINTS_OPTIONS.map((value) => (
-                            <option key={value} value={value}>
-                              {value}점
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </th>
-                    {columns.map((submission) => {
-                      const qualityItem = submission.quality?.items.find(
-                        (item) => item.item_id === requirement.requirement_id,
-                      );
-                      const entry = requirement.entries.find(
-                        (e) => e.submission_id === submission.submission_id,
-                      );
-                      const isLinked = entry?.is_linked ?? false;
-                      // 확인 위치는 판정과 무관한 안내다(#909, ADR-0074) — 충족 여부와 묶지 않고,
-                      // 있으면 목록만 그린다. 비어 있다고 경고하지 않는다.
-                      return (
-                        <td
-                          key={submission.submission_id}
-                          className="border border-rule p-3 align-top text-sm"
-                          data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}`}
-                          data-linked={isLinked ? "true" : "false"}
-                          data-met={entry?.is_met ? "true" : "false"}
-                        >
-                          <div className="flex flex-col gap-1">
-                            <p className={entry?.is_met ? "text-success" : "text-ink"}>
-                              {entry?.is_met ? "충족" : "미충족"}
-                            </p>
-                            {isLinked && (
-                              <ul
-                                className="flex flex-col gap-1"
-                                data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}-locations`}
-                              >
-                                {entry!.evidence.map((item, index) => {
-                                  const text = `[${evidenceKindLabel(item.kind)}] ${item.value}`;
-                                  const link =
-                                    item.kind === "video_timestamp" && item.asset_id != null
-                                      ? submission.assets.find(
-                                          (a) => a.id === item.asset_id && a.kind === "video_link",
-                                        )
-                                      : undefined;
-                                  const embedded = link != null && youtubeVideoId(link.value) !== null;
-                                  return (
-                                    <li key={index} className="font-mono text-xs text-ink">
-                                      {link != null && embedded ? (
-                                        <button
-                                          type="button"
-                                          className="text-left underline"
-                                          data-testid={`evidence-play-${link.id}`}
-                                          onClick={() =>
-                                            setPlayback((prev) => ({
-                                              ...prev,
-                                              [submission.submission_id]: {
-                                                assetId: link.id,
-                                                start: timestampSeconds(item.value) ?? 0,
-                                              },
-                                            }))
-                                          }
-                                        >
-                                          {text}
-                                        </button>
-                                      ) : link != null ? (
-                                        <a
-                                          href={link.value}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="underline"
-                                          data-testid={`evidence-open-${link.id}`}
-                                        >
-                                          {text}
-                                        </a>
-                                      ) : (
-                                        text
-                                      )}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            )}
-                            {entry?.note && <p className="text-xs text-ink">{entry.note}</p>}
-                          </div>
-                          {isBonus ? (
-                            <div className="mt-2 border-t border-rule pt-2">
-                              <BonusScoreEditor
-                                testId={`bonus-${requirement.requirement_id}-${submission.submission_id}`}
-                                initialScore={
-                                  submission.bonus_scores?.find((b) => b.requirement_id === requirement.requirement_id)
-                                    ?.score ?? 0
-                                }
-                                initialMemo={
-                                  submission.bonus_scores?.find((b) => b.requirement_id === requirement.requirement_id)
-                                    ?.memo ?? ""
-                                }
-                                onSave={(score, memo) =>
-                                  rateBonus(submission.submission_id, requirement.requirement_id, score, memo)
-                                }
-                              />
-                            </div>
-                          ) : qualityItem ? (
-                            <div
-                              className="mt-2 border-t border-rule pt-2"
-                              data-testid={`quality-item-${requirement.requirement_id}-${submission.submission_id}`}
+                  {comparison.requirements.map((requirement) => {
+                    const isBonus = requirement.grade === "bonus";
+                    const qualityItem = submission.quality?.items.find(
+                      (item) => item.item_id === requirement.requirement_id,
+                    );
+                    const entry = requirement.entries.find(
+                      (e) => e.submission_id === submission.submission_id,
+                    );
+                    const isLinked = entry?.is_linked ?? false;
+                    // 확인 위치는 판정과 무관한 안내다(#909, ADR-0074) — 충족 여부와 묶지 않고,
+                    // 있으면 목록만 그린다. 비어 있다고 경고하지 않는다.
+                    return (
+                      <td
+                        key={requirement.requirement_id}
+                        className="border border-l-0 border-t-0 border-rule p-3 align-top text-sm"
+                        data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}`}
+                        data-linked={isLinked ? "true" : "false"}
+                        data-met={entry?.is_met ? "true" : "false"}
+                      >
+                        <div className="flex flex-col gap-1">
+                          <p className={entry?.is_met ? "text-success" : "text-ink"}>
+                            {entry?.is_met ? "충족" : "미충족"}
+                          </p>
+                          {isLinked && (
+                            <ul
+                              className="flex flex-col gap-1"
+                              data-testid={`cell-${requirement.requirement_id}-${submission.submission_id}-locations`}
                             >
-                              <p className="text-xs font-semibold">
-                                항목 완성도 {qualityItem.score}/5 · {formatPoints(qualityItem.item_points)} /{" "}
-                                {qualityItem.points}점
-                              </p>
-                              <p className="text-xs text-ink/70">{qualityItem.reasoning}</p>
-                            </div>
-                          ) : null}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
+                              {entry!.evidence.map((item, index) => {
+                                const text = `[${evidenceKindLabel(item.kind)}] ${item.value}`;
+                                const link =
+                                  item.kind === "video_timestamp" && item.asset_id != null
+                                    ? submission.assets.find(
+                                        (a) => a.id === item.asset_id && a.kind === "video_link",
+                                      )
+                                    : undefined;
+                                const embedded = link != null && youtubeVideoId(link.value) !== null;
+                                return (
+                                  <li key={index} className="break-all font-mono text-xs text-ink">
+                                    {link != null && embedded ? (
+                                      <button
+                                        type="button"
+                                        className="text-left underline"
+                                        data-testid={`evidence-play-${link.id}`}
+                                        onClick={() =>
+                                          setPlayback((prev) => ({
+                                            ...prev,
+                                            [submission.submission_id]: {
+                                              assetId: link.id,
+                                              start: timestampSeconds(item.value) ?? 0,
+                                            },
+                                          }))
+                                        }
+                                      >
+                                        {text}
+                                      </button>
+                                    ) : link != null ? (
+                                      <a
+                                        href={link.value}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="underline"
+                                        data-testid={`evidence-open-${link.id}`}
+                                      >
+                                        {text}
+                                      </a>
+                                    ) : (
+                                      text
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                          {entry?.note && <LongText>{entry.note}</LongText>}
+                        </div>
+                        {isBonus ? (
+                          <div className="mt-2 border-t border-rule pt-2">
+                            <BonusScoreEditor
+                              testId={`bonus-${requirement.requirement_id}-${submission.submission_id}`}
+                              initialScore={
+                                submission.bonus_scores?.find((b) => b.requirement_id === requirement.requirement_id)
+                                  ?.score ?? 0
+                              }
+                              initialMemo={
+                                submission.bonus_scores?.find((b) => b.requirement_id === requirement.requirement_id)
+                                  ?.memo ?? ""
+                              }
+                              onSave={(score, memo) =>
+                                rateBonus(submission.submission_id, requirement.requirement_id, score, memo)
+                              }
+                            />
+                          </div>
+                        ) : qualityItem ? (
+                          <div
+                            className="mt-2 border-t border-rule pt-2"
+                            data-testid={`quality-item-${requirement.requirement_id}-${submission.submission_id}`}
+                          >
+                            <p className="text-xs font-semibold">
+                              항목 완성도 {qualityItem.score}/5 · {formatPoints(qualityItem.item_points)} /{" "}
+                              {qualityItem.points}점
+                            </p>
+                            <LongText>{qualityItem.reasoning}</LongText>
+                          </div>
+                        ) : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -477,6 +474,16 @@ export default function JudgeComparisonPage() {
         </ErrorNote>
       )}
     </main>
+  );
+}
+
+// 긴 글(판정 사유·완성도 사유)은 칸을 늘리지 않는다 — 접어 두고 누르면 그 칸 안에서 펼친다.
+function LongText({ children }: { children: string }) {
+  return (
+    <details className="text-xs text-ink/70">
+      <summary className="cursor-pointer select-none underline">사유</summary>
+      <p className="mt-1 whitespace-pre-wrap break-words">{children}</p>
+    </details>
   );
 }
 
