@@ -105,7 +105,7 @@ test("개발자 이름을 클릭하면 그 개발자의 공개 프로필이 새 
 
 // #884·#904 — 완성도 열(「n / 만점점」)과 「완성도순」. 시드는 A(먼저 낸 제출)를 필수 2·선택 2, B 를 필수 5·선택 3 으로
 // 심는다 — 기본 배점(필수 2·선택 1)이면 A 1.2 / 3점, B 2.6 / 3점.
-test("「완성도순」을 누르면 완성도가 높은 제출작이 앞 열로 온다", async ({ page }) => {
+test("「완성도순」을 누르면 완성도가 높은 제출작이 첫 행으로 온다", async ({ page }) => {
   await loginAsJudgingSponsor(page);
   await page.goto(`/console/contests/${seeded.judging.id}/judge`);
   await expect(page.getByTestId("comparison-matrix")).toBeVisible();
