@@ -264,7 +264,7 @@ export default function JudgeComparisonPage() {
             </button>
           </div>
         <div className="overflow-x-auto" data-testid="comparison-scroll">
-          <table className="border-separate border-spacing-0" data-testid="comparison-matrix">
+          <table className="border-collapse" data-testid="comparison-matrix">
             <thead>
               <tr>
                 <th className="sm:sticky sm:left-0 sm:z-10 w-[240px] min-w-[240px] border border-rule bg-surface p-3 text-left text-sm sm:w-[280px] sm:min-w-[280px]">
