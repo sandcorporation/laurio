@@ -1,0 +1,25 @@
+# 워크플로 문법 검사(#1105) — actionlint. pr-check.yml 자체가 파싱되지 않으면 pr-check 의 어떤 잡도 뜨지 않으므로
+# (빈 `env:` 사고) 검사는 pr-check 와 별개 파일에 둔다. 필수 검사(결과 집계·ruleset)에는 넣지 않는다 —
+# PR 에 빨강으로 보이는 것이 목적이다. 워크플로가 바뀐 PR 에서만 돈다.
+# 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다): pull_request_target 없음, 호스팅 실행기만, 액션 SHA 고정, secrets 없음.
+name: workflow-lint
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "scripts/ci/actionlint.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: bash scripts/ci/actionlint.sh --all
