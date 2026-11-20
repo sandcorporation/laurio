@@ -109,8 +109,16 @@ class RuntimeSettingOut(Schema):
     choices: list[str] | None = None
 
 
+class AccountRefusalOut(Schema):
+    at: datetime
+    vendor: str
+    kind: str
+
+
 class RuntimeSettingsOut(Schema):
     settings: list[RuntimeSettingOut]
+    # 에이전트 실행이 벤더 계정 쪽으로 마지막에 거절당한 기록(#1058). 없으면 null.
+    last_account_refusal: AccountRefusalOut | None = None
 
 
 class RuntimeSettingChangeOut(Schema):

@@ -4946,6 +4946,18 @@ export interface components {
          * @enum {string}
          */
         Account: "sponsor_deposit" | "developer_payable" | "platform_fee_revenue" | "withholding_tax_payable" | "pg_fee_expense";
+        /** AccountRefusalOut */
+        AccountRefusalOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Kind */
+            kind: string;
+            /** Vendor */
+            vendor: string;
+        };
         /** AppealCreateIn */
         AppealCreateIn: {
             /** Reason */
@@ -9310,6 +9322,7 @@ export interface components {
         };
         /** RuntimeSettingsOut */
         RuntimeSettingsOut: {
+            last_account_refusal?: components["schemas"]["AccountRefusalOut"] | null;
             /** Settings */
             settings: components["schemas"]["RuntimeSettingOut"][];
         };

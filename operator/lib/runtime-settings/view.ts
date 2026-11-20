@@ -2,7 +2,7 @@
 
 import { POLICY_FEE_FIELDS, POLICY_LIMIT_FIELDS } from "../policies/types";
 import type { PolicyField } from "../policies/types";
-import type { ProbeResult, RuntimeSetting, RuntimeSettingChange, RuntimeSettingSource } from "./types";
+import type { AccountRefusal, ProbeResult, RuntimeSetting, RuntimeSettingChange, RuntimeSettingSource } from "./types";
 
 export const MASK = "••••";
 
@@ -129,4 +129,14 @@ export function policyFieldsOfTab(tab: SettingsTabId): readonly PolicyField[] {
   if (tab === "limits") return POLICY_LIMIT_FIELDS;
   if (tab === "fees") return POLICY_FEE_FIELDS;
   return [];
+}
+
+const REFUSAL_VENDOR_LABELS: Record<string, string> = { openai: "OpenAI", anthropic: "Anthropic" };
+const REFUSAL_KIND_LABELS: Record<string, string> = { usage_limit: "사용 한도", rate_limit: "빈도 제한", credit: "크레딧" };
+
+/** 「마지막 계정 거절」 한 줄 — 시각 · 벤더 · 종류. 기록이 없으면 null(칸을 그리지 않는다). 모르는 이름은 원문 그대로. */
+export function accountRefusalText(refusal: AccountRefusal | null): string | null {
+  if (!refusal) return null;
+  const at = new Date(refusal.at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+  return [at, REFUSAL_VENDOR_LABELS[refusal.vendor] ?? refusal.vendor, REFUSAL_KIND_LABELS[refusal.kind] ?? refusal.kind].join(" · ");
 }

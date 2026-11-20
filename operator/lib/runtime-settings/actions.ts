@@ -4,12 +4,14 @@ import type { ApiResult } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 
-import type { ProbeResult, RuntimeSetting, RuntimeSettingChange, RuntimeSettingSaveResult } from "./types";
+import type { AccountRefusal, ProbeResult, RuntimeSetting, RuntimeSettingChange, RuntimeSettingSaveResult } from "./types";
 
 const BASE = "/api/backend/operator/runtime-settings";
 
-export function fetchRuntimeSettings(): Promise<ApiResult<{ settings: RuntimeSetting[] }>> {
-  return bffClient.get<{ settings: RuntimeSetting[] }>(BASE);
+export function fetchRuntimeSettings(): Promise<
+  ApiResult<{ settings: RuntimeSetting[]; last_account_refusal?: AccountRefusal | null }>
+> {
+  return bffClient.get<{ settings: RuntimeSetting[]; last_account_refusal?: AccountRefusal | null }>(BASE);
 }
 
 export function fetchRuntimeSettingChanges(): Promise<ApiResult<RuntimeSettingChange[]>> {

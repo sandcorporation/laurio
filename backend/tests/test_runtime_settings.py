@@ -332,3 +332,20 @@ def test_probe_without_any_key_is_422(su, monkeypatch):
 def test_probe_is_only_for_the_key(su):
     response = _post(su, "/LLM_OPENAI_MODEL/test", value="gpt-x")
     assert (response.status_code, response.json()["code"]) == (422, "not_probeable")
+
+
+def test_listing_carries_the_last_account_refusal_only_when_there_is_one(su):
+    """#1058: 마지막 계정 거절(시각·벤더·종류) — 기록이 없으면 null 이고, 거절 본문은 어디에도 없다."""
+
+    from django.core.cache import caches
+
+    from core.agent_refusal_alert import report_account_refusal
+
+    caches["rate_limits"].clear()
+    assert su.get(URL, HTTP_ORIGIN=ORIGIN).json()["last_account_refusal"] is None
+
+    report_account_refusal("anthropic", "usage_limit")
+    last = su.get(URL, HTTP_ORIGIN=ORIGIN).json()["last_account_refusal"]
+    assert (last["vendor"], last["kind"]) == ("anthropic", "usage_limit")
+    assert last["at"]
+    assert set(last) == {"at", "vendor", "kind"}

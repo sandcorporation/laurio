@@ -38,3 +38,10 @@ export interface RuntimeSettingSaveResult {
   changed: boolean;
   setting: RuntimeSetting;
 }
+
+/** 에이전트 실행이 벤더 계정 쪽으로 마지막에 거절당한 기록(#1058). `kind` 는 백엔드 `ACCOUNT_REFUSAL_KINDS` 의 키. */
+export interface AccountRefusal {
+  at: string;
+  vendor: string;
+  kind: string;
+}

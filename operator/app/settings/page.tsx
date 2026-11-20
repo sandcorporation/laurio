@@ -15,7 +15,7 @@ import { usePolicyHistory } from "@/lib/policies/use-policy-history";
 import { PolicyEditor } from "@/lib/policies/policy-editor";
 import { PolicyHistoryTable } from "@/lib/policies/policy-history";
 import { PolicyValuesTable } from "@/lib/policies/policy-values-table";
-import { SETTINGS_TABS, policyFieldsOfTab, settingsOfTab, tabFromParam } from "@/lib/runtime-settings/view";
+import { SETTINGS_TABS, accountRefusalText, policyFieldsOfTab, settingsOfTab, tabFromParam } from "@/lib/runtime-settings/view";
 
 function Heading({ children }: { children: string }) {
   return <h2 className="text-[15px] font-semibold tracking-[-0.01em]">{children}</h2>;
@@ -28,7 +28,7 @@ function RuntimeSettingsScreen() {
   const hasPolicy = policyFields.length > 0;
   const session = useSession();
   const authed = session.status === "authenticated";
-  const { settings, changes, reload } = useRuntimeSettings(authed);
+  const { settings, changes, lastRefusal, reload } = useRuntimeSettings(authed);
   const { state: policy, reload: reloadPolicy } = usePolicy(authed);
   const { state: policyHistory, reload: reloadPolicyHistory } = usePolicyHistory(authed);
 
@@ -43,6 +43,7 @@ function RuntimeSettingsScreen() {
   }
 
   const editable = session.user.is_superuser;
+  const refusalText = tab === "ai" ? accountRefusalText(lastRefusal) : null;
   const tabSettings = settings.status === "loaded" ? settingsOfTab(settings.data, tab) : [];
   const visibleTabs = SETTINGS_TABS.filter(
     (t) =>
@@ -112,6 +113,13 @@ function RuntimeSettingsScreen() {
                 />
               ))}
             </div>
+          )}
+
+          {refusalText && (
+            <dl data-testid="runtime-settings-last-refusal" className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border border-rule bg-surface px-4 py-3 text-[13px]">
+              <dt className="text-ink/62">마지막 계정 거절</dt>
+              <dd className="tabular-nums">{refusalText}</dd>
+            </dl>
           )}
 
           {hasPolicy && policy.status === "error" && (

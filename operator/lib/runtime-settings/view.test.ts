@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RuntimeSetting, RuntimeSettingChange } from "./types";
 import {
+  accountRefusalText,
   canClear,
   canProbe,
   changeText,
@@ -179,5 +180,21 @@ describe("정책 탭(#1041)", () => {
     const rows = [setting({ key: "REPOSITORY_DOWNLOAD_LIMIT_MB" })];
     expect(settingsOfTab(rows, "limits")).toHaveLength(1);
     expect(tabFromParam("fees")).toBe("fees");
+  });
+});
+
+describe("마지막 계정 거절(#1058)", () => {
+  it("기록이 없으면 칸을 그리지 않는다", () => {
+    expect(accountRefusalText(null)).toBeNull();
+  });
+
+  it("시각·벤더·종류를 한 줄로 보인다", () => {
+    expect(accountRefusalText({ at: "2026-11-19T21:44:00Z", vendor: "anthropic", kind: "usage_limit" })).toBe(
+      "2026. 11. 20. 오전 6:44:00 · Anthropic · 사용 한도",
+    );
+  });
+
+  it("모르는 벤더·종류는 이름 그대로 보인다", () => {
+    expect(accountRefusalText({ at: "2026-11-19T21:44:00Z", vendor: "x", kind: "y" })).toContain("x · y");
   });
 });

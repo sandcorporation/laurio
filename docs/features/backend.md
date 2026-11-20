@@ -534,6 +534,11 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 보류·실패 횟수가 늘지 않으며 다음 스캔에 다시 집힌다. 같은 스캔에서 첫 거절 뒤 남은 제출은 벤더를 부르지 않고
 `deferred` 로 넘긴다 — 스캔마다 한 건만 묻는다. 완성도 리뷰(`submission-quality-review`)도 같고, 강의실(클래스 키)은
 크레딧 소진과 같은 자리(`Class.scoring_quota_exhausted_at`)로 멈춘다. 다른 오류(스키마 어긋남 같은 400)는 그대로 재실행·보류다.
+**계정 거절은 경보가 난다**(#1058, `core.agent_refusal_alert`) — 세 길이 같이 거치는 `run_agent_job` 에서 GlitchTip 경고 하나를 보낸다.
+지문은 `["agent-account-refusal", 벤더, 종류]` 고정(종류 = `ACCOUNT_REFUSAL_KINDS` 의 키 `usage_limit`·`rate_limit`·`credit`)이라 한 이슈로
+묶이고, 태그는 `vendor`·`refusal_kind`, 같은 (벤더, 종류)는 `rate_limits` 캐시 키로 한 시간에 한 번만 보낸다. 이벤트에는 이름만 있고 키·응답
+원문은 없다. 보내지 않은 거절도 「마지막 계정 거절」(시각·벤더·종류, 같은 캐시에 30일)을 갱신하고, `GET /operator/runtime-settings` 의
+`last_account_refusal`(없으면 null)로 나간다. 캐시가 비면 기록 없음이고 다음 거절이 채운다. 경보 실패는 채점을 막지 않는다.
 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
 필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/scoring/agent-runs` 가 보인다. Score 의
 `model_version` 은 `agent:<벤더>:<모델>`, 판정 이유는 「이유 근거: 경로:줄, …」(충족만, 근거 5개, 2000자)다. 지침·스키마는
