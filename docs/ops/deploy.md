@@ -133,10 +133,9 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
 승격, Jenkins 는 배포만」. ADR-0071 의 「병합 하나 = 배포 하나」는 그대로다):
 
 1. **브랜치 → PR → `main`.** GitHub Actions `PR 검사`(`pr-check.yml`)가 검사 묶음·amd64 이미지 부팅 가드·e2e·celery 를 돈다
-   (Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서). 「결과」 잡이 초록(`gh pr checks <PR>`)이면 **작업자가 squash 로
-   병합한다**(`gh pr merge <N> --squash`). **`main` 에 직접 push 하지 않는다** — 그러면 PR 검사 없이 release 가 돈다.
-   **배포 가능 판정은 병합 대기열 한 번이다**(#1090): release 는 검사하지 않으므로 main 이 대기열로만 움직여야 한다(포크는 ruleset
-   `main-merge-queue` 로 그렇다 — 대기열이 없는 저장소에 이 꼴을 옮기기 전에 대기열부터, 「CI」 문서).
+   (Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서). 「결과」 잡이 초록(`gh pr checks <PR>`)이면 **작업자가 병합 대기열에
+   넣는다**(`gh pr merge <N> --squash` — 대기열이 전부를 다시 검사하고 squash 병합한다, #1118). **`main` 에 직접 push 하지 않는다** — 그러면 PR 검사 없이 release 가 돈다.
+   **배포 가능 판정은 병합 대기열 한 번이다**(#1090): release 는 검사하지 않으므로 main 이 대기열로만 움직인다(main ruleset 의 `merge_queue`, 「CI」 문서).
 2. **`main` → `production`**(GitHub Actions `release.yml`, `push: main` 과 수동 실행 — release 를 끈 뒤 켜면 `gh workflow run release.yml --ref main` 으로 한 번 돌린다, main 밖 ref 는 `main_only` 잡이 막는다, #1018). 검사는 돌지 않는다(#1090) — 두 잡이 차례로 돈다(PR 검사의 캐시를 채우는
    `cache`·`cache-node` 는 곁에서 돌고 승격은 기다리지 않는다):
    - **image** — `image.yml`: 일곱 서비스마다 `ubuntu-24.04-arm` 실행기 하나(matrix)가 `scripts/ci/images.sh arm64` 로 굽거나

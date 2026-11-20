@@ -33,13 +33,13 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
     경로 표는 `scripts/ci/paths.py` 하나다 — `changed.sh`·`e2e_plan.py`·`pytest_plan.py` 가 모두 이것을 읽는다. `scripts/test_changed_paths.py` 가 고정한다.
   - **병합 대기열 잡**(`merge_group`): 경로와 상관없이 전부(pytest 6조각 — e2e 는 빼고, #1111) 돌고 위에 **guard(frontend·operator·classroom)** 가 더해진다 — 배포 가능 판정은 여기 한 번이다(#1090).
   - **e2e 는 PR 검사의 `e2e` 잡(바뀐 앱, 필수)과 매시 main 의 `e2e.yml`(전부)이다**(#1089·#1111). 시험은 `frontend/e2e/<앱>/`(공개)·`frontend/e2e/operator/<앱>/`·`frontend/e2e/classroom/` 에 두고 **폴더 이름이 앱 표시다** — `backend/app_deps.toml` 의 앱 이름이거나 `frontend`(백엔드 앱이 없는 화면·BFF 시험). `plan` 잡이 `scripts/ci/e2e_plan.py` 로 조각을 낸다: PR 은 바뀐 백엔드 앱(`app_deps.py affected`)의 폴더, 앞단이 바뀌면 그 앱 시험 전부, 시험 폴더만 바뀌면 그 폴더만, 공유 도우미·설정·워크플로·그 밖은 전부. 매시 `e2e.yml` 은 늘 전부(`--all`). 시험 파일을 **기록된 시험 시간**으로 조각에 나눠 담고(#1112 — 조각 수는 시간 합 ÷ 25초, 프로젝트 수~5(#1116 — 층 캐시가 찬 뒤 조각 준비가 ~150초라 8조각은 끝 시각을 거의 줄이지 못하고 실행기 시간만 먹었다), 프로젝트마다 한 조각에서 시작해 조각당 시간이 가장 긴 프로젝트에 하나씩 더 준다) 조각마다 실행기 하나가 스택을 따로 굽는다(`CODEMIT_E2E_PATHS`, `e2e.sh`).
-    **e2e 시간 기록(#1112)**: `e2e.sh` 가 패스마다 Playwright JSON 리포트를 `test-results/timings/` 에 남기고, 매시 `e2e.yml` 의 `durations` 잡이 조각들의 것을 직전 기록에 합쳐(`scripts/ci/e2e_durations.py update` — 통과한 파일만 직전 값과 평균, 실패·못 잰 파일은 그대로, 지운 파일은 뺀다) Actions 캐시 `e2e-durations-<실행>` 으로 저장한다. PR 검사·`e2e.yml` 의 계획 잡은 가장 새 것을 복원해 `--durations` 로 넘긴다. **커밋하지 않는다** — 대기열·PR 에 쓰기 권한을 더하지 않고 매시 저절로 새로워진다. 캐시가 없으면(첫 실행, 7일 안 쓴 캐시가 지워졌을 때) 저장소의 씨앗 기록 `scripts/ci/e2e-durations.json` 을 쓴다 — 씨앗은 가끔 `durations` 잡의 산출물 `e2e-durations`(30일)를 받아 그대로 커밋해 새로 한다. 기록에 없는 새 시험은 기록 평균으로 센다. 규칙은 `scripts/test_e2e_plan.py` 가 고정한다. 조각 시간의 대부분은 시험 밖 준비다 — 층 캐시가 찬 뒤(#1116) 체크아웃·캐시 복원·굽기(23~43초)·띄우기·정리를 합쳐 121~187초, 시험은 조각당 12~25초. 포크에 캐시가 없던 동안은 굽기만 120~200초였다. 병합 기준 `결과` 가 `e2e` 를 본다(조각이 있으면 success). 이미지 층 캐시는 release 의 `cache` 잡이 저장하고 PR 검사의 잡은 모두 복원만 한다(#1090). 매시 `e2e.yml` 이 저장하는 캐시는 e2e 시간 기록 하나다.
+    **e2e 시간 기록(#1112)**: `e2e.sh` 가 패스마다 Playwright JSON 리포트를 `test-results/timings/` 에 남기고, 매시 `e2e.yml` 의 `durations` 잡이 조각들의 것을 직전 기록에 합쳐(`scripts/ci/e2e_durations.py update` — 통과한 파일만 직전 값과 평균, 실패·못 잰 파일은 그대로, 지운 파일은 뺀다) Actions 캐시 `e2e-durations-<실행>` 으로 저장한다. PR 검사·`e2e.yml` 의 계획 잡은 가장 새 것을 복원해 `--durations` 로 넘긴다. **커밋하지 않는다** — 대기열·PR 에 쓰기 권한을 더하지 않고 매시 저절로 새로워진다. 캐시가 없으면(첫 실행, 7일 안 쓴 캐시가 지워졌을 때) 저장소의 씨앗 기록 `scripts/ci/e2e-durations.json` 을 쓴다 — 씨앗은 가끔 `durations` 잡의 산출물 `e2e-durations`(30일)를 받아 그대로 커밋해 새로 한다. 기록에 없는 새 시험은 기록 평균으로 센다. 규칙은 `scripts/test_e2e_plan.py` 가 고정한다. 조각 시간의 대부분은 시험 밖 준비다 — 층 캐시가 찬 뒤(#1116) 체크아웃·캐시 복원·굽기(23~43초)·띄우기·정리를 합쳐 121~187초, 시험은 조각당 12~25초. 병합 기준 `결과` 가 `e2e` 를 본다(조각이 있으면 success). 이미지 층 캐시는 release 의 `cache` 잡이 저장하고 PR 검사의 잡은 모두 복원만 한다(#1090). 매시 `e2e.yml` 이 저장하는 캐시는 e2e 시간 기록 하나다.
   - **대기열에서 e2e 를 뺀 까닭(#1111, 대표 결정 2026-11-20)**: 대기열 시간의 대부분이 e2e 조각(4:20~9:29)이었는데, CI 의 e2e 가 11일 동안
     막은 실제 버그는 0, 헛실패는 5였다. 대가: 각자 초록인 두 PR 이 함께 깨뜨린 화면은 대기열이 못 잡고 최대 한 시간 뒤 매시 e2e 가 잡는다.
   - **매시 `e2e.yml`**: 본 저장소의 것(#1015·#1020)을 되살린 꼴 — `gate` 가 직전 schedule 실행이 같은 sha 를 초록으로 돌았으면 건너뛰고,
     조각은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109). main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」
     (라벨 `ci-red`, `scripts/ci/ci-issue.sh`)를 열거나 댓글을 달고, 초록이면 「복구됨」 댓글을 달고 닫는다. **제목을 바꾸지 않는다** — 조율자
-    점검(`stall-check.sh`)이 이 제목으로 찾는다. 실제 실패 이슈는 본 저장소에서만 만든다(notify 잡의 `github.repository` 조건, 포크는 알림 시험만).
+    점검(`stall-check.sh`)이 이 제목으로 찾는다. 실제 실패 이슈는 이 저장소에서만 만든다(notify 잡의 `github.repository` 조건).
     알림 시험: `gh workflow run e2e.yml --ref main -f simulate=fail`(새 이슈, 한 번 더면 댓글)·`-f simulate=ok`(복구·닫기) — 제목에 「(알림 시험)」.
   - **필수 검사 이름은 그대로 「결과」 하나다** — e2e 는 「결과」가 PR 에서 집계하고, 대기열에서는 plan 이 조각을 내지 않아 `skipped` 를 기대한다.
   - **pytest 는 PR 에서는 바뀐 앱과 그 앱에 기대는 앱의 시험만, 병합 대기열에서는 전부를 조각 나란히로 돈다**(#1088). `plan` 잡이 `scripts/ci/pytest_plan.py` 로 고른다:
@@ -94,8 +94,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
   **이미 있으면 받지도 굽지도 않는다** — 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이 바뀐 병합에서만 굽는다.
   없으면 앞 세대(`bk-<이름>-` 접두사)를 복원해 `--output type=cacheonly` 로 층만 굽고 `/tmp/bk-new` 에 내보낸 뒤 복원 폴더 자리에 바꿔 끼워
   저장한다(actions/cache 의 버전은 경로로 갈려 같은 경로여야 PR 이 받는다, 한 세대만 남는다). 저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
-  `type=gha` 는 쓰지 않는 까닭. 승격은 이 잡을 기다리지 않는다. **포크(#1116)에서도 main push 면 이 두 잡만 돈다**(`main_only` 가 건너뛰어진
-  자리를 `github.repository`·`github.ref` 로 대신 본다) — 전에는 포크 release 가 통째로 건너뛰어 캐시가 한 번도 저장되지 않았고, 포크 PR 의 e2e 조각은 층 없이 ~200초씩 구웠다. 키는 `pr-check.yml` 의 복원 키와 같아야 한다(`test_release_flow.py`).
+  `type=gha` 는 쓰지 않는 까닭. 승격은 이 잡을 기다리지 않는다. 키는 `pr-check.yml` 의 복원 키와 같아야 한다(`test_release_flow.py`).
 - **병렬화(#932)**: `checks` 는 `sub-checks.sh <묶음>` 으로 여섯 실행기 — `static`(Django·마이그레이션 호환·생성물·문서·언어 검사)·`pytest I/N`(전부면 6조각, PR 은 고른 시험의 시간만큼,
   파일별 시간 기록으로 고르게 — `pytest_shards.py`, 기록 갱신은 `pytest-durations-update.sh`, #1083)·`web`(단위 시험·typecheck). 인자 없이는 전부 돈다(로컬 길). `e2e` 는 `CODEMIT_E2E_TARGETS` 로
   `public operator`·`classroom` 두 실행기(일꾼 1개 그대로). Playwright `--shard` 대신 프로젝트 단위로 나눈 까닭은 `e2e-two-pass.sh` 의
@@ -103,8 +102,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
   동시 잡은 plan 1 + checks 최대 8(static·pytest 6·web) + guard 3 + e2e 조각 + celery 1 + agent-grader 1 + 결과 1 — 공개 저장소 한도 20 을 넘는 만큼은 줄을 선다. 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
 - **pnpm 저장소**(`e2e` 잡 호스트 설치, 키는 lockfile 해시)도 같은 규칙이다.
 - **e2e 의 Playwright 는 공식 이미지에서 돈다 — 잡이 apt 도 브라우저 CDN 도 부르지 않는다(#1109).** 예전에는 조각마다
-  `playwright install --with-deps chromium` 이 실행기 미러에서 글꼴·라이브러리를 apt 로 받았고(브라우저 캐시는 포크에서 한 번도 저장되지
-  않아 브라우저도 매번 받았다), 미러가 느린 날 그 조각 하나가 5분을 넘겨 대기열 전체를 붙잡았다. 지금은 `e2e.sh` 가
+  `playwright install --with-deps chromium` 이 실행기 미러에서 글꼴·라이브러리를 apt 로 받았고, 미러가 느린 날 그 조각 하나가 5분을 넘겨 대기열 전체를 붙잡았다. 지금은 `e2e.sh` 가
   `CODEMIT_E2E_PLAYWRIGHT_IMAGE=1` 일 때 `scripts/ci/playwright-image`(MCR `playwright:v<판>-noble`, 다이제스트 고정)를 스택 굽기와 겹쳐
   받고, Playwright 만 그 안에서 `--network host`·호스트 사용자로 돌린다 — 스택은 호스트 compose 그대로, node_modules 는 호스트에서 깔아
   같은 경로로 마운트한다. **이미지 판 ≠ lockfile 의 `@playwright/test` 면 시험 전에 실패한다**(`scripts/ci/playwright_image.py`, 시험
@@ -316,22 +314,12 @@ result.ts` 의 `normalizeDetail`)라 첫 스텝이 볼 수 없던 표면이다. 
 `scripts/test_check_screen_language.py` 가 「남은 자리가 없습니다」 같은 정상
 문구가 통과하는 것까지 고정한다.
 
-### 포크 `laurio-restructure` — 이미지·승격·스케줄·이슈는 돌지 않는다, 병합은 대기열로(#1084)
+### 병합은 대기열로 — `gh pr merge <N> --squash` 가 대기열에 넣는다(#1090·#1118)
 
-구조 재편(#1079)은 포크에서 한다. 포크에는 비밀값·변수·환경이 없고, 같은 워크플로가 돌되 운영에 닿는 잡은
-`github.repository == 'sandcorporation/laurio'` 조건으로 멈춘다(본 저장소에서는 늘 참이라 무해하다).
-
-| 워크플로 | 포크에서 |
-| --- | --- |
-| `release.yml` | `main_only` 가 건너뛰어 image·cache·cache-node·promote·notify 가 모두 멈춘다 |
-| `image.yml` | `build` 가 건너뛴다(수동 실행도) — 운영 이미지 저장소에 올리지 않는다 |
-| `pr-check.yml` | PR 과 병합 대기열(`merge_group`) 양쪽에서 돈다 |
-
-포크 main 은 ruleset `main-merge-queue` 의 병합 대기열(squash)과 필수 검사 「결과」로만 들어간다.
-PR 이 초록이면 `bash scripts/fork/enqueue.sh <번호>` 로 대기열에 넣는다(포크는 자동 병합이 꺼져 있어 `gh pr merge` 가 거절한다) —
-대기열이 머지 커밋으로 `pr-check.yml` 을 다시 돌려 「결과」가 초록이면 squash 병합한다.
-`scripts/test_release_flow.py` 가 위 조건과 `merge_group` 트리거를 고정한다.
-
-본 저장소 main 은 매일(그리고 포크 티켓을 시작하기 전에) `bash scripts/fork/sync-upstream.sh` 로 당겨 맞춘다 —
-마지막으로 당긴 sha(`scripts/fork/upstream-sha`)부터의 차이를 얹어 PR 을 열고 대기열에 넣는다. 충돌이면 멈춘다.
-`scripts/fork/` 는 본 저장소로 되돌리는 PR 에 싣지 않는다.
+`main` 은 ruleset 의 병합 대기열(squash)과 필수 검사 「결과」로만 들어간다. PR 의 「결과」가 초록이면
+`gh pr merge <N> --squash` 로 대기열에 넣는다(대기열이 있으면 이 명령이 곧바로 병합하지 않고 줄을 세운다 — 안 되면 graphql
+`enqueuePullRequest`). 대기열이 머지 커밋으로 `pr-check.yml`(`merge_group`, 전부 + guard)을 다시 돌려 「결과」가 초록이면
+squash 병합한다 — 이것이 배포 가능 판정 한 번이다. 대기열에서 빠진 PR 은 `origin/main` 위로 rebase 해 다시 넣는다.
+release 는 검사하지 않고 이미지·승격만 한다. 운영에 닿는 잡(`release.yml` 의 image·promote·notify, `image.yml` 의 build, 매시
+e2e 의 실패 이슈)은 `github.repository == 'sandcorporation/laurio'` 조건을 단다 — `scripts/test_release_flow.py` 가 이 조건과
+`merge_group` 트리거를 고정한다.
