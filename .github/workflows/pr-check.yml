@@ -131,6 +131,14 @@ jobs:
         with:
           path: /tmp/bk/ci
           key: bk-ci-${{ hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml') }}
+      # pytest 조각의 시간 기록(#1083) — 초록이어도 올린다. scripts/ci/pytest-durations-update.sh 가 받아 기록을 다시 쓴다
+      - if: success() && startsWith(matrix.name, 'pytest-')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pytest-junit-${{ matrix.name }}
+          path: test-results/backend-junit-*.xml
+          retention-days: 14
+          if-no-files-found: error
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

@@ -113,6 +113,12 @@ cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py prune_e2e_junk
 **Contest 를 먼저 걷어야 기준데이터가 풀린다** — `Contest.category` 가 PROTECT 라서다.
 `global-setup.ts` 의 순서가 그래서 그 순서다.
 
+**PR 검사는 pytest 를 넷으로 나눠 돈다**(#932) — 조각은 파일 단위이고, 파일별 시간 기록
+`scripts/ci/pytest-durations.json` 으로 고르게 나눈다(`scripts/ci/pytest_shards.py`, #1083 — 전에는 파일 순번 % 4 라
+느린 조각이 빠른 조각의 1.9배였다). 기록에 없는 새 파일은 평균값으로 센다. 기록은
+`scripts/ci/pytest-durations-update.sh [실행 id]` 로 다시 쓰고 커밋한다 — pytest 조각 잡이 늘 올리는 junit 산출물
+`pytest-junit-<조각>`(14일)을 받아 합친다. 조각 시간이 1.3배 넘게 벌어지거나 큰 시험 파일을 옮기고 나누면 돌린다.
+
 **스위트는 기본으로 병렬 실행된다**(#104). `pyproject.toml` 의 `addopts` 가 `-n auto` 를
 준다 — 실측(이 머신, 당시 1192건 — 지금 2482건 통과·1건 skip(요청 id·배포 JSON 로그·prod 지표를 더한 로깅·모니터링 4단계까지, 2026-09-21). Assignment 가 #205~#212 로
 1312건에서 1377건까지, staging 검증이 낳은 #214~#217 로 1388건까지, 저장소만으로

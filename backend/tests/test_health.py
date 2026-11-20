@@ -112,10 +112,13 @@ def test_beat_sets_key_with_ttl_and_touches_file(tmp_path, memory_store):
     assert 0 < memory_store.ttl(heartbeat.KEY_PREFIX + "grader") <= heartbeat.TTL_SECONDS
 
 
-def test_started_heartbeat_keeps_refreshing_key(memory_store, monkeypatch, tmp_path):
+def test_started_heartbeat_keeps_refreshing_key(memory_store, monkeypatch, tmp_path, request):
     monkeypatch.setattr(heartbeat, "HEARTBEAT_FILE", tmp_path / "hb")
     monkeypatch.setattr(heartbeat, "_started", {})
+    monkeypatch.setattr(heartbeat, "_stops", {})
     key = heartbeat.KEY_PREFIX + "celery"
+    # 0.05초마다 깨는 스레드를 남기지 않는다 — 같은 일꾼의 뒤 시험이 time.monotonic 을 갈아 끼우면 그 값을 먹는다(#1083)
+    request.addfinalizer(lambda: heartbeat.stop_heartbeat("celery"))
 
     heartbeat.start_heartbeat("celery", interval=0.05)
     heartbeat.start_heartbeat("celery", interval=0.05)  # 중복 호출은 스레드를 늘리지 않는다
