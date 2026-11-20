@@ -70,6 +70,7 @@ class MemoryStore:
 
 _memory = MemoryStore()
 _started: dict[str, threading.Thread] = {}
+_stops: dict[str, threading.Event] = {}
 _lock = threading.Lock()
 
 
@@ -90,8 +91,7 @@ def beat(role: str, *, client: HeartbeatStore | None = None, path: Path | None =
     (client or store()).set(KEY_PREFIX + role, "1", ex=TTL_SECONDS)
 
 
-def _run(role: str, interval: float) -> None:
-    stop = threading.Event()
+def _run(role: str, interval: float, stop: threading.Event) -> None:
     while not stop.wait(interval):
         try:
             beat(role)
@@ -109,9 +109,24 @@ def start_heartbeat(role: str, *, interval: float = INTERVAL_SECONDS) -> None:
             beat(role)
         except Exception:  # noqa: BLE001 — 시작 때 redis 가 없어도 워커는 떠야 한다
             logger.warning("[heartbeat] %s 첫 신호를 보내지 못했다", role, exc_info=True)
-        thread = threading.Thread(target=_run, args=(role, interval), name=f"heartbeat-{role}", daemon=True)
+        stop = threading.Event()
+        thread = threading.Thread(target=_run, args=(role, interval, stop), name=f"heartbeat-{role}", daemon=True)
         _started[role] = thread
+        _stops[role] = stop
         thread.start()
+
+
+def stop_heartbeat(role: str) -> None:
+    """띄운 스레드를 멈춘다. 운영 워커는 부르지 않는다(프로세스와 함께 끝난다) — 시험이 스레드를 남기지 않게 쓴다.
+    남은 스레드는 시험이 `time.monotonic` 을 갈아 끼운 사이에도 깨어나 그 값을 먹는다(#1083)."""
+
+    with _lock:
+        thread = _started.pop(role, None)
+        stop = _stops.pop(role, None)
+    if stop is not None:
+        stop.set()
+    if thread is not None:
+        thread.join(timeout=SOCKET_TIMEOUT * 2)
 
 
 def missing_roles(required: list[str], *, client: HeartbeatStore | None = None) -> list[str]:
