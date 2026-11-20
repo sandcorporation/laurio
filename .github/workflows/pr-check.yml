@@ -67,7 +67,7 @@ jobs:
       # release.yml 의 verify 잡(#959)이 jobs API 로 이 단계 이름을 읽어 「이 트리는 이미 초록」을 증명한다 — 이름 꼴을 바꾸지 않는다
       # (scripts/ci/verified_tree.py 의 TESTED_STEP). PR 이면 github.sha 는 refs/pull/N/merge 커밋이다.
       - name: 검사한 커밋 ${{ github.sha }}
-        run: echo "트리 $(git rev-parse HEAD^{tree})"
+        run: echo "트리 $(git rev-parse 'HEAD^{tree}')"
       - id: plan
         name: 무엇을 돌릴지
         run: |
@@ -83,10 +83,14 @@ jobs:
           fi
           if [ "$front" = 1 ]; then matrix+=',{"name":"web","args":"web"}'; fi
           matrix+=']}'
-          echo "tests=$tests" >>"$GITHUB_OUTPUT"
-          echo "back=$back" >>"$GITHUB_OUTPUT"
-          echo "front=$front" >>"$GITHUB_OUTPUT"
-          echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
+          {
+            echo "tests=$tests"
+            echo "back=$back"
+            echo "front=$front"
+            echo "matrix=$matrix"
+          } >>"$GITHUB_OUTPUT"
+      - name: 워크플로 문법(actionlint, 워크플로가 바뀐 PR 만)
+        run: bash scripts/ci/actionlint.sh "$(git merge-base origin/main HEAD 2>/dev/null || true)"
       - name: ADR 상태
         run: python3 scripts/check_adr_status.py
       - name: 공개해도 되는 HEAD 인가(내부 호스트·OCI 실값·워크플로 보안)
