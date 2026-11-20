@@ -13,7 +13,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 
 - **PR 검사**는 `.github/workflows/pr-check.yml` 하나다(#930·#932, ADR-0076 — Jenkins PR 검사 `codemit/ci-pr` 는 꺼졌다).
   `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만·프런트만·백엔드만이면 해당 잡만, 공개 위생
-  `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
+  `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘)·그와 나란히 `ci-image`(CI 이미지를 한 번 굽어 산출물 `ci-image` tar 로, `ci-image.sh save`, #1081) → `checks`(그 tar 를 싣고 `sub-checks.sh`)·`guard`(세 앱을
   amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`)·`agent-grader`(`agent-grader-check.sh` — `ubuntu-24.04-arm`
   에서 에이전트 채점 실행기 이미지를 굽고 운영과 같은 격리 설정(seccomp 프로필 포함)으로 Codex 샌드박스 한 줄과 가짜 벤더에 두 CLI 를 돌린다. 실행기의 AppArmor 사용자 네임스페이스 제한은 끄고 돈다 — 운영 호스트에는 AppArmor 가 없다, #999) →
   `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
@@ -71,9 +71,15 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
 시험 시간은 그대로다.
 
 - **이미지 층**: buildx `type=local` 캐시를 `actions/cache` 에 얹는다(`docker/setup-buildx-action` 의 컨테이너 빌더, 그래서 `--load`).
-  폴더는 이미지별 — `ci`(`checks`)·`backend`(`e2e`)·`frontend`·`operator`·`classroom`(`guard`) — 이고, 키는
+  폴더는 이미지별 — `ci`(`ci-image`)·`backend`(`e2e`)·`frontend`·`operator`·`classroom`(`guard`) — 이고, 키는
   `bk-<이름>-<Dockerfile·lockfile 해시>` 다. 복원은 `actions/cache/restore` 가 정확한 키 다음 `bk-<이름>-` 접두사로 가장 새 main 캐시를 받는다.
   `e2e`·`celery` 는 backend·세 앱 폴더를 모두 복원한다(compose 쪽 연결은 `docker/compose.ci-cache.yaml`).
+- **CI 이미지는 한 번만 굽는다(#1081)**: `ci-image` 잡이 `scripts/ci/ci-image.sh save` 로 컨테이너 빌더에서 tar 를 바로 쓰고
+  (도커에 싣지 않는다, 새 층만 zstd), `actions/upload-artifact`(산출물 `ci-image`, 압축 없음, 하루)로 올린다. `checks` 여섯 잡은
+  `actions/download-artifact` 로 받아 `sub-checks.sh` 가 `CODEMIT_CI_IMAGE_TAR` 를 `docker load` 한다 — 그 동안 postgres 가 먼저 뜬다.
+  레지스트리(ghcr)에는 쓰지 않는다 — 포크 PR 에도 같은 길이고 권한이 `contents: read` 그대로다. `ci-image` 는 `plan` 을 기다리지 않고
+  나란히 돈다(문서만인 PR 에서도 굽지만 `checks` 가 건너뛰어 버려진다). 로컬·`CODEMIT_CI_IMAGE_TAR` 없이는 `sub-checks.sh` 가
+  `ci-image.sh load` 로 그 자리에서 굽는다.
 - **저장은 main 실행(release.yml 의 check)에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
   10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
   `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.
@@ -81,7 +87,7 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   시험 파일을 정렬한 순번 % 4)·`web`(단위 시험·typecheck). 인자 없이는 전부 돈다(로컬 길). `e2e` 는 `CODEMIT_E2E_TARGETS` 로
   `public operator`·`classroom` 두 실행기(일꾼 1개 그대로). Playwright `--shard` 대신 프로젝트 단위로 나눈 까닭은 `e2e-two-pass.sh` 의
   `@exclusive` 패스가 시험 순번 shard 와 섞이면 일꾼 하나 보장이 깨지기 때문이다. 실패 결과물은 `checks-test-results-<묶음>`·`e2e-test-results-<이름>`.
-  동시 잡은 plan 1 + checks 6 + guard 3 + e2e 2 + celery 1 + agent-grader 1 + 결과 1 = 15(공개 저장소 한도 20 안). 잡 분 합계는 늘 수 있다 — 실행기마다 이미지를 따로 굽기 때문이다.
+  동시 잡은 plan 1 + ci-image 1 + checks 6 + guard 3(release 만) + celery 1 + agent-grader 1 + 결과 1 = 14(공개 저장소 한도 20 안, e2e 는 #1015 로 빠졌다).
 - **pnpm 저장소**·**Playwright 브라우저**(`e2e` 잡 호스트 설치, 키는 lockfile 해시·Playwright 버전)도 같은 규칙이다.
 - **10GB**: 키가 lockfile·Dockerfile 해시라 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터 지운다.
   `gh cache list` 합계를 가끔 본다.

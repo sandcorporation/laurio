@@ -2,7 +2,8 @@
 # 검사 내용은 이 파일에 쓰지 않고 scripts/ci/ 의 스크립트들을 그대로 부른다.
 #
 #   plan    문서(.md·docs/)만 바뀌었나(`changed.sh`) — 그러면 ADR 상태 검사만
-#   checks  `sub-checks.sh` — Django check·check --deploy·pytest 전체·생성물·문서 검사·단위 시험·타입 검사
+#   ci-image  CI 이미지(docker/ci.Dockerfile)를 한 번 굽어 산출물 `ci-image`(tar)로 올린다(`ci-image.sh save`, #1081) — plan 과 나란히
+#   checks  ci-image 를 받아 싣고 `sub-checks.sh` — Django check·check --deploy·pytest 전체·생성물·문서 검사·단위 시험·타입 검사
 #   guard   (PR 에서는 건너뜀, release 에서만 — #1015) 세 앱 prod 이미지(amd64)를 여기서 굽고 `deploy-guard.sh` — 설정 없이는 죽고, 완전한 설정으로는 뜬다
 #   (e2e 는 PR·release 에서 빠졌다 — e2e.yml 이 main 을 매시 돈다, #1015)
 #   celery  `celery-broker.sh` — 실제 Redis 브로커로 beat → worker
@@ -97,17 +98,12 @@ jobs:
           python3 scripts/test_changed_paths.py
           bash scripts/ci/promote_test.sh
 
-  checks:
-    name: checks ${{ matrix.name }}
-    needs: plan
-    if: needs.plan.outputs.tests == '1'
+  # CI 이미지를 한 번만 굽는다(#1081) — checks 여섯 잡이 잡마다 굽던 것. plan 을 기다리지 않고 나란히 시작한다
+  # (문서만인 PR 에서도 구워지지만 checks 가 건너뛰어 쓰이지 않는다 — 걸림 경로에서 plan 을 빼는 값이다).
+  # 산출물은 이 실행 안에서만 보이고 하루 뒤 지워진다. 레지스트리에는 올리지 않는다(포크 PR 도 같은 길).
+  ci-image:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        # sub-checks.sh 의 묶음(#932) — pytest 는 시험 파일을 넷으로 나눈다. 어느 묶음을 돌지는 plan 이 바뀐 경로로 고른다(#1082)
-        include: ${{ fromJSON(needs.plan.outputs.matrix).include }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -121,8 +117,16 @@ jobs:
           path: /tmp/bk/ci
           key: bk-ci-${{ hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml') }}
           restore-keys: bk-ci-
-      - name: 검사 묶음(sub-checks.sh)
-        run: bash scripts/ci/sub-checks.sh ${{ matrix.args }}
+      - name: CI 이미지 굽기(ci-image.sh save)
+        run: bash scripts/ci/ci-image.sh save codemit-ci:shared /tmp/ci-image.tar
+      # 층이 이미 압축돼 있어(캐시 층 gzip·새 층 zstd) 다시 묶지 않는다
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-image
+          path: /tmp/ci-image.tar
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
       - if: success() && env.CODEMIT_BK_CACHE_SAVE != '' && steps.bk-ci.outputs.cache-hit != 'true'
         name: 이미지 층 캐시 저장(ci, main push 만)
         run: rm -rf /tmp/bk/ci && mv /tmp/bk-new/ci /tmp/bk/ci
@@ -131,6 +135,31 @@ jobs:
         with:
           path: /tmp/bk/ci
           key: bk-ci-${{ hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml') }}
+
+  checks:
+    name: checks ${{ matrix.name }}
+    needs: [plan, ci-image]
+    if: needs.plan.outputs.tests == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # sub-checks.sh 의 묶음(#932) — pytest 는 시험 파일을 넷으로 나눈다. 어느 묶음을 돌지는 plan 이 바뀐 경로로 고른다(#1082)
+        include: ${{ fromJSON(needs.plan.outputs.matrix).include }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: CI 이미지 받기(ci-image 잡)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ci-image
+          path: /tmp/ci-image
+      - name: 검사 묶음(sub-checks.sh)
+        env:
+          CODEMIT_CI_IMAGE_TAR: /tmp/ci-image/ci-image.tar
+        run: bash scripts/ci/sub-checks.sh ${{ matrix.args }}
       - if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -246,36 +275,38 @@ jobs:
 
   result:
     name: 결과
-    needs: [plan, checks, guard, celery, agent-grader]
+    needs: [plan, ci-image, checks, guard, celery, agent-grader]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # skipped 를 통과로 세지 않는다(#1015) — 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어져도 초록이 되던 구멍.
       # 돌아야 할 잡은 이벤트·plan 이 정한다: plan 이 시험 없음(문서만)이면 나머지는 skipped 여야 하고,
-      # 아니면 checks·celery·agent-grader 는 success, guard 는 PR 이 아닐 때(plan 출력 guard=1) success 이고 PR 에서만 skipped.
+      # 아니면 ci-image·checks·celery·agent-grader 는 success(문서만이면 ci-image 는 보지 않는다), guard 는 PR 이 아닐 때(plan 출력 guard=1) success 이고 PR 에서만 skipped.
       - name: 돌아야 할 잡이 success 인가
         env:
           PLAN: ${{ needs.plan.result }}
           TESTS: ${{ needs.plan.outputs.tests }}
           BACK: ${{ needs.plan.outputs.back }}
           GUARD_ON: ${{ needs.plan.outputs.guard }}
+          CI_IMAGE: ${{ needs.ci-image.result }}
           CHECKS: ${{ needs.checks.result }}
           GUARD: ${{ needs.guard.result }}
           CELERY: ${{ needs.celery.result }}
           AGENT_GRADER: ${{ needs.agent-grader.result }}
         run: |
-          echo "plan=$PLAN tests=$TESTS back=$BACK guard_on=$GUARD_ON checks=$CHECKS guard=$GUARD celery=$CELERY agent_grader=$AGENT_GRADER"
+          echo "plan=$PLAN tests=$TESTS back=$BACK guard_on=$GUARD_ON ci_image=$CI_IMAGE checks=$CHECKS guard=$GUARD celery=$CELERY agent_grader=$AGENT_GRADER"
           [ "$PLAN" = success ] || { echo "plan 이 success 가 아니다"; exit 1; }
+          bad=0
           if [ "$TESTS" = 1 ]; then
             # checks 는 static 이 늘 있어 success. celery·agent-grader 는 백엔드·공통 경로가 바뀌었을 때만 돈다(#1082)
             want_checks=success
             if [ "$BACK" = 1 ]; then want_celery=success; want_agent_grader=success; else want_celery=skipped; want_agent_grader=skipped; fi
+            [ "$CI_IMAGE" = success ] || { echo "ci-image: $CI_IMAGE (기대 success)"; bad=1; }
             if [ "$GUARD_ON" = 1 ]; then want_guard=success; else want_guard=skipped; fi
           else
             want_checks=skipped; want_celery=skipped; want_guard=skipped; want_agent_grader=skipped
           fi
-          bad=0
           for pair in "checks:$CHECKS:$want_checks" "guard:$GUARD:$want_guard" "celery:$CELERY:$want_celery" "agent-grader:$AGENT_GRADER:$want_agent_grader"; do
             IFS=: read -r name got want <<<"$pair"
             [ "$got" = "$want" ] || { echo "$name: $got (기대 $want)"; bad=1; }
