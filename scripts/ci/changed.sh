@@ -1,7 +1,7 @@
 #!/bin/bash
 # PR CI 가 무엇을 돌릴지 — main 에서 갈라진 뒤 바뀐 파일만 본다(2026-10-02, Jenkinsfile.pr).
 #
-#   scripts/ci/changed.sh <기준 커밋>   →  TESTS=0|1  BACK=0|1  FRONT=0|1
+#   scripts/ci/changed.sh <기준 커밋> [끝 커밋=HEAD]   →  TESTS=0|1  BACK=0|1  FRONT=0|1
 #
 # 바뀐 경로를 세 묶음으로 가른다(#1082):
 #   문서     .md · docs/                                 → 이것만이면 TESTS=0 (문서 검사만, 곧바로 초록)
@@ -16,7 +16,7 @@ if [ -z "$base" ]; then
   all
   exit 0
 fi
-files=$(git diff --name-only "$base" HEAD)
+files=$(git diff --name-only "$base" "${2:-HEAD}")
 if [ -z "$files" ]; then
   all
   exit 0

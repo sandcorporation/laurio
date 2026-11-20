@@ -136,6 +136,53 @@ class ReleaseSkipsAlreadyCheckedTreeTest(unittest.TestCase):
         self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(guard="failure")]).skip)
         self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(tests="skipped")]).skip)
 
+    def partial_run(self, tests: str = "1", back: str = "1", front: str = "1", **overrides: str) -> Run:
+        """PR 검사가 계획대로 돈 실행(잡 이름은 pr-check.yml 의 것)."""
+        jobs = [Job("plan", "success", ("검사한 커밋 " + self.X,)), Job("결과", "success", ()), Job("guard", "skipped", ())]
+        if tests == "1":
+            jobs.append(Job("checks static", "success", ()))
+        if back == "1":
+            jobs += [Job(f"checks pytest-{i}of4", "success", ()) for i in (1, 2, 3, 4)]
+            jobs += [Job("celery", "success", ()), Job("agent-grader", "success", ())]
+        else:
+            jobs += [Job("celery", "skipped", ()), Job("agent-grader", "skipped", ())]
+        if front == "1":
+            jobs.append(Job("checks web", "success", ()))
+        if tests == "0":
+            jobs.append(Job("checks ${{ matrix.name }}", "skipped", ()))
+        jobs = [Job(j.name, overrides.get(j.name, j.conclusion), j.steps) for j in jobs]
+        return Run(1, "success", tuple(jobs), self.TREE)
+
+    def partial(self, plan: tuple[str, str, str], run: Run, released: bool = True) -> bool:
+        return decide(self.TREE, 1, ["x"], [run], plan, released).skip
+
+    def test_frontend_only_pr_is_accepted_when_the_plan_skips_the_same(self) -> None:
+        self.assertTrue(self.partial(("1", "0", "1"), self.partial_run(back="0")))
+
+    def test_backend_only_pr_is_accepted_when_the_plan_skips_the_same(self) -> None:
+        self.assertTrue(self.partial(("1", "1", "0"), self.partial_run(front="0")))
+
+    def test_docs_only_pr_is_accepted_when_the_plan_skips_everything(self) -> None:
+        self.assertTrue(self.partial(("0", "0", "0"), self.partial_run(tests="0", back="0", front="0")))
+
+    def test_pr_that_skipped_more_than_the_plan_is_rejected(self) -> None:
+        # 병합 커밋은 백엔드·프런트 둘 다 바꿨는데 PR 은 프런트만 돌았다
+        self.assertFalse(self.partial(("1", "1", "1"), self.partial_run(back="0")))
+        # 백엔드만 바뀌었는데 static 까지 건너뛰었다
+        run = self.partial_run(front="0")
+        self.assertFalse(self.partial(("1", "1", "0"), Run(1, "success", tuple(j for j in run.jobs if j.name != "checks static"), self.TREE)))
+        # 계획이 문서만인데 PR 은 시험을 돌았다 → 더 돈 것도 계획과 다르다
+        self.assertFalse(self.partial(("0", "0", "0"), self.partial_run()))
+
+    def test_partial_run_is_rejected_when_the_parent_was_not_released(self) -> None:
+        self.assertFalse(self.partial(("1", "0", "1"), self.partial_run(back="0"), released=False))
+
+    def test_unreadable_plan_keeps_the_strict_rule(self) -> None:
+        self.assertFalse(decide(self.TREE, 1, ["x"], [self.partial_run(back="0")], None, True).skip)
+
+    def test_red_job_in_the_part_that_ran_is_rejected(self) -> None:
+        self.assertFalse(self.partial(("1", "0", "1"), self.partial_run(back="0", **{"checks web": "failure"})))
+
     def test_main_moved_between_check_and_merge_runs_full_check(self) -> None:
         self.assertFalse(decide(self.TREE, 1, ["backend/app.py"], [self.run_(tree="c" * 40)]).skip)
 
