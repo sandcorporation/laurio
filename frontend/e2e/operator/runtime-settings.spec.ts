@@ -50,7 +50,7 @@ test.describe("운영 설정(#922)", () => {
     await expect(page.getByTestId(`${ROW}-clear`)).toHaveCount(0);
   });
 
-  test("@exclusive 채점 벤더(#994)는 선택 상자로 저장하고, 방침이 덮지 않는 Claude 는 저장되지 않는다", async ({ page }) => {
+  test("@exclusive 채점 벤더(#994)는 선택 상자로 저장하고, Claude(anthropic)도 저장되고 다시 읽히며 지우면 env 로 돌아간다", async ({ page }) => {
     const VENDOR = "runtime-setting-LLM_SCORING_VENDOR";
     const su = await seedE2eOperator({ username: `e2e-op-settings-vendor-${Date.now()}`, superuser: true });
     await establishOperatorSession(page, su.username, E2E_OPERATOR_PASSWORD, "/settings");
@@ -65,9 +65,10 @@ test.describe("운영 설정(#922)", () => {
 
     await page.getByTestId(`${VENDOR}-input`).selectOption("anthropic");
     await page.getByTestId(`${VENDOR}-save`).click();
-    await expect(page.getByTestId(`${VENDOR}-error`)).toContainText("개인정보처리방침");
+    await expect(page.getByTestId(`${VENDOR}-source`)).toHaveText("DB");
+    await expect(page.getByTestId(`${VENDOR}-error`)).toHaveCount(0);
     await page.reload();
-    await expect(page.getByTestId(`${VENDOR}-value`)).toHaveText("openai");
+    await expect(page.getByTestId(`${VENDOR}-value`)).toHaveText("anthropic");
 
     await page.getByTestId(`${VENDOR}-clear`).click();
     await expect(page.getByTestId(`${VENDOR}-source`)).not.toHaveText("DB");
