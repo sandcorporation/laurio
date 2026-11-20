@@ -180,7 +180,7 @@ def test_claude_agent_verdict_becomes_the_score(client, category, landing_type, 
     assert len(run.record["prompt_sha256"]) == 64
 
 
-_STRICT_RULE = "10. 충족으로 볼 항목마다 반례를 한 번 찾습니다"
+_STRICT_RULE = "12. 충족으로 볼 항목마다 반례를 한 번 찾습니다"
 
 
 @pytest.mark.django_db

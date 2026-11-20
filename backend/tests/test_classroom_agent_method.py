@@ -215,7 +215,7 @@ def test_agent_scoring_of_a_claude_key_class_uses_the_class_key_through_the_prox
     run = AgentRun.objects.get()
     assert (run.purpose, run.outcome, run.record["key_source"]) == ("scoring", AgentRun.Outcome.ACCEPTED, "class")
     # #1048: Haiku 클래스 키이면 엄격 규칙 8~10 이 붙고, 기록의 지문은 CLI 에 넘긴 지침의 것이다.
-    assert "10. 충족으로 볼 항목마다 반례를 한 번 찾습니다" in spec["prompt"]
+    assert "12. 충족으로 볼 항목마다 반례를 한 번 찾습니다" in spec["prompt"]
     assert run.record["prompt_sha256"] == hashlib.sha256(spec["prompt"].encode("utf-8")).hexdigest()
     for text in (json.dumps(spec), json.dumps(run.record), score.prompt):
         assert CLASS_KEY not in text
@@ -322,5 +322,5 @@ def test_agent_quality_check_reads_the_snapshot_with_the_class_key_and_records_t
     run = AgentRun.objects.get()
     assert (run.purpose, run.outcome, run.record["key_source"]) == ("quality", AgentRun.Outcome.ACCEPTED, "class")
     # #1048: 엄격 규칙 7~9 는 모델이 Haiku 계열일 때만 붙는다. 기록의 지문은 CLI 에 넘긴 지침의 것이다.
-    assert ("9. 2 점 이상을 매길 항목마다 반례를" in spec["prompt"]) is spec["model"].startswith("claude-haiku-")
+    assert ("11. 2 점 이상을 매길 항목마다 반례를" in spec["prompt"]) is spec["model"].startswith("claude-haiku-")
     assert run.record["prompt_sha256"] == hashlib.sha256(spec["prompt"].encode("utf-8")).hexdigest()
