@@ -90,6 +90,7 @@ if want static; then
   step "시험의 고정 대기 금지" python3 scripts/check_test_waits.py
   step "고정 대기 검사기 자체" python3 scripts/test_check_test_waits.py
   step "dev-server 메모리 여유 검사" python3 scripts/test_dev_server.py
+  step "dev-env 오프셋 지정" python3 scripts/test_dev_env.py
   step "pytest 조각 나누기" python3 scripts/test_pytest_shards.py
 fi
 if want web; then
