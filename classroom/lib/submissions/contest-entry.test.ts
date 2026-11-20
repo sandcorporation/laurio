@@ -4,6 +4,8 @@ import {
   attemptEntryLabel,
   gridEntryLabel,
   instructorEntryBadge,
+  latestRowEntryBadge,
+  currentEntryAttemptByMember,
   buildEntryPayload,
   entryBlockedReason,
   initialEntryState,
@@ -103,6 +105,26 @@ describe("instructorEntryBadge (#550)", () => {
     expect(
       instructorEntryBadge({ contest_entry: { status: "rejected" }, is_current_contest_entry: false })?.tone,
     ).toBe("warning");
+  });
+});
+
+describe("latestRowEntryBadge (#1062)", () => {
+  const entered = { status: "entered" };
+  it("앞 시도가 출품이면 최신 행에 그 시도 번호를 단다", () => {
+    const rows = [
+      { member_id: 1, attempt_number: 1, is_current_contest_entry: true },
+      { member_id: 1, attempt_number: 2, is_current_contest_entry: false },
+    ];
+    const at = currentEntryAttemptByMember(rows).get(1) ?? null;
+    expect(at).toBe(1);
+    expect(latestRowEntryBadge({ contest_entry: null, is_current_contest_entry: false }, at)?.label).toBe("공모전 제출(시도 1)");
+  });
+  it("최신 시도가 출품이면 지금 배지 그대로", () => {
+    expect(latestRowEntryBadge({ contest_entry: entered, is_current_contest_entry: true }, 2)?.label).toBe("지금 공모전 제출");
+  });
+  it("출품이 없으면 행 자신의 표시만", () => {
+    expect(currentEntryAttemptByMember([{ member_id: 1, attempt_number: 1, is_current_contest_entry: false }]).size).toBe(0);
+    expect(latestRowEntryBadge({ contest_entry: null, is_current_contest_entry: false }, null)).toBeNull();
   });
 });
 
