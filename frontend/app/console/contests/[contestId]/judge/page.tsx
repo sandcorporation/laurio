@@ -44,6 +44,7 @@ import {
   formatPoints,
   formatQualityTotal,
   orderSubmissions,
+  rankingRows,
   type ComparisonQuality,
   type JudgeSortOrder,
 } from "@/lib/submissions/quality";
@@ -243,6 +244,12 @@ export default function JudgeComparisonPage() {
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
+          <RankingSummary
+            rows={rankingRows(
+              comparison.submissions,
+              comparison.requirements.filter((r) => r.grade === "bonus").map((r) => r.requirement_id),
+            )}
+          />
           <div className="flex gap-2" role="group" aria-label="정렬" data-testid="judge-sort">
             <button
               type="button"
@@ -485,6 +492,48 @@ function LongText({ children }: { children: string }) {
       <summary className="cursor-pointer select-none underline">사유</summary>
       <p className="mt-1 whitespace-pre-wrap break-words">{children}</p>
     </details>
+  );
+}
+
+function RankingSummary({ rows }: { rows: ReturnType<typeof rankingRows> }) {
+  return (
+    <section className="flex flex-col gap-2" data-testid="quality-ranking">
+      <h2 className="text-base font-semibold">완성도 순위</h2>
+      <ol className="flex flex-col border border-rule bg-surface text-sm">
+        {rows.map((row) => (
+          <li
+            key={row.submissionId}
+            className="flex min-w-0 items-baseline gap-3 border-b border-rule px-3 py-2 last:border-b-0"
+            data-testid={`ranking-row-${row.submissionId}`}
+          >
+            <span className="w-10 shrink-0 font-mono" data-testid={`ranking-rank-${row.submissionId}`}>
+              {row.quality ? `${row.quality.rank}등` : "—"}
+            </span>
+            <a
+              href={`#submission-row-${row.submissionId}`}
+              className="min-w-0 flex-1 truncate underline"
+              onClick={(event) => {
+                event.preventDefault();
+                document
+                  .querySelector(`[data-testid="submission-row-${row.submissionId}"]`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
+              data-testid={`ranking-link-${row.submissionId}`}
+            >
+              {row.name}
+            </a>
+            <span className="shrink-0 font-mono" data-testid={`ranking-total-${row.submissionId}`}>
+              {row.quality ? formatQualityTotal(row.quality.total, row.quality.max_total) : "—"}
+            </span>
+            {row.bonusScored !== null ? (
+              <span className="shrink-0 font-mono text-xs text-ink/70" data-testid={`ranking-bonus-${row.submissionId}`}>
+                가산 {row.bonusScored}/{row.bonusTotal}
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
