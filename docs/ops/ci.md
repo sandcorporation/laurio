@@ -80,6 +80,8 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   레지스트리(ghcr)에는 쓰지 않는다 — 포크 PR 에도 같은 길이고 권한이 `contents: read` 그대로다. `ci-image` 는 `plan` 을 기다리지 않고
   나란히 돈다(문서만인 PR 에서도 굽지만 `checks` 가 건너뛰어 버려진다). 로컬·`CODEMIT_CI_IMAGE_TAR` 없이는 `sub-checks.sh` 가
   `ci-image.sh load` 로 그 자리에서 굽는다.
+  `ci.Dockerfile` 은 워크스페이스 매니페스트만 먼저 넣고 `pnpm install` 한 뒤 소스를 넣는다 — 의존이 같으면 node_modules 층도
+  캐시에서 온다. 워크스페이스 패키지를 더하면 그 `package.json` COPY 도 더한다(`scripts/test_ci_images.py` 가 어긋나면 막는다).
 - **저장은 main 실행(release.yml 의 check)에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
   10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
   `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.
