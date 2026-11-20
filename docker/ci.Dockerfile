@@ -32,6 +32,18 @@ COPY backend/pyproject.toml backend/uv.lock backend/
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd backend && uv sync --locked
 
-COPY . .
+# node_modules 도 의존이 같으면 캐시에서 온다(#1081) — 소스보다 먼저 워크스페이스 매니페스트만 넣고 설치한다.
+# 워크스페이스에 패키지를 더하면 여기에도 더한다. 빠뜨리면 --frozen-lockfile 이 lockfile 과 어긋난다며 멈춘다.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY frontend/package.json frontend/
+COPY operator/package.json operator/
+COPY classroom/package.json classroom/
+COPY packages/banned-words/package.json packages/banned-words/
+COPY packages/bff-client/package.json packages/bff-client/
+COPY packages/bff-shared/package.json packages/bff-shared/
+COPY packages/markdown/package.json packages/markdown/
+COPY packages/route-audit/package.json packages/route-audit/
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
+
+COPY . .

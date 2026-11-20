@@ -74,6 +74,9 @@ PR → pr-check.yml(「결과」 초록) → 작업자 squash 병합 → main
   폴더는 이미지별 — `ci`(`checks`)·`backend`(`e2e`)·`frontend`·`operator`·`classroom`(`guard`) — 이고, 키는
   `bk-<이름>-<Dockerfile·lockfile 해시>` 다. 복원은 `actions/cache/restore` 가 정확한 키 다음 `bk-<이름>-` 접두사로 가장 새 main 캐시를 받는다.
   `e2e`·`celery` 는 backend·세 앱 폴더를 모두 복원한다(compose 쪽 연결은 `docker/compose.ci-cache.yaml`).
+- **CI 이미지의 node_modules 층도 캐시에서 온다(#1081)**: `ci.Dockerfile` 은 워크스페이스 매니페스트만 먼저 넣고 `pnpm install` 한 뒤
+  소스를 넣는다 — 의존이 같으면 설치 층이 캐시 적중이다. 워크스페이스 패키지를 더하면 그 `package.json` COPY 도 더한다
+  (`scripts/test_ci_images.py` 가 어긋나면 막는다). 이미지를 한 번 굽어 잡들이 나눠 받는 길은 재 보니 걸림 경로가 늘어 접었다(#1081 댓글).
 - **저장은 main 실행(release.yml 의 check)에서만**(`CODEMIT_BK_CACHE_SAVE`) — PR 에서 만든 캐시는 그 PR 안에서만 쓰여 다른 PR 에 소용이 없고
   10GB 만 먹는다. 저장은 `actions/cache/save` 이고 정확한 키가 이미 있으면 건너뛴다(저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
   `type=gha` 는 쓰지 않는 까닭). 내보내는 곳은 복원한 폴더와 다른 `/tmp/bk-new` 이고 저장 직전에 바꿔 끼워 한 세대만 남긴다.

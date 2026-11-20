@@ -113,5 +113,23 @@ class ImagesScript(unittest.TestCase):
         self.assertEqual((self.repo / ".images-arm64.result").read_text(), "backend=skipped\nfrontend=skipped\n")
 
 
+class CiImageManifestsTest(unittest.TestCase):
+    """#1081 — ci.Dockerfile 이 소스보다 먼저 넣는 매니페스트가 pnpm 워크스페이스 전부인가."""
+
+    def test_every_workspace_package_json_is_copied_before_install(self) -> None:
+        patterns = [
+            line.strip().lstrip("-").strip().strip('"')
+            for line in (ROOT / "pnpm-workspace.yaml").read_text().splitlines()
+            if line.strip().startswith("-")
+        ]
+        want = {"package.json"} | {
+            p.relative_to(ROOT).as_posix() for pat in patterns for p in ROOT.glob(f"{pat}/package.json")
+        }
+        dockerfile = (ROOT / "docker" / "ci.Dockerfile").read_text()
+        before_source = dockerfile.split("\nCOPY . .", 1)[0]
+        copied = {tok for line in before_source.splitlines() if line.startswith("COPY ") for tok in line.split()[1:-1]}
+        self.assertEqual(sorted(want - copied), [], "ci.Dockerfile 의 매니페스트 COPY 에 더한다")
+
+
 if __name__ == "__main__":
     unittest.main()
