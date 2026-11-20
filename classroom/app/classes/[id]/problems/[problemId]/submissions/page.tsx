@@ -44,7 +44,7 @@ import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions
 import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { withLate } from "@/lib/problems/due-dates";
-import { instructorEntryBadge } from "@/lib/submissions/contest-entry";
+import { currentEntryAttemptByMember, latestRowEntryBadge } from "@/lib/submissions/contest-entry";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
 
@@ -109,7 +109,9 @@ function AttemptRow({
   checklistLabelById,
   open,
   onToggle,
+  currentEntryAttempt = null,
 }: {
+  currentEntryAttempt?: number | null;
   submission: InstructorSubmissionRow;
   items: { id: number; label: string; required: boolean }[];
   syntaxCheckEnabled: boolean;
@@ -119,7 +121,7 @@ function AttemptRow({
 }) {
   const testId = `instructor-submission-row-${submission.id}`;
   const summary = requiredSummary(submission, items, syntaxCheckEnabled);
-  const entry = instructorEntryBadge(submission);
+  const entry = latestRowEntryBadge(submission, currentEntryAttempt);
   const canOpen = submission.status === "scored" && submission.score !== null;
   return (
     <li data-testid={testId} className="px-4 py-3">
@@ -281,6 +283,7 @@ export default function ProblemSubmissionsPage() {
     !blockedByMissingKey && submissions.some((s) => s.pending_reason === "model_rejected");
 
   const rows = showAll ? submissions : latestPerMember(submissions);
+  const entryAttempts = showAll ? null : currentEntryAttemptByMember(submissions);
   const toggle = (id: number) =>
     setOpenIds((prev) => {
       const next = new Set(prev);
@@ -381,6 +384,7 @@ export default function ProblemSubmissionsPage() {
                   checklistLabelById={checklistLabelById}
                   open={openIds.has(submission.id)}
                   onToggle={() => toggle(submission.id)}
+                  currentEntryAttempt={entryAttempts?.get(submission.member_id) ?? null}
                 />
               ))}
             </ol>

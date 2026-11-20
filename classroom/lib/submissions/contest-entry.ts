@@ -173,6 +173,26 @@ export function instructorEntryBadge(row: {
   return { label: "공모전에는 못 냄", tone: "warning" };
 }
 
+/** 「최신 시도」 보기의 행에 다는 표시 — 그 행이 지금 출품 시도면 그대로, 출품 시도가 다른 시도에 있으면
+ *  그 시도 번호(`currentEntryAttempt`)를 말한다. */
+export function latestRowEntryBadge(
+  row: { contest_entry: { status: string } | null; is_current_contest_entry: boolean },
+  currentEntryAttempt: number | null,
+): InstructorEntryBadge | null {
+  const own = instructorEntryBadge(row);
+  if (row.is_current_contest_entry || currentEntryAttempt === null) return own;
+  return { label: `공모전 제출(시도 ${currentEntryAttempt})`, tone: "verified" };
+}
+
+/** 학생(member_id)별 지금 출품 시도 번호 — 지금 출품이 없는 학생은 없다. */
+export function currentEntryAttemptByMember(
+  rows: { member_id: number; attempt_number: number; is_current_contest_entry: boolean }[],
+): Map<number, number> {
+  const byMember = new Map<number, number>();
+  for (const row of rows) if (row.is_current_contest_entry) byMember.set(row.member_id, row.attempt_number);
+  return byMember;
+}
+
 export type GridContestEntry = "current" | "entered" | null;
 
 /** 명단 격자 한 칸의 공모전 표시 문구 — 칸의 title·aria-label 에 덧붙인다. */
