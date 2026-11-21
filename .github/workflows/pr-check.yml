@@ -10,7 +10,10 @@
 #   celery  `celery-broker.sh` — 실제 Redis 브로커로 beat → worker
 #   agent-grader  `agent-grader-check.sh` — 에이전트 채점 실행기 이미지를 arm64 실행기에서 굽고, 운영과 같은 격리 설정으로
 #           가짜 벤더(`llm-proxy` 자리)에 Claude Code·Codex 를 한 번씩 돌린다(#999). 진짜 벤더·키 없음
-#   결과    위가 모두 초록(또는 문서만이라 건너뜀)이면 초록 — 브랜치 보호의 필수 검사로 걸 이름 하나
+#   빨리 멈춤  (#1139) 잡 하나가 실패하면 이 실행을 바로 취소한다(`fail_fast.py watch`) — matrix 의 fail-fast 는 같은 matrix
+#           안만 멈추고, 잡 사이는 이 잡이 멈춘다. 「결과」의 needs 가 아니다 — 판정에 끼지 않고, 죽어도 느려질 뿐 틀리지 않는다
+#   결과    위가 모두 초록(또는 문서만이라 건너뜀)이면 초록 — 브랜치 보호의 필수 검사로 걸 이름 하나.
+#           취소돼도 돈다(`if: always()`). 취소·실패를 통과로 읽지 않고, 요약 첫 줄에 처음 실패한 잡을 쓴다(`fail_fast.py summary`)
 #
 # 배포 가능 판정은 병합 대기열의 이 검사 한 번이다(#1090) — main 은 대기열로만 움직이고, release.yml 은 검사하지 않고
 # 이미지·승격만 한다. 그래서 이 워크플로는 main push 로도, workflow_call 로도 돌지 않는다.
@@ -24,7 +27,9 @@
 # image.yml 이 main 에서 굽고 부팅 가드를 다시 돈다.
 #
 # 보안(공개 저장소): `pull_request` 만(`pull_request_target` 금지), 호스팅 실행기만, secrets 를 쓰지 않는다(값은
-# scripts/ci/*.env 의 CI 전용 가짜 값), 권한은 contents: read, 액션은 SHA 로 고정한다.
+# scripts/ci/*.env 의 CI 전용 가짜 값), 권한은 contents: read, 액션은 SHA 로 고정한다. 잡 권한을 넓히는 곳은 둘뿐(#1139):
+# `빨리 멈춤` 의 actions: write(실행 취소 — 시험 코드를 돌리지 않는 잡이고, 스크립트 하나만 체크아웃한다),
+# 「결과」의 actions: read(처음 실패한 잡 찾기). 포크 PR 은 토큰이 읽기 전용이라 취소가 안 된다 — 그때는 지금처럼 끝까지 돈다.
 name: PR 검사
 
 on:
@@ -132,6 +137,7 @@ jobs:
           python3 scripts/test_e2e_plan.py
           python3 scripts/test_playwright_image.py
           python3 scripts/test_pytest_plan.py
+          python3 scripts/test_fail_fast.py
           bash scripts/ci/promote_test.sh
           bash scripts/ci/e2e_stale_test.sh
 
@@ -142,7 +148,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
-      fail-fast: false
+      # 같은 matrix 안은 GitHub 가 바로 멈춘다. 잡 사이는 `빨리 멈춤`(#1139)
+      fail-fast: true
       matrix:
         # sub-checks.sh 의 묶음(#932) — pytest 는 시험 파일을 조각으로 나눈다. 어느 묶음·어느 시험을 돌지는 plan 이 바뀐 경로로 고른다(#1082·#1088)
         include: ${{ fromJSON(needs.plan.outputs.matrix).include }}
@@ -188,7 +195,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         app: [frontend, operator, classroom]
     steps:
@@ -280,7 +287,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         # e2e_plan.py 가 기록된 시험 시간으로 나눈 조각(#1112) — 조각마다 실행기가 하나라 스택을 따로 굽고 나란히 돈다(일꾼은 그대로 1개)
         include: ${{ fromJSON(needs.plan.outputs.e2e_matrix).include }}
@@ -352,17 +359,65 @@ jobs:
           path: test-results/
           retention-days: 7
 
+  # 잡 하나가 실패하면 실행을 취소한다(#1139) — 가장 긴 잡(e2e 조각 5~6분)을 기다리지 않고 「결과」가 곧바로 실패로 난다.
+  # 「결과」의 needs 가 아니다: 판정에 끼지 않는다. 대기열의 merge_group 실행은 저마다 run id 가 따로라 남의 실행을 멈추지 않는다.
+  fail-fast:
+    name: 빨리 멈춤
+    needs: plan
+    if: needs.plan.outputs.tests == '1'
+    runs-on: ubuntu-latest
+    # 가장 긴 잡의 한도(60분)를 넘겨 본다 — 이 잡이 먼저 끝나면 빨라지지 않을 뿐이다
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/fail_fast.py
+          sparse-checkout-cone-mode: false
+      - name: 실패를 보면 실행 취소
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/fail_fast.py watch --skip 결과 --skip "빨리 멈춤"
+
   result:
     name: 결과
     needs: [plan, checks, guard, celery, agent-grader, e2e]
+    # 실행이 취소돼도(빨리 멈춤·새 push) 돈다 — 필수 검사가 「기다리는 중」으로 남지 않는다. 단계도 always() 다:
+    # 취소된 실행에서 기본 조건(success())인 단계가 건너뛰어지면 잡이 초록으로 끝날 수 있다(거짓 초록).
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     steps:
+      # 처음 실패한 잡을 첫 줄에(#1139) — 취소된 잡들에 묻히지 않게. 알림일 뿐 판정은 아래 단계가 needs 로만 한다.
+      - if: always()
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/fail_fast.py
+          sparse-checkout-cone-mode: false
+      - name: 처음 실패한 잡
+        if: always()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          lines=$(python3 scripts/ci/fail_fast.py summary --skip 결과 --skip "빨리 멈춤")
+          [ -n "$lines" ] || exit 0
+          echo "$lines"
+          # 주석(annotation) 한 줄 — PR 검사 화면에 이 줄이 먼저 보인다
+          echo "::error::$(head -n1 <<<"$lines")"
+          { echo "### $(head -n1 <<<"$lines")"; tail -n +2 <<<"$lines" | sed 's/^/- /'; } >>"$GITHUB_STEP_SUMMARY"
       # skipped 를 통과로 세지 않는다(#1015) — 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어져도 초록이 되던 구멍.
       # 돌아야 할 잡은 이벤트·plan 이 정한다: plan 이 시험 없음(문서만)이면 나머지는 skipped 여야 하고,
       # 아니면 checks·celery·agent-grader 는 success, guard 는 PR 이 아닐 때(plan 출력 guard=1) success 이고 PR 에서만 skipped.
       - name: 돌아야 할 잡이 success 인가
+        if: always()
         env:
           PLAN: ${{ needs.plan.result }}
           TESTS: ${{ needs.plan.outputs.tests }}
