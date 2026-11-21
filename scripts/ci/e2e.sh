@@ -41,12 +41,13 @@ if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then
 else
   # 굽는 길 — backend·events·grader 는 한 번만 굽는다(#1136). 이미지 이름은 실행마다 달라야 해 프로젝트 이름을 태그로 쓴다.
   export CODEMIT_E2E_BACKEND_TAG="$project"
-  C+=(-f docker/compose.ci-backend-shared.yaml)
 fi
 # 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽는다(저장은 release.yml 의 cache 잡, #1090).
 if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
   C+=(-f docker/compose.ci-cache.yaml)
 fi
+# 겹치는 순서가 중요하다 — 층 캐시 파일이 events·grader 에 build 를 다시 달므로 이 파일이 그 뒤여야 build 가 비워진 채 남는다.
+if [ -z "${CODEMIT_IMAGE_TAG:-}" ]; then C+=(-f docker/compose.ci-backend-shared.yaml); fi
 # 정리에서 구운 이미지를 지운다(`--rmi local`) — 일회용 GitHub 호스팅 실행기(GITHUB_ACTIONS=true)에서는 뺀다(#1136): 실행기째
 # 버려져 지울 이유가 없고 지우는 데 26초가 들었다. 굽는 길의 Docker VM 이 남는 노드·로컬에서는 그대로다.
 rmi_flag=(--rmi local)
