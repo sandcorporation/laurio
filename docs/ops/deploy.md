@@ -381,6 +381,13 @@ compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh p
 받는다.** celery-worker 는 지금처럼 내리고 올린다(그 안에서 `-B` 로 도는 beat 는 하나여야 하고
 태스크는 Redis 에서 기다린다).
 
+**옛 것은 SIGTERM 으로 따뜻하게 내려간다**(#1170). backend·events 의 compose 명령은 `sh -c "… && exec gunicorn …"`·
+`sh -c "exec uvicorn …"` 이다 — `exec` 가 없으면 PID 1 이 sh 로 남아(단일 명령도 sh 가 exec 하지 않았다) SIGTERM 을
+넘기지 않고, `docker stop -t <grace>` 가 유예를 다 채운 뒤 SIGKILL 해 진행 중 요청이 끊겼다. 실측(dev 이미지,
+운영과 같은 명령, 2026-11-21): gunicorn 사슬 22.7초 → **4.9초**(「Handling signal: term」 → 워커 마무리),
+uvicorn 11.0초 → **2.5초**. 그래서 `rolling_replace` 가 옛 것을 내리는 시간도 유예 끝(30초·10초)이 아니라
+진행 중 요청이 끝나는 때다. `test_compose_commands_exec.py` 가 compose 파일의 `sh -c` 마지막 명령이 `exec` 인지 본다.
+
 **`/api/health` 의 워커 신호와 롤링**(#949). 신호(TTL 90초)가 끊겨도 `/api/health`(전체)가 503 인 것은 감시용이고,
 배포 판정(`rolling_replace`·`health`)은 `?scope=ready` 라 영향이 없다. 겹쳐 바꾸는 배포에서 celery-worker 는
 `up -d` 한 번에 옛 것 종료 → 새 것 시작이라 신호가 끊기는 구간은 종료~새 `worker_ready` 사이(수 초~수십 초)로 TTL 90초

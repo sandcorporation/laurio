@@ -109,7 +109,7 @@ services:
       sh -c "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
              mc mb --ignore-existing local/codemit-dev &&
              mc mb --ignore-existing local/codemit-dev-public-images &&
-             mc anonymous set download local/codemit-dev-public-images"
+             exec mc anonymous set download local/codemit-dev-public-images"
     restart: "no"
 
   # 공모전 검색 실물 어댑터(`contests.search_opensearch.OpenSearchContestSearch`,
@@ -273,7 +273,7 @@ services:
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py seed_dev_data &&
-             python manage.py runserver 0.0.0.0:8000"
+             exec python manage.py runserver 0.0.0.0:8000"
 
   # 이벤트 서비스(ADR-0046, #379) — 같은 backend 이미지를 ASGI 로 띄우는
   # 별도 프로세스다. 기존 API(`backend`)는 그대로 동기 gunicorn/runserver다 —
@@ -311,7 +311,7 @@ services:
     volumes:
       - ../backend:/app
     command: >
-      sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --reload"
+      sh -c "exec uvicorn config.asgi:application --host 0.0.0.0 --port 8001 --reload"
 
   # 에이전트 채점 키 프록시(#998) — `agent` 프로필이라 기본 기동에 없다(`--profile agent up -d llm-proxy`).
   # 벤더 주소는 `LLM_PROXY_*_BASE_URL` 로 흉내 서버를 가리킬 수 있다. 키는 런타임 설정(.env 의 키는 잔고 0원이다).
@@ -536,7 +536,7 @@ services:
     # — 서로 다른 문제를 막는다.
     command: >
       sh -c "cd /app && CI=true pnpm install --filter codemit-frontend... --frozen-lockfile --force &&
-             cd /app/frontend && pnpm dev"
+             cd /app/frontend && exec pnpm dev"
 
   # 운영자 앱(#63, ADR-0019/0021) — 공개 앱과 다른 오리진으로 뜬다. 같은
   # 워크스페이스 멤버라서 frontend 서비스와 거의 같은 모양이다: 저장소 전체를
@@ -579,7 +579,7 @@ services:
     # 남긴다.
     command: >
       sh -c "cd /app && CI=true pnpm install --filter codemit-operator... --frozen-lockfile --force &&
-             cd /app/operator && pnpm dev"
+             cd /app/operator && exec pnpm dev"
 
   # 강의실(#276, ADR-0037) — 공개 앱·운영자 앱과 다른 오리진으로 뜬다. 같은
   # 워크스페이스 멤버라서 두 서비스와 거의 같은 모양이다.
@@ -631,7 +631,7 @@ services:
     # 막는다(이 서비스가 그 디렉터리들을 볼륨으로 가리지 않으므로).
     command: >
       sh -c "cd /app && CI=true pnpm install --filter codemit-classroom... --frozen-lockfile --force &&
-             cd /app/classroom && pnpm dev"
+             cd /app/classroom && exec pnpm dev"
 
 # 에이전트 실행기 전용 내부 네트워크(#998) — 밖으로 나가는 길이 없다. llm-proxy 만 이쪽과 default 에 함께 붙는다.
 networks:

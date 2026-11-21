@@ -431,7 +431,7 @@ services:
     command: >
       sh -c "rm -rf \"$$PROMETHEUS_MULTIPROC_DIR\" && mkdir -p \"$$PROMETHEUS_MULTIPROC_DIR\" &&
              python manage.py collectstatic --noinput &&
-             gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
+             exec gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4"
 
   celery-worker:
     logging: *default-logging
@@ -557,7 +557,7 @@ services:
       <<: *backend-env
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?prod DJANGO_ALLOWED_HOSTS 를 .env.prod 에 설정하라},events
     command: >
-      sh -c "uvicorn config.asgi:application --host 0.0.0.0 --port 8001"
+      sh -c "exec uvicorn config.asgi:application --host 0.0.0.0 --port 8001"
     # **열 수 있는 파일 개수를 올린다**(2026-09-18). SSE 스트림 하나가 소켓 1 +
     # Redis 구독 1 = 서술자 2개를 쓰는데, 컨테이너 기본 soft 한도가 1024 라
     # 동시 시청자 **약 500명**에서 `Too many open files` 로 막혔다 — 당시 staging 에서

@@ -103,7 +103,7 @@ services:
     command: >
       sh -c "python manage.py migrate --noinput &&
              python manage.py seed_dev_data &&
-             gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --access-logfile - --access-logformat '%(r)s %(s)s %(B)s %(M)sms pid=%(p)s'"
+             exec gunicorn -c config/gunicorn.conf.py config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --access-logfile - --access-logformat '%(r)s %(s)s %(B)s %(M)sms pid=%(p)s'"
 
   # 이벤트 서비스(ADR-0046, #379) — `backend`와 같은 이유로 마운트를 걷는다.
   # dev 의 `--reload`(uvicorn watchfiles)는 코드가 이미지에 구워진 CI 에서는
