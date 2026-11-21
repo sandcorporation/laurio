@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -111,14 +112,57 @@ class ShardsByRecordedTime(unittest.TestCase):
         self.assertEqual(len(tiny), 1)
 
     def test_seed_record_covers_every_spec(self) -> None:
-        seed = e2e_durations.read_record()
-        missing = e2e_durations.spec_files() - set(seed)
-        self.assertLessEqual(len(missing), 5, f"씨앗 기록이 많이 낡았다 — e2e.yml 의 e2e-durations 산출물로 다시 쓴다: {sorted(missing)}")
+        # PR 검사(PR_BASE 가 있을 때)는 이 브랜치가 더한 시험을 빼고 센다(#1251) — main 의 낡음은 매시 e2e-seed-stale.sh 가 알린다
+        base = e2e_durations.pr_base()
+        before = e2e_durations.spec_files_at(base) if base else None
+        missing = e2e_durations.seed_missing(e2e_durations.read_record(), e2e_durations.spec_files(), before)
+        self.assertLessEqual(
+            len(missing), e2e_durations.SEED_SLACK,
+            f"씨앗 기록이 많이 낡았다(기준 {base or '없음 — 전체'}) — e2e.yml 의 e2e-durations 산출물로 다시 쓴다: {missing}",
+        )
 
     def test_real_plan_spread_on_the_seed(self) -> None:
         shards = e2e_plan.plan(None, e2e_durations.read_record())["include"]
         seconds = [float(s["seconds"]) for s in shards]
         self.assertLess(max(seconds) - min(seconds), 15, shards)
+
+
+class SeedSlack(unittest.TestCase):
+    """씨앗 문턱은 브랜치가 새로 더한 시험을 세지 않는다(#1251)."""
+
+    SEED = {f"e2e/a/s{i}.spec.ts": 1.0 for i in range(10)}
+
+    def test_branch_adding_six_new_specs_passes(self) -> None:
+        before = set(self.SEED)
+        present = before | {f"e2e/a/new{i}.spec.ts" for i in range(6)}
+        self.assertEqual(e2e_durations.seed_missing(self.SEED, present, before), [])
+        self.assertEqual(len(e2e_durations.seed_missing(self.SEED, present)), 6)  # base 를 모르면 전체를 센다
+
+    def test_six_missing_on_the_base_side_fails(self) -> None:
+        before = set(self.SEED) | {f"e2e/a/old{i}.spec.ts" for i in range(6)}
+        present = before | {"e2e/a/mine.spec.ts"}
+        missing = e2e_durations.seed_missing(self.SEED, present, before)
+        self.assertEqual(len(missing), 6)
+        self.assertGreater(len(missing), e2e_durations.SEED_SLACK)
+        self.assertNotIn("e2e/a/mine.spec.ts", missing)
+
+    def test_spec_files_at_reads_a_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+            subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+            (root / "frontend/e2e/a").mkdir(parents=True)
+            (root / "frontend/e2e/a/old.spec.ts").write_text("")
+            (root / "frontend/e2e/lib.ts").write_text("")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-qm", "base", "--no-verify"], cwd=root, check=True)
+            base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+            (root / "frontend/e2e/a/new.spec.ts").write_text("")
+            subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+            subprocess.run([*git, "commit", "-qm", "branch", "--no-verify"], cwd=root, check=True)
+            self.assertEqual(e2e_durations.spec_files_at(base, root), {"e2e/a/old.spec.ts"})
+            self.assertEqual(e2e_durations.pr_base(base, root), base)
+            self.assertIsNone(e2e_durations.pr_base("", root))
 
 
 def report(*tests: tuple[str, float, str]) -> dict[str, object]:

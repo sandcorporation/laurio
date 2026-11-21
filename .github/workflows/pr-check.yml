@@ -134,6 +134,9 @@ jobs:
       - name: 공개해도 되는 HEAD 인가(내부 호스트·OCI 실값·워크플로 보안)
         run: python3 scripts/test_public_repo.py
       - name: 승격 흐름(워크플로 셋·Jenkinsfile 이미지 목록·promote.sh)
+        env:
+          # test_e2e_plan.py 의 씨앗 문턱이 이 PR 이 더한 시험을 빼고 센다(#1251, 기준은 pr-base.sh)
+          PR_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           python3 scripts/test_release_flow.py
           python3 scripts/test_changed_paths.py
@@ -147,6 +150,7 @@ jobs:
           bash scripts/ci/promote_test.sh
           bash scripts/ci/wait-merged_test.sh
           bash scripts/ci/e2e_stale_test.sh
+          bash scripts/ci/e2e_seed_stale_test.sh
           bash scripts/ci/cpu_reference_watch_test.sh
           bash scripts/ci/e2e_gate_test.sh
 
