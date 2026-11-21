@@ -30,6 +30,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && useradd --uid 10001 --create-home --shell /usr/sbin/nologin grader
 
 COPY backend/scoring/agent_runner.py /app/agent_runner.py
+# 우리 채점 루프(#1245) — 실행 틀이 옆 파일로 import 한다(표준 라이브러리만).
+COPY backend/scoring/selfloop.py /app/selfloop.py
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

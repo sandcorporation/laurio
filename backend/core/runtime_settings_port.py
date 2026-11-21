@@ -29,6 +29,8 @@ class RuntimeSettings(Protocol):
 
     def agent_scoring_daily_limit_usd(self) -> Decimal: ...
 
+    def agent_experiment_daily_limit_usd(self) -> Decimal: ...
+
     def repository_download_limit_bytes(self) -> int: ...
 
 
@@ -45,6 +47,10 @@ def scoring_vendor() -> ScoringVendor:
 
 def agent_scoring_daily_limit_usd() -> Decimal:
     return RUNTIME_SETTINGS.get().agent_scoring_daily_limit_usd()
+
+
+def agent_experiment_daily_limit_usd() -> Decimal:
+    return RUNTIME_SETTINGS.get().agent_experiment_daily_limit_usd()
 
 
 def repository_download_limit_bytes() -> int:

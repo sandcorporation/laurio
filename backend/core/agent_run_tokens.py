@@ -39,15 +39,17 @@ from django.utils import timezone
 from core.agent_ports import ModelPrice, price_for
 from core.clock import Clock
 from core.models import AgentRunToken
-from core.runtime_settings_port import ScoringVendor, agent_scoring_daily_limit_usd
+from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, agent_scoring_daily_limit_usd
 
 #: 실행 하나의 기본 예산(USD) — 공모전 3 실측 1건 $0.09~0.21 의 다섯 배쯤.
 DEFAULT_RUN_BUDGET_USD = Decimal("1")
 #: 실행 토큰의 수명. 실행 하나의 상한(10분)보다 조금 길다.
 RUN_TOKEN_TTL = timedelta(minutes=15)
 
-Purpose = Literal["scoring", "quality"]
-_PURPOSES: frozenset[str] = frozenset({AgentRunToken.PURPOSE_SCORING, AgentRunToken.PURPOSE_QUALITY})
+Purpose = Literal["scoring", "quality", "experiment"]
+_PURPOSES: frozenset[str] = frozenset(
+    {AgentRunToken.PURPOSE_SCORING, AgentRunToken.PURPOSE_QUALITY, AgentRunToken.PURPOSE_EXPERIMENT}
+)
 _VENDORS: frozenset[str] = frozenset({"openai", "anthropic"})
 
 #: Anthropic 프롬프트 캐시의 단가 배율(입력 단가 기준) — 쓰기 1.25배, 읽기 0.1배(5분 캐시, 공개 단가표).
@@ -112,6 +114,7 @@ RefusalCode = Literal[
     "wrong_model",
     "run_budget",
     "daily_limit",
+    "experiment_daily_limit",
 ]
 
 
@@ -177,13 +180,21 @@ def _day_start(now: datetime) -> datetime:
     return timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def spent_today_usd(now: datetime | None = None, *, key_class_id: int | None = None) -> Decimal:
+def spent_today_usd(
+    now: datetime | None = None, *, key_class_id: int | None = None, experiment: bool = False
+) -> Decimal:
     """오늘(KST 0시부터) 발급한 실행 토큰들이 쓴 비용 합 — 기본은 플랫폼 키 몫만(하루 상한이 보는 값),
-    `key_class_id` 를 주면 그 클래스 키 몫만(#1036)."""
+    `key_class_id` 를 주면 그 클래스 키 몫만(#1036). 방식 비교 실험(#1246) 몫은 따로 센다 — `experiment=True`
+    면 실험 몫만, 아니면 실험 몫을 뺀다."""
 
     start = _day_start(now or Clock.now())
     rows = AgentRunToken.objects.filter(created_at__gte=start)
     rows = rows.filter(key_class_id__isnull=True) if key_class_id is None else rows.filter(key_class_id=key_class_id)
+    rows = (
+        rows.filter(purpose=AgentRunToken.PURPOSE_EXPERIMENT)
+        if experiment
+        else rows.exclude(purpose=AgentRunToken.PURPOSE_EXPERIMENT)
+    )
     total = rows.aggregate(total=Sum("spent_usd"))["total"]
     return total or Decimal(0)
 
@@ -205,7 +216,12 @@ def authorize(token: str | None, *, vendor: ScoringVendor, model: str | None) ->
         return Refusal("wrong_model", 403, f"이 실행 토큰은 모델 {row.model} 만 부를 수 있다")
     if row.spent_usd >= row.budget_usd:
         return Refusal("run_budget", 429, f"실행 예산 ${row.budget_usd} 을 다 썼다")
-    if row.key_class_id is None:
+    if row.purpose == AgentRunToken.PURPOSE_EXPERIMENT:
+        # 방식 비교 실험(#1246)은 제 하루 상한만 본다 — 운영 채점의 하루 몫을 먹지 않는다. 기본 0 은 꺼짐.
+        experiment_limit = agent_experiment_daily_limit_usd()
+        if spent_today_usd(now, experiment=True) >= experiment_limit:
+            return Refusal("experiment_daily_limit", 429, f"오늘의 채점 방식 비교 실험 비용 상한 ${experiment_limit} 에 닿았다")
+    elif row.key_class_id is None:
         # 플랫폼 하루 상한은 플랫폼 키 실행만 본다 — 클래스 키 실행은 그 클래스 소유자의 돈이다(#1036).
         limit = agent_scoring_daily_limit_usd()
         if spent_today_usd(now) >= limit:

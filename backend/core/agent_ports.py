@@ -18,11 +18,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Literal, NotRequired, Protocol, TypedDict
 
 from core.registry import Slot, Slots
 
 Vendor = Literal["anthropic", "openai"]
+
+
+class SelfLoopRequirement(TypedDict):
+    """`scoring.selfloop.Requirement` 와 같은 모양."""
+
+    id: int
+    text: str
 
 
 class RunSpec(TypedDict):
@@ -35,6 +43,8 @@ class RunSpec(TypedDict):
     run_token: str
     max_budget_usd: float
     timeout_seconds: NotRequired[int]
+    mode: NotRequired[Literal["cli", "selfloop"]]  # #1245 — 없으면 cli
+    requirements: NotRequired[list[SelfLoopRequirement]]  # selfloop 일 때만
 
 
 class RunResult(TypedDict):
@@ -61,6 +71,10 @@ class AgentGrader(Protocol):
     RunRejected: type[Exception]
 
     def request_run(self, spec: RunSpec, repo_zip: bytes, *, timeout: float) -> RunResult: ...
+
+    def extract_repo(self, zip_path: Path, dest: Path) -> str:
+        """박제본을 실행기와 같은 규칙(링크·크기·항목 수)으로 푼다 — 비교 실험의 근거 확인(#1246)이 쓴다."""
+        ...
 
 
 class ModelPrice(Protocol):
