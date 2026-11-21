@@ -25,17 +25,21 @@ COPY backend/pyproject.toml backend/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
-COPY backend/ ./
-
 # 문법 검사(#409)가 쓰는 tree-sitter 문법을 이미지에 넣는다. tree-sitter-language-pack 은
 # 문법을 설치 때가 아니라 처음 쓸 때 인터넷에서 받으므로, 이 단계가 없으면 새 컨테이너의
 # 첫 채점이 GitHub 에 기대다 파싱 시간 제한에 걸린다(2026-09-15 CI 에서 드러났다). 채점
 # 중에는 내려받지 않고, 없는 문법의 파일은 AI 판정으로 넘긴다(classroom/syntax_check.py).
+# **backend 소스 복사 앞 층이다**(#1205) — 받기 스크립트 하나(Django 를 가져오지 않는다)만
+# 복사해 직접 돌리므로, backend 파일이 바뀌어도 이 층은 CACHED 로 남아 GitHub 를 다시
+# 부르지 않는다. 언어 목록은 그 스크립트 안에 있다. 받기가 끊기면 스크립트가 짧게 다시 시도한다.
 # 캐시 위치를 /app 밖에 둔다 — dev compose 가 /app 을 바인드 마운트한다.
 ENV XDG_CACHE_HOME=/opt/codemit-cache
+COPY backend/classroom/grammar_prefetch.py /opt/grammar-prefetch/grammar_prefetch.py
 # 받은 묶음 압축본(bundles/)은 풀린 뒤 쓰이지 않는다 — 이미지에서 뺀다(약 60MB).
-RUN python manage.py prefetch_syntax_grammars --skip-checks \
+RUN python -I /opt/grammar-prefetch/grammar_prefetch.py \
     && rm -rf /opt/codemit-cache/tree-sitter-language-pack/*/bundles
+
+COPY backend/ ./
 
 EXPOSE 8000
 
