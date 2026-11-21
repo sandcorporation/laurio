@@ -29,11 +29,6 @@ class NotificationsConfig(AppConfig):
         for spec in NOTIFICATION_SCANS:
             register_scan(spec)
 
-        # 발송 실패·수신자 0 운영 경보(#1123).
-        from .dispatch_alert import NOTIFICATION_DISPATCH_ALERT_SCAN
-
-        register_scan(NOTIFICATION_DISPATCH_ALERT_SCAN)
-
 
 _REQUIRED_FLAG_KEYS = ("is_transactional", "is_promotional", "is_quiet_hours_exempt")
 

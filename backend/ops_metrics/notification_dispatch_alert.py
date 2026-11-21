@@ -21,10 +21,10 @@ from django.db import transaction
 from django.db.models import Count, Q
 
 from core.scans import ScanSpec
-from ops_metrics import alerts
-from ops_metrics.models import AlertState
+from notifications.models import Notification, NotificationDispatch, NotificationType
 
-from .models import Notification, NotificationDispatch, NotificationType
+from . import alerts
+from .models import AlertState
 
 FAILURES_RULE = "notification-dispatch-failures"
 ZERO_REACH_RULE = "notification-zero-reach"

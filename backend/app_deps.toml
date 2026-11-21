@@ -57,7 +57,7 @@ plugs = []
 
 [notifications]
 group = "shared"
-uses = ["accounts", "core", "ops_metrics", "storage"]
+uses = ["accounts", "core", "storage"]
 plugs = ["core"]
 
 [ops_metrics]
