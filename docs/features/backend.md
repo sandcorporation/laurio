@@ -542,9 +542,11 @@ append-only 저장되고, 통과·달성률 계산이 이 항목을 필수로 �
 닫은 점수인지(`model_version == PLATFORM_FAILURE_MODEL_VERSION`)를 서버가 판정해 싣는다(#679) —
 화면은 그 문자열을 다시 쓰지 않는다.
 tree-sitter 문법은 `tree-sitter-language-pack`으로 쓴다. **이 패키지는 문법을 설치 때가
-아니라 처음 쓸 때 인터넷에서 받으므로, 백엔드 이미지를 구울 때 `manage.py
-prefetch_syntax_grammars`로 여덟 언어 문법을 미리 넣는다**(`XDG_CACHE_HOME=/opt/codemit-cache`,
-CI 테스트 잡도 테스트 전에 같은 명령을 부른다). 채점 중에는 문법을 내려받지 않는다 — 문법이
+아니라 처음 쓸 때 인터넷에서 받으므로, 백엔드 이미지를 구울 때 `classroom/grammar_prefetch.py`
+로 아홉 문법을 미리 넣는다**(`XDG_CACHE_HOME=/opt/codemit-cache`, CI 테스트 잡도 테스트 전에
+`manage.py prefetch_syntax_grammars`로 같은 함수를 부른다). 이미지의 받기 층은 backend 소스
+복사 **앞**에 있고 그 파일 하나만 복사하므로(Django 를 가져오지 않는다) backend 파일이 바뀌어도
+CACHED 로 남고, 받기가 끊기면 언어마다 3회 다시 시도한다(#1205). 채점 중에는 문법을 내려받지 않는다 — 문법이
 캐시에 없는 언어의 파일은 AI 판정으로 넘어간다. backend·celery·events가 같은 Dockerfile을
 쓰므로 이미지가 함께 커졌다(문법 포함 약 692MB).
 
@@ -882,7 +884,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `score-correction`(#1180 — 운영자가 건 진행 중 정정을 처음 커밋으로 다시 채점) · `scoring-size-hold-expiry`(#989 — 심사 종료까지 풀리지 않은 「크기 초과」 보류를 자동 0%) · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」·「크기 초과」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
+| 채점 | `submission-scoring` · `score-correction`(#1180 — 운영자가 건 진행 중 정정을 처음 커밋으로 다시 채점) · `scoring-size-hold-expiry`(#989 — 심사 종료까지 풀리지 않은 「크기 초과」 보류를 자동 0%) · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 점수 정정이 끝나면 그 정정 판으로 한 번 더 매긴다(#1181 — 기록은 판마다 하나, 실패 상한도 판마다; 개최자 「완성도 순위」는 순위에 드는 판 중 가장 나중 것을 읽고, 배분 끝남 뒤의 정정 판은 순위에 들지 않는다; 내 점수는 가장 나중 판). 「입력 없음」·「채점 실패」·「크기 초과」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
@@ -974,7 +976,7 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 `POST /api/operator/contests/{id}/score-corrections` 가 `{reason, submission_ids?}` 를 받아(사유가 비면 422, 비운
 `submission_ids` 는 그 공모전에서 채점된 제출 전부, 다른 공모전의 제출이 섞이면 422) 제출마다 「진행 중」 정정 행을
 만들고 201 로 돌려준다 — Score 가 없거나 이미 진행 중 정정이 있는 제출은 `skipped` 에 까닭(`not_scored`·`in_progress`)과
-함께 남는다(진행 중은 Score 당 하나, DB 제약). `GET` 같은 주소는 그 공모전의 정정 전부를 최근 것부터 준다. 둘 다
+함께 남는다(진행 중은 Score 당 하나, DB 제약). `GET` 같은 주소는 그 공모전의 정정 전부를 최근 것부터 주고, 정정 대상으로 고를 채점된 제출 목록(`submissions` — 참가자·처음 채점 점수·모델 판)도 싣는다(#1183). 둘 다
 `prize_settled`(`distributions.services.is_prize_settled` — Distribution 이 있거나 AWARDED 면 참, 무료는 늘 거짓)와
 정정마다 정정 전 점수·정정 점수·`error`·그 제출에 발급돼 취소되지 않은 상장 수(`certificates_issued`, 정정은 상장을
 취소하지 않는다)를 싣는다. 채점은 `score-correction` 스캔(워커 안, 한도·스위치는 `submission-scoring` 과 같다)이 진행

@@ -251,17 +251,25 @@ class SubmissionQualityReview(AppendOnlyModel):
 
     `Score` 와 같은 append-only 스냅샷이고 **Score 와 무관하다**: 달성률·Distribution·Award 의 뜻과
     계산을 바꾸지 않고, 상금 배분에 쓰지 않는다. 마감 뒤 Score 가 생긴 제출(「입력 없음」·「채점 실패」
-    자동 0% 제외)에 플랫폼 키로 **한 번** 매긴다 — 마감 뒤엔 Requirement 를 고칠 수 없으니 제출당 하나다
-    (`OneToOneField` 가 두 스캔의 겹친 삽입도 막는다).
+    자동 0% 제외)에 플랫폼 키로 **판마다 한 번** 매긴다 — 판은 현재 점수다(#1181): 원래 `Score` 판 하나, 점수
+    정정(`ScoreCorrection`)이 끝나면 그 정정 판으로 하나 더. 화면은 가장 나중 판을 읽는다.
 
     **`on_delete=CASCADE` 다(Score 는 PROTECT).** 이 행은 Score 가 있는 제출에만 생기고, Score 의
     PROTECT 가 이미 그 제출·공모전의 삭제를 막는다. 그 막음을 넘는 길은 시드 정리
     (`hard_delete_demo_seed_scores`·`hard_delete_e2e_fixture_rows`)뿐이고, 그때 이 행도 함께 지워져야
     재시드가 돈다 — PROTECT 로 두면 두 정리 경로가 모두 이 모델을 따로 알아야 한다."""
 
-    submission = models.OneToOneField(
-        "submissions.Submission", related_name="quality_review", on_delete=models.CASCADE
+    submission = models.ForeignKey(
+        "submissions.Submission", related_name="contest_quality_reviews", on_delete=models.CASCADE
     )
+    #: 판 — 이 리뷰가 읽은 현재 점수의 정정(#1181). None 이면 원래 `Score` 판이다. 판마다 하나다(아래 제약).
+    #: 정정 행이 시드 정리로 지워지면 그 판의 리뷰도 함께 지운다.
+    correction = models.ForeignKey(
+        "scoring.ScoreCorrection", null=True, blank=True, related_name="quality_reviews", on_delete=models.CASCADE
+    )
+    #: 개최자 「완성도 순위」가 읽는 리뷰인가(#1181). 원래 판은 늘 참이다. 정정 판은 쓸 때 상금 배분이 끝났으면
+    #: (`contests.ports.PRIZE_SETTLED`) 거짓이다 — 배분이 끝난 공모전의 순위는 고정한다(스펙 #1178).
+    ranked = models.BooleanField(default=True, db_default=True)
     #: Requirement id·문구·필수 여부의 해시(`core.quality_review.checklist_fingerprint`).
     checklist_fingerprint = models.CharField(max_length=64)
     model_version = models.CharField(max_length=200)
@@ -277,6 +285,19 @@ class SubmissionQualityReview(AppendOnlyModel):
     class Meta:
         verbose_name = "완성도"
         verbose_name_plural = "완성도"
+        constraints = [
+            # 판마다 하나 — 겹친 두 스캔의 삽입도 막는다(OneToOne 이던 때와 같은 일).
+            models.UniqueConstraint(
+                fields=["submission"],
+                condition=models.Q(correction__isnull=True),
+                name="scoring_quality_review_one_original",
+            ),
+            models.UniqueConstraint(
+                fields=["submission", "correction"],
+                condition=models.Q(correction__isnull=False),
+                name="scoring_quality_review_one_per_correction",
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover
         return f"SubmissionQualityReview(submission={self.submission_id}, weighted={self.weighted_score})"
@@ -314,6 +335,14 @@ class QualityReviewAttempt(models.Model):
 
     submission = models.ForeignKey(
         "submissions.Submission", related_name="quality_review_attempts", on_delete=models.CASCADE
+    )
+    #: 실패한 판(#1181) — 실패 상한·영구 실패는 판마다 센다. None 이면 원래 `Score` 판이다.
+    correction = models.ForeignKey(
+        "scoring.ScoreCorrection",
+        null=True,
+        blank=True,
+        related_name="quality_review_attempts",
+        on_delete=models.CASCADE,
     )
     attempted_at = models.DateTimeField(auto_now_add=True)
     error = models.TextField()

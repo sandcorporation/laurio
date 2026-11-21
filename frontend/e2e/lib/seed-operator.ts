@@ -228,6 +228,18 @@ export async function seedE2eOperatorCertificates(): Promise<SeededOperatorCerti
   })) as SeededOperatorCertificates;
 }
 
+export type SeededScoreCorrectionContests = {
+  open: { contest_id: number; submission_ids: number[] };
+  settled: { contest_id: number; submission_ids: number[] };
+};
+
+/** `seed_e2e_operator_score_corrections` — 채점이 끝난 마감 공모전 둘: 배분 전(`open`)·배분 끝남(`settled`)(#1183). */
+export async function seedE2eOperatorScoreCorrections(): Promise<SeededScoreCorrectionContests> {
+  return (await runSeedCommand("operator-score-corrections", {
+    run_id: e2eRunId(),
+  })) as SeededScoreCorrectionContests;
+}
+
 /** 개최자 쪽에서 본 그 공모전의 상장 번호별 취소 시각 — 운영자 취소가 개최자 표면에도 반영됐는지 본다. */
 export async function sponsorCertificateCancelled(
   contestId: number,

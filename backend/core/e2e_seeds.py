@@ -76,6 +76,12 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         options=frozenset({"run_id"}),
         serialized=False,
     ),
+    # 운영자 앱 점수 정정 e2e(#1183) — 채점이 끝난 마감 공모전 둘(배분 전·배분 끝남).
+    "operator-score-corrections": SeedEntry(
+        command="seed_e2e_operator_score_corrections",
+        options=frozenset({"run_id"}),
+        serialized=False,
+    ),
     "operator-appeal": SeedEntry(
         command="seed_e2e_operator_appeal",
         # 이 시드도 `_own_title_prefix` 로 자기 것을 가르므로 run_id 를 받는다.

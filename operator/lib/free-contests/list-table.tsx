@@ -15,7 +15,7 @@ const COL = {
   status: "w-[96px]",
   deadline: "w-[168px]",
   winner: "w-[160px]",
-  action: "w-[260px]",
+  action: "w-[380px]",
 };
 
 function TableHead() {
@@ -33,7 +33,7 @@ function TableHead() {
 export function FreeContestListTable({ contests }: { contests: FreeContest[] }) {
   return (
     <div data-testid="free-contest-list-table" className="border border-rule bg-surface">
-      <TableScroll minWidth={940}>
+      <TableScroll minWidth={1060}>
         <TableHead />
         {contests.map((contest, i) => (
           <div
@@ -65,6 +65,13 @@ export function FreeContestListTable({ contests }: { contests: FreeContest[] }) 
                 className="inline-block border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
               >
                 상장
+              </Link>
+              <Link
+                href={`/contests/${contest.id}/score-corrections`}
+                data-testid={`free-contest-corrections-${contest.id}`}
+                className="inline-block border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
+              >
+                점수 정정
               </Link>
               {contest.winner && (
                 <Link

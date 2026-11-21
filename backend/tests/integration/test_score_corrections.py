@@ -374,3 +374,8 @@ def test_a_correction_without_a_certificate_does_not_notify_the_sponsor(world, d
         _run_corrections(world)
     assert Notification.objects.filter(notification_type=NotificationType.SCORE_CORRECTED).count() == 1
     assert not Notification.objects.filter(notification_type=NotificationType.CERTIFICATE_SCORE_CORRECTED).exists()
+
+
+    # 거는 화면이 고를 제출 목록 — 처음 채점 점수 그대로(정정이 끝나도 원래 점수가 남는다).
+    originals = {s["submission_id"]: s["original_percentage"] for s in listed["submissions"]}
+    assert originals == {seeded["honest_id"]: "100.00", seeded["failed_id"]: "0.00"}

@@ -9830,6 +9830,8 @@ export interface components {
             corrections: components["schemas"]["ScoreCorrectionOut"][];
             /** Prize Settled */
             prize_settled: boolean;
+            /** Submissions */
+            submissions: components["schemas"]["ScoredSubmissionOut"][];
         };
         /** ScoreCorrectionOut */
         ScoreCorrectionOut: {
@@ -9946,6 +9948,20 @@ export interface components {
             kind: string;
             /** Label */
             label: string;
+        };
+        /**
+         * ScoredSubmissionOut
+         * @description 정정 대상으로 고를 수 있는 제출 — 처음 채점 점수 그대로(정정 판정은 아래 `corrections` 에 있다).
+         */
+        ScoredSubmissionOut: {
+            /** Original Model Version */
+            original_model_version: string;
+            /** Original Percentage */
+            original_percentage: string;
+            /** Participant */
+            participant: string;
+            /** Submission Id */
+            submission_id: number;
         };
         /**
          * ScoringBasis
