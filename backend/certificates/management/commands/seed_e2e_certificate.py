@@ -58,6 +58,9 @@ class Command(BaseCommand):
         category = Category.objects.create(name=f"[E2E] 상장 {tag}")
         deliverable_type = DeliverableType.objects.create(name=f"[E2E] 상장 {tag}", minimum_prize=0)
         title = f"E2E-CERT 상장 공모전 {tag}"
+        # 시드는 마감된 공모전을 바로 심는다 — 변수로 넘기는 것은 `seed_e2e_contests._contest` 와 같은 경계다
+        # (`contests/tests/test_contest_status_writes_are_declared.py` 가 리터럴 생성만 CREATION_STATES 로 묶는다).
+        status = Contest.Status.CLOSED
         contest = Contest.objects.create(
             sponsor=sponsor,
             title=title,
@@ -65,7 +68,7 @@ class Command(BaseCommand):
             description="상장 e2e 용 마감된 무료 공모전입니다.",
             prize=0,
             deadline_at=timezone.now() - timedelta(days=1),
-            status=Contest.Status.CLOSED,
+            status=status,
             is_free=True,
         )
         contest.deliverable_types.set([deliverable_type])
