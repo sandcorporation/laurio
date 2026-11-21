@@ -65,6 +65,12 @@ if git diff --cached --name-only | grep -qE '^\.github/workflows/' && command -v
   fi
 fi
 
+# backend/**/*.py 가 staged 일 때만 — 문법·Django 검사·구조 시험(#1226, scripts/pre_commit_backend_checks.sh).
+# 타입 재생성보다 먼저 돈다: 문법이 깨진 채로는 재생성도 같은 말만 한다.
+if git diff --cached --name-only | grep -qE '^backend/.*\.py$'; then
+  bash scripts/pre_commit_backend_checks.sh || exit 1
+fi
+
 # backend/**/*.py 가 staged 일 때만 재생성한다 — 문서만 고친 커밋은 2.1초를 안 낸다.
 if git diff --cached --name-only | grep -qE '^backend/.*\.py$'; then
   echo "pre-commit: backend 변경 감지 — API 타입을 재생성한다 (pnpm --dir frontend generate:api)."
@@ -74,5 +80,4 @@ if git diff --cached --name-only | grep -qE '^backend/.*\.py$'; then
   fi
   git add packages/bff-client/src/schema.gen.ts
 fi
-
 exit 0
