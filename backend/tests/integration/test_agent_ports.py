@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import get_type_hints
+from typing import get_args, get_origin, get_type_hints, is_typeddict
 
 import pytest
 
@@ -39,11 +39,24 @@ def test_price_for_answers_like_the_classroom_table() -> None:
     assert agent_ports.price_for("모르는-모델") is None
 
 
+def _shape(hints: dict[str, object]) -> dict[str, object]:
+    """안에 든 TypedDict(`list[SelfLoopRequirement]` 등)는 이름이 아니라 키·타입으로 견준다."""
+
+    out: dict[str, object] = {}
+    for key, hint in hints.items():
+        args = get_args(hint)
+        if args and is_typeddict(args[0]):
+            out[key] = (get_origin(hint), get_type_hints(args[0]), args[0].__required_keys__)
+        else:
+            out[key] = hint
+    return out
+
+
 @pytest.mark.parametrize("name", ["RunSpec", "RunResult"])
 def test_contract_types_match_the_runner_file(name: str) -> None:
     # 실행 틀은 이미지가 홀로 COPY 하는 파일이라 core 를 import 할 수 없다 — 같은 모양을 두 곳에 두고 여기서 견준다.
     ours, theirs = getattr(agent_ports, name), getattr(agent_runner, name)
-    assert get_type_hints(ours) == get_type_hints(theirs)
+    assert _shape(get_type_hints(ours)) == _shape(get_type_hints(theirs))
     assert ours.__required_keys__ == theirs.__required_keys__
     assert ours.__optional_keys__ == theirs.__optional_keys__
 

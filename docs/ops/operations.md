@@ -32,7 +32,7 @@
 **에이전트 채점 키 프록시 `llm-proxy`**(#998)는 backend 계열과 함께 배포되는 상주 프로세스다(내부 전용, 포트를
 열지 않는다). 하루 비용 상한은 「운영 설정」의 `AGENT_SCORING_DAILY_LIMIT_USD`(값이 없으면 $20), 실행 하나의 예산은
 발급 때 정한다(기본 $1). 넘은 요청은 429 와 이유(`run_budget`·`daily_limit`)로 거절되고 로그에
-`llm-proxy: refused … code=…` 한 줄이 남는다. 토큰은 에이전트 채점기(#1000)만 발급하므로 `CONTEST_SCORING_METHOD` 가 `agent` 가 아니면(기본 `single_call`) 아무것도 중계하지 않는다.
+`llm-proxy: refused … code=…` 한 줄이 남는다. 토큰은 에이전트 채점기(#1000)와 채점 방식 비교 실험(#1246)만 발급하므로 `CONTEST_SCORING_METHOD` 가 `agent` 가 아니면(기본 `single_call`) 실험을 돌릴 때 말고는 아무것도 중계하지 않는다. 실험 토큰(용도 `experiment`)은 운영 상한이 아니라 `AGENT_EXPERIMENT_DAILY_LIMIT_USD`(기본 0 = 꺼짐)에 세고 넘으면 `experiment_daily_limit` 로 거절한다 — 절차는 `scoring-experiment.md`.
 
 **에이전트 채점을 켜는 순서**(#1002, ADR-0082) — 배포해도 꺼져 있다. 순서를 지킨다: ① 키 — 고른 벤더의 `OPEN_AI_API_KEY`
 (Codex) 또는 `ANTHROPIC_API_KEY`(Claude, 방침 시행일 2026-11-27 이후)를 「운영 설정」에 저장하고 「연결 시험」으로 확인한다.

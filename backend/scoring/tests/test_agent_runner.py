@@ -213,7 +213,8 @@ def test_runner_uses_only_the_standard_library() -> None:
             roots |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             roots.add(node.module.split(".")[0])
-    assert roots - {"__future__"} <= set(sys.stdlib_module_names)
+    # 옆 파일 하나(우리 루프 `selfloop.py`, #1245)는 이미지에 같이 복사된다 — backend 에서는 `scoring.selfloop` 이다.
+    assert roots - {"__future__", "scoring", "selfloop"} <= set(sys.stdlib_module_names)
 
 
 # ── 박제본 풀기 ──────────────────────────────────────────────────────────────────────────────────────────
