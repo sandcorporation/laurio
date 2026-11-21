@@ -181,8 +181,16 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    | `check` | reindex 뒤 `scripts/ci/post-deploy-check.sh` — 실패면 표식을 옮기지 않고 2 로 끝난다 |
    | `rollback` | 교체 뒤 실패(up·verify·health·reindex·확인 어디서든)면 직전 배포 표식의 이미지로 되돌리고 2 로 끝난다 |
 
-   확인은 한도 `CODEMIT_POSTDEPLOY_SECONDS`(기본 60초) 안에서 셋을 본다 — **준비**(backend 안 `/api/health?scope=ready`),
+   확인은 한도 `CODEMIT_POSTDEPLOY_SECONDS`(기본 60초) 안에서 넷을 본다 — **준비**(backend 안 `/api/health?scope=ready`),
    **작업자**(backend 안 `/api/health` 가 작업자 생존 신호까지 200 이고 celery-worker 안 `celery inspect ping` 에 답이 있다),
+   **필수 설정**(#1124 — backend·celery-worker 마다 그 컨테이너 안에서 `python manage.py check_required_settings --service
+   <이름>`: 그 서비스가 실제로 읽는 값이 비었는지. 운영 설정(DB)이 env 보다 앞서는 키는 그 규칙대로 본다. 키 이름과
+   「비어 있음」만 찍고 값·길이·해시는 찍지 않는다. 기다려도 채워지지 않으므로 한 번만 본다. 표는
+   `backend/ops_metrics/required_settings.py` 한 곳 — `SUPPORT_EMAIL`·`OPS_ALERT_DISCORD_WEBHOOK_URL` 은 늘, `ALIGO_*` 셋은
+   알림 어댑터가 알리고일 때, `OPEN_AI_API_KEY`·`ANTHROPIC_API_KEY` 는 공모전 AI 채점이 실물로 켜져 있을 때 운영 설정의
+   벤더 것 하나만 celery-worker 에서. 빈 설정은 이미지를 되돌려도 채워지지 않는다 — `rollback` 이면 되돌린 뒤 확인도
+   같은 줄로 실패하니, `.env.prod`(또는 운영 설정 화면)에서 그 키를 채우고 그 서비스를 다시 띄운다. 표에 키를 더하는 PR 은
+   병합 전에 운영에 그 키가 있는지 대장에게 키 이름으로 확인받는다),
    **핵심 경로**(`CODEMIT_POSTDEPLOY_URLS` 의 주소마다 2xx·3xx, 쉼표나 빈칸으로 가른다). 주소는 `.env.prod` 에만 둔다 —
    켰는데 비어 있으면 확인이 실패한다. 되돌리기는 `deploy.sh prod rollback-plan` 이 실패한 계획을 표식 커밋으로 고치고
    (같은 서비스, 겹쳐 바꾸기), `post-deploy-rollback.sh`(임시 사본으로 돈다)가 그 커밋을 체크아웃해 `image`·`up`·`verify`·
@@ -192,7 +200,8 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    **켜는 것은 대장이 oracle `.env.prod` 에서** — `check` 로 며칠 보고 `rollback` 으로 올린다(날짜 조건은 없다, 대표 지시 2026-11-21).
 
    시연: `bash scripts/ci/post-deploy-drill.sh` — 로컬 dev 스택(따로 띄우는 `codemit-drill-6`)에서 일부러 깨진 backend
-   이미지로 바꿔 끼우면 확인이 실패하고, 직전 이미지로 되돌리면 다시 통과한다. 되돌리기의 순서는
+   이미지로 바꿔 끼우면 확인이 실패하고, 직전 이미지로 되돌리면 다시 통과한다. 이어서 문의 이메일을 비워 띄우면 필수 설정이
+   `SUPPORT_EMAIL: 비어 있음` 으로 실패하고, 채워 다시 띄우면 통과한다. 되돌리기의 순서는
    `backend/tests/test_deploy_postdeploy.py` 가 본다(꺼진 상태의 순서가 스위치를 넣기 전과 같다는 것도).
 
    **prod 를 멈추려면 Jenkins 에서 `codemit/deploy` 를 「Disable」한다.**

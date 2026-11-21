@@ -62,7 +62,7 @@ plugs = ["core"]
 
 [ops_metrics]
 group = "shared"
-uses = ["core"]
+uses = ["core", "notifications", "policies"]
 plugs = ["core"]
 
 [payments]

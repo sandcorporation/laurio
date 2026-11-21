@@ -38,16 +38,20 @@ esac
 exit 0
 """
 
-# 실패 판정은 `docker`·`curl` 하위 명령의 이름으로 — ready / health / ping / curl
+# 실패 판정은 `docker`·`curl` 하위 명령의 이름으로 — ready / health / ping / settings / curl
 FAKE_TOOL = r"""#!/bin/sh
 case "$*" in
   *scope=ready*) step=ready ;;
   *api/health*) step=health ;;
   *"inspect ping"*) step=ping ;;
+  *check_required_settings*) step=settings ;;
   *) step="$TOOL" ;;
 esac
 echo "$TOOL $step@$(git rev-parse HEAD | cut -c1-4)" >> "$FAKE_CALLS"
-if [ "$(git rev-parse HEAD)" = "${FAKE_BAD:-}" ] && [ "${FAKE_FAIL:-}" = "$step" ]; then exit 1; fi
+if [ "$(git rev-parse HEAD)" = "${FAKE_BAD:-}" ] && [ "${FAKE_FAIL:-}" = "$step" ]; then
+  [ "$step" = settings ] && echo "celery-worker SUPPORT_EMAIL: 비어 있음" && echo "Traceback: 이 줄은 옮기지 않는다"
+  exit 1
+fi
 exit 0
 """
 
@@ -170,7 +174,8 @@ def test_check_passes_then_marks(prod):
     assert result.returncode == 0, result.stdout + result.stderr
     steps = _steps(lines)
     assert steps[steps.index("reindex") + 1:] == [
-        "docker ready", "docker health", "docker ping", "curl curl", "curl curl", "mark", "glitchtip", "prune",
+        "docker ready", "docker health", "docker ping", "docker settings", "docker settings",
+        "curl curl", "curl curl", "mark", "glitchtip", "prune",
     ]
     assert "배포 뒤 확인 통과" in result.stdout
     assert _marker(repo) == b
@@ -185,6 +190,24 @@ def test_check_failure_ends_2_and_does_not_roll_back(prod):
     assert result.returncode == 2
     assert "rollback-plan" not in _steps(lines)
     assert "확인 작업자: 실패" in result.stdout
+    assert _marker(repo) == a
+
+
+def test_check_empty_required_setting_ends_2_with_key_names_only(prod):
+    """필수 설정(#1124) — 빈 키는 `<서비스> <키>: 비어 있음` 줄만 옮기고, 기다리지 않고 한 번만 본다."""
+
+    repo, a, b, run = prod
+    result, lines = run(
+        env_file="CODEMIT_POSTDEPLOY=check\nCODEMIT_POSTDEPLOY_URLS=https://web.example/\n",
+        FAKE_BAD=b, FAKE_FAIL="settings", CODEMIT_POSTDEPLOY_SECONDS="30", CODEMIT_POSTDEPLOY_INTERVAL="5",
+    )
+    assert result.returncode == 2
+    assert "  celery-worker SUPPORT_EMAIL: 비어 있음" in result.stdout
+    assert "Traceback" not in result.stdout
+    assert "확인 필수 설정: 실패" in result.stdout
+    assert "배포 뒤 확인 실패: 필수 설정" in result.stdout
+    assert _steps(lines).count("docker settings") == 2  # backend·celery-worker 한 번씩, 다시 보지 않는다
+    assert "curl curl" in _steps(lines)  # 뒤 항목은 그대로 본다
     assert _marker(repo) == a
 
 
@@ -216,7 +239,7 @@ def test_failed_check_rolls_back_to_marker_image(prod):
     assert after == [
         f"{step}@{a[:4]}" for step in (
             "image backend", "up", "verify", "health backend", "health events", "health search", "reindex",
-            "docker ready", "docker health", "docker ping", "curl curl",
+            "docker ready", "docker health", "docker ping", "docker settings", "docker settings", "curl curl",
         )
     ]
     assert "자동 되돌리기 끝" in result.stdout
