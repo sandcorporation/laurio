@@ -38,3 +38,8 @@ export function defaultAwardDate(min: string, max: string, today: string = today
   if (today > max) return max;
   return today;
 }
+
+/** 묶음 PDF 에 들어가는 장 — 취소되지 않았고 받는 사람이 탈퇴하지 않아 파일이 있는 것(#1130). */
+export function bundleCount(certificates: readonly CertificateOut[]): number {
+  return certificates.filter((c) => c.cancelled_at === null && c.pdf_available).length;
+}

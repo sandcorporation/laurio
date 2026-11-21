@@ -85,3 +85,41 @@ test("발급한 상장을 취소한다 — 경고를 거쳐 「취소됨」이 �
   await expect(row).toHaveAttribute("data-status", "cancelled");
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeEnabled();
 });
+
+test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기·다시 발급이 꺼진다", async ({ page }) => {
+  const seeded = await seedE2eContests();
+  await establishDeveloperSession(page, seeded.judging.sponsor_login_seed);
+  const { id } = seeded.judging;
+  const stamp = "2026-11-20T00:00:00Z";
+  const fake = (n: number, pdfAvailable: boolean) => ({
+    id: 9000 + n,
+    number: `E2E-${n}`,
+    recipient_name: `수상자${n}`,
+    award_name: "우수상",
+    body: "",
+    giver_name: "개최자",
+    giver_title: "",
+    award_date: "2026-11-20",
+    issued_at: stamp,
+    cancelled_at: null,
+    replaced_by_id: null,
+    pdf_available: pdfAvailable,
+  });
+  // 탈퇴는 회원 쪽 사건이라 화면 시험은 보드 응답에 두 장(유효·탈퇴)을 얹어 본다.
+  await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const board = await response.json();
+    await route.fulfill({ response, json: { ...board, certificates: [fake(1, true), fake(2, false)] } });
+  });
+  await page.goto(`/console/contests/${id}/certificates`);
+
+  const gone = page.getByTestId("certificates-row-9002");
+  await expect(gone).toContainText("받는 사람 탈퇴 — 파일 없음");
+  await expect(page.getByTestId("certificates-download-9002")).toBeDisabled();
+  await expect(page.getByTestId("certificates-reissue-9002")).toBeDisabled();
+  await expect(page.getByTestId("certificates-cancel-9002")).toBeEnabled();
+  await expect(page.getByTestId("certificates-download-9001")).toBeEnabled();
+  // 묶음에는 파일 있는 한 장만 센다.
+  await expect(page.getByTestId("certificates-bundle")).toHaveText("묶음 받기 (1)");
+});
