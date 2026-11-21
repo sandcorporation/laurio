@@ -177,6 +177,7 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertIn("name: 빨리 멈춤", watcher)
         self.assertRegex(watcher, r"(?m)^\s+actions: write$")
         self.assertNotIn("sub-checks.sh", watcher)
+        self.assertNotRegex(watcher, r"(?m)^    needs:", "plan 과 함께 떠야 실행기 줄에서 늦지 않는다")
         result = job_block(code, "result")
         self.assertIn("name: 결과", result)
         needs = re.search(r"needs: \[([^\]]*)\]", result)

@@ -3,7 +3,7 @@
     python3 scripts/ci/fail_fast.py watch   --skip 결과 --skip "빨리 멈춤"   # 실패를 보면 실행 취소
     python3 scripts/ci/fail_fast.py summary --skip 결과 --skip "빨리 멈춤"   # 처음 실패한 잡 · 취소된 잡
 
-matrix 의 `fail-fast` 는 같은 matrix 안만 멈춘다. 잡 사이(checks ↔ e2e ↔ celery …)는 이 감시가 멈춘다:
+matrix 의 `fail-fast` 는 같은 matrix 안만 멈춘다. 감시 잡은 needs 없이 plan 과 함께 뜬다(실행기 줄에서 늦지 않게). 잡 사이(checks ↔ e2e ↔ celery …)는 이 감시가 멈춘다:
 이 실행의 잡 목록(`filter=latest` — 「실패한 잡만 다시」 시도의 잡도 그 시도의 것)을 몇 초마다 읽어,
 `--skip` 밖의 잡 하나가 failure·timed_out 으로 끝나면 실행을 취소한다. 「결과」는 `if: always()` 라 취소돼도 돌아
 취소된 잡을 실패로 읽는다(거짓 초록 없음). 이 스크립트는 판정하지 않는다 — 판정은 「결과」가 needs 로만 한다.
@@ -83,6 +83,7 @@ def summary(jobs: Sequence[Job], skip: Sequence[str]) -> list[str]:
 def watch(api: Api, skip: Sequence[str], *, interval: float = 10, max_errors: int = 6,
           sleep: Callable[[float], None] = time.sleep, log: Callable[[str], None] = print) -> int:
     errors = 0
+    done_seen = 0
     while True:
         try:
             jobs = api.jobs()
@@ -96,7 +97,10 @@ def watch(api: Api, skip: Sequence[str], *, interval: float = 10, max_errors: in
             sleep(interval)
             continue
         decision = decide(jobs, skip)
-        if decision == "done":
+        # 「끝남」은 두 번 잇달아 봐야 믿는다 — 감시는 plan 과 함께 뜨므로, plan 이 끝난 직후 뒤 잡(matrix)이
+        # 아직 목록에 펼쳐지지 않은 틈을 「모두 끝남」으로 읽고 일찍 나가지 않게
+        done_seen = done_seen + 1 if decision == "done" else 0
+        if done_seen >= 2:
             log("모든 잡이 끝났다 — 실패 없음")
             return 0
         if decision == "cancel":

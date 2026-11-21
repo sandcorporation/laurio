@@ -361,13 +361,13 @@ jobs:
 
   # 잡 하나가 실패하면 실행을 취소한다(#1139) — 가장 긴 잡(e2e 조각 5~6분)을 기다리지 않고 「결과」가 곧바로 실패로 난다.
   # 「결과」의 needs 가 아니다: 판정에 끼지 않는다. 대기열의 merge_group 실행은 저마다 run id 가 따로라 남의 실행을 멈추지 않는다.
+  # needs 가 없다 — plan 과 함께 실행 첫머리에 실행기를 받는다. plan 뒤에 만들면 matrix 잡 십여 개와 한 줄에 서서
+  # 실행기를 몇 분 늦게 받는다(시험 PR 에서 5분 — 그동안 실패를 못 본다).
   fail-fast:
     name: 빨리 멈춤
-    needs: plan
-    if: needs.plan.outputs.tests == '1'
     runs-on: ubuntu-latest
-    # 가장 긴 잡의 한도(60분)를 넘겨 본다 — 이 잡이 먼저 끝나면 빨라지지 않을 뿐이다
-    timeout-minutes: 70
+    # plan(5분) 뒤 가장 긴 잡의 한도(60분)를 넘겨 본다 — 이 잡이 먼저 끝나면 빨라지지 않을 뿐이다
+    timeout-minutes: 75
     permissions:
       contents: read
       actions: write
