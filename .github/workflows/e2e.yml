@@ -1,25 +1,38 @@
-# e2e 전부 — main 을 매시 한 번 돈다(#1111, 대표 결정 2026-11-20). PR 검사의 e2e 는 바뀐 앱의 것만 돌고 「결과」 필수,
+# e2e 전부 — main 의 화면 전체를 도는 곳(#1111, 대표 결정 2026-11-20). 방아쇠는 main 병합 사건이 주(#1154)이고 예약(매시)은 보조다. PR 검사의 e2e 는 바뀐 앱의 것만 돌고 「결과」 필수,
 # 병합 대기열은 e2e 를 돌지 않는다 — 그 대가로 두 PR 이 함께 깨뜨린 화면은 최대 한 시간 main 에 있을 수 있다.
 # 본 저장소의 e2e.yml(#1015·#1020)을 되살린 꼴이다: gate(같은 sha 건너뜀)·알림 시험 입력·고정 제목 이슈(scripts/ci/ci-issue.sh).
-#   schedule           매시(한 시간에 네 번 두드리고 하나만 돈다, #1122) — main 기준. 직전 schedule 실행이 같은 sha 를 초록으로 돌았으면 건너뛴다(`gate` 잡).
-#   workflow_dispatch  `gh workflow run e2e.yml --ref <브랜치>` — 브랜치에서도 돈다, 늘 돈다, 이슈는 만들지 않는다(main 의 알림 시험만).
+#   workflow_dispatch  `-f source=merge` — main 병합 사건: release.yml 의 `e2e_dispatch` 잡이 병합마다 부른다(#1154). GitHub 예약은 이 저장소에서
+#                      29시간에 4번만 왔고 한 시간에 네 번 두드려도 여섯 번 연달아 안 왔다(#1138) — 예약에만 기대지 않는다. 50분 안에 실제로 도는 전체 실행이
+#                      있으면(또는 같은 sha 를 초록으로 돌았으면) 부르지도 돌지도 않는다(`scripts/ci/e2e-gate.sh`). 붉으면 이슈를 연다.
+#   schedule           매시(한 시간에 네 번 두드리고 하나만 돈다, #1122) — 보조: 병합이 없는 동안에도 가끔은 돈다. 같은 gate 판정.
+#   workflow_dispatch  그 밖(`gh workflow run e2e.yml --ref <브랜치>`) — 브랜치에서도 돈다, 늘 돈다, 이슈는 만들지 않는다(main 의 알림 시험만).
+# 「main 의 전체 실행」 = schedule + source=merge dispatch. 실행 이름(run-name)이 `e2e [schedule]`·`e2e [merge]` 로 시작해 gate·notify·감시(e2e-stale.sh)가 거른다.
 # 조각은 PR 검사와 같은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109). 이미지 층·pnpm 캐시는 복원만 한다(저장은 release-cache.yml).
 # 이 워크플로가 저장하는 캐시는 e2e 조각 시간 기록(`e2e-durations-*`, durations 잡, #1112) 하나다.
 # main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」를 열거나 댓글을 달고(직전 초록 sha … 이번 sha 비교 링크와
 # 그 사이 커밋), 초록이 되면 「복구됨」 댓글을 달고 닫는다. **제목을 바꾸지 않는다** — 조율자 점검(stall-check.sh)이 이 제목으로 찾는다.
 # 실제 실패 이슈는 본 저장소에서만 만든다(포크 #1084 는 알림 시험만).
-# 보안(공개 저장소): secrets 없음(github.token 하나), 호스팅 실행기, 액션 SHA 고정, 쓰기 권한은 notify 잡의 issues 하나.
+# 보안(공개 저장소): secrets 없음(github.token 하나), 호스팅 실행기, 액션 SHA 고정, 쓰기 권한은 notify 잡의 issues 하나(부르는 쪽 release.yml 의 e2e_dispatch 는 actions: write 하나).
 name: e2e
+
+# 실행 이름 — gh 는 입력으로 실행을 거를 수 없어 종류를 이름에 새긴다(scripts/ci/e2e-gate.sh·e2e-stale.sh 가 앞부분으로 거른다)
+run-name: e2e [${{ github.event_name == 'schedule' && 'schedule' || inputs.simulate != 'none' && 'sim' || inputs.source == 'merge' && 'merge' || 'manual' }}]
 
 on:
   schedule:
     # 한 시간에 네 번 두드린다(#1122) — GitHub 예약은 부하 때 실행을 건너뛴다(문서: 지연·누락 가능). 한 번뿐이던 때 23시간에 2번 돌았다.
-    # 실제로 도는 것은 한 시간에 하나다: gate 가 50분 안에 이미 예약 실행이 있으면 건너뛴다.
+    # 실제로 도는 것은 한 시간에 하나다: gate 가 50분 안에 이미 전체 실행(예약·병합 사건)이 있으면 건너뛴다. 방아쇠의 주는 병합 사건이다(#1154).
     - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
+      # main 병합 사건(#1154) — release.yml 의 e2e_dispatch 가 `-f source=merge` 로 부른다. 이 실행만 schedule 처럼 gate 판정·실패 이슈를 가진다.
+      source:
+        description: "부른 곳 — merge(main 병합 사건)·manual(그 밖)"
+        type: choice
+        options: [manual, merge]
+        default: manual
       # 알림 시험(#1020) — e2e 는 돌리지 않고 notify 잡만 fail(실패로)·ok(초록으로) 흉내 낸다. main 에서만 이슈를 건드리며,
-      # 제목에 「(알림 시험)」이 붙어 실제 e2e 실패 이슈·gate 판정(schedule 실행만 본다)·직전 초록 조회를 흐리지 않는다.
+      # 제목에 「(알림 시험)」이 붙어 실제 e2e 실패 이슈·gate 판정(전체 실행만 본다)·직전 초록 조회를 흐리지 않는다.
       simulate:
         description: "알림 시험 — none(실제 e2e)·fail·ok"
         type: choice
@@ -67,24 +80,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           SHA: ${{ github.sha }}
           SIM: ${{ inputs.simulate || 'none' }}
+          SOURCE: ${{ inputs.source || '' }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          run=1
-          # 알림 시험이면 실제 e2e 는 돌리지 않는다
-          [ "$SIM" = none ] || run=0
-          if [ "$EVENT" = schedule ]; then
-            last=$(gh run list --workflow e2e.yml --event schedule --branch main --status completed --limit 20 \
-              --json conclusion,headSha -q '[.[]|select(.conclusion=="success" or .conclusion=="failure")][0] | "\(.conclusion) \(.headSha)"' || true)
-            echo "직전 실행: ${last:-없음}"
-            [ "$last" = "success $SHA" ] && run=0
-            # 한 시간 한 번(#1122) — 50분 안에 이 실행 말고 다른 예약 실행이 있으면(건너뛴 것 포함) 이 두드림은 쉰다
-            CUT=$(date -u -d '50 minutes ago' +%Y-%m-%dT%H:%M:%SZ); export CUT
-            # shellcheck disable=SC2016  # $ENV 는 jq 식이다
-            recent=$(gh run list --workflow e2e.yml --event schedule --branch main --limit 10 \
-              --json databaseId,createdAt -q '[.[]|select(.databaseId != ($ENV.RUN_ID|tonumber) and .createdAt > $ENV.CUT)]|length' || echo 0)
-            echo "50분 안의 다른 예약 실행: ${recent:-0}"
-            [ "${recent:-0}" -gt 0 ] && run=0
-          fi
+          # 알림 시험이면 실제 e2e 는 돌리지 않는다. 전체 실행(예약·병합 사건)이면 같은 sha 초록·50분 안 실행을 본다(scripts/ci/e2e-gate.sh)
+          decision=$(EVENT="$EVENT" SIM="$SIM" SOURCE="$SOURCE" SHA="$SHA" RUN_ID="$RUN_ID" bash scripts/ci/e2e-gate.sh)
+          sed '$d' <<<"$decision"
+          run=$(sed -n '$s/^run=//p' <<<"$decision")
           plan=$(python3 scripts/ci/e2e_plan.py --all --durations .e2e-durations/record.json)
           echo "조각: $(sed -n 's/^MATRIX=//p' <<<"$plan")"
           {
@@ -226,7 +228,8 @@ jobs:
   notify:
     needs: [gate, e2e]
     # 실제 결과는 본 저장소 main 에서만 이슈로(포크는 알림 시험만, #1111). 알림 시험은 main 이면 어디서나.
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && ((needs.gate.outputs.run == '1' && github.repository == 'sandcorporation/laurio' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success')) || (inputs.simulate || 'none') != 'none') }}
+    # 실제 결과 이슈는 전체 실행(예약·병합 사건 dispatch)만 만든다(#1154) — 수동 dispatch 는 돌아도 이슈를 만들지 않는다.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && ((needs.gate.outputs.run == '1' && (github.event_name == 'schedule' || inputs.source == 'merge') && github.repository == 'sandcorporation/laurio' && (needs.e2e.result == 'failure' || needs.e2e.result == 'success')) || (inputs.simulate || 'none') != 'none') }}  # leak-guard:allow — 본 저장소 이름(이미 공개된 워크플로 조건)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -250,9 +253,9 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # 직전 초록 = 이 실행 앞의 가장 새 성공 실행의 sha(건너뛴 실행도 같은 sha 라 그대로 맞다)
-          # (schedule 실행만 본다 — 수동·알림 시험 실행은 e2e 를 안 돌았을 수 있다)
-          green=$(gh run list --workflow e2e.yml --branch main --event schedule --status success --limit 10 --json databaseId,headSha \
-            -q "[.[]|select(.databaseId != $RUN_ID)][0].headSha // empty" || true)
+          # (전체 실행 — 예약·병합 사건 dispatch — 만 본다: 수동·알림 시험 실행은 e2e 를 안 돌았을 수 있다)
+          green=$(gh run list --workflow e2e.yml --branch main --status success --limit 30 --json databaseId,headSha,displayTitle \
+            -q "[.[]|select(.displayTitle|test(\"^e2e \\\\[(schedule|merge)\\\\]\"))|select(.databaseId != $RUN_ID)][0].headSha // empty" || true)
           title="e2e 실패 — main 의 화면이 깨졌을 수 있다"
           if [ "$SIM" != none ]; then
             title="${title} (알림 시험)"

@@ -17,7 +17,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
   amd64 로 굽고 `deploy-guard.sh`, `CODEMIT_GUARD_IMAGE`)·`celery`(`celery-broker.sh`)·`agent-grader`(`agent-grader-check.sh` — `ubuntu-24.04-arm`
   에서 에이전트 채점 실행기 이미지를 굽고 운영과 같은 격리 설정(seccomp 프로필 포함)으로 Codex 샌드박스 한 줄과 가짜 벤더에 두 CLI 를 돌린다. 실행기의 AppArmor 사용자 네임스페이스 제한은 끄고 돈다 — 운영 호스트에는 AppArmor 가 없다, #999) →
   `결과`(모두 초록이면 초록 — 필수 검사로 걸 이름). **병합 기준은 「결과」 잡이다** — `gh pr checks <PR>`·`gh run watch` 로 본다.
-  **PR 에서는 `guard` 를 건너뛴다**(#1015, 줄 서기 단축). **`e2e` 는 PR 에서만 바뀐 앱의 시험을 조각 나란히로 돌고 「결과」에 필수다. 병합 대기열(`merge_group`)은 e2e 를 돌지 않고, 전부는 매시 main 의 `e2e.yml` 이 돈다**(#1089·#1111).
+  **PR 에서는 `guard` 를 건너뛴다**(#1015, 줄 서기 단축). **`e2e` 는 PR 에서만 바뀐 앱의 시험을 조각 나란히로 돌고 「결과」에 필수다. 병합 대기열(`merge_group`)은 e2e 를 돌지 않고, 전부는 main 병합 사건이 부르는(예약은 보조) `e2e.yml` 이 돈다**(#1089·#1111·#1154).
   `guard` 는 `plan` 잡 출력 `guard`(PR 이벤트면 빔)를 `if` 가 본다. 잡 이름·`결과` 는 그대로다.
   - **`결과` 는 skipped 를 통과로 세지 않는다**: plan 이 시험 없음(문서만)이면 나머지가 skipped, 아니면 checks·celery 는 success, guard 는 PR 이 아닐 때 success(PR 에서만 skipped)여야 통과다. 조건을 잘못 걸어 필수 잡이 통째로 건너뛰어도 초록이던 구멍을 막는다.
   - **잡 하나가 실패하면 실행을 바로 멈춘다(#1139)**: matrix(`checks`·`guard`·`e2e`)는 `fail-fast: true` 로 같은 matrix 안을, 잡 사이는 `빨리 멈춤` 잡(`scripts/ci/fail_fast.py watch`)이 멈춘다 — 이 실행의 잡 목록을 10초마다 읽어 하나가 failure·timed_out 이면 그 실행(`GITHUB_RUN_ID` 하나 — 대기열의 merge_group 실행은 저마다 따로)을 취소한다. 이 잡은 needs 없이 plan 과 함께 뜬다 — plan 뒤에 matrix 잡 십여 개와 한 줄에 서면 실행기를 몇 분 늦게 받아(시험 PR 에서 5분) 그동안 실패를 못 본다. `actions: write` 는 이 잡에만 있고, 이 잡은 스크립트 하나만 체크아웃해 시험 코드를 돌리지 않는다. 「결과」의 needs 가 아니라 판정에 끼지 않는다(죽으면 느려질 뿐). **포크 PR** 은 토큰이 읽기 전용이라 취소가 403 — 경고만 남고 지금처럼 끝까지 돈다.
@@ -35,20 +35,25 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
     `결과` 는 위 표대로 돌아야 할 잡이 success, 건너뛰어야 할 잡이 skipped 일 때만 초록이다.
     경로 표는 `scripts/ci/paths.py` 하나다 — `changed.sh`·`e2e_plan.py`·`pytest_plan.py` 가 모두 이것을 읽는다. `scripts/test_changed_paths.py` 가 고정한다.
   - **병합 대기열 잡**(`merge_group`): 경로와 상관없이 전부(pytest 6조각 — e2e 는 빼고, #1111) 돌고 위에 **guard(frontend·operator·classroom)** 가 더해진다 — 배포 가능 판정은 여기 한 번이다(#1090).
-  - **e2e 는 PR 검사의 `e2e` 잡(바뀐 앱, 필수)과 매시 main 의 `e2e.yml`(전부)이다**(#1089·#1111). 시험은 `frontend/e2e/<앱>/`(공개)·`frontend/e2e/operator/<앱>/`·`frontend/e2e/classroom/` 에 두고 **폴더 이름이 앱 표시다** — `backend/app_deps.toml` 의 앱 이름이거나 `frontend`(백엔드 앱이 없는 화면·BFF 시험). `plan` 잡이 `scripts/ci/e2e_plan.py` 로 조각을 낸다: PR 은 바뀐 백엔드 앱(`app_deps.py affected`)의 폴더, 앞단이 바뀌면 그 앱 시험 전부, 시험 폴더만 바뀌면 그 폴더만, 공유 도우미·설정·워크플로·그 밖은 전부. 매시 `e2e.yml` 은 늘 전부(`--all`). 시험 파일을 **기록된 시험 시간**으로 조각에 나눠 담고(#1112 — 조각 수는 시간 합 ÷ 25초, 프로젝트 수~5(#1116 — 층 캐시가 찬 뒤 조각 준비가 ~150초라 8조각은 끝 시각을 거의 줄이지 못하고 실행기 시간만 먹었다), 프로젝트마다 한 조각에서 시작해 조각당 시간이 가장 긴 프로젝트에 하나씩 더 준다) 조각마다 실행기 하나가 스택을 따로 굽는다(`CODEMIT_E2E_PATHS`, `e2e.sh`).
+  - **e2e 는 PR 검사의 `e2e` 잡(바뀐 앱, 필수)과 main 병합 사건이 부르는 `e2e.yml`(전부, 예약은 보조)이다**(#1089·#1111·#1154). 시험은 `frontend/e2e/<앱>/`(공개)·`frontend/e2e/operator/<앱>/`·`frontend/e2e/classroom/` 에 두고 **폴더 이름이 앱 표시다** — `backend/app_deps.toml` 의 앱 이름이거나 `frontend`(백엔드 앱이 없는 화면·BFF 시험). `plan` 잡이 `scripts/ci/e2e_plan.py` 로 조각을 낸다: PR 은 바뀐 백엔드 앱(`app_deps.py affected`)의 폴더, 앞단이 바뀌면 그 앱 시험 전부, 시험 폴더만 바뀌면 그 폴더만, 공유 도우미·설정·워크플로·그 밖은 전부. 매시 `e2e.yml` 은 늘 전부(`--all`). 시험 파일을 **기록된 시험 시간**으로 조각에 나눠 담고(#1112 — 조각 수는 시간 합 ÷ 25초, 프로젝트 수~5(#1116 — 층 캐시가 찬 뒤 조각 준비가 ~150초라 8조각은 끝 시각을 거의 줄이지 못하고 실행기 시간만 먹었다), 프로젝트마다 한 조각에서 시작해 조각당 시간이 가장 긴 프로젝트에 하나씩 더 준다) 조각마다 실행기 하나가 스택을 따로 굽는다(`CODEMIT_E2E_PATHS`, `e2e.sh`).
     **e2e 시간 기록(#1112)**: `e2e.sh` 가 패스마다 Playwright JSON 리포트를 `test-results/timings/` 에 남기고, 매시 `e2e.yml` 의 `durations` 잡이 조각들의 것을 직전 기록에 합쳐(`scripts/ci/e2e_durations.py update` — 통과한 파일만 직전 값과 평균, 실패·못 잰 파일은 그대로, 지운 파일은 뺀다) Actions 캐시 `e2e-durations-<실행>` 으로 저장한다. PR 검사·`e2e.yml` 의 계획 잡은 가장 새 것을 복원해 `--durations` 로 넘긴다. **커밋하지 않는다** — 대기열·PR 에 쓰기 권한을 더하지 않고 매시 저절로 새로워진다. 캐시가 없으면(첫 실행, 7일 안 쓴 캐시가 지워졌을 때) 저장소의 씨앗 기록 `scripts/ci/e2e-durations.json` 을 쓴다 — 씨앗은 가끔 `durations` 잡의 산출물 `e2e-durations`(30일)를 받아 그대로 커밋해 새로 한다. 기록에 없는 새 시험은 기록 평균으로 센다. 규칙은 `scripts/test_e2e_plan.py` 가 고정한다. 조각 시간의 대부분은 시험 밖 준비다 — 층 캐시가 찬 뒤(#1116) 체크아웃·캐시 복원·굽기(23~43초)·띄우기·정리를 합쳐 121~187초, 시험은 조각당 12~25초. 병합 기준 `결과` 가 `e2e` 를 본다(조각이 있으면 success). 이미지 층 캐시는 release 의 `cache` 잡이 저장하고 PR 검사의 잡은 모두 복원만 한다(#1090). 매시 `e2e.yml` 이 저장하는 캐시는 e2e 시간 기록 하나다.
   - **대기열에서 e2e 를 뺀 까닭(#1111, 대표 결정 2026-11-20)**: 대기열 시간의 대부분이 e2e 조각(4:20~9:29)이었는데, CI 의 e2e 가 11일 동안
     막은 실제 버그는 0, 헛실패는 5였다. 대가: 각자 초록인 두 PR 이 함께 깨뜨린 화면은 대기열이 못 잡고 최대 한 시간 뒤 매시 e2e 가 잡는다.
-  - **매시 `e2e.yml`**: 본 저장소의 것(#1015·#1020)을 되살린 꼴 — `gate` 가 직전 schedule 실행이 같은 sha 를 초록으로 돌았으면 건너뛰고,
-    조각은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109). main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」
-    (라벨 `ci-red`, `scripts/ci/ci-issue.sh`)를 열거나 댓글을 달고, 초록이면 「복구됨」 댓글을 달고 닫는다. **제목을 바꾸지 않는다** — 조율자
-    점검(`stall-check.sh`)이 이 제목으로 찾는다. 실제 실패 이슈는 이 저장소에서만 만든다(notify 잡의 `github.repository` 조건).
-    **예약은 건너뛰어진다(#1122)**: GitHub 은 예약 실행이 부하 때 지연·누락될 수 있다고 문서에 적는다. 이 저장소에서는 매시(`7 * * * *`)였던 때
-    23시간에 2번(예약 시각에서 7~57분 늦게, 그 사이는 통째로 없음)만 돌았다 — 워크플로는 `active`, 수동 실행은 정상, 예약 시각이 아닌 다른 설정 탓은 찾지 못했다.
-    그래서 `7,22,37,52` 로 한 시간에 네 번 두드리고, `gate` 가 50분 안에 다른 예약 실행(건너뛴 것 포함)이 있으면 쉰다 — 한 시간에 e2e 하나는 그대로다.
-    그래도 멈출 수 있어 `release.yml` 의 `e2e_watch` 잡(main 병합마다, `scripts/ci/e2e-stale.sh`)이 마지막 예약 실행이 3시간(`E2E_STALE_HOURS`)보다 오래면
-    고정 제목 이슈 「e2e 예약이 멈췄다 — 매시 main 화면 시험이 돌지 않는다」(`ci-red`)를 열고(열려 있으면 댓글을 더하지 않는다), 다시 돌았으면 닫는다.
-    병합이 없는 동안은 감시도 없다 — 그때는 병합도 없으니 새 위험이 없다. 시험: `scripts/ci/e2e_stale_test.sh`.
+  - **main 의 전체 e2e `e2e.yml` — 방아쇠는 main 병합 사건이다(#1154), 예약(매시)은 보조다**: 본 저장소의 것(#1015·#1020)을 되살린 꼴 — 조각은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109).
+    main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」(라벨 `ci-red`, `scripts/ci/ci-issue.sh`)를 열거나 댓글을 달고, 초록이면 「복구됨」 댓글을 달고 닫는다.
+    **제목을 바꾸지 않는다** — 조율자 점검(`stall-check.sh`)이 이 제목으로 찾는다. 실제 실패 이슈는 이 저장소에서만 만든다(notify 잡의 `github.repository` 조건).
+    **예약에만 기댈 수 없다(#1122·#1138·#1154)**: GitHub 은 예약 실행이 부하 때 지연·누락될 수 있다고 문서에 적는다. 이 저장소에서는 매시(`7 * * * *`)였던 때 23시간에 2번, e2e.yml 을 되살린
+    11-20 뒤 29시간에 4번만 돌았고, 한 시간에 네 번(`7,22,37,52`) 두드리게 바꾼 뒤에도 여섯 번 연달아 한 번도 안 왔다 — 워크플로는 `active`, 수동 실행은 정상, 두드리는 횟수를 늘려서는 고쳐지지 않는다.
+    그래서 **main 병합마다 `release.yml` 의 `e2e_dispatch` 잡이 `gh workflow run e2e.yml --ref main -f source=merge` 로 e2e 를 부른다**(`GITHUB_TOKEN` 의 `workflow_dispatch` 는 실행을 만든다 — `actions: write`
+    는 이 잡에만, 시험 코드는 안 돈다). 예약은 병합이 없는 동안에도 가끔 돌도록 남겼다.
+    **돌지 않는 경우**(`scripts/ci/e2e-gate.sh` — `e2e_dispatch` 와 e2e.yml 의 `gate` 잡이 같은 스크립트로 판정한다, 부르는 쪽이 한 번, 도는 쪽이 한 번 더): 알림 시험이면, 가장 새 전체 실행이 같은 sha 를 초록으로 돌았으면,
+    50분 안에 실제로 e2e 를 돈(또는 도는 중인) 다른 전체 실행이 있으면. **「전체 실행」 = 예약 + `source=merge` dispatch**이고 실행 이름(`run-name`)이 `e2e [schedule]`·`e2e [merge]` 로 시작한다
+    (gh 는 입력으로 실행을 거를 수 없어 이름에 새겼다). 수동 dispatch(`e2e [manual]`)·알림 시험(`e2e [sim]`)은 판정·이슈·직전 초록 조회에 끼지 않고, 수동은 늘 돈다(이슈는 만들지 않는다).
+    「실제로」 = e2e 조각 잡이 `skipped` 가 아니다 — 건너뛴 실행(gate 가 쉰 것)은 50분 창을 늘리지 않는다(#1122 의 판정은 건너뛴 것도 세어, 한 시간에 네 번 두드릴 때 앞 시간의 건너뜀이 다음 시간을 영영 막았다).
+    맞바꿈: 병합이 몰리면 마지막 병합은 그 50분 창이 닫힐 때까지(다음 병합이나 예약까지) 전체 e2e 를 거치지 않는다 — 한 시간에 e2e 하나라는 #1111 의 한도는 그대로다.
+    그래도 멈출 수 있어 `release.yml` 의 `e2e_watch` 잡(main 병합마다, `e2e_dispatch` 가 부른 뒤, `scripts/ci/e2e-stale.sh`)이 마지막 전체 실행이 3시간(`E2E_STALE_HOURS`)보다 오래면
+    고정 제목 이슈 「e2e 가 멈췄다 — main 의 전체 화면 시험이 돌지 않는다」(`ci-red`)를 열고(열려 있으면 댓글을 더하지 않는다), 다시 돌았으면 닫는다.
+    병합이 없는 동안은 감시도 없다 — 그때는 병합도 없으니 새 위험이 없다. 시험: `scripts/ci/e2e_stale_test.sh`·`scripts/ci/e2e_gate_test.sh`(PR 검사가 돈다)·`scripts/test_release_flow.py`.
     알림 시험: `gh workflow run e2e.yml --ref main -f simulate=fail`(새 이슈, 한 번 더면 댓글)·`-f simulate=ok`(복구·닫기) — 제목에 「(알림 시험)」.
   - **필수 검사 이름은 그대로 「결과」 하나다** — e2e 는 「결과」가 PR 에서 집계하고, 대기열에서는 plan 이 조각을 내지 않아 `skipped` 를 기대한다.
   - **pytest 는 PR 에서는 바뀐 앱과 그 앱에 기대는 앱의 시험만, 병합 대기열에서는 전부를 조각 나란히로 돈다**(#1088). `plan` 잡이 `scripts/ci/pytest_plan.py` 로 고른다:
