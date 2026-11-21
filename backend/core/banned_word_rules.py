@@ -73,6 +73,23 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
     ("classroom", "PublishTemplateIn", "publisher_display_name"): BannedWordRule(
         checks_impersonation=True, checks_profanity=True
     ),
+    #: 공모전 상장(#1126, 스펙 #1071) — 받는 사람·수여자 이름은 사람 이름 자리라 사칭까지,
+    #: 상 이름·본문·직함은 공개 본문이라 욕설만 본다(확인 페이지가 로그인 없이 보인다).
+    ("certificates", "CertificateTextIn", "recipient_name"): BannedWordRule(
+        checks_impersonation=True, checks_profanity=True
+    ),
+    ("certificates", "CertificateTextIn", "giver_name"): BannedWordRule(
+        checks_impersonation=True, checks_profanity=True
+    ),
+    ("certificates", "CertificateTextIn", "award_name"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("certificates", "CertificateTextIn", "body"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
+    ("certificates", "CertificateTextIn", "giver_title"): BannedWordRule(
+        checks_impersonation=False, checks_profanity=True
+    ),
     ("accounts", "SponsorProfileIn", "display_name"): BannedWordRule(
         checks_impersonation=True, checks_profanity=True
     ),

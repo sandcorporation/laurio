@@ -2251,6 +2251,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/{contest_id}/certificates/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Certificate */
+        post: operations["certificates_api_preview_certificate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/{contest_id}/extend-judging-period": {
         parameters: {
             query?: never;
@@ -5284,6 +5301,30 @@ export interface components {
             name: string;
             /** Reason */
             reason: string;
+        };
+        /** CertificateTextIn */
+        CertificateTextIn: {
+            /**
+             * Award Date
+             * Format: date
+             */
+            award_date: string;
+            /** Award Name */
+            award_name: string;
+            /**
+             * Body
+             * @default
+             */
+            body: string;
+            /** Giver Name */
+            giver_name: string;
+            /**
+             * Giver Title
+             * @default
+             */
+            giver_title: string;
+            /** Recipient Name */
+            recipient_name: string;
         };
         /**
          * ChecklistItemIn
@@ -13766,6 +13807,30 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["AwardOut"];
                 };
+            };
+        };
+    };
+    certificates_api_preview_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateTextIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

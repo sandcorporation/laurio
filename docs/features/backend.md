@@ -210,6 +210,23 @@ http(s)·호스트 있음·사용자 정보(`user:pass@`) 없음·2000자 이하
 **그 값은 행위 엔드포인트의 전제와 같은 조건에서 나와야 한다.** 조건을 두 벌로 쓰면
 언젠가 갈라지고, 그때 화면은 시키는 대로 한 사용자에게 403 을 보여준다.
 
+### 상장(#1071)
+
+개최자는 마감이 지난 자기 공모전의 제출자에게 상장(A4 가로 PDF)을 발급한다 — 당선(`Award`)과
+따로 움직인다. 지금 있는 것은 **미리보기**다(#1126): `POST /api/contests/{id}/certificates/preview`
+가 칸(상 이름·받는 사람 이름·본문·수여자 이름·직함·수여 날짜)을 받아 발급본과 같은 틀의 PDF 를
+돌려준다. 「미리보기」 표시가 얹히고 상장 번호·QR 은 예시 값이며 저장하지 않는다. 마감 전·초안이면
+409, 남의 공모전이면 404.
+
+칸 제한: 상 이름·받는 사람 이름 1~20자, 본문 0~120자(줄바꿈 없음), 수여자 이름 1~30자, 직함
+0~30자, 수여 날짜는 마감일부터 오늘+30일. 다섯 칸 모두 금칙어 표(`core/banned_word_rules.py`)에
+있다 — 두 이름 칸은 사칭까지, 나머지는 욕설만.
+
+PDF 는 서버에서 WeasyPrint 로 그린다(`certificates/rendering.py`). 틀은 금색 두 줄 테 하나, 글꼴은
+`certificates/fonts/` 의 고운바탕(OFL, 한글·라틴만 남긴 woff)뿐이고 바깥 글꼴 서버에 기대지 않는다.
+QR 은 확인 주소(`{CODEMIT_WEB_ORIGIN}/c/{토큰}`, 비면 `https://codemit.kr`)를 담는다. 이미지에는
+pango·harfbuzz-subset 시스템 라이브러리가 들어간다(`docker/backend.Dockerfile`).
+
 ### 돈
 
 | | |
@@ -1181,6 +1198,7 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `scoring` | Score · ScoringAttempt |
 | `repositories` | RepositorySnapshot |
 | `awards` · `handovers` | Award · Handover · BuildAsset |
+| `certificates`(#1071) | (모델 없음 — 미리보기만, #1126) |
 | `appeals` | Appeal · AppealRuling · SourceReading |
 | `payments` · `payouts` | Payment · Payout · TaxIdentity · Seller · 웹훅 전달 기록 · OperatorPayoutAction |
 | `distributions` | Distribution · DistributionShare |

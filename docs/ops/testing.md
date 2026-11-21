@@ -210,6 +210,10 @@ Contest 전이 그래프를 한 곳에 선언하고 선언 밖을 정적으로 �
 프로세스 하나)를 끄고, 「처음 세는 상태」·저장소·클래스 준비를 픽스처로 옮겼다. 새 시험이
 그 근처면 같은 방법을 먼저 본다.
 
+**상장 PDF 시험은 호스트에 `libharfbuzz-subset0` 이 있어야 한도 안이다**(#1126). WeasyPrint 는
+그것이 없으면 글꼴 서브셋을 fontTools 로 돌려 한 장에 CPU 1초를 넘긴다(있으면 0.3~0.4초).
+pango 는 데스크톱 우분투에 이미 있다. 이미지(`backend`·`ci`)에는 Dockerfile 이 넣는다.
+
 **시험별 CPU 는 junit 의 `cpu_seconds` 로 본다** — PR 검사가 `test-results/backend-junit.xml` 에
 남기고(Jenkins 화면에 junit 보고서를 붙이지는 않는다 — #873 전에는 열차가 붙였다), 로컬은 `--junitxml=<경로>` 를 붙여 돌린 파일에서 본다.
 **junit 의 `time` 은 setup·teardown 을 포함하고 `cpu_seconds` 는 시험 본문만이다** — 둘이 크게

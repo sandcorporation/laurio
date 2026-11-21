@@ -49,6 +49,7 @@ API_ROUTERS: tuple[Mount, ...] = (
     Mount("", "payments.api.router"),
     Mount("", "contests.submission_api.router"),
     Mount("", "awards.api.router"),
+    Mount("", "certificates.api.router"),
     Mount("", "handovers.api.router"),
     Mount("", "payouts.api.router"),
     Mount("", "appeals.api.router"),

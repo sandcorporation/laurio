@@ -54,6 +54,9 @@ dependencies = [
     "opensearch-py>=2.8.0",
     "prometheus-client>=0.26.0",
     "aiohttp>=3.14.4",
+    "weasyprint>=63",
+    "segno>=1.6",
+    "pypdf>=5",
 ]
 
 [tool.uv]
