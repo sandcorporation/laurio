@@ -75,6 +75,9 @@ class ModelPrice:
     long_context_input_tokens: int | None = None
     long_context_input_multiplier: float = 1.0
     long_context_output_multiplier: float = 1.0
+    #: 캐시 읽기 입력 단가(OpenAI `input_tokens_details.cached_tokens`, #1259). 없으면 입력 단가 그대로 센다.
+    #: Anthropic 은 입력 단가의 배율(`core.agent_run_tokens`)로 세므로 여기 두지 않는다.
+    cached_input_usd_per_million: float | None = None
 
 
 #: 모델별 단가(USD / 100만 토큰, 2026-10 기준, 표준 등급). 여기 없는 모델은 「단가 모름」이다(`price_for`) —
@@ -82,27 +85,29 @@ class ModelPrice:
 #: 출처: https://developers.openai.com/api/docs/pricing (2026-10-06 확인 — gpt-5.1 도 이 표에서
 #: 확인했다), 교차 확인 https://www.morphllm.com/openai-api-pricing ·
 #: https://spendlint.dev/pricing/openai-api . gpt-5.4·gpt-5.5 는 입력 27.2만 토큰을 넘으면 그 호출
-#: 전체가 입력 2배·출력 1.5배다.
+#: 전체가 입력 2배·출력 1.5배다(캐시 읽기 입력도 2배).
+#: 캐시 입력(cached input) 단가는 같은 표의 「Cached input」 열이다(2026-11-22 확인, #1259). gpt-4.1-nano 는 그 표에
+#: 없어 캐시 단가를 두지 않는다(입력 단가로 센다).
 _LONG_CONTEXT = {
     "long_context_input_tokens": 272_000,
     "long_context_input_multiplier": 2.0,
     "long_context_output_multiplier": 1.5,
 }
 PRICES: dict[str, ModelPrice] = {
-    "gpt-4o": ModelPrice(2.50, 10.00),
-    "gpt-4o-mini": ModelPrice(0.15, 0.60),
-    "gpt-4.1": ModelPrice(2.00, 8.00),
-    "gpt-4.1-mini": ModelPrice(0.40, 1.60),
+    "gpt-4o": ModelPrice(2.50, 10.00, cached_input_usd_per_million=1.25),
+    "gpt-4o-mini": ModelPrice(0.15, 0.60, cached_input_usd_per_million=0.075),
+    "gpt-4.1": ModelPrice(2.00, 8.00, cached_input_usd_per_million=0.50),
+    "gpt-4.1-mini": ModelPrice(0.40, 1.60, cached_input_usd_per_million=0.10),
     "gpt-4.1-nano": ModelPrice(0.10, 0.40),
-    "gpt-5": ModelPrice(1.25, 10.00),
-    "gpt-5-mini": ModelPrice(0.25, 2.00),
-    "gpt-5-nano": ModelPrice(0.05, 0.40),
-    "gpt-5.1": ModelPrice(1.25, 10.00),
-    "gpt-5.2": ModelPrice(1.75, 14.00),
-    "gpt-5.4": ModelPrice(2.50, 15.00, **_LONG_CONTEXT),
-    "gpt-5.4-mini": ModelPrice(0.75, 4.50),
-    "gpt-5.4-nano": ModelPrice(0.20, 1.25),
-    "gpt-5.5": ModelPrice(5.00, 30.00, **_LONG_CONTEXT),
+    "gpt-5": ModelPrice(1.25, 10.00, cached_input_usd_per_million=0.125),
+    "gpt-5-mini": ModelPrice(0.25, 2.00, cached_input_usd_per_million=0.025),
+    "gpt-5-nano": ModelPrice(0.05, 0.40, cached_input_usd_per_million=0.005),
+    "gpt-5.1": ModelPrice(1.25, 10.00, cached_input_usd_per_million=0.125),
+    "gpt-5.2": ModelPrice(1.75, 14.00, cached_input_usd_per_million=0.175),
+    "gpt-5.4": ModelPrice(2.50, 15.00, **_LONG_CONTEXT, cached_input_usd_per_million=0.25),
+    "gpt-5.4-mini": ModelPrice(0.75, 4.50, cached_input_usd_per_million=0.075),
+    "gpt-5.4-nano": ModelPrice(0.20, 1.25, cached_input_usd_per_million=0.02),
+    "gpt-5.5": ModelPrice(5.00, 30.00, **_LONG_CONTEXT, cached_input_usd_per_million=0.50),
     # Claude(Anthropic) 키 연결(#795) — 출처: https://platform.claude.com/docs/en/about-claude/pricing
     # (2026-10-28 확인, 표준 입력·출력). Haiku 5.5 는 프롬프트가 10만 토큰을 넘으면 그 호출 전체가
     # 입력·출력 모두 5배다(0.10→0.50, 0.50→2.50). Sonnet 5.5·5·4.6 은 1M 컨텍스트 전체가 표준 단가다.

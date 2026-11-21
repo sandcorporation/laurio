@@ -1,6 +1,7 @@
 """채점 방식 비교 실험을 돌린다(#1246) — `--confirm` 없이는 예상 호출 수·줄별 비용 범위·하루 상한·남은 돈만 찍는다.
 
     python manage.py compare_scoring_methods --contest 3 --repeat 3 --limit-submissions 16
+    python manage.py compare_scoring_methods --contest 3 --repeat 1 --limit-submissions 8 --pick spread
     python manage.py compare_scoring_methods --contest 3 --rows agent:claude-sonnet-5-5,self_loop:gpt-4.1-mini --repeat 3 --confirm
 
 같은 인자로 다시 부르면 같은 실험(이름)의 남은 칸만 돈다 — 하루 상한에 멈춘 뒤 이어 가는 길이다. `--name` 을 같게 주면
@@ -25,9 +26,10 @@ from scoring import experiment as ex
 from scoring.models import ScoringExperiment
 
 
-def _default_name(contest_id: int, rows: list[ex.Row], repeat: int, limit: int | None) -> str:
+def _default_name(contest_id: int, rows: list[ex.Row], repeat: int, limit: int | None, pick: ex.Pick) -> str:
     digest = hashlib.sha256(",".join(r.name for r in rows).encode()).hexdigest()[:8]
-    return f"contest{contest_id}-r{repeat}-n{limit if limit is not None else 'all'}-{digest}"
+    picked = "-spread" if pick == "spread" else ""  # "id" 는 옛 이름 그대로(같은 인자 = 같은 실험)
+    return f"contest{contest_id}-r{repeat}-n{limit if limit is not None else 'all'}{picked}-{digest}"
 
 
 class Command(BaseCommand):
@@ -38,6 +40,10 @@ class Command(BaseCommand):
         parser.add_argument("--rows", default=None, help="방식:모델,… (첫째가 기준 줄). 비면 기본 줄 일곱")
         parser.add_argument("--repeat", type=int, default=3)
         parser.add_argument("--limit-submissions", type=int, default=None)
+        parser.add_argument(
+            "--pick", choices=ex.PICKS, default=None,
+            help="--limit-submissions 건을 고르는 법: id(id 순 앞 N 건, 기본) · spread(운영 점수 분위로 고르게 N 건)",
+        )
         parser.add_argument("--name", default=None, help="실험 이름. 비면 인자에서 만든다(같은 인자 = 같은 실험)")
         parser.add_argument("--by", default=None, help="만든 사람(기록용). 비면 OS 사용자")
         parser.add_argument("--confirm", action="store_true", help="이것이 있어야 모델을 부른다")
@@ -56,12 +62,18 @@ class Command(BaseCommand):
             rows = ex.parse_rows(options["rows"])  # type: ignore[arg-type]  # argparse str|None
         except ex.ExperimentError as exc:
             raise CommandError(str(exc)) from exc
-        name = str(options["name"] or _default_name(contest_id, rows, repeat, limit))
+        pick_raw = options["pick"]
+        pick: ex.Pick | None = "spread" if pick_raw == "spread" else ("id" if pick_raw == "id" else None)
+        name = str(options["name"] or _default_name(contest_id, rows, repeat, limit, pick or "id"))
         experiment = ScoringExperiment.objects.filter(name=name).first()
         if experiment is not None and (experiment.contest_id != contest_id or experiment.rows != [r.name for r in rows]):
             raise CommandError(f"실험 {name} 은 다른 공모전·줄로 만들어졌다 — 다른 --name 을 쓴다")
+        if experiment is not None and pick is not None and pick != experiment.pick:
+            raise CommandError(f"실험 {name} 은 --pick {experiment.pick} 로 만들어졌다 — 고른 집합을 바꾸지 않는다")
+        if pick is None:
+            pick = "spread" if experiment is not None and experiment.pick == "spread" else "id"
 
-        plan = ex.plan(contest, rows, repeat=repeat, limit=limit, experiment=experiment)
+        plan = ex.plan(contest, rows, repeat=repeat, limit=limit, experiment=experiment, pick=pick)
         grader = ex.grader_problem() if ex.needs_grader(rows) else None
         self._preview(name, plan, repeat, resumed=experiment is not None)
         if ex.needs_grader(rows):
@@ -81,7 +93,8 @@ class Command(BaseCommand):
         if experiment is None:
             experiment = ScoringExperiment.objects.create(
                 name=name, contest=contest, created_by=str(options["by"] or getpass.getuser()),
-                rows=[r.name for r in rows], repeat=repeat, limit_submissions=limit, daily_limit_usd=plan.daily_limit_usd,
+                rows=[r.name for r in rows], repeat=repeat, limit_submissions=limit, pick=pick,
+                daily_limit_usd=plan.daily_limit_usd,
             )
         self._run(experiment, plan)
 
@@ -110,7 +123,8 @@ class Command(BaseCommand):
             if remaining < per_run_high[row]:
                 left = len(plan.cells) - done
                 self.stdout.write(
-                    f"하루 상한에 닿아 멈췄다 — 남은 돈 {max(remaining, Decimal(0)):.4f} < 칸당 최대 {per_run_high[row]:.4f}. "
+                    f"하루 상한에 닿아 멈췄다 — 남은 돈 {max(remaining, Decimal(0)):.4f} < 칸당 최대 {per_run_high[row]:.4f}"
+                    f"(에이전트·우리 루프는 칸 예산). "
                     f"남은 칸 {left}개는 같은 명령으로 이어 돈다."
                 )
                 return

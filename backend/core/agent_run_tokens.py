@@ -233,8 +233,12 @@ def _price(price: ModelPrice, attr: str, multiplier: float) -> Decimal:
     return Decimal(str(getattr(price, attr))) * Decimal(str(multiplier)) / _PER_MILLION
 
 
-def usage_cost_usd(vendor: ScoringVendor, model: str, usage: Usage) -> Decimal:
-    """응답 하나의 비용(USD). 단가를 모르는 모델은 발급 단계에서 막히므로 여기서는 0 이 아니라 예외다."""
+def usage_cost_usd(vendor: ScoringVendor, model: str, usage: Usage, *, long_context: bool = True) -> Decimal:
+    """응답 하나의 비용(USD). 단가를 모르는 모델은 발급 단계에서 막히므로 여기서는 0 이 아니라 예외다.
+
+    긴 프롬프트 할증(Haiku 5.5 의 10만 토큰 초과 5배 등)은 **요청 하나**의 프롬프트에 걸린다. 여러 요청의 합계를
+    값으로 받으면 문턱이 합계에 걸려 몇 배로 부푼다(#1259) — 그럴 때는 `long_context=False` 로 할증 없이 근사한다.
+    """
 
     price = price_for(model)
     if price is None:
@@ -242,17 +246,26 @@ def usage_cost_usd(vendor: ScoringVendor, model: str, usage: Usage) -> Decimal:
     prompt_tokens = usage.input_tokens + (
         usage.cache_read_tokens + usage.cache_write_tokens if vendor == "anthropic" else 0
     )
-    long_context = price.long_context_input_tokens is not None and prompt_tokens > price.long_context_input_tokens
-    in_mult = price.long_context_input_multiplier if long_context else 1.0
-    out_mult = price.long_context_output_multiplier if long_context else 1.0
+    surcharge = (
+        long_context and price.long_context_input_tokens is not None and prompt_tokens > price.long_context_input_tokens
+    )
+    in_mult = price.long_context_input_multiplier if surcharge else 1.0
+    out_mult = price.long_context_output_multiplier if surcharge else 1.0
     unit_in = _price(price, "input_usd_per_million", in_mult)
     unit_out = _price(price, "output_usd_per_million", out_mult)
-    cost = Decimal(usage.input_tokens) * unit_in + Decimal(usage.output_tokens) * unit_out
     if vendor == "anthropic":
+        cost = Decimal(usage.input_tokens) * unit_in + Decimal(usage.output_tokens) * unit_out
         cost += Decimal(usage.cache_write_tokens) * unit_in * _ANTHROPIC_CACHE_WRITE_MULTIPLIER
         cost += Decimal(usage.cache_read_tokens) * unit_in * _ANTHROPIC_CACHE_READ_MULTIPLIER
-    # OpenAI 의 캐시 읽기(`input_tokens_details.cached_tokens`)는 `input_tokens` 안에 있다 — 할인 없이
-    # 입력 단가로 센다(상한은 넉넉히 세는 쪽이 안전하다).
+        return cost.quantize(Decimal("0.000001"))
+    # OpenAI 의 캐시 읽기(`input_tokens_details.cached_tokens`)는 `input_tokens` 안에 있다 — 그 몫은 표의 캐시 입력
+    # 단가로 센다(#1259, 청구와 맞춘다). 캐시 단가가 없는 모델만 입력 단가 그대로다.
+    cached = min(usage.cache_read_tokens, usage.input_tokens)
+    cached_price = price.cached_input_usd_per_million
+    unit_cached = unit_in if cached_price is None else Decimal(str(cached_price)) * Decimal(str(in_mult)) / _PER_MILLION
+    cost = (
+        Decimal(usage.input_tokens - cached) * unit_in + Decimal(cached) * unit_cached + Decimal(usage.output_tokens) * unit_out
+    )
     return cost.quantize(Decimal("0.000001"))
 
 
