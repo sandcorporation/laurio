@@ -3076,6 +3076,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/feedback/permission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Permission
+         * @description 화면이 버튼을 그릴지 묻는 자리 — 권한이 없어도 403 이 아니라 `granted=false` 다.
+         */
+        get: operations["feedback_api_get_own_permission"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Own Reports */
+        get: operations["feedback_api_list_own_reports"];
+        put?: never;
+        /** Create Report */
+        post: operations["feedback_api_create_report"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Own Report */
+        get: operations["feedback_api_get_own_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/reports/{report_id}/screenshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Own Screenshot
+         * @description 열 때마다 짧게(분 단위) 발급한다. 보관 기한이 지나 지운 그림도 404 다.
+         */
+        get: operations["feedback_api_get_own_screenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/feedback/screenshot-upload-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request Screenshot Upload Url */
+        post: operations["feedback_api_request_screenshot_upload_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -3969,6 +4061,74 @@ export interface paths {
         put?: never;
         /** Deactivate Deliverable Type Endpoint */
         post: operations["contests_operator_api_deactivate_deliverable_type_endpoint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/feedback-permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Feedback Permission Accounts */
+        get: operations["feedback_operator_api_list_feedback_permission_accounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/feedback-permissions/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Feedback Permission Changes */
+        get: operations["feedback_operator_api_list_feedback_permission_changes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/feedback-permissions/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Feedback Permission Accounts */
+        get: operations["feedback_operator_api_search_feedback_permission_accounts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/feedback-permissions/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Feedback Permission */
+        post: operations["feedback_operator_api_set_feedback_permission"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7507,6 +7667,137 @@ export interface components {
             /** Value */
             value: string;
         };
+        /** FeedbackPermissionAccountOut */
+        FeedbackPermissionAccountOut: {
+            /** Email */
+            email: string;
+            /** Is Granted */
+            is_granted: boolean;
+            /** Nickname */
+            nickname: string;
+            /** User Id */
+            user_id: number;
+        };
+        /** FeedbackPermissionChangeOut */
+        FeedbackPermissionChangeOut: {
+            /** Action */
+            action: string;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** Id */
+            id: number;
+            /** Operator Username */
+            operator_username: string;
+            /** Reason */
+            reason: string;
+            /** User Email */
+            user_email: string;
+            /** User Id */
+            user_id: number;
+        };
+        /** FeedbackReportIn */
+        FeedbackReportIn: {
+            /**
+             * App
+             * @enum {string}
+             */
+            app: "contest" | "classroom";
+            /** Body */
+            body: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "suggestion" | "bug";
+            /**
+             * Page Url
+             * @default
+             */
+            page_url: string;
+            /** Screen Height */
+            screen_height?: number | null;
+            /** Screen Width */
+            screen_width?: number | null;
+            /**
+             * Screenshot Key
+             * @default
+             */
+            screenshot_key: string;
+            /**
+             * User Agent
+             * @default
+             */
+            user_agent: string;
+        };
+        /** FeedbackReportListOut */
+        FeedbackReportListOut: {
+            /** App */
+            app: string;
+            /** Body */
+            body: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Has Screenshot */
+            has_screenshot: boolean;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Status */
+            status: string;
+        };
+        /** FeedbackReportOut */
+        FeedbackReportOut: {
+            /** App */
+            app: string;
+            /** Body */
+            body: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Has Screenshot */
+            has_screenshot: boolean;
+            /** History */
+            history: components["schemas"]["FeedbackStatusChangeOut"][];
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Page Url */
+            page_url: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Resolution Note */
+            resolution_note: string;
+            /** Status */
+            status: string;
+        };
+        /** FeedbackStatusChangeOut */
+        FeedbackStatusChangeOut: {
+            /** Actor */
+            actor: string;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** From Status */
+            from_status: string;
+            /** Note */
+            note: string;
+            /** To Status */
+            to_status: string;
+        };
         /**
          * FreeContestCreateIn
          * @description 무료 공모전 초안 생성 입력 (#415, ADR-0048) — `ContestCreateIn`과 달리
@@ -8396,10 +8687,7 @@ export interface components {
         };
         /** OperatorErrorOut */
         OperatorErrorOut: {
-            /**
-             * Code
-             * @default error
-             */
+            /** Code */
             code: string;
             /** Detail */
             detail: string;
@@ -8862,6 +9150,11 @@ export interface components {
              * Format: date-time
              */
             requested_at: string;
+        };
+        /** PermissionOut */
+        PermissionOut: {
+            /** Granted */
+            granted: boolean;
         };
         /** PolicyChangeOut */
         PolicyChangeOut: {
@@ -10169,6 +10462,39 @@ export interface components {
             /** Label */
             label: string;
         };
+        /** ScreenshotDownloadOut */
+        ScreenshotDownloadOut: {
+            /** Download Url */
+            download_url: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** ScreenshotUploadUrlIn */
+        ScreenshotUploadUrlIn: {
+            /** Content Type */
+            content_type: string;
+        };
+        /** ScreenshotUploadUrlOut */
+        ScreenshotUploadUrlOut: {
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Fields */
+            fields: {
+                [key: string]: string;
+            };
+            /** Method */
+            method: string;
+            /** Object Key */
+            object_key: string;
+            /** Upload Url */
+            upload_url: string;
+        };
         /**
          * SellerContactSubmitIn
          * @description 토스 셀러 등록(businessType=INDIVIDUAL)의 individual 객체가 요구하는
@@ -10232,6 +10558,13 @@ export interface components {
             recipient_id: number;
             /** Title */
             title: string;
+        };
+        /** SetFeedbackPermissionIn */
+        SetFeedbackPermissionIn: {
+            /** Granted */
+            granted: boolean;
+            /** Reason */
+            reason: string;
         };
         /** SetHostingPermissionIn */
         SetHostingPermissionIn: {
@@ -15369,6 +15702,138 @@ export interface operations {
             };
         };
     };
+    feedback_api_get_own_permission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PermissionOut"];
+                };
+            };
+        };
+    };
+    feedback_api_list_own_reports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackReportListOut"][];
+                };
+            };
+        };
+    };
+    feedback_api_create_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackReportIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackReportOut"];
+                };
+            };
+        };
+    };
+    feedback_api_get_own_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackReportOut"];
+                };
+            };
+        };
+    };
+    feedback_api_get_own_screenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotDownloadOut"];
+                };
+            };
+        };
+    };
+    feedback_api_request_screenshot_upload_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScreenshotUploadUrlIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScreenshotUploadUrlOut"];
+                };
+            };
+        };
+    };
     config_api_health: {
         parameters: {
             query?: never;
@@ -16551,6 +17016,121 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorDeliverableTypeOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    feedback_operator_api_list_feedback_permission_accounts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackPermissionAccountOut"][];
+                };
+            };
+        };
+    };
+    feedback_operator_api_list_feedback_permission_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackPermissionChangeOut"][];
+                };
+            };
+        };
+    };
+    feedback_operator_api_search_feedback_permission_accounts: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackPermissionAccountOut"][];
+                };
+            };
+        };
+    };
+    feedback_operator_api_set_feedback_permission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetFeedbackPermissionIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackPermissionAccountOut"];
                 };
             };
             /** @description Not Found */

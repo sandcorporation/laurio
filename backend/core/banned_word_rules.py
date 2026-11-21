@@ -811,4 +811,36 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="OAuth 인가 요청의 식별자·주소·PKCE 값 — 사람이 짓는 문구가 아니다.",
     ),
+    # --- 건의·버그 제보(#1238) — 운영자와 제보자 본인만 읽는 비공개 글이고, 화면의 문구를
+    # 그대로 옮겨 적어야 할 때가 있다. 남에게 보이는 표면이 아니라 사칭·욕설 검사를 하지 않는다.
+    ("feedback", "FeedbackReportIn", "body"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="제보 내용 — 운영자와 제보자 본인만 읽고, 화면 문구를 그대로 인용해야 할 때가 있다(#1238).",
+    ),
+    ("feedback", "FeedbackReportIn", "page_url"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="브라우저가 채우는 화면 주소 — 사람이 짓는 문구가 아니다.",
+    ),
+    ("feedback", "FeedbackReportIn", "user_agent"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="브라우저가 채우는 User-Agent — 사람이 짓는 문구가 아니다.",
+    ),
+    ("feedback", "FeedbackReportIn", "screenshot_key"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="스토리지 키 — 식별자.",
+    ),
+    ("feedback", "ScreenshotUploadUrlIn", "content_type"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="MIME 타입 — 식별자.",
+    ),
+    ("feedback", "SetFeedbackPermissionIn", "reason"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="권한 변경 사유 — 운영자 표면(spec #474).",
+    ),
 }

@@ -880,6 +880,24 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 심사 비교·공개 프로필이 그 URL을 자료 목록에 이미 실어 보낸다 — 화면이 별도로 발급받지
 않는다.
 
+### 건의·버그 제보(#1237 스펙)
+
+운영자가 계정별로 켠 사용자만 제보한다. 공개 앱·강의실 앱 둘 다 BFF(`/api/backend/feedback/…`)로 부른다.
+
+| | |
+| --- | --- |
+| `GET /api/feedback/permission` | 내 제보 권한 — 권한이 없어도 200(`granted=false`) |
+| `POST /api/feedback/screenshot-upload-url` | 스크린샷 presigned 업로드(PRIVATE 버킷, png/jpeg/webp, 5MB) |
+| `POST /api/feedback/reports` | 제보 만들기 — 갈래(`suggestion`·`bug`), 내용(4,000자), 앱(`contest`·`classroom`), 화면 주소, User-Agent, 화면 크기, 스크린샷 키(없어도 됨) |
+| `GET /api/feedback/reports` · `{id}` · `{id}/screenshot` | 내 제보 목록·상세(처리 글·상태 이력)·스크린샷 짧은 발급 |
+| `GET /api/operator/feedback-permissions` · `search` · `changes` · `POST {user_id}` | 운영자 — 켠 계정·찾기·변경 이력·켜기/끄기(최고 운영자, 사유 필수) |
+
+**권한이 없으면 제보 표면 전부가 403** 이다(`permission` 만 예외). 남의 제보·스크린샷은 404.
+**하루 상한**: 계정당 최근 24시간에 20건, 넘으면 429. **스크린샷**: 올린 사람 접두어(`feedback-screenshot:<user_id>/`)
+가 아닌 키, 아직 올라오지 않은 키, 앞 바이트가 png/jpeg/webp 가 아닌 것, 5MB 를 넘는 것, 이미 다른 제보에 붙은 키는
+만들기에서 422. 열람 주소는 제보자 본인과 운영자에게만, 열 때마다 짧게 발급한다(목록엔 `has_screenshot` 만).
+상태는 접수(`received`) → 작업 중(`in_progress`) → 배포됨(`deployed`) | 반려(`declined`).
+
 ## 스스로 도는 일 — 스캔 31개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
@@ -1282,6 +1300,7 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `distributions` | Distribution · DistributionShare |
 | `ledger` | Account · JournalEntry · LedgerLine (전부 append-only) |
 | `notifications` | Notification · NotificationDispatch · NotificationOptIn |
+| `feedback`(공유층 — #1238) | FeedbackPermission · FeedbackPermissionChange · FeedbackReport · FeedbackStatusChange |
 | `policies` | PlatformPolicy · PolicyChange |
 | `core` | ClockOverride · ScheduledStateDemo |
 | `ops_metrics`(공유층 — #827) | LlmMinute · LlmQueueMinute · RequestMinute(#828)(1분 집계, 90일 보관) · AlertState(#830, 규칙마다 한 행 · 느린 경로는 경로마다 한 행, #971) |

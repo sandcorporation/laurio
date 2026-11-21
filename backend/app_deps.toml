@@ -50,6 +50,11 @@ group = "contest"
 uses = ["accounts", "appeals", "certificates", "contests", "core", "ledger", "notifications", "policies", "scoring", "submissions"]
 plugs = ["appeals", "contests", "core"]
 
+[feedback]
+group = "shared"
+uses = ["accounts", "core", "storage"]
+plugs = []
+
 [handovers]
 group = "contest"
 uses = ["accounts", "awards", "contests", "core", "ledger", "policies", "submissions"]

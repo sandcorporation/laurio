@@ -46,6 +46,7 @@ export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/submissions",
   "/api/payouts",
   "/api/notifications",
+  "/api/feedback",
   "/api/ledger",
   "/api/storage",
   // 받는 사람의 상장 줄(#1130) — 내 상장 목록·PDF·확인 페이지 닫기. 개최자 경로는 `/api/contests` 아래다.
