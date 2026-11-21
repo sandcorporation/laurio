@@ -10,9 +10,13 @@
 #   준비        backend 컨테이너 안에서 `/api/health?scope=ready` 가 200
 #   작업자      backend 의 `/api/health`(작업자 생존 신호 `HEALTH_REQUIRED_WORKERS` 까지, #949)가 200 이고,
 #               celery-worker 안에서 `celery inspect ping` 에 답하는 작업자가 있다
+#   필수 설정   서비스마다 그 컨테이너 안에서 `manage.py check_required_settings --service <이름>`(#1124) — 그 서비스가
+#               실제로 읽는 운영 필수 설정(운영 설정 DB 가 env 보다 앞서는 키는 그 규칙대로)이 비었는지. 표는
+#               `backend/ops_metrics/required_settings.py`, 서비스 목록은 아래 `REQUIRED_SETTINGS_SERVICES`(표와 같아야
+#               한다 — 시험이 본다). 키 이름과 「비어 있음」만 찍는다. 설정은 기다려도 채워지지 않으므로 다시 보지 않는다
 #   핵심 경로   `CODEMIT_POSTDEPLOY_URLS` 의 주소마다 2xx·3xx(바깥 길 — 프록시·공개 앱·API 를 지난다)
 #
-# 항목은 차례로, 하나의 한도(`CODEMIT_POSTDEPLOY_SECONDS`, 기본 60초) 안에서 통과할 때까지 다시 본다.
+# 항목은 차례로(필수 설정은 한 번만), 하나의 한도(`CODEMIT_POSTDEPLOY_SECONDS`, 기본 60초) 안에서 통과할 때까지 다시 본다.
 # 한도가 끝나면 남은 항목은 실패다.
 #
 # **스위치 `CODEMIT_POSTDEPLOY`(기본 off)** — off: 확인도 되돌리기도 없다(지금 배포 그대로) · check: 확인하고 실패면
@@ -69,6 +73,19 @@ check_workers() {
   # shellcheck disable=SC2086
   $COMPOSE exec -T celery-worker celery -A config inspect ping --timeout 3 >/dev/null 2>&1
 }
+REQUIRED_SETTINGS_SERVICES="backend celery-worker"
+check_settings() {
+  local service out ok=0
+  for service in $REQUIRED_SETTINGS_SERVICES; do
+    # shellcheck disable=SC2086
+    out=$($COMPOSE exec -T "$service" python manage.py check_required_settings --service "$service" 2>/dev/null) && continue
+    ok=1
+    # 키 이름 줄(`<서비스> <키>: 비어 있음`)만 옮긴다 — 다른 줄(예외 문구 등)은 버린다.
+    printf '%s\n' "$out" | grep ': 비어 있음$' | sed 's/^/  /'
+    printf '%s\n' "$out" | grep -q ': 비어 있음$' || echo "  $service: 필수 설정을 읽지 못했다"
+  done
+  return $ok
+}
 check_paths() {
   [ -n "$URLS" ] || { echo "  CODEMIT_POSTDEPLOY_URLS 가 비었다 — 핵심 경로를 볼 수 없다"; return 1; }
   local url
@@ -78,15 +95,21 @@ check_paths() {
 }
 
 failed=""
-for item in ready workers paths; do
+for item in ready workers settings paths; do
   case "$item" in
     ready) label="준비" ;;
     workers) label="작업자" ;;
+    settings) label="필수 설정" ;;
     paths) label="핵심 경로" ;;
   esac
   while :; do
     if "check_$item"; then
       echo "확인 $label: 통과 ($((SECONDS - start))초)"
+      break
+    fi
+    if [ "$item" = settings ]; then
+      echo "확인 $label: 실패 — 빈 키를 채우고 그 서비스를 다시 띄운다"
+      failed="$failed $label"
       break
     fi
     if [ $((SECONDS + INTERVAL)) -gt "$deadline" ]; then

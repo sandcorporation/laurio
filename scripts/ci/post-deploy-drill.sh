@@ -3,6 +3,7 @@
 # (`post-deploy-check.sh`, 진짜)이 그것을 잡은 뒤 직전 이미지로 되돌려 다시 통과하는 것을 본다. 운영·원격에 닿지 않는다.
 #
 #   bash scripts/ci/post-deploy-drill.sh        # 띄우고 → 통과 → 깨진 이미지 → 실패 → 되돌림 → 통과 → 내린다
+#                                                 → 문의 이메일을 비움 → 필수 설정 실패 → 채움 → 통과(#1124)
 #   CODEMIT_DRILL_KEEP=1 bash …                  # 끝나도 스택을 남긴다
 #
 # 이 워크트리의 dev 스택과 겹치지 않게 프로젝트 `codemit-drill-<오프셋>` 을 따로 띄운다 — 포트는 dev-env.sh 의 칸
@@ -30,9 +31,13 @@ services:
   backend:
     image: ${DRILL_BACKEND_IMAGE}
     pull_policy: never
+    environment: &drill-env
+      CODEMIT_PUBLIC_SUPPORT_EMAIL: ${DRILL_SUPPORT_EMAIL-dev@example.test}
+      OPS_ALERT_DISCORD_WEBHOOK_URL: http://127.0.0.1:9/drill
   celery-worker:
     image: ${DRILL_BACKEND_IMAGE}
     pull_policy: never
+    environment: *drill-env
 YAML
 compose=(docker compose -f docker/compose.dev.yaml -f "$work/override.yaml" --profile celery)
 
@@ -71,4 +76,18 @@ fi
 echo "== 확인 실패 — 직전 이미지로 되돌린다"
 swap "$good"
 check 60
-echo "== 시연 끝: 깨진 이미지를 잡고, 되돌린 뒤 다시 통과했다"
+
+# 필수 설정(#1124) — dev 의 경보 주소는 비어 있어 드릴만 닿지 않는 주소를 채운다. 알림·채점은 dev 에서 흉내라 그 키는 필요 없다.
+echo "== 필수 설정: backend·celery-worker 의 문의 이메일(SUPPORT_EMAIL)을 비운다"
+DRILL_SUPPORT_EMAIL="" swap "$good"
+if out=$(check 60); then
+  echo "$out"
+  echo "!! 빈 필수 설정을 확인이 잡지 못했다"
+  exit 1
+fi
+echo "$out"
+echo "$out" | grep -q 'SUPPORT_EMAIL: 비어 있음' || { echo "!! 빈 키 이름이 찍히지 않았다"; exit 1; }
+echo "== 확인 실패 — 문의 이메일을 채워 다시 띄운다"
+swap "$good"
+check 60
+echo "== 시연 끝: 깨진 이미지와 빈 필수 설정을 잡고, 되돌린 뒤 다시 통과했다"
