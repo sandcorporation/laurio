@@ -48,6 +48,8 @@ export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/notifications",
   "/api/ledger",
   "/api/storage",
+  // 받는 사람의 상장 줄(#1130) — 내 상장 목록·PDF·확인 페이지 닫기. 개최자 경로는 `/api/contests` 아래다.
+  "/api/certificates",
 ];
 
 // 검사 로직 자체(문자열 접두어 비교)는 공유 패키지 것을 그대로 쓴다(ADR-0021,

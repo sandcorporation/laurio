@@ -77,6 +77,17 @@ export function describeNotification(
   }
 }
 
+/** 알림에서 이어지는 화면 — 상장 알림(#1130)은 받는 사람의 상장 줄이 있는 내 참가 현황으로 간다. */
+export function notificationHref(notification: Pick<NotificationOut, "notification_type">): string | null {
+  switch (notification.notification_type) {
+    case "certificate_issued":
+    case "certificate_reissued":
+      return "/console/participation";
+    default:
+      return null;
+  }
+}
+
 export const STATUS_LABELS: Record<string, string> = {
   queued: "발송 대기",
   deferred: "야간 연기 — 다음 날 오전 8시 이후 발송",

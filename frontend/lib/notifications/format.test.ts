@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { STATUS_LABELS, describeNotification } from "./format";
+import { STATUS_LABELS, describeNotification, notificationHref } from "./format";
 import type { NotificationOut } from "./types";
 
 function row(overrides: Partial<NotificationOut>): NotificationOut {
@@ -95,3 +95,12 @@ describe("STATUS_LABELS", () => {
     expect(STATUS_LABELS.not_dispatched).toBe("앱 안에서만 전달됨");
   });
 });
+
+describe("알림에서 이어지는 화면(#1130)", () => {
+  it("상장 알림은 내 참가 현황으로, 나머지는 없다", () => {
+    expect(notificationHref({ notification_type: "certificate_issued" })).toBe("/console/participation");
+    expect(notificationHref({ notification_type: "certificate_reissued" })).toBe("/console/participation");
+    expect(notificationHref({ notification_type: "contest_updated" })).toBeNull();
+  });
+});
+

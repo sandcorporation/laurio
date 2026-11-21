@@ -35,6 +35,7 @@ import {
   DISPATCH_STATUS_LABELS,
   STATUS_LABELS,
   describeNotification,
+  notificationHref,
   formatDateTime,
 } from "@/lib/notifications/format";
 import { broadcastNotificationsRead, subscribeToNotificationsRead } from "@/lib/notifications/read-bus";
@@ -247,6 +248,8 @@ function NotificationRow({
     }
   }
 
+  const href = notificationHref(notification);
+
   return (
     <li
       data-testid={`notification-row-${notification.id}`}
@@ -257,6 +260,15 @@ function NotificationRow({
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm leading-relaxed">
           {describeNotification(notification, { supportEmail: supportEmail() })}
+          {href && (
+            <Link
+              href={href}
+              className="ml-2 text-xs text-ink/60 underline"
+              data-testid={`notification-link-${notification.id}`}
+            >
+              상장 보기
+            </Link>
+          )}
           {hasBody && (
             <button
               type="button"

@@ -12,8 +12,15 @@
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015). 미들웨어가 쿠키 없는 요청을
 // 렌더링 전에 /login 으로 돌린다.
 import Link from "next/link";
+import { useState } from "react";
 
-import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import { Badge, Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import {
+  certificatesBySubmission,
+  describeCertificateLine,
+  type MyCertificate,
+} from "@/lib/certificates/recipient";
+import { certificatePdfPath, setCertificateHidden, useMyCertificates } from "@/lib/certificates/use-my-certificates";
 import { useSession } from "@/lib/auth/use-session";
 import { PARTICIPATION_EMPTY_MESSAGE } from "@/lib/participation/empty-state";
 import {
@@ -25,6 +32,11 @@ import {
 export default function MyParticipationPage() {
   const session = useSession();
   const state = useMyParticipation();
+  // 상장(#1130)은 따로 읽는다 — 실패해도 참가 현황은 그대로 보인다.
+  const certificates = useMyCertificates();
+  const bySubmission = certificatesBySubmission(
+    certificates.state.status === "ready" ? certificates.state.data : [],
+  );
 
   // **순서가 중요하다**: 세션이 죽었는지를 로딩 게이트보다 **먼저** 본다.
   // 반대로 두면 세션이 만료됐을 때 조회가 시작되지 않아 영원히 "불러오는 중"
@@ -60,7 +72,12 @@ export default function MyParticipationPage() {
         <>
           <ul className="flex flex-col gap-3" data-testid="participation-list">
             {state.rows.map((row) => (
-              <ParticipationCard key={row.submission_id} row={row} />
+              <ParticipationCard
+                key={row.submission_id}
+                row={row}
+                certificates={bySubmission.get(row.submission_id) ?? []}
+                onCertificateChanged={certificates.reload}
+              />
             ))}
           </ul>
 
@@ -87,7 +104,15 @@ export default function MyParticipationPage() {
   );
 }
 
-function ParticipationCard({ row }: { row: ParticipationRow }) {
+function ParticipationCard({
+  row,
+  certificates,
+  onCertificateChanged,
+}: {
+  row: ParticipationRow;
+  certificates: MyCertificate[];
+  onCertificateChanged: () => void;
+}) {
   const label = NEXT_ACTION_LABELS[row.next_action];
 
   return (
@@ -188,7 +213,76 @@ function ParticipationCard({ row }: { row: ParticipationRow }) {
           인수 자료
         </Link>
       ) : null}
+
+      {certificates.map((certificate) => (
+        <CertificateRow key={certificate.id} certificate={certificate} onChanged={onCertificateChanged} />
+      ))}
       </Card>
     </li>
+  );
+}
+
+/** 상장 줄(#1130, 스펙 #1071 결정 5) — 상 이름·번호·상태, PDF 받기, 확인 페이지 닫기/열기. */
+function CertificateRow({ certificate, onChanged }: { certificate: MyCertificate; onChanged: () => void }) {
+  const line = describeCertificateLine(certificate);
+  const action = line.visibilityAction;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const testid = `certificate-row-${certificate.id}`;
+
+  async function toggle(hidden: boolean) {
+    setBusy(true);
+    setError(null);
+    const result = await setCertificateHidden(certificate.id, hidden);
+    setBusy(false);
+    if (result.ok) onChanged();
+    else setError(result.message);
+  }
+
+  return (
+    <div
+      className="mt-3 flex flex-col gap-2 border-t border-rule pt-3"
+      data-testid={testid}
+      data-certificate-state={certificate.state}
+      data-certificate-hidden={certificate.hidden}
+    >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-semibold">상장 · {certificate.award_name}</span>
+        <span className="font-mono text-sm text-ink/60">{certificate.number}</span>
+        <Badge tone={line.tone}>
+          <span data-testid={`${testid}-state`}>{line.stateLabel}</span>
+        </Badge>
+      </div>
+      {line.canDownload || action ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {line.canDownload ? (
+            <a
+              className={buttonClass("secondary", "sm")}
+              href={certificatePdfPath(certificate.id)}
+              download={`certificate-${certificate.number}.pdf`}
+              data-testid={`${testid}-pdf`}
+            >
+              PDF 받기
+            </a>
+          ) : null}
+          {action ? (
+            <button
+              type="button"
+              className={buttonClass("secondary", "sm")}
+              disabled={busy}
+              onClick={() => toggle(action.hidden)}
+              data-testid={`${testid}-visibility`}
+            >
+              {action.label}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {error ? (
+        <p className="text-sm text-error" data-testid={`${testid}-error`}>
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

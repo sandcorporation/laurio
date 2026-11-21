@@ -51,6 +51,8 @@ class CertificateOut(Schema):
     cancelled_at: datetime | None
     replaced_by_id: int | None
     verify_url: str
+    #: 받는 사람이 탈퇴하면(#1130) 이름과 PDF 를 파기한다 — 그 상장은 거짓이 되고 받기·다시 발급이 없다.
+    pdf_available: bool = True
 
 
 class CertificateRecipientOut(Schema):
@@ -95,3 +97,21 @@ class CertificateVerifyOut(Schema):
     issued_on: date | None = None
     cancelled_on: date | None = None
     reissued: bool = False
+
+
+class MyCertificateOut(Schema):
+    """받는 사람의 상장 줄(#1130) — 내 참가 현황의 제출 행에 붙는다."""
+
+    id: int
+    submission_id: int
+    contest_id: int
+    contest_title: str
+    number: str
+    award_name: str
+    state: Literal["valid", "cancelled"]
+    hidden: bool
+    verify_url: str
+
+
+class CertificateVisibilityIn(Schema):
+    hidden: bool
