@@ -13,6 +13,8 @@ import pytest
 from django.test import override_settings
 from django.utils import timezone
 
+from certificates.models import Certificate
+from contests.models import ContestSubmission
 from distributions.models import Distribution, DistributionShare
 from scoring.models import Score, ScoreCorrection, ScoringAttempt
 from scoring.services import PLATFORM_FAILURE_MODEL_VERSION, SCORING_FAILURE_GRACE, SCORING_FAILURE_LIMIT
@@ -20,7 +22,6 @@ from submissions.models import SubmissionAsset
 
 from payouts.tests.test_distributions import (  # noqa: F401 - 픽스처(category·landing_type·_default_cutline)도 들여온다
     _advance_to_distribution_due,
-    _auth_header,
     _close_contest,
     _default_cutline,
     _freeze,
@@ -296,27 +297,21 @@ def test_a_correction_reports_the_certificates_issued_to_that_submission_and_kee
     """정정은 상장을 취소하지 않는다 — 발급된 수를 응답에 실어 운영자가 개최자에게 알릴 근거를 준다."""
 
     seeded = _contest_with_platform_failure(world, uid="corr-cert")
-    issued = world.post(
-        f"/api/contests/{seeded['contest_id']}/certificates",
-        data={
-            "items": [
-                {
-                    "submission_id": seeded["failed_id"],
-                    "text": {
-                        "award_name": "최우수상",
-                        "recipient_name": "김코드밋",
-                        "body": "위 사람은 뛰어난 완성도로 우수한 성과를 거두었기에 이 상장을 수여합니다.",
-                        "giver_name": "홍길동",
-                        "giver_title": "심사위원장",
-                        "award_date": timezone.localtime(seeded["deadline"]).date().isoformat(),
-                    },
-                }
-            ]
-        },
-        content_type="application/json",
-        **_auth_header(seeded["sponsor"]["access"]),
+    # 발급 API 는 PDF 를 그려 CPU 한도를 넘긴다 — 셈만 보면 되니 행을 바로 만든다(발급 자체는 상장 시험 몫).
+    submission = ContestSubmission.objects.select_related("contest__sponsor").get(pk=seeded["failed_id"])
+    Certificate.objects.create(
+        contest=submission.contest,
+        submission=submission,
+        recipient=submission.user,
+        number="CORR-CERT-1",
+        token="corr-cert-token",
+        award_name="최우수상",
+        giver_name="홍길동",
+        award_date=timezone.localtime(seeded["deadline"]).date(),
+        pdf_object_key="certificates/corr-cert.pdf",
+        issued_at=timezone.now(),
+        issued_by=submission.contest.sponsor.user,
     )
-    assert issued.status_code == 201, issued.content
 
     operator = _operator_client("op-corr-cert")
     body = _request(operator, seeded["contest_id"]).json()
