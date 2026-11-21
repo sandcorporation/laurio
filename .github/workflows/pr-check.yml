@@ -133,6 +133,7 @@ jobs:
           python3 scripts/test_playwright_image.py
           python3 scripts/test_pytest_plan.py
           bash scripts/ci/promote_test.sh
+          bash scripts/ci/e2e_stale_test.sh
 
   checks:
     name: checks ${{ matrix.name }}
