@@ -21,8 +21,10 @@ from django.conf import settings
 REPO_ROOT = settings.BASE_DIR.parent
 
 FAKE_DEPLOY = r"""#!/bin/sh
+# git 을 띄우지 않고 HEAD 를 읽는다 — 가짜는 단계마다 불려서 git 프로세스가 시험 CPU 한도(1초)의 대부분이었다
+head() { h=$(cat .git/HEAD); case "$h" in "ref: "*) h=$(cat ".git/${h#ref: }") ;; esac; echo "$h"; }
 cmd="$2"; arg="${3:-}"
-head=$(git rev-parse HEAD)
+head=$(head)
 echo "${cmd}${arg:+ $arg}@$(echo "$head" | cut -c1-4)" >> "$FAKE_CALLS"
 if [ "$head" = "${FAKE_BAD:-}" ] && [ "${FAKE_FAIL:-}" = "${cmd}${arg:+ $arg}" ]; then exit 1; fi
 case "$cmd" in
@@ -40,15 +42,24 @@ exit 0
 
 # 실패 판정은 `docker`·`curl` 하위 명령의 이름으로 — ready / health / ping / settings / curl
 FAKE_TOOL = r"""#!/bin/sh
+# git 을 띄우지 않고 HEAD 를 읽는다 — 가짜는 단계마다 불려서 git 프로세스가 시험 CPU 한도(1초)의 대부분이었다
+head() { h=$(cat .git/HEAD); case "$h" in "ref: "*) h=$(cat ".git/${h#ref: }") ;; esac; echo "$h"; }
+h=$(head)
 case "$*" in
+  *"--config -"*)
+    # 운영 경보(ops-alert.sh) — 설정(표준 입력, 주소)과 명령줄을 따로 남긴다
+    { echo "stdin: $(cat)"; echo "argv: $*"; } >> "$FAKE_ALERTS"
+    echo "$TOOL alert@$(echo "$h" | cut -c1-4)" >> "$FAKE_CALLS"
+    [ -n "${FAKE_ALERT_FAIL:-}" ] && { printf 000; exit 7; }
+    printf 204; exit 0 ;;
   *scope=ready*) step=ready ;;
   *api/health*) step=health ;;
   *"inspect ping"*) step=ping ;;
   *check_required_settings*) step=settings ;;
   *) step="$TOOL" ;;
 esac
-echo "$TOOL $step@$(git rev-parse HEAD | cut -c1-4)" >> "$FAKE_CALLS"
-if [ "$(git rev-parse HEAD)" = "${FAKE_BAD:-}" ] && [ "${FAKE_FAIL:-}" = "$step" ]; then
+echo "$TOOL $step@$(echo "$h" | cut -c1-4)" >> "$FAKE_CALLS"
+if [ "$h" = "${FAKE_BAD:-}" ] && [ "${FAKE_FAIL:-}" = "$step" ]; then
   [ "$step" = settings ] && echo "celery-worker SUPPORT_EMAIL: 비어 있음" && echo "Traceback: 이 줄은 옮기지 않는다"
   exit 1
 fi
@@ -74,7 +85,7 @@ def prod(tmp_path):
     repo = tmp_path / "repo"
     (repo / "scripts" / "ci").mkdir(parents=True)
     (repo / "docker").mkdir()
-    for name in ("deploy-prod.sh", "post-deploy-check.sh", "post-deploy-rollback.sh"):
+    for name in ("deploy-prod.sh", "post-deploy-check.sh", "post-deploy-rollback.sh", "ops-alert.sh"):
         shutil.copy(REPO_ROOT / "scripts" / "ci" / name, repo / "scripts" / "ci" / name)
     (repo / "scripts" / "ci" / "glitchtip-resolve.sh").write_text(
         '#!/bin/sh\necho "glitchtip@$(git rev-parse HEAD | cut -c1-4)" >> "$FAKE_CALLS"\n', encoding="utf-8",
@@ -102,6 +113,7 @@ def prod(tmp_path):
     } | {
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "FAKE_CALLS": str(calls),
+        "FAKE_ALERTS": str(tmp_path / "alerts"),
         "CODEMIT_POSTDEPLOY_INTERVAL": "0",
         "CODEMIT_POSTDEPLOY_SECONDS": "0",
     }
@@ -265,6 +277,82 @@ def test_rollback_failure_is_reported(prod):
     assert result.returncode == 2
     assert lines[-1] == f"verify@{a[:4]}"
     assert "자동 되돌리기 실패(verify)" in result.stdout
+
+
+# ------------------------------------------------------------ 운영 경보(#1166)
+
+
+HOOK = "https://discord.invalid/api/webhooks/1/secret-token"
+ALERT_ENV = ROLLBACK_ENV + f"OPS_ALERT_DISCORD_WEBHOOK_URL={HOOK}\n"
+
+
+def _alerts(repo: Path) -> list[str]:
+    path = repo.parent / "alerts"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+
+
+def test_rollback_sends_one_alert_line_with_both_shas_and_the_stage(prod):
+    repo, a, b, run = prod
+    result, lines = run(env_file=ALERT_ENV, FAKE_BAD=b, FAKE_FAIL="health backend")
+    assert result.returncode == 2
+    assert lines[-1] == f"curl alert@{a[:4]}"
+    stdin, argv = _alerts(repo)
+    assert stdin == f'stdin: url = "{HOOK}"'
+    assert HOOK not in argv and HOOK not in result.stdout + result.stderr
+    assert f"{b[:12]} → {a[:12]}" in argv
+    assert "실패 단계: health backend" in argv and "되돌렸다, 확인 통과" in argv
+    assert '{"content":"' in argv
+
+
+def test_failed_rollback_alerts_with_the_step_that_broke(prod):
+    # 되돌리기 스크립트만 — 되돌릴 커밋을 체크아웃하지 못하면 그 단계를 경보에 적는다(배포 전체를 돌리지 않는다: CPU 한도)
+    repo, _, b, _ = prod
+    (repo / "docker" / ".env.prod").write_text(ALERT_ENV, encoding="utf-8")
+    missing = "0" * 40
+    result = subprocess.run(
+        ["bash", "scripts/ci/post-deploy-rollback.sh", missing, b, "scripts/ci/post-deploy-check.sh", "verify"],
+        cwd=repo, capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{repo.parent / 'bin'}{os.pathsep}{os.environ['PATH']}",
+             "FAKE_CALLS": str(repo.parent / "calls"), "FAKE_ALERTS": str(repo.parent / "alerts")},
+    )
+    assert result.returncode == 2
+    line = _alerts(repo)[-1]
+    assert f"{b[:12]} → {missing[:12]}" in line
+    assert "실패 단계: verify" in line and "되돌리기 실패(체크아웃)" in line
+
+
+def test_alert_failure_does_not_change_the_rollback(prod):
+    repo, a, b, run = prod
+    result, lines = run(env_file=ALERT_ENV, FAKE_BAD=b, FAKE_FAIL="health backend", FAKE_ALERT_FAIL="1")
+    assert result.returncode == 2
+    assert "자동 되돌리기 끝" in result.stdout
+    assert "경보: 보내지 못했다" in result.stdout
+    assert _git(repo, "rev-parse", "HEAD") == a
+    assert _marker(repo) == a
+
+
+def test_no_alert_address_skips_quietly(prod):
+    repo, a, b, run = prod
+    result, lines = run(env_file=ROLLBACK_ENV, FAKE_BAD=b, FAKE_FAIL="health backend")
+    assert result.returncode == 2
+    assert "OPS_ALERT_DISCORD_WEBHOOK_URL 이 비어 있다" in result.stdout
+    assert "curl alert" not in _steps(lines)
+
+
+def test_rollback_that_cannot_start_still_alerts(prod):
+    repo, a, b, run = prod
+    (repo / ".jenkins-prod-deployed").write_text(b + "\n", encoding="utf-8")
+    result, _ = run(deploy=a, env_file=ALERT_ENV, FAKE_BAD=a, FAKE_FAIL="health backend")
+    assert result.returncode == 2
+    assert "되돌리기 못 함" in _alerts(repo)[1] and "되돌릴 곳 없음" in _alerts(repo)[1]
+
+
+def test_check_mode_never_alerts(prod):
+    repo, a, b, run = prod
+    env = ALERT_ENV.replace("CODEMIT_POSTDEPLOY=rollback", "CODEMIT_POSTDEPLOY=check")
+    result, _ = run(env_file=env, FAKE_BAD=b, FAKE_FAIL="health backend")
+    assert result.returncode == 2
+    assert _alerts(repo) == []
 
 
 def test_manual_rollback_sha_is_not_rolled_back_again(prod):

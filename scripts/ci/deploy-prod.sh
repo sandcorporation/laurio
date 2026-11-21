@@ -17,6 +17,7 @@
 #
 # 종료 코드는 라이브러리 약속(README 「자동 롤백」)을 따른다: 0 성공 · 1 교체 전 실패(옛 서비스 그대로) ·
 # 2 교체 뒤 실패(되돌리지 않는다 — Jenkinsfile 의 `autoRollback: false`). `SANDCORP_ROLLBACK=1` 로 불리면 거절한다.
+# 되돌리기(성공·실패)와 「되돌릴 곳 없음」은 운영 경보 채널로 한 줄을 보낸다(`ops-alert.sh`, #1166).
 #
 # **배포 뒤 확인·자동 되돌리기(#1092)는 스위치 `CODEMIT_POSTDEPLOY` 뒤에 있다 — 기본 off 는 위 순서 그대로다.**
 # check 면 reindex 뒤 `post-deploy-check.sh`(1분 한도)를 돌려 실패를 2 로 끝내고, rollback 이면 교체 뒤 실패(up 부터
@@ -62,18 +63,21 @@ fi
 
 # 교체 뒤 실패 — off·check 는 지금처럼 2 로 끝내고, rollback 이면 직전 배포 표식으로 되돌린다. 뒤로 가는 배포
 # (ROLLBACK_SHA — 표식이 이 커밋보다 새것)는 되돌리지 않는다: 표식이 바로 피하려던 커밋이다.
+# 되돌리지 못하고 끝날 때도 운영 경보 채널로 한 줄(#1166) — 경보는 실패해도 넘어간다.
 after_replace_failed() {
   [ "$postdeploy" = rollback ] || exit 2
   echo "교체 뒤 실패($1) — 직전 배포 표식으로 되돌린다"
+  local stop="🔥 [Codemit] 배포 자동 되돌리기 못 함 — ${sha:0:12} · 실패 단계: $1 · 사람이 본다"
   if [ -z "$previous_deployed" ] || "${GIT[@]}" merge-base --is-ancestor "$sha" "$previous_deployed" 2>/dev/null; then
     echo "되돌릴 곳이 없다(배포 표식 ${previous_deployed:-없음}) — 되돌리지 않는다"
+    bash scripts/ci/ops-alert.sh "$stop (되돌릴 곳 없음)" docker/.env.prod || true
     exit 2
   fi
-  run rollback-plan || exit 2
+  run rollback-plan || { bash scripts/ci/ops-alert.sh "$stop (rollback-plan 실패)" docker/.env.prod || true; exit 2; }
   local tmp
   tmp=$(mktemp -d) || exit 2
-  cp scripts/ci/post-deploy-rollback.sh scripts/ci/post-deploy-check.sh "$tmp/" || exit 2
-  exec bash "$tmp/post-deploy-rollback.sh" "$previous_deployed" "$sha" "$tmp/post-deploy-check.sh"
+  cp scripts/ci/post-deploy-rollback.sh scripts/ci/post-deploy-check.sh scripts/ci/ops-alert.sh "$tmp/" || exit 2
+  exec bash "$tmp/post-deploy-rollback.sh" "$previous_deployed" "$sha" "$tmp/post-deploy-check.sh" "$1"
 }
 
 run preflight || exit 1

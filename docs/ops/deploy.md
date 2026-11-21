@@ -195,7 +195,10 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    켰는데 비어 있으면 확인이 실패한다. 되돌리기는 `deploy.sh prod rollback-plan` 이 실패한 계획을 표식 커밋으로 고치고
    (같은 서비스, 겹쳐 바꾸기), `post-deploy-rollback.sh`(임시 사본으로 돈다)가 그 커밋을 체크아웃해 `image`·`up`·`verify`·
    `health`·`reindex`·확인을 다시 돈다. 스키마는 되돌리지 않는다 — 직전 판 코드가 새 스키마에서 도는 것은
-   [마이그레이션 호환 검사](migrations.md)가 지킨다. 표식은 옮기지 않고, 잡은 빨갛게 끝난다(그것이 알림이다). 뒤로 가는 배포
+   [마이그레이션 호환 검사](migrations.md)가 지킨다. 표식은 옮기지 않고 잡은 빨갛게 끝나며, 운영 경보 채널(backend 운영 경보와
+   같은 `OPS_ALERT_DISCORD_WEBHOOK_URL`)로 한 줄이 간다 — `🔥 [Codemit] 배포 자동 되돌리기 — <실패 sha> → <되돌린 sha> · 실패 단계: <단계> ·
+   <결과>`(되돌리기 실패·되돌릴 곳 없음도). 호스트에서 curl 로 보낸다(`scripts/ci/ops-alert.sh` — 되돌리기가 실패하면 알릴 대상이 바로
+   backend 다). 주소는 `.env.prod` 에만 있고 명령줄·로그에 남지 않으며, 보내기 실패는 되돌리기·끝 코드를 바꾸지 않는다(#1166). 뒤로 가는 배포
    (`ROLLBACK_SHA`)는 되돌리지 않는다. 직전 커밋의 이미지는 ghcr 에 최근 24개가 남아 있어 받을 수 있다(`ghcr_prune.py`).
    **켜는 것은 대장이 oracle `.env.prod` 에서** — `check` 로 며칠 보고 `rollback` 으로 올린다(날짜 조건은 없다, 대표 지시 2026-11-21).
 
@@ -203,6 +206,30 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    이미지로 바꿔 끼우면 확인이 실패하고, 직전 이미지로 되돌리면 다시 통과한다. 이어서 문의 이메일을 비워 띄우면 필수 설정이
    `SUPPORT_EMAIL: 비어 있음` 으로 실패하고, 채워 다시 띄우면 통과한다. 되돌리기의 순서는
    `backend/tests/test_deploy_postdeploy.py` 가 본다(꺼진 상태의 순서가 스위치를 넣기 전과 같다는 것도).
+
+   **리허설(#1166, 2026-11-21)**: `bash scripts/ci/post-deploy-rehearsal.sh` — `deploy-prod.sh` 를 **고치지 않고** 개발 머신의
+   실제 docker 로 A(지금 HEAD, 처음 배포) → B(A + `ops_metrics` 열 추가 마이그레이션 + `config/wsgi.py` 가 import 때 죽는 진입점)를
+   배포한다. 운영과 다른 것은 환경 값뿐이다: 로컬 레지스트리(`CODEMIT_IMAGE_REPO`, x86 이미지에 `-arm64` 태그), 세 앱·agent-grader 는
+   busybox 대역, preflight 의 ghcr 로그인 검사를 넘기는 `DOCKER_CONFIG`(빈 `ghcr.io` 항목), 임시 클론의 `.env.prod`(어댑터는 예시
+   파일의 실물 경로 — 운영 설정이 fake 를 거부한다 — 키·주소는 닿지 않는 값, `COMPOSE_PROJECT_NAME=codemit-rehearsal-<오프셋>`),
+   가짜 웹훅, `image prune`·`builder prune` 만 건너뛰는 `docker` 감싸개(deploy.sh 의 prune 은 호스트 전역이다).
+   **스크립트를 바꿔야 돌릴 수 있는 곳은 없었다.**
+
+   | 시각(UTC) | 단계 |
+   | --- | --- |
+   | 07:59:48 → 08:01:00 | A 처음 배포 — 마이그레이션 전부, 확인 통과(11초), 종료 0, 표식 A |
+   | 08:01:03 | B 배포 — plan: backend 만, 마이그레이션 `ops_metrics.9999` |
+   | 08:01:15 | 마이그레이션 적용(새 이미지의 일회성 컨테이너 — `manage.py` 는 wsgi 를 읽지 않아 성공) |
+   | 08:01:16 → 08:05:21 | backend 겹쳐 바꾸기 — 새 것이 `rehearsal: 일부러 깨진 진입점` 으로 죽고, 옛 A 컨테이너가 그대로 받는다 |
+   | 08:05:21 | `교체 뒤 실패(up)` → `rollback-plan`(PLANNED_COMMIT=A) |
+   | 08:05:22 → 08:06:28 | `post-deploy-rollback.sh`: A 체크아웃 → image backend → up(적용할 마이그레이션 없음, A 를 다시 겹쳐 바꾸기) → verify·health 셋 |
+   | 08:06:28 → 08:06:41 | reindex → 배포 뒤 확인 통과(10초) → 종료 2, HEAD·표식 A |
+   | 08:06:41 | 경보 한 줄: `🔥 [Codemit] 배포 자동 되돌리기 — 10822af472fc → fd3adaf9be2e · 실패 단계: up · 되돌렸다, 확인 통과` |
+
+   B 의 열(`rehearsal_note`)은 남아 있고(스키마는 되돌리지 않는다), A 이미지가 그 스키마 위에서 확인을 다시 통과했다(11초).
+   걸린 시간: 실패 판정까지 258초, 되돌리기 80초. 판정이 긴 것은 겹쳐 바꾸기의 기다림이다 — 문구는 「150초」지만 시도마다
+   `exec` 가 몇 초씩 더 걸려 245초를 기다렸다. 그동안 옛 컨테이너가 받으므로 끊김은 없다. 리허설의 첫 두 판은 가짜 값이
+   운영 설정 검사(`DJANGO_SECRET_KEY` 길이, 실물 어댑터의 키)에 걸려 A 에서 멈췄고, 그때는 「되돌릴 곳 없음」 경보가 갔다.
 
    **prod 를 멈추려면 Jenkins 에서 `codemit/deploy` 를 「Disable」한다.**
 
