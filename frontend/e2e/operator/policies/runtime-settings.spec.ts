@@ -82,4 +82,35 @@ test.describe("운영 설정(#922)", () => {
     await expect(page.getByTestId(`${MODEL_ROW}-input`)).toHaveCount(0);
     await expect(page.getByTestId(`${ROW}-probe`)).toHaveCount(0);
   });
+
+  test("@exclusive 스위치는 바뀐 날짜를 보이고, 「이대로 둔다」는 새로고침 뒤에도 남고, 일반 등급에는 버튼이 없다(#1221)", async ({ page }) => {
+    const su = await seedE2eOperator({ username: `e2e-op-switch-su-${Date.now()}`, superuser: true });
+    await establishOperatorSession(page, su.username, E2E_OPERATOR_PASSWORD, "/settings");
+    const row = "runtime-setting-CONTEST_AI_SCORING";
+    await expect(page.getByTestId(row)).toBeVisible();
+
+    await page.getByTestId(`${row}-input`).fill("on");
+    await page.getByTestId(`${row}-save`).click();
+    await expect(page.getByTestId(`${row}-value`)).toHaveText("on");
+    await expect(page.getByTestId(`${row}-changed`)).toContainText("바뀐 날짜");
+    await expect(page.getByTestId(`${row}-confirm`)).toHaveText("이대로 둔다");
+
+    await page.getByTestId(`${row}-confirm`).click();
+    await expect(page.getByTestId(`${row}-confirm`)).toHaveCount(0);
+    await expect(page.getByTestId(`${row}-confirmed`)).toContainText(su.username);
+    await page.reload();
+    await expect(page.getByTestId(`${row}-confirmed`)).toContainText(su.username);
+    await expect(page.getByTestId("runtime-settings-history")).toContainText("이대로 둔다 · on");
+
+    // 일반 등급은 날짜와 확인 기록은 보되 버튼은 없다.
+    const ordinary = await seedE2eOperator({ username: `e2e-op-switch-plain-${Date.now()}` });
+    await establishOperatorSession(page, ordinary.username, E2E_OPERATOR_PASSWORD, "/settings");
+    await expect(page.getByTestId(`${row}-changed`)).toBeVisible();
+    await expect(page.getByTestId(`${row}-confirm`)).toHaveCount(0);
+
+    // 정리 — 지워서 다음 시험이 env 출처에서 시작하게 한다.
+    await establishOperatorSession(page, su.username, E2E_OPERATOR_PASSWORD, "/settings");
+    await page.getByTestId(`${row}-clear`).click();
+    await expect(page.getByTestId(`${row}-source`)).not.toHaveText("DB");
+  });
 });

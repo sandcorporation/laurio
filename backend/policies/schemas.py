@@ -107,6 +107,12 @@ class RuntimeSettingOut(Schema):
     updated_by: str | None
     # `choice` 가 받는 값(#994). 그 밖의 kind 는 null.
     choices: list[str] | None = None
+    # 스위치만(#1221) — 마지막 변경(저장·지우기) 시각, 그 뒤의 「이대로 둔다」(시각·확인한 운영자), 경보 대상이라 확인이
+    # 필요한가. 스위치가 아니면 null·false.
+    changed_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    confirmed_by: str | None = None
+    needs_confirm: bool = False
 
 
 class AccountRefusalOut(Schema):

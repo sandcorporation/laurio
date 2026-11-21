@@ -12,13 +12,14 @@
 #   main_only 수동 실행(workflow_dispatch)의 ref 가 main 이 아니면 실패 — 아래 잡이 모두 이 잡 success 를 기다린다(#1018)
 #   promote needs main_only·image — image 초록일 때만. production 을 이 sha 로 fast-forward 만(scripts/ci/promote.sh ff).
 #           production 이 이미 더 새 판이면(옛 실행이 늦게 끝남) 실패가 아니라 건너뜀.
+#   cpu_reference_watch  CPU 기준표가 낡았는지(#1222, scripts/ci/cpu-reference-watch.sh) — 승격과 무관.
 #   notify  image 가 붉으면 승격이 없다 = 배포가 없다 — ci-red 이슈를 연다(#1015). 초록이 되면 「복구됨」 댓글로 닫는다.
 # production 은 앞으로만 간다(ruleset: 강제 push·삭제 금지). 되돌리기는 main 에 revert PR — 이 흐름을 그대로 탄다.
 # 급하면 Jenkins 「Build with Parameters」의 ROLLBACK_SHA(production 은 그대로) — docs/ops/deploy.md 「되돌리기」.
 #
 # 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다):
 #   - push: main 만. pull_request·pull_request_target 없음. GitHub 호스팅 실행기만. 액션은 SHA 고정. secrets 없음.
-#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만, actions: write 는 e2e_dispatch 잡에만(전체 e2e 를 부른다, #1154), issues: write 는 notify·e2e_watch 잡에만.
+#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만, actions: write 는 e2e_dispatch 잡에만(전체 e2e 를 부른다, #1154), issues: write 는 notify·e2e_watch·cpu_reference_watch 잡에만.
 #   - GITHUB_TOKEN 의 push 는 다른 워크플로를 깨우지 않는다(production push 로 Actions 가 다시 돌지 않는다).
 #     저장소 웹훅(Jenkins)은 깨운다.
 name: release
@@ -141,6 +142,27 @@ jobs:
           GH_REPO: ${{ github.repository }}
           CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
         run: bash scripts/ci/e2e-stale.sh
+
+  # CPU 기준표(backend/tests/cpu_reference.json)가 낡았는지 — 최근 초록 병합 대기열 실행들의 junit 으로 잰다(#1222).
+  # 범위 밖이면 ci-red 고정 이슈를 열거나 본문을 갱신하고, 돌아오면 닫는다. 승격과 무관하다(실패해도 배포를 막지 않는다).
+  cpu_reference_watch:
+    needs: main_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: CPU 기준표가 낡았는가
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
+        run: bash scripts/ci/cpu-reference-watch.sh
 
   promote:
     needs: [main_only, image]

@@ -20,7 +20,14 @@ PR 검사의 호스티드 실행기는 같은 일에 드는 CPU 초가 셋으로
 않고, 기준이 낡았거나 측정이 튀어도 한도가 1.5배를 넘게 풀리지 않는다. 비교할 시험이
 `MIN_SAMPLES` 개가 안 되면(조각의 첫머리, 로컬에서 파일 하나) 1.0 이다.
 
+**기준이 낡았는지는 검사가 말한다**(#1222). 기준을 새로 쓴 직후에는 같은 실행들의 시험별
+중앙값이라 「시험 CPU 초 / 기준」의 중앙값이 1.0 근처다. 무거운 시험을 고치거나 옮기면 그 값이
+1.0 에서 멀어진다 — 낮아지면 배율이 1.0 에 붙어 느린 실행기에 한도를 풀어 주지 못하고, 높아지면
+빠른 실행기에서도 한도가 풀린다. `drift` 가 최근 실행마다 그 중앙값을, 실행들의 값의 중앙값을
+내고 `DRIFT_LOW`~`DRIFT_HIGH` 밖이면 종료 코드 3 으로 알린다(`scripts/ci/cpu-reference-watch.sh`).
+
     python3 backend/tests/cpu_speed.py update JUNIT.xml...   # 기준을 다시 쓴다
+    python3 backend/tests/cpu_speed.py drift RUN_DIR...       # 기준이 낡았나 (디렉터리 하나 = 실행 하나)
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 MIN_SCALE = 1.0
@@ -44,6 +52,12 @@ MIN_REFERENCE_SECONDS = 0.2
 MIN_RUNS = 3
 
 REFERENCE = Path(__file__).with_name("cpu_reference.json")
+
+# 실행들의 중앙값이 이 범위 밖이면 기준이 낡았다(#1222). 실행기 세 무리(약 0.62·0.95·1.22)에서
+# 실행 8번을 뽑으면 가운데 무리가 중앙값을 쥔다 — 새 기준의 값은 0.95~1.0 근처다. 아래는 빠른 무리
+# 쪽으로 반쯤(0.85), 위는 느린 무리(1.22)에 닿기 전(1.2)에서 끊는다.
+DRIFT_LOW = 0.85
+DRIFT_HIGH = 1.2
 
 
 def junit_key(nodeid: str) -> str:
@@ -74,6 +88,10 @@ class RunnerPace:
             self._ratios.append(cpu_seconds / expected)
 
     @property
+    def ratios(self) -> list[float]:
+        return list(self._ratios)
+
+    @property
     def samples(self) -> int:
         return len(self._ratios)
 
@@ -99,14 +117,58 @@ def reference_from_junit(paths: Iterable[Path]) -> dict[str, float]:
     return dict(sorted(out.items()))
 
 
+def run_pace(junits: Iterable[Path], reference: Mapping[str, float]) -> RunnerPace:
+    """한 실행(조각 여럿)의 junit → 기준에 있는 시험마다의 비율."""
+    pace = RunnerPace(reference)
+    for path in junits:
+        for case in ET.parse(path).iter("testcase"):
+            cpu = next((p.get("value") for p in case.iter("property") if p.get("name") == "cpu_seconds"), None)
+            if cpu is not None:
+                pace.record(f"{case.get('classname')}::{case.get('name')}", float(cpu))
+    return pace
+
+
+@dataclass(frozen=True)
+class Drift:
+    runs: dict[str, tuple[float, int]]  # 실행 이름 → (비율 중앙값, 비교한 시험 수)
+    median: float | None  # 실행들의 값의 중앙값 — 비교할 실행이 없으면 None
+    low: float = DRIFT_LOW
+    high: float = DRIFT_HIGH
+
+    @property
+    def stale(self) -> bool:
+        return self.median is not None and not self.low <= self.median <= self.high
+
+    def report(self) -> str:
+        lines = [f"- 실행 {name}: {value:.3f} (시험 {n}개)" for name, (value, n) in self.runs.items()]
+        head = "비교할 실행이 없다" if self.median is None else f"실행 {len(self.runs)}번의 중앙값 **{self.median:.3f}**"
+        return "\n".join([f"{head} — 범위 {self.low}~{self.high}", "", *lines])
+
+
+def drift(runs: Mapping[str, Iterable[Path]], reference: Mapping[str, float]) -> Drift:
+    """실행마다 「시험 CPU 초 / 기준」의 중앙값, 그 값들의 중앙값. 비교한 시험이 `MIN_SAMPLES` 개 안 되는 실행은 뺀다."""
+    out: dict[str, tuple[float, int]] = {}
+    for name, junits in runs.items():
+        pace = run_pace(junits, reference)
+        if pace.samples >= MIN_SAMPLES:
+            out[name] = (round(statistics.median(pace.ratios), 3), pace.samples)
+    median = round(statistics.median(v for v, _ in out.values()), 3) if out else None
+    return Drift(out, median)
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[0] != "update":
-        print(__doc__.rstrip().splitlines()[-1].strip())
-        return 2
-    table = reference_from_junit(Path(p) for p in argv[1:])
-    REFERENCE.write_text(json.dumps(table, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
-    print(f"{REFERENCE.name}: 시험 {len(table)}개")
-    return 0
+    if len(argv) >= 2 and argv[0] == "update":
+        table = reference_from_junit(Path(p) for p in argv[1:])
+        REFERENCE.write_text(json.dumps(table, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
+        print(f"{REFERENCE.name}: 시험 {len(table)}개")
+        return 0
+    if len(argv) >= 2 and argv[0] == "drift":
+        dirs = [Path(p) for p in argv[1:]]
+        result = drift({d.name: sorted(d.rglob("*.xml")) for d in dirs}, load_reference())
+        print(result.report())
+        return 3 if result.stale else 0
+    print("\n".join(__doc__.rstrip().splitlines()[-2:]))
+    return 2
 
 
 if __name__ == "__main__":

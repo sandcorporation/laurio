@@ -57,6 +57,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
     그래도 멈출 수 있어 `release.yml` 의 `e2e_watch` 잡(main 병합마다, `e2e_dispatch` 가 부른 뒤, `scripts/ci/e2e-stale.sh`)이 마지막 전체 실행이 3시간(`E2E_STALE_HOURS`)보다 오래면
     고정 제목 이슈 「e2e 가 멈췄다 — main 의 전체 화면 시험이 돌지 않는다」(`ci-red`)를 열고(열려 있으면 댓글을 더하지 않는다), 다시 돌았으면 닫는다.
     병합이 없는 동안은 감시도 없다 — 그때는 병합도 없으니 새 위험이 없다. 시험: `scripts/ci/e2e_stale_test.sh`·`scripts/ci/e2e_gate_test.sh`(PR 검사가 돈다)·`scripts/test_release_flow.py`.
+    같은 꼴로 `release.yml` 의 `cpu_reference_watch` 잡(main 병합마다, `scripts/ci/cpu-reference-watch.sh`, #1222)이 시험 CPU 기준표가 낡았는지 보고 고정 제목 이슈 「CPU 기준표가 낡았다 — cpu-reference-update.sh」(`ci-red`)를 열거나 갱신·닫는다 — 기준은 `docs/ops/testing.md` 「실행기 속도만큼」. 시험: `scripts/ci/cpu_reference_watch_test.sh`.
     알림 시험: `gh workflow run e2e.yml --ref main -f simulate=fail`(새 이슈, 한 번 더면 댓글)·`-f simulate=ok`(복구·닫기) — 제목에 「(알림 시험)」.
   - **필수 검사 이름은 그대로 「결과」 하나다** — e2e 는 「결과」가 PR 에서 집계하고, 대기열에서는 plan 이 조각을 내지 않아 `skipped` 를 기대한다.
   - **pytest 는 PR 에서는 바뀐 앱과 그 앱에 기대는 앱의 시험만, 병합 대기열에서는 전부를 조각 나란히로 돈다**(#1088). `plan` 잡이 `scripts/ci/pytest_plan.py` 로 고른다:
