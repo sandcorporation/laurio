@@ -16,7 +16,7 @@ if [ -n "${CODEMIT_IMAGE_TAG:-}" ]; then
   # shellcheck source=scripts/ci/ghcr-login.sh
   . scripts/ci/ghcr-login.sh
 fi
-# 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽는다(저장은 release.yml 의 cache 잡, #1090).
+# 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽는다(저장은 release-cache.yml 의 cache 잡, #1090).
 if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
   C+=(-f docker/compose.ci-cache.yaml)
 fi

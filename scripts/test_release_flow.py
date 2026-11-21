@@ -47,7 +47,7 @@ BK_KEYS_STEP = 'run: bash scripts/ci/bk-keys.sh >>"$GITHUB_OUTPUT"'
 
 
 def release_key(expr: str, name: str) -> str:
-    """release.yml cache 잡의 KEY 식에서 ci·backend 가 고르는 키를 pr-check.yml 꼴로 쓴다(세 앱은 bk-keys.sh, #1137)."""
+    """release-cache.yml cache 잡의 KEY 식에서 ci·backend 가 고르는 키를 pr-check.yml 꼴로 쓴다(세 앱은 bk-keys.sh, #1137)."""
     special = dict(re.findall(r"format\('bk-(\w+)-\{0\}', (hashFiles\([^)]*\))\)", expr))
     assert name in special, (name, expr)
     return resolve(f"bk-{name}-${{{{ {special[name]} }}}}", name)
@@ -84,7 +84,7 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertNotIn("pr-check.yml", code)
         self.assertNotIn("verified_tree", code)
         jobs = re.findall(r"(?m)^  ([\w-]+):\n", code.split("\njobs:\n", 1)[1])
-        self.assertEqual(sorted(jobs), ["cache", "cache-node", "e2e_watch", "image", "main_only", "notify", "promote"])
+        self.assertEqual(sorted(jobs), ["e2e_watch", "image", "main_only", "notify", "promote"])
         self.assertFalse((ROOT / "scripts" / "ci" / "verified_tree.py").exists())
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)
@@ -101,7 +101,7 @@ class ReleaseFlowTest(unittest.TestCase):
         pr = read(WORKFLOWS / "pr-check.yml")
         self.assertNotIn("actions/cache/save", pr, "PR·대기열 ref 에서 저장한 캐시는 다른 PR 이 못 읽는다 — 저장은 release 에서만")
         restored = set(re.findall(r"(?m)^          key: (bk-.+)$", pr))
-        release = read(WORKFLOWS / "release.yml")
+        release = read(WORKFLOWS / "release-cache.yml")
         cache = job_block(release, "cache")
         names = re.findall(r"(?m)^          - \{ name: (\w+), target: [^}]*\}", cache)
         self.assertEqual(sorted(names), ["backend", "ci", "classroom", "frontend", "operator"])
@@ -117,7 +117,7 @@ class ReleaseFlowTest(unittest.TestCase):
 
     def test_app_layer_cache_keys_come_from_one_script(self) -> None:
         """세 앱의 층 캐시 키는 저장·복원 모두 bk-keys.sh(앱 빌드 문맥 해시)에서 온다(#1137)."""
-        cache = job_block(read(WORKFLOWS / "release.yml"), "cache")
+        cache = job_block(read(WORKFLOWS / "release-cache.yml"), "cache")
         self.assertIn('bash scripts/ci/bk-keys.sh "$NAME"', cache)
         self.assertRegex(re.search(r"(?ms)KEY: >-\n(.*?)\n        run:", cache).group(1), r"\|\| ''\s*\}\}$")
         for workflow in ("pr-check.yml", "e2e.yml"):
@@ -141,8 +141,27 @@ class ReleaseFlowTest(unittest.TestCase):
         for app, key in keys.items():
             self.assertRegex(key, rf"^bk-{app}-[0-9a-f]{{16,}}$")
 
+    def test_cache_saves_live_outside_release_so_a_queued_cancel_cannot_fail_the_deploy_verdict(self) -> None:
+        """#1151 — cache 잡의 이름별 concurrency 대기열은 밀린 잡을 취소한다. 같은 실행 안에 있으면 release 결론이 cancelled 가 돼
+        배포된 실행이 거짓 실패로 읽혔다. 취소될 수 있는 잡은 release 실행 밖(release-cache.yml)에 있어야 한다."""
+        release = read(WORKFLOWS / "release.yml")
+        self.assertNotIn("concurrency:", release.replace("group: production-branch", "").split("promote:", 1)[0])
+        self.assertNotIn("release-cache-", release)
+        self.assertNotIn("actions/cache", release)
+        for job in re.findall(r"(?m)^  ([\w-]+):\n", release.split("\njobs:\n", 1)[1]):
+            with self.subTest(job=job):
+                # release 의 잡 가운데 concurrency 로 줄 서는 것은 promote 하나뿐이다(production 은 하나씩 앞으로 간다)
+                if job != "promote":
+                    self.assertNotIn("concurrency:", job_block(release, job))
+        cache_wf = read(WORKFLOWS / "release-cache.yml")
+        on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", cache_wf)
+        self.assertEqual(re.sub(r"\s+", " ", on.group(1)).strip(), "push: branches: [main] workflow_dispatch:")
+        self.assertEqual(re.findall(r"(?m)^  ([\w-]+):\n", cache_wf.split("\njobs:\n", 1)[1]), ["cache", "cache-node"])
+        # 같은 이름끼리는 여전히 한 줄로 선다(#1137) — 옛 커밋이 새 세대를 지우지 않게
+        self.assertIn("group: release-cache-${{ matrix.name }}", cache_wf)
+
     def test_release_cache_prunes_older_generations_one_name_at_a_time(self) -> None:
-        cache = job_block(read(WORKFLOWS / "release.yml"), "cache")
+        cache = job_block(read(WORKFLOWS / "release-cache.yml"), "cache")
         self.assertRegex(cache, r"permissions:\n\s+contents: read\n\s+actions: write\n")
         self.assertIn("group: release-cache-${{ matrix.name }}", cache)
         self.assertIn('gh cache list --ref refs/heads/main --key "bk-$NAME-"', cache)
@@ -159,16 +178,17 @@ class ReleaseFlowTest(unittest.TestCase):
         release = read(WORKFLOWS / "release.yml")
         # 승격·이미지·알림은 모두 main_only success 를 기다린다 — main_only 하나를 막으면 다 멈춘다.
         self.assertIn(f"if: {only_upstream}", job_block(release, "main_only"))
-        for job in ("image", "cache", "cache-node", "notify", "promote", "e2e_watch"):
+        for job in ("image", "notify", "promote", "e2e_watch"):
             self.assertRegex(job_block(release, job), r"needs:\s*(main_only|\[main_only)")
         self.assertIn(f"if: {only_upstream}", job_block(read(WORKFLOWS / "image.yml"), "build"))
         # 캐시 잡만은 포크 main 에서도 돈다(#1116) — 포크 PR 검사의 층 캐시가 비어 e2e 조각마다 처음부터 굽던 것.
-        # 저장하는 것은 Actions 캐시뿐이고, 본 저장소에서는 main_only success 를, 포크에서는 main ref 를 요구한다.
-        fork_cache = "needs.main_only.result == 'skipped' && github.repository != 'sandcorporation/laurio' && github.ref == 'refs/heads/main'"
+        # 저장하는 것은 Actions 캐시뿐이고, release-cache.yml(#1151)에서 main ref 만 요구한다 — 본 저장소 조건이 따로 없다.
+        cache_wf = read(WORKFLOWS / "release-cache.yml")
         for job in ("cache", "cache-node"):
             with self.subTest(fork_cache=job):
-                block = job_block(release, job)
-                self.assertIn(fork_cache, block)
+                block = job_block(cache_wf, job)
+                self.assertIn("if: github.ref == 'refs/heads/main'", block)
+                self.assertNotIn("needs:", block)
                 # 넓히는 권한은 cache 잡의 actions: write(제 저장소의 앞 세대 캐시 지우기, #1137) 하나뿐이다
                 perms = re.findall(r"(?m)^    permissions:\n((?:      \w+: \w+\n)+)", block)
                 self.assertEqual(perms, ["      contents: read\n      actions: write\n"] if job == "cache" else [])

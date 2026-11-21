@@ -1,0 +1,140 @@
+# PR 검사의 이미지 층·pnpm 캐시를 main 에서 채운다(#932·#1090·#1137) — release.yml 에서 떼어 냈다(#1151).
+# 이름별 concurrency 대기열(cache 잡)에서 밀린 잡은 GitHub 이 취소하는데, release 안에 두면 그 취소가 release 실행 결론을
+# cancelled 로 만들어 「배포 가능」을 읽는 쪽(wait-deploy 등)이 배포된 실행을 실패로 읽었다. 여기서는 취소돼도 이 워크플로 실행만 cancelled 이고
+# release(이미지·승격·배포)는 영향이 없다. 승격은 이 워크플로를 기다리지 않는다.
+#
+# 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다): push: main 만, GitHub 호스팅 실행기만, 액션은 SHA 고정, secrets 없음.
+# 기본 권한 contents: read — actions: write 는 cache 잡에만(앞 세대 캐시 지우기).
+name: release-cache
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # PR 검사의 이미지 층 캐시(#932) — 키는 pr-check.yml 의 복원 키와 글자까지 같아야 한다(scripts/test_release_flow.py 가 견준다).
+  # 키가 이미 있으면 받지도 굽지도 않는다(lookup-only). 없으면 앞 세대를 복원해 굽고 새 키로 저장한다.
+  cache:
+    # 본 저장소·포크 모두 main 에서만 돈다(#1116) — 저장하는 것은 이 저장소의 Actions 캐시뿐이다. 수동 실행도 main ref 만.
+    if: github.ref == 'refs/heads/main'
+    name: cache ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # 앞 세대 지우기(gh cache delete)에만 쓴다 — main push 로만 돌고 secrets 가 없다
+    permissions:
+      contents: read
+      actions: write
+    # 같은 이름의 저장이 겹치면 늦게 끝난 옛 커밋이 새 세대를 지운다 — 이름마다 한 줄로 세운다(밀린 것은 가장 새 것 하나만 남는다)
+    concurrency:
+      group: release-cache-${{ matrix.name }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: ci, target: "" }
+          - { name: backend, target: "" }
+          - { name: frontend, target: runner }
+          - { name: operator, target: runner }
+          - { name: classroom, target: runner }
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - id: key
+        name: 캐시 키
+        env:
+          NAME: ${{ matrix.name }}
+          # ci·backend 는 의존 파일 해시. 세 앱은 앱 빌드 문맥 해시(scripts/ci/bk-keys.sh, #1137) — 앱 소스가 바뀐 main push 마다
+          # 새 세대를 저장해 층 캐시가 main 의 앱 소스를 따라간다(전에는 Dockerfile·잠금 파일이 바뀔 때만 저장해 COPY·pnpm build 층이 늘 빗나갔다).
+          KEY: >-
+            ${{ matrix.name == 'ci' && format('bk-ci-{0}', hashFiles('docker/ci.Dockerfile','backend/uv.lock','pnpm-lock.yaml'))
+            || matrix.name == 'backend' && format('bk-backend-{0}', hashFiles('docker/backend.Dockerfile','backend/uv.lock'))
+            || '' }}
+        run: |
+          [ -n "$KEY" ] || KEY=$(bash scripts/ci/bk-keys.sh "$NAME" | sed -n "s/^$NAME=//p")
+          [ -n "$KEY" ] && echo "key=$KEY" >>"$GITHUB_OUTPUT"
+      - id: have
+        name: 이미 있나
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.name }}
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - if: steps.have.outputs.cache-hit != 'true'
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - if: steps.have.outputs.cache-hit != 'true'
+        name: 앞 세대 복원
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.name }}
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: bk-${{ matrix.name }}-
+      - if: steps.have.outputs.cache-hit != 'true'
+        name: 층 굽기(amd64, 이미지는 버린다)
+        env:
+          NAME: ${{ matrix.name }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p "/tmp/bk/$NAME"
+          docker buildx build -f "docker/$NAME.Dockerfile" ${TARGET:+--target "$TARGET"} \
+            --cache-from "type=local,src=/tmp/bk/$NAME" --cache-to "type=local,dest=/tmp/bk-new/$NAME,mode=max" \
+            --output type=cacheonly .
+          # 저장 경로는 복원 경로와 같아야 한다(actions/cache 의 버전이 경로로 갈린다) — 앞 세대를 버리고 새 세대를 그 자리에
+          rm -rf "/tmp/bk/$NAME" && mv "/tmp/bk-new/$NAME" "/tmp/bk/$NAME"
+      - if: steps.have.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: /tmp/bk/${{ matrix.name }}
+          key: ${{ steps.key.outputs.key }}
+      # 세대 정리(#1137) — 새 세대를 저장했으면 같은 이름의 main 세대(`bk-<이름>-…`) 가운데 가장 새 KEEP 개만 남기고 지운다.
+      # PR 검사는 자기 커밋의 앱 빌드 문맥 해시로 정확한 키를 찾는다 — main 이 그 뒤 그 앱을 바꿨어도 그 세대가 남아 있으면 맞는다.
+      # 세 앱은 3세대(앱 하나 약 290MB), ci·backend 는 키가 드물게 바뀌어 2세대. 지우지 못해도 잡은 초록 — GitHub 가 7일 뒤·한도 초과 때 지운다.
+      - if: steps.have.outputs.cache-hit != 'true'
+        name: 앞 세대 지우기
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NAME: ${{ matrix.name }}
+          KEEP: ${{ (matrix.name == 'ci' || matrix.name == 'backend') && 2 || 3 }}
+        run: |
+          gh cache list --ref refs/heads/main --key "bk-$NAME-" --sort created_at --order desc --limit 100 --json id,key \
+            --jq ".[] | select(.key | startswith(\"bk-$NAME-\")) | .id" | tail -n +"$((KEEP + 1))" |
+            while read -r id; do gh cache delete "$id" && echo "지움 $id"; done || echo "::warning::앞 세대를 지우지 못했다"
+
+  # e2e 의 pnpm 저장소 캐시 — 위와 같은 까닭으로 main 에서 채운다. 키·경로는 pr-check.yml 의 e2e 잡과 같다.
+  # Playwright 브라우저는 캐시하지 않는다 — e2e 는 브라우저가 든 공식 이미지에서 돈다(#1109).
+  cache-node:
+    # 본 저장소·포크 모두 main 에서만 돈다(#1116) — 저장하는 것은 이 저장소의 Actions 캐시뿐이다. 수동 실행도 main ref 만.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - id: pnpm-store
+        name: pnpm 저장소 경로
+        run: |
+          corepack enable
+          echo "path=$(pnpm store path --silent)" >>"$GITHUB_OUTPUT"
+      - id: have-pnpm
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          lookup-only: true
+      - if: steps.have-pnpm.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.have-pnpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}

@@ -42,7 +42,7 @@ else
   # 굽는 길 — backend·events·grader 는 한 번만 굽는다(#1136). 이미지 이름은 실행마다 달라야 해 프로젝트 이름을 태그로 쓴다.
   export CODEMIT_E2E_BACKEND_TAG="$project"
 fi
-# 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽는다(저장은 release.yml 의 cache 잡, #1090).
+# 이미지 층 캐시(GitHub Actions, #932) — 워크플로가 CODEMIT_BK_CACHE 를 주면 복원한 층을 읽는다(저장은 release-cache.yml 의 cache 잡, #1090).
 if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
   C+=(-f docker/compose.ci-cache.yaml)
 fi
