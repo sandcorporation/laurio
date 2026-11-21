@@ -322,6 +322,10 @@ test_banned_word_field_registration.py`) — 사용자가 적는 이름·제목�
 안 된다는 한 방향의 강제다. `test_no_stale_registrations`가 반대 방향(표에는 있는데
 더는 스캔되지 않는 죽은 항목)도 잡는다.
 
+**채점 응답 파서의 호출 경로는 한 표로 시험한다**(#1125, `backend/core/tests/test_scoring_parser_paths.py`) —
+OpenAI·Anthropic·에이전트 판정 경로 × id 모양(양수·문법 검사 대체 항목 `-1`·빠짐·겹침·문자열·bool·모르는 id)을
+지금 동작대로 못 박는다. 파서 호출 지점(`CALL_SITES`)이 늘거나 줄면 구조 시험이 막으니 그 경로를 표에 넣는다.
+
 **면제는 이유가 있어야 한다.** `BannedWordRule(checks_impersonation=False,
 checks_profanity=False, exempt_reason="...")` 로 적는다 — 둘 다 거짓인데
 `exempt_reason`이 비어 있으면 실패한다(`scripts/check_screen_language.py`의
