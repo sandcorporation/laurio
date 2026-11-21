@@ -8,6 +8,7 @@ import { metricsSnippetSrc, publicConfigFromEnv, publicConfigScript } from "@/li
 import { webAppOrigin } from "@/lib/seo/origin";
 import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/preference";
 
+import { FeedbackButton } from "./components/feedback-button";
 import { SiteFooter } from "./components/site-footer";
 import { SiteHeader } from "./components/site-header";
 
@@ -122,6 +123,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <SiteHeader themePreference={themePreference} />
         {children}
         <SiteFooter />
+        <FeedbackButton />
       </body>
     </html>
   );

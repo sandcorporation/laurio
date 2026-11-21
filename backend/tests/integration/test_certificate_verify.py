@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, time, timedelta
+
 from django.utils import timezone
 
 from certificates.models import Certificate
+from core.clock import Clock
 
 from tests.integration.test_certificate_issue import (  # noqa: F401 — 픽스처
     _auth_header,
@@ -21,6 +24,7 @@ from tests.integration.test_certificate_issue import (  # noqa: F401 — 픽스�
     landing_type,
     world,
 )
+from tests.integration.test_free_contest_award import _freeze
 
 VERIFY = "/api/certificates/verify/{token}"
 
@@ -31,6 +35,11 @@ def _token(certificate_id: int) -> str:
 
 def _verify(client, token: str):
     return client.get(VERIFY.format(token=token))
+
+
+def _clock_date() -> str:
+    # 발급·취소는 얼린 Clock 으로 찍힌다 — 실제 시계(localdate)와 섞으면 KST 23시대에 하루 어긋난다(#1248).
+    return timezone.localtime(Clock.now()).date().isoformat()
 
 
 def test_valid_certificate_shows_its_text_without_login(client, world, blank_renderer):
@@ -48,7 +57,7 @@ def test_valid_certificate_shows_its_text_without_login(client, world, blank_ren
         "recipient_name": "이첫째",
         "giver_name": "홍길동",
         "giver_title": "심사위원장",
-        "issued_on": timezone.localdate().isoformat(),
+        "issued_on": _clock_date(),
         "cancelled_on": None,
         "reissued": False,
     }
@@ -62,7 +71,7 @@ def test_cancelled_certificate_shows_only_number_contest_and_date(client, world,
 
     assert body["state"] == "cancelled"
     assert body["reissued"] is False
-    assert body["cancelled_on"] == timezone.localdate().isoformat()
+    assert body["cancelled_on"] == _clock_date()
     assert body["contest_title"] == world["contest"]["title"]
     assert body["recipient_name"] is None and body["award_name"] is None
 
@@ -100,3 +109,18 @@ def test_unknown_token_is_404(client, db):
     response = _verify(client, "x" * 22)
 
     assert response.status_code == 404
+
+
+def test_dates_follow_frozen_clock_across_midnight(client, world, blank_renderer):
+    """얼린 시계가 실제 날짜와 다른 날(이틀 뒤 KST 00:22)이어도 발급·취소 날짜는 얼린 시계를 따른다(#1248)."""
+    after_midnight = timezone.make_aware(
+        datetime.combine(timezone.localdate() + timedelta(days=2), time(0, 22))
+    )
+    _freeze(after_midnight)
+    [issued] = _issue(client, world, [_item(world, 0)]).json()
+    client.post(_url(world, f"/{issued['id']}/cancel"), **_auth_header(world["sponsor"]["access"]))
+
+    body = _verify(client, _token(issued["id"])).json()
+
+    assert body["cancelled_on"] == after_midnight.date().isoformat()
+    assert body["cancelled_on"] != timezone.localdate().isoformat()

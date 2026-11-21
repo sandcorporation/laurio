@@ -29,6 +29,7 @@ export const BACKEND_PROXY_ALLOWLIST: readonly string[] = [
   "/api/accounts",
   "/api/storage",
   "/api/notifications",
+  "/api/feedback",
 ];
 
 export function isAllowedBackendPath(pathname: string): boolean {

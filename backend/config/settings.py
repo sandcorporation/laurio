@@ -185,6 +185,8 @@ INSTALLED_APPS = [
     # 이름을 적어 뒀다.
     "classroom",
     "ops_metrics",
+    # 건의·버그 제보(#1237 스펙) — 두 앱이 함께 쓰는 공유층.
+    "feedback",
 ]
 
 MIDDLEWARE = [

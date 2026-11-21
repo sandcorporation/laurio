@@ -147,3 +147,12 @@ describe("소유권 이전 알림 (#575)", () => {
     expect(text).toBe("보조 강사님이 '알고리즘 1반' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.");
   });
 });
+
+describe("제보 상태 알림 (#1242)", () => {
+  it("바뀐 상태를 말한다", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_feedback_status_changed", context: { report_id: 5, status_label: "반영" } }),
+    );
+    expect(text).toBe("보내신 제보가 '반영' 상태로 바뀌었습니다.");
+  });
+});

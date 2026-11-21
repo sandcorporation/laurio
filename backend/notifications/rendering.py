@@ -109,6 +109,15 @@ def render_message(notification: Notification) -> str:
             "점수가 플랫폼 오류로 정정됐습니다. 상장은 자동으로 취소되지 않습니다 — codemit 상장 화면에서 확인해 주세요."
         )
 
+    if notification_type in (
+        NotificationType.FEEDBACK_STATUS_CHANGED,
+        NotificationType.CLASSROOM_FEEDBACK_STATUS_CHANGED,
+    ):
+        return (
+            f"{_BRAND_PREFIX} 보내신 제보 #{context.get('report_id', '')}의 상태가 "
+            f"「{context.get('status_label', '')}」(으)로 바뀌었습니다."
+        )
+
     if notification_type == NotificationType.APPEAL_RULED:
         return f"{_BRAND_PREFIX} 제기하신 이의 심판이 완료됐습니다. codemit에서 결과를 확인하세요."
 

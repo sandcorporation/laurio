@@ -101,3 +101,10 @@ describe("notificationHref — 소유권 이전 (#575)", () => {
     ).toBeNull();
   });
 });
+
+describe("notificationHref — 제보 상태 (#1242)", () => {
+  it("제보 상세로 가고, id 가 없으면 목록으로 간다", () => {
+    expect(notificationHref(row({ notification_type: "classroom_feedback_status_changed", context: { report_id: 5 } }))).toBe("/feedback/5");
+    expect(notificationHref(row({ notification_type: "classroom_feedback_status_changed", context: {} }))).toBe("/feedback");
+  });
+});

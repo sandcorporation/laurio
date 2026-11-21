@@ -10,12 +10,15 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema.gen.ts",
     "./login-redirect": "./src/login-redirect.ts",
-    "./repository-url": "./src/repository-url.ts"
+    "./repository-url": "./src/repository-url.ts",
+    "./feedback": "./src/feedback/index.ts",
+    "./feedback.css": "./feedback.css"
   },
   "scripts": {
     "generate:api": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {
+    "html-to-image": "1.11.13",
     "openapi-fetch": "^0.13.8"
   },
   "devDependencies": {
