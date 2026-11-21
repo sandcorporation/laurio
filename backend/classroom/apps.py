@@ -74,3 +74,10 @@ class ClassroomConfig(AppConfig):
         from .withdrawal import instructor_has_class_in_progress
 
         INSTRUCTOR_CLASS_IN_PROGRESS.register(instructor_has_class_in_progress)
+
+        # 채점 방식 실험의 `classroom_call` 줄(#1262) — `scoring` 이 강의실을 import 하지 않고 강의실 프롬프트로 채점한다.
+        from core.experiment_material import CLASSROOM_EXPERIMENT_CALL
+
+        from .experiment_material import experiment_call
+
+        CLASSROOM_EXPERIMENT_CALL.register(experiment_call)

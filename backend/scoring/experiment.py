@@ -15,10 +15,12 @@ min(칸 예산, 남은 하루 돈)으로 발급해 하루 상한에 닿기 전�
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -26,10 +28,11 @@ from pathlib import Path
 from typing import Literal
 
 from django.conf import settings
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from contests.models import Contest, ContestSubmission, Requirement
+from core import experiment_material as em
 from core.adapters import is_fake_adapter_binding
 from core.agent_ports import agent_grader, price_for
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt
@@ -46,7 +49,14 @@ from core.agent_scoring import (
 )
 from core.clock import Clock
 from core.models import AgentRunToken
-from core.llm_scoring import LLMScoringAdapter, RequirementInput, RequirementVerdict, ScoringInput, get_adapter
+from core.llm_scoring import (
+    LLMAdapterAuthError,
+    LLMScoringAdapter,
+    RequirementInput,
+    RequirementVerdict,
+    ScoringInput,
+    get_adapter,
+)
 from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, setting_value
 
 from . import selfloop
@@ -56,6 +66,8 @@ from .experiment_report import BillPart
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
 from .selfloop_scoring import run_selfloop_scoring
+from submissions.models import Submission, SubmissionAsset
+
 from .services import (
     CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS,
     _agent_snapshot,
@@ -68,8 +80,12 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
-Method = Literal["single_call", "agent", "self_loop"]
-METHODS: tuple[Method, ...] = ("single_call", "agent", "self_loop")
+Method = Literal["single_call", "agent", "self_loop", "classroom_call"]
+METHODS: tuple[Method, ...] = ("single_call", "agent", "self_loop", "classroom_call")
+#: 벤더를 직접 부르는 방식(칸 하나 = 요청 하나) — 비용을 실험 표에 적고 하루 상한에 직접 더한다.
+DIRECT_METHODS: tuple[Method, ...] = ("single_call", "classroom_call")
+#: 강의실 운영 채점과 같은 프롬프트·한 번 호출(#1262) — 사본 재료(`--material`)에서만 돈다.
+MATERIAL_ONLY_METHODS: tuple[Method, ...] = ("classroom_call",)
 
 BASELINE = "agent:claude-sonnet-5-5"
 DEFAULT_ROWS = (
@@ -89,6 +105,7 @@ DEFAULT_ROWS = (
 #: 모두 5배 단가라(`classroom.scoring_cost`) 높은 쪽이 그 문턱 아래(옛 90k)에 있으면 칸당 최대가 열 배 가까이 작게 나온다.
 _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
     "single_call": ((20_000, 1_000), (300_000, 4_000)),
+    "classroom_call": ((20_000, 1_000), (300_000, 4_000)),
     "agent": ((60_000, 2_000), (600_000, 15_000)),
     "self_loop": ((40_000, 2_000), (400_000, 12_000)),
 }
@@ -96,6 +113,7 @@ _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
 #: 한 번 호출은 요청 하나라 토큰이 없다(벤더를 직접 부른다).
 CELL_BUDGET_USD: dict[Method, Decimal | None] = {
     "single_call": None,
+    "classroom_call": None,
     "agent": AGENT_RUN_BUDGET_USD,
     "self_loop": SELFLOOP_RUN_BUDGET_USD,
 }
@@ -113,11 +131,14 @@ def infra_errors() -> tuple[type[Exception], ...]:
     실행기 예외는 `core.agent_ports` 에 등록된 실행 틀 모듈의 것이다(실행기를 직접 들이지 않는다)."""
 
     grader = agent_grader()
-    return (grader.AgentGraderError, grader.AgentGraderBusy, RunTokenRefused, AgentVendorRefused)
+    # 키 인증 실패(만료된 실험 키, #1262)도 방식의 실패가 아니다 — 결과로 굳지 않고 연속 3칸이면 멈춘다.
+    return (grader.AgentGraderError, grader.AgentGraderBusy, RunTokenRefused, AgentVendorRefused, LLMAdapterAuthError)
 
 
 #: `problem` 이 이 이름으로 시작하는 `failed` 칸이 인프라 실패다(`infra_errors` 의 클래스 이름과 같다 — 시험이 지킨다).
-INFRA_PROBLEM_PREFIXES = ("AgentGraderError:", "AgentGraderBusy:", "RunTokenRefused:", "AgentVendorRefused:")
+INFRA_PROBLEM_PREFIXES = (
+    "AgentGraderError:", "AgentGraderBusy:", "RunTokenRefused:", "AgentVendorRefused:", "LLMAdapterAuthError:",
+)
 #: 인프라 실패 칸의 상태 — `CellResult` 에만 쓰고 실험 표에는 남기지 않는다.
 INFRA = "infra"
 
@@ -140,7 +161,7 @@ def is_infra_failure(status: str, problem: str) -> bool:
 def needs_grader(rows: Sequence[Row]) -> bool:
     """줄 가운데 실행기(`agent-grader`)를 부르는 것이 있는가 — 한 번 호출은 벤더를 직접 부른다."""
 
-    return any(row.method != "single_call" for row in rows)
+    return any(row.method not in DIRECT_METHODS for row in rows)
 
 
 def probe_grader() -> None:
@@ -178,15 +199,22 @@ def vendor_for(model: str) -> ScoringVendor:
     raise ExperimentError(f"벤더를 알 수 없는 모델: {model}")
 
 
-def parse_rows(text: str | None) -> list[Row]:
-    """`방식:모델,…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다."""
+#: 사본 재료의 기본 줄 — 공모전 기본 줄에 강의실 운영 채점의 재현 줄 하나(운영 판정은 gpt-4.1-mini, 강사 키).
+DEFAULT_MATERIAL_ROWS = (*DEFAULT_ROWS, "classroom_call:gpt-4.1-mini")
 
-    names = [p.strip() for p in (text or ",".join(DEFAULT_ROWS)).split(",") if p.strip()]
+
+def parse_rows(text: str | None, *, material: bool = False) -> list[Row]:
+    """`방식:모델,…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다.
+    `classroom_call` 은 사본 재료에서만 받는다(공모전 제출에는 강의실 문제·체크리스트가 없다)."""
+
+    names = [p.strip() for p in (text or ",".join(DEFAULT_MATERIAL_ROWS if material else DEFAULT_ROWS)).split(",") if p.strip()]
     rows: list[Row] = []
     for name in names:
         method, sep, model = name.partition(":")
         if not sep or method not in METHODS or not model:
             raise ExperimentError(f"줄은 `방식:모델` 이고 방식은 {', '.join(METHODS)} 중 하나다: {name}")
+        if method in MATERIAL_ONLY_METHODS and not material:
+            raise ExperimentError(f"{method} 줄은 사본 재료(--material)에서만 돈다: {name}")
         if price_for(model) is None:
             raise ExperimentError(f"단가를 모르는 모델이라 비용을 셀 수 없다: {model}")
         row = Row(method, model, vendor_for(model))  # type: ignore[arg-type]  # method 는 위에서 METHODS 로 좁혔다
@@ -239,6 +267,7 @@ class Material:
     score: Decimal
     unmet_required: int
     unmet_optional: int  # 선택·가산
+    label: str = ""  # 미리 보기에 찍는 이름 — 사본 재료면 가명 id(비면 제출 번호)
 
 
 def materials(contest: Contest, submissions: Sequence[ContestSubmission]) -> list[Material]:
@@ -267,6 +296,108 @@ def materials(contest: Contest, submissions: Sequence[ContestSubmission]) -> lis
     return out
 
 
+# ── 사본 재료(#1262) ──────────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class MaterialSubject:
+    """사본 재료의 제출 하나 — 운영 제출과 잇는 것이 없고 가명 id 로만 남는다. `pk` 는 가명의 정수 꼴(실행 토큰·보고표)."""
+
+    item: em.Item
+
+    @property
+    def pk(self) -> int:
+        return self.item.key
+
+    @property
+    def material_id(self) -> str:
+        return self.item.material_id
+
+
+Subject = ContestSubmission | MaterialSubject
+
+
+def material_subjects(items: Sequence[em.Item], limit: int | None, pick: Pick = "id") -> list[MaterialSubject]:
+    """사본에서 `limit` 건 — `id` 는 가명 순 앞 N 건, `spread` 는 운영 점수 순으로 양 끝을 포함해 고르게 N 건."""
+
+    by_key = sorted(items, key=lambda i: i.material_id)
+    if limit is None:
+        chosen = by_key
+    elif pick == "spread":
+        ranked = sorted(by_key, key=lambda i: (i.production_score(), i.material_id))
+        keep = set(spread([i.key for i in ranked], limit))
+        chosen = [i for i in by_key if i.key in keep]
+    else:
+        chosen = by_key[:limit]
+    return [MaterialSubject(i) for i in chosen]
+
+
+def material_materials(subjects: Sequence[MaterialSubject]) -> list[Material]:
+    """사본 재료의 기대 점수 = 운영 점수(필수 충족 비율)와 운영 판정의 미충족 수."""
+
+    out = []
+    for s in subjects:
+        grades = {c.id: c.grade for c in s.item.checklist}
+        unmet = [v.checklist_item_id for v in s.item.verdicts if not v.is_met and v.checklist_item_id in grades]
+        out.append(
+            Material(
+                submission_id=s.pk,
+                score=Decimal(str(s.item.production_score())).quantize(Decimal("0.01")),
+                unmet_required=sum(1 for i in unmet if grades[i] == Requirement.Grade.REQUIRED),
+                unmet_optional=sum(1 for i in unmet if grades[i] != Requirement.Grade.REQUIRED),
+                label=s.material_id,
+            )
+        )
+    return out
+
+
+def production_row(item: em.Item) -> str:
+    """보고표의 「운영」 줄 이름 — 사본의 운영 판정(돈 0)."""
+
+    return f"운영:{item.model_version or '모름'}"
+
+
+def record_production(experiment: ScoringExperiment, subjects: Sequence[MaterialSubject]) -> None:
+    """사본의 운영 판정을 「운영(model_version)」 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로."""
+
+    for s in subjects:
+        ScoringExperimentRun.objects.get_or_create(
+            experiment=experiment, submission=None, material_id=s.material_id, row=production_row(s.item), round=1,
+            defaults=dict(
+                status=ScoringExperimentRun.Status.SCORED,
+                score=Decimal(str(s.item.production_score())).quantize(Decimal("0.01")),
+                verdicts=[{"requirement_id": v.checklist_item_id, "met": v.is_met} for v in s.item.verdicts],
+                model_version=s.item.model_version,
+                created_at=Clock.now(),
+            ),
+        )
+
+
+def vendor_key(vendor: ScoringVendor) -> str:
+    """플랫폼(실험) 키 — 운영 설정 값(`core.llm_proxy` 와 같은 이름). 개발 환경에서는 대장이 dev 운영자 앱에서 넣는다."""
+
+    return (setting_value("ANTHROPIC_API_KEY" if vendor == "anthropic" else "OPEN_AI_API_KEY") or "").strip()
+
+
+def rows_without_key(rows: Sequence[Row]) -> list[Row]:
+    """벤더 키가 비어 「키 없음」인 줄 — 사본 재료의 `--confirm` 이 거절한다(돈을 쓰지 않고, 칸이 실패로 굳지 않게)."""
+
+    return [row for row in rows if not vendor_key(row.vendor)]
+
+
+#: 사본 재료 + `--confirm` 일 때만 참 — 개발 환경(어댑터 fake)에서도 이 명령의 직접 호출만 실험 키로 실제 벤더에 나간다.
+_REAL_VENDOR: contextvars.ContextVar[bool] = contextvars.ContextVar("experiment_real_vendor", default=False)
+
+
+@contextmanager
+def real_vendor() -> Iterator[None]:
+    token = _REAL_VENDOR.set(True)
+    try:
+        yield
+    finally:
+        _REAL_VENDOR.reset(token)
+
+
 def same_score(picked: Sequence[Material]) -> Decimal | None:
     """뽑힌 재료의 기대 점수가 모두 같으면 그 점수 — 그 재료로는 방식을 가를 수 없다(`contest3-four-s4`: 16건 모두
     100 이라 32칸·판정 704개가 전부 100·충족이었다). 하나뿐이어도 같다고 본다(순위도 차이도 잴 수 없다)."""
@@ -287,10 +418,14 @@ def spent_today_experiment_usd(now: datetime | None = None) -> Decimal:
 
     now = now or Clock.now()
     direct = (
-        ScoringExperimentRun.objects.filter(created_at__gte=_day_start(now), row__startswith="single_call:")
+        ScoringExperimentRun.objects.filter(_direct_rows(), created_at__gte=_day_start(now))
         .aggregate(total=Sum("cost_usd"))["total"]
     )
     return spent_today_usd(now, experiment=True) + (direct or Decimal(0))
+
+
+def _direct_rows() -> Q:
+    return Q(row__startswith="single_call:") | Q(row__startswith="classroom_call:")
 
 
 def cost_range(row: Row, observed: Sequence[Decimal] = ()) -> tuple[Decimal, Decimal]:
@@ -330,8 +465,11 @@ def bill_parts(experiment: ScoringExperiment) -> list[BillPart]:
     (프록시가 요청마다 센 합)과 한 번 호출 칸(벤더 직접 호출, 칸 하나 = 요청 하나). 결과로 남지 않은 인프라 실패 칸의
     토큰도 든다 — 돈은 썼다. 같은 제출·같은 때 다른 실험을 돌렸으면 그 토큰도 섞인다(토큰은 실험 이름을 모른다)."""
 
-    submissions = set(experiment.runs.values_list("submission_id", flat=True))
-    submissions |= {s.pk for s in eligible_submissions(experiment.contest, experiment.limit_submissions, experiment_pick(experiment))}
+    submissions = {run.subject_key for run in experiment.runs.all().only("submission_id", "material_id")}
+    if experiment.contest is not None:
+        submissions |= {
+            s.pk for s in eligible_submissions(experiment.contest, experiment.limit_submissions, experiment_pick(experiment))
+        }
     tokens = AgentRunToken.objects.filter(
         purpose=AgentRunToken.PURPOSE_EXPERIMENT, submission_id__in=submissions, created_at__gte=experiment.created_at
     ).order_by("created_at")
@@ -343,7 +481,7 @@ def bill_parts(experiment: ScoringExperiment) -> list[BillPart]:
         )
         for t in tokens
     ]
-    for run in experiment.runs.filter(row__startswith="single_call:").order_by("created_at"):
+    for run in experiment.runs.filter(_direct_rows()).order_by("created_at"):
         model = run.row.split(":", 1)[1]
         parts.append(
             BillPart(
@@ -368,6 +506,7 @@ class _Inputs:
     readable: list
     cloned: list
     snapshot: Snapshot | None
+    item: em.Item | None = None  # 사본 재료면 그 항목(`classroom_call` 이 강의실 프롬프트로 다시 짓는다)
 
 
 @dataclass
@@ -393,10 +532,30 @@ def load_inputs(submission: ContestSubmission) -> _Inputs:
     return _Inputs(_requirement_inputs(submission), readable, cloned, _agent_snapshot(readable, cloned))
 
 
-def _single_call_adapter(row: Row) -> LLMScoringAdapter:
-    """줄의 모델로 만든 한 번 호출 어댑터. 가짜 어댑터 모드(dev·시험)면 가짜다 — 진짜 벤더를 부르지 않는다."""
+def material_inputs(item: em.Item) -> _Inputs:
+    """사본 항목의 채점 입력 — 체크리스트 항목을 요구사항으로(`classroom.scoring._requirement_inputs` 와 같은 변환, 등급은
+    공모전 값으로), 소스 바이트를 읽을 소스 하나로. DB·저장소·GitHub 를 부르지 않는다."""
 
-    if is_fake_adapter_binding(settings.LLM_ADAPTER_MODE):
+    requirements = [
+        RequirementInput(
+            requirement_id=c.id,
+            text=c.label,
+            grade=Requirement.Grade.REQUIRED if c.grade == "required" else Requirement.Grade.OPTIONAL,
+            self_reported_met=False,
+        )
+        for c in item.checklist
+    ]
+    asset = SubmissionAsset(id=1, kind=item.asset_kind, label="")  # 운영 자산 id·라벨은 사본에 없다
+    readable = [(asset, item.source)]
+    return _Inputs(requirements, readable, [], _agent_snapshot(readable, []), item=item)
+
+
+def _single_call_adapter(row: Row) -> LLMScoringAdapter:
+    """줄의 모델로 만든 한 번 호출 어댑터. 가짜 어댑터 모드(dev·시험)면 가짜다 — 진짜 벤더를 부르지 않는다. 사본 재료 +
+    `--confirm`(`real_vendor`)이면 어댑터 모드와 상관없이 실험 키로 나간다."""
+
+    real = _REAL_VENDOR.get()
+    if is_fake_adapter_binding(settings.LLM_ADAPTER_MODE) and not real:
         return get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
     if row.vendor == "anthropic":
         from core.llm_scoring_anthropic import PLATFORM_SCORING_EFFORT, AnthropicScoringAdapter
@@ -410,6 +569,10 @@ def _single_call_adapter(row: Row) -> LLMScoringAdapter:
         )
     from core.llm_scoring import OpenAIScoringAdapter
 
+    if real:
+        return OpenAIScoringAdapter(
+            api_key=vendor_key("openai"), model=row.model, timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS
+        )
     return OpenAIScoringAdapter(model=row.model, timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
 
 
@@ -451,23 +614,38 @@ def count_real_evidence(snapshot: Snapshot, items: list[dict[str, JSON]]) -> tup
     return len(evidence), real
 
 
-def _run_single_call(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
+def _contest_of(subject: Subject, inputs: _Inputs) -> Contest:
+    """공모전 프롬프트의 공모전 — 사본 재료면 저장하지 않은 공모전에 문제 제목만(`_build_prompt` 는 제목만 읽는다)."""
+
+    if isinstance(subject, MaterialSubject):
+        return Contest(id=0, title=inputs.item.problem.title if inputs.item is not None else "")
+    return subject.contest
+
+
+def _submission_of(subject: Subject) -> Submission:
+    """실행 토큰·박제본 자리가 읽는 제출 — 쓰는 것은 id 뿐이다. 사본 재료면 저장하지 않은 제출에 가명의 정수 꼴."""
+
+    return Submission(id=subject.pk) if isinstance(subject, MaterialSubject) else subject
+
+
+def _run_single_call(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
     llm = _single_call_adapter(row)
+    contest = _contest_of(submission, inputs)
     source_files, omission, _budget = _measure_source_fit(
         llm,
         submission_id=submission.pk,
-        contest=submission.contest,
+        contest=contest,
         requirements=inputs.requirements,
         sources=[(a.id, _asset_label(a), raw) for a, raw in inputs.readable]
         + [(a.id, _asset_label(a), c.zip_bytes) for a, c in inputs.cloned],
     )
     if omission.any:
         return CellResult("held", problem="소스가 모델 컨텍스트에 다 들어가지 않는다(운영이면 보류)")
-    prompt = _build_prompt(contest=submission.contest, requirements=inputs.requirements, source_files=source_files)
+    prompt = _build_prompt(contest=contest, requirements=inputs.requirements, source_files=source_files)
     output = llm.score(
         ScoringInput(
             submission_id=submission.pk,
-            contest_id=submission.contest_id,
+            contest_id=contest.id,
             prompt=prompt,
             source_files=source_files,
             requirements=inputs.requirements,
@@ -488,11 +666,33 @@ def _run_single_call(submission: ContestSubmission, row: Row, inputs: _Inputs) -
     )
 
 
-def _run_agent(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
+def _run_classroom_call(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
+    """강의실 운영 채점과 같은 프롬프트·한 번 호출(#1262) — 강의실 앱이 `core.experiment_material` 자리에 올린 것을 부른다."""
+
+    if inputs.item is None:
+        return CellResult("failed", problem="classroom_call 은 사본 재료에서만 돈다")
+    key = vendor_key(row.vendor) if _REAL_VENDOR.get() else None
+    out = em.CLASSROOM_EXPERIMENT_CALL.get()(inputs.item, model=row.model, api_key=key or None)
+    if out.status != "scored":
+        return CellResult("held", problem=out.problem)
+    verdicts = [RequirementVerdict(requirement_id=v.checklist_item_id, is_met=v.is_met, reasoning=v.reasoning) for v in out.verdicts]
+    cost = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=out.input_tokens, output_tokens=out.output_tokens))
+    return CellResult(
+        "scored",
+        score=_percentage(requirements=inputs.requirements, verdicts=verdicts),
+        verdicts=[{"requirement_id": v.requirement_id, "met": v.is_met, "evidence": [], "reason": v.reasoning} for v in verdicts],
+        input_tokens=out.input_tokens,
+        output_tokens=out.output_tokens,
+        cost_usd=cost,
+        model_version=out.model_version,
+    )
+
+
+def _run_agent(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
     assert inputs.snapshot is not None
     requirements = inputs.requirements
     job = AgentJob(
-        submission=submission,
+        submission=_submission_of(submission),
         purpose="experiment",
         build_prompt=lambda model: build_scoring_prompt(requirements, model=model),
         output_schema=SCORING_OUTPUT_SCHEMA,
@@ -580,11 +780,11 @@ def _proxy_stop(record: dict[str, JSON]) -> str | None:
     return None
 
 
-def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
+def _run_self_loop(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
     assert inputs.snapshot is not None
     try:
         outcome = run_selfloop_scoring(
-            submission, inputs.requirements, inputs.snapshot, vendor=row.vendor, model=row.model, purpose="experiment",
+            _submission_of(submission), inputs.requirements, inputs.snapshot, vendor=row.vendor, model=row.model, purpose="experiment",
             budget_usd=cell_budget_usd(row),
         )
     except AgentRunHeld as held:
@@ -606,7 +806,12 @@ def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> 
     )
 
 
-_RUNNERS = {"single_call": _run_single_call, "agent": _run_agent, "self_loop": _run_self_loop}
+_RUNNERS = {
+    "single_call": _run_single_call,
+    "agent": _run_agent,
+    "self_loop": _run_self_loop,
+    "classroom_call": _run_classroom_call,
+}
 
 
 @dataclass(frozen=True)
@@ -617,7 +822,7 @@ class InfraFailure:
 
 
 def run_cell(
-    experiment: ScoringExperiment, submission: ContestSubmission, row: Row, round_no: int, inputs: _Inputs | Exception
+    experiment: ScoringExperiment, submission: Subject, row: Row, round_no: int, inputs: _Inputs | Exception
 ) -> ScoringExperimentRun | InfraFailure:
     """칸 하나를 돌려 남긴다. 방식의 실패(틀린 꼴·시간 초과 등)도 칸으로 남긴다(다시 돌리지 않는다 — 실패율이 보고표의
     숫자다). 인프라 실패(`infra_errors()`·프록시 거절)는 남기지 않고 `InfraFailure` 를 돌려준다. #1257 전에 인프라 실패로
@@ -626,7 +831,7 @@ def run_cell(
     started = time.monotonic()
     if isinstance(inputs, Exception):
         result = CellResult("failed", problem=f"입력을 다시 받지 못했다: {inputs}")
-    elif row.method != "single_call" and inputs.snapshot is None:
+    elif row.method not in DIRECT_METHODS and inputs.snapshot is None:
         result = CellResult("failed", problem="채점 입력이 하나가 아니라 에이전트가 읽을 박제본이 없다(운영이면 한 번 호출)")
     else:
         try:
@@ -639,9 +844,14 @@ def run_cell(
     if result.status == INFRA:
         logger.warning("실험 %s 칸(제출 %s, %s, %s) 인프라 실패: %s", experiment.name, submission.pk, row.name, round_no, result.problem)
         return InfraFailure(result.problem)
+    where = (
+        dict(submission=None, material_id=submission.material_id)
+        if isinstance(submission, MaterialSubject)
+        else dict(submission=submission)
+    )
     run, _created = ScoringExperimentRun.objects.update_or_create(
         experiment=experiment,
-        submission=submission,
+        **where,
         row=row.name,
         round=round_no,
         defaults=_run_fields(result, started),
@@ -683,8 +893,8 @@ class RowPlan:
 
 @dataclass(frozen=True)
 class Plan:
-    submissions: list[ContestSubmission]
-    cells: list[tuple[ContestSubmission, Row, int]]  # 남은 칸, 회차 → 제출 → 줄 순(상한에 멈춰도 줄끼리 고르게)
+    submissions: Sequence[Subject]
+    cells: list[tuple[Subject, Row, int]]  # 남은 칸, 회차 → 제출 → 줄 순(상한에 멈춰도 줄끼리 고르게)
     rows: list[RowPlan]
     daily_limit_usd: Decimal
     spent_today_usd: Decimal
@@ -695,22 +905,30 @@ class Plan:
 
 
 def plan(
-    contest: Contest,
+    contest: Contest | None,
     rows: list[Row],
     *,
     repeat: int,
     limit: int | None,
     experiment: ScoringExperiment | None,
     pick: Pick = "id",
+    subjects: Sequence[Subject] | None = None,
 ) -> Plan:
-    submissions = eligible_submissions(contest, limit, pick)
+    """남은 칸과 줄별 비용 범위. `subjects` 를 주면(사본 재료) 공모전에서 고르지 않고 그것을 쓴다."""
+
+    if subjects is not None:
+        submissions: Sequence[Subject] = subjects
+    else:
+        assert contest is not None
+        submissions = eligible_submissions(contest, limit, pick)
     done: set[tuple[int, str, int]] = set()
     observed: dict[str, list[Decimal]] = {}
     if experiment is not None:
-        for run in experiment.runs.all().only("submission_id", "row", "round", "cost_usd", "status", "problem"):
+        fields = ("submission_id", "material_id", "row", "round", "cost_usd", "status", "problem")
+        for run in experiment.runs.all().only(*fields):
             if is_infra_failure(run.status, run.problem):
                 continue  # 끝난 칸이 아니다 — 다시 돈다
-            done.add((run.submission_id, run.row, run.round))
+            done.add((run.subject_key, run.row, run.round))
             if run.status != ScoringExperimentRun.Status.FAILED:
                 observed.setdefault(run.row, []).append(run.cost_usd)
     cells = [

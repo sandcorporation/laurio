@@ -355,6 +355,43 @@ def to_markdown(
     return "\n".join(lines) + "\n"
 
 
+#: 운영 점수 구간(필수 충족 비율) — 사본 재료의 보고표가 구간마다 평균 차를 보인다(#1262).
+BANDS = ("0~20", "20~40", "40~60", "60~80", "80~100")
+
+
+def _band(score: float) -> str:
+    return BANDS[min(int(score // 20), len(BANDS) - 1)]
+
+
+def band_diffs(runs: Sequence[RunRow], *, production_row: str) -> dict[str, dict[str, tuple[float, int]]]:
+    """줄마다 운영 점수 구간별 (평균 차 = 줄 점수 − 운영 점수, 칸 수). 운영 점수가 없는 제출·채점 안 된 칸은 뺀다."""
+
+    truth = {r.submission_id: r.score for r in runs if r.row == production_row and r.score is not None}
+    acc: dict[str, dict[str, list[float]]] = {}
+    for r in runs:
+        if r.row == production_row or r.score is None or r.submission_id not in truth:
+            continue
+        base = truth[r.submission_id]
+        acc.setdefault(r.row, {}).setdefault(_band(base), []).append(r.score - base)
+    return {row: {band: (mean(d), len(d)) for band, d in bands.items()} for row, bands in acc.items()}
+
+
+def band_lines(runs: Sequence[RunRow], *, production_row: str, row_names: Sequence[str]) -> str:
+    """운영 점수 구간별 평균 차 표(마크다운) — 칸이 없는 구간은 「—」."""
+
+    diffs = band_diffs(runs, production_row=production_row)
+    head = ["줄", *(f"운영 {b}%" for b in BANDS)]
+    lines = ["", f"## 운영 점수 구간별 평균 차(줄 − {production_row})", "", "| " + " | ".join(head) + " |"]
+    lines.append("| " + " | ".join("---" for _ in head) + " |")
+    for name in row_names:
+        cells = []
+        for band in BANDS:
+            cell = diffs.get(name, {}).get(band)
+            cells.append("—" if cell is None else f"{cell[0]:+.1f} (n={cell[1]})")
+        lines.append("| " + " | ".join([name, *cells]) + " |")
+    return "\n".join(lines) + "\n"
+
+
 def to_csv(reports: Sequence[RowReport], *, repeat: int, full_submissions: int) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
