@@ -84,27 +84,32 @@ def _minutes() -> int:
 
 
 def check(*, now) -> dict[str, str]:
-    """규칙 둘을 한 번 검사하고 규칙 → 상태를 돌려준다."""
+    """규칙 둘을 한 번 검사하고 상태가 **바뀐** 규칙 → 새 상태를 돌려준다(그대로면 빈 dict)."""
 
     since = now - _window()
     readings = {FAILURES_RULE: read_failures(since), ZERO_REACH_RULE: read_zero_reach(since)}
+    changed: dict[str, str] = {}
     with transaction.atomic():
         AlertState.objects.bulk_create([AlertState(rule=name) for name in _RULES], ignore_conflicts=True)
         states = {s.rule: s for s in AlertState.objects.select_for_update().filter(rule__in=_RULES)}
         for name in _RULES:
             state = states[name]
+            before = state.status
             alerts._step(state, alerts.Rule(name, 1, lambda _inputs: readings[name]), readings[name], now)
             alerts._deliver(state)
             state.save()
-    return {name: str(state.status) for name, state in states.items()}
+            if state.status != before:
+                changed[name] = str(state.status)
+    return changed
 
 
 def _candidates(as_of: Any, ctx: dict) -> list[int]:
     return [1]
 
 
-def _handle_row(_row: int, as_of: Any, ctx: dict) -> dict:
-    return check(now=as_of)
+def _handle_row(_row: int, as_of: Any, ctx: dict) -> dict | None:
+    # 아무 일도 없으면 행을 내지 않는다 — tick 의 count 가 이 스캔 때문에 늘지 않는다.
+    return check(now=as_of) or None
 
 
 NOTIFICATION_DISPATCH_ALERT_SCAN = ScanSpec(

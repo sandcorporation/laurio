@@ -119,3 +119,4 @@ def test_unset_webhook_stays_silent(client, user, settings):
     body = _scan(client)
 
     assert body["rows"][0]["notification-dispatch-failures"] == "firing"
+    assert _scan(client)["rows"] == []  # 바뀐 게 없으면 행도 없다
