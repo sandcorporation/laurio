@@ -13,10 +13,13 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from scoring.experiment import bill_parts, eligible_submissions, is_infra_failure
 from contests.models import Requirement
+from core import experiment_material as em
+from core.clock import Clock
 from scoring.experiment_report import (
     COST_ONLY_NOTE,
     NO_TRUTH_NOTE,
     RunRow,
+    band_lines,
     bill_lines,
     bill_markdown,
     limits_note,
@@ -50,7 +53,7 @@ class Command(BaseCommand):
             return
         runs = [
             RunRow(
-                submission_id=r.submission_id,
+                submission_id=r.subject_key,
                 row=r.row,
                 round=r.round,
                 status=r.status,
@@ -65,23 +68,37 @@ class Command(BaseCommand):
             if not is_infra_failure(r.status, r.problem)  # 결과가 아니다(#1257) — 다음 실행에서 다시 돈다
         ]
         baseline = experiment.rows[0] if experiment.rows else ""
-        required = frozenset(
-            Requirement.objects.filter(contest_id=experiment.contest_id, grade=Requirement.Grade.REQUIRED)
-            .values_list("pk", flat=True)
-        )
-        reports = report_rows(runs, baseline=baseline, row_names=experiment.rows, required_ids=required)
+        production = sorted({r.row for r in runs if r.row.startswith("운영:")})  # 사본 재료의 운영 판정 줄(#1262)
+        if experiment.contest is not None:
+            required = frozenset(
+                Requirement.objects.filter(contest_id=experiment.contest_id, grade=Requirement.Grade.REQUIRED)
+                .values_list("pk", flat=True)
+            )
+            full = len(eligible_submissions(experiment.contest, None))  # 공모전에서 채점된 제출 전부
+            source = f"공모전 {experiment.contest_id}"
+        else:
+            required = frozenset(int(i) for i in experiment.material_required_ids or [])
+            full = len({r.submission_id for r in runs})
+            source = f"사본 재료 {experiment.material}(가명 id)"
+        reports = report_rows(runs, baseline=baseline, row_names=[*experiment.rows, *production], required_ids=required)
         repeat = max((r.round for r in runs), default=experiment.repeat)
-        full = len(eligible_submissions(experiment.contest, None))  # 공모전에서 채점된 제출 전부
         if options["format"] == "csv":
             self.stdout.write(to_csv(reports, repeat=repeat, full_submissions=full), ending="")
             return
+        stale = (
+            experiment.material_exported_at is not None
+            and Clock.now() - experiment.material_exported_at > em.STALE_AFTER
+        )
         notes = [
+            *(["경고: 사본 재료를 가져온 지 7일이 넘었다 — 다 쓴 사본은 --purge-material 로 지운다."] if stale else []),
             *([COST_ONLY_NOTE] if experiment.cost_only else []),
-            f"공모전 {experiment.contest_id} · 기준 줄 {baseline}",
+            f"{source} · 기준 줄 {baseline}",
             *limits_note(reports, repeat=repeat),
             NO_TRUTH_NOTE,
         ]
         md = to_markdown(f"채점 방식 비교 — {experiment.name}", reports, notes, repeat=repeat, full_submissions=full)
+        if production:
+            md += band_lines(runs, production_row=production[0], row_names=[*experiment.rows, *production[1:]])
         self.stdout.write(md, ending="")
 
 

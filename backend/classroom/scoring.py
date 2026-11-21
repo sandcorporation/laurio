@@ -246,6 +246,7 @@ def _scoring_adapter(
     timeout: float = CLASSROOM_SCORING_VENDOR_TIMEOUT_SECONDS,
     asynchronous: bool = False,
     log_context: dict | None = None,
+    mode: str | None = None,
 ) -> LLMScoringAdapter:
     """실제 OpenAI 어댑터 또는 결정적 fake 어댑터를 고른다(#340, ADR-0043).
 
@@ -271,7 +272,8 @@ def _scoring_adapter(
     주소와 인증 값은 채점 연결(`connection`, #599)이 준다 — 이 함수는 OpenAI 주소를 모른다.
     인증 값은 fake 모드에서도 여기서 풀린다(예전에도 호출부가 풀어 넘겼다)."""
 
-    mode = settings.CLASSROOM_SCORING_ADAPTER_MODE
+    # `mode` 는 채점 방식 실험(#1262)만 준다 — 개발 환경(fake)에서도 실험 키로 실제 벤더에 나간다. 운영 채점은 주지 않는다.
+    mode = mode or settings.CLASSROOM_SCORING_ADAPTER_MODE
     if connection.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY and not is_fake_adapter_binding(mode):
         # 「Claude(Anthropic) 키」 연결(#795, ADR-0066)은 벤더가 달라 실물 어댑터가 따로다. 스위치
         # (`CLASSROOM_SCORING_ADAPTER_MODE`)는 그대로 「실제로 나가는가」만 가르고 — fake 면 위 fake

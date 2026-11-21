@@ -365,7 +365,14 @@ class ScoringExperiment(models.Model):
     """
 
     name = models.CharField(max_length=120, unique=True)
-    contest = models.ForeignKey("contests.Contest", related_name="scoring_experiments", on_delete=models.PROTECT)
+    #: 공모전 재료면 그 공모전. 사본 재료(#1262)면 비고 `material` 이 찬다.
+    contest = models.ForeignKey(
+        "contests.Contest", related_name="scoring_experiments", on_delete=models.PROTECT, null=True, blank=True
+    )
+    #: 사본 재료의 이름(#1262, `core.experiment_material`) — 운영 강의실 제출을 가명으로 꺼낸 것. 칸은 가명 id 로 남는다.
+    material = models.CharField(max_length=120, blank=True, default="", db_default="")
+    material_exported_at = models.DateTimeField(null=True, blank=True)  # 사본을 가져온 때 — 7일 경고
+    material_required_ids = models.JSONField(default=list, blank=True, null=True)  # 사본 재료의 필수 항목 id — 보고표의 필수 일치율
     created_by = models.CharField(max_length=150)
     rows = models.JSONField()  # ["agent:claude-sonnet-5-5", ...] — 첫째가 기준 줄
     repeat = models.PositiveSmallIntegerField()
@@ -399,8 +406,11 @@ class ScoringExperimentRun(models.Model):
 
     experiment = models.ForeignKey(ScoringExperiment, related_name="runs", on_delete=models.CASCADE)
     submission = models.ForeignKey(
-        "contests.ContestSubmission", related_name="scoring_experiment_runs", on_delete=models.CASCADE
+        "contests.ContestSubmission", related_name="scoring_experiment_runs", on_delete=models.CASCADE,
+        null=True, blank=True,
     )
+    #: 사본 재료의 가명 id(#1262) — 운영 제출과 잇는 칸이 없다. 공모전 재료면 빈 글.
+    material_id = models.CharField(max_length=16, blank=True, default="", db_default="")
     row = models.CharField(max_length=120)
     round = models.PositiveSmallIntegerField()
     status = models.CharField(max_length=10, choices=Status.choices)
@@ -418,10 +428,21 @@ class ScoringExperimentRun(models.Model):
     record = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField()  # `Clock.now()` — 실험 하루 상한이 실행 토큰과 같은 시계로 센다
 
+    @property
+    def subject_key(self) -> int:
+        """칸의 제출을 정수로 — 공모전 제출 번호, 사본 재료면 가명의 정수 꼴(`core.experiment_material.Item.key`)."""
+
+        return self.submission_id if self.submission_id is not None else int(self.material_id, 16)
+
     class Meta:
         ordering = ["experiment_id", "submission_id", "row", "round"]
         constraints = [
-            models.UniqueConstraint(fields=["experiment", "submission", "row", "round"], name="scoring_experiment_cell")
+            models.UniqueConstraint(fields=["experiment", "submission", "row", "round"], name="scoring_experiment_cell"),
+            models.UniqueConstraint(
+                fields=["experiment", "material_id", "row", "round"],
+                condition=models.Q(submission__isnull=True),
+                name="scoring_experiment_material_cell",
+            ),
         ]
         verbose_name = "채점 방식 비교 실험 회차"
         verbose_name_plural = "채점 방식 비교 실험 회차"
