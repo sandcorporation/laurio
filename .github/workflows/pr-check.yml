@@ -140,6 +140,7 @@ jobs:
           python3 scripts/test_fail_fast.py
           bash scripts/ci/promote_test.sh
           bash scripts/ci/e2e_stale_test.sh
+          bash scripts/ci/e2e_gate_test.sh
 
   checks:
     name: checks ${{ matrix.name }}

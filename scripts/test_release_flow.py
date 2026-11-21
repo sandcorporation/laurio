@@ -84,7 +84,7 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertNotIn("pr-check.yml", code)
         self.assertNotIn("verified_tree", code)
         jobs = re.findall(r"(?m)^  ([\w-]+):\n", code.split("\njobs:\n", 1)[1])
-        self.assertEqual(sorted(jobs), ["e2e_watch", "image", "main_only", "notify", "promote"])
+        self.assertEqual(sorted(jobs), ["e2e_dispatch", "e2e_watch", "image", "main_only", "notify", "promote"])
         self.assertFalse((ROOT / "scripts" / "ci" / "verified_tree.py").exists())
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)
@@ -178,7 +178,7 @@ class ReleaseFlowTest(unittest.TestCase):
         release = read(WORKFLOWS / "release.yml")
         # 승격·이미지·알림은 모두 main_only success 를 기다린다 — main_only 하나를 막으면 다 멈춘다.
         self.assertIn(f"if: {only_upstream}", job_block(release, "main_only"))
-        for job in ("image", "notify", "promote", "e2e_watch"):
+        for job in ("image", "notify", "promote", "e2e_dispatch", "e2e_watch"):
             self.assertRegex(job_block(release, job), r"needs:\s*(main_only|\[main_only)")
         self.assertIn(f"if: {only_upstream}", job_block(read(WORKFLOWS / "image.yml"), "build"))
         # 캐시 잡만은 포크 main 에서도 돈다(#1116) — 포크 PR 검사의 층 캐시가 비어 e2e 조각마다 처음부터 굽던 것.
@@ -221,6 +221,37 @@ class ReleaseFlowTest(unittest.TestCase):
             self.assertRegex(block, r"key: e2e-durations-\$\{\{ github.run_id \}\}", "매시 e2e 가 저장하는 캐시는 시간 기록뿐")
         self.assertIn("e2e_plan.py --all --durations .e2e-durations/record.json", job_block(hourly, "gate"))
         self.assertIn("e2e_plan.py --base \"$base\" --durations .e2e-durations/record.json", plan)
+
+    def test_main_merge_calls_the_full_e2e_instead_of_trusting_the_schedule(self) -> None:
+        # #1154: GitHub 예약이 29시간에 4번만 왔다 — main 병합 사건(release)이 e2e 를 부르고, 예약은 보조다.
+        release = read(WORKFLOWS / "release.yml")
+        dispatch = job_block(release, "e2e_dispatch")
+        self.assertIn("gh workflow run e2e.yml --ref main -f source=merge", dispatch)
+        self.assertIn("scripts/ci/e2e-gate.sh", dispatch)  # 50분 안이면 부르지 않는다 — gate 와 같은 판정
+        self.assertRegex(dispatch, r"permissions:\n      contents: read\n      actions: write\n")
+        self.assertNotIn("secrets.", release)
+        # 감시는 부른 뒤에 본다
+        self.assertRegex(job_block(release, "e2e_watch"), r"needs:\s*\[main_only, e2e_dispatch\]")
+        hourly = read(WORKFLOWS / "e2e.yml")
+        on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", hourly)
+        assert on
+        self.assertRegex(on.group(1), r"(?m)^  schedule:")  # 보조로 남긴다
+        self.assertRegex(on.group(1), r"(?ms)^      source:\n.*?options: \[manual, merge\]")
+        # 실행 이름이 전체 실행(예약·병합)과 수동·알림 시험을 가른다 — gate·notify·감시가 이 앞부분으로 거른다
+        self.assertRegex(hourly, r"(?m)^run-name: e2e \[\$\{\{ github.event_name == 'schedule' && 'schedule' \|\| inputs.simulate != 'none' && 'sim' \|\| inputs.source == 'merge' && 'merge' \|\| 'manual' \}\}\]$")
+        gate = job_block(hourly, "gate")
+        self.assertIn("scripts/ci/e2e-gate.sh", gate)
+        self.assertIn("SOURCE: ${{ inputs.source || '' }}", gate)
+        # 실제 실패 이슈는 전체 실행만 만든다 — 수동 dispatch 와 알림 시험이 판정·이슈를 흐리지 않는다
+        notify = job_block(hourly, "notify")
+        self.assertIn("(github.event_name == 'schedule' || inputs.source == 'merge')", notify)
+        self.assertIn('displayTitle|test(\\"^e2e \\\\\\\\[(schedule|merge)', notify)
+        gate_sh = read(ROOT / "scripts" / "ci" / "e2e-gate.sh")
+        stale_sh = read(ROOT / "scripts" / "ci" / "e2e-stale.sh")
+        for script in (gate_sh, stale_sh):
+            self.assertIn("(schedule|merge)", script)
+            self.assertNotIn("--event schedule", script)
+        self.assertIn("E2E_WINDOW_MINUTES:-50", gate_sh)
 
     def test_pr_check_also_judges_the_merge_queue(self) -> None:
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "pr-check.yml"))
