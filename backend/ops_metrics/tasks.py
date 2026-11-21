@@ -48,3 +48,15 @@ def check_slow_routes_daily() -> list[str]:
     from ops_metrics.slow_route_check import check_daily
 
     return check_daily(now=datetime.now(dt_timezone.utc))
+
+
+@shared_task(name="ops_metrics.check_switch_alert_daily", ignore_result=True)
+def check_switch_alert_daily() -> list[str]:
+    """매일 10:00(서울) — 바뀐 채 오래 남은 운영 스위치를 디스코드로 알린다(#1221, `ops_metrics.switch_alert`)."""
+
+    from datetime import datetime
+    from datetime import timezone as dt_timezone
+
+    from ops_metrics.switch_alert import check_daily
+
+    return check_daily(now=datetime.now(dt_timezone.utc))

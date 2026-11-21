@@ -58,6 +58,8 @@ SCHEDULED_JOBS = {
     "ops-metrics:alerts": {"task": "ops_metrics.check_alerts", "schedule": crontab(), "options": {"expires": 55}},
     # 매일 00:10 어제 하루의 경로별 요청 시간 중앙값을 평소와 견줘 느린 경로를 GlitchTip 경고로 올린다(#971).
     "ops-metrics:slow-routes-daily": {"task": "ops_metrics.check_slow_routes_daily", "schedule": crontab(hour=0, minute=10)},
+    # 매일 10:00 바뀐 채 오래 남은 운영 스위치를 알린다(#1221).
+    "ops-metrics:switch-alert-daily": {"task": "ops_metrics.check_switch_alert_daily", "schedule": crontab(hour=10, minute=0)},
     # 매일 03:40 90일보다 오래된 운영 지표 집계 행을 지운다(#827).
     "ops-metrics:purge": {"task": "ops_metrics.purge_old_minutes", "schedule": crontab(hour=3, minute=40)},
 }

@@ -21,13 +21,18 @@ export interface RuntimeSetting {
   updated_by: string | null;
   /** `choice` 가 받는 값(#994). 그 밖의 kind 는 null. */
   choices: string[] | null;
+  /** 스위치만(#1221) — 마지막 변경 시각, 그 뒤의 「이대로 둔다」(시각·확인한 운영자), 경보 대상이라 확인이 필요한가. */
+  changed_at?: string | null;
+  confirmed_at?: string | null;
+  confirmed_by?: string | null;
+  needs_confirm?: boolean;
 }
 
 export interface RuntimeSettingChange {
   id: number;
   key: string;
   label: string;
-  action: "set" | "clear";
+  action: "set" | "clear" | "ack";
   before: string;
   after: string;
   operator_username: string;

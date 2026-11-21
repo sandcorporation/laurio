@@ -5,6 +5,8 @@
 - `GET /operator/runtime-settings/changes` — 변경 이력(비밀은 끝 4자리 표시만).
 - `POST /operator/runtime-settings/{key}` — 저장. 비운 입력은 기존 값을 그대로 둔다. 상위 등급만.
 - `POST /operator/runtime-settings/{key}/clear` — DB 값을 지운다(env 로 돌아간다). 상위 등급만.
+- `POST /operator/runtime-settings/{key}/confirm` — 스위치의 「이대로 둔다」(#1221). 다음 변경까지 스위치 경보에서 뺀다.
+  상위 등급만.
 - `POST /operator/runtime-settings/{key}/test` — 연결 시험. 입력값이 있으면 그것으로, 없으면 지금
   쓰이는 값으로. 결과(ok·invalid_key·unavailable)만 돌려준다. 상위 등급만.
 """
@@ -27,6 +29,7 @@ from .runtime_settings import (
     probe_setting,
     save_setting,
 )
+from .switch_watch import SwitchWatch, confirm_switch, watches
 from .schemas import (
     AccountRefusalOut,
     ErrorOut,
@@ -45,7 +48,7 @@ _SUPERUSER = SuperuserOperatorAuth()
 _HISTORY_LIMIT = 200
 
 
-def _out(view: SettingView) -> RuntimeSettingOut:
+def _out(view: SettingView, watch: SwitchWatch | None = None) -> RuntimeSettingOut:
     return RuntimeSettingOut(
         key=view.key,
         label=view.label,
@@ -58,11 +61,20 @@ def _out(view: SettingView) -> RuntimeSettingOut:
         updated_at=view.updated_at,
         updated_by=view.updated_by,
         choices=list(view.choices) or None,
+        changed_at=watch.changed_at if watch else None,
+        confirmed_at=watch.confirmed_at if watch else None,
+        confirmed_by=watch.confirmed_by if watch else None,
+        needs_confirm=watch.needs_confirm if watch else False,
     )
 
 
 def _view_of(key: str) -> RuntimeSettingOut:
-    return next(_out(v) for v in describe_settings() if v.key == key)
+    return next(v for v in _outs() if v.key == key)
+
+
+def _outs() -> list[RuntimeSettingOut]:
+    switches = watches()
+    return [_out(v, switches.get(v.key)) for v in describe_settings()]
 
 
 def _error_status(exc: RuntimeSettingError) -> int:
@@ -73,7 +85,7 @@ def _error_status(exc: RuntimeSettingError) -> int:
 def list_runtime_settings(request: HttpRequest):
     refusal = last_account_refusal()
     return 200, RuntimeSettingsOut(
-        settings=[_out(v) for v in describe_settings()],
+        settings=_outs(),
         last_account_refusal=AccountRefusalOut(**refusal) if refusal else None,
     )
 
@@ -119,6 +131,19 @@ def save_runtime_setting(request: HttpRequest, key: str, payload: RuntimeSetting
 def clear_runtime_setting(request: HttpRequest, key: str):
     try:
         changed = clear_setting(key, operator=request.auth)
+    except RuntimeSettingError as exc:
+        return _error_status(exc), ErrorOut(detail=exc.detail, code=exc.code)
+    return 200, RuntimeSettingSaveOut(changed=changed, setting=_view_of(key))
+
+
+@runtime_settings_router.post(
+    "/runtime-settings/{key}/confirm",
+    response={200: RuntimeSettingSaveOut, 404: ErrorOut, 422: ErrorOut},
+    auth=_SUPERUSER,
+)
+def confirm_runtime_setting(request: HttpRequest, key: str):
+    try:
+        changed = confirm_switch(key, operator=request.auth)
     except RuntimeSettingError as exc:
         return _error_status(exc), ErrorOut(detail=exc.detail, code=exc.code)
     return 200, RuntimeSettingSaveOut(changed=changed, setting=_view_of(key))

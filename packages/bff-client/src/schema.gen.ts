@@ -4601,6 +4601,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/runtime-settings/{key}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Runtime Setting */
+        post: operations["policies_runtime_settings_api_confirm_runtime_setting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/runtime-settings/{key}/test": {
         parameters: {
             query?: never;
@@ -9796,10 +9813,16 @@ export interface components {
         };
         /** RuntimeSettingOut */
         RuntimeSettingOut: {
+            /** Changed At */
+            changed_at?: string | null;
             /** Choices */
             choices?: string[] | null;
             /** Configured */
             configured: boolean;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Confirmed By */
+            confirmed_by?: string | null;
             /** Default */
             default: string | null;
             /** Key */
@@ -9810,6 +9833,11 @@ export interface components {
             label: string;
             /** Last4 */
             last4: string | null;
+            /**
+             * Needs Confirm
+             * @default false
+             */
+            needs_confirm: boolean;
             /** Source */
             source: string;
             /** Updated At */
@@ -17400,6 +17428,46 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    policies_runtime_settings_api_confirm_runtime_setting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeSettingSaveOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

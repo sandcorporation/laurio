@@ -408,6 +408,14 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   비면 보내지 않고 상태만 기록한다. 겹쳐 돈 검사는 advisory 잠금을 못 잡아 건너뛴다. 지금 울리는 목록은 같은
   `GET /api/operator/ops-metrics` 의 `alerts`(기간과 무관)로 콘솔 `/ops` 맨 위 패널에 보인다.
 - **발송 실패 경보(#1123, `ops_metrics.notification_dispatch_alert`).** 스캔 `notification-dispatch-alert`(5분 주기)가 같은 `AlertState`·디스코드 길로 규칙 둘을 본다 — `notification-dispatch-failures`(최근 창 안 실패 이력 ≥ 문턱)와 `notification-zero-reach`(한 알림 유형이 최소 건수 이상인데 성공 이력 0). 기본값: 창 60분(`NOTIFICATION_ALERT_WINDOW_MINUTES`), 실패 문턱 5건(`NOTIFICATION_ALERT_FAILURE_THRESHOLD`), 수신자 0 최소 3건(`NOTIFICATION_ALERT_ZERO_REACH_MIN`). 발생·해소를 한 번씩만 보내고 웹훅이 비면 조용하다. 글에는 건수·채널·알림 유형만 있고 수신자·주소는 없다.
+- **운영 스위치 경보(#1221, `ops_metrics.switch_alert`).** 운영 스위치(`policies.runtime_settings` 의 `switch` 종류 — 지금
+  `CONTEST_AI_SCORING`·`CONTEST_AI_QUALITY_REVIEW`, 앞으로 더해질 것 포함)가 바뀐 채 오래 남으면 매일 10:00(서울)
+  `ops_metrics.check_switch_alert_daily` 가 같은 디스코드 길(`OPS_ALERT_DISCORD_WEBHOOK_URL`, 비면 보내지 않는다)로 **하루 한 번**
+  묶어 보낸다. 대상: (가) 지금 값이 기본값과 다르다, (나) 마지막 변경이 on → off 다(끈 값이 기본값과 같아도 잡는다 — 11-19
+  완성도 리뷰를 끈 채 이틀을 몰랐다). 둘 다 **마지막 변경 뒤 N 일**(운영 설정 `SWITCH_ALERT_AFTER_DAYS`, 기본 2)이 지나야 한다.
+  글: 키·라벨·지금 값/기본값·마지막 변경 시각(서울)·운영자 계정 id — 이름·이메일은 없다. **멈추는 길은 운영자 앱 설정 화면의
+  「이대로 둔다」**(상위 등급) — 변경 이력에 `ack`(누가·언제)로 남고, 그 뒤 새 변경(저장·지우기)이 오면 효력을 잃고 다시 대상이 된다.
+  일부러 켜 둔 스위치는 이것으로 조용해진다. 전송이 실패하면 경고 로그만 남고 다음 날 다시 대상이다. 판정은 `policies.switch_watch`.
 - **느린 경로 경고(#971, `ops_metrics.slow_route_check`).** 요청 지표(`RequestMinute` + 아직 옮기지 않은 Redis 분)를
   **경로(메서드 + URL 패턴)마다** 보고, 느리면 디스코드가 아니라 **GlitchTip 에 `warning` 경고**를 올린다 — 자동 진단이
   집는다(아래 「GlitchTip 자동 진단」). 판정은 순수 함수 `ops_metrics.slow_routes` 하나다(재생 스크립트도 같은 함수).
