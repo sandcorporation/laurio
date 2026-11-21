@@ -1195,7 +1195,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_OPENAI_MODEL` | 모델 이름 | 같은 셋 | `gpt-4o-mini` |
 | `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
-| `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 은 방침이 공모전 채점의 Anthropic 이전을 적은 개정의 시행일(`PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` = 2026-11-27, #997) 0시(KST) 전에는 저장되지 않는다(422 `privacy_not_covered`) |
+| `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 도 시행일과 상관없이 저장되고 돈다(대표 결정 2026-11-20, `config/settings.py`). 방침 개정 시행일 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`(2026-11-27, #997)는 방침 화면 잠금 시험만 본다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
@@ -1230,8 +1230,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   모든 모델에 「1 점 이상은 파일을 Read 로 열어 보고, 근거는 Read 로 본 줄」 규칙 7·8 이 붙고(#1717), Haiku 계열이면
   채점의 엄격 규칙을 0~5 로 옮긴 규칙 9~11 이 더 붙는다(#1048, 강의실 완성도도 같다).
   기록의 `model_version` 은 `agent:<벤더>:<모델>`.
-- 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 은 방침 시행일
-  (2026-11-27) 전에 거절된다(#995·#997).
+- 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 도 방침 시행일
+  (2026-11-27) 전에 막지 않는다(대표 결정 2026-11-20 — 시행일은 방침 화면 잠금 시험만 본다).
 - **강의실**(#1036)은 클래스가 「에이전트」를 고르면(`Class.scoring_method`·`quality_method`) 판정 채점·완성도 검사가
   같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(Claude 키 → Claude Code). **에이전트를 고를 수 있는
   벤더는 `AGENT_VERIFIED_VENDORS` 한 곳이 정하고 지금은 Anthropic 뿐이다** — OpenAI 키(Codex)는 운영 실측(#1681)에서 예산에 끊겨
