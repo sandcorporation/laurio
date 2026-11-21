@@ -25,7 +25,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='scoringexperiment',
             name='material_required_ids',
-            field=models.JSONField(blank=True, default=list),
+            field=models.JSONField(blank=True, default=list, null=True),
         ),
         migrations.AddField(
             model_name='scoringexperimentrun',

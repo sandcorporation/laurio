@@ -77,7 +77,7 @@ class Command(BaseCommand):
             full = len(eligible_submissions(experiment.contest, None))  # 공모전에서 채점된 제출 전부
             source = f"공모전 {experiment.contest_id}"
         else:
-            required = frozenset(int(i) for i in experiment.material_required_ids)
+            required = frozenset(int(i) for i in experiment.material_required_ids or [])
             full = len({r.submission_id for r in runs})
             source = f"사본 재료 {experiment.material}(가명 id)"
         reports = report_rows(runs, baseline=baseline, row_names=[*experiment.rows, *production], required_ids=required)

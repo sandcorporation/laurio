@@ -372,7 +372,7 @@ class ScoringExperiment(models.Model):
     #: 사본 재료의 이름(#1262, `core.experiment_material`) — 운영 강의실 제출을 가명으로 꺼낸 것. 칸은 가명 id 로 남는다.
     material = models.CharField(max_length=120, blank=True, default="", db_default="")
     material_exported_at = models.DateTimeField(null=True, blank=True)  # 사본을 가져온 때 — 7일 경고
-    material_required_ids = models.JSONField(default=list, blank=True)  # 사본 재료의 필수 항목 id — 보고표의 필수 일치율
+    material_required_ids = models.JSONField(default=list, blank=True, null=True)  # 사본 재료의 필수 항목 id — 보고표의 필수 일치율
     created_by = models.CharField(max_length=150)
     rows = models.JSONField()  # ["agent:claude-sonnet-5-5", ...] — 첫째가 기준 줄
     repeat = models.PositiveSmallIntegerField()
