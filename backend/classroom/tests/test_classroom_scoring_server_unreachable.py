@@ -116,8 +116,9 @@ def test_an_unreachable_server_never_turns_into_an_automatic_fail_and_waits_on_t
     # 그것만으로 CPU 0.2초가 든다(#701). 이 시험이 보는 것은 서버가 닿지 않을 때다.
     _, ctx = _setup(client, monkeypatch, syntax_check_enabled=False)
 
-    # 실패 한도(5회)의 두 배를, 다시 확인 간격을 넘겨 가며 돌린다.
-    for n in range(2 * classroom_scoring.SCORING_FAILURE_LIMIT):
+    # 실패 한도(5회)를 넘기는 첫 스캔까지를, 다시 확인 간격을 넘겨 가며 돌린다.
+    # 한도를 한 번 넘긴 뒤의 스캔은 같은 분기를 되풀이할 뿐이라 CPU 만 먹는다(#1265).
+    for n in range(classroom_scoring.SCORING_FAILURE_LIMIT + 1):
         _set_now(_after_intervals(start, n))
         run_scan(client)
 
