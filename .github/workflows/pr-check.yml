@@ -20,7 +20,7 @@
 #
 # 캐시(#932): 이미지 층은 buildx `type=local` 캐시를 actions/cache 로 옮긴다(키 = ci·backend 는 Dockerfile·lockfile 해시,
 # 세 앱은 앱 빌드 문맥 해시 — `scripts/ci/bk-keys.sh`, #1137). 여기서는 복원만(`actions/cache/restore`) 한다 — PR·대기열
-# ref 에서 저장한 캐시는 다른 PR 이 못 읽는다. 저장은 release.yml 의 cache 잡이 main 에서 한다(키가 없을 때만 굽는다).
+# ref 에서 저장한 캐시는 다른 PR 이 못 읽는다. 저장은 release-cache.yml 의 cache 잡이 main 에서 한다(키가 없을 때만 굽는다).
 # 별도 권한(`actions: write`)이 필요 없다 — GHA 캐시 백엔드(type=gha) 대신 actions/cache 를 쓰는 까닭이다.
 #
 # 여기서 굽는 이미지는 amd64 시험용이고 레지스트리에 올리지 않는다(ctx·e2e 태그 없음). 배포할 arm64 이미지는
@@ -46,7 +46,7 @@ concurrency:
 
 env:
   CODEMIT_CI_RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
-  # 이미지 층 캐시(#932) — 복원만 한다(저장은 release.yml 의 cache 잡)
+  # 이미지 층 캐시(#932) — 복원만 한다(저장은 release-cache.yml 의 cache 잡)
   # compose(bake)가 로컬 캐시 폴더 읽기·쓰기를 허락받으라고 멈춘다 — 이 실행기 안의 /tmp 폴더라 끈다
   BUILDX_BAKE_ENTITLEMENTS_FS: "0"
   CODEMIT_BK_CACHE: /tmp/bk

@@ -25,7 +25,7 @@ rm -rf test-results && mkdir -p test-results
 
 echo "CI 이미지 굽는 중($image)…"
 # 층 캐시(GitHub Actions, #932): CODEMIT_BK_CACHE 가 있으면 복원한 층을 읽고(buildx 컨테이너 빌더라 --load),
-# 저장은 release.yml 의 cache 잡이 한다(#1090).
+# 저장은 release-cache.yml 의 cache 잡이 한다(#1090).
 build_cache=()
 if [ -n "${CODEMIT_BK_CACHE:-}" ]; then
   build_cache=(--load --cache-from "type=local,src=$CODEMIT_BK_CACHE/ci")

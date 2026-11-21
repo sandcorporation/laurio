@@ -7,7 +7,7 @@
 ```
 PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 → pr-check.yml(merge_group, 전부 + guard — 배포 가능 판정 한 번) → squash → main
    → release.yml(push: main): image(image.yml, ubuntu-24.04-arm 일곱) → promote(production fast-forward)
-                              ‖ cache·cache-node(PR 검사의 캐시를 main 에 채운다 — 승격은 기다리지 않는다)
+   → release-cache.yml(push: main, release 와 별개 실행): cache·cache-node(PR 검사의 캐시를 main 에 채운다 — 승격은 기다리지 않는다)
    → Jenkins `codemit/deploy`(*/production): 굽지도 검사하지도 않고 ghcr `codemit-<서비스>:<sha>` 를 받아 oracle 에 배포
 ```
 
@@ -69,7 +69,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
   초록이면 promote 가 `production` 을 그 sha 로 앞당긴다(`scripts/ci/promote.sh ff`). 실행은 `gh run list --workflow release.yml`.
 - 보안(공개 저장소, `scripts/test_public_repo.py`): `pull_request_target`·self-hosted 없음, secrets 없음(`github.token` 하나), 워크플로
   기본 권한 `contents: read`, **쓰기는 정해진 자리에만** — `packages: write` 는 image(image.yml·release.yml 의 image 잡), `contents: write`
-  는 release.yml 의 promote 잡. 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
+  는 release.yml 의 promote 잡, `actions: write` 는 release-cache.yml 의 cache 잡(앞 세대 캐시 지우기). 액션은 SHA 로 고정한다. PR 검사가 굽는 amd64 이미지는 올리지 않는다.
 - **e2e 대조·e2e 태그는 없다**(#938에서 걷었다) — Actions PR 검사가 이미지를 올리지 않아 태그를 붙일 쪽이 없다.
 - **production 승격 전에 그 커밋을 보증하는 것: main 은 병합 대기열로만 움직인다**(#1090 — #959 의 트리 비교 `verified_tree.py` 를 대신한다).
   - ruleset `main-merge-queue`(기본 브랜치, `enforcement: active`, **bypass_actors 없음** — 관리자도 넘지 못한다): `merge_queue`(squash, `ALLGREEN`)와
@@ -85,7 +85,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
 - **워크플로 문법 검사(#1105)**: `workflow-lint.yml`(별도 파일 — pr-check.yml 자체가 파싱 안 되면 그 안의 어떤 잡도 안 뜨기 때문)이 `.github/workflows/**` 가 바뀐 PR 에서만 `scripts/ci/actionlint.sh --all` 로 actionlint(1.7.12, linux amd64 tarball 을 sha256 고정으로 내려받음)를 돌린다. 필수 검사(「결과」·ruleset)에는 넣지 않는다 — PR 에 빨강으로 보이는 것이 목적이다. `.githooks/pre-commit` 도 워크플로가 staged 일 때 같은 스크립트를 건다(로컬에 actionlint 가 있을 때). 로컬: `scripts/ci/actionlint.sh --all`.
 - **아래에서 「PR 검사(Jenkins)」·macos·e2e 태그를 말하는 표와 글은 꺼진 검사의 기록이다.** Jenkins 이미지 빌드 비상 길도 제거했다. 검사와 이미지 빌드는 GitHub Actions만 수행한다.
 
-### Actions 의 캐시 — main(release 의 cache 잡)이 저장하고 PR·대기열은 복원만 한다(#932·#1090)
+### Actions 의 캐시 — main(release-cache.yml 의 cache 잡)이 저장하고 PR·대기열은 복원만 한다(#932·#1090)
 
 처음에는 캐시가 없어 PR 하나가 11분(646~665초)쯤 걸렸다. 잡 안쪽을 재 보니 시간은 **이미지 굽기**(`checks` 의 CI 이미지 약 107초,
 `guard` 92~112초, `e2e`·`celery` 의 스택 굽기 e2e 약 6분·celery 약 6분)와 **backend pytest 435초**에 몰려 있다. 앞의 것만 캐시로 줄인다 —
@@ -103,7 +103,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
 - **CI 이미지의 node_modules 층도 캐시에서 온다(#1081)**: `ci.Dockerfile` 은 워크스페이스 매니페스트만 먼저 넣고 `pnpm install` 한 뒤
   소스를 넣는다 — 의존이 같으면 설치 층이 캐시 적중이다. 워크스페이스 패키지를 더하면 그 `package.json` COPY 도 더한다
   (`scripts/test_ci_images.py` 가 어긋나면 막는다). 이미지를 한 번 굽어 잡들이 나눠 받는 길은 재 보니 걸림 경로가 늘어 접었다(#1081 댓글).
-- **저장은 main 에서만, release.yml 의 `cache`·`cache-node` 잡이 한다**(#1090) — PR·대기열(`gh-readonly-queue/…` ref)에서 만든 캐시는 그 ref
+- **저장은 main 에서만, release-cache.yml 의 `cache`·`cache-node` 잡이 한다**(#1090, #1151 에서 release.yml 에서 떼어 냈다) — PR·대기열(`gh-readonly-queue/…` ref)에서 만든 캐시는 그 ref
   안에서만 쓰여 다른 PR 에 소용이 없고 10GB 만 먹는다. 잡은 이름마다(ci·backend·frontend·operator·classroom) 정확한 키를 `lookup-only` 로 보고
   **이미 있으면 받지도 굽지도 않는다** — ci·backend 는 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이, 세 앱은 그 앱의
   빌드 문맥이 바뀐 병합에서만 굽는다.
@@ -131,6 +131,7 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
   (다이제스트 얻는 법은 스크립트 머리말). 로컬 `scripts/test.sh e2e` 는 그대로 호스트 Playwright 다.
 - **10GB**: 층 캐시는 세 앱 3세대(앱 하나 약 290MB)·ci·backend 2세대(약 440·150MB) — 합쳐 약 3.8GB 를 넘지 않는다. 새 세대를
   저장한 cache 잡이 그 밖의 앞 세대를 지운다(#1137).
+  **캐시 저장은 release 실행 안에 두지 않는다(#1151)** — 이름별 `concurrency`(`release-cache-<이름>`)는 한 그룹에 실행 하나·대기 하나만 둬 병합이 잇따르면 대기 중인 잡을 취소한다. 같은 실행 안이면 그 취소가 release 실행 결론을 cancelled 로 만들어, 이미지·승격·배포가 성공했는데 실행 결론을 읽는 판정(`wait-deploy.py` 등)이 거짓 실패를 냈다. 그래서 두 잡은 별도 워크플로로 떼어 냈고, 취소돼도 `release-cache` 실행만 cancelled 다(`scripts/test_release_flow.py`).
   그 밖의 것(pnpm 저장소·e2e 시간 기록)은 키가 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터
   지운다. `gh cache list` 합계를 가끔 본다.
 - 보안 규칙(`scripts/test_public_repo.py`)은 그대로다 — 액션 SHA 고정, `permissions: contents: read`, secrets 없음.
