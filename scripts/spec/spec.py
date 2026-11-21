@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""스펙 브랜치 흐름(#1210) — 여러 티켓짜리 스펙은 `spec/<이름>` 하나에 모아 main 에 한 번 병합·한 번 배포한다.
+"""스펙 브랜치 흐름(#1210, #1228) — 여러 티켓짜리 스펙은 `spec/<이름>` 하나에 PR 없이 모아 PR 하나·검사 한 번·배포 한 번.
 
     python3 scripts/spec/spec.py start <이름>            # origin/main 위에 spec/<이름> 을 만들어 push(착수 표지 커밋 하나)
-    python3 scripts/spec/spec.py merge-ticket <PR>       # base 가 spec/* 이고 head 의 「결과」가 초록일 때만 squash 병합
+    python3 scripts/spec/spec.py push <이름>             # 작업자 워크트리에서: fetch → merge origin/spec/<이름> → 보통 push(티켓 사이 PR·CI 없음)
     python3 scripts/spec/spec.py sync <이름>             # spec/<이름> 워크트리에서: git merge origin/main → 보통 push
-    python3 scripts/spec/spec.py finish <이름> [--title] # spec/<이름> → main PR 을 연다(모인 티켓의 Closes 목록). 그 뒤는 enqueue.sh
-    python3 scripts/spec/spec.py report <이름>           # 착수→배포 시각·티켓 PR·전체 검사·배포·마지막 검사 실패·충돌
+    python3 scripts/spec/spec.py finish <이름> [--title] # spec/<이름> → main PR 하나(티켓별 커밋·Closes). 그 뒤는 enqueue.sh
+    python3 scripts/spec/spec.py blame <이름> <실행 번호|시험 경로>  # 붉은 PR — 실패 파일을 마지막으로 바꾼 티켓 커밋
+    python3 scripts/spec/spec.py report <이름>           # 착수→배포 시각·티켓·전체 검사·배포·마지막 검사 실패·충돌
     python3 scripts/spec/spec.py report --prs 1179,1180  # 「티켓마다 main PR」 방식의 같은 숫자(비교용)
     python3 scripts/spec/spec.py dev <이름> [--offset N] [--print]  # 스펙 브랜치를 워크트리 + 오프셋 dev 스택으로 띄운다
 
 판정은 사람 눈이 아니라 이 스크립트가 한다. 종료 코드: 0 됨 · 1 거절(까닭 한 줄) · 2 사용법·조회 실패.
-force push 는 하지 않는다. 기록은 커밋 꼬리말 둘에 남는다 — `Spec-Start: <이름>`(start), `Spec-Sync-Conflicts: <수>`(sync);
-report 가 그 꼬리말을 GitHub API 로 읽어 센다.
+force push 는 하지 않는다. 기록은 커밋 꼬리말 셋에 남는다 — `Spec-Start: <이름>`(start), `Spec-Ticket: #<이슈>`(티켓
+커밋마다, push 가 없으면 거절), `Spec-Sync-Conflicts: <수>`(sync); finish·blame·report 가 그 꼬리말을 읽는다.
 """
 
 from __future__ import annotations
@@ -29,12 +30,12 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,40}$")
-CHECK = "결과"  # pr-check.yml 의 필수 검사 이름 — 바꾸면 main ruleset 과 함께 바뀐다
 WORKFLOW = "pr-check.yml"
 DEPLOY_CONTEXT = os.environ.get("ISSUE_TRACK_DEPLOY_CONTEXT", "sandcorp/deploy")
 START_TRAILER = "Spec-Start"
 SYNC_TRAILER = "Spec-Sync-Conflicts"
-CLOSES = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", re.IGNORECASE)
+TICKET_TRAILER = "Spec-Ticket"
+TICKET_TRAILER_RE = re.compile(rf"^{TICKET_TRAILER}:\s*#?(\d+)\s*$", re.MULTILINE)
 
 Gh = Callable[[Sequence[str]], str]
 
@@ -76,49 +77,97 @@ def start(name: str, cwd: Path | None = None) -> str:
     return f"{br} 만듦 — {sha[:12]} (origin/main 위)"
 
 
-# ── merge-ticket ─────────────────────────────────────────────────────────────────────────
-class PrInfo(TypedDict):
-    number: int
-    baseRefName: str
-    headRefOid: str
-    state: str
-    isDraft: bool
+# ── 티켓 커밋 ────────────────────────────────────────────────────────────────────────────
+@dataclass
+class TicketCommit:
+    sha: str
+    subject: str
+    tickets: list[int]
 
 
-class CheckRun(TypedDict):
-    id: int
-    status: str
-    conclusion: str | None
-    started_at: str | None
-    html_url: str
+def tickets_of(message: str) -> list[int]:
+    out: list[int] = []
+    for n in TICKET_TRAILER_RE.findall(message):
+        if int(n) not in out:
+            out.append(int(n))
+    return out
 
 
-def merge_ticket(pr: str, gh: Gh = _gh) -> str:
-    info = cast(PrInfo, json.loads(gh(["pr", "view", pr, "--json", "number,baseRefName,headRefOid,state,isDraft"])))
-    base = info["baseRefName"]
-    if not base.startswith("spec/"):
-        raise Refused(f"PR #{info['number']} 의 base 가 {base} — spec/* 만 병합한다(main 은 bash scripts/ci/enqueue.sh)")
-    if info["state"] != "OPEN":
-        raise Refused(f"PR #{info['number']} 가 {info['state']}")
-    if info["isDraft"]:
-        raise Refused(f"PR #{info['number']} 가 초안")
-    sha = info["headRefOid"]
-    runs = cast(
-        list[CheckRun],
-        json.loads(
-            gh(["api", "-X", "GET", f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs", "-f", f"check_name={CHECK}",
-                "-f", "per_page=100", "-q", ".check_runs"])
-        ),
-    )
-    if not runs:
-        raise Refused(f"head {sha[:12]} 에 「{CHECK}」가 없다")
-    last = max(runs, key=lambda r: (r["started_at"] or "", r["id"]))
-    if last["status"] != "completed":
-        raise Refused(f"「{CHECK}」가 아직 돈다({last['status']}) — {last['html_url']}")
-    if last["conclusion"] != "success":
-        raise Refused(f"「{CHECK}」가 {last['conclusion']} — {last['html_url']}")
-    gh(["pr", "merge", pr, "--squash", "--match-head-commit", sha])
-    return f"PR #{info['number']} → {base} squash 병합(head {sha[:12]}, 「{CHECK}」 success)"
+def ticket_commits(rev_range: str, cwd: Path | None = None, paths: Sequence[str] = ()) -> list[TicketCommit]:
+    """merge 커밋을 뺀 범위의 커밋(오래된 것부터). 착수 표지(`Spec-Start`)는 티켓이 아니라 뺀다."""
+    out = _git("log", "--reverse", "--no-merges", "--format=%H%x1f%s%x1f%B%x1e", rev_range, "--", *paths, cwd=cwd).stdout
+    commits: list[TicketCommit] = []
+    for rec in out.split("\x1e"):
+        if not rec.strip():
+            continue
+        sha, subject, body = rec.strip("\n").split("\x1f", 2)
+        if re.search(rf"^{START_TRAILER}:", body, re.MULTILINE):
+            continue
+        commits.append(TicketCommit(sha, subject, tickets_of(body)))
+    return commits
+
+
+# ── push ─────────────────────────────────────────────────────────────────────────────────
+PUSH_TRIES = 3  # 앞질러짐(non-fast-forward) 뒤 다시 받아 합치는 횟수 — 사슬 셋이 한꺼번에 올려도 끝난다
+REJECTED = ("[rejected]", "non-fast-forward", "fetch first", "cannot lock ref", "stale info")
+
+
+MIGRATION = re.compile(r"^(.+)/migrations/\d{4}_[^/]+\.py$")
+
+
+def migration_overlap(br: str, cwd: Path | None) -> list[str]:
+    """갈라진 뒤 양쪽이 같은 앱에 마이그레이션을 더했나 — git 충돌은 없어도 leaf 가 둘이 된다."""
+    def apps(rng: str) -> set[str]:
+        out = _git("diff", "--name-only", "--diff-filter=A", rng, cwd=cwd).stdout.split()
+        return {m.group(1) for f in out if (m := MIGRATION.match(f))}
+    return sorted(apps(f"origin/{br}...HEAD") & apps(f"HEAD...origin/{br}"))
+
+
+def push(name: str, cwd: Path | None = None, before_push: Callable[[], None] | None = None) -> str:
+    """작업자 워크트리의 로컬 브랜치(origin/spec/<이름> 에서 딴 것)를 스펙 브랜치에 올린다 — fetch → merge → 보통 push.
+
+    before_push 는 시험이 「fetch 와 push 사이에 남이 먼저 올렸다」를 만들 자리다.
+    """
+    br = branch(name)
+    dirty = _git("status", "--porcelain", "--untracked-files=no", cwd=cwd).stdout.splitlines()
+    if dirty:
+        raise Refused(f"작업 트리가 더럽다({len(dirty)}개) — 커밋하거나 되돌린 뒤 다시\n"
+                      + "\n".join(f"  {ln}" for ln in dirty[:20]))
+    _git("fetch", "-q", "origin", br, cwd=cwd)
+    mine = ticket_commits(f"origin/{br}..HEAD", cwd=cwd)
+    bare = [c for c in mine if not c.tickets]
+    if bare:
+        raise Refused(f"꼬리말 `{TICKET_TRAILER}: #<이슈>` 없는 커밋 {len(bare)}개 — `git commit --amend` 로 꼬리말을 더한 뒤 다시\n"
+                      + "\n".join(f"  {c.sha[:12]} {c.subject}" for c in bare))
+    for attempt in range(1, PUSH_TRIES + 1):
+        if attempt > 1:
+            _git("fetch", "-q", "origin", br, cwd=cwd)
+        if _git("merge-base", "--is-ancestor", f"origin/{br}", "HEAD", cwd=cwd, check=False).returncode != 0:
+            both = migration_overlap(br, cwd)
+            if both:
+                raise Refused(f"마이그레이션이 겹친다(앱 {', '.join(both)}) — 남의 사슬이 같은 앱에 먼저 올렸다. "
+                              f"`git merge origin/{br}` 뒤 내 마이그레이션 파일을 그 다음 번호로 옮기고 dependencies 를 고쳐 "
+                              f"커밋(`makemigrations --merge` 는 쓰지 않는다) → 다시 push")
+            r = _git("merge", "--no-edit", "-q", f"origin/{br}", cwd=cwd, check=False)
+            if r.returncode != 0:
+                files = _git("diff", "--name-only", "--diff-filter=U", cwd=cwd).stdout.split()
+                if not files:
+                    raise RuntimeError(f"git merge origin/{br}: {(r.stderr or r.stdout).strip()[:300]}")
+                raise Refused(f"origin/{br} 와 충돌 {len(files)}개 — 고친 뒤 `git add` · `git commit --no-edit` · 다시 push"
+                              f"(그만두려면 `git merge --abort`)\n" + "\n".join(f"  {f}" for f in files))
+        head = _git("rev-parse", "HEAD", cwd=cwd).stdout.strip()
+        if head == _git("rev-parse", f"origin/{br}", cwd=cwd).stdout.strip():
+            return f"{br}: 올릴 것 없음"
+        if before_push:
+            before_push()
+        r = _git("push", "-q", "origin", f"HEAD:refs/heads/{br}", cwd=cwd, check=False)
+        if r.returncode == 0:
+            tickets = sorted({n for c in mine for n in c.tickets})
+            again = f" · {attempt}번째에" if attempt > 1 else ""
+            return f"{br}: push {head[:12]} — 티켓 {', '.join(f'#{n}' for n in tickets) or '없음'}{again}"
+        if not any(k in r.stderr for k in REJECTED):
+            raise RuntimeError(f"git push: {r.stderr.strip()[:300]}")
+    raise Refused(f"{PUSH_TRIES}번 다시 받았는데도 앞질러졌다 — 잠시 뒤 다시 `spec.py push {name}`")
 
 
 # ── sync ─────────────────────────────────────────────────────────────────────────────────
@@ -159,41 +208,85 @@ def sync(name: str, cwd: Path | None = None) -> str:
 
 
 # ── finish ───────────────────────────────────────────────────────────────────────────────
-class TicketPr(TypedDict):
-    number: int
-    title: str
-    body: str
+def red_path(name: str) -> list[str]:
+    return [
+        "붉으면 이 PR 에서 고친다 — 새 PR 을 열지 않는다:",
+        f"  1. python3 scripts/spec/spec.py blame {name} <실행 번호|시험 경로>  # 그 파일을 마지막으로 바꾼 티켓",
+        f"  2. 워크트리(origin/spec/{name} 에서)에서 고쳐 커밋 — 꼬리말 `{TICKET_TRAILER}: #<그 티켓>`",
+        f"  3. python3 scripts/spec/spec.py push {name}  # 같은 브랜치 → 같은 PR 이 다시 검사된다",
+    ]
 
 
-def closes(body: str) -> list[int]:
-    return [int(n) for n in CLOSES.findall(body or "")]
-
-
-def finish_body(br: str, tickets: Sequence[TicketPr]) -> str:
-    issues: list[int] = []
-    for t in sorted(tickets, key=lambda t: t["number"]):
-        for n in closes(t["body"]):
-            if n not in issues:
-                issues.append(n)
-    lines = [f"스펙 `{br}` → main. 병합은 `bash scripts/ci/enqueue.sh <이 PR>` — 대기열 검사 한 번, 병합 하나 = 배포 하나.", "",
-             "## 티켓 PR", ""]
-    lines += [f"- #{t['number']} {t['title']}" for t in sorted(tickets, key=lambda t: t["number"])] or ["- (없음)"]
-    lines += ["", *[f"Closes #{n}" for n in issues]]
+def finish_body(name: str, commits: Sequence[TicketCommit]) -> str:
+    br = branch(name)
+    by: dict[int, list[TicketCommit]] = {}
+    for c in commits:
+        for n in c.tickets:
+            by.setdefault(n, []).append(c)
+    lines = [f"스펙 `{br}` → main. 병합은 `bash scripts/ci/enqueue.sh <이 PR>` — 전체 검사 한 번, 병합 하나 = 배포 하나.", "",
+             "## 티켓별 커밋", ""]
+    for n in sorted(by):
+        lines.append(f"- #{n}")
+        lines += [f"  - {c.sha[:12]} {c.subject}" for c in by[n]]
+    lines += ["", *red_path(name), "", *[f"Closes #{n}" for n in sorted(by)]]
     return "\n".join(lines).rstrip() + "\n"
 
 
-def finish(name: str, title: str | None, gh: Gh = _gh) -> str:
+def finish(name: str, title: str | None, gh: Gh = _gh, cwd: Path | None = None) -> str:
     br = branch(name)
-    tickets = cast(list[TicketPr], json.loads(
-        gh(["pr", "list", "--base", br, "--state", "merged", "--limit", "200", "--json", "number,title,body"])))
-    body = finish_body(br, tickets)
+    _git("fetch", "-q", "origin", "main", br, cwd=cwd)
+    commits = ticket_commits(f"origin/main..origin/{br}", cwd=cwd)
+    if not any(c.tickets for c in commits):
+        raise Refused(f"origin/main..origin/{br} 에 꼬리말 `{TICKET_TRAILER}: #<이슈>` 커밋이 없다 — 올린 티켓이 없다")
+    body = finish_body(name, commits)
     opened = cast(list[dict[str, str]], json.loads(
         gh(["pr", "list", "--head", br, "--base", "main", "--state", "open", "--json", "url"])))
     if opened:
         gh(["pr", "edit", opened[0]["url"], "--body", body])
-        return f"이미 열려 있다 — 본문만 고쳤다: {opened[0]['url']}"
-    url = gh(["pr", "create", "--base", "main", "--head", br, "--title", title or f"스펙 {name}", "--body", body]).strip()
-    return f"{url}\n다음: bash scripts/ci/enqueue.sh {url.rsplit('/', 1)[-1]} --wait"
+        url, said = opened[0]["url"], "이미 열려 있다 — 본문만 고쳤다"
+    else:
+        url = gh(["pr", "create", "--base", "main", "--head", br, "--title", title or f"스펙 {name}", "--body", body]).strip()
+        said = "열었다"
+    pr = url.rsplit("/", 1)[-1]
+    return "\n".join([f"{said}: {url}", f"초록이면: bash scripts/ci/enqueue.sh {pr} --wait", *red_path(name)])
+
+
+# ── blame ────────────────────────────────────────────────────────────────────────────────
+# pytest `FAILED backend/x/tests/test_y.py::…`, playwright `› e2e/x.spec.ts:12` 같은 줄에서 파일 경로를 줍는다
+LOG_PATH = re.compile(r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.(?:py|ts|tsx|js|mjs|sh))(?=[:\s]|$)")
+
+
+def failed_paths(log: str, files: Sequence[str]) -> list[str]:
+    """실패 로그에 찍힌 경로 중 스펙 tip 에 있는 파일. 앱 폴더를 뺀 상대 경로(playwright)는 끝이 맞는 파일로 잇는다."""
+    out: list[str] = []
+    known = set(files)
+    for raw in LOG_PATH.findall(log):
+        hit = [raw] if raw in known else [f for f in files if f.endswith("/" + raw)]
+        if len(hit) == 1 and hit[0] not in out:
+            out.append(hit[0])
+    return out
+
+
+def blame(name: str, target: str, gh: Gh = _gh, cwd: Path | None = None) -> str:
+    br = branch(name)
+    _git("fetch", "-q", "origin", "main", br, cwd=cwd)
+    if target.isdigit():
+        files = _git("ls-tree", "-r", "--name-only", f"origin/{br}", cwd=cwd).stdout.split()
+        paths = failed_paths(gh(["run", "view", target, "--log-failed"]), files)
+        if not paths:
+            raise Refused(f"실행 {target} 의 실패 로그에서 저장소 파일 경로를 못 찾았다 — 시험 경로를 직접 준다")
+    else:
+        paths = [target]
+    lines: list[str] = []
+    for f in paths:
+        touched = ticket_commits(f"origin/main..origin/{br}", cwd=cwd, paths=[f])
+        if not touched:
+            lines.append(f"{f} ← 스펙이 바꾸지 않았다(main 그대로) — 이 파일이 부르는 쪽을 바꾼 티켓을 본다")
+            continue
+        last = touched[-1]
+        who = ", ".join(f"#{n}" for n in last.tickets) or "꼬리말 없음"
+        lines.append(f"{f} ← {who} {last.sha[:12]} {last.subject}")
+    return "\n".join(lines)
 
 
 # ── report ───────────────────────────────────────────────────────────────────────────────
@@ -246,7 +339,7 @@ class Numbers:
         return [
             self.label,
             f"착수 {self.started or '?'} → 배포 {self.deployed or '아직'}{took}",
-            f"티켓 PR {self.tickets} · 전체 검사 {self.pr_checks + self.queue_checks} (PR {self.pr_checks} · 대기열 {self.queue_checks}) · 배포 {self.deploys}",
+            f"티켓 {self.tickets} · 전체 검사 {self.pr_checks + self.queue_checks} (PR {self.pr_checks} · 대기열 {self.queue_checks}) · 배포 {self.deploys}",
             f"마지막 전체 검사 실패 잡 {last}",
             f"main 충돌 {conf}",
         ]
@@ -337,8 +430,6 @@ PR_FIELDS = "number,headRefName,state,mergedAt,mergeCommit"
 
 def report_spec(name: str, gh: Gh = _gh) -> Numbers:
     br = branch(name)
-    tickets = cast(list[dict[str, int]], _json(gh, ["pr", "list", "--base", br, "--state", "merged", "--limit", "200",
-                                                    "--json", "number"]))
     mains = cast(list[MainPr], _json(gh, ["pr", "list", "--head", br, "--base", "main", "--state", "all", "--json", PR_FIELDS]))
     mains = sorted(mains, key=lambda p: p["number"])
     if mains:
@@ -346,7 +437,7 @@ def report_spec(name: str, gh: Gh = _gh) -> Numbers:
     else:
         commits = cast(list[Commit], _json(gh, ["api", f"repos/{{owner}}/{{repo}}/compare/main...{br}", "-q", ".commits"]))
     return measure(gh, f"스펙 {br} — main PR {', '.join('#' + str(p['number']) for p in mains) or '아직 없음'}",
-                   mains, len(tickets), commits, spec=True)
+                   mains, len({n for c in commits for n in tickets_of(_message(c))}), commits, spec=True)
 
 
 def report_prs(prs: Sequence[int], gh: Gh = _gh) -> Numbers:
@@ -378,14 +469,17 @@ def dev(name: str, offset: int | None, only_print: bool, cwd: Path | None = None
 
 # ── 진입 ─────────────────────────────────────────────────────────────────────────────────
 def main(argv: Sequence[str]) -> int:
-    p = argparse.ArgumentParser(prog="spec.py", description="스펙 브랜치 흐름(#1210)")
+    p = argparse.ArgumentParser(prog="spec.py", description="스펙 브랜치 흐름(#1210, #1228)")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("start").add_argument("name")
-    sub.add_parser("merge-ticket").add_argument("pr")
+    sub.add_parser("push").add_argument("name")
     sub.add_parser("sync").add_argument("name")
     f = sub.add_parser("finish")
     f.add_argument("name")
     f.add_argument("--title")
+    bl = sub.add_parser("blame")
+    bl.add_argument("name")
+    bl.add_argument("target", help="pr-check 실행 번호 또는 시험 파일 경로")
     r = sub.add_parser("report")
     r.add_argument("name", nargs="?")
     r.add_argument("--prs", help="쉼표로 — 「티켓마다 main PR」 방식의 PR 들")
@@ -397,8 +491,10 @@ def main(argv: Sequence[str]) -> int:
     try:
         if a.cmd == "start":
             print(start(a.name))
-        elif a.cmd == "merge-ticket":
-            print(merge_ticket(a.pr))
+        elif a.cmd == "push":
+            print(push(a.name))
+        elif a.cmd == "blame":
+            print(blame(a.name, a.target))
         elif a.cmd == "sync":
             print(sync(a.name))
         elif a.cmd == "finish":
