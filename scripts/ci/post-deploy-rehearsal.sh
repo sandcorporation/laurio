@@ -5,12 +5,17 @@
 #
 #   bash scripts/ci/post-deploy-rehearsal.sh       # 커밋된 HEAD 를 A 로, 그 위에 깨진 B 를 만들어 A → B 를 배포한다
 #   CODEMIT_REHEARSAL_KEEP=1 bash …               # 끝나도 스택·레지스트리·임시 클론을 남긴다
+#   CODEMIT_REHEARSAL_BREAK=hang bash …           # 진입점을 어떻게 깨뜨리나(#1189) — 아래 B
 #
 # 판 둘(임시 클론 안에서만 만든다, 어디에도 push 하지 않는다):
 #   A  지금 HEAD — 처음 배포(표식 없음 → 전부 받고 마이그레이션 전부)
 #   B  A + `ops_metrics` 에 열 하나 더하는 마이그레이션 + backend 진입점(config/wsgi.py)이 import 때 죽는다.
 #      마이그레이션(`manage.py`)은 wsgi 를 읽지 않으므로 스키마는 B 로 오르고 gunicorn 만 못 뜬다 →
 #      교체 뒤 실패 → 되돌리기가 A 이미지를 **B 의 스키마 위에** 다시 띄운다(스키마는 되돌리지 않는다).
+#      깨뜨리는 방식(`CODEMIT_REHEARSAL_BREAK`): `crash`(기본) — 보통 예외. gunicorn 마스터가 「Worker failed to
+#      boot」로 끝나 컨테이너가 재시작에 들어가고, 겹쳐 바꾸기가 마감을 기다리지 않고 바로 실패로 본다.
+#      `hang` — `SystemExit`. 워커만 exit 1 로 끝나 마스터가 끝없이 다시 띄우므로 컨테이너는 running 이고,
+#      겹쳐 바꾸기의 벽시계 마감(150초)으로만 잡힌다.
 #
 # 운영과 다른 것은 환경 값뿐이다(스크립트에 dev 분기 없음):
 #   - 이미지: 로컬 레지스트리(127.0.0.1:<포트>, `CODEMIT_IMAGE_REPO`). backend·pgbouncer·search 는 진짜로 굽고(x86,
@@ -27,6 +32,8 @@ set -euo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 
 offset="${CODEMIT_REHEARSAL_OFFSET:-2}"
+break_mode="${CODEMIT_REHEARSAL_BREAK:-crash}"
+case "$break_mode" in crash|hang) ;; *) echo "CODEMIT_REHEARSAL_BREAK 는 crash|hang (받은 값: $break_mode)"; exit 2 ;; esac
 reg_port=$((15000 + offset))
 hook_port=$((15100 + offset))
 project="codemit-rehearsal-$offset"
@@ -79,12 +86,15 @@ class Migration(migrations.Migration):
         ),
     ]
 PY
-printf '\nraise SystemExit("rehearsal: 일부러 깨진 진입점")\n' >>backend/config/wsgi.py
+case "$break_mode" in
+  crash) printf '\nraise RuntimeError("rehearsal: 일부러 깨진 진입점")\n' >>backend/config/wsgi.py ;;
+  hang) printf '\nraise SystemExit("rehearsal: 일부러 깨진 진입점")\n' >>backend/config/wsgi.py ;;
+esac
 git add -A
 git commit -qm "rehearsal: 깨진 진입점 + 열 추가 마이그레이션"
 B=$(git rev-parse HEAD)
 git checkout -q --detach "$A"
-stamp "A=${A:0:12} B=${B:0:12} (마이그레이션 ops_metrics.9999 ← ${leaf%.py})"
+stamp "A=${A:0:12} B=${B:0:12} (마이그레이션 ops_metrics.9999 ← ${leaf%.py}, 진입점 $break_mode)"
 
 # ---------------------------------------------------------------- 레지스트리·이미지
 docker rm -f "$reg_name" >/dev/null 2>&1 || true
