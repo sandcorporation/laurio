@@ -14,6 +14,7 @@
 | 가입 | 소셜 로그인 식별자, 제공자가 인증한 이메일(내려줄 때만) | Codemit | Authentication — 실명과 무관. 이메일은 계정 연결의 신뢰 근거로만 쓰고 화면에 노출하지 않는다([ADR-0049](../adr/0049-identity-stays-on-social-uid-and-only-verified-email-links-accounts.md)) | `backend/accounts/social.py`, `backend/accounts/models.py` `SocialAccount.email`, [ADR-0013](../adr/0013-social-login-only.md) |
 | 가입(카카오, 닉네임 제공에 동의했을 때만) | 카카오 닉네임 | Codemit | 클래스 가입 시 이름 기본값 — 다른 사람에게 따로 노출되지 않는다 | `backend/accounts/models.py` `SocialAccount.nickname`, #390 |
 | 공모전 개최·참가 시(무료 공모전에서도 받는다) | 공개용 이름·소개(선택) | Codemit | 개최자·참가자 공개 프로필 | `backend/accounts/models.py` `SponsorProfile`/`DeveloperProfile` |
+| 개최자가 상장을 발급할 때(#1071) | 받는 사람 이름(개최자가 적는다 — 기본값은 공개 프로필 이름) | Codemit | 상장 PDF, 그리고 **상장 진위 확인 페이지 `/c/{토큰}` 에 공개** — 확인 주소(QR)를 아는 사람만 닿고 검색 엔진에는 싣지 않는다(`X-Robots-Tag`·robots.txt). 취소된 상장과 받는 사람이 닫은 상장은 이름을 보이지 않는다. 처리방침 1항 「공모전 상장」, 부칙 ③(2026-11-28 시행, #1128) | `backend/certificates/models.py` `Certificate.recipient_name`, `backend/certificates/api.py` `verify_certificate` |
 | 유료 공모전에 Submission 제출 · Contest 개최 | 실명·생년월일·CI·DI·전화번호 | 포트원 본인확인 → Codemit 저장 | 만 19세 확인, 자전거래 차단, 통지 | `backend/verification/models.py` `Verification`, [ADR-0011](../adr/0011-verification-at-action-time-and-adults-only.md) |
 | Payout 확정 | 주민등록번호 | Codemit | 지급명세서 ([tax.md](tax.md)) | `backend/payouts/models.py` `TaxIdentity` |
 | Payout 확정 후 Seller 등록 | 이름·이메일·전화번호·계좌, 본인인증·KYC | **토스가 직접** — Codemit 는 `sellerId` 만 | 지급대행사 자신의 의무 | [ADR-0020](../adr/0020-seller-registration-happens-after-payout-is-confirmed.md) |
