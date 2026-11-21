@@ -2362,7 +2362,7 @@ export interface paths {
         };
         /**
          * Download Bundle
-         * @description 유효한 상장 전부를 한 파일로 — 저장하지 않는다.
+         * @description 상장을 한 파일로 — 저장하지 않는다. `ids=1,2` 면 고른 것만, 없으면 유효한 것 전부.
          */
         get: operations["certificates_api_download_bundle"];
         put?: never;
@@ -14366,7 +14366,9 @@ export interface operations {
     };
     certificates_api_download_bundle: {
         parameters: {
-            query?: never;
+            query?: {
+                ids?: string | null;
+            };
             header?: never;
             path: {
                 contest_id: number;

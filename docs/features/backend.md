@@ -222,7 +222,7 @@ http(s)·호스트 있음·사용자 정보(`user:pass@`) 없음·2000자 이하
 | `POST …/certificates/preview` | 칸을 받아 「미리보기」 표시·예시 번호·QR 을 얹은 PDF(#1126). 저장하지 않는다 |
 | `POST …/certificates` | 발급 — 받는 사람(제출 id)마다 칸 한 벌, 한 번에 50명까지. 201 과 발급본 목록 |
 | `GET …/certificates/{cid}/pdf` | 발급 때 저장해 둔 한 장 |
-| `GET …/certificates/bundle.pdf` | 유효한 상장 전부를 이은 한 파일(pypdf, 저장하지 않음). 없으면 404 |
+| `GET …/certificates/bundle.pdf[?ids=1,2]` | 상장을 이은 한 파일(pypdf, 저장하지 않음). `ids` 가 있으면 고른 것만(번호 순), 없으면 유효한 것 전부, 없으면 404. `ids` 에 이 공모전의 것이 아니거나·취소됐거나·받는 사람이 탈퇴해 파일이 없는 장이 섞이면 400(그 장과 까닭을 말한다), 번호가 숫자가 아니거나 비어 있어도 400 |
 | `POST …/certificates/{cid}/cancel` | 취소. 이미 취소된 것은 409. 알리지 않는다 |
 | `POST …/certificates/{cid}/reissue` | 취소하고 새 번호로 다시 발급(칸 한 벌). 옛 것의 `replaced_by` 가 새 것을 가리킨다 |
 | `GET /api/certificates/mine` | 받는 사람(#1130) — 내 상장(제출 id·공모전·번호·상 이름·`valid`/`cancelled`·확인 페이지를 닫았는지·확인 주소). 다시 발급되어 바뀐 옛 상장은 빼고 취소만 된 것은 남긴다. 제품 스위치와 무관 |

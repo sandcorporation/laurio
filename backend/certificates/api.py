@@ -201,17 +201,41 @@ def _owned_certificate(contest: Contest, certificate_id: int) -> Certificate:
     return certificate
 
 
+def _picked_certificates(contest: Contest, ids: str) -> list[Certificate]:
+    """고른 상장 — 이 공모전의 것이 아니거나 취소됐거나 파일이 파기된 것이 섞이면 400 이고 까닭을 말한다."""
+
+    try:
+        wanted = sorted({int(part) for part in ids.split(",") if part.strip()})
+    except ValueError:
+        raise HttpError(400, "고른 상장 번호가 올바르지 않습니다.") from None
+    if not wanted:
+        raise HttpError(400, "고른 상장이 없습니다.")
+    found = {c.id: c for c in Certificate.objects.filter(contest=contest, id__in=wanted)}
+    for certificate_id in wanted:
+        certificate = found.get(certificate_id)
+        if certificate is None:
+            raise HttpError(400, f"상장 {certificate_id}번은 이 공모전의 것이 아닙니다.")
+        if certificate.cancelled_at is not None:
+            raise HttpError(400, f"상장 {certificate.number}은 취소되어 받을 수 없습니다.")
+        if not certificate.pdf_object_key:
+            raise HttpError(400, f"상장 {certificate.number}은 받는 사람이 탈퇴해 파일이 없습니다.")
+    return [found[i] for i in wanted]
+
+
 @router.get("/contests/{contest_id}/certificates/bundle.pdf", auth=jwt_auth)
-def download_bundle(request: HttpRequest, contest_id: int):
-    """유효한 상장 전부를 한 파일로 — 저장하지 않는다."""
+def download_bundle(request: HttpRequest, contest_id: int, ids: str | None = None):
+    """상장을 한 파일로 — 저장하지 않는다. `ids=1,2` 면 고른 것만, 없으면 유효한 것 전부."""
 
     contest = _get_closed_owned_contest(request, contest_id)
-    # 받는 사람이 탈퇴해 파일을 파기한 장(#1130)은 묶음에서 뺀다.
-    certificates = list(
-        Certificate.objects.filter(contest=contest, cancelled_at__isnull=True)
-        .exclude(pdf_object_key="")
-        .order_by("id")
-    )
+    if ids is not None:
+        certificates = _picked_certificates(contest, ids)
+    else:
+        # 받는 사람이 탈퇴해 파일을 파기한 장(#1130)은 묶음에서 뺀다.
+        certificates = list(
+            Certificate.objects.filter(contest=contest, cancelled_at__isnull=True)
+            .exclude(pdf_object_key="")
+            .order_by("id")
+        )
     if not certificates:
         raise HttpError(404, "발급한 상장이 없습니다.")
     try:

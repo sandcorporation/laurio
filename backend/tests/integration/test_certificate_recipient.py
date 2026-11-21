@@ -195,6 +195,22 @@ def test_bundle_skips_withdrawn_recipients(client, world, blank_renderer, django
     assert len(PdfReader(io.BytesIO(bundle.content)).pages) == 1
 
 
+def test_bundle_with_ids_rejects_a_withdrawn_recipients_certificate(
+    client, world, blank_renderer, django_capture_on_commit_callbacks
+):
+    sponsor = world["sponsor"]["access"]
+    first, second = _issue(
+        client, world, [_item(world, 0, recipient_name="이첫째"), _item(world, 1, recipient_name="김둘째")]
+    ).json()
+    _withdraw(world, 0, django_capture_on_commit_callbacks)
+
+    response = client.get(_url(world, f"/bundle.pdf?ids={first['id']},{second['id']}"), **_auth_header(sponsor))
+
+    assert response.status_code == 400
+    assert first["number"] in response.json()["detail"]
+    assert "탈퇴" in response.json()["detail"]
+
+
 def test_withdrawn_submitter_cannot_receive_a_new_certificate(
     client, world, blank_renderer, django_capture_on_commit_callbacks
 ):

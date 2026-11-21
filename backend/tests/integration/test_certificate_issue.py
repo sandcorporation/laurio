@@ -174,6 +174,48 @@ def test_issue_several_at_once_and_bundle_them_in_order(client, world, blank_ren
     assert len(PdfReader(io.BytesIO(bundle.content)).pages) == 2
 
 
+def test_bundle_with_ids_holds_only_the_picked_ones(client, world, blank_renderer, monkeypatch):
+    from certificates import services
+
+    issued = _issue(
+        client, world, [_item(world, 0), _item(world, 1, recipient_name="최둘째")]
+    ).json()
+    bundled: list[int] = []
+    real = services.bundle_pdf
+
+    def spy(certificates):
+        bundled.extend(c.id for c in certificates)
+        return real(certificates)
+
+    monkeypatch.setattr(services, "bundle_pdf", spy)
+
+    bundle = client.get(
+        _url(world, f"/bundle.pdf?ids={issued[1]['id']}"), **_auth_header(world["sponsor"]["access"])
+    )
+
+    assert bundle.status_code == 200
+    assert bundled == [issued[1]["id"]]
+    assert len(PdfReader(io.BytesIO(bundle.content)).pages) == 1
+
+
+def test_bundle_with_ids_rejects_cancelled_foreign_and_garbled_ones(client, world, blank_renderer):
+    header = _auth_header(world["sponsor"]["access"])
+    issued = _issue(client, world, [_item(world, 0), _item(world, 1, recipient_name="최둘째")]).json()
+    client.post(_url(world, f"/{issued[0]['id']}/cancel"), **header)
+
+    cancelled = client.get(_url(world, f"/bundle.pdf?ids={issued[0]['id']},{issued[1]['id']}"), **header)
+    assert cancelled.status_code == 400
+    assert issued[0]["number"] in cancelled.json()["detail"]
+    assert "취소" in cancelled.json()["detail"]
+
+    foreign = client.get(_url(world, "/bundle.pdf?ids=999999"), **header)
+    assert foreign.status_code == 400
+    assert "이 공모전의 것이 아닙니다" in foreign.json()["detail"]
+
+    assert client.get(_url(world, "/bundle.pdf?ids=abc"), **header).status_code == 400
+    assert client.get(_url(world, "/bundle.pdf?ids="), **header).status_code == 400
+
+
 def test_bundle_without_certificates_is_404(client, world):
     response = client.get(_url(world, "/bundle.pdf"), **_auth_header(world["sponsor"]["access"]))
     assert response.status_code == 404
