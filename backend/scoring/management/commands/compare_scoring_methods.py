@@ -3,7 +3,8 @@
     python manage.py compare_scoring_methods --contest 3 --repeat 3 --limit-submissions 16
     python manage.py compare_scoring_methods --contest 3 --rows agent:claude-sonnet-5-5,self_loop:gpt-4.1-mini --repeat 3 --confirm
 
-같은 인자로 다시 부르면 같은 실험(이름)의 남은 칸만 돈다 — 하루 상한에 멈춘 뒤 이어 가는 길이다.
+같은 인자로 다시 부르면 같은 실험(이름)의 남은 칸만 돈다 — 하루 상한에 멈춘 뒤 이어 가는 길이다. `--name` 을 같게 주면
+회차·건수를 늘려 이어 갈 수 있다(먼저 `--limit-submissions 2 --repeat 1` 로 단가를 재고, 같은 이름으로 전체를 돌린다).
 운영 표(`Score`·`AgentRun`·`ScoreCorrection`·순위·지급)는 쓰지 않는다. 절차는 `docs/ops/scoring-experiment.md`.
 """
 
@@ -53,10 +54,8 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         name = str(options["name"] or _default_name(contest_id, rows, repeat, limit))
         experiment = ScoringExperiment.objects.filter(name=name).first()
-        if experiment is not None and (
-            experiment.contest_id != contest_id or experiment.rows != [r.name for r in rows] or experiment.repeat != repeat
-        ):
-            raise CommandError(f"실험 {name} 은 다른 공모전·줄·회차로 만들어졌다 — 다른 --name 을 쓴다")
+        if experiment is not None and (experiment.contest_id != contest_id or experiment.rows != [r.name for r in rows]):
+            raise CommandError(f"실험 {name} 은 다른 공모전·줄로 만들어졌다 — 다른 --name 을 쓴다")
 
         plan = ex.plan(contest, rows, repeat=repeat, limit=limit, experiment=experiment)
         self._preview(name, plan, repeat, resumed=experiment is not None)
@@ -66,6 +65,10 @@ class Command(BaseCommand):
         if not plan.cells:
             self.stdout.write("남은 칸이 없다.")
             return
+        if experiment is not None and (experiment.repeat, experiment.limit_submissions) != (repeat, limit):
+            # 같은 실험을 넓혀 이어 간다(먼저 2건 × 1회로 단가를 재고 전체로, 대장 #4345) — 끝난 칸은 다시 돌지 않는다.
+            experiment.repeat, experiment.limit_submissions = repeat, limit
+            experiment.save(update_fields=["repeat", "limit_submissions"])
         if experiment is None:
             experiment = ScoringExperiment.objects.create(
                 name=name, contest=contest, created_by=str(options["by"] or getpass.getuser()),

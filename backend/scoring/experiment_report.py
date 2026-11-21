@@ -20,8 +20,17 @@ from decimal import Decimal
 from statistics import mean, stdev
 
 BASELINE_ROW = "agent:claude-sonnet-5-5"
-MAX_MEAN_DIFF = 5.0  # 평균 점수 차(점, 0~100)
+#: 통과 문턱(스펙 #1244 넷 + 대장 #4345 설계안) — 점수는 0~100.
+MAX_MEAN_DIFF = 5.0
+MAX_MAX_DIFF = 15.0
+MIN_SPEARMAN = 0.8
+STABILITY_SLACK = 2.0  # 흔들림 ≤ 기준 + 이만큼
 MIN_EVIDENCE_RATE = 0.95
+MAX_TROUBLE_RATE = 1 / 16  # 실패 + 보류
+COST_DIVISOR = 3  # 건당 비용 × 3 ≤ 기준 건당 비용(1/3 을 Decimal 로 나누면 끝자리가 잘린다)
+MAX_P90_SECONDS = 300.0
+FULL_REPEAT = 3  # 「전체」 예상 금액의 회차
+CRITERIA = ("diff", "max_diff", "spearman", "stability", "evidence", "trouble", "cost", "p90")
 
 
 @dataclass(frozen=True)
@@ -54,7 +63,7 @@ class RowReport:
     cost_per_run: Decimal | None
     p50_seconds: float | None
     p90_seconds: float | None
-    passes: dict[str, bool | None]  # 기준 넷: diff·stability·evidence·cost (판단 못 하면 None)
+    passes: dict[str, bool | None]  # 문턱마다(`CRITERIA`), 판단 못 하면 None
 
 
 def _per_submission(rows: Iterable[RunRow]) -> dict[int, list[float]]:
@@ -146,17 +155,24 @@ def _row_report(name: str, rows: list[RunRow], baseline: dict[int, list[float]],
         p90_seconds=percentile(durations, 90),
         passes={},
     )
-    passes: dict[str, bool | None] = {
-        "diff": None if report.mean_diff is None else report.mean_diff <= MAX_MEAN_DIFF,
-        "stability": None,
-        "evidence": None if report.evidence_rate is None else report.evidence_rate >= MIN_EVIDENCE_RATE,
-        "cost": None,
-    }
+    passes: dict[str, bool | None] = dict.fromkeys(CRITERIA)
+    if report.runs:
+        passes["trouble"] = (report.held + report.failed) / report.runs <= MAX_TROUBLE_RATE
+    if report.evidence_rate is not None:
+        passes["evidence"] = report.evidence_rate >= MIN_EVIDENCE_RATE
+    if report.p90_seconds is not None:
+        passes["p90"] = report.p90_seconds <= MAX_P90_SECONDS
     if base is not None and base is not report:
+        if report.mean_diff is not None:
+            passes["diff"] = report.mean_diff <= MAX_MEAN_DIFF
+        if report.max_diff is not None:
+            passes["max_diff"] = report.max_diff <= MAX_MAX_DIFF
+        if report.spearman is not None:
+            passes["spearman"] = report.spearman >= MIN_SPEARMAN
         if report.stability is not None and base.stability is not None:
-            passes["stability"] = report.stability <= base.stability
-        if report.cost_per_run is not None and base.cost_per_run is not None:
-            passes["cost"] = report.cost_per_run < base.cost_per_run
+            passes["stability"] = report.stability <= base.stability + STABILITY_SLACK
+        if report.cost_per_run is not None and base.cost_per_run:
+            passes["cost"] = report.cost_per_run * COST_DIVISOR <= base.cost_per_run
     return RowReport(**{**report.__dict__, "passes": passes})
 
 
@@ -188,7 +204,9 @@ def limits_note(reports: Sequence[RowReport], *, repeat: int) -> list[str]:
         widest = max(widths)
         verdict = "차이 5점을 가르기에 넓다" if widest > MAX_MEAN_DIFF else "차이 5점은 가를 수 있다"
         notes.append(f"평균 점수 차의 95% 신뢰 구간 반폭 최대 ±{widest:.1f}점 — {verdict}.")
-    if repeat < 3:
+    if repeat == 1:
+        notes.append("회차 1 — 흔들림은 잴 수 없다.")
+    elif repeat < 3:
         notes.append("회차가 3보다 적어 흔들림은 거칠다.")
     if n < 30:
         notes.append("순위 일치(스피어만)는 제출이 적으면 크게 흔들린다.")
@@ -205,32 +223,44 @@ def _mark(value: bool | None) -> str:
 
 HEADERS = [
     "줄", "제출", "회차", "채점", "보류", "실패", "평균 차", "최대 차", "순위 일치", "흔들림", "근거 실재율",
-    "건당 비용(USD)", "p50(초)", "p90(초)", "기준: 차", "기준: 흔들림", "기준: 근거", "기준: 비용",
+    "실측 건당 비용(USD)", "전체 예상(USD)", "p50(초)", "p90(초)",
+    "평균 차 ≤5", "최대 차 ≤15", "순위 ≥0.8", "흔들림 ≤기준+2", "근거 ≥95%", "실패·보류 ≤1/16", "비용 ≤기준/3", "p90 ≤300초",
 ]
 
 
-def _cells(r: RowReport) -> list[str]:
+def full_estimate_usd(r: RowReport, full_submissions: int) -> Decimal | None:
+    """이 줄을 공모전 전체(제출 N × 회차 3)로 돌리면 드는 돈 — 실측 건당 비용으로."""
+
+    return None if r.cost_per_run is None else (r.cost_per_run * full_submissions * FULL_REPEAT).quantize(Decimal("0.01"))
+
+
+def _cells(r: RowReport, *, repeat: int, full_submissions: int) -> list[str]:
+    stability = "회차 1 — 잴 수 없음" if repeat == 1 else _fmt(r.stability, ".2f")
     return [
         r.row, str(r.submissions), str(r.runs), str(r.scored), str(r.held), str(r.failed),
-        _fmt(r.mean_diff, ".2f"), _fmt(r.max_diff, ".2f"), _fmt(r.spearman, ".3f"), _fmt(r.stability, ".2f"),
+        _fmt(r.mean_diff, ".2f"), _fmt(r.max_diff, ".2f"), _fmt(r.spearman, ".3f"), stability,
         _fmt(None if r.evidence_rate is None else r.evidence_rate * 100, ".1f") + ("%" if r.evidence_rate is not None else ""),
-        _fmt(r.cost_per_run, "f"), _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),
-        *(_mark(r.passes.get(k)) for k in ("diff", "stability", "evidence", "cost")),
+        _fmt(r.cost_per_run, "f"), _fmt(full_estimate_usd(r, full_submissions), "f"),
+        _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),
+        *(_mark(r.passes.get(k)) for k in CRITERIA),
     ]
 
 
-def to_markdown(title: str, reports: Sequence[RowReport], notes: Sequence[str]) -> str:
-    lines = [f"# {title}", "", *(f"- {n}" for n in notes), ""]
-    lines.append("| " + " | ".join(HEADERS) + " |")
-    lines.append("| " + " | ".join("---" for _ in HEADERS) + " |")
-    lines += ["| " + " | ".join(_cells(r)) + " |" for r in reports]
+def to_markdown(
+    title: str, reports: Sequence[RowReport], notes: Sequence[str], *, repeat: int, full_submissions: int
+) -> str:
+    total = sum((e for r in reports if (e := full_estimate_usd(r, full_submissions)) is not None), Decimal(0))
+    lines = [f"# {title}", "", *(f"- {n}" for n in notes)]
+    lines.append(f"- 전체 예상 = 실측 건당 비용 × 제출 {full_submissions} × 회차 {FULL_REPEAT} — 줄 모두 합계 {total:.2f} USD.")
+    lines += ["", "| " + " | ".join(HEADERS) + " |", "| " + " | ".join("---" for _ in HEADERS) + " |"]
+    lines += ["| " + " | ".join(_cells(r, repeat=repeat, full_submissions=full_submissions)) + " |" for r in reports]
     return "\n".join(lines) + "\n"
 
 
-def to_csv(reports: Sequence[RowReport]) -> str:
+def to_csv(reports: Sequence[RowReport], *, repeat: int, full_submissions: int) -> str:
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(HEADERS)
     for r in reports:
-        writer.writerow(_cells(r))
+        writer.writerow(_cells(r, repeat=repeat, full_submissions=full_submissions))
     return buf.getvalue()

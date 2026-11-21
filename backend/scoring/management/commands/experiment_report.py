@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
+from scoring.experiment import eligible_submissions
 from scoring.experiment_report import RunRow, limits_note, report_rows, to_csv, to_markdown
 from scoring.models import ScoringExperiment
 
@@ -41,8 +42,11 @@ class Command(BaseCommand):
         ]
         baseline = experiment.rows[0] if experiment.rows else ""
         reports = report_rows(runs, baseline=baseline)
+        repeat = max((r.round for r in runs), default=experiment.repeat)
+        full = len(eligible_submissions(experiment.contest, None))  # 공모전에서 채점된 제출 전부
         if options["format"] == "csv":
-            self.stdout.write(to_csv(reports), ending="")
+            self.stdout.write(to_csv(reports, repeat=repeat, full_submissions=full), ending="")
             return
-        notes = [f"공모전 {experiment.contest_id} · 기준 줄 {baseline}", *limits_note(reports, repeat=experiment.repeat)]
-        self.stdout.write(to_markdown(f"채점 방식 비교 — {experiment.name}", reports, notes), ending="")
+        notes = [f"공모전 {experiment.contest_id} · 기준 줄 {baseline}", *limits_note(reports, repeat=repeat)]
+        md = to_markdown(f"채점 방식 비교 — {experiment.name}", reports, notes, repeat=repeat, full_submissions=full)
+        self.stdout.write(md, ending="")

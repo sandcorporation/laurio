@@ -155,6 +155,23 @@ def test_stops_at_the_daily_limit_and_resumes_only_the_rest(scored, monkeypatch,
 
 
 @pytest.mark.django_db
+def test_two_by_one_first_then_the_same_experiment_grows_to_three_rounds(scored, monkeypatch, limit):
+    monkeypatch.setattr(ex, "_RUNNERS", {"single_call": lambda *a: ex.CellResult("scored", score=Decimal("50"), cost_usd=Decimal("0.01"))})
+    limit("1")
+    base = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--name", "probe")
+
+    _call(*base, "--limit-submissions", "2", "--repeat", "1", "--confirm")
+    report = _call("experiment_report", "probe")
+    assert "회차 1 — 잴 수 없음" in report and "제출 1 × 회차 3" in report and "| 0.0100 | 0.03 |" in report
+
+    out = _call(*base, "--repeat", "3", "--confirm")
+    assert "(이어서)" in out and "남은 호출 2칸" in out
+    experiment = ScoringExperiment.objects.get(name="probe")
+    assert (experiment.repeat, experiment.limit_submissions) == (3, None)
+    assert sorted(experiment.runs.values_list("round", flat=True)) == [1, 2, 3]
+
+
+@pytest.mark.django_db
 def test_limit_zero_runs_nothing(scored, monkeypatch):
     monkeypatch.setattr(ex, "_RUNNERS", {"single_call": lambda *a: pytest.fail("상한 0 인데 돌았다")})
     out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--confirm")

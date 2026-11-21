@@ -1238,8 +1238,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   수·줄별 비용 범위·실험 하루 상한·남은 돈만 찍는다. 에이전트·우리 루프의 실행 토큰은 용도 `experiment` 라 프록시가
   `AGENT_EXPERIMENT_DAILY_LIMIT_USD` 에 세고(운영 몫과 따로, 기본 0 = 꺼짐), 한 번 호출 비용은 표에 적어 같은 하루 합계에
   넣는다. 상한에 닿으면 멈추고, 같은 인자로 다시 부르면 남은 칸만 돈다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
-  (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 건당 비용, p50·p90, 통과 기준 넷과 표본의 한계를
-  마크다운·CSV 로 낸다. `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
+  (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 실측 건당 비용과 전체(제출 N × 회차 3) 예상 금액, p50·p90,
+  문턱 여덟과 표본의 한계를 마크다운·CSV 로 낸다. 같은 `--name` 으로 회차·건수를 늘려 이어 갈 수 있다(먼저 2건 × 1회로 단가 실측). `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |
