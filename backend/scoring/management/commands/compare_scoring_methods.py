@@ -65,7 +65,7 @@ class Command(BaseCommand):
         grader = ex.grader_problem() if ex.needs_grader(rows) else None
         self._preview(name, plan, repeat, resumed=experiment is not None)
         if ex.needs_grader(rows):
-            self.stdout.write(grader or f"실행기 {ex.GRADER_ADDRESS} 에 닿는다.")
+            self.stdout.write(grader or f"실행기 {ex.grader_address()} 에 닿는다.")
         if not options["confirm"]:
             self.stdout.write("--confirm 이 없어 모델을 부르지 않았다.")
             return

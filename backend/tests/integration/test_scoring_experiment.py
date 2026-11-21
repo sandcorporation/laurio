@@ -44,7 +44,7 @@ def scored(client, category, landing_type):  # noqa: F811
 @pytest.fixture(autouse=True)
 def grader_up(monkeypatch):
     """실행기 health 는 닿는다고 둔다 — 실행은 시험마다 같은 프로세스로 바꿔 끼운다(#1257)."""
-    monkeypatch.setattr(ex, "check_health", lambda **_k: None)
+    monkeypatch.setattr(ex, "probe_grader", lambda: None)
 
 
 @pytest.fixture
@@ -211,7 +211,7 @@ def test_experiment_tokens_have_their_own_daily_limit(limit):
     assert spent_today_usd() == Decimal("0.25") and spent_today_usd(experiment=True) == Decimal("0.5")
 
 
-def _grader_down(**_k):
+def _grader_down():
     raise ar.AgentGraderError("URLError")
 
 
@@ -219,7 +219,7 @@ def _grader_down(**_k):
 def test_unreachable_grader_makes_no_cells_even_with_confirm(scored, monkeypatch, limit):
     from django.core.management.base import CommandError
 
-    monkeypatch.setattr(ex, "check_health", _grader_down)
+    monkeypatch.setattr(ex, "probe_grader", _grader_down)
     monkeypatch.setattr(ex, "_RUNNERS", {"self_loop": lambda *a: pytest.fail("실행기에 못 닿는데 칸을 돌았다")})
     limit("5")
     args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "1")

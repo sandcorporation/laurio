@@ -44,7 +44,6 @@ from core.llm_scoring import LLMScoringAdapter, RequirementInput, RequirementVer
 from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, setting_value
 
 from . import selfloop
-from .agent_runner import DEFAULT_SERVICE_URL, AgentGraderBusy, AgentGraderError, check_health
 from .corrections import _fixed_inputs
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
@@ -97,14 +96,25 @@ class ExperimentError(Exception):
 
 # ── 인프라 실패(#1257) ────────────────────────────────────────────────────────────────────────────────
 
-#: 방식의 실패가 아니라 인프라 실패인 예외 — 실행기에 닿지 못함·HTTP 오류(`AgentGraderError`)·바쁨(`AgentGraderBusy`),
-#: 실행 토큰 거절(`RunTokenRefused`), 벤더 계정 쪽 거절(`AgentVendorRefused` — 실행 도중 상한 429 가 CLI 에서 이렇게 온다).
-INFRA_ERRORS: tuple[type[Exception], ...] = (AgentGraderError, AgentGraderBusy, RunTokenRefused, AgentVendorRefused)
-_INFRA_PROBLEM_PREFIXES = tuple(f"{error.__name__}:" for error in INFRA_ERRORS)
+def infra_errors() -> tuple[type[Exception], ...]:
+    """방식의 실패가 아니라 인프라 실패인 예외 — 실행기에 닿지 못함·HTTP 오류(`AgentGraderError`)·바쁨(`AgentGraderBusy`),
+    실행 토큰 거절(`RunTokenRefused`), 벤더 계정 쪽 거절(`AgentVendorRefused` — 실행 도중 상한 429 가 CLI 에서 이렇게 온다).
+    실행기 예외는 `core.agent_ports` 에 등록된 실행 틀 모듈의 것이다(실행기를 직접 들이지 않는다)."""
+
+    grader = agent_grader()
+    return (grader.AgentGraderError, grader.AgentGraderBusy, RunTokenRefused, AgentVendorRefused)
+
+
+#: `problem` 이 이 이름으로 시작하는 `failed` 칸이 인프라 실패다(`infra_errors` 의 클래스 이름과 같다 — 시험이 지킨다).
+INFRA_PROBLEM_PREFIXES = ("AgentGraderError:", "AgentGraderBusy:", "RunTokenRefused:", "AgentVendorRefused:")
 #: 인프라 실패 칸의 상태 — `CellResult` 에만 쓰고 실험 표에는 남기지 않는다.
 INFRA = "infra"
-#: 실행기 주소(`agent-grader:8003`) — 미리 보기·거절 문구에 쓴다.
-GRADER_ADDRESS = DEFAULT_SERVICE_URL.removeprefix("http://")
+
+
+def grader_address() -> str:
+    """실행기 주소(`agent-grader:8003`) — 미리 보기·거절 문구에 쓴다."""
+
+    return agent_grader().DEFAULT_SERVICE_URL.removeprefix("http://")
 #: 연속으로 이만큼 인프라 실패면 멈춘다 — 실행기·프록시가 죽었는데 남은 칸을 다 부딪쳐 볼 까닭이 없다.
 MAX_CONSECUTIVE_INFRA_FAILURES = 3
 
@@ -113,7 +123,7 @@ def is_infra_failure(status: str, problem: str) -> bool:
     """실험 표에 남은 칸이 인프라 실패인가 — 지금은 그런 칸을 남기지 않지만, #1257 전에 `failed` 로 남은 칸
     (`AgentGraderError: URLError` 등)을 같은 판정으로 끝나지 않은 칸으로 본다(데이터를 고치지 않고 규칙으로)."""
 
-    return status == ScoringExperimentRun.Status.FAILED and problem.startswith(_INFRA_PROBLEM_PREFIXES)
+    return status == ScoringExperimentRun.Status.FAILED and problem.startswith(INFRA_PROBLEM_PREFIXES)
 
 
 def needs_grader(rows: Sequence[Row]) -> bool:
@@ -122,13 +132,19 @@ def needs_grader(rows: Sequence[Row]) -> bool:
     return any(row.method != "single_call" for row in rows)
 
 
+def probe_grader() -> None:
+    """실행기에 한 번 닿아 본다 — 시험이 바꿔 끼우는 자리."""
+
+    agent_grader().check_health()
+
+
 def grader_problem() -> str | None:
     """실행기에 한 번 닿아 본다 — 닿으면 None, 아니면 사람이 읽을 까닭."""
 
     try:
-        check_health()
-    except AgentGraderError as exc:
-        return f"실행기 {GRADER_ADDRESS} 에 닿지 못한다({exc}) — celery-worker 에서 돌린다"
+        probe_grader()
+    except agent_grader().AgentGraderError as exc:
+        return f"실행기 {grader_address()} 에 닿지 못한다({exc}) — celery-worker 에서 돌린다"
     return None
 
 
@@ -458,7 +474,7 @@ def run_cell(
     experiment: ScoringExperiment, submission: ContestSubmission, row: Row, round_no: int, inputs: _Inputs | Exception
 ) -> ScoringExperimentRun | InfraFailure:
     """칸 하나를 돌려 남긴다. 방식의 실패(틀린 꼴·시간 초과 등)도 칸으로 남긴다(다시 돌리지 않는다 — 실패율이 보고표의
-    숫자다). 인프라 실패(`INFRA_ERRORS`·프록시 거절)는 남기지 않고 `InfraFailure` 를 돌려준다. #1257 전에 인프라 실패로
+    숫자다). 인프라 실패(`infra_errors()`·프록시 거절)는 남기지 않고 `InfraFailure` 를 돌려준다. #1257 전에 인프라 실패로
     남은 칸 자리면 그 행을 이번 결과로 바꾼다."""
 
     started = time.monotonic()
@@ -469,7 +485,7 @@ def run_cell(
     else:
         try:
             result = _RUNNERS[row.method](submission, row, inputs)
-        except INFRA_ERRORS as exc:
+        except infra_errors() as exc:
             result = CellResult(INFRA, problem=f"{type(exc).__name__}: {exc}"[:2000])
         except Exception as exc:  # noqa: BLE001 - 칸 하나의 실패가 실험 전체를 멈추지 않는다
             logger.warning("실험 %s 칸(제출 %s, %s, %s) 실패: %r", experiment.name, submission.pk, row.name, round_no, exc)

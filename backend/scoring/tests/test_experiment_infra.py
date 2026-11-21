@@ -75,6 +75,10 @@ def test_self_loop_stopped_by_the_proxy_is_infra(monkeypatch, stopped, detail, s
     assert result.status == status
 
 
+def test_infra_prefixes_name_the_infra_errors():
+    assert ex.INFRA_PROBLEM_PREFIXES == tuple(f"{e.__name__}:" for e in ex.infra_errors())
+
+
 def test_check_health_raises_when_unreachable():
     with pytest.raises(ar.AgentGraderError):
         ar.check_health(service_url="http://127.0.0.1:9", timeout=1)
