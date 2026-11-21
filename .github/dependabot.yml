@@ -1,7 +1,11 @@
 version: 2
 updates:
-  # 기반 이미지 digest 갱신은 PR 로만 온다(#945) — 태그는 그대로, @sha256 만 올라간다.
+  # 기반 이미지 digest·부 판 갱신만 PR 로 온다(#945, #1147) — 주 버전 태그 갱신(node 22→26,
+  # opensearch 2→3 꼴)은 런타임 판 올리기라 따로 티켓으로 한다.
   - package-ecosystem: "docker"
     directory: "/docker"
     schedule:
       interval: "weekly"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
