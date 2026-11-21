@@ -1040,7 +1040,11 @@ cmd_up() {
   # 태그를 새로 받으면 compose 가 이미지 id 가 달라졌다며 redis·db 를 재생성해 Redis
   # 가 비워졌다. 기반 서비스는 배포가 건드리지 않는다 — 올릴 때는 compose 의 digest 를
   # 커밋으로 바꾸고 `deploy.sh recreate-infra` 로 한다.
-  $COMPOSE up -d --no-recreate db redis
+  #
+  # **`--wait` — 헬스까지 기다린다**(#1189). 바로 뒤의 배포 전 덤프가 `exec db psql` 로 DB 크기를 묻는데, 새
+  # 볼륨의 Postgres 는 뜬 뒤 몇 초 동안 접속을 거절한다(실측 2초). 이미 떠 있으면(운영) 곧바로 지나간다.
+  # 첫 배포 리허설에서 이미지 받기가 캐시로 0초가 되자 「DB 크기를 읽지 못했다」로 멈췄다.
+  $COMPOSE up -d --no-recreate --wait --wait-timeout 120 db redis
   # 아래 up 은 전부 $UP_FLAGS(registry 면 --no-build)를 붙인다.
 
   # **바꿔 끼우기 전에, 마이그레이션이 있으면 덤프부터**(#839) — 풀러 블록보다 앞이라 덤프하는
