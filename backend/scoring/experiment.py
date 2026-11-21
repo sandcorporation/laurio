@@ -27,7 +27,7 @@ from django.utils import timezone
 
 from contests.models import Contest, ContestSubmission
 from core.adapters import is_fake_adapter_binding
-from core.agent_ports import price_for
+from core.agent_ports import agent_grader, price_for
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt
 from core.agent_run_tokens import Usage, spent_today_usd, usage_cost_usd
 from core.agent_scoring import JSON, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
@@ -35,7 +35,7 @@ from core.clock import Clock
 from core.llm_scoring import LLMScoringAdapter, RequirementInput, RequirementVerdict, ScoringInput, get_adapter
 from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, setting_value
 
-from . import agent_runner, selfloop
+from . import selfloop
 from .corrections import _fixed_inputs
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
@@ -249,7 +249,7 @@ def count_real_evidence(snapshot: Snapshot, items: list[dict[str, JSON]]) -> tup
         zip_path = Path(tmp) / "repo.zip"
         zip_path.write_bytes(snapshot.zip_bytes)
         root = Path(tmp) / "repo"
-        agent_runner.extract_repo(zip_path, root)
+        agent_grader().extract_repo(zip_path, root)
         tools = selfloop.RepoTools(root)
         real = sum(1 for item in evidence if not selfloop.check_evidence(tools, [item]))
     return len(evidence), real
