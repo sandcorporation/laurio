@@ -857,8 +857,20 @@ rolling_replace() {
   done
   log "$svc 새 것 응답 확인 — 옛 것을 내린다"
 
-  docker stop -t "$grace" "$old" >/dev/null
-  docker rm "$old" >/dev/null
+  # **이미 죽은 옛 것은 유예 없이 지운다**(#1206). 자동 되돌리기에서 옛 것은 방금 실패한 판일 수
+  # 있다 — 재시작을 되풀이하거나 끝나 버린 컨테이너는 받던 요청이 없으니 따뜻한 종료를 기다릴 것이
+  # 없다. 살아 있는 옛 것은 그대로 SIGTERM + 유예다(받던 요청을 마저 끝낸다). 멈춤에 걸린 초를
+  # 남긴다 — #1189 리허설 한 판에서 옛 backend 멈춤이 유예 끝(31초)까지 갔는데 같은 리허설 다섯
+  # 판에서는 1~2초였다(원인 미확인 — 그 순간 끝나지 않은 연결이 있었다고 본다).
+  if old_gave_up=$(container_gave_up "$old"); then
+    log "$svc 옛 것이 이미 죽었다($old_gave_up) — 유예 없이 지운다"
+    docker rm -f "$old" >/dev/null
+  else
+    stop_started=$(date +%s)
+    docker stop -t "$grace" "$old" >/dev/null
+    docker rm "$old" >/dev/null
+    log "$svc 옛 것을 내렸다 — 따뜻한 종료 $(( $(date +%s) - stop_started ))초(유예 ${grace}초)"
+  fi
   docker rename "$new" "$old_name"
   log "$svc 바꿨다 ($old_name)"
 }

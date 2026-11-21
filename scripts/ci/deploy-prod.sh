@@ -28,6 +28,14 @@
 # 그 파일의 `name: codemit-prod` 를 쓴다. 문맥 해시(`CODEMIT_CTX_*`)는 더 이상 Jenkins 배포 단계에서 만들거나 전달하지 않는다.
 set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
+# 한 줄 요약(#1206) — 배포 파이프라인이 이 스크립트(되돌리기 포함)가 끝난 직후 `.postdeploy-summary` 의 첫 줄을 읽어
+# 배포 커밋 상태 설명에 붙인다(60자에서 자른다, 공개 — 단계·항목 이름과 초·sha 만). **모든 길에서 쓴다**: 확인 스크립트가
+# 통과·실패를, 되돌리기가 그 결과를 덧쓰고, 여기서는 그 밖의 끝을 쓴다. 적은 줄 없이 끝나면(예상 못 한 종료, 옛 커밋으로
+# 체크아웃한 뒤 등) EXIT 덫이 종료 코드를 적는다 — 덫은 체크아웃 전에 걸어 둔다(셸이 들고 있다). 되돌리기는 `exec` 라
+# 이 덫이 돌지 않고 그 스크립트가 제 덫을 건다.
+rm -f .postdeploy-summary
+summary() { printf '%s\n' "$1" >.postdeploy-summary || true; }
+trap 'code=$?; [ -s .postdeploy-summary ] || summary "배포 실패(종료 $code)"' EXIT
 unset COMPOSE_PROJECT_NAME COMPOSE_FILE
 # Jenkins is deployment-only: ignore any local-build override and pull the
 # Actions-published GHCR artifacts checked by sandcorpDeploy's image wait.
@@ -65,6 +73,8 @@ fi
 # (ROLLBACK_SHA — 표식이 이 커밋보다 새것)는 되돌리지 않는다: 표식이 바로 피하려던 커밋이다.
 # 되돌리지 못하고 끝날 때도 운영 경보 채널로 한 줄(#1166) — 경보는 실패해도 넘어간다.
 after_replace_failed() {
+  # 배포 뒤 확인이 실패했으면 그 스크립트가 항목을 이미 적었다
+  [ "$1" = "배포 뒤 확인" ] || summary "교체 뒤 실패($1)"
   [ "$postdeploy" = rollback ] || exit 2
   echo "교체 뒤 실패($1) — 직전 배포 표식으로 되돌린다"
   local stop="🔥 [Codemit] 배포 자동 되돌리기 못 함 — ${sha:0:12} · 실패 단계: $1 · 사람이 본다"
@@ -80,8 +90,8 @@ after_replace_failed() {
   exec bash "$tmp/post-deploy-rollback.sh" "$previous_deployed" "$sha" "$tmp/post-deploy-check.sh" "$1"
 }
 
-run preflight || exit 1
-run plan || exit 1
+run preflight || { summary "교체 전 실패(preflight)"; exit 1; }
+run plan || { summary "교체 전 실패(plan)"; exit 1; }
 
 # plan 이 남긴 `KEY=value` 줄(.jenkins-prod-plan) — 이 스크립트는 교체 여부와 서비스별 받기만 읽는다.
 declare -A plan=()
@@ -114,6 +124,7 @@ if [ "${plan[DEPLOY_ANY]:-false}" = true ]; then
   done
   if [ -n "$failed" ]; then
     echo "이미지를 받지 못했다:$failed — 교체하지 않는다"
+    summary "교체 전 실패(image)"
     exit 1
   fi
 
@@ -130,12 +141,15 @@ if [ "${plan[DEPLOY_ANY]:-false}" = true ]; then
   if [ "$postdeploy" != off ]; then
     echo "== 배포 뒤 확인 ($postdeploy)"
     bash scripts/ci/post-deploy-check.sh || after_replace_failed "배포 뒤 확인"
+  else
+    summary "확인 꺼짐"
   fi
 else
   echo "바뀐 서비스가 없다(문서만 등) — 교체하지 않고 배포 표식만 옮긴다"
+  summary "교체 없음"
 fi
 
-run mark || exit "$replaced"
+run mark || { summary "표식 실패(mark)"; exit "$replaced"; }
 bash scripts/ci/glitchtip-resolve.sh "$previous_deployed" "$sha" docker/.env.prod || echo "GlitchTip 표시 실패 — 배포와 무관하다"
 run prune || echo "정리를 건너뛴다 — 배포 결과와 무관하다"
 exit 0

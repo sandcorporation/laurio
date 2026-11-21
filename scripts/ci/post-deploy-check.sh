@@ -24,6 +24,10 @@
 # 값은 환경변수가 먼저, 없으면 `docker/.env.prod` 의 같은 이름 줄이다 — 호스트·주소는 코드에 두지 않는다.
 # 주소가 없는데 켜져 있으면 핵심 경로가 실패한다(조용히 통과하지 않는다).
 #
+# **한 줄 요약(#1206)** — 끝날 때 지금 폴더(배포 작업 폴더)의 `.postdeploy-summary` 에 한 줄을 덮어쓴다:
+# `확인 통과(<스위치>, <초>초)` · `확인 실패(<항목>·<항목>)`(스위치가 off 면 `deploy-prod.sh` 가 `확인 꺼짐`). 배포 파이프라인이 그 줄을 배포 커밋 상태 설명에
+# 붙인다(공개된다 — 주소·호스트·키 값은 넣지 않는다, 항목 이름과 초만). 되돌리기(`post-deploy-rollback.sh`)가 끝에 덧쓴다.
+#
 # 시험·dev 시연용: `POSTDEPLOY_COMPOSE`(compose 명령 앞부분), `POSTDEPLOY_ENV_FILE`, `CODEMIT_POSTDEPLOY_INTERVAL`.
 # bash 3.2 문법만 쓴다(macOS 에서 dev 시연을 돈다).
 set -uo pipefail
@@ -52,6 +56,8 @@ if [ "${1:-}" = --mode ]; then
   echo "$MODE"
   exit 0
 fi
+
+summary() { printf '%s\n' "$1" >.postdeploy-summary || true; }
 
 LIMIT=$(setting CODEMIT_POSTDEPLOY_SECONDS 60)
 INTERVAL=$(setting CODEMIT_POSTDEPLOY_INTERVAL 5)
@@ -95,6 +101,7 @@ check_paths() {
 }
 
 failed=""
+failed_short=""
 for item in ready workers settings paths; do
   case "$item" in
     ready) label="준비" ;;
@@ -110,11 +117,13 @@ for item in ready workers settings paths; do
     if [ "$item" = settings ]; then
       echo "확인 $label: 실패 — 빈 키를 채우고 그 서비스를 다시 띄운다"
       failed="$failed $label"
+      failed_short="${failed_short:+$failed_short·}$label"
       break
     fi
     if [ $((SECONDS + INTERVAL)) -gt "$deadline" ]; then
       echo "확인 $label: 실패 — ${LIMIT}초 안에 통과하지 못했다"
       failed="$failed $label"
+      failed_short="${failed_short:+$failed_short·}$label"
       break
     fi
     sleep "$INTERVAL"
@@ -123,6 +132,8 @@ done
 
 if [ -n "$failed" ]; then
   echo "배포 뒤 확인 실패:$failed"
+  summary "확인 실패($failed_short)"
   exit 1
 fi
 echo "배포 뒤 확인 통과 ($((SECONDS - start))초)"
+summary "확인 통과($MODE, $((SECONDS - start))초)"
