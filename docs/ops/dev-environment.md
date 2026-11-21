@@ -100,6 +100,19 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 필요할 때. 범위 밖이면 멈추고, 그 오프셋의 compose 프로젝트(`codemit-dev-N`)가 다른 체크아웃의
 것이면(컨테이너 라벨 `com.docker.compose.project.working_dir` 로 판정) 멈춘다. 값이 없으면 위 규칙 그대로.
 
+**주인 디렉터리가 이미 사라진 스택은 고아다**(#1186). 거절하지 않고 그 프로젝트의 컨테이너를
+`docker compose -p <프로젝트> down` 으로 내린 뒤(**볼륨은 지우지 않는다**) stderr 로 한 줄 알리고 그 오프셋을 쓴다.
+디렉터리가 있으면 위처럼 거절한다. `scripts/dev-server.sh reap`(5분 타이머)도 같은 판정(`docker/dev-stack-orphans.sh`)으로
+워크트리가 사라진 `codemit-dev*` 스택의 컨테이너를 내린다.
+
+**`-e2e` 스택은 일회용이라 주인 디렉터리가 있어도 걷는다**(#1192). `scripts/test.sh e2e` 는 띄우기 전에
+`~/.codemit/dev-servers/<프로젝트>.owner`(자기 pid)를 남기고, 셸이 SIGKILL 로 죽어 EXIT trap 이 안 돌면 그 pid 의
+`test.sh` 가 없다는 것이 고아 판정이다(표식이 없는 옛 스택은 한 시간 넘게 떠 있을 때만). `CODEMIT_E2E_KEEP=1` 은
+`.keep` 을 남겨 12시간까지(`CODEMIT_E2E_KEEP_MAX_SECONDS`) 봐준다. 걷기는 `dev-server.sh reap`(work 의 5분 타이머)과
+**`test.sh e2e` 시작 때**(타이머가 없는 mac)다. **티켓이 끝나면 `scripts/worktree-rm.sh <워크트리> [브랜치]`**
+— 그 워크트리를 주인으로 둔 스택을 먼저 내리고(`-e2e` 는 볼륨까지, dev 스택 볼륨은 남김) dev 서버를 멈춘 뒤
+워크트리·브랜치를 지운다. 손으로 `git worktree remove` 만 하면 스택이 고아로 남는다.
+
 **거절하면 뒤따르는 compose 도 돌지 않는다**(#1146). `eval "$(…)"` 는 명령 치환의 종료코드를 삼키므로,
 거절 때 스크립트는 stdout 으로 `docker` 를 실패하는 함수로 가리고 `false` 로 끝나는 조각을 내보낸다 —
 `;` 로 이어진 `docker compose` 도, `&&` 체인도, `set -e` 스크립트(`scripts/test.sh`)도 거기서 멈춘다.

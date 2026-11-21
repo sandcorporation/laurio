@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 
 from django.conf import settings
@@ -16,6 +17,9 @@ from core import llm_metrics
 from core.heartbeat import start_heartbeat
 
 from classroom.grader import Grader
+
+
+logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
@@ -32,6 +36,12 @@ class Command(BaseCommand):
         start_heartbeat("grader")
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
+
+        def on_signal(sig: signal.Signals) -> None:
+            # 종료 코드 0 의 재시작이 되풀이될 때 누가 보냈는지 로그로 남긴다(#1192) — 정상 종료는 신호 하나뿐이다.
+            logger.warning("grader: %s 를 받았다 — 하던 채점을 끝내고 종료한다(종료 코드 0)", sig.name)
+            stop.set()
+
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, stop.set)
+            loop.add_signal_handler(sig, on_signal, sig)
         await Grader().run_forever(stop)

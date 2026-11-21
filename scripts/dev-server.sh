@@ -323,6 +323,23 @@ cmd_reap() {
     fi
   done
   echo "걷은 서버 $swept개"
+  # compose 스택도 같은 판정으로 걷는다(#1186) — 주인 워크트리가 사라진 codemit-dev* 의 컨테이너만 내린다.
+  # 볼륨은 남긴다. docker 가 없거나 안 닿으면 조용히 넘어간다.
+  command -v docker >/dev/null 2>&1 || return 0
+  . "$here/docker/dev-stack-orphans.sh"
+  local project stacks=0
+  for project in $(docker ps -a --filter "label=com.docker.compose.project" \
+      --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u | grep -E '^codemit-dev(-[0-9])?$' || true); do
+    if dev_stack_is_orphan "$project"; then
+      echo "  주인 워크트리가 사라졌다($(dev_stack_owners "$project" | tr '\n' ' ')) → 스택 $project 내린다(볼륨은 남김)"
+      dev_stack_down_orphan "$project"; stacks=$((stacks+1))
+    fi
+  done
+  echo "내린 스택 $stacks개"
+  # -e2e 스택은 주인 디렉터리가 있어도 걷는다(#1192) — 띄운 test.sh 가 없으면 고아다. mac 은 타이머가 없어
+  # `scripts/test.sh e2e` 시작 때 같은 걷기를 한다.
+  e2e_stack_reap
+  echo "내린 e2e 스택 ${E2E_REAPED:-0}개"
 }
 
 case "${1:-}" in

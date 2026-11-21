@@ -181,6 +181,27 @@ export default function AppealDetailPage() {
           ) : (
           <>
           <section data-testid="appeal-detail-score" className="border border-rule bg-surface">
+            {appeal.score.corrected ? (
+              <div
+                data-testid="appeal-detail-score-correction"
+                className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-4 py-3 text-[13px]"
+              >
+                <Badge tone="neutral" testId="appeal-detail-score-corrected">
+                  정정됨
+                </Badge>
+                <span>
+                  원래 점수{" "}
+                  <strong data-testid="appeal-detail-score-original">{appeal.score.original_percentage}%</strong>
+                </span>
+                <span>
+                  정정 점수{" "}
+                  <strong data-testid="appeal-detail-score-corrected-percentage">{appeal.score.percentage}%</strong>
+                </span>
+                <span className="text-ink/70" data-testid="appeal-detail-score-correction-reason">
+                  {appeal.score.correction_reason}
+                </span>
+              </div>
+            ) : null}
             <div className="border-b border-rule px-4 py-3 text-[14px] font-semibold">
               채점 결과
               <span className="ml-2.5 text-[12.5px] font-normal text-ink/45">

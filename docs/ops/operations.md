@@ -128,6 +128,19 @@ healthcheck(celery-worker·grader)는 그 파일이 90초 안에 갱신됐는지
 - **닿는지 확인하는 법**: Alertmanager 에 시험 경보를 넣는다(`POST /api/v2/alerts`, 3분 뒤
   해소 메시지가 한 번 더 온다). 2026-09-21 에 그렇게 확인했다 — 발송 1·실패 0.
 
+**호스트 재부팅 때 세 앱은 backend 가 듣기를 기다렸다가 뜬다**(#869, 오류 75·83). 재부팅이면
+도커 데몬이 `restart: unless-stopped` 컨테이너를 `depends_on` 을 지키지 않고 한꺼번에 올린다.
+backend 는 collectstatic 과 gunicorn 때문에 8000 을 듣기까지 컨테이너 시작 뒤 **약 36초**
+(2026-11-04 측정, 앱 Ready 뒤 16.9초)가 걸려 BFF 재시도 예산(15.75초)을 넘겼고, 그 틈에 들어온
+요청이 500 이었다. 그래서 frontend·operator·classroom 이미지의 진입점
+(`docker/entrypoint/wait-for-backend.cjs`)이 `CODEMIT_API_BASE_URL` 의 `/api/health?scope=ready`
+가 HTTP 응답을 줄 때까지(상태 코드는 보지 않는다) `node server.js` 를 띄우지 않는다 — 그동안
+앱 포트는 닫혀 있어 프록시가 연결 거부로 받는다. **상한은 `CODEMIT_BACKEND_WAIT_SECONDS`
+(기본 120초, 0 이면 대기 없음)** 이고, 넘기면 로그 한 줄(`[entrypoint] backend 가 … 안에
+응답하지 않는다`)을 남기고 앱을 그대로 띄운다 — backend 가 죽어 있어도 앱은 뜨고(예전처럼
+BFF 가 재시도 뒤 오류를 낸다), 끝없이 매달리지 않는다. 배포 때 앱 교체는 backend 가 이미
+듣고 있어 첫 시도에 끝난다(dev 측정: 대기 없음 0.36초 → 있음 0.34초).
+
 **컨테이너 로그는 무제한으로 쌓이지 않는다**(2026-09-21). 도커 기본 json-file 은 크기
 제한이 없어 home 에는 이 저장소 밖의 컨테이너 로그가 319M·106M 쌓여 있었다. 두 배포
 compose 의 서비스 11개 전부에 `x-logging`(20MB × 5개)을 걸었다 — **다음 배포의 컨테이너

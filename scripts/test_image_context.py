@@ -283,6 +283,7 @@ class IgnoredFilesDoNotMoveTheHash(unittest.TestCase):
             "frontend/app/page.tsx": "page",
             "frontend/e2e/auth.spec.ts": "spec",
             "frontend/lib/a.test.ts": "unit",
+            "docker/entrypoint/wait.cjs": "entry",
         }
         for name in ic.NODE_WORKSPACE:
             files[f"{name}/x" if name == "packages" else name] = name
@@ -349,7 +350,7 @@ class ChangedServices(unittest.TestCase):
     FILES = (
         ".dockerignore", "backend/app.py", "frontend/page.tsx", "operator/page.tsx", "classroom/page.tsx",
         "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
-        "docker/pgbouncer/entry.sh", "backend/scoring/agent_runner.py",
+        "docker/pgbouncer/entry.sh", "backend/scoring/agent_runner.py", "docker/entrypoint/wait.cjs",
         *(f"docker/{name}.Dockerfile" for name in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer", "agent-grader")),
     )
 
@@ -422,8 +423,8 @@ class ChangedServices(unittest.TestCase):
         # #729 — 표의 target 만 바꾼 커밋은 다시 구워지므로 바꿔 끼워야 한다.
         old = self.commit(ic.TABLE_FILE, self.TABLE)
         head = self.commit(ic.TABLE_FILE, self.TABLE.replace(
-            'Service("operator", ("operator", *NODE_WORKSPACE), target="runner")',
-            'Service("operator", ("operator", *NODE_WORKSPACE), target="slim")'))
+            'Service("operator", ("operator", *NODE_WORKSPACE, "docker/entrypoint"), target="runner")',
+            'Service("operator", ("operator", *NODE_WORKSPACE, "docker/entrypoint"), target="slim")'))
         self.assertEqual(self.changed(old, head), ["operator"])
 
     def test_a_path_removed_from_the_table_changes_that_service(self) -> None:

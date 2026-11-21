@@ -383,6 +383,16 @@ class OwnScoreOut(Schema):
     quality: SubmissionQualityOut | None = None
     # 숨은 항목 요약(#906) — `reasoning` 에서 숨은 항목은 빠지고 개수·충족 수만 여기 남는다. 숨은 항목이 없으면 total 0.
     hidden_summary: HiddenSummaryOut
+    # 점수 정정(#1179) — 끝난 정정이 있으면 위 판정 필드는 정정 값이고, 원래 점수와 사유가 아래에 남는다.
+    # 정정이 없으면 false·null 이다.
+    corrected: bool = False
+    original_percentage: str | None = None
+    original_model_version: str | None = None
+    correction_reason: str | None = None
+
+    @staticmethod
+    def resolve_original_percentage(obj) -> str | None:
+        return None if obj.original_percentage is None else str(obj.original_percentage)
 
     @staticmethod
     def resolve_quality(obj):

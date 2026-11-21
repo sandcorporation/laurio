@@ -60,10 +60,12 @@ RUN groupadd --system --gid 1001 nodejs \
 
 COPY --from=builder --chown=nextjs:nodejs /app/operator/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/operator/.next/static ./operator/.next/static
+# backend 가 응답할 때까지 기다렸다가 server.js 를 연다(#869) — 재부팅 때 콜드 스타트 틈의 500 을 막는다.
+COPY --chown=nextjs:nodejs docker/entrypoint/wait-for-backend.cjs ./wait-for-backend.cjs
 
 USER nextjs
 EXPOSE 3000
 
 # instrumentation.ts의 register()가 이 프로세스 시작 시 호출되므로, 배포
 # 설정 가드는 여기서도 그대로 작동한다.
-CMD ["node", "operator/server.js"]
+CMD ["node", "wait-for-backend.cjs", "operator/server.js"]

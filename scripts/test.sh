@@ -48,6 +48,8 @@ fi
 
 if [ "$kind" = e2e-down ]; then
   "${C[@]}" down -v --remove-orphans
+  . docker/dev-stack-orphans.sh
+  e2e_stack_unmark "$E2E_PROJECT"
   exit 0
 fi
 
@@ -114,13 +116,19 @@ case "$kind" in
     exec ${PIN[@]+"${PIN[@]}"} uv run pytest -n "$CPUS" "$@"
     ;;
   e2e)
+    # SIGKILL 이면 아래 trap 이 안 돈다 — 표식(`.owner`=이 pid)을 남겨 다음 `reap`·다음 e2e 시작이 고아를 판정하게
+    # 한다(#1192). 먼저 남의 고아(mac 은 reap 타이머가 없다)를 걷고 나서 이 스택을 표시한다.
+    . docker/dev-stack-orphans.sh
+    e2e_stack_reap
+    e2e_stack_mark "$E2E_PROJECT" "$$" "${CODEMIT_E2E_KEEP:-}"
     cleanup() {
       if [ -z "${CODEMIT_E2E_KEEP:-}" ]; then
         "${C[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+        e2e_stack_unmark "$E2E_PROJECT"
       fi
     }
     trap cleanup EXIT
-    trap 'exit 130' INT TERM
+    trap 'exit 130' INT TERM HUP
 
     read_port() { "${C[@]}" port "$1" "$2" | head -n 1 | sed 's/.*://'; }
 

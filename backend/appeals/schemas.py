@@ -77,6 +77,12 @@ class ScoreSnapshotOut(Schema):
     # scoring_basis_for`에서 같은 방식으로 파생된다)이지만, 여기서는 `reasoning`
     # 이 원문 그대로라는 것과 짝을 이룬다.
     scoring_basis: ScoringBasis
+    # 점수 정정(#1179, 스펙 #1178 결정 5) — 이의가 걸린 점수가 정정되면 위 판정 필드는 정정 값이고, 원래 점수와
+    # 정정 사유가 아래에 남는다. 정정이 없으면 false·null 이다.
+    corrected: bool = False
+    original_percentage: str | None = None
+    original_model_version: str | None = None
+    correction_reason: str | None = None
 
 
 class RulingOut(Schema):

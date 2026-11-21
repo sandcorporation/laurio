@@ -94,6 +94,7 @@ CONTEXT_FILES = (
     "backend/app.py", "frontend/app/page.tsx", "frontend/playwright.config.ts", "operator/page.tsx",
     "classroom/page.tsx", "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
     "docker/pgbouncer/entry.sh",
+    "docker/entrypoint/wait-for-backend.cjs",
     *(f"docker/{n}.Dockerfile" for n in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer")),
 )
 

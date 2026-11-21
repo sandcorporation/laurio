@@ -57,9 +57,10 @@ SERVICES: dict[str, Service] = {
     s.name: s
     for s in (
         Service("backend", ("backend",)),
-        Service("frontend", ("frontend", *NODE_WORKSPACE), target="runner"),
-        Service("operator", ("operator", *NODE_WORKSPACE), target="runner"),
-        Service("classroom", ("classroom", *NODE_WORKSPACE), target="runner"),
+        # docker/entrypoint — 세 앱 runner 가 COPY 하는 진입점(#869), 바뀌면 이미지가 다시 구워져야 한다.
+        Service("frontend", ("frontend", *NODE_WORKSPACE, "docker/entrypoint"), target="runner"),
+        Service("operator", ("operator", *NODE_WORKSPACE, "docker/entrypoint"), target="runner"),
+        Service("classroom", ("classroom", *NODE_WORKSPACE, "docker/entrypoint"), target="runner"),
         Service("search", ()),
         Service("pgbouncer", ("docker/pgbouncer",)),
         # 에이전트 채점 실행기(#999) — 실행 틀 파일 하나만 읽는다(문맥은 `agent-grader.Dockerfile.dockerignore`).

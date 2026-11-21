@@ -147,7 +147,7 @@ DeliverableTypeChange와 같은 규율)가 남고 이미 제출한 참가자 전
 | `GET`·`PUT /api/contests/{id}/submissions/me` | 내 제출 조회·수정 |
 | `GET /api/submissions/mine` | 내 참가 현황 |
 | `GET /api/submissions/{id}` | 제출물 하나 |
-| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884·#904, 등수 없이 「total / max_total」·요구사항별 0~5·항목 점수·근거, 아직 없으면 null). 숨은 항목(#906)은 reasoning 에서 빠지고 `hidden_summary {total, met}`, 완성도 항목은 「숨은 항목 k」·점수만. 이의 대상은 Score 뿐이다 |
+| `GET /api/submissions/{id}/score` | 내 점수 — 본인 완성도(#884·#904, 등수 없이 「total / max_total」·요구사항별 0~5·항목 점수·근거, 아직 없으면 null). 숨은 항목(#906)은 reasoning 에서 빠지고 `hidden_summary {total, met}`, 완성도 항목은 「숨은 항목 k」·점수만. 이의 대상은 Score 뿐이다. 판정 필드는 현재 점수이고, 정정됐으면 `corrected` 와 `original_percentage`·`original_model_version`·`correction_reason` 이 붙는다(#1179, 운영자 이의 상세의 `score` 도 같다) |
 | `GET`·`POST /api/submissions/{id}/appeal` | 이의 |
 | `GET`·`POST /api/submissions/{id}/build-assets` | 인수용 빌드 산출물 |
 | `GET .../source-readings` | 내 소스를 누가 열람했는가 |
@@ -962,8 +962,13 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 채점 입력이 없었던 경우(ADR-0030)와 플랫폼이 채점하지 못한 경우(ADR-0031). 뒤엣것은 이의를
 낼 사유다. 참가자에게는 내부 참조 없는 문장으로, 운영자 심판에는 원문 그대로 나간다.
 
-**Score 는 불변이다**(ADR-0006). 고치는 길은 없고, 잘못된 판정의 구제는 이의와 원장으로만
-한다.
+**Score 는 불변이다**(ADR-0006). 원래 행은 고치지 않고, 플랫폼 오류로 틀린 점수는 **정정 기록**
+(`ScoreCorrection`, #1179·스펙 #1178)을 덧대 바로잡는다 — 진행 중·끝·실패, 사유·운영자·판정 필드(Score 와
+같은 모양), 끝·실패가 된 행은 다시 저장도 삭제도 못 한다. 「현재 점수」는 끝난 정정 중 가장 나중 것, 없으면
+원래 Score 이고 `scoring.current` 하나로만 읽는다(공모전·이의 앱은 `contests.ports.CURRENT_SCORE`) — 배분
+컷라인·내 점수·이의 상세·이의 소스 펼침·완성도 대상 거르기가 그것을 쓴다. 「채점이 한 번 돌았나」(채점 대기·
+보류·이의 신청 가능)는 원래 Score 유무 그대로다. `tests/test_current_score_reads.py` 가 그 밖의 직접 읽기를
+막는다. 정정을 거는 API 는 아직 없다(#1180).
 
 **시연 영상은 보존 기간 뒤 파일만 파기된다**(ADR-0035). `demo-video-retention-purge`가
 이의 창의 끝(`judging_ends_at`) + `demo_video_retention_grace_days`가 지난 시연
@@ -1235,7 +1240,7 @@ IPv4-mapped·docker 내부 이름은 거부), 푼 그 IP 로 직접 붙고 TLS(S
 | `verification` | Verification · VerificationRequest · RetainedIdentity · IdentityReading |
 | `contests` | Contest · Category · DeliverableType · Requirement · ContestImage · RequirementChatMessage · JudgingExtensionPayment · ContestSubmission(#270, `submissions.Submission`의 공모전 자식) · 변경 이력 넷(CategoryChange · DeliverableTypeChange · HostingPermissionChange · ContestChange, #473) |
 | `submissions`(공유층 — #270, ADR-0039) | Submission(부모) · SubmissionAsset · RequirementResponse · Evidence |
-| `scoring` | Score · ScoringAttempt |
+| `scoring` | Score · ScoreCorrection(#1179) · ScoringAttempt |
 | `repositories` | RepositorySnapshot |
 | `awards` · `handovers` | Award · Handover · BuildAsset |
 | `certificates`(#1071) | Certificate |
