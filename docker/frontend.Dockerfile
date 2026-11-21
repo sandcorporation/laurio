@@ -97,6 +97,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/frontend/public ./frontend/public
 
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/frontend/.next/static ./frontend/.next/static
+# backend 가 응답할 때까지 기다렸다가 server.js 를 연다(#869) — 재부팅 때 콜드 스타트 틈의 500 을 막는다.
+COPY --chown=nextjs:nodejs docker/entrypoint/wait-for-backend.cjs ./wait-for-backend.cjs
 
 USER nextjs
 EXPOSE 3000
@@ -104,4 +106,4 @@ EXPOSE 3000
 # server.js는 standalone 산출물이 만든 자체 Node 서버다 — pnpm/next CLI를 거치지
 # 않는다. instrumentation.ts의 register()가 이 프로세스 시작 시 호출되므로, 배포
 # 설정 가드는 여기서도 그대로 작동한다(#38).
-CMD ["node", "frontend/server.js"]
+CMD ["node", "wait-for-backend.cjs", "frontend/server.js"]
