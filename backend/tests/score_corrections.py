@@ -1,4 +1,4 @@
-"""시험이 정정 행을 바로 덧대는 도우미(#1179) — 판정 상태를 골라 만들 때 쓴다. 거는 길(API·스캔)은 `test_score_corrections`(#1180).
+"""시험이 정정 행을 바로 덧대는 도우미(#1179) — 판정 상태를 골라 만들 때 쓴다. 거는 길(API·스캔)은 `test_score_corrections`(#1180)."""
 
 from __future__ import annotations
 
