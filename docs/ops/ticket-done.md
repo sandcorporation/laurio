@@ -47,8 +47,8 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
 - **티켓 본문에 「건드리는 앱」 줄.** 앱 이름은 `backend/config/settings.py` 의 로컬 앱, 프런트는
   `frontend`·`operator`·`classroom`·`packages` 다. 조율자는 이 줄이 겹치지 않는 티켓만 동시에 띄우고,
   겹치면 앞 티켓이 main 에 들어간 뒤에 띄운다.
-- **작업자의 끝은 「main 에 들어감」이다.** PR 이 튕기면(충돌·검사 실패) 같은 작업자가 `origin/main` 위로 rebase 해
-  다시 시도해 main 도착까지 간다. 끝 보고는 병합 sha 다. 대기열에서 빠진 PR 도
+- **작업자의 끝은 「main 에 들어감」이다.** PR 이 튕기면(충돌·검사 실패) 같은 작업자가 `git merge origin/main` 뒤 보통 push 로
+  (강제 push 금지) 다시 시도해 main 도착까지 간다. 끝 보고는 병합 sha 다. 대기열에서 빠진 PR 도
   같은 길로 다룬다.
 - **워크트리와 포트.** `git worktree add ../codemit-<이름> -b <브랜치> origin/main` 으로 만들고,
   `sh docker/dev-env.sh | head -1` 이 지시서가 준 오프셋과 같은지 본다. 새 오프셋의 DB 는 `migrate` 부터.

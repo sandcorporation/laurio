@@ -21,6 +21,18 @@ CODEMIT_DEV_SERVER_ROOT="$wt" "$here/scripts/dev-server.sh" stop-all >/dev/null 
 . "$here/docker/dev-stack-orphans.sh"
 dev_stack_down_owned_by "$wt"
 
-git -C "$here" worktree remove --force "$wt"
+# 이미 root 소유 파일이 남았으면(옛 dev 컨테이너의 .pnpm-store 등, #1220) 일회용 컨테이너로 지우고 이어 간다.
+if ! git -C "$here" worktree remove --force "$wt" >/dev/null 2>&1; then
+  echo "지우지 못한 파일이 있다 — 일회용 컨테이너로 지운다"
+  # 이미 내려받은 이미지를 우선 쓴다(오프라인 대비). 워크트리 경로 말고는 아무것도 출력하지 않는다.
+  img="$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -m1 -E '^(alpine|busybox):' || true)"
+  [ -n "$img" ] || img="$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep -v '<none>' | head -1)"
+  [ -n "$img" ] || img=alpine
+  docker run --rm --entrypoint sh -v "$wt:/w" "$img" -c 'find /w -mindepth 1 -delete' >/dev/null 2>&1 || true
+  # git 이 일부만 지우고 멈췄을 수 있다 — 등록 정보를 정리하고 빈 디렉터리를 치운다.
+  git -C "$here" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  git -C "$here" worktree prune
+  rmdir "$wt" 2>/dev/null || true
+fi
 [ -z "$branch" ] || git -C "$here" branch -D "$branch" >/dev/null 2>&1 || true
 echo "워크트리 $wt 정리 끝"
