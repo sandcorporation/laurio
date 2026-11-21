@@ -27,6 +27,10 @@ class DevOffset(unittest.TestCase):
         (self.root / "docker").mkdir(parents=True)
         self.script = self.root / "docker" / "dev-env.sh"
         self.script.write_text(SRC.read_text())
+        (self.root / "docker" / "dev-stack-orphans.sh").write_text((SRC.parent / "dev-stack-orphans.sh").read_text())
+        # 남의 체크아웃 — 디렉터리가 살아 있어야 「남의 스택」이다(사라졌으면 고아).
+        self.other = str(Path(self._tmp.name) / "other" / "docker")
+        Path(self.other).mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
 
     def fake_docker(self, owner: str) -> None:
@@ -70,11 +74,11 @@ class DevOffset(unittest.TestCase):
             self.assertNotIn("export ", r.stdout)
 
     def test_other_checkout_owns_offset(self) -> None:
-        self.fake_docker("/somewhere/else/docker")
+        self.fake_docker(self.other)
         r = self.run_env("4")
         self.assertEqual(r.returncode, 1)
         self.assertNotIn("export ", r.stdout)
-        self.assertIn("/somewhere/else/docker", r.stderr)
+        self.assertIn(self.other, r.stderr)
         self.assertIn("고칠 길", r.stderr)
 
     def chain(self, offset: str, owner: str, tail: str) -> subprocess.CompletedProcess[str]:
@@ -88,10 +92,10 @@ class DevOffset(unittest.TestCase):
 
     def test_rejected_offset_stops_compose(self) -> None:
         for tail in (" && docker compose up", "; docker compose up", "\ndocker compose up"):
-            r = self.chain("4", "/somewhere/else/docker", tail)
+            r = self.chain("4", self.other, tail)
             self.assertNotIn("COMPOSE_RAN", r.stdout, repr(tail))
-            self.assertIn("/somewhere/else/docker", r.stderr)
-        r = self.chain("4", "/somewhere/else/docker", "\ndocker compose up\n")
+            self.assertIn(self.other, r.stderr)
+        r = self.chain("4", self.other, "\ndocker compose up\n")
         self.assertNotIn("COMPOSE_RAN", r.stdout)
         # set -e 로 도는 스크립트(scripts/test.sh)는 eval 에서 멈춘다.
         r2 = subprocess.run(
@@ -110,6 +114,33 @@ class DevOffset(unittest.TestCase):
         self.fake_docker(str(self.root / "docker"))
         r = self.run_env("4")
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def logging_docker(self, owner: str) -> Path:
+        """ps 에는 owner 를 답하고, 그 밖의 호출은 로그에 남기는 가짜 docker."""
+        log = Path(self._tmp.name) / "docker.log"
+        d = self.bin / "docker"
+        d.write_text(f"#!/bin/sh\n[ \"$1\" = ps ] && {{ echo '{owner}'; exit 0; }}\necho \"$@\" >> '{log}'\nexit 0\n")
+        d.chmod(d.stat().st_mode | stat.S_IEXEC)
+        return log
+
+    def test_orphan_stack_is_taken_down_and_offset_used(self) -> None:
+        log = self.logging_docker("/gone/worktree/t1077/docker")
+        r = self.run_env("4")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("export COMPOSE_PROJECT_NAME=codemit-dev-4", r.stdout)
+        self.assertIn("고아", r.stderr)
+        calls = log.read_text()
+        self.assertIn("compose -p codemit-dev-4 down", calls)
+        self.assertNotIn("-v", calls.split())
+        self.assertNotIn("volume", calls)
+
+    def test_live_owner_is_still_refused_and_not_taken_down(self) -> None:
+        live = Path(self.other)
+        log = self.logging_docker(str(live))
+        r = self.run_env("4")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(str(live), r.stderr)
+        self.assertFalse(log.exists())
 
 
 if __name__ == "__main__":

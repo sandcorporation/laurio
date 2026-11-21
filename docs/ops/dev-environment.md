@@ -100,6 +100,11 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 필요할 때. 범위 밖이면 멈추고, 그 오프셋의 compose 프로젝트(`codemit-dev-N`)가 다른 체크아웃의
 것이면(컨테이너 라벨 `com.docker.compose.project.working_dir` 로 판정) 멈춘다. 값이 없으면 위 규칙 그대로.
 
+**주인 디렉터리가 이미 사라진 스택은 고아다**(#1186). 거절하지 않고 그 프로젝트의 컨테이너를
+`docker compose -p <프로젝트> down` 으로 내린 뒤(**볼륨은 지우지 않는다**) stderr 로 한 줄 알리고 그 오프셋을 쓴다.
+디렉터리가 있으면 위처럼 거절한다. `scripts/dev-server.sh reap`(5분 타이머)도 같은 판정(`docker/dev-stack-orphans.sh`)으로
+워크트리가 사라진 `codemit-dev*` 스택의 컨테이너를 내린다.
+
 **거절하면 뒤따르는 compose 도 돌지 않는다**(#1146). `eval "$(…)"` 는 명령 치환의 종료코드를 삼키므로,
 거절 때 스크립트는 stdout 으로 `docker` 를 실패하는 함수로 가리고 `false` 로 끝나는 조각을 내보낸다 —
 `;` 로 이어진 `docker compose` 도, `&&` 체인도, `set -e` 스크립트(`scripts/test.sh`)도 거기서 멈춘다.

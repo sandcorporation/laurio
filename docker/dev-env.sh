@@ -55,8 +55,14 @@ if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   # 그 오프셋의 compose 프로젝트가 다른 체크아웃 것이면 멈춘다 — 남의 스택에 붙지 않는다.
   project=codemit-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$offset" )
   if command -v docker >/dev/null 2>&1; then
-    owners=$(docker ps -a --filter "label=com.docker.compose.project=$project" \
-      --format '{{.Label "com.docker.compose.project.working_dir"}}' 2>/dev/null | sort -u || true)
+    . "$script_dir/dev-stack-orphans.sh"
+    owners=$(dev_stack_owners "$project")
+    # 주인 디렉터리가 모두 사라진 스택은 고아다 — 컨테이너를 내리고(볼륨은 남긴다) 그 오프셋을 쓴다(#1186).
+    if dev_stack_is_orphan "$project"; then
+      echo "dev-env.sh: 오프셋 $offset($project)은 사라진 체크아웃($(echo $owners))의 고아 스택이라 내렸다(볼륨은 남겼다)" >&2
+      dev_stack_down_orphan "$project"
+      owners=
+    fi
     for owner in $owners; do
       case "$owner" in
         "$root" | "$root"/*) ;;
