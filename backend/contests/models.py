@@ -1246,3 +1246,35 @@ def distribution_due_q(as_of, policy) -> Q:
         judging_ends_at__lte=as_of - timedelta(days=policy.distribution_wait_days),
         is_free=False,
     )
+
+
+class ContestArchiveEvent(models.Model):
+    """공모전 보관·해제 한 번 — 누가·언제·어느 길로 (#1225).
+
+    `Contest.archived_at` 은 지금 보관 중인가만 말한다. 이 행이 그 칸을 바꾼 사건을 남긴다.
+    `ContestChange` 에 넣지 않은 까닭: 그쪽은 DRAFT 를 남기지 않고(보관은 초안에도 한다),
+    `before`/`after` 가 브리프 필드 모양이며 행위자 칸이 없다.
+
+    `actor` 는 SET_NULL — 계정이 지워져도 사건은 남고, `contest` 는 CASCADE(재시드 정리와
+    함께 지워진다). `via` 는 길의 이름이다(MCP 도구 이름 등).
+    """
+
+    class Action(models.TextChoices):
+        ARCHIVED = "archived", "보관"
+        UNARCHIVED = "unarchived", "해제"
+
+    contest = models.ForeignKey(Contest, related_name="archive_events", on_delete=models.CASCADE)
+    action = models.CharField(max_length=16, choices=Action.choices)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, related_name="+", on_delete=models.SET_NULL
+    )
+    via = models.CharField(max_length=64)
+    occurred_at = models.DateTimeField()
+
+    class Meta:
+        verbose_name = "공모전 보관 기록"
+        verbose_name_plural = "공모전 보관 기록"
+        ordering = ["-occurred_at", "-id"]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ContestArchiveEvent({self.action}, contest_id={self.contest_id})"

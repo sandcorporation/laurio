@@ -12,7 +12,7 @@ import type { FreeContest } from "./types";
 // 고르고 끝난) 행은 `winner`가 없어 그 자리가 비어 있다. 상태는 판정(통과·
 // 미충족)이 아니라 Contest 의 생애주기 단계라 중립 배지로만 보인다.
 const COL = {
-  status: "w-[96px]",
+  status: "w-[230px]",
   deadline: "w-[168px]",
   winner: "w-[160px]",
   action: "w-[380px]",
@@ -33,7 +33,7 @@ function TableHead() {
 export function FreeContestListTable({ contests }: { contests: FreeContest[] }) {
   return (
     <div data-testid="free-contest-list-table" className="border border-rule bg-surface">
-      <TableScroll minWidth={1060}>
+      <TableScroll minWidth={1130}>
         <TableHead />
         {contests.map((contest, i) => (
           <div
@@ -44,10 +44,15 @@ export function FreeContestListTable({ contests }: { contests: FreeContest[] }) 
             }`}
           >
             <div className="min-w-0 flex-1 truncate">{contest.title}</div>
-            <div className={`${COL.status} shrink-0`}>
+            <div className={`${COL.status} flex shrink-0 flex-col items-start gap-1`}>
               <Badge testId={`free-contest-status-${contest.id}`}>
                 {freeContestStatusLabel(contest.status)}
               </Badge>
+              {contest.archived_at && (
+                <Badge tone="attention" testId={`free-contest-archived-${contest.id}`}>
+                  보관됨 {new Date(contest.archived_at).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })}
+                </Badge>
+              )}
             </div>
             <div className={`${COL.deadline} shrink-0 truncate font-mono text-[12.5px] text-ink/62`}>
               {new Date(contest.deadline_at).toLocaleString("ko-KR")}

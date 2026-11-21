@@ -20,7 +20,7 @@ from django.core.cache import caches
 from django.utils import timezone
 
 from contests.mcp import TOOLS as CONTEST_TOOLS
-from contests.models import Contest, ContestConnectedAppWrite
+from contests.models import Contest, ContestArchiveEvent, ContestConnectedAppWrite
 from core.contest_catalog import contest_catalog
 from tests.mcp_output_schema import assert_matches_output_schema
 from contests.tests.test_free_contest_hosting import (  # noqa: F401 — 픽스처 재사용
@@ -403,6 +403,35 @@ def test_create_update_publish_close_archive_and_unarchive(client, category, lan
         "archive_free_contest",
         "unarchive_free_contest",
     ]
+
+
+def test_archive_and_unarchive_leave_who_when_and_which_way_and_screens_show_archived(client, category, landing_type):
+    """보관·해제는 사건 한 행씩(누가·언제·어느 길)을 남기고, 개최자 목록·운영자 목록이 보관 시각을 싣는다(#1225)."""
+
+    host = _host(client, "mcp-archive-record")
+    token = _connect(client, host["access"])["access_token"]
+    contest_id = _ok(client, token, "create_free_contest", **_brief(category, landing_type))["contest"]["id"]
+
+    _confirmed(client, token, "archive_free_contest", contest_id=contest_id)
+    (archived,) = ContestArchiveEvent.objects.filter(contest_id=contest_id)
+    assert (archived.action, archived.actor_id, archived.via) == ("archived", host["user_id"], "archive_free_contest")
+    assert archived.occurred_at == Contest.objects.get(pk=contest_id).archived_at
+
+    mine = client.get(f"{CONTESTS_URL}/mine", **_auth_header(host["access"])).json()["items"]
+    (row,) = [item for item in mine if item["contest_id"] == contest_id]
+    assert row["archived_at"] is not None
+    operator = _operator_client("root-mcp-archive-record-view")
+    listed = operator.get("/api/operator/contests/free", HTTP_ORIGIN="http://testserver").json()
+    assert [c["archived_at"] is not None for c in listed if c["id"] == contest_id] == [True]
+
+    _confirmed(client, token, "unarchive_free_contest", contest_id=contest_id)
+    events = list(ContestArchiveEvent.objects.filter(contest_id=contest_id).order_by("id").values_list("action", "actor_id", "via"))
+    assert events == [
+        ("archived", host["user_id"], "archive_free_contest"),
+        ("unarchived", host["user_id"], "unarchive_free_contest"),
+    ]
+    mine = client.get(f"{CONTESTS_URL}/mine", **_auth_header(host["access"])).json()["items"]
+    assert [item["archived_at"] for item in mine if item["contest_id"] == contest_id] == [None]
 
 
 def test_published_contest_with_submissions_cannot_be_archived_until_closed(client, category, landing_type):

@@ -453,6 +453,7 @@ def _serialize_free_contest(contest: Contest) -> OperatorFreeContestOut:
         deadline_at=contest.deadline_at,
         judging_ends_at=contest.judging_ends_at,
         winner=winner,
+        archived_at=contest.archived_at,
     )
 
 
@@ -479,6 +480,7 @@ def _serialize_paid_contest(contest: Contest) -> OperatorPaidContestOut:
         status=contest.status,
         deadline_at=contest.deadline_at,
         prize=contest.prize,
+        archived_at=contest.archived_at,
     )
 
 

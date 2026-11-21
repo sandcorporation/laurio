@@ -354,7 +354,7 @@ def _archive(grant: ConnectedApp, arguments: dict) -> WriteResult | Preview:
     if refusal is not None:
         raise HttpError(409, refusal)
     preview = {"contest_id": contest.id, "title": contest.title, "status": contest.status, "effect": "공개 목록·상세·검색·강의실 들여오기에서 숨긴다. 지우지 않고, 해제하면 돌아온다."}
-    return _two_step(grant, "archive_free_contest", arguments, preview, lambda: (archive_contest(contest), _result(grant, contest, f"보관: {contest.title}"))[1])
+    return _two_step(grant, "archive_free_contest", arguments, preview, lambda: (archive_contest(contest, actor=grant.instructor, via="archive_free_contest"), _result(grant, contest, f"보관: {contest.title}"))[1])
 
 
 def _unarchive(grant: ConnectedApp, arguments: dict) -> WriteResult | Preview:
@@ -363,7 +363,7 @@ def _unarchive(grant: ConnectedApp, arguments: dict) -> WriteResult | Preview:
     if contest.archived_at is None:
         raise HttpError(409, "보관하지 않은 공모전입니다.")
     preview = {"contest_id": contest.id, "title": contest.title, "status": contest.status, "effect": "보관을 풀어 다시 공개 목록에 보인다(공개 상태일 때)."}
-    return _two_step(grant, "unarchive_free_contest", arguments, preview, lambda: (unarchive_contest(contest), _result(grant, contest, f"보관 해제: {contest.title}"))[1])
+    return _two_step(grant, "unarchive_free_contest", arguments, preview, lambda: (unarchive_contest(contest, actor=grant.instructor, via="unarchive_free_contest"), _result(grant, contest, f"보관 해제: {contest.title}"))[1])
 
 
 # --- 등록부 ---------------------------------------------------------------------

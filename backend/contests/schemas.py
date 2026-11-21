@@ -213,6 +213,7 @@ class OperatorFreeContestOut(Schema):
     deadline_at: datetime
     judging_ends_at: datetime | None
     winner: OperatorFreeContestWinnerOut | None
+    archived_at: datetime | None = None
 
 
 class OperatorPaidContestOut(Schema):
@@ -224,6 +225,7 @@ class OperatorPaidContestOut(Schema):
     status: str
     deadline_at: datetime
     prize: int
+    archived_at: datetime | None = None
 
 
 class QuoteIn(Schema):
@@ -575,6 +577,8 @@ class MySponsoredContestOut(Schema):
     # 화면이 `status` 를 직접 비교하지 않는다.
     can_edit: bool
     created_at: datetime
+    # 보관 중이면 보관한 시각(Contest.archived_at), 아니면 null — 개최자 목록의 「보관됨」 배지 (#1225).
+    archived_at: datetime | None = None
 
     @staticmethod
     def resolve_contest_id(obj) -> int:
