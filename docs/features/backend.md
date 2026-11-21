@@ -225,6 +225,7 @@ http(s)·호스트 있음·사용자 정보(`user:pass@`) 없음·2000자 이하
 | `GET …/certificates/bundle.pdf` | 유효한 상장 전부를 이은 한 파일(pypdf, 저장하지 않음). 없으면 404 |
 | `POST …/certificates/{cid}/cancel` | 취소. 이미 취소된 것은 409. 알리지 않는다 |
 | `POST …/certificates/{cid}/reissue` | 취소하고 새 번호로 다시 발급(칸 한 벌). 옛 것의 `replaced_by` 가 새 것을 가리킨다 |
+| `GET /api/certificates/verify/{token}` | **로그인 없이**(#1128) 확인 페이지가 부른다. 상태 셋 — `valid`(번호·공모전·상·받는 사람·수여자·발급일), `cancelled`(번호·공모전·취소일, 다시 발급됐는지만 — 새 상장은 가리키지 않는다), `hidden`(받는 사람이 닫음·탈퇴, 번호만). 없는 토큰만 404. `X-Robots-Tag: noindex, nofollow`. 공모전 제품 스위치와 무관하다 |
 
 발급 규칙(`certificates/services.py`): 받는 사람은 그 공모전의 제출자다(아니면 422), 한 사람은
 유효한 상장을 하나만 가진다(이미 있으면 409, DB 의 부분 유니크 제약이 같은 것을 막는다), 유효한

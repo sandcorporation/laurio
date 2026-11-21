@@ -47,6 +47,11 @@ const ANTHROPIC_TRANSFER_EFFECTIVE_ISO = "2026-11-06";
 const PREVIOUS_EFFECTIVE_ISO = "2026-11-12";
 const PREVIOUS_EFFECTIVE_DATE = koreanDate(PREVIOUS_EFFECTIVE_ISO);
 
+// 상장 진위 확인 페이지의 받는 사람 이름(1항, #1128)만 따로 시행한다 — 병합일(KST) 당일, 부칙 ③(대표 결정). 이 판(①)은
+// 이미 시행일을 공지했으므로 그 날짜를 옮기지 않는다(옮기면 백엔드 채점 벤더 기준일과 어긋난다).
+const CERTIFICATE_VERIFY_EFFECTIVE_ISO = "2026-11-21";
+const CERTIFICATE_VERIFY_EFFECTIVE_DATE = koreanDate(CERTIFICATE_VERIFY_EFFECTIVE_ISO);
+
 function Article({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
@@ -91,6 +96,10 @@ export default function PrivacyPolicyPage() {
             <li>
               공모전 이용: 공개 프로필에 표시할 이름과 소개(회원이 직접 입력), 제출한 소스코드와
               요구사항에 대한 자가 응답
+            </li>
+            <li data-testid="privacy-certificate-item">
+              공모전 상장: 개최자가 상장에 적은 받는 사람 이름. 상장의 확인 주소(QR)로 들어온 사람에게 상장 진위
+              확인 페이지에서 상 이름·공모전 이름과 함께 공개되며, 검색 엔진에는 싣지 않습니다.
             </li>
             <li>클래스 이용: 해당 클래스에서 사용할 표시 이름(참여자가 직접 입력), 제출한 소스코드</li>
             <li>클래스 개설: 강사가 등록한 인공지능 서비스 키(암호화하여 저장)</li>
@@ -331,6 +340,7 @@ export default function PrivacyPolicyPage() {
         <Article title="부칙">
           <p>① 이 방침은 {EFFECTIVE_DATE}부터 시행합니다.</p>
           <p>② {PREVIOUS_EFFECTIVE_DATE}부터 시행된 종전 방침은 이 방침의 시행일 전날까지 적용됩니다.</p>
+          <p>③ 1항의 「공모전 상장」 항목은 {CERTIFICATE_VERIFY_EFFECTIVE_DATE}부터 시행합니다.</p>
         </Article>
       </div>
     </PageShell>

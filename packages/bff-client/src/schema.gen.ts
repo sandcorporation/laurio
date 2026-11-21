@@ -163,6 +163,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/verify/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verify Certificate
+         * @description 공개 확인(#1128) — 로그인 없이. 없는 토큰만 404 이고, 상장이 있다는 사실은 숨기지 않는다.
+         *
+         *     공모전 제품 스위치와 무관하다 — 이미 나간 상장의 진위는 제품을 꺼도 확인돼야 한다.
+         */
+        get: operations["certificates_api_verify_certificate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/class-templates": {
         parameters: {
             query?: never;
@@ -5505,6 +5527,42 @@ export interface components {
             recipient_name: string;
         };
         /**
+         * CertificateVerifyOut
+         * @description 공개 확인 페이지 `/c/{token}`(#1128) — 상태마다 보여도 되는 칸만 채운다.
+         *
+         *     - `valid`: 번호·공모전·상·받는 사람·수여자·발급일
+         *     - `cancelled`: 번호·공모전·취소일, `reissued` 는 다시 발급됐는지(새 상장은 가리키지 않는다)
+         *     - `hidden`: 받는 사람이 닫았거나 탈퇴 — 번호만
+         */
+        CertificateVerifyOut: {
+            /** Award Name */
+            award_name?: string | null;
+            /** Cancelled On */
+            cancelled_on?: string | null;
+            /** Contest Title */
+            contest_title?: string | null;
+            /** Giver Name */
+            giver_name?: string | null;
+            /** Giver Title */
+            giver_title?: string | null;
+            /** Issued On */
+            issued_on?: string | null;
+            /** Number */
+            number: string;
+            /** Recipient Name */
+            recipient_name?: string | null;
+            /**
+             * Reissued
+             * @default false
+             */
+            reissued: boolean;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "valid" | "cancelled" | "hidden";
+        };
+        /**
          * ChecklistItemIn
          * @description `grade` 가 진실이다. `grade` 없이 `required` 만 오면 옛 모양으로 읽는다(True → 필수, False → 선택).
          *     `points` 가 없으면 등급별 기본값(필수 2·선택 1).
@@ -10552,6 +10610,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenPairOut"];
+                };
+            };
+        };
+    };
+    certificates_api_verify_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateVerifyOut"];
                 };
             };
         };

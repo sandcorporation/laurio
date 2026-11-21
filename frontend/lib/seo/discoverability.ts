@@ -34,7 +34,7 @@ export function decideRobots(params: {
   }
 
   return {
-    rules: [{ userAgent: "*", allow: "/", disallow: ["/console", "/login"] }],
+    rules: [{ userAgent: "*", allow: "/", disallow: ["/console", "/login", "/c/"] }],
     sitemap: `${origin}/sitemap.xml`,
   };
 }
