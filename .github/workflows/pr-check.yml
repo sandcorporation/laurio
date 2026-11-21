@@ -146,6 +146,7 @@ jobs:
           bash scripts/ci/promote_test.sh
           bash scripts/ci/wait-merged_test.sh
           bash scripts/ci/e2e_stale_test.sh
+          bash scripts/ci/cpu_reference_watch_test.sh
           bash scripts/ci/e2e_gate_test.sh
 
   checks:
