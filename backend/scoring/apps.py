@@ -27,6 +27,10 @@ class ScoringConfig(AppConfig):
         from .services import SIZE_HOLD_EXPIRY_SCAN, SUBMISSION_SCORING_SCAN
 
         register_scan(SUBMISSION_SCORING_SCAN)
+        # 운영자가 건 정정 채점(#1180) — 「진행 중」 정정 행이 큐다.
+        from .corrections import SCORE_CORRECTION_SCAN
+
+        register_scan(SCORE_CORRECTION_SCAN)
         # 「크기 초과」 보류가 심사 종료까지 풀리지 않으면 자동 0%(#989 A2).
         register_scan(SIZE_HOLD_EXPIRY_SCAN)
         # 완성도 스캔(#884, ADR-0072) — Score 가 생긴 제출을 뒤따라 집는다. Score 흐름과 따로 돈다.

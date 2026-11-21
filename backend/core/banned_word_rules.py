@@ -199,6 +199,13 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
             "운영자 공지 본문 — 운영자 공지 제목과 같은 이유(spec #474)."
         ),
     ),
+    ("distributions", "ScoreCorrectionIn", "reason"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason=(
+            "운영자 점수 정정 사유 — 운영자 표면이고 감사 기록이라 원문 그대로 남긴다(#1180)."
+        ),
+    ),
     ("notifications", "SendOperatorNoticeIn", "image_object_key"): BannedWordRule(
         checks_impersonation=False,
         checks_profanity=False,

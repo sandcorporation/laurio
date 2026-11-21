@@ -36,6 +36,8 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("scoring/participation.py", "is_scored"): "채점이 한 번 돌았나(원래 Score 유무).",
     ("contests/scoring_hold.py", "is_size_held"): "채점 보류 대상인가(원래 Score 유무).",
     ("appeals/api.py", "create_appeal"): "이의를 낼 수 있나 — 채점이 한 번 돌았나(원래 Score 유무).",
+    ("scoring/corrections.py", "_in_progress"): "정정 채점이 원래 Score 의 처음 커밋(`scored_assets`)을 읽는다(#1180).",
+    ("distributions/correction_api.py", "list_score_corrections"): "정정 목록이 정정 전 점수(`original_percentage`)를 함께 보인다(#1180).",
 }
 
 
