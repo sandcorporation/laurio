@@ -69,7 +69,7 @@
 #                                                                    backend 코드와 무관하게 갈린다)
 #   docker/pgbouncer.Dockerfile, docker/pgbouncer/ -> pgbouncer      (#453/#458 — 연결 풀러
 #                                                                    이미지 자체만 바뀐다)
-#   docker/agent-grader.Dockerfile, backend/scoring/agent_runner.py -> agent-grader
+#   docker/agent-grader.Dockerfile, backend/scoring/agent_runner.py, backend/scoring/selfloop.py -> agent-grader
 #   docker/agent-grader-seccomp.json -> agent-grader(이미지는 그대로, 컨테이너만 다시 만든다)
 #                                                                   (#999 — 에이전트 채점 실행기. 실행 틀 파일
 #                                                                    하나와 CLI 고정 버전으로만 갈린다)
@@ -435,8 +435,8 @@ cmd_plan() {
         BUILD_PGBOUNCER=true
       fi
 
-      # 에이전트 채점 실행기(#999) — 실행 틀 파일 하나와 이 Dockerfile 로만 갈린다.
-      if touched '^docker/agent-grader\.Dockerfile|^backend/scoring/agent_runner\.py$'; then
+      # 에이전트 채점 실행기(#999) — 실행 틀 파일·루프(#1245)와 이 Dockerfile 로만 갈린다.
+      if touched '^docker/agent-grader\.Dockerfile|^backend/scoring/(agent_runner|selfloop)\.py$'; then
         BUILD_AGENT_GRADER=true
       fi
     fi

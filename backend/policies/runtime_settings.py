@@ -91,6 +91,10 @@ DEFAULT_SWITCH_ALERT_AFTER_DAYS = "2"
 AGENT_SCORING_DAILY_LIMIT_USD = "AGENT_SCORING_DAILY_LIMIT_USD"
 _DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD = "20"
 
+#: 채점 방식 비교 실험의 하루 비용 상한(#1246) — 기본 0 은 「꺼짐」(실험 실행을 하나도 받지 않는다).
+AGENT_EXPERIMENT_DAILY_LIMIT_USD = "AGENT_EXPERIMENT_DAILY_LIMIT_USD"
+_DEFAULT_AGENT_EXPERIMENT_DAILY_LIMIT_USD = "0"
+
 #: 저장소 다운로드 상한(#1005) — 키·기본값·한계(MB). 아래 한계는 grader(`mem_limit: 2g`, 소스 읽기
 #: 스레드 8개)가 저장소 zip 을 한 벌씩 동시에 쥐는 최악(8 × 상한)에 기반 몫 400MB 를 남긴 값이다
 #: — (2048 − 400) / 8 ≈ 206 → 200. grader 메모리 한도를 올리면 이 최대치도 같이 올린다.
@@ -165,6 +169,16 @@ SPECS: dict[str, SettingSpec] = {
             "에이전트 채점 하루 비용 상한 (USD)",
             "float",
             default=_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD,
+            min_value=0.0,
+            max_value=1000.0,
+        ),
+        # #1246: 채점 방식 비교 실험(`compare_scoring_methods`)이 하루(KST)에 쓰는 비용 상한. 운영 상한과 따로 센다.
+        # 0 이면 실험은 돌지 않는다.
+        SettingSpec(
+            AGENT_EXPERIMENT_DAILY_LIMIT_USD,
+            "채점 방식 비교 실험 하루 비용 상한 (USD)",
+            "float",
+            default=_DEFAULT_AGENT_EXPERIMENT_DAILY_LIMIT_USD,
             min_value=0.0,
             max_value=1000.0,
         ),
@@ -420,18 +434,28 @@ def contest_quality_review_enabled() -> bool:
     return switch_on(CONTEST_AI_QUALITY_REVIEW)
 
 
+def _usd_setting(key: str, default: str) -> Decimal:
+    raw = (setting_value(key) or "").strip()
+    try:
+        value = Decimal(raw or default)
+    except InvalidOperation:
+        value = Decimal(default)
+    if not value.is_finite():
+        value = Decimal(default)
+    return max(value, Decimal(0))
+
+
 def agent_scoring_daily_limit_usd() -> Decimal:
     """에이전트 채점 하루 비용 상한(#998, USD) — 값이 없거나 읽을 수 없으면(env 는 저장 검사를 지나지
     않는다) 기본값 20, 음수는 0 으로 본다."""
 
-    raw = (setting_value(AGENT_SCORING_DAILY_LIMIT_USD) or "").strip()
-    try:
-        value = Decimal(raw or _DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
-    except InvalidOperation:
-        value = Decimal(_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
-    if not value.is_finite():
-        value = Decimal(_DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
-    return max(value, Decimal(0))
+    return _usd_setting(AGENT_SCORING_DAILY_LIMIT_USD, _DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD)
+
+
+def agent_experiment_daily_limit_usd() -> Decimal:
+    """채점 방식 비교 실험의 하루 비용 상한(#1246, USD) — 값이 없거나 읽을 수 없으면 0(꺼짐), 음수는 0."""
+
+    return _usd_setting(AGENT_EXPERIMENT_DAILY_LIMIT_USD, _DEFAULT_AGENT_EXPERIMENT_DAILY_LIMIT_USD)
 
 
 def repository_download_limit_bytes() -> int:

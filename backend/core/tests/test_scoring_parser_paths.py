@@ -210,7 +210,13 @@ CALL_SITES = {
         "scoring/quality_agent.py": 1,
     },
     # 에이전트 일(`AgentJob`)을 만드는 곳 — 채점(scoring)은 위 표의 agent 경로, quality 는 parse_content 로 간다.
-    "AgentJob": {"classroom/agent_grading.py": 2, "scoring/quality_agent.py": 1, "scoring/services.py": 1},
+    # 비교 실험(scoring/experiment.py, #1246)의 에이전트 칸은 운영 채점과 같은 스키마·acceptance_problems 를 지난다(agent 경로).
+    "AgentJob": {
+        "classroom/agent_grading.py": 2,
+        "scoring/experiment.py": 1,
+        "scoring/quality_agent.py": 1,
+        "scoring/services.py": 1,
+    },
 }
 
 

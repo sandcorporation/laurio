@@ -63,8 +63,8 @@ SERVICES: dict[str, Service] = {
         Service("classroom", ("classroom", *NODE_WORKSPACE, "docker/entrypoint"), target="runner"),
         Service("search", ()),
         Service("pgbouncer", ("docker/pgbouncer",)),
-        # 에이전트 채점 실행기(#999) — 실행 틀 파일 하나만 읽는다(문맥은 `agent-grader.Dockerfile.dockerignore`).
-        Service("agent-grader", ("backend/scoring/agent_runner.py",)),
+        # 에이전트 채점 실행기(#999) — 실행 틀 파일과 그 옆의 루프(#1245) 둘만 읽는다(문맥은 `agent-grader.Dockerfile.dockerignore`).
+        Service("agent-grader", ("backend/scoring/agent_runner.py", "backend/scoring/selfloop.py")),
     )
 }
 
