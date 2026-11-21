@@ -72,7 +72,9 @@ else
   # 0 이 아닌 1~9 로 접는다 — 0 은 주 워크트리의 몫이다.
   # **앞의 0 을 직접 뗀다.** `039` 를 그대로 넘기면 셸이 8진수로 읽어 죽고, `10#` 은
   # bash 확장이라 `sh`(dash)에서는 쓸 수 없다 — 이 스크립트는 `sh` 로 불린다.
-  digits=$(printf '%s' "$root" | sha256sum | tr -dc '0-9' | cut -c1-3 | sed 's/^0*//')
+  # macOS 에는 sha256sum 이 없다 — shasum -a 256 이 같은 값을 낸다.
+  if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum; else hash='shasum -a 256'; fi
+  digits=$(printf '%s' "$root" | $hash | tr -dc '0-9' | cut -c1-3 | sed 's/^0*//')
   offset=$(( (${digits:-0} % 9) + 1 ))
 fi
 

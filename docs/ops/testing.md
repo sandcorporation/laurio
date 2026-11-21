@@ -42,6 +42,9 @@ docker/compose.dev.yaml exec backend uv run pytest`(또는 컨테이너 안 셸�
 scripts/test.sh backend tests/test_x.py   # 호스트에서 돈다 — 포트는 dev-env.sh 가 고른다
 ```
 
+macOS 기본 환경(bash 3.2, `nproc`·`taskset`·`flock` 없음)에서도 같은 명령이 돈다 —
+코어 수는 `sysctl`, 칸은 디렉터리 잠금으로 잡고 CPU 고정은 건너뛴다(#1006).
+
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 

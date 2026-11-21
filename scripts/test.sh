@@ -21,7 +21,12 @@ kind="${1:-}"
 
 SLOTS=2
 LOCAL_TEST_LIMIT=400
-NCPU=$(nproc)
+# macOS 에는 nproc·taskset·flock 이 없다(bash 도 3.2) — 있으면 쓰고 없으면 비켜 간다(#1006).
+if command -v nproc >/dev/null 2>&1; then
+  NCPU=$(nproc)
+else
+  NCPU=$(sysctl -n hw.ncpu)
+fi
 CPUS=$((NCPU / 3))
 [ "$CPUS" -ge 1 ] || CPUS=1
 # e2e 일꾼은 코어 둘에 하나(web-rpg 와 같은 비율) — 정하지 않으면 Playwright 가 호스트 코어를 보고
@@ -46,18 +51,39 @@ if [ "$kind" = e2e-down ]; then
   exit 0
 fi
 
-# 빈 칸을 잡는다 — fd 를 쥔 채 이 스크립트가 끝나면 풀린다.
+# 빈 칸을 잡는다 — flock 이 있으면 fd 를 쥔 채 이 스크립트가 끝나면 풀린다(bash 3.2 에서도 되게
+# 고정 fd 9 를 쓴다). flock 이 없으면(macOS) 칸마다 디렉터리를 만들어 잡고, 쥔 프로세스가 죽었으면 뺏는다.
 mkdir -p "$LOCK_DIR"
+if command -v flock >/dev/null 2>&1; then
+  take_slot() {
+    exec 9>"$LOCK_DIR/slot-$1.lock"
+    if flock -n 9; then return 0; fi
+    exec 9>&-
+    return 1
+  }
+else
+  take_slot() {
+    d="$LOCK_DIR/slot-$1.d"
+    if mkdir "$d" 2>/dev/null; then
+      echo $$ >"$d/pid"
+      trap 'rm -f "$d/pid"; rmdir "$d" 2>/dev/null || true' EXIT
+      return 0
+    fi
+    holder=$(cat "$d/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -f "$d/pid"; rmdir "$d" 2>/dev/null || true
+    fi
+    return 1
+  }
+fi
 waited=0
 while :; do
   for i in $(seq 1 "$SLOTS"); do
-    exec {slot_fd}>"$LOCK_DIR/slot-$i.lock"
-    if flock -n "$slot_fd"; then
+    if take_slot "$i"; then
       echo "$$ $kind $(pwd) $(date +%H:%M:%S)" >"$LOCK_DIR/slot-$i.who"
       slot=$i
       break 2
     fi
-    exec {slot_fd}>&-
   done
   if [ $((waited % 30)) -eq 0 ]; then
     echo "시험 칸 빈 곳 기다림($SLOTS/$SLOTS 사용 중):"
@@ -68,7 +94,14 @@ while :; do
 done
 first=$(((slot - 1) * CPUS % NCPU))
 CPUSET="$first-$((first + CPUS - 1))"
-echo "시험 칸 $slot — 코어 $CPUSET (호스트 ${NCPU}코어의 1/3)"
+# taskset 이 없으면(macOS) 코어를 못 박지 못한다 — 고정 없이 돈다.
+PIN=()
+if command -v taskset >/dev/null 2>&1; then
+  PIN=(taskset -c "$CPUSET")
+  echo "시험 칸 $slot — 코어 $CPUSET (호스트 ${NCPU}코어의 1/3)"
+else
+  echo "시험 칸 $slot — taskset 없음: CPU 고정 없이 돈다(일꾼 $CPUS)"
+fi
 # conftest·playwright.config 가 이 표식이 없는 로컬 실행을 거절한다 — 칸을 건너뛴 실행을 막는다.
 export CODEMIT_TEST_ENTRY="scripts/test.sh 칸 $slot"
 
@@ -78,7 +111,7 @@ case "$kind" in
     docker update --cpuset-cpus "$CPUSET" "${COMPOSE_PROJECT_NAME}-db-1" >/dev/null
     cd backend
     # pyproject 의 `-n auto` 를 칸 크기로 덮는다 — 뒤에 준 값이 이긴다.
-    exec taskset -c "$CPUSET" uv run pytest -n "$CPUS" "$@"
+    exec ${PIN[@]+"${PIN[@]}"} uv run pytest -n "$CPUS" "$@"
     ;;
   e2e)
     cleanup() {
@@ -115,7 +148,7 @@ case "$kind" in
       curl --fail --silent "$url/healthz" >/dev/null || { echo "$url 이 응답하지 않는다"; "${C[@]}" logs --tail 50; exit 1; }
     done
 
-    pw=(taskset -c "$CPUSET" pnpm --dir frontend exec playwright test)
+    pw=(${PIN[@]+"${PIN[@]}"} pnpm --dir frontend exec playwright test)
     count=$("${pw[@]}" --list "$@" 2>/dev/null | grep -c ' › ' || true)
     if [ "$count" -gt "$LOCAL_TEST_LIMIT" ]; then
       echo "시험 ${count}개를 한 번에 돌리려 했다 — 로컬은 ${LOCAL_TEST_LIMIT}개까지다. 파일·--project 로 좁히고, 전체는 브랜치 PR 의 CI 로 본다."
@@ -127,6 +160,6 @@ case "$kind" in
     # 폴더면 뒤 패스(시험 0개여도)가 앞 패스의 실패 trace 를 지운다(#699). 파일 하나로 좁히면 한쪽 패스가
     # 빌 수 있어 E2E_ALLOW_EMPTY 로 두 패스 모두 「시험 없음」을 통과로 친다.
     PLAYWRIGHT_WORKERS="$E2E_WORKERS" E2E_ALLOW_EMPTY=1 \
-      taskset -c "$CPUSET" frontend/scripts/e2e-two-pass.sh all "$@"
+      ${PIN[@]+"${PIN[@]}"} frontend/scripts/e2e-two-pass.sh all "$@"
     ;;
 esac
