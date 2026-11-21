@@ -35,7 +35,7 @@ scripts/feedback.sh untake 12                    # 집음을 지워 다음 실�
 scripts/feedback.sh status 12 deployed "PR #1300 으로 고쳤습니다"   # 제보자에게 앱 안 알림이 간다
 
 orca-ide automations create --name "제보 전달" --trigger "* * * * *" \
-  --precheck "scripts/feedback.sh check" --workspace path:$HOME/workspace/codemit --workspace-mode existing \
+  --precheck "scripts/feedback.sh check" --repo path:$HOME/workspace/codemit --workspace-mode existing \
   --provider claude --prompt "scripts/feedback.sh take 로 제보를 집고, 줄마다 scripts/feedback.sh forward <id> 를 실행한다. 코드를 고치지 않는다." --json
 orca-ide automations list --json                 # id 찾기
 orca-ide automations edit <id> --disabled --json # 잠시 끄기
