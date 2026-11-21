@@ -28,8 +28,8 @@ describe("개인정보처리방침 시행일 표시", () => {
     expect(iso("PREVIOUS_EFFECTIVE_ISO")).toBe("2026-11-12");
   });
 
-  it("상장 확인 항목(#1128)은 부칙 ③으로 병합일(2026-11-21)+7일에 따로 시행한다", () => {
-    expect(iso("CERTIFICATE_VERIFY_EFFECTIVE_ISO")).toBe("2026-11-28");
+  it("상장 확인 항목(#1128)은 부칙 ③으로 병합일(2026-11-21) 당일에 따로 시행한다", () => {
+    expect(iso("CERTIFICATE_VERIFY_EFFECTIVE_ISO")).toBe("2026-11-21");
     expect(page).toContain('data-testid="privacy-certificate-item"');
     expect(page).toContain("③ 1항의 「공모전 상장」 항목은 {CERTIFICATE_VERIFY_EFFECTIVE_DATE}부터 시행합니다.");
   });

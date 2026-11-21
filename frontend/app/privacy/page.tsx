@@ -47,9 +47,9 @@ const ANTHROPIC_TRANSFER_EFFECTIVE_ISO = "2026-11-06";
 const PREVIOUS_EFFECTIVE_ISO = "2026-11-12";
 const PREVIOUS_EFFECTIVE_DATE = koreanDate(PREVIOUS_EFFECTIVE_ISO);
 
-// 상장 진위 확인 페이지의 받는 사람 이름(1항, #1128)만 따로 시행한다 — 병합일(KST)+7일, 부칙 ③. 이 판(①)은
+// 상장 진위 확인 페이지의 받는 사람 이름(1항, #1128)만 따로 시행한다 — 병합일(KST) 당일, 부칙 ③(대표 결정). 이 판(①)은
 // 이미 시행일을 공지했으므로 그 날짜를 옮기지 않는다(옮기면 백엔드 채점 벤더 기준일과 어긋난다).
-const CERTIFICATE_VERIFY_EFFECTIVE_ISO = "2026-11-28";
+const CERTIFICATE_VERIFY_EFFECTIVE_ISO = "2026-11-21";
 const CERTIFICATE_VERIFY_EFFECTIVE_DATE = koreanDate(CERTIFICATE_VERIFY_EFFECTIVE_ISO);
 
 function Article({ title, children }: { title: string; children: ReactNode }) {
