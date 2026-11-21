@@ -49,6 +49,10 @@ export function describeNotification(
     }
     case "contest_updated":
       return `참가하신 '${contestTitle}' 공모전의 내용이 바뀌었습니다 — 바뀐 조건을 확인해주세요.`;
+    case "certificate_issued":
+      return `참가하신 '${contestTitle}' 공모전의 상장이 발급되었습니다.`;
+    case "certificate_reissued":
+      return `참가하신 '${contestTitle}' 공모전의 상장이 다시 발급되었습니다.`;
     case "appeal_ruled":
       return "제기하신 이의 심판이 완료됐습니다.";
     case "new_contest_in_category":

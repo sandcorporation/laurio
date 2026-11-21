@@ -90,6 +90,12 @@ def render_message(notification: Notification) -> str:
             "codemit에서 바뀐 조건을 확인하세요."
         )
 
+    if notification_type == NotificationType.CERTIFICATE_ISSUED:
+        return f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest의 상장이 발급되었습니다. codemit에서 내려받으세요."
+
+    if notification_type == NotificationType.CERTIFICATE_REISSUED:
+        return f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest의 상장이 다시 발급되었습니다. codemit에서 내려받으세요."
+
     if notification_type == NotificationType.APPEAL_RULED:
         return f"{_BRAND_PREFIX} 제기하신 이의 심판이 완료됐습니다. codemit에서 결과를 확인하세요."
 

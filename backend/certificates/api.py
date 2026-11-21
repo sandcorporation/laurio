@@ -1,7 +1,7 @@
-"""공모전 상장(스펙 #1071) — 개최자 미리보기(#1126).
+"""공모전 상장(스펙 #1071) — 개최자 표면: 미리보기(#1126), 발급·목록·받기·묶음·취소·다시 발급(#1127).
 
 미리보기는 발급본과 같은 틀로 그리되 「미리보기」 표시를 얹고 상장 번호·QR 자리에 예시 값을
-쓴다. 저장하지 않는다.
+쓴다. 저장하지 않는다. 발급 규칙은 `services.py` 에 있다.
 """
 
 from __future__ import annotations
@@ -14,13 +14,22 @@ from ninja import Router
 from ninja.errors import HttpError
 
 from accounts.middleware import jwt_auth
-from contests.models import Contest
+from contests.models import Contest, ContestSubmission
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 from core.clock import Clock
 from core.contest_switch import require_contest_product_enabled
 
+from . import services
+from .models import Certificate
 from .rendering import CertificateSheet, CertificateText, render_certificate_pdf, verify_url
-from .schemas import CertificateTextIn
+from .schemas import (
+    CertificateBoardOut,
+    CertificateDefaultsOut,
+    CertificateIssueIn,
+    CertificateOut,
+    CertificateRecipientOut,
+    CertificateTextIn,
+)
 
 router = Router(tags=["certificates"])
 
@@ -55,6 +64,14 @@ def _get_closed_owned_contest(request: HttpRequest, contest_id: int) -> Contest:
     return contest
 
 
+def _award_date_range(contest: Contest, today: date) -> tuple[date, date]:
+    return timezone.localtime(contest.deadline_at).date(), today + timedelta(days=AWARD_DATE_FUTURE_DAYS)
+
+
+def _today() -> date:
+    return timezone.localtime(Clock.now()).date()
+
+
 def _clean_text(contest: Contest, payload: CertificateTextIn, *, today: date) -> CertificateText:
     values = {
         name: " ".join(getattr(payload, name).split()) if name != "body" else getattr(payload, name)
@@ -77,8 +94,7 @@ def _clean_text(contest: Contest, payload: CertificateTextIn, *, today: date) ->
         if violation is BannedWordViolation.PROFANITY:
             raise HttpError(422, f"{label}에 욕설을 쓸 수 없습니다.")
 
-    earliest = timezone.localtime(contest.deadline_at).date()
-    latest = today + timedelta(days=AWARD_DATE_FUTURE_DAYS)
+    earliest, latest = _award_date_range(contest, today)
     if not earliest <= payload.award_date <= latest:
         raise HttpError(
             422,
@@ -98,7 +114,7 @@ def _pdf_response(pdf: bytes, filename: str) -> HttpResponse:
 @router.post("/contests/{contest_id}/certificates/preview", auth=jwt_auth)
 def preview_certificate(request: HttpRequest, contest_id: int, payload: CertificateTextIn):
     contest = _get_closed_owned_contest(request, contest_id)
-    today = timezone.localtime(Clock.now()).date()
+    today = _today()
     text = _clean_text(contest, payload, today=today)
     sheet = CertificateSheet(
         text=text,
@@ -108,3 +124,128 @@ def preview_certificate(request: HttpRequest, contest_id: int, payload: Certific
         preview=True,
     )
     return _pdf_response(render_certificate_pdf(sheet), "certificate-preview.pdf")
+
+
+def _certificate_out(certificate: Certificate) -> CertificateOut:
+    return CertificateOut(
+        id=certificate.id,
+        number=certificate.number,
+        submission_id=certificate.submission_id,
+        award_name=certificate.award_name,
+        recipient_name=certificate.recipient_name,
+        body=certificate.body,
+        giver_name=certificate.giver_name,
+        giver_title=certificate.giver_title,
+        award_date=certificate.award_date,
+        issued_at=certificate.issued_at,
+        cancelled_at=certificate.cancelled_at,
+        replaced_by_id=certificate.replaced_by_id,
+        verify_url=verify_url(certificate.token),
+    )
+
+
+def _rule_error(error: services.CertificateRuleError) -> HttpError:
+    return HttpError(error.status, error.message)
+
+
+@router.get("/contests/{contest_id}/certificates", auth=jwt_auth, response=CertificateBoardOut)
+def certificate_board(request: HttpRequest, contest_id: int):
+    """발급 화면 한 벌 — 칸 기본값, 발급할 수 있는 사람, 발급한 것."""
+
+    contest = _get_closed_owned_contest(request, contest_id)
+    certificates = list(Certificate.objects.filter(contest=contest).order_by("-id"))
+    valid_by_submission = {c.submission_id: c.id for c in certificates if c.is_valid}
+    submissions = ContestSubmission.objects.filter(contest=contest).select_related("developer").order_by("id")
+    giver_name, giver_title = services.giver_defaults(contest)
+    earliest, latest = _award_date_range(contest, _today())
+    return CertificateBoardOut(
+        defaults=CertificateDefaultsOut(
+            giver_name=giver_name, giver_title=giver_title, award_date_min=earliest, award_date_max=latest
+        ),
+        recipients=[
+            CertificateRecipientOut(
+                submission_id=s.id,
+                default_recipient_name=s.developer.display_name[:20],
+                certificate_id=valid_by_submission.get(s.id),
+            )
+            for s in submissions
+        ],
+        certificates=[_certificate_out(c) for c in certificates],
+    )
+
+
+@router.post("/contests/{contest_id}/certificates", auth=jwt_auth, response={201: list[CertificateOut]})
+def issue_certificates(request: HttpRequest, contest_id: int, payload: CertificateIssueIn):
+    contest = _get_closed_owned_contest(request, contest_id)
+    today = _today()
+    requests = [
+        services.IssueRequest(submission_id=item.submission_id, text=_clean_text(contest, item.text, today=today))
+        for item in payload.items
+    ]
+    try:
+        issued = services.issue_certificates(contest=contest, issuer=request.auth_user, requests=requests)
+    except services.CertificateRuleError as error:
+        raise _rule_error(error) from error
+    return 201, [_certificate_out(c) for c in issued]
+
+
+def _owned_certificate(contest: Contest, certificate_id: int) -> Certificate:
+    certificate = Certificate.objects.filter(contest=contest, id=certificate_id).first()
+    if certificate is None:
+        raise HttpError(404, "상장을 찾을 수 없습니다.")
+    return certificate
+
+
+@router.get("/contests/{contest_id}/certificates/bundle.pdf", auth=jwt_auth)
+def download_bundle(request: HttpRequest, contest_id: int):
+    """유효한 상장 전부를 한 파일로 — 저장하지 않는다."""
+
+    contest = _get_closed_owned_contest(request, contest_id)
+    certificates = list(Certificate.objects.filter(contest=contest, cancelled_at__isnull=True).order_by("id"))
+    if not certificates:
+        raise HttpError(404, "발급한 상장이 없습니다.")
+    try:
+        pdf = services.bundle_pdf(certificates)
+    except services.CertificateRuleError as error:
+        raise _rule_error(error) from error
+    return _pdf_response(pdf, f"certificates-{contest.id}.pdf")
+
+
+@router.get("/contests/{contest_id}/certificates/{certificate_id}/pdf", auth=jwt_auth)
+def download_certificate(request: HttpRequest, contest_id: int, certificate_id: int):
+    contest = _get_closed_owned_contest(request, contest_id)
+    certificate = _owned_certificate(contest, certificate_id)
+    try:
+        pdf = services.read_pdf(certificate)
+    except services.CertificateRuleError as error:
+        raise _rule_error(error) from error
+    return _pdf_response(pdf, f"certificate-{certificate.number}.pdf")
+
+
+@router.post("/contests/{contest_id}/certificates/{certificate_id}/cancel", auth=jwt_auth, response=CertificateOut)
+def cancel_certificate(request: HttpRequest, contest_id: int, certificate_id: int):
+    contest = _get_closed_owned_contest(request, contest_id)
+    try:
+        certificate = services.cancel_certificate(
+            contest=contest, certificate_id=certificate_id, actor=request.auth_user
+        )
+    except services.CertificateRuleError as error:
+        raise _rule_error(error) from error
+    return _certificate_out(certificate)
+
+
+@router.post(
+    "/contests/{contest_id}/certificates/{certificate_id}/reissue",
+    auth=jwt_auth,
+    response={201: CertificateOut},
+)
+def reissue_certificate(request: HttpRequest, contest_id: int, certificate_id: int, payload: CertificateTextIn):
+    contest = _get_closed_owned_contest(request, contest_id)
+    text = _clean_text(contest, payload, today=_today())
+    try:
+        certificate = services.reissue_certificate(
+            contest=contest, certificate_id=certificate_id, text=text, issuer=request.auth_user
+        )
+    except services.CertificateRuleError as error:
+        raise _rule_error(error) from error
+    return 201, _certificate_out(certificate)
