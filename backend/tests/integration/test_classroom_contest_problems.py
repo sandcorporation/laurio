@@ -105,11 +105,19 @@ def _importable(client, world, **params):
     return response.json()
 
 
-def test_a_long_list_comes_twenty_at_a_time_in_deadline_order(client, world, category, landing_type):
-    """공모전이 많아도 시트가 한 번에 다 받지 않는다 — 마감 빠른 순 20개씩, `next` 로 이어 받는다."""
+def test_a_long_list_comes_a_page_at_a_time_in_deadline_order(
+    client, world, category, landing_type, monkeypatch
+):
+    """공모전이 많아도 시트가 한 번에 다 받지 않는다 — 마감 빠른 순으로 한 쪽씩, `next` 로 이어 받는다.
 
+    쪽 크기(운영 20)를 2로 줄여 본다 — 공모전 24개를 개최하던 판은 CPU 한도에 붙어
+    실행기에 따라 헛실패했다(#1163)."""
+
+    import classroom.api
+
+    monkeypatch.setattr(classroom.api, "IMPORTABLE_CONTESTS_PAGE_SIZE", 2)
     now = timezone.now()
-    for day in range(1, 25):
+    for day in (3, 1, 2):  # 개최 순서와 마감 순서를 다르게
         _free_contest(
             client, world["host"], category, landing_type,
             title=f"공모전 {day:02d}", deadline_at=now + timedelta(days=day),
@@ -118,10 +126,10 @@ def test_a_long_list_comes_twenty_at_a_time_in_deadline_order(client, world, cat
     first = _importable(client, world)
     second = _importable(client, world, after=first["next"])
 
-    assert len(first["items"]) == 20
+    assert len(first["items"]) == 2
     assert first["next"] is not None
     titles = [c["title"] for c in first["items"] + second["items"]]
-    assert len(titles) == 25 and len(set(titles)) == 25
+    assert len(titles) == 4 and len(set(titles)) == 4  # world 의 공모전 하나 + 셋
     deadlines = [c["deadline_at"] for c in first["items"] + second["items"]]
     assert deadlines == sorted(deadlines)
     assert second["next"] is None

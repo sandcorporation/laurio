@@ -589,10 +589,11 @@ def test_release_due_scan_is_bounded_by_batch_size(client, category, landing_typ
     from core import scans
 
     spec = scans.SCAN_REGISTRY["handover-release"]
-    monkeypatch.setitem(scans.SCAN_REGISTRY, "handover-release", replace(spec, batch_size=2))
+    # 배치 1·인계 둘로 본다 — 배치 2·인계 셋은 공모전 셋을 끝까지 돌려 CPU 한도에 붙었다(#1163).
+    monkeypatch.setitem(scans.SCAN_REGISTRY, "handover-release", replace(spec, batch_size=1))
 
     handovers = []
-    for i in range(3):
+    for i in range(2):
         # 이전 반복의 _close_contest가 시계를 미래로 얼려 놓았다 — 그대로 두면
         # 다음 반복이 만드는 Contest의 deadline_at(실제 현재 시각 기준)이 이미
         # 지난 것으로 보여 제출 자체가 403으로 막힌다. 각 반복 시작 시 실제
@@ -608,7 +609,7 @@ def test_release_due_scan_is_bounded_by_batch_size(client, category, landing_typ
 
     first = client.post(INTERNAL_HANDOVER_RELEASE_DUE_URL, **_internal_headers())
     assert first.status_code == 200
-    assert first.json()["count"] == 2
+    assert first.json()["count"] == 1
 
     second = client.post(INTERNAL_HANDOVER_RELEASE_DUE_URL, **_internal_headers())
     assert second.status_code == 200
