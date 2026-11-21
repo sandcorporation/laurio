@@ -2251,6 +2251,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/contests/{contest_id}/certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Certificate Board
+         * @description 발급 화면 한 벌 — 칸 기본값, 발급할 수 있는 사람, 발급한 것.
+         */
+        get: operations["certificates_api_certificate_board"];
+        put?: never;
+        /** Issue Certificates */
+        post: operations["certificates_api_issue_certificates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/certificates/bundle.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Bundle
+         * @description 유효한 상장 전부를 한 파일로 — 저장하지 않는다.
+         */
+        get: operations["certificates_api_download_bundle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/contests/{contest_id}/certificates/preview": {
         parameters: {
             query?: never;
@@ -2262,6 +2303,57 @@ export interface paths {
         put?: never;
         /** Preview Certificate */
         post: operations["certificates_api_preview_certificate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/certificates/{certificate_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Certificate */
+        post: operations["certificates_api_cancel_certificate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/certificates/{certificate_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Certificate */
+        get: operations["certificates_api_download_certificate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/contests/{contest_id}/certificates/{certificate_id}/reissue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reissue Certificate */
+        post: operations["certificates_api_reissue_certificate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5302,6 +5394,92 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** CertificateBoardOut */
+        CertificateBoardOut: {
+            /** Certificates */
+            certificates: components["schemas"]["CertificateOut"][];
+            defaults: components["schemas"]["CertificateDefaultsOut"];
+            /** Recipients */
+            recipients: components["schemas"]["CertificateRecipientOut"][];
+        };
+        /** CertificateDefaultsOut */
+        CertificateDefaultsOut: {
+            /**
+             * Award Date Max
+             * Format: date
+             */
+            award_date_max: string;
+            /**
+             * Award Date Min
+             * Format: date
+             */
+            award_date_min: string;
+            /** Giver Name */
+            giver_name: string;
+            /** Giver Title */
+            giver_title: string;
+        };
+        /** CertificateIssueIn */
+        CertificateIssueIn: {
+            /** Items */
+            items: components["schemas"]["CertificateIssueItemIn"][];
+        };
+        /**
+         * CertificateIssueItemIn
+         * @description 받는 사람 한 명과 그 사람의 칸.
+         */
+        CertificateIssueItemIn: {
+            /** Submission Id */
+            submission_id: number;
+            text: components["schemas"]["CertificateTextIn"];
+        };
+        /** CertificateOut */
+        CertificateOut: {
+            /**
+             * Award Date
+             * Format: date
+             */
+            award_date: string;
+            /** Award Name */
+            award_name: string;
+            /** Body */
+            body: string;
+            /** Cancelled At */
+            cancelled_at: string | null;
+            /** Giver Name */
+            giver_name: string;
+            /** Giver Title */
+            giver_title: string;
+            /** Id */
+            id: number;
+            /**
+             * Issued At
+             * Format: date-time
+             */
+            issued_at: string;
+            /** Number */
+            number: string;
+            /** Recipient Name */
+            recipient_name: string;
+            /** Replaced By Id */
+            replaced_by_id: number | null;
+            /** Submission Id */
+            submission_id: number;
+            /** Verify Url */
+            verify_url: string;
+        };
+        /**
+         * CertificateRecipientOut
+         * @description 발급할 수 있는 사람(그 공모전의 제출자) 한 명.
+         */
+        CertificateRecipientOut: {
+            /** Certificate Id */
+            certificate_id: number | null;
+            /** Default Recipient Name */
+            default_recipient_name: string;
+            /** Submission Id */
+            submission_id: number;
+        };
         /** CertificateTextIn */
         CertificateTextIn: {
             /**
@@ -7906,7 +8084,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -13810,6 +13988,74 @@ export interface operations {
             };
         };
     };
+    certificates_api_certificate_board: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateBoardOut"];
+                };
+            };
+        };
+    };
+    certificates_api_issue_certificates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateIssueIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateOut"][];
+                };
+            };
+        };
+    };
+    certificates_api_download_bundle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     certificates_api_preview_certificate: {
         parameters: {
             query?: never;
@@ -13831,6 +14077,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    certificates_api_cancel_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                certificate_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateOut"];
+                };
+            };
+        };
+    };
+    certificates_api_download_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                certificate_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    certificates_api_reissue_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                certificate_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateTextIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateOut"];
+                };
             };
         };
     };

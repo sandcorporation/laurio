@@ -93,6 +93,10 @@ class NotificationType(models.TextChoices):
     # 자신이 참가한 조건이 실제로 바뀌었다는 사실 통지라 옵트인이 필요 없다
     # (SCORING_COMPLETE·APPEAL_RULED와 같은 분류).
     CONTEST_UPDATED = "contest_updated", "공모전 내용 변경"
+    # 개최자가 상장을 발급했다 / 취소하고 새 번호로 다시 발급했다(#1127, 스펙 #1071 G4).
+    # 거래성이다: 받는 사람 본인의 제출에 대한 사실 통지다. 취소만 하면 알리지 않는다.
+    CERTIFICATE_ISSUED = "certificate_issued", "상장 발급"
+    CERTIFICATE_REISSUED = "certificate_reissued", "상장 다시 발급"
 
 
 #: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
@@ -267,6 +271,19 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 필요 없다. DEADLINE_REMINDER 등 같은 수신자 집합(참가 중인 Developer)을
     # 대상으로 하는 다른 라이프사이클 유형과 같은 채널 취급을 받는다.
     NotificationType.CONTEST_UPDATED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
+    },
+    # 받는 사람 본인의 제출에 대한 사실 통지(#1127) — 거래성, 옵트인 필요 없음.
+    NotificationType.CERTIFICATE_ISSUED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
+    },
+    NotificationType.CERTIFICATE_REISSUED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

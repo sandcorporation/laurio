@@ -60,6 +60,18 @@ describe("describeNotification", () => {
     expect(text).toContain("내용이 바뀌었습니다");
   });
 
+  it("상장 발급·다시 발급 알림을 구별해 렌더한다(#1127)", () => {
+    const issued = describeNotification(
+      row({ notification_type: "certificate_issued", context: { contest_title: "1127 공모전" } }),
+    );
+    const reissued = describeNotification(
+      row({ notification_type: "certificate_reissued", context: { contest_title: "1127 공모전" } }),
+    );
+    expect(issued).toContain("1127 공모전");
+    expect(issued).toContain("상장이 발급되었습니다");
+    expect(reissued).toContain("다시 발급되었습니다");
+  });
+
   it("운영팀 알림은 제목을 그대로 보여준다(#418)", () => {
     const text = describeNotification(
       row({ notification_type: "operator_notice", title: "기프티콘을 보내드립니다" }),
