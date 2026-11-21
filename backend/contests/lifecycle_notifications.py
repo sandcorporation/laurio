@@ -81,12 +81,14 @@ def _participating_developer_users(contest: Contest):
 
 def _deadline_reminder_candidates(as_of, ctx):
     """마감이 다가오는 PUBLISHED Contest — Contest 당 한 번만 "완료"로 표시하므로
-    `deadline_reminder_sent_at` 이 비어 있는 행만 대상이다."""
+    `deadline_reminder_sent_at` 이 비어 있는 행만 대상이다. 보관된 Contest(`archived_at`)는
+    후보에서 빼고 `*_sent_at` 도 찍지 않는다 — 보관을 풀었을 때 아직 기한 안이면 다음 틱에 나간다."""
 
     lead = timedelta(hours=current_policy().deadline_reminder_lead_hours)
     return Contest.objects.filter(
         status__in=Contest.Status.SENDS_LIFECYCLE_NOTICES.statuses,
         deadline_reminder_sent_at__isnull=True,
+        archived_at__isnull=True,
         deadline_at__lte=as_of + lead,
     ).select_related("sponsor__user")
 
@@ -144,6 +146,7 @@ def _judging_end_reminder_candidates(as_of, ctx):
     return Contest.objects.filter(
         status__in=Contest.Status.AWARDABLE.statuses,
         judging_end_reminder_sent_at__isnull=True,
+        archived_at__isnull=True,
         judging_ends_at__isnull=False,
         judging_ends_at__lte=as_of + lead,
     ).select_related("sponsor__user")
@@ -230,6 +233,7 @@ def _final_warning_candidates(as_of, ctx):
         NO_DISTRIBUTION_FILTER.get()(),
         status__in=Contest.Status.AWAITING_DISTRIBUTION.statuses,
         distribution_final_warning_sent_at__isnull=True,
+        archived_at__isnull=True,
         judging_ends_at__isnull=False,
         judging_ends_at__lte=cutoff,
     ).select_related("sponsor__user")
