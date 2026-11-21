@@ -37,6 +37,12 @@ class ScoringConfig(AppConfig):
         from . import agent_runner
 
         AGENT_GRADER.register(agent_runner)
+        # 운영자 실행 기록 목록(#1167) — 공유층 `core.api` 가 출처마다 모아 보인다.
+        from core.agent_ports import AGENT_RUN_LISTERS
+
+        from .agent_runs import contest_agent_runs
+
+        AGENT_RUN_LISTERS.register("contest", contest_agent_runs)
 
         # 공모전 API 가 묻는 채점·완성도·가산 자리(#1086) — `contests.ports`
         from contests import ports

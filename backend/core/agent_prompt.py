@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from core.llm_scoring import RequirementInput
 from core.prompt_safety import neutralize_untrusted
 
@@ -69,16 +71,26 @@ def wants_strict_rules(model: str) -> bool:
     return model.startswith("claude-haiku-")
 
 
-def build_scoring_prompt(requirements: list[RequirementInput], *, model: str) -> str:
+#: 지침의 첫머리가 누구의 제출물을 말하는가(#1167) — 공모전(기본)과 강의실(클래스 문제).
+Audience = Literal["contest", "classroom"]
+
+#: 첫 줄. 공모전 글자는 운영에서 잰 그대로다 — 한 글자도 바꾸지 않는다(sha256 시험이 못 박는다).
+_SCORING_OPENING: dict[Audience, str] = {
+    "contest": "당신은 코딩 공모전 제출물을 채점하는 채점 보조자입니다. 지금 작업 디렉터리는 참가자가 제출한 저장소(마감 직전 커밋)입니다.",
+    "classroom": "당신은 클래스 문제의 제출물을 채점하는 채점 보조자입니다. 지금 작업 디렉터리는 참여자가 제출한 저장소(제출한 커밋)입니다.",
+}
+
+
+def build_scoring_prompt(requirements: list[RequirementInput], *, model: str, audience: Audience = "contest") -> str:
     """에이전트 채점 지침 전문. 참가자의 자가 응답은 싣지 않는다 — 에이전트는 저장소만 본다.
-    `model` 이 Haiku 계열이면 엄격 규칙 10~12 를 붙인다."""
+    `model` 이 Haiku 계열이면 엄격 규칙 10~12 를 붙인다. `audience` 는 첫 줄만 가른다(#1167)."""
 
     count = len(requirements)
     rules = _RULES.format(count=count, max_evidence=MAX_EVIDENCE)
     if wants_strict_rules(model):
         rules += "\n" + _HAIKU_RULES
     lines = [
-        "당신은 코딩 공모전 제출물을 채점하는 채점 보조자입니다. 지금 작업 디렉터리는 참가자가 제출한 저장소(마감 직전 커밋)입니다.",
+        _SCORING_OPENING[audience],
         f"아래 요구사항 {count}개 각각에 대해, 저장소의 실제 구현 코드가 그 요구사항을 충족하는지 판정합니다.",
         "",
         rules,

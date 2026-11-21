@@ -110,3 +110,73 @@ def test_every_model_is_told_to_read_before_judging(model):
     assert "9. evidence 는 Read 로 확인한 줄 번호를 붙인" in scoring
     assert "7. 1 점 이상을 매기기 전에 그 기능을 구현한 파일을 Read 로 직접 열어 확인합니다." in quality
     assert "8. evidence 는 Read 로 확인한 줄 번호를 붙인" in quality
+
+
+@pytest.mark.parametrize("model", (HAIKU,) + NOT_HAIKU)
+def test_contest_prompts_named_explicitly_are_the_same_letters(model):
+    """#1167: 출처를 밝혀 부른 공모전 지침은 기본 호출과 한 글자도 다르지 않다(위 sha256 이 그 글자를 못 박는다)."""
+
+    assert build_scoring_prompt(REQUIREMENTS, model=model, audience="contest") == build_scoring_prompt(
+        REQUIREMENTS, model=model
+    )
+    assert build_agent_prompt(title="게시판 만들기", items=ITEMS, model=model, audience="contest") == build_agent_prompt(
+        title="게시판 만들기", items=ITEMS, model=model
+    )
+
+
+@pytest.mark.parametrize("model", (HAIKU, "claude-sonnet-5-5"))
+def test_classroom_prompts_speak_of_the_class_not_a_contest(model):
+    """#1167: 강의실 실행의 지침은 「코딩 공모전」을 말하지 않는다 — 첫머리만 클래스 말로 바뀌고 규칙·요구사항은 같다."""
+
+    contest_scoring = build_scoring_prompt(REQUIREMENTS, model=model)
+    contest_quality = build_agent_prompt(title="게시판 만들기", items=ITEMS, model=model)
+    scoring = build_scoring_prompt(REQUIREMENTS, model=model, audience="classroom")
+    quality = build_agent_prompt(title="게시판 만들기", items=ITEMS, model=model, audience="classroom")
+
+    for prompt in (scoring, quality):
+        assert "공모전" not in prompt and "참가자" not in prompt
+        assert "참여자가 제출한 저장소" in prompt
+    assert scoring.startswith("당신은 클래스 문제의 제출물을 채점하는 채점 보조자입니다.")
+    assert quality.startswith("당신은 클래스 문제의 제출물의 완성도를 매기는 보조자입니다.")
+    assert "\n문제 제목: 게시판 만들기\n" in quality
+    # 첫머리 뒤(규칙·요구사항)는 공모전 지침과 같다.
+    assert scoring.split("\n", 1)[1] == contest_scoring.split("\n", 1)[1]
+    assert quality[quality.index("아래 요구사항") :] == contest_quality[contest_quality.index("아래 요구사항") :]
+
+
+@pytest.mark.parametrize("purpose", ("scoring", "quality"))
+def test_classroom_runs_build_the_classroom_prompt(monkeypatch, purpose):
+    """#1167: 강의실 채점·완성도 길(`agent_grading`)이 에이전트에 넘기는 지침이 클래스 지침이다."""
+
+    jobs: list[agent_scoring.AgentJob] = []
+
+    def capture(job: agent_scoring.AgentJob) -> agent_scoring.AgentJobOutcome:
+        jobs.append(job)
+        raise agent_scoring.AgentRunHeld(["흉내"], {})
+
+    monkeypatch.setattr(agent_scoring, "run_agent_job", capture)
+    monkeypatch.setattr(
+        agent_grading, "_class_key", lambda class_obj, m: agent_scoring.ClassKey(class_id=1, vendor="anthropic", model=m)
+    )
+
+    if purpose == "scoring":
+        agent_grading.run_scoring(
+            None,  # type: ignore[arg-type]  # 실행은 흉내라 제출을 읽지 않는다.
+            None,  # type: ignore[arg-type]  # `_class_key` 를 바꿔 두어 클래스를 읽지 않는다.
+            model="claude-sonnet-5-5",
+            requirements=REQUIREMENTS,
+            snapshot=None,
+        )
+    else:
+        agent_grading.run_quality(
+            None,  # type: ignore[arg-type]  # 실행은 흉내라 제출을 읽지 않는다.
+            None,  # type: ignore[arg-type]  # `_class_key` 를 바꿔 두어 클래스를 읽지 않는다.
+            model="claude-sonnet-5-5",
+            title="게시판 만들기",
+            items=ITEMS,
+            snapshot=None,
+        )
+
+    (job,) = jobs
+    prompt = job.build_prompt("claude-sonnet-5-5")
+    assert prompt.startswith("당신은 클래스 문제의 제출물") and "공모전" not in prompt

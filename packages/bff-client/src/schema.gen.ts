@@ -3100,6 +3100,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/internal/agent-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Agent Runs
+         * @description 에이전트 실행 기록(#1000) — 공모전·강의실 실행을 한 목록으로(#1167), 줄마다 출처(`source`)를 단다.
+         *     기본은 사람이 볼 것만: 보류(`held`)와, 받아들였지만 필수 전부 충족·전부 미충족이라 한 번 더 볼 것(`review`).
+         *     `?all=true` 면 받아들인 것까지 최근 순으로. 원본(`record`)은 크므로 싣지 않는다 — 시도 수·거절 사유만 낸다.
+         */
+        get: operations["core_api_agent_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/internal/e2e/seed/{name}": {
         parameters: {
             query?: never;
@@ -3193,28 +3215,6 @@ export interface paths {
          *     스캔은 여기서 "등록되지 않은 스캔"과 똑같이 404 다.
          */
         post: operations["core_api_scan"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/internal/scoring/agent-runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Agent Runs
-         * @description 에이전트 실행 기록(#1000) — 기본은 사람이 볼 것만: 보류(`held`)와, 받아들였지만 필수 전부 충족·전부
-         *     미충족이라 한 번 더 볼 것(`review`). `?all=true` 면 받아들인 것까지 최근 순으로. 원본(`record`)은 크므로
-         *     싣지 않는다 — 시도 수·거절 사유만 낸다.
-         */
-        get: operations["scoring_api_agent_runs"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -15195,6 +15195,26 @@ export interface operations {
             };
         };
     };
+    core_api_agent_runs: {
+        parameters: {
+            query?: {
+                all?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     core_api_e2e_seed: {
         parameters: {
             query?: never;
@@ -15286,26 +15306,6 @@ export interface operations {
             path: {
                 name: string;
             };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    scoring_api_agent_runs: {
-        parameters: {
-            query?: {
-                all?: boolean;
-            };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;

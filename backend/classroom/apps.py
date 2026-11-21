@@ -55,6 +55,12 @@ class ClassroomConfig(AppConfig):
 
         CLASS_VENDOR_KEY.register(agent_vendor_key)
         PRICE_FOR.register(price_for)
+        # 운영자 실행 기록 목록(#1167) — 강의실 실행도 `core.api` 의 목록에 `classroom` 출처로 보인다.
+        from core.agent_ports import AGENT_RUN_LISTERS
+
+        from .agent_runs import classroom_agent_runs
+
+        AGENT_RUN_LISTERS.register("classroom", classroom_agent_runs)
         # 강의실 모양 target_ref 의 가시성 판정(#1085) — 공유층 `submissions.resolvers` 가 강의실을 import 하지 않게.
         from submissions.resolvers import TARGET_SHAPES
 

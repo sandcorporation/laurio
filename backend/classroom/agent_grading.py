@@ -186,7 +186,7 @@ def run_scoring(
         agent_scoring.AgentJob(
             submission=submission,
             purpose="scoring",
-            build_prompt=lambda m: build_scoring_prompt(list(requirements), model=m),
+            build_prompt=lambda m: build_scoring_prompt(list(requirements), model=m, audience="classroom"),
             output_schema=SCORING_OUTPUT_SCHEMA,
             expected_ids=frozenset(r.requirement_id for r in requirements),
             items_key=ITEMS_KEY,
@@ -229,7 +229,7 @@ def run_quality(
         agent_scoring.AgentJob(
             submission=submission,
             purpose="quality",
-            build_prompt=lambda m: build_agent_prompt(title=title, items=items, model=m),
+            build_prompt=lambda m: build_agent_prompt(title=title, items=items, model=m, audience="classroom"),
             output_schema=agent_response_schema(),
             expected_ids=frozenset(i.item_id for i in items),
             items_key=QUALITY_ITEMS_KEY,

@@ -29,7 +29,7 @@ from tests.integration.test_scoring import (  # noqa: F401 - fixture 들을 이 
 )
 from tests.integration.test_scoring_transient_vendor_failure import _closed_submission
 
-AGENT_RUNS_URL = "/api/internal/scoring/agent-runs"
+AGENT_RUNS_URL = "/api/internal/agent-runs"
 
 
 def _requirement_id(submission_id: int) -> int:
@@ -525,7 +525,10 @@ def test_operator_sees_held_and_review_runs(client, category, landing_type, monk
 
     assert response.status_code == 200
     runs = response.json()["runs"]
-    assert [(r["submission_id"], r["outcome"], r["attempts"]) for r in runs] == [(held_id, "held", 2)]
+    assert [(r["source"], r["submission_id"], r["outcome"], r["attempts"]) for r in runs] == [
+        ("contest", held_id, "held", 2)
+    ]
+    assert runs[0]["contest_id"] is not None and runs[0]["class_id"] is None
     assert runs[0]["reasons"] == [f"근거 없음: [{rid}]"]
     assert client.get(AGENT_RUNS_URL).status_code == 401
 
