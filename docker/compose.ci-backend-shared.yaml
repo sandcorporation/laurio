@@ -1,0 +1,12 @@
+# e2e.sh 가 직접 굽는 길에서만 겹친다(#1136) — backend·events·grader 는 같은 Dockerfile 이라 compose 가 이미지를
+# 셋으로 따로 내보냈다(각 37초). 한 이름으로 backend 만 굽고 나머지는 그 이미지를 쓴다.
+# 레지스트리 이미지를 받는 길(`compose.ci-images.yaml`)은 이미 같은 이미지라 이 파일을 겹치지 않는다. 운영 compose 는 건드리지 않는다.
+services:
+  backend:
+    image: codemit-e2e-backend:${CODEMIT_E2E_BACKEND_TAG:?e2e.sh 가 정한다}
+  events:
+    image: codemit-e2e-backend:${CODEMIT_E2E_BACKEND_TAG:?e2e.sh 가 정한다}
+    build: !reset null
+  grader:
+    image: codemit-e2e-backend:${CODEMIT_E2E_BACKEND_TAG:?e2e.sh 가 정한다}
+    build: !reset null
