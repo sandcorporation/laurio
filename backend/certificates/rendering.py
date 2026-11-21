@@ -3,6 +3,14 @@
 틀은 하나다 — 금색 두 줄 테(스펙 「틀」 다안). 글꼴은 이 앱의 `fonts/` 에 담긴 것만 쓰고
 바깥 글꼴 서버에 기대지 않는다(#743 과 같은 이유). WeasyPrint 가 PDF 에 서브셋으로 넣는다.
 
+글꼴 준비는 프로세스마다 한 번이다(#1196). WeasyPrint 는 `FontConfiguration` 을 따로 주지 않으면
+그릴 때마다 새로 만들고, 그때마다 woff 두 개(3MB)를 fontTools 로 풀어 TTF 로 다시 쓴다 — 한 장
+0.33초 중 0.27초가 그것이었고 gunicorn 4 워커가 함께 그리면 p95 1.5초까지 늘었다. 같은
+`FontConfiguration` 을 다시 주면 풀어 둔 파일을 그대로 쓴다(서브셋은 장마다 따로 심는다).
+`FontConfiguration` 하나가 임시 폴더에 풀린 TTF 19MB 를 들고 있어 프로세스에 하나만 두고,
+pango 글꼴 맵을 스레드끼리 함께 만지지 않도록 그리기를 잠금 하나로 줄 세운다 — 그리기는 GIL 을
+쥐는 파이썬 일이 대부분이라 gthread 의 스레드끼리 동시에 그려도 빨라지지 않는다.
+
 WeasyPrint 는 `word-break: keep-all` 을 따르지 않는다 — 그대로 두면 「뛰어/난」처럼 어절
 가운데서 줄이 바뀐다. 그래서 본문은 어절마다 줄바꿈 없는 span 으로 감싼다(`_keep_words`).
 """
@@ -10,12 +18,17 @@ WeasyPrint 는 `word-break: keep-all` 을 따르지 않는다 — 그대로 두�
 from __future__ import annotations
 
 import html
+import threading
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import segno
 from django.conf import settings
+
+if TYPE_CHECKING:
+    from weasyprint.text.fonts import FontConfiguration
 
 FONTS_DIR = Path(__file__).resolve().parent / "fonts"
 
@@ -142,8 +155,18 @@ def certificate_html(sheet: CertificateSheet) -> str:
 </div></body></html>"""
 
 
+_render_lock = threading.Lock()
+_font_config: FontConfiguration | None = None
+
+
 def render_certificate_pdf(sheet: CertificateSheet) -> bytes:
     # WeasyPrint 는 시스템 라이브러리(pango)를 불러 무겁다 — 상장을 그릴 때만 불러온다.
     from weasyprint import HTML
+    from weasyprint.text.fonts import FontConfiguration
 
-    return HTML(string=certificate_html(sheet), base_url=str(FONTS_DIR)).write_pdf()
+    global _font_config
+    document = HTML(string=certificate_html(sheet), base_url=str(FONTS_DIR))
+    with _render_lock:
+        if _font_config is None:
+            _font_config = FontConfiguration()
+        return document.write_pdf(font_config=_font_config)

@@ -90,6 +90,60 @@ def test_preview_is_one_landscape_a4_page_marked_as_preview(client, closed):
         assert expected in text
 
 
+def _embedded_fonts(pdf: bytes) -> list[str]:
+    page = PdfReader(io.BytesIO(pdf)).pages[0]
+    # 서브셋 접두(`ABCDEF+`)는 담긴 글자에 따라 바뀐다 — 이름만 본다.
+    return sorted(str(font["/BaseFont"]).split("+", 1)[-1] for font in page["/Resources"]["/Font"].values())
+
+
+def test_sheets_drawn_one_after_another_each_carry_their_own_text_and_both_fonts(client, closed):
+    """글꼴 준비를 프로세스에서 한 번만 한다(#1196) — 앞 장의 글자·글꼴이 뒤 장에 새지 않는다."""
+
+    sponsor, contest, deadline = closed
+    names = ["김첫째", "박둘째", "이셋째"]
+
+    pdfs = [_preview(client, sponsor["access"], contest["id"], _fields(deadline, recipient_name=name)) for name in names]
+
+    for name, response in zip(names, pdfs, strict=True):
+        assert response.status_code == 200, response.content
+        text = PdfReader(io.BytesIO(response.content)).pages[0].extract_text().replace(" ", "")
+        assert name in text
+        assert [other for other in names if other != name and other in text] == []
+        assert _embedded_fonts(response.content) == ["Certificate-Serif", "Certificate-Serif-Bold"]
+
+
+def test_drawing_again_does_not_load_the_fonts_again(closed):
+    """한 장 그리기가 매번 woff 두 개(3MB)를 풀어 0.3초를 쓰던 것(#1196) — 두 번째부터는 글꼴을 다시 풀지 않는다."""
+
+    import time
+    from datetime import date
+
+    from certificates import rendering
+
+    sheet = rendering.CertificateSheet(
+        text=rendering.CertificateText(
+            award_name="최우수상",
+            recipient_name="김코드밋",
+            body="위 사람은 뛰어난 완성도로 우수한 성과를 거두었기에 이 상장을 수여합니다.",
+            giver_name="홍길동",
+            giver_title="심사위원장",
+            award_date=date(2026, 11, 21),
+        ),
+        contest_title="상장 공모전",
+        number="2026-0001-001",
+        verify_url=rendering.verify_url("token"),
+    )
+    rendering.render_certificate_pdf(sheet)
+
+    started = time.process_time()
+    for _ in range(3):
+        rendering.render_certificate_pdf(sheet)
+    per_sheet = (time.process_time() - started) / 3
+
+    # 글꼴을 매번 풀면 한 장 0.3초 남짓, 한 번만 풀면 0.05초 남짓이다(이 머신). CI 가 두 배 느려도 갈린다.
+    assert per_sheet < 0.15, f"한 장 {per_sheet:.3f}초"
+
+
 def test_preview_before_deadline_is_refused(client, published):
     sponsor, contest, deadline = published
 

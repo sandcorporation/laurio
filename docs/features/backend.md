@@ -260,6 +260,8 @@ PDF 는 서버에서 WeasyPrint 로 그린다(`certificates/rendering.py`). 틀�
 `certificates/fonts/` 의 고운바탕(OFL, 한글·라틴만 남긴 woff)뿐이고 바깥 글꼴 서버에 기대지 않는다.
 QR 은 확인 주소(`{CODEMIT_WEB_ORIGIN}/c/{토큰}`, 비면 `https://codemit.kr`)를 담는다. 이미지에는
 pango·harfbuzz-subset 시스템 라이브러리가 들어간다(`docker/backend.Dockerfile`).
+글꼴(woff 풀기·fontconfig 등록)은 프로세스마다 처음 한 번만 준비하고 다음 장부터 다시 쓴다 — 한 장 약
+0.05초(처음 0.4초), 발급·다시 발급·미리보기 모두 요청 안에서 그린다(#1196).
 
 ### 돈
 
