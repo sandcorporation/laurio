@@ -61,3 +61,12 @@ test("배분이 끝난 공모전이면 정정 거는 버튼 앞에 「순위·�
   );
   await expect(page.getByTestId("correction-submit")).toBeVisible();
 });
+
+test("유료 공모전 목록의 줄에서 점수 정정 화면으로 들어간다", async ({ page }) => {
+  await establishOperatorSession(page, operator.username, E2E_OPERATOR_PASSWORD, "/contests/paid");
+
+  await page.getByTestId(`paid-contest-corrections-${seeded.open.contest_id}`).click();
+
+  await expect(page).toHaveURL(new RegExp(`/contests/${seeded.open.contest_id}/score-corrections$`));
+  await expect(page.getByTestId("correction-submit")).toBeVisible();
+});

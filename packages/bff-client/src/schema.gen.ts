@@ -3837,6 +3837,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/contests/paid": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Paid Contests */
+        get: operations["contests_operator_api_list_paid_contests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/contests/{contest_id}/certificates": {
         parameters: {
             query?: never;
@@ -8447,6 +8464,26 @@ export interface components {
             is_superuser: boolean;
             /** Username */
             username: string;
+        };
+        /**
+         * OperatorPaidContestOut
+         * @description 운영자 앱 유료 공모전 목록 한 줄 (#1212) — 상태·마감·상금. 수상자 자리는 없다
+         *     (유료 공모전의 순위·배분은 점수 정정·상장 화면이 맡는다).
+         */
+        OperatorPaidContestOut: {
+            /**
+             * Deadline At
+             * Format: date-time
+             */
+            deadline_at: string;
+            /** Id */
+            id: number;
+            /** Prize */
+            prize: number;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
         };
         /**
          * OperatorPayoutCountsOut
@@ -16215,6 +16252,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorFreeContestOut"][];
+                };
+            };
+        };
+    };
+    contests_operator_api_list_paid_contests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorPaidContestOut"][];
                 };
             };
         };
