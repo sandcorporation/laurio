@@ -133,12 +133,13 @@ if [ -f "$app/.env.guard-backup" ]; then mv "$app/.env.guard-backup" "$app/.env"
 # ── 설정이 모자라면 죽는가 ─────────────────────────────────────────────────────
 # 죽어야 하는 실행 — 0(떴다)이나 124(60초 동안 살아 있었다)면 가드가 깨졌다. 출력은 $out 에.
 # `timeout 60 docker run` 대신 띄워 두고 60초 동안 상태를 본다 — macos 에는 GNU timeout 이 없다(#838).
+# 앱 진입점(#869)이 backend 를 기다리면 부팅 가드까지 못 가므로, 가드 시험은 대기를 끈다(`CODEMIT_BACKEND_WAIT_SECONDS=0`).
 must_die() {
   local why="$1"
   shift
   local status=124 i=0
   docker rm -f "$doomed" >/dev/null 2>&1 || true
-  docker run -d --name "$doomed" "$@" "$local_image" >/dev/null
+  docker run -d --name "$doomed" -e CODEMIT_BACKEND_WAIT_SECONDS=0 "$@" "$local_image" >/dev/null
   while [ "$i" -lt 60 ]; do
     if [ "$(docker inspect -f '{{.State.Running}}' "$doomed")" = false ]; then
       status="$(docker inspect -f '{{.State.ExitCode}}' "$doomed")"
@@ -235,6 +236,7 @@ docker rm -f "$box" >/dev/null 2>&1 || true
 case "$app" in
   frontend)
     docker run -d --name "$box" \
+      -e CODEMIT_BACKEND_WAIT_SECONDS=0 \
       -e CODEMIT_DEPLOYMENT_TARGET=production \
       -e CODEMIT_WEB_ORIGIN=https://codemit.example \
       -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
@@ -249,6 +251,7 @@ case "$app" in
     ;;
   operator)
     docker run -d --name "$box" \
+      -e CODEMIT_BACKEND_WAIT_SECONDS=0 \
       -e CODEMIT_DEPLOYMENT_TARGET=production \
       -e CODEMIT_OPERATOR_ORIGIN=https://operator.codemit.example \
       -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
@@ -256,6 +259,7 @@ case "$app" in
     ;;
   classroom)
     docker run -d --name "$box" \
+      -e CODEMIT_BACKEND_WAIT_SECONDS=0 \
       -e CODEMIT_DEPLOYMENT_TARGET=production \
       -e CODEMIT_CLASSROOM_ORIGIN=https://classroom.codemit.example \
       -e CODEMIT_API_BASE_URL=http://127.0.0.1:1 \
