@@ -7,7 +7,7 @@
 # 자체는 지우지 않고(베이스 이미지 구성 그대로), compose 의 DISABLE_SECURITY_PLUGIN
 # 환경변수로 런타임에 끈다(dev/staging/prod 세 compose 가 공통으로 준다) — 이미지를
 # 둘로 가르는 것보다 단순하다.
-FROM opensearchproject/opensearch:2.19.1
+FROM opensearchproject/opensearch:2.19.7
 
 # --batch 는 대화형 확인(플러그인이 요구하는 권한 목록 승인)을 건너뛴다 — Docker
 # 빌드는 TTY 가 없어 대화형 프롬프트가 그대로 빌드를 멈춘다.
