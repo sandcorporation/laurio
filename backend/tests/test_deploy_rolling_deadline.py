@@ -31,6 +31,7 @@ DEPLOY_SH = REPO_ROOT / "deploy.sh"
 # 상태는 파일로 둔다(`$STATE`) — 가짜는 부를 때마다 새로 뜨는 sh 다(파이썬이면 그것만으로 CPU 한도를 먹는다).
 #   scaled       `up --scale` 뒤에는 `ps -q backend` 가 옛 것과 새 것 둘을 낸다
 #   new_state    새 컨테이너의 `{{.State.Status}} {{.RestartCount}}` (기본 `running 0`)
+#   old_state    옛 컨테이너의 같은 값 — 되돌리기에서는 옛 것이 죽은 판일 수 있다(#1206)
 #   ready_after  `exec` 가 몇 번째 시도부터 성공하는가(없으면 늘 실패)
 #   exec_delay   `exec` 한 번이 걸리는 초 — 리허설에서 본 「시도마다 몇 초 더」
 #   calls        stop·rm·rename·logs 를 부른 기록
@@ -41,7 +42,9 @@ case "$1" in
   inspect)
     case "$3" in
       *Name*) echo /codemit-prod-backend-1 ;;
-      *RestartCount*) cat "$S/new_state" 2>/dev/null || echo "running 0" ;;
+      *RestartCount*)
+        if [ "$4" = old ]; then cat "$S/old_state" 2>/dev/null || echo "running 0"
+        else cat "$S/new_state" 2>/dev/null || echo "running 0"; fi ;;
       *State.Status*)
         svc=${4#cid-}
         if grep -qx "$svc" "$S/exited" 2>/dev/null; then echo exited; else echo running; fi ;;
@@ -168,6 +171,20 @@ def test_정상이면_첫_응답에서_바로_바꾼다(fake):
     assert _calls(state) == ["stop -t 30 old", "rm old", "rename new codemit-prod-backend-1"]
     # 두 번째 시도에서 응답 — 간격 한 번(1초)만 기다렸다
     assert took < 2.5, took
+    assert re.search(r"backend 옛 것을 내렸다 — 따뜻한 종료 \d+초", result.stdout), result.stdout
+
+
+@pytest.mark.parametrize("old_state", ["restarting 3\n", "running 2\n", "exited 0\n"])
+def test_옛_컨테이너가_이미_죽었으면_유예_없이_지운다(fake, old_state):
+    """되돌리기에서 옛 것은 방금 실패한 판일 수 있다(#1206) — 받던 요청이 없으니 따뜻한 종료를 기다리지 않는다."""
+    state: Path = fake["state"]  # type: ignore[assignment]
+    (state / "ready_after").write_text("1")
+    (state / "old_state").write_text(old_state)
+    result, _ = _replace(fake, ROLLING_READY_INTERVAL="1")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _calls(state) == ["rm -f old", "rename new codemit-prod-backend-1"]
+    assert f"backend 옛 것이 이미 죽었다({old_state.split()[0]}, 재시작 {old_state.split()[1]}번) — 유예 없이 지운다" in result.stdout
 
 
 # ---------------------------------------------------------------- verify

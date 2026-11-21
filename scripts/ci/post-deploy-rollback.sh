@@ -26,6 +26,18 @@ GIT=(git -c safe.directory="$PWD")
 env_file="$PWD/docker/.env.prod"
 alert_script="$(dirname "$check")/ops-alert.sh"
 
+# 한 줄 요약(#1206, `deploy-prod.sh` 머리 주석) — 실패 까닭은 확인 스크립트가 남긴 줄(배포 뒤 확인이 실패했을 때)이나
+# 실패 단계, 끝은 되돌린 결과다. 지금 폴더는 배포 작업 폴더 그대로다(체크아웃은 무시된 파일을 건드리지 않는다).
+cause="교체 뒤 실패(${stage})"
+if [ "$stage" = "배포 뒤 확인" ]; then
+  last=$(cat .postdeploy-summary 2>/dev/null || true)
+  case "$last" in "확인 실패("*) cause=$last ;; esac
+fi
+summary_done=""
+summary() { printf '%s\n' "$cause → $1" >.postdeploy-summary || true; summary_done=1; }
+# 끝 줄을 적지 못하고 끝나면(예상 못 한 종료) 종료 코드라도 — 파이프라인은 이 스크립트가 끝난 직후 읽는다.
+trap 'code=$?; [ -n "$summary_done" ] || summary "되돌리기 중단(종료 $code)"' EXIT
+
 alert() {
   local line="🔥 [Codemit] 배포 자동 되돌리기 — ${failed_sha:0:12} → ${target:0:12} · 실패 단계: ${stage} · $1"
   [ -f "$alert_script" ] || { echo "경보: 스크립트가 없다($alert_script) — 보내지 않는다"; return 0; }
@@ -35,6 +47,7 @@ alert() {
 give_up() {
   echo "!! 자동 되돌리기 실패($1) — ${failed_sha:0:12} → ${target:0:12}. 사람이 본다: docs/ops/deploy.md 「되돌리기」"
   alert "되돌리기 실패($1) — 사람이 본다"
+  summary "되돌리기 실패($1)"
   exit 2
 }
 
@@ -70,8 +83,10 @@ rm -f .jenkins-prod-plan
 if bash "$check"; then
   echo "!! 자동 되돌리기 끝 — ${target:0:12} 로 돌아갔다. ${failed_sha:0:12} 배포는 실패다"
   alert "되돌렸다, 확인 통과"
+  summary "되돌림 ${target:0:12}"
 else
   echo "!! 자동 되돌리기 뒤에도 확인이 실패한다 — ${target:0:12}. 사람이 본다"
   alert "되돌렸으나 확인 실패 — 사람이 본다"
+  summary "되돌림 ${target:0:12}, 되돌린 뒤 확인 실패"
 fi
 exit 2

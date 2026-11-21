@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -136,6 +137,19 @@ def _steps(lines: list[str]) -> list[str]:
     return [line.rsplit("@", 1)[0] for line in lines]
 
 
+SUMMARY_LIMIT = 60  # 배포 파이프라인이 첫 줄을 이 길이에서 자른다(jenkins-shared, 대장 #4241)
+
+
+def _summary(repo: Path) -> str:
+    """모든 길에서 한 줄이 생기고, 상태 설명 한도 안이다."""
+    path = repo / ".postdeploy-summary"
+    assert path.exists(), "요약 파일이 없다"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1, lines
+    assert 0 < len(lines[0]) <= SUMMARY_LIMIT, lines[0]
+    return lines[0]
+
+
 def _marker(repo: Path) -> str:
     return (repo / ".jenkins-prod-deployed").read_text(encoding="utf-8").strip()
 
@@ -150,6 +164,7 @@ def test_off_runs_the_same_steps_and_never_checks(prod, env_file):
     assert result.returncode == 0, result.stdout + result.stderr
     assert _steps(lines) == OFF_SUCCESS
     assert _marker(repo) == b
+    assert _summary(repo) == "확인 꺼짐"
 
 
 def test_off_failure_after_replace_ends_2_without_rollback(prod):
@@ -158,13 +173,15 @@ def test_off_failure_after_replace_ends_2_without_rollback(prod):
     assert result.returncode == 2
     assert _steps(lines) == ["preflight", "plan", "image backend", "up", "verify", "health backend"]
     assert _marker(repo) == a
+    assert _summary(repo) == "교체 뒤 실패(health backend)"
 
 
 def test_off_image_failure_ends_1(prod):
-    _, _, b, run = prod
+    repo, _, b, run = prod
     result, lines = run(FAKE_BAD=b, FAKE_FAIL="image backend")
     assert result.returncode == 1
     assert _steps(lines) == ["preflight", "plan", "image backend"]
+    assert _summary(repo) == "교체 전 실패(image)"
 
 
 def test_off_docs_only_moves_marker(prod):
@@ -173,6 +190,7 @@ def test_off_docs_only_moves_marker(prod):
     assert result.returncode == 0
     assert _steps(lines) == ["preflight", "plan", "mark", "glitchtip", "prune"]
     assert _marker(repo) == b
+    assert _summary(repo) == "교체 없음"
 
 
 # ------------------------------------------------------------ check
@@ -191,6 +209,7 @@ def test_check_passes_then_marks(prod):
     ]
     assert "배포 뒤 확인 통과" in result.stdout
     assert _marker(repo) == b
+    assert re.fullmatch(r"확인 통과\(check, \d+초\)", _summary(repo))
 
 
 def test_check_failure_ends_2_and_does_not_roll_back(prod):
@@ -203,6 +222,7 @@ def test_check_failure_ends_2_and_does_not_roll_back(prod):
     assert "rollback-plan" not in _steps(lines)
     assert "확인 작업자: 실패" in result.stdout
     assert _marker(repo) == a
+    assert _summary(repo) == "확인 실패(작업자)"
 
 
 def test_check_empty_required_setting_ends_2_with_key_names_only(prod):
@@ -228,6 +248,7 @@ def test_check_without_urls_fails_instead_of_passing(prod):
     result, _ = run(CODEMIT_POSTDEPLOY="check")
     assert result.returncode == 2
     assert "CODEMIT_POSTDEPLOY_URLS 가 비었다" in result.stdout
+    assert _summary(prod[0]) == "확인 실패(핵심 경로)"
 
 
 def test_unknown_switch_value_stops_before_replacing(prod):
@@ -235,6 +256,7 @@ def test_unknown_switch_value_stops_before_replacing(prod):
     result, lines = run(CODEMIT_POSTDEPLOY="on")
     assert result.returncode == 1
     assert lines == []
+    assert _summary(prod[0]) == "배포 실패(종료 1)"  # 적은 줄 없이 끝나도 덫이 남긴다
 
 
 # ------------------------------------------------------------ rollback
@@ -258,6 +280,7 @@ def test_failed_check_rolls_back_to_marker_image(prod):
     assert _git(repo, "rev-parse", "HEAD") == a
     assert _marker(repo) == a
     assert not (repo / ".jenkins-prod-plan").exists()
+    assert _summary(repo) == f"확인 실패(핵심 경로) → 되돌림 {a[:12]}"
 
 
 def test_failed_health_rolls_back_before_the_check(prod):
@@ -267,6 +290,7 @@ def test_failed_health_rolls_back_before_the_check(prod):
     steps = _steps(lines)
     assert steps[steps.index("health backend") + 1] == "rollback-plan"
     assert f"up@{a[:4]}" in lines
+    assert _summary(prod[0]) == f"교체 뒤 실패(health backend) → 되돌림 {a[:12]}"
 
 
 def test_rollback_failure_is_reported(prod):
@@ -277,6 +301,7 @@ def test_rollback_failure_is_reported(prod):
     assert result.returncode == 2
     assert lines[-1] == f"verify@{a[:4]}"
     assert "자동 되돌리기 실패(verify)" in result.stdout
+    assert _summary(repo) == "확인 실패(핵심 경로) → 되돌리기 실패(verify)"
 
 
 # ------------------------------------------------------------ 운영 경보(#1166)
@@ -441,3 +466,23 @@ def test_rollback_plan_refuses_without_a_place_to_go(real_deploy, marker, any_, 
     assert result.returncode == 1
     assert message in result.stdout
     assert f"PLANNED_COMMIT={b}" in plan
+
+
+# ------------------------------------------------------------ 한 줄 요약(#1206)
+
+
+def test_summary_preflight_failure_replaces_last_deploys_line(prod):
+    repo, _, b, run = prod
+    (repo / ".postdeploy-summary").write_text("확인 통과(check, 9초)\n", encoding="utf-8")
+    result, _ = run(FAKE_BAD=b, FAKE_FAIL="preflight")
+    assert result.returncode == 1
+    assert _summary(repo) == "교체 전 실패(preflight)"
+
+
+def test_summary_longest_possible_line_fits():
+    """가장 긴 줄 — 확인 항목 넷이 다 실패하고 되돌린 뒤 확인도 실패. 항목 이름은 확인 스크립트에서 읽는다."""
+    src = (REPO_ROOT / "scripts" / "ci" / "post-deploy-check.sh").read_text(encoding="utf-8")
+    labels = re.findall(r'label="([^"]+)"', src)
+    assert len(labels) == 4, labels
+    longest = f"확인 실패({'·'.join(labels)}) → 되돌림 {'0' * 12}, 되돌린 뒤 확인 실패"
+    assert len(longest) <= SUMMARY_LIMIT, (len(longest), longest)
