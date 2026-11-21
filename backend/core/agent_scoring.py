@@ -93,7 +93,7 @@ class ClassKey:
 @dataclass(frozen=True)
 class AgentJob:
     submission: Submission  # 공모전·강의실 제출 모두(자산은 바탕 `Submission` 에 붙는다)
-    purpose: Literal["scoring", "quality"]  # issue_run_token 의 purpose 로 간다
+    purpose: Literal["scoring", "quality", "experiment"]  # issue_run_token 의 purpose 로 간다
     build_prompt: Callable[[str], str]  # 모델 → 지침 전문(호출자가 준다). 모델을 정한 뒤에 부른다(#1048)
     output_schema: dict  # JSON 스키마(호출자가 만든다) — 계약 서명 그대로(#1000 댓글)
     expected_ids: frozenset[int]  # 응답 items 의 id 가 정확히 이 집합이어야 한다
@@ -102,6 +102,8 @@ class AgentJob:
     evidence_required: Callable[[dict], bool]  # 이 항목에 근거 `경로:줄` 이 있어야 하나
     class_key: ClassKey | None = None  # 비면 플랫폼 키(운영 설정의 벤더·모델), 있으면 그 클래스 키(#1036)
     load_snapshot: Callable[[], Snapshot] | None = None  # 박제본을 받는 길(`provided_snapshot` 이 없을 때)
+    #: 플랫폼 키로 돌되 운영 설정 대신 이 벤더·모델로(방식 비교 실험, #1246). `class_key` 가 있으면 그쪽이 이긴다.
+    pinned_model: tuple[Vendor, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -579,6 +581,8 @@ def _budget_spent(attempt: JSON) -> bool:
 def run_agent_job(job: AgentJob) -> AgentJobOutcome:
     if job.class_key is not None:
         vendor, model = job.class_key.vendor, job.class_key.model
+    elif job.pinned_model is not None:
+        vendor, model = job.pinned_model
     else:
         vendor = scoring_vendor()
         model = agent_model(vendor)

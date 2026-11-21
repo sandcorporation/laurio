@@ -229,7 +229,9 @@ class AgentRunToken(models.Model):
 
     PURPOSE_SCORING = "scoring"
     PURPOSE_QUALITY = "quality"
-    PURPOSE_CHOICES = [(PURPOSE_SCORING, "채점"), (PURPOSE_QUALITY, "완성도")]
+    #: 채점 방식 비교 실험(#1246) — 운영 하루 상한에 세지 않고 실험 하루 상한(`AGENT_EXPERIMENT_DAILY_LIMIT_USD`)에 센다.
+    PURPOSE_EXPERIMENT = "experiment"
+    PURPOSE_CHOICES = [(PURPOSE_SCORING, "채점"), (PURPOSE_QUALITY, "완성도"), (PURPOSE_EXPERIMENT, "방식 비교 실험")]
 
     token_hash = models.CharField(max_length=64, unique=True)
     submission_id = models.PositiveBigIntegerField(db_index=True)

@@ -1176,6 +1176,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
+| `AGENT_EXPERIMENT_DAILY_LIMIT_USD` | USD 0~1000(#1246) | 채점 방식 비교 실험의 하루(KST) 비용 상한 — 실행 토큰 용도 `experiment` 만 세고 운영 상한과 따로다. 0 이면 실험이 돌지 않는다 | 0 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·정정 채점(`score-correction`, #1180) 스캔만 — 꺼지면 정정은 진행 중으로 기다린다 | **off** — 채점 스캔이 돌지 않는다 |
 | `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
@@ -1230,6 +1231,15 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   `model_version` `agent:selfloop:<모델>`, 기록은 `AgentRun.record` 꼴 + 단계·요구사항별 토큰·비용·다시 물은 횟수·근거 탈락 수·시간,
   판정이 안 난 요구사항이 있으면 보류). **운영 채점은 이것을 타지 않는다** — `CONTEST_SCORING_METHOD` 선택지에 없고, 부르는 곳은
   방식 비교 실험(#1246)뿐이다.
+- **채점 방식 비교 실험(#1246)** — `manage.py compare_scoring_methods --contest <id> --rows <방식:모델,…> --repeat N
+  [--limit-submissions K] [--confirm]` 가 운영 채점이 끝난 제출에 줄(`single_call`·`agent`·`self_loop` × 모델)마다 회차만큼
+  돌려 `ScoringExperiment`·`ScoringExperimentRun`(칸 = 제출·줄·회차: 점수·판정·근거 실재 수·보류/실패 까닭·토큰·비용·시간·
+  `model_version`)에만 남긴다. 입력은 `Score` 의 처음 커밋으로 다시 받는다(정정 채점과 같은 길). `--confirm` 없이는 예상 호출
+  수·줄별 비용 범위·실험 하루 상한·남은 돈만 찍는다. 에이전트·우리 루프의 실행 토큰은 용도 `experiment` 라 프록시가
+  `AGENT_EXPERIMENT_DAILY_LIMIT_USD` 에 세고(운영 몫과 따로, 기본 0 = 꺼짐), 한 번 호출 비용은 표에 적어 같은 하루 합계에
+  넣는다. 상한에 닿으면 멈추고, 같은 인자로 다시 부르면 남은 칸만 돈다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
+  (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 건당 비용, p50·p90, 통과 기준 넷과 표본의 한계를
+  마크다운·CSV 로 낸다. `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |

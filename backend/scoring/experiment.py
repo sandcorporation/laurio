@@ -1,0 +1,476 @@
+"""채점 방식 비교 실험(#1246, 스펙 #1244) — 줄(방식:모델) × 제출 × 회차 칸을 돌려 `ScoringExperimentRun` 에만 남긴다.
+
+**운영 동작을 바꾸지 않는다**: 운영 설정(`CONTEST_SCORING_METHOD`·`LLM_SCORING_VENDOR`·모델)을 읽거나 쓰지 않고 벤더·모델을
+인자로 넘긴다. `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 입력은 운영 채점이 실제로 본 것과 같다 —
+정정 채점처럼 `Score` 에 남은 처음 커밋으로 다시 받는다(`scoring.corrections._fixed_inputs`).
+
+돈: 에이전트·우리 루프는 실행 토큰 용도 `experiment` 로 `llm-proxy` 를 지나고, 프록시가 실험 하루 상한
+(`AGENT_EXPERIMENT_DAILY_LIMIT_USD`, 기본 0 = 꺼짐)을 운영 몫과 따로 센다. 한 번 호출은 벤더를 직접 부르므로 비용을 이
+표에 적고, 명령이 칸마다 「오늘 실험에 쓴 돈 + 이 칸의 최대 비용 ≤ 상한」을 먼저 본다.
+"""
+
+from __future__ import annotations
+
+import logging
+import tempfile
+import time
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Literal
+
+from django.conf import settings
+from django.db.models import Sum
+from django.utils import timezone
+
+from contests.models import Contest, ContestSubmission
+from core.adapters import is_fake_adapter_binding
+from core.agent_ports import price_for
+from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt
+from core.agent_run_tokens import Usage, spent_today_usd, usage_cost_usd
+from core.agent_scoring import JSON, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
+from core.clock import Clock
+from core.llm_scoring import LLMScoringAdapter, RequirementInput, RequirementVerdict, ScoringInput, get_adapter
+from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, setting_value
+
+from . import agent_runner, selfloop
+from .corrections import _fixed_inputs
+from .models import Score, ScoringExperiment, ScoringExperimentRun
+from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
+from .selfloop_scoring import run_selfloop_scoring
+from .services import (
+    CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS,
+    _agent_snapshot,
+    _asset_label,
+    _build_prompt,
+    _measure_source_fit,
+    _percentage,
+    _requirement_inputs,
+)
+
+logger = logging.getLogger(__name__)
+
+Method = Literal["single_call", "agent", "self_loop"]
+METHODS: tuple[Method, ...] = ("single_call", "agent", "self_loop")
+
+BASELINE = "agent:claude-sonnet-5-5"
+DEFAULT_ROWS = (
+    BASELINE,
+    "single_call:claude-haiku-5-5",
+    "agent:claude-haiku-5-5",
+    "self_loop:claude-haiku-5-5",
+    "single_call:gpt-4.1-mini",
+    "agent:gpt-4.1-mini",
+    "self_loop:gpt-4.1-mini",
+)
+
+#: 칸 하나의 비용 추정에 쓰는 토큰 범위(입력, 출력) — 낮은·높은. 공모전 3 실측(#992, ADR-0082)에서 잡은 대략값이고,
+#: 실험이 이미 돈 칸이 있으면 그 줄의 실제 최소·최대가 이긴다. 에이전트·우리 루프의 높은 쪽은 실행 예산($1)으로 자른다.
+_TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
+    "single_call": ((20_000, 1_000), (90_000, 4_000)),
+    "agent": ((60_000, 2_000), (600_000, 15_000)),
+    "self_loop": ((40_000, 2_000), (400_000, 12_000)),
+}
+_RUN_BUDGET_USD: dict[Method, Decimal | None] = {
+    "single_call": None,
+    "agent": Decimal("1"),
+    "self_loop": SELFLOOP_RUN_BUDGET_USD,
+}
+
+
+class ExperimentError(Exception):
+    """줄·공모전·실험 이름이 잘못됐다 — 명령이 그대로 보여 준다."""
+
+
+@dataclass(frozen=True)
+class Row:
+    method: Method
+    model: str
+    vendor: ScoringVendor
+
+    @property
+    def name(self) -> str:
+        return f"{self.method}:{self.model}"
+
+
+def vendor_for(model: str) -> ScoringVendor:
+    if model.startswith("claude-"):
+        return "anthropic"
+    if model.startswith(("gpt-", "o1", "o3", "o4")):
+        return "openai"
+    raise ExperimentError(f"벤더를 알 수 없는 모델: {model}")
+
+
+def parse_rows(text: str | None) -> list[Row]:
+    """`방식:모델,…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다."""
+
+    names = [p.strip() for p in (text or ",".join(DEFAULT_ROWS)).split(",") if p.strip()]
+    rows: list[Row] = []
+    for name in names:
+        method, sep, model = name.partition(":")
+        if not sep or method not in METHODS or not model:
+            raise ExperimentError(f"줄은 `방식:모델` 이고 방식은 {', '.join(METHODS)} 중 하나다: {name}")
+        if price_for(model) is None:
+            raise ExperimentError(f"단가를 모르는 모델이라 비용을 셀 수 없다: {model}")
+        row = Row(method, model, vendor_for(model))  # type: ignore[arg-type]  # method 는 위에서 METHODS 로 좁혔다
+        if row in rows:
+            raise ExperimentError(f"같은 줄이 두 번 있다: {name}")
+        rows.append(row)
+    return rows
+
+
+def eligible_submissions(contest: Contest, limit: int | None) -> list[ContestSubmission]:
+    """운영 채점이 끝난(`Score` 가 있는) 제출 — 입력을 같은 커밋으로 다시 받을 수 있는 것만. id 순."""
+
+    in_contest = ContestSubmission.objects.filter(contest=contest).values("pk")
+    ids = Score.objects.filter(submission_id__in=in_contest).order_by("submission_id").values_list("submission_id", flat=True)
+    if limit is not None:
+        ids = ids[:limit]
+    return list(ContestSubmission.objects.filter(pk__in=list(ids)).select_related("contest").order_by("pk"))
+
+
+# ── 돈 ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def _day_start(now: datetime) -> datetime:
+    return timezone.localtime(now).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def spent_today_experiment_usd(now: datetime | None = None) -> Decimal:
+    """오늘(KST) 실험에 쓴 돈 — 프록시를 지난 실험 토큰 몫 + 벤더를 직접 부른 한 번 호출 몫."""
+
+    now = now or Clock.now()
+    direct = (
+        ScoringExperimentRun.objects.filter(created_at__gte=_day_start(now), row__startswith="single_call:")
+        .aggregate(total=Sum("cost_usd"))["total"]
+    )
+    return spent_today_usd(now, experiment=True) + (direct or Decimal(0))
+
+
+def cost_range(row: Row, observed: Sequence[Decimal] = ()) -> tuple[Decimal, Decimal]:
+    """칸 하나의 비용 범위(USD). 이미 돈 칸이 있으면 그 최소·최대, 없으면 토큰 추정 × 단가(실행 예산으로 자른다)."""
+
+    if observed:
+        return min(observed), max(observed)
+    (lo_in, lo_out), (hi_in, hi_out) = _TOKEN_ESTIMATE[row.method]
+    low = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=lo_in, output_tokens=lo_out))
+    high = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=hi_in, output_tokens=hi_out))
+    cap = _RUN_BUDGET_USD[row.method]
+    if cap is not None:
+        low, high = min(low, cap), min(high, cap)
+    return low.quantize(Decimal("0.0001")), high.quantize(Decimal("0.0001"))
+
+
+# ── 칸 하나 ───────────────────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class _Inputs:
+    requirements: list[RequirementInput]
+    readable: list
+    cloned: list
+    snapshot: Snapshot | None
+
+
+@dataclass
+class CellResult:
+    status: str
+    score: Decimal | None = None
+    verdicts: list[dict[str, JSON]] = field(default_factory=list)
+    evidence_offered: int = 0
+    evidence_real: int = 0
+    problem: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: Decimal = Decimal(0)
+    model_version: str = ""
+    record: dict[str, JSON] = field(default_factory=dict)
+
+
+def load_inputs(submission: ContestSubmission) -> _Inputs:
+    """운영 채점이 본 입력 — `Score` 의 처음 커밋으로 다시 받는다. 박제본은 입력이 하나일 때만(운영과 같다)."""
+
+    score = Score.objects.get(submission_id=submission.pk)
+    readable, cloned = _fixed_inputs(score, submission)
+    return _Inputs(_requirement_inputs(submission), readable, cloned, _agent_snapshot(readable, cloned))
+
+
+def _single_call_adapter(row: Row) -> LLMScoringAdapter:
+    """줄의 모델로 만든 한 번 호출 어댑터. 가짜 어댑터 모드(dev·시험)면 가짜다 — 진짜 벤더를 부르지 않는다."""
+
+    if is_fake_adapter_binding(settings.LLM_ADAPTER_MODE):
+        return get_adapter(timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
+    if row.vendor == "anthropic":
+        from core.llm_scoring_anthropic import PLATFORM_SCORING_EFFORT, AnthropicScoringAdapter
+
+        return AnthropicScoringAdapter(
+            api_key=setting_value("ANTHROPIC_API_KEY") or "",
+            model=row.model,
+            reasoning_effort=PLATFORM_SCORING_EFFORT,
+            timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS,
+            product="contest",
+        )
+    from core.llm_scoring import OpenAIScoringAdapter
+
+    return OpenAIScoringAdapter(model=row.model, timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS)
+
+
+def _verdict_rows(requirements: list[RequirementInput], items: list[dict[str, JSON]]) -> tuple[list[dict[str, JSON]], Decimal]:
+    by_id = {item[ID_KEY]: item for item in items}
+    verdicts = [
+        RequirementVerdict(requirement_id=r.requirement_id, is_met=by_id[r.requirement_id]["met"] is True, reasoning="")
+        for r in requirements
+    ]
+    return [by_id[r.requirement_id] for r in requirements], _percentage(requirements=requirements, verdicts=verdicts)
+
+
+def _proxy_totals(record: dict[str, JSON]) -> tuple[int, int, Decimal]:
+    tokens_in = tokens_out = 0
+    spent = Decimal(0)
+    attempts = record.get("attempts")
+    for attempt in attempts if isinstance(attempts, list) else []:
+        usage = attempt.get("proxy_usage") if isinstance(attempt, dict) else None
+        if isinstance(usage, dict):
+            tokens_in += int(usage.get("input_tokens") or 0)  # type: ignore[arg-type]  # 기록 JSON
+            tokens_out += int(usage.get("output_tokens") or 0)  # type: ignore[arg-type]  # 기록 JSON
+            spent += Decimal(str(usage.get("spent_usd") or 0))
+    return tokens_in, tokens_out, spent
+
+
+def count_real_evidence(snapshot: Snapshot, items: list[dict[str, JSON]]) -> tuple[int, int]:
+    """판정들이 낸 근거 `경로:줄` 가운데 박제본에 실재하는 수 — 우리 루프와 같은 검사(`selfloop.check_evidence`)."""
+
+    evidence = [str(e) for item in items for e in (item.get("evidence") or []) if isinstance(item.get("evidence"), list)]  # type: ignore[union-attr]  # 위에서 list 로 좁혔다
+    if not evidence:
+        return 0, 0
+    with tempfile.TemporaryDirectory(prefix="experiment-evidence-") as tmp:
+        zip_path = Path(tmp) / "repo.zip"
+        zip_path.write_bytes(snapshot.zip_bytes)
+        root = Path(tmp) / "repo"
+        agent_runner.extract_repo(zip_path, root)
+        tools = selfloop.RepoTools(root)
+        real = sum(1 for item in evidence if not selfloop.check_evidence(tools, [item]))
+    return len(evidence), real
+
+
+def _run_single_call(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
+    llm = _single_call_adapter(row)
+    source_files, omission, _budget = _measure_source_fit(
+        llm,
+        submission_id=submission.pk,
+        contest=submission.contest,
+        requirements=inputs.requirements,
+        sources=[(a.id, _asset_label(a), raw) for a, raw in inputs.readable]
+        + [(a.id, _asset_label(a), c.zip_bytes) for a, c in inputs.cloned],
+    )
+    if omission.any:
+        return CellResult("held", problem="소스가 모델 컨텍스트에 다 들어가지 않는다(운영이면 보류)")
+    prompt = _build_prompt(contest=submission.contest, requirements=inputs.requirements, source_files=source_files)
+    output = llm.score(
+        ScoringInput(
+            submission_id=submission.pk,
+            contest_id=submission.contest_id,
+            prompt=prompt,
+            source_files=source_files,
+            requirements=inputs.requirements,
+        )
+    )
+    cost = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=output.input_tokens, output_tokens=output.output_tokens))
+    verdicts: list[dict[str, JSON]] = [
+        {"requirement_id": v.requirement_id, "met": v.is_met, "evidence": [], "reason": v.reasoning} for v in output.verdicts
+    ]
+    return CellResult(
+        "scored",
+        score=_percentage(requirements=inputs.requirements, verdicts=output.verdicts),
+        verdicts=verdicts,
+        input_tokens=output.input_tokens,
+        output_tokens=output.output_tokens,
+        cost_usd=cost,
+        model_version=output.model_version,
+    )
+
+
+def _run_agent(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
+    assert inputs.snapshot is not None
+    requirements = inputs.requirements
+    job = AgentJob(
+        submission=submission,
+        purpose="experiment",
+        build_prompt=lambda model: build_scoring_prompt(requirements, model=model),
+        output_schema=SCORING_OUTPUT_SCHEMA,
+        expected_ids=frozenset(r.requirement_id for r in requirements),
+        items_key=ITEMS_KEY,
+        id_key=ID_KEY,
+        evidence_required=lambda item: item.get("met") is True,
+        pinned_model=(row.vendor, row.model),
+    )
+    try:
+        with provided_snapshot(submission.pk, inputs.snapshot):
+            outcome = run_agent_job(job)
+    except AgentRunHeld as held:
+        tokens_in, tokens_out, spent = _proxy_totals(held.record)
+        return CellResult(
+            "held", problem="; ".join(held.reasons), input_tokens=tokens_in, output_tokens=tokens_out,
+            cost_usd=spent, model_version=f"agent:{row.vendor}:{row.model}", record=held.record,
+        )
+    items = outcome.structured_output[ITEMS_KEY]
+    verdicts, score = _verdict_rows(requirements, items)
+    offered, real = count_real_evidence(inputs.snapshot, verdicts)
+    tokens_in, tokens_out, spent = _proxy_totals(outcome.record)
+    return CellResult(
+        "scored", score=score, verdicts=verdicts, evidence_offered=offered, evidence_real=real,
+        input_tokens=tokens_in, output_tokens=tokens_out, cost_usd=spent,
+        model_version=outcome.model_version, record=outcome.record,
+    )
+
+
+def _loop(record: dict[str, JSON]) -> dict[str, JSON]:
+    attempts = record.get("attempts")
+    last = attempts[-1] if isinstance(attempts, list) and attempts else None
+    loop = last.get("loop") if isinstance(last, dict) else None
+    return loop if isinstance(loop, dict) else {}
+
+
+def _dropped(record: dict[str, JSON]) -> int:
+    subs = _loop(record).get("requirements")
+    total = 0
+    for sub in subs if isinstance(subs, list) else []:
+        dropped = sub.get("evidence_dropped") if isinstance(sub, dict) else None
+        total += dropped if isinstance(dropped, int) else 0
+    return total
+
+
+def _items(output: dict[str, JSON]) -> list[dict[str, JSON]]:
+    items = output.get(ITEMS_KEY)
+    return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
+
+
+def _loop_totals(record: dict[str, JSON]) -> tuple[int, int, Decimal]:
+    """우리 루프의 토큰·비용 — 루프가 벤더 응답에서 센 값(`_price_loop` 가 단가를 곱했다). 프록시가 센 값이 더 크면 그것."""
+
+    loop = _loop(record)
+    usage = loop.get("usage") if isinstance(loop.get("usage"), dict) else {}
+    tokens_in = int(usage.get("input_tokens") or 0)  # type: ignore[union-attr, arg-type]  # 기록 JSON
+    tokens_out = int(usage.get("output_tokens") or 0)  # type: ignore[union-attr, arg-type]  # 기록 JSON
+    loop_cost = Decimal(str(loop.get("cost_usd") or 0))
+    proxy_in, proxy_out, proxy_cost = _proxy_totals(record)
+    return max(tokens_in, proxy_in), max(tokens_out, proxy_out), max(loop_cost, proxy_cost)
+
+
+def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
+    assert inputs.snapshot is not None
+    try:
+        outcome = run_selfloop_scoring(
+            submission, inputs.requirements, inputs.snapshot, vendor=row.vendor, model=row.model, purpose="experiment"
+        )
+    except AgentRunHeld as held:
+        tokens_in, tokens_out, spent = _loop_totals(held.record)
+        return CellResult(
+            "held", problem="; ".join(held.reasons), evidence_offered=_dropped(held.record), input_tokens=tokens_in,
+            output_tokens=tokens_out, cost_usd=spent, model_version=f"agent:selfloop:{row.model}", record=held.record,
+        )
+    verdicts, score = _verdict_rows(inputs.requirements, _items(outcome.structured_output))
+    offered, real = count_real_evidence(inputs.snapshot, verdicts)
+    tokens_in, tokens_out, spent = _loop_totals(outcome.record)
+    return CellResult(
+        "scored", score=score, verdicts=verdicts, evidence_offered=offered + _dropped(outcome.record),
+        evidence_real=real, input_tokens=tokens_in, output_tokens=tokens_out, cost_usd=max(spent, outcome.cost_usd),
+        model_version=outcome.model_version, record=outcome.record,
+    )
+
+
+_RUNNERS = {"single_call": _run_single_call, "agent": _run_agent, "self_loop": _run_self_loop}
+
+
+def run_cell(
+    experiment: ScoringExperiment, submission: ContestSubmission, row: Row, round_no: int, inputs: _Inputs | Exception
+) -> ScoringExperimentRun:
+    """칸 하나를 돌려 남긴다. 실패도 칸으로 남긴다(다시 돌리지 않는다 — 실패율이 보고표의 숫자다)."""
+
+    started = time.monotonic()
+    if isinstance(inputs, Exception):
+        result = CellResult("failed", problem=f"입력을 다시 받지 못했다: {inputs}")
+    elif row.method != "single_call" and inputs.snapshot is None:
+        result = CellResult("failed", problem="채점 입력이 하나가 아니라 에이전트가 읽을 박제본이 없다(운영이면 한 번 호출)")
+    else:
+        try:
+            result = _RUNNERS[row.method](submission, row, inputs)
+        except Exception as exc:  # noqa: BLE001 - 칸 하나의 실패가 실험 전체를 멈추지 않는다
+            logger.warning("실험 %s 칸(제출 %s, %s, %s) 실패: %r", experiment.name, submission.pk, row.name, round_no, exc)
+            result = CellResult("failed", problem=f"{type(exc).__name__}: {exc}"[:2000])
+    return ScoringExperimentRun.objects.create(
+        experiment=experiment,
+        submission=submission,
+        row=row.name,
+        round=round_no,
+        status=result.status,
+        score=result.score,
+        verdicts=result.verdicts,
+        evidence_offered=result.evidence_offered,
+        evidence_real=result.evidence_real,
+        evidence_all_real=result.evidence_offered > 0 and result.evidence_real == result.evidence_offered,
+        problem=result.problem,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        duration_seconds=round(time.monotonic() - started, 3),
+        model_version=result.model_version,
+        record=result.record,
+        created_at=Clock.now(),
+    )
+
+
+# ── 계획 ──────────────────────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class RowPlan:
+    row: Row
+    pending: int  # 남은 칸
+    done: int
+    low_usd: Decimal  # 남은 칸 전체의 비용 범위
+    high_usd: Decimal
+    per_run_high_usd: Decimal
+
+
+@dataclass(frozen=True)
+class Plan:
+    submissions: list[ContestSubmission]
+    cells: list[tuple[ContestSubmission, Row, int]]  # 남은 칸, 회차 → 제출 → 줄 순(상한에 멈춰도 줄끼리 고르게)
+    rows: list[RowPlan]
+    daily_limit_usd: Decimal
+    spent_today_usd: Decimal
+
+    @property
+    def remaining_usd(self) -> Decimal:
+        return max(self.daily_limit_usd - self.spent_today_usd, Decimal(0))
+
+
+def plan(
+    contest: Contest, rows: list[Row], *, repeat: int, limit: int | None, experiment: ScoringExperiment | None
+) -> Plan:
+    submissions = eligible_submissions(contest, limit)
+    done: set[tuple[int, str, int]] = set()
+    observed: dict[str, list[Decimal]] = {}
+    if experiment is not None:
+        for run in experiment.runs.all().only("submission_id", "row", "round", "cost_usd", "status"):
+            done.add((run.submission_id, run.row, run.round))
+            if run.status != ScoringExperimentRun.Status.FAILED:
+                observed.setdefault(run.row, []).append(run.cost_usd)
+    cells = [
+        (s, row, rnd)
+        for rnd in range(1, repeat + 1)
+        for s in submissions
+        for row in rows
+        if (s.pk, row.name, rnd) not in done
+    ]
+    row_plans = []
+    for row in rows:
+        pending = sum(1 for _s, r, _n in cells if r == row)
+        low, high = cost_range(row, observed.get(row.name, ()))
+        row_plans.append(
+            RowPlan(row, pending, len(submissions) * repeat - pending, low * pending, high * pending, high)
+        )
+    return Plan(submissions, cells, row_plans, agent_experiment_daily_limit_usd(), spent_today_experiment_usd())

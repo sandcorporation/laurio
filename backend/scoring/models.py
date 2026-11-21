@@ -355,3 +355,70 @@ class QualityReviewAttempt(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"QualityReviewAttempt(submission={self.submission_id}, at={self.attempted_at})"
+
+
+class ScoringExperiment(models.Model):
+    """채점 방식 비교 실험 하나(#1246, 스펙 #1244) — 공모전 하나의 채점된 제출에 줄(방식:모델)마다 회차만큼 돌린다.
+
+    **운영 표에 닿지 않는다**: `Score`·`ScoreCorrection`·`AgentRun`·순위·지급을 쓰지 않고, 결과는
+    `ScoringExperimentRun` 에만 남는다. 만드는 곳은 `manage.py compare_scoring_methods` 뿐이다.
+    """
+
+    name = models.CharField(max_length=120, unique=True)
+    contest = models.ForeignKey("contests.Contest", related_name="scoring_experiments", on_delete=models.PROTECT)
+    created_by = models.CharField(max_length=150)
+    rows = models.JSONField()  # ["agent:claude-sonnet-5-5", ...] — 첫째가 기준 줄
+    repeat = models.PositiveSmallIntegerField()
+    limit_submissions = models.PositiveIntegerField(null=True, blank=True)
+    daily_limit_usd = models.DecimalField(max_digits=10, decimal_places=4)  # 만들 때의 실험 하루 상한
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "채점 방식 비교 실험"
+        verbose_name_plural = "채점 방식 비교 실험"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ScoringExperiment({self.name})"
+
+
+class ScoringExperimentRun(models.Model):
+    """실험의 칸 하나 = (제출, 줄, 회차) 한 번 돌린 결과(#1246). 같은 칸은 한 번만 — 상한에 멈췄다가 다시 돌리면
+    남은 칸만 돈다."""
+
+    class Status(models.TextChoices):
+        SCORED = "scored", "채점"
+        HELD = "held", "보류"
+        FAILED = "failed", "실패"
+
+    experiment = models.ForeignKey(ScoringExperiment, related_name="runs", on_delete=models.CASCADE)
+    submission = models.ForeignKey(
+        "contests.ContestSubmission", related_name="scoring_experiment_runs", on_delete=models.CASCADE
+    )
+    row = models.CharField(max_length=120)
+    round = models.PositiveSmallIntegerField()
+    status = models.CharField(max_length=10, choices=Status.choices)
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    verdicts = models.JSONField(default=list, blank=True)  # [{requirement_id, met, evidence, reason}]
+    evidence_offered = models.PositiveIntegerField(default=0)  # 모델이 낸 근거 수(루프가 버린 것 포함)
+    evidence_real = models.PositiveIntegerField(default=0)  # 그중 박제본에 실재한 수
+    evidence_all_real = models.BooleanField(default=False)
+    problem = models.TextField(blank=True, default="")  # 보류·실패 까닭
+    input_tokens = models.PositiveBigIntegerField(default=0)
+    output_tokens = models.PositiveBigIntegerField(default=0)
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    duration_seconds = models.FloatField(null=True, blank=True)
+    model_version = models.CharField(max_length=200, blank=True, default="")
+    record = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField()  # `Clock.now()` — 실험 하루 상한이 실행 토큰과 같은 시계로 센다
+
+    class Meta:
+        ordering = ["experiment_id", "submission_id", "row", "round"]
+        constraints = [
+            models.UniqueConstraint(fields=["experiment", "submission", "row", "round"], name="scoring_experiment_cell")
+        ]
+        verbose_name = "채점 방식 비교 실험 회차"
+        verbose_name_plural = "채점 방식 비교 실험 회차"
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ScoringExperimentRun({self.experiment_id}, {self.submission_id}, {self.row}, {self.round})"
