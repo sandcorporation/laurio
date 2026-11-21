@@ -84,7 +84,7 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertNotIn("pr-check.yml", code)
         self.assertNotIn("verified_tree", code)
         jobs = re.findall(r"(?m)^  ([\w-]+):\n", code.split("\njobs:\n", 1)[1])
-        self.assertEqual(sorted(jobs), ["e2e_dispatch", "e2e_watch", "image", "main_only", "notify", "promote"])
+        self.assertEqual(sorted(jobs), ["cpu_reference_watch", "e2e_dispatch", "e2e_watch", "image", "main_only", "notify", "promote"])
         self.assertFalse((ROOT / "scripts" / "ci" / "verified_tree.py").exists())
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)

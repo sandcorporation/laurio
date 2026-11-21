@@ -4,12 +4,15 @@
 // 비밀 입력은 쓰기 전용이다: 처음 값은 언제나 빈칸이고, 저장 뒤에도 비운다.
 import { useState } from "react";
 
-import { clearRuntimeSetting, probeRuntimeSetting, saveRuntimeSetting } from "./actions";
+import { clearRuntimeSetting, confirmRuntimeSetting, probeRuntimeSetting, saveRuntimeSetting } from "./actions";
 import type { ProbeResult, RuntimeSetting } from "./types";
 import {
   PROBE_LABELS,
   SOURCE_LABELS,
   canClear,
+  canConfirm,
+  changedDateText,
+  confirmedText,
   canProbe,
   choiceOptions,
   initialInput,
@@ -78,6 +81,13 @@ export function RuntimeSettingRow({
     );
   }
 
+  function handleConfirm() {
+    void run(
+      () => confirmRuntimeSetting(setting.key),
+      () => onChanged(),
+    );
+  }
+
   function handleProbe() {
     void run(
       async () => {
@@ -108,7 +118,24 @@ export function RuntimeSettingRow({
           </span>
         </div>
       </div>
-      {updatedText(setting) !== null && (
+      {changedDateText(setting) !== null && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px] text-ink/62">
+          <span data-testid={`${id}-changed`}>바뀐 날짜 {changedDateText(setting)}</span>
+          {confirmedText(setting) !== null && <span data-testid={`${id}-confirmed`}>{confirmedText(setting)}</span>}
+          {canConfirm(setting, editable) && (
+            <button
+              type="button"
+              data-testid={`${id}-confirm`}
+              disabled={pending}
+              onClick={handleConfirm}
+              className={BUTTON}
+            >
+              이대로 둔다
+            </button>
+          )}
+        </div>
+      )}
+      {changedDateText(setting) === null && updatedText(setting) !== null && (
         <div data-testid={`${id}-updated`} className="text-[12px] text-ink/62">
           {updatedText(setting)}
         </div>

@@ -83,6 +83,10 @@ SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 _SWITCH_ON = {"on", "true", "1", "yes"}
 _SWITCH_OFF = {"off", "false", "0", "no"}
 
+#: 스위치가 바뀐 채 이만큼(일) 지나면 하루 한 번 알린다(#1221, `policies.switch_watch`).
+SWITCH_ALERT_AFTER_DAYS = "SWITCH_ALERT_AFTER_DAYS"
+DEFAULT_SWITCH_ALERT_AFTER_DAYS = "2"
+
 #: 에이전트 채점 하루 비용 상한(#998) — 키와 기본값(USD).
 AGENT_SCORING_DAILY_LIMIT_USD = "AGENT_SCORING_DAILY_LIMIT_USD"
 _DEFAULT_AGENT_SCORING_DAILY_LIMIT_USD = "20"
@@ -145,6 +149,15 @@ SPECS: dict[str, SettingSpec] = {
         SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점", "switch", default="off", max_length=3),
         # #1033: 완성도 리뷰(`submission-quality-review` 스캔)만 여닫는 스위치. 값이 없으면 꺼짐.
         SettingSpec(CONTEST_AI_QUALITY_REVIEW, "공모전 완성도 리뷰", "switch", default="off", max_length=3),
+        # #1221: 운영 스위치가 기본값과 다르거나 켜져 있던 것이 꺼진 채 이만큼 지나면 하루 한 번 알린다.
+        SettingSpec(
+            SWITCH_ALERT_AFTER_DAYS,
+            "스위치 경보 시작 (일)",
+            "float",
+            default=DEFAULT_SWITCH_ALERT_AFTER_DAYS,
+            min_value=0.0,
+            max_value=30.0,
+        ),
         # #998: 에이전트 채점 키 프록시(`llm-proxy`)가 하루(KST)에 쓰는 비용 합계의 상한. 넘으면 그날의
         # 요청을 429 로 거절한다. 값이 없으면 기본값(`agent_scoring_daily_limit_usd`).
         SettingSpec(

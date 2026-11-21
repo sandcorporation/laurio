@@ -481,6 +481,8 @@ class RuntimeSettingChange(models.Model):
     class Action(models.TextChoices):
         SET = "set", "저장"
         CLEAR = "clear", "지우기"
+        # 「이대로 둔다」(#1221) — 값을 바꾸지 않는 확인. 다음 변경까지 스위치 경보에서 뺀다. `before`·`after` 는 확인한 값이다.
+        ACK = "ack", "이대로 둔다"
 
     operator = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="runtime_setting_changes", on_delete=models.PROTECT

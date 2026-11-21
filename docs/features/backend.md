@@ -944,6 +944,8 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 00:10(서울) `ops_metrics.check_slow_routes_daily` 가 어제 하루를 같은 기준(1건 이상)으로 본다(`docs/ops/operations.md`
 「운영 경보」).
 
+**운영 스위치 경보(#1221).** 매일 10:00(서울) `ops_metrics.check_switch_alert_daily` 가 `switch` 설정 중 기본값과 다르거나 on → off 로 끝난 것이 마지막 변경 뒤 `SWITCH_ALERT_AFTER_DAYS`(기본 2)일 지났고 「이대로 둔다」(`POST /api/operator/runtime-settings/{key}/confirm`, 변경 이력 `ack`)로 확인되지 않았으면 같은 디스코드 길로 하루 한 번 알린다(`docs/ops/operations.md` 「운영 경보」).
+
 `POST /api/internal/tick` 이 등록 순서로 전부 한 바퀴 돌고, `POST /api/internal/scans/{name}`
 이 하나만 돌린다. **tick 은 시간을 앞당기지 않는다** — 「이미 밀린 일을 beat 를 기다리지
 않고 즉시 처리한다」이다.
@@ -1222,6 +1224,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `GET /api/operator/runtime-settings/changes` | 변경 이력(최근 200건, 비밀은 `••••abcd` 표시만). 일반 등급도 |
 | `POST /api/operator/runtime-settings/{key}` | 저장(`{"value": …}`). 빈 값은 기존 값 유지(`changed: false`). 상위 등급만 |
 | `POST /api/operator/runtime-settings/{key}/clear` | DB 값을 지운다 — env 로 돌아간다. 상위 등급만 |
+| `POST /api/operator/runtime-settings/{key}/confirm` | 스위치의 「이대로 둔다」(#1221) — 경보 대상이고 아직 확인하지 않은 스위치만 `ack` 로 기록(`changed`). 스위치가 아니면 422. 상위 등급만. 목록 응답의 스위치에는 `changed_at`·`confirmed_at`·`confirmed_by`·`needs_confirm` 이 붙는다 |
 | `POST /api/operator/runtime-settings/{key}/test` | 연결 시험(키만) — 입력값, 없으면 지금 값으로 `/v1/models` 한 번. `ok`·`invalid_key`·`unavailable` 만. `LLM_ADAPTER_MODE` 가 fake 면 흉내. 상위 등급만 |
 
 ## 바깥 세계

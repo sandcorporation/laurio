@@ -5,7 +5,10 @@ import {
   accountRefusalText,
   canClear,
   canProbe,
+  canConfirm,
   changeText,
+  changedDateText,
+  confirmedText,
   choiceOptions,
   initialInput,
   inputAttributes,
@@ -196,5 +199,31 @@ describe("마지막 계정 거절(#1058)", () => {
 
   it("모르는 벤더·종류는 이름 그대로 보인다", () => {
     expect(accountRefusalText({ at: "2026-11-19T21:44:00Z", vendor: "x", kind: "y" })).toContain("x · y");
+  });
+});
+
+describe("스위치의 바뀐 날짜와 「이대로 둔다」(#1221)", () => {
+  const sw = (overrides: Partial<RuntimeSetting> = {}) =>
+    setting({ key: "CONTEST_AI_SCORING", kind: "switch", value: "on", default: "off", ...overrides });
+
+  it("바뀐 날짜는 스위치에만, 서울 시각으로 보인다", () => {
+    expect(changedDateText(sw({ changed_at: "2026-11-19T20:39:00Z" }))).toContain("2026. 11. 20.");
+    expect(changedDateText(sw())).toBeNull();
+    expect(changedDateText(setting({ kind: "text", changed_at: "2026-11-19T20:39:00Z" }))).toBeNull();
+  });
+
+  it("확인 버튼은 상위 등급이 경보 대상 스위치를 볼 때만", () => {
+    expect(canConfirm(sw({ needs_confirm: true }), true)).toBe(true);
+    expect(canConfirm(sw({ needs_confirm: true }), false)).toBe(false);
+    expect(canConfirm(sw({ needs_confirm: false }), true)).toBe(false);
+    expect(canConfirm(setting({ needs_confirm: true }), true)).toBe(false);
+  });
+
+  it("확인 기록은 누가·언제, 이력은 「이대로 둔다」", () => {
+    expect(confirmedText(sw({ confirmed_at: "2026-11-21T03:03:00Z", confirmed_by: "boss" }))).toContain("boss");
+    expect(confirmedText(sw())).toBeNull();
+    expect(
+      changeText({ id: 1, key: "K", label: "L", action: "ack", before: "on", after: "on", operator_username: "a", changed_at: "2026-11-21T00:00:00Z" }),
+    ).toBe("이대로 둔다 · on");
   });
 });

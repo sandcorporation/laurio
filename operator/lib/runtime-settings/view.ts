@@ -78,6 +78,7 @@ export function canProbe(setting: RuntimeSetting): boolean {
 }
 
 export function changeText(change: RuntimeSettingChange): string {
+  if (change.action === "ack") return `이대로 둔다 · ${change.after || "—"}`;
   if (change.action === "clear") return `지우기 · ${change.before || "—"}`;
   return `${change.before || "—"} → ${change.after}`;
 }
@@ -86,6 +87,24 @@ export function changeText(change: RuntimeSettingChange): string {
 export function updatedText(setting: RuntimeSetting): string | null {
   if (!setting.updated_at) return null;
   return `${new Date(setting.updated_at).toLocaleString("ko-KR")} · ${setting.updated_by ?? ""}`;
+}
+
+/** 스위치의 「바뀐 날짜」(#1221) — 마지막 변경 시각. 스위치가 아니거나 변경 이력이 없으면 null(줄을 그리지 않는다). */
+export function changedDateText(setting: RuntimeSetting): string | null {
+  if (setting.kind !== "switch" || !setting.changed_at) return null;
+  return new Date(setting.changed_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+}
+
+/** 「이대로 둔다」를 누른 기록 — 마지막 변경 뒤의 확인이 없으면 null. */
+export function confirmedText(setting: RuntimeSetting): string | null {
+  if (setting.kind !== "switch" || !setting.confirmed_at) return null;
+  const at = new Date(setting.confirmed_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+  return `이대로 둠 · ${at} · ${setting.confirmed_by ?? ""}`;
+}
+
+/** 「이대로 둔다」 버튼 — 상위 등급이 경보 대상 스위치를 볼 때만. */
+export function canConfirm(setting: RuntimeSetting, editable: boolean): boolean {
+  return editable && setting.kind === "switch" && setting.needs_confirm === true;
 }
 
 export type SettingsTabId = "ai" | "limits" | "fees" | "etc";
