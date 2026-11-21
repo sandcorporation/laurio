@@ -11,6 +11,8 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
    → Jenkins `codemit/deploy`(*/production): 굽지도 검사하지도 않고 ghcr `codemit-<서비스>:<sha>` 를 받아 oracle 에 배포
 ```
 
+**병합 대기열에 넣고 기다리는 명령(#1156)**: `bash scripts/ci/enqueue.sh <PR> --wait`(넣고 기다림) 또는 `bash scripts/ci/wait-merged.sh <PR>`(이미 넣은 PR). 병합(0, 병합 sha)·대기열에서 빠짐(1, `RemovedFromMergeQueueEvent.reason`·실패 잡·실행 주소, CPU 한도 시험이면 한 줄 더)·시간 초과(2, 기본 40분, `WAIT_MERGED_TIMEOUT` 초)에서 끝난다. 시험은 `wait-merged_test.sh`(gh 흉내).
+
 - **PR 검사**는 `.github/workflows/pr-check.yml` 하나다(#930·#932, ADR-0076 — Jenkins PR 검사 `codemit/ci-pr` 는 꺼졌다).
   `pull_request` 마다 호스팅 실행기에서 같은 스크립트를 잡으로 나눠 부른다 — `plan`(`changed.sh`, 문서만이면 ADR 검사만·프런트만·백엔드만이면 해당 잡만, 공개 위생
   `scripts/test_public_repo.py`·승격 배선 `scripts/test_release_flow.py`·`promote_test.sh` 는 늘) → `checks`(`sub-checks.sh`)·`guard`(세 앱을
