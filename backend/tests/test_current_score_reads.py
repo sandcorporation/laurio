@@ -19,7 +19,9 @@ from __future__ import annotations
 import ast
 import re
 
-from tests.ast_scan_support import BACKEND_ROOT, python_sources
+import pytest
+
+from tests.ast_scan_support import ParsedSource
 
 _SUBMISSION_NAMES = {"submission", "contest_submission", "contestsubmission"}
 _PULL_CALLS = {"hasattr", "getattr", "select_related", "prefetch_related"}
@@ -41,12 +43,16 @@ ALLOWLIST: dict[tuple[str, str], str] = {
 }
 
 
-def _violations() -> list[tuple[str, str, int, str]]:
+@pytest.fixture(scope="module")
+def violations(backend_sources: list[ParsedSource]) -> list[tuple[str, str, int, str]]:
+    """소스 전체를 훑은 결과 — 세션 픽스처 `backend_sources` 가 이미 읽어 파싱해 둔 트리를 한 번만 걷는다.
+    시험마다 다시 읽고 파싱·걷던 때는 시험 둘이 각각 CPU 0.75~1.3초였다(#1198). 픽스처 setup 은 시험 본문의
+    CPU 한도 밖이다."""
+
     found: list[tuple[str, str, int, str]] = []
-    for path in python_sources():
-        rel = path.relative_to(BACKEND_ROOT).as_posix()
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        found.extend((rel, *hit) for hit in _scan(tree))
+    for source in backend_sources:
+        assert isinstance(source.tree, ast.Module)
+        found.extend((source.relative.as_posix(), *hit) for hit in _scan(source.tree))
     return found
 
 
@@ -98,10 +104,10 @@ def _is_submission(value: ast.expr) -> bool:
     return False
 
 
-def test_score_verdict_is_read_only_through_current_score():
+def test_score_verdict_is_read_only_through_current_score(violations):
     offenders = [
         f"{file}:{line} ({func}) {what}"
-        for file, func, line, what in _violations()
+        for file, func, line, what in violations
         if (file, func) not in ALLOWLIST
     ]
     assert not offenders, (
@@ -110,8 +116,8 @@ def test_score_verdict_is_read_only_through_current_score():
     )
 
 
-def test_every_allowlist_entry_is_still_needed():
-    used = {(file, func) for file, func, _, _ in _violations()}
+def test_every_allowlist_entry_is_still_needed(violations):
+    used = {(file, func) for file, func, _, _ in violations}
     stale = sorted(key for key in ALLOWLIST if key not in used)
     assert not stale, f"더는 원래 Score 를 읽지 않는 허용 항목 — 지운다: {stale}"
 
