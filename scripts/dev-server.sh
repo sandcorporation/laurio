@@ -336,6 +336,10 @@ cmd_reap() {
     fi
   done
   echo "내린 스택 $stacks개"
+  # -e2e 스택은 주인 디렉터리가 있어도 걷는다(#1192) — 띄운 test.sh 가 없으면 고아다. mac 은 타이머가 없어
+  # `scripts/test.sh e2e` 시작 때 같은 걷기를 한다.
+  e2e_stack_reap
+  echo "내린 e2e 스택 ${E2E_REAPED:-0}개"
 }
 
 case "${1:-}" in

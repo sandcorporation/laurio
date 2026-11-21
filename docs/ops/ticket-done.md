@@ -61,8 +61,9 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
 - **병합 = 승격 = prod 배포다**(ADR-0068·ADR-0077). release 가 빨가면 production 이 움직이지 않는다 — 그 실행의 실패 줄을 보고 고친다. 문서만 바뀐 병합은 `codemit/deploy` 가 교체 없이 표식만 옮긴다. 배포가 돌았다면 prod
   `/api/health` 200 과 콘솔의 「디스코드 알림 실패」 0건을 확인한다(읽기만 — Jenkins 자격증명은 셸 env 의
   `JENKINS_URL`·`JENKINS_USER`·`JENKINS_API_TOKEN`, 값은 출력하지 않는다).
-- **끝나면** 이슈가 닫혔는지 보고, 띄운 `-p codemit-dev-<오프셋>` 스택을 내리고 dev 서버를 멈춘 뒤 워크트리·로컬
-  브랜치·원격 브랜치를 지운다.
+- **끝나면** 이슈가 닫혔는지 보고, `scripts/worktree-rm.sh <워크트리> <브랜치>` 한 번으로 그 워크트리의 스택(`-e2e`
+  포함)·dev 서버를 내리고 워크트리·로컬 브랜치를 지운 뒤 원격 브랜치를 지운다(#1192 — `git worktree remove` 만 하면
+  스택이 고아로 남아 mac 의 docker 가 스왑에 빠진 적이 있다).
 
 | 언제 | 무엇 | 실측 (이 머신, 2026-09-04) |
 | --- | --- | --- |
