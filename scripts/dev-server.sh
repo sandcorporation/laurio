@@ -125,13 +125,29 @@ _mem_gate() {  # $1 = 띄울 대상. 거절이면 1.
   fi
   cur="$(cat "$dir/memory.current" 2>/dev/null || true)"
   [[ "$cur" =~ ^[0-9]+$ ]] || { echo "메모리 여유 검사 없음: $dir/memory.current 를 읽지 못했다." >&2; return 0; }
+  # 쓰는 양 = memory.current − inactive_file(커널이 언제든 쫓아낼 수 있는 캐시, kubelet working set 과 같은 정의).
+  # active_file 은 그대로 센다 — 11-18 사고는 자주 쓰는 캐시를 쫓아내며 난 것이다.
+  local stat="$dir/memory.stat" anon=0 shmem=0 act=0 inact=0 k v
+  if [ -r "$stat" ]; then
+    while read -r k v; do
+      case "$k" in
+        anon) anon="$v" ;; shmem) shmem="$v" ;; active_file) act="$v" ;; inactive_file) inact="$v" ;;
+      esac
+    done < "$stat"
+  fi
+  [[ "$inact" =~ ^[0-9]+$ ]] || inact=0
+  [ "$inact" -le "$cur" ] || inact=0
+  local raw="$cur"
+  cur=$((cur - inact))
   lim="$(_limit_bytes "$dir")"
   need=$(( $(_expected_mb "$what") * 1048576 ))
   thr=$(( lim / 100 * mem_ratio_pct ))
   if [ $((cur + need)) -le "$thr" ]; then return 0; fi
   {
     echo "띄우지 않았다: $what — 메모리 묶음에 여유가 없다."
-    echo "  묶음 ${dir#"$cg_root"}: 지금 $((cur / 1048576))MB + $what 예상 $((need / 1048576))MB > 한도 $((lim / 1048576))MB 의 ${mem_ratio_pct}% ($((thr / 1048576))MB)"
+    echo "  묶음 ${dir#"$cg_root"}: 쓰는 양 $((cur / 1048576))MB(memory.current $((raw / 1048576))MB − inactive_file $((inact / 1048576))MB) + $what 예상 $((need / 1048576))MB > 한도 $((lim / 1048576))MB 의 ${mem_ratio_pct}% ($((thr / 1048576))MB)"
+    echo "  내역: anon $((anon / 1048576))MB · shmem $((shmem / 1048576))MB · active_file $((act / 1048576))MB · inactive_file $((inact / 1048576))MB"
+    echo "  shmem 이 크면 tmpfs(/tmp 등)가 원인일 수 있다 — 거기 쌓인 파일을 지운다."
     echo "  넘기면 커널이 파일 캐시를 쫓아내며 머신이 멎는다(2026-11-18). 아래에서 내릴 것을 고른다:"
     cmd_list | sed 's/^/  /'
     echo "  내리는 법: 그 워크트리에서 scripts/dev-server.sh stop-all (또는 stop <대상>)"

@@ -115,9 +115,9 @@ cd <worktree>
 
 - **여유 검사.** `start` 는 띄우기 전에 `/proc/self/cgroup` 에서 자기 묶음을 찾아 위로
   올라가며 한도(`memory.high`, 없으면 `memory.max`)가 숫자인 가장 가까운 곳의
-  `memory.current` 를 읽는다. 지금 값 + 예상 크기(next 2GB, runserver 0.2GB)가 한도의 85%
+  `memory.current − inactive_file`(쓰는 양 — 커널이 언제든 쫓아낼 수 있는 inactive 파일 캐시는 뺀다, kubelet working set 과 같은 정의, #1230. active_file 은 센다)을 읽는다. 지금 값 + 예상 크기(next 2GB, runserver 0.2GB)가 한도의 85%
   (`CODEMIT_DEV_SERVER_MEM_PCT`)를 넘으면 **거절**(종료코드 1)하고, 이 머신에 뜬 서버를
-  `list` 꼴(워크트리·앱·RSS)로 찍어 무엇을 내릴지 보인다. cgroup v2 가 없거나 한도가 `max`
+  `list` 꼴(워크트리·앱·RSS)과 내역(anon·shmem·active_file·inactive_file, shmem 이 크면 tmpfs `/tmp`)을 찍어 무엇을 내릴지 보인다. cgroup v2 가 없거나 한도가 `max`
   면 막지 않고 한 줄만 알린다. 띄우지 않고 보려면 `dev-server.sh check <대상>`.
   `CODEMIT_DEV_SERVER_FORCE=1` 로 건너뛸 수 있지만 **쓰지 않는다** — 거절은 내릴 것이 있다는 뜻이다.
 - **동시에 next 둘 넘기지 않는다.** 앱 하나가 1.3~2.1GB 다. 다른 앱을 보려면 앞의 것을
