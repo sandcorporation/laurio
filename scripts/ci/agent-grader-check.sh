@@ -9,6 +9,7 @@
 #
 # 환경변수: AGENT_GRADER_IMAGE(기본 codemit-agent-grader:check), AGENT_GRADER_SKIP_BUILD=1 이면 굽지 않는다.
 set -euo pipefail
+echo "#1139 시험: 일부러 실패"; exit 1
 cd "$(dirname "$0")/../.."
 
 export AGENT_GRADER_IMAGE="${AGENT_GRADER_IMAGE:-codemit-agent-grader:check}"
