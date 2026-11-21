@@ -987,6 +987,11 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 다시 걸 수 있다). 벤더 계정 거절만 진행 중으로 두고 다음 실행에 미룬다. **진행 중 정정이 있는 공모전은 배분 스캔이
 건너뛴다**(대기 이의와 같은 틀). 배분이 끝난 공모전의 정정은 기록만 남는다 — 이미 만든 Distribution·몫·컷라인은 다시
 계산하지 않는다.
+**정정이 끝나면 알린다**(#1182) — `scoring.corrections` 의 정정 완료 훅(`CORRECTION_DONE_HOOKS`, 커밋 뒤 한 번씩, 한 줄의
+실패가 다른 줄을 막지 않는다)에 `distributions/correction_notices.py` 가 건다. 참가자에게 `score_corrected`(「플랫폼 오류로
+다시 채점했다」, 원래·새 점수), 그 제출에 취소되지 않은 상장이 있으면 개최자에게 `certificate_score_corrected` 한 번(상장은
+자동으로 취소하지 않는다). 둘 다 거래성이다. 실패한 정정은 알리지 않는다. 채점 완료 알림의 「이의제기 기간」 문구는 유료
+공모전에만 붙는다(무료는 이의가 없다).
 
 **시연 영상은 보존 기간 뒤 파일만 파기된다**(ADR-0035). `demo-video-retention-purge`가
 이의 창의 끝(`judging_ends_at`) + `demo_video_retention_grace_days`가 지난 시연
