@@ -44,6 +44,7 @@ dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 �
 로컬에서 흉내 내는 유일한 길이다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
 아니라 공개 앱도 띄운다** — 빼면 그 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다
 (#318 이 그 스펙을 더한 뒤 main 에서 여섯 번 연속 그렇게 빨갛게 났다).
+**e2e 프로젝트가 닿을 수 있는 앱은 자기 조각이 띄우는 것뿐이다** — 로컬은 세 앱이 다 떠 있어 통과하고 CI 조각에서만 붉던 실수(#1247)를 `scripts/test_e2e_origins.py` 가 정적으로 잡는다(조각 정의는 `scripts/ci/e2e.sh` 의 `want_*`, 닿음은 spec 에서 상대 import 를 따라 쓰이는 선언만 본다). 다른 앱이 필요하면 backend 포트를 직접 치거나 `e2e.sh` 조각에 앱을 더한다. 글자로만 있는 예외는 그 시험의 `ALLOWED` 에 이유와 함께 둔다.
 
 **운영자 앱은 인증의 모양이 다르다**(#63, ADR-0016·0018·0019) — 세션 쿠키 이름은
 `codemit_operator_session`(`backend/config/settings.py`)이다. e2e 가 로그인할

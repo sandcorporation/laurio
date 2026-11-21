@@ -138,6 +138,7 @@ jobs:
           python3 scripts/test_release_flow.py
           python3 scripts/test_changed_paths.py
           python3 scripts/test_e2e_plan.py
+          python3 scripts/test_e2e_origins.py
           python3 scripts/test_playwright_image.py
           python3 scripts/test_pytest_plan.py
           python3 scripts/test_fail_fast.py
