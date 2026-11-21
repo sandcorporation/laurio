@@ -1,3 +1,4 @@
+// spec/demo 받아들임(#1210) — 병합되지 않는다
 import path from "node:path";
 
 import type { NextConfig } from "next";
