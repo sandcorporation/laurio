@@ -3871,6 +3871,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/contests/{contest_id}/score-corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Score Corrections */
+        get: operations["distributions_correction_api_list_score_corrections"];
+        put?: never;
+        /** Request Score Corrections */
+        post: operations["distributions_correction_api_request_score_corrections"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/deliverable-types": {
         parameters: {
             query?: never;
@@ -9797,6 +9815,62 @@ export interface components {
             /** Settings */
             settings: components["schemas"]["RuntimeSettingOut"][];
         };
+        /** ScoreCorrectionIn */
+        ScoreCorrectionIn: {
+            /** Reason */
+            reason: string;
+            /** Submission Ids */
+            submission_ids?: number[] | null;
+        };
+        /** ScoreCorrectionListOut */
+        ScoreCorrectionListOut: {
+            /** Contest Id */
+            contest_id: number;
+            /** Corrections */
+            corrections: components["schemas"]["ScoreCorrectionOut"][];
+            /** Prize Settled */
+            prize_settled: boolean;
+        };
+        /** ScoreCorrectionOut */
+        ScoreCorrectionOut: {
+            /** Certificates Issued */
+            certificates_issued: number;
+            /** Created At */
+            created_at: string;
+            /** Error */
+            error: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Id */
+            id: number;
+            /** Model Version */
+            model_version: string;
+            /** Operator Id */
+            operator_id: number;
+            /** Original Model Version */
+            original_model_version: string;
+            /** Original Percentage */
+            original_percentage: string;
+            /** Percentage */
+            percentage: string | null;
+            /** Reason */
+            reason: string;
+            /** Status */
+            status: string;
+            /** Submission Id */
+            submission_id: number;
+        };
+        /** ScoreCorrectionRequestOut */
+        ScoreCorrectionRequestOut: {
+            /** Contest Id */
+            contest_id: number;
+            /** Corrections */
+            corrections: components["schemas"]["ScoreCorrectionOut"][];
+            /** Prize Settled */
+            prize_settled: boolean;
+            /** Skipped */
+            skipped: components["schemas"]["SkippedCorrectionOut"][];
+        };
         /**
          * ScoreSnapshotOut
          * @description 운영자가 심판 근거로 보는 Score 스냅샷 — 점수·근거·모델버전(#21 AC, ADR-0006).
@@ -10078,6 +10152,13 @@ export interface components {
             granted: boolean;
             /** Reason */
             reason: string;
+        };
+        /** SkippedCorrectionOut */
+        SkippedCorrectionOut: {
+            /** Reason */
+            reason: string;
+            /** Submission Id */
+            submission_id: number;
         };
         /** SocialLoginIn */
         SocialLoginIn: {
@@ -16161,6 +16242,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorCertificateOut"];
+                };
+            };
+        };
+    };
+    distributions_correction_api_list_score_corrections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreCorrectionListOut"];
+                };
+            };
+        };
+    };
+    distributions_correction_api_request_score_corrections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreCorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreCorrectionRequestOut"];
                 };
             };
         };

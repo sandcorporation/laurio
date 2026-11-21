@@ -106,6 +106,8 @@ class ScoreCorrection(models.Model):
     scored_assets = models.JSONField(default=list, blank=True)
     repository_reachability_check = models.JSONField(default=list, blank=True)
     reason = models.TextField()
+    # 「실패」로 넘긴 까닭(#1180) — 운영자가 다시 걸지 판단한다. 「진행 중」·「끝」에는 비어 있다.
+    error = models.TextField(blank=True, default="")
     operator = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="score_corrections", on_delete=models.PROTECT
     )
@@ -123,6 +125,12 @@ class ScoreCorrection(models.Model):
                 name="score_correction_done_has_verdict",
             ),
             models.CheckConstraint(condition=~models.Q(reason=""), name="score_correction_reason_required"),
+            # 한 Score 에 진행 중 정정은 하나다(#1180) — 둘이 동시에 걸리면 어느 판정이 「현재」인지가 끝난 순서로 갈린다.
+            models.UniqueConstraint(
+                fields=["score"],
+                condition=models.Q(status="in_progress"),
+                name="score_correction_one_in_progress",
+            ),
         ]
 
     def save(self, *args, **kwargs):
