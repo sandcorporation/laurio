@@ -366,7 +366,8 @@ compose 의 digest 를 커밋으로 바꾸고, 호스트에서 `sh ./deploy.sh p
 `FROM`(uv·node)과 compose.prod 의 외부 `image:` 는 `이름:태그@sha256:<멀티아키 인덱스 digest>` 다 —
 `docker buildx imagetools inspect <이름:태그>` 의 `Digest:`(운영은 arm64, CI 는 amd64 라 인덱스여야 한다).
 태그만 쓴 줄은 `scripts/test_release_flow.py` 가 PR 검사에서 막는다. `.github/dependabot.yml` 이 `/docker`
-를 주 1회 보고 digest 를 올리는 PR 을 연다. **예외 둘**: `search.Dockerfile`(opensearch)·`pgbouncer.Dockerfile`
+를 주 1회 보고 digest·부 판을 올리는 PR 을 연다(`ignore` 로 주 버전 갱신은 끈다, #1147 — node 22→26·opensearch 2→3
+같은 런타임 판 올리기는 따로 티켓으로 한다). **예외 둘**: `search.Dockerfile`(opensearch)·`pgbouncer.Dockerfile`
 (debian)은 아직 태그만이다 — 그 파일을 고치면 `deploy.sh` 가 이미지를 새로 구워 운영 search·pgbouncer 컨테이너를
 바꿔 끼우므로, 다음 의도적 교체 때 digest 를 붙이고 시험의 `FROM_PIN_DEFERRED` 에서 뺀다.
 
