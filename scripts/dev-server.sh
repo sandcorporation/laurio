@@ -323,6 +323,19 @@ cmd_reap() {
     fi
   done
   echo "걷은 서버 $swept개"
+  # compose 스택도 같은 판정으로 걷는다(#1186) — 주인 워크트리가 사라진 codemit-dev* 의 컨테이너만 내린다.
+  # 볼륨은 남긴다. docker 가 없거나 안 닿으면 조용히 넘어간다.
+  command -v docker >/dev/null 2>&1 || return 0
+  . "$here/docker/dev-stack-orphans.sh"
+  local project stacks=0
+  for project in $(docker ps -a --filter "label=com.docker.compose.project" \
+      --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u | grep -E '^codemit-dev(-[0-9])?$' || true); do
+    if dev_stack_is_orphan "$project"; then
+      echo "  주인 워크트리가 사라졌다($(dev_stack_owners "$project" | tr '\n' ' ')) → 스택 $project 내린다(볼륨은 남김)"
+      dev_stack_down_orphan "$project"; stacks=$((stacks+1))
+    fi
+  done
+  echo "내린 스택 $stacks개"
 }
 
 case "${1:-}" in
