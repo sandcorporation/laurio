@@ -8,6 +8,14 @@
 메인 스레드에서 파일을 하나씩 파싱하는 일이라 약 20초가 남는다 — `outputFileTracingExcludes` 로
 빌드 도구를 빼도 7초쯤만 준다. dev(`next dev`)는 그대로 webpack 이다.
 
+**Turbopack 빌드는 `.next/cache` 에 컴파일 캐시를 남기지 않는다**(#1137, Next 15.5.24). 빌드 뒤 `.next/cache` 에는
+타입 검사의 `.tsbuildinfo`(약 460KB)·`fetch-cache` 뿐이다. 그래서 그 폴더를 실행 사이에 이어도 앱 파일 하나 바꾼 frontend
+빌드가 44초 → 40초(타입 검사 증분)일 뿐 컴파일(7초)은 그대로다 — 이미지 굽기에 캐시 마운트·보존 장치를 두지 않았다. 컴파일
+캐시를 켜는 설정 `experimental.turbopackPersistentCaching` 은 이 판에서 canary 전용이라 안정판에서 켜면 설정 검사가 실패한다
+(`CanaryOnlyError`). 켜려면 Next 를 그 기능이 안정판에 열린 판으로 올려야 하고, 실험 기능이 운영 이미지를 만드는 위험을 따로
+따진다. 바뀐 앱의 빌드에서 가장 큰 몫은 컴파일이 아니라 추적 수집이다(같은 기계의 이미지 굽기에서 약 39초, 빌드 67초 가운데). 바뀌지 않은 앱은 층 캐시가
+`pnpm build` 층째 `CACHED` 로 건너뛴다([CI](ci.md) 「Actions 의 캐시」).
+
 **그래서 세 앱이 `require-in-the-middle`·`import-in-the-middle` 을 직접 의존성으로 갖는다** — 코드
 어디에서도 import 하지 않지만 **지우면 안 된다.** Sentry 서버 계측(OpenTelemetry)이 쓰는 둘을
 Turbopack 은 번들하지 않고 외부 패키지로 남기는데, pnpm 에서는 앱 디렉터리에서 풀리지 않아
