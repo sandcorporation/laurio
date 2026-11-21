@@ -26,6 +26,14 @@ def _ids(text: str) -> list[int]:
     return ids
 
 
+def _skipped_line(skipped: dict[str, list[int]]) -> str:
+    if not skipped:
+        return ""
+    total = sum(len(v) for v in skipped.values())
+    parts = ", ".join(f"{reason} {len(v)}({','.join(map(str, v))})" for reason, v in skipped.items())
+    return f"건너뜀 {total}건 — {parts}"
+
+
 class Command(BaseCommand):
     help = (
         "강의실 제출을 채점 방식 실험의 가명 사본(tar.gz, 0600)으로 꺼낸다(#1262) — 읽기만 한다. "
@@ -41,8 +49,12 @@ class Command(BaseCommand):
         ids = _ids(str(options["classroom_submissions"]))
         name = str(options["name"])
         try:
-            items = collect(ids, name=name)
+            items, skipped = collect(ids, name=name)
+            if not items:
+                raise em.MaterialError("꺼낼 수 있는 제출이 없다 — " + (_skipped_line(skipped) or "건너뜀 0건"))
             size = em.write(Path(str(options["out"])), name=name, exported_at=Clock.now(), items=items)
         except em.MaterialError as exc:
             raise CommandError(str(exc)) from exc
         self.stdout.write(f"{len(items)}건 · {size} 바이트")
+        if skipped:
+            self.stdout.write(_skipped_line(skipped))
