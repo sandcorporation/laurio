@@ -20,7 +20,7 @@ from core.experiment_material import (
     pseudonym,
 )
 from core.llm_scoring import ScoringInput, SourceFile
-from core.repository_adapters import get_github_adapter
+from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 
@@ -47,7 +47,14 @@ def _source_bytes(asset: SubmissionAsset) -> bytes:
         return raw
     if not asset.repository_commit_sha:
         raise MaterialError("저장소 제출에 고정 커밋이 없다 — 운영이 본 내용을 다시 받을 수 없다")
-    return get_github_adapter().clone(asset.value, commit_sha=asset.repository_commit_sha).zip_bytes
+    try:
+        return get_github_adapter().clone(asset.value, commit_sha=asset.repository_commit_sha).zip_bytes
+    except GitHubAdapterError as exc:
+        raise RepositoryUnreachable() from exc
+
+
+class RepositoryUnreachable(MaterialError):
+    """저장소·커밋·zip 을 GitHub 에서 받을 수 없다(지웠거나 비공개로 돌렸다)."""
 
 
 def _verdicts(reasoning: object) -> tuple[ProductionVerdict, ...]:
@@ -61,8 +68,15 @@ def _verdicts(reasoning: object) -> tuple[ProductionVerdict, ...]:
     return tuple(out)
 
 
-def collect(submission_ids: Sequence[int], *, name: str) -> list[Item]:
-    """운영 채점이 끝난 강의실 제출들을 사본 항목으로. 없는 제출·채점 안 된 제출이 하나라도 있으면 아무것도 담지 않는다."""
+NO_PINNED_COMMIT = "고정 커밋 없음"
+REPOSITORY_UNREACHABLE = "저장소 닿지 않음"
+
+
+def collect(submission_ids: Sequence[int], *, name: str) -> tuple[list[Item], dict[str, list[int]]]:
+    """운영 채점이 끝난 강의실 제출들을 사본 항목으로. 없는 제출·채점 안 된 제출이 하나라도 있으면 아무것도 담지 않는다.
+
+    소스를 꺼낼 수 없는 제출(고정 커밋 없음·저장소 닿지 않음)은 건너뛰고 까닭별 제출 번호를 함께 돌려준다.
+    """
 
     submissions = {
         s.pk: s for s in ClassroomSubmission.objects.filter(pk__in=submission_ids).select_related("problem__classroom")
@@ -75,13 +89,20 @@ def collect(submission_ids: Sequence[int], *, name: str) -> list[Item]:
     if unscored:
         raise MaterialError(f"운영 채점이 없는 제출: {', '.join(map(str, unscored))}")
     items = []
+    skipped: dict[str, list[int]] = {}
     for sid in submission_ids:
         submission = submissions[sid]
         problem = submission.problem
         try:
             source = _source_bytes(submission.assets.get())
+        except RepositoryUnreachable:
+            skipped.setdefault(REPOSITORY_UNREACHABLE, []).append(sid)
+            continue
         except MaterialError as exc:
-            raise MaterialError(f"제출 {sid}: {exc}") from exc
+            if "고정 커밋" not in str(exc):
+                raise MaterialError(f"제출 {sid}: {exc}") from exc
+            skipped.setdefault(NO_PINNED_COMMIT, []).append(sid)
+            continue
         checklist = problem.checklist_items.exclude(grade=ChecklistGrade.BONUS)  # 운영 채점이 읽는 그대로(`_prepare_head`)
         score = scores[sid]
         items.append(
@@ -106,7 +127,7 @@ def collect(submission_ids: Sequence[int], *, name: str) -> list[Item]:
                 model_version=score.model_version,
             )
         )
-    return items
+    return items, skipped
 
 
 def experiment_call(item: Item, *, model: str, api_key: str | None) -> ClassroomCallResult:

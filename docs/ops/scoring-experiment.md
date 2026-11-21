@@ -110,7 +110,7 @@
    담는 것: 운영 채점이 읽은 소스(저장소는 고정 커밋의 zip), 문제 제목·설명·채점 지침, 체크리스트 항목(id·라벨·등급·숨김·점수,
    가산 제외), 운영 판정(항목·충족·근거)과 model_version, manifest(가져온 날·이름·건수·체크섬). 이름·계정·멤버 id·이메일·
    클래스 이름·제출 시각·운영 제출 id·자산 라벨은 담지 않는다 — 제출은 가명 id(이름 솔트 + sha256 앞 12자)뿐이다.
-   저장소 제출에 고정 커밋이 없으면 그 제출 번호를 찍고 아무것도 쓰지 않는다.
+   꺼낼 수 없는 제출(고정 커밋 없음·저장소가 GitHub 에서 닿지 않음)은 건너뛰고 끝에 `건너뜀 N건 — 까닭 n(제출 번호,…)` 한 줄을 찍는다. 꺼낸 건수가 0 이면 파일 없이 실패한다.
 2. **옮기기** — work 의 `~/.cache/codemit-work/experiment-material/<이름>/` 로 scp 한다. **운영 서버에 남은 파일은 옮긴 뒤 지운다.**
 3. **미리 보기(dev)** — `python manage.py compare_scoring_methods --material ~/.cache/codemit-work/experiment-material/<이름>/<이름>.tar.gz
    --repeat 1 [--rows …]`. 사본에서 입력을 짓는다 — 운영 DB·저장소·GitHub 를 부르지 않는다. 제출 칸은 가명 id 다. 기대 점수는

@@ -33,21 +33,28 @@ EMAIL = "made-up-instructor-1262@example.com"
 SOURCE = "def add_two_numbers(a, b):\n    return a + b\n"
 
 
-def _scored_submission(client) -> int:
+def _scored_submissions(client, count: int = 1) -> list[int]:
     instructor = login(client, uid="instructor-1262", email=EMAIL)
     class_id = create_class(client, instructor["access"], name=CLASS_NAME)
     problem = create_open_problem(
         client, instructor["access"], class_id, title="두 수 더하기", submission_formats=["source"],
         required_labels=["add_two_numbers"], optional_labels=["곱하기 함수"],
     )
-    student = login(client, uid="student-1262")
-    join_class(client, student["access"], class_id, instructor_access=instructor["access"], display_name=STUDENT)
-    submitted = submit_source(
-        client, student["access"], class_id, problem.id, participant_user_id=user_id("student-1262"),
-        files={"main.py": SOURCE},
-    )
+    ids = []
+    for n in range(count):
+        uid = f"student-1262-{n}"
+        student = login(client, uid=uid)
+        join_class(client, student["access"], class_id, instructor_access=instructor["access"], display_name=f"{STUDENT}{n}")
+        submitted = submit_source(
+            client, student["access"], class_id, problem.id, participant_user_id=user_id(uid), files={"main.py": SOURCE},
+        )
+        ids.append(submitted["id"])
     run_scan(client)
-    return submitted["id"]
+    return ids
+
+
+def _scored_submission(client) -> int:
+    return _scored_submissions(client)[0]
 
 
 def _export(*args: str) -> str:
@@ -99,6 +106,54 @@ def test_export_refuses_an_unscored_submission_and_writes_nothing(client, tmp_pa
     out_path = tmp_path / "m.tar.gz"
     with pytest.raises(CommandError, match="강의실 제출이 없다: 999999"):
         _export("--classroom-submissions", "999999", "--name", "t", "--out", str(out_path))
+    assert not out_path.exists()
+
+
+def _unextractable(monkeypatch, reasons: dict[int, Exception]) -> None:
+    """제출별로 소스를 꺼낼 수 없게 한다 — 운영의 「고정 커밋 없음」「저장소 404」 꼴."""
+    from classroom import experiment_material as cm
+
+    real = cm._source_bytes
+
+    def fake(asset):
+        exc = reasons.get(asset.submission_id)
+        if exc is not None:
+            raise exc
+        return real(asset)
+
+    monkeypatch.setattr(cm, "_source_bytes", fake)
+
+
+@pytest.mark.django_db
+def test_export_skips_unextractable_submissions_and_prints_the_skipped_line(client, tmp_path, monkeypatch):
+    from classroom import experiment_material as cm
+
+    a, b, c = _scored_submissions(client, 3)
+    _unextractable(monkeypatch, {
+        b: em.MaterialError("저장소 제출에 고정 커밋이 없다 — 운영이 본 내용을 다시 받을 수 없다"),
+        c: cm.RepositoryUnreachable(),
+    })
+    out_path = tmp_path / "m.tar.gz"
+
+    printed = _export("--classroom-submissions", f"{a},{b},{c}", "--name", "t1267", "--out", str(out_path))
+
+    assert printed.splitlines() == [
+        f"1건 · {out_path.stat().st_size} 바이트",
+        f"건너뜀 2건 — 고정 커밋 없음 1({b}), 저장소 닿지 않음 1({c})",
+    ]
+    assert SOURCE not in printed and "github" not in printed.lower()
+    with tarfile.open(out_path) as tar:
+        manifest = json.loads(tar.extractfile("manifest.json").read())
+    assert manifest["count"] == 1
+
+
+@pytest.mark.django_db
+def test_export_fails_and_writes_nothing_when_every_submission_is_skipped(client, tmp_path, monkeypatch):
+    (a,) = _scored_submissions(client)
+    _unextractable(monkeypatch, {a: em.MaterialError("저장소 제출에 고정 커밋이 없다 — x")})
+    out_path = tmp_path / "m.tar.gz"
+    with pytest.raises(CommandError, match="꺼낼 수 있는 제출이 없다 — 건너뜀 1건 — 고정 커밋 없음 1"):
+        _export("--classroom-submissions", str(a), "--name", "t", "--out", str(out_path))
     assert not out_path.exists()
 
 
