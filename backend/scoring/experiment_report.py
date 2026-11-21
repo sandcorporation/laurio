@@ -16,6 +16,7 @@ import io
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from statistics import mean, stdev
 
@@ -275,3 +276,80 @@ def to_csv(reports: Sequence[RowReport], *, repeat: int, full_submissions: int) 
     for r in reports:
         writer.writerow(_cells(r, repeat=repeat, full_submissions=full_submissions))
     return buf.getvalue()
+
+
+# ── 청구 대조(#1259) ──────────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class BillPart:
+    """청구 한 덩어리 — 실행 토큰 하나(프록시가 요청마다 센 합) 또는 한 번 호출 칸 하나(벤더 직접 호출)."""
+
+    source: str  # "proxy" | "direct"
+    vendor: str
+    model: str
+    at: datetime  # 토큰 발급·칸 기록 시각(UTC 로 묶는다)
+    requests: int
+    input_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    output_tokens: int
+    usd: Decimal
+
+
+@dataclass(frozen=True)
+class BillLine:
+    vendor: str
+    model: str
+    day: str  # UTC "YYYY-MM-DD"
+    window: str  # UTC "HH:00–HH:59"
+    requests: int
+    input_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    output_tokens: int
+    usd: Decimal
+
+
+def bill_lines(parts: Iterable[BillPart]) -> list[BillLine]:
+    """벤더·모델·UTC 날짜·UTC 한 시간 창마다 더한다 — 벤더 콘솔의 사용량 표(UTC)와 줄 단위로 맞춰 보는 꼴."""
+
+    groups: dict[tuple[str, str, str, int], list[BillPart]] = {}
+    for part in parts:
+        at = part.at.astimezone(UTC)
+        groups.setdefault((part.vendor, part.model, at.strftime("%Y-%m-%d"), at.hour), []).append(part)
+    lines = []
+    for (vendor, model, day, hour), group in sorted(groups.items()):
+        lines.append(
+            BillLine(
+                vendor=vendor,
+                model=model,
+                day=day,
+                window=f"{hour:02d}:00–{hour:02d}:59",
+                requests=sum(p.requests for p in group),
+                input_tokens=sum(p.input_tokens for p in group),
+                cache_read_tokens=sum(p.cache_read_tokens for p in group),
+                cache_write_tokens=sum(p.cache_write_tokens for p in group),
+                output_tokens=sum(p.output_tokens for p in group),
+                usd=sum((p.usd for p in group), Decimal(0)),
+            )
+        )
+    return lines
+
+
+def bill_markdown(title: str, lines: Sequence[BillLine], notes: Sequence[str]) -> str:
+    out = [
+        f"# {title}",
+        "",
+        "| 벤더 | 모델 | 날짜(UTC) | 시간(UTC) | 요청 | 입력 | 캐시 읽기 | 캐시 쓰기 | 출력 | 금액(USD) |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for line in lines:
+        out.append(
+            f"| {line.vendor} | {line.model} | {line.day} | {line.window} | {line.requests} | {line.input_tokens} | "
+            f"{line.cache_read_tokens} | {line.cache_write_tokens} | {line.output_tokens} | {line.usd:.6f} |"
+        )
+    total = sum((line.usd for line in lines), Decimal(0))
+    out.append(f"| 합계 | | | | {sum(line.requests for line in lines)} | | | | | {total:.6f} |")
+    out += ["", *notes]
+    return "\n".join(out) + "\n"

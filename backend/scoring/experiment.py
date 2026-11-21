@@ -7,6 +7,10 @@
 돈: 에이전트·우리 루프는 실행 토큰 용도 `experiment` 로 `llm-proxy` 를 지나고, 프록시가 실험 하루 상한
 (`AGENT_EXPERIMENT_DAILY_LIMIT_USD`, 기본 0 = 꺼짐)을 운영 몫과 따로 센다. 한 번 호출은 벤더를 직접 부르므로 비용을 이
 표에 적고, 명령이 칸마다 「오늘 실험에 쓴 돈 + 이 칸의 최대 비용 ≤ 상한」을 먼저 본다.
+
+칸 예산(#1259): 에이전트·우리 루프 칸 하나(에이전트는 시도 둘 모두)의 하드 상한은 `CELL_BUDGET_USD` 하나다. 실행 토큰 예산은
+min(칸 예산, 남은 하루 돈)으로 발급해 하루 상한에 닿기 전에 토큰이 먼저 끊긴다. 칸은 남은 돈이 칸 예산 이상일 때만 시작한다
+(추정이 아니라 실제로 끊기는 값으로 견준다). 프록시는 요청 **전에** 쓴 돈만 보므로 마지막 요청 하나만큼은 넘칠 수 있다.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from core.adapters import is_fake_adapter_binding
 from core.agent_ports import agent_grader, price_for
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt
 from core.agent_run_tokens import RunTokenRefused, Usage, spent_today_usd, usage_cost_usd
+from core.agent_scoring import RUN_BUDGET_USD as AGENT_RUN_BUDGET_USD
 from core.agent_scoring import (
     JSON,
     AgentJob,
@@ -40,11 +45,13 @@ from core.agent_scoring import (
     run_agent_job,
 )
 from core.clock import Clock
+from core.models import AgentRunToken
 from core.llm_scoring import LLMScoringAdapter, RequirementInput, RequirementVerdict, ScoringInput, get_adapter
 from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, setting_value
 
 from . import selfloop
 from .corrections import _fixed_inputs
+from .experiment_report import BillPart
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
 from .selfloop_scoring import run_selfloop_scoring
@@ -75,7 +82,8 @@ DEFAULT_ROWS = (
 )
 
 #: 칸 하나의 비용 추정에 쓰는 토큰 범위(입력, 출력) — 낮은·높은. 공모전 3 실측(#992, ADR-0082)에서 잡은 대략값이고,
-#: 실험이 이미 돈 칸이 있으면 그 줄의 실제 최소·최대가 이긴다. 에이전트·우리 루프의 높은 쪽은 실행 예산($1)으로 자른다.
+#: 실험이 이미 돈 칸이 있으면 그 줄의 실제 최소·최대가 이긴다. 에이전트·우리 루프는 낮은 쪽에만 쓴다 — 높은 쪽은 칸 예산이다
+#: (#1259: 실측이 4.1-mini 에이전트 시도 하나 198만, 우리 루프 85만~216만 토큰으로 추정의 몇 배였다).
 #: 한 번 호출의 높은 쪽은 공모전 3 실험 실측(#1257: 입력 100k~255k)을 덮는다 — 10만 토큰을 넘으면 Haiku 5.5 는 입력·출력
 #: 모두 5배 단가라(`classroom.scoring_cost`) 높은 쪽이 그 문턱 아래(옛 90k)에 있으면 칸당 최대가 열 배 가까이 작게 나온다.
 _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
@@ -83,9 +91,11 @@ _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
     "agent": ((60_000, 2_000), (600_000, 15_000)),
     "self_loop": ((40_000, 2_000), (400_000, 12_000)),
 }
-_RUN_BUDGET_USD: dict[Method, Decimal | None] = {
+#: 칸 하나의 하드 상한(USD) — 실행 토큰이 끊는 값. 에이전트는 시도 둘(최초 + 재실행)을 합쳐 이 안이다(#1259).
+#: 한 번 호출은 요청 하나라 토큰이 없다(벤더를 직접 부른다).
+CELL_BUDGET_USD: dict[Method, Decimal | None] = {
     "single_call": None,
-    "agent": Decimal("1"),
+    "agent": AGENT_RUN_BUDGET_USD,
     "self_loop": SELFLOOP_RUN_BUDGET_USD,
 }
 
@@ -185,14 +195,36 @@ def parse_rows(text: str | None) -> list[Row]:
     return rows
 
 
-def eligible_submissions(contest: Contest, limit: int | None) -> list[ContestSubmission]:
-    """운영 채점이 끝난(`Score` 가 있는) 제출 — 입력을 같은 커밋으로 다시 받을 수 있는 것만. id 순."""
+Pick = Literal["id", "spread"]
+PICKS: tuple[Pick, ...] = ("id", "spread")
+
+
+def spread(ranked: Sequence[int], n: int) -> list[int]:
+    """점수 순으로 줄 선 것에서 양 끝을 포함해 고르게 n 개(하나면 가운데)."""
+
+    if n >= len(ranked):
+        return list(ranked)
+    if n == 1:
+        return [ranked[(len(ranked) - 1) // 2]]
+    step = (len(ranked) - 1) / (n - 1)
+    return [ranked[round(i * step)] for i in range(n)]
+
+
+def eligible_submissions(contest: Contest, limit: int | None, pick: Pick = "id") -> list[ContestSubmission]:
+    """운영 채점이 끝난(`Score` 가 있는) 제출 — 입력을 같은 커밋으로 다시 받을 수 있는 것만. 돌려주는 것은 id 순.
+
+    `limit` 건을 고르는 법: `id` 는 id 순 앞 N 건, `spread` 는 운영 점수 순(같으면 id 순)으로 줄 세워 양 끝을 포함해 고르게
+    N 건(점수 분위, #1259). 같은 운영 점수·같은 N 이면 언제나 같은 집합이다."""
 
     in_contest = ContestSubmission.objects.filter(contest=contest).values("pk")
-    ids = Score.objects.filter(submission_id__in=in_contest).order_by("submission_id").values_list("submission_id", flat=True)
-    if limit is not None:
-        ids = ids[:limit]
-    return list(ContestSubmission.objects.filter(pk__in=list(ids)).select_related("contest").order_by("pk"))
+    scores = Score.objects.filter(submission_id__in=in_contest)
+    if limit is None:
+        ids = list(scores.values_list("submission_id", flat=True))
+    elif pick == "spread":
+        ids = spread(list(scores.order_by("percentage", "submission_id").values_list("submission_id", flat=True)), limit)
+    else:
+        ids = list(scores.order_by("submission_id").values_list("submission_id", flat=True)[:limit])
+    return list(ContestSubmission.objects.filter(pk__in=ids).select_related("contest").order_by("pk"))
 
 
 # ── 돈 ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -214,17 +246,69 @@ def spent_today_experiment_usd(now: datetime | None = None) -> Decimal:
 
 
 def cost_range(row: Row, observed: Sequence[Decimal] = ()) -> tuple[Decimal, Decimal]:
-    """칸 하나의 비용 범위(USD). 이미 돈 칸이 있으면 그 최소·최대, 없으면 토큰 추정 × 단가(실행 예산으로 자른다)."""
+    """칸 하나의 비용 범위(USD). 이미 돈 칸이 있으면 그 최소·최대. 없으면 낮은 쪽은 토큰 추정 × 단가, 높은 쪽은
+    에이전트·우리 루프면 칸 예산(하드 상한, #1259), 한 번 호출이면 토큰 추정 × 단가."""
 
     if observed:
         return min(observed), max(observed)
     (lo_in, lo_out), (hi_in, hi_out) = _TOKEN_ESTIMATE[row.method]
     low = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=lo_in, output_tokens=lo_out))
-    high = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=hi_in, output_tokens=hi_out))
-    cap = _RUN_BUDGET_USD[row.method]
-    if cap is not None:
-        low, high = min(low, cap), min(high, cap)
+    cap = CELL_BUDGET_USD[row.method]
+    if cap is None:
+        high = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=hi_in, output_tokens=hi_out))
+    else:
+        low, high = min(low, cap), cap
     return low.quantize(Decimal("0.0001")), high.quantize(Decimal("0.0001"))
+
+
+def per_cell_max(row: Row, observed: Sequence[Decimal] = ()) -> Decimal:
+    """칸을 시작하기 전에 남은 돈과 견줄 값 — 에이전트·우리 루프는 칸 예산(실제로 끊기는 값), 한 번 호출은 높은 추정."""
+
+    cap = CELL_BUDGET_USD[row.method]
+    return cap if cap is not None else cost_range(row, observed)[1]
+
+
+def cell_budget_usd(row: Row, now: datetime | None = None) -> Decimal:
+    """이 칸의 실행 토큰 예산 — min(칸 예산, 남은 하루 돈)(#1259). 하루 상한에 닿기 전에 토큰이 먼저 끊긴다."""
+
+    cap = CELL_BUDGET_USD[row.method]
+    assert cap is not None, row.name
+    remaining = agent_experiment_daily_limit_usd() - spent_today_experiment_usd(now)
+    return max(min(cap, remaining), Decimal(0))
+
+
+def bill_parts(experiment: ScoringExperiment) -> list[BillPart]:
+    """청구 대조(`experiment_report --bill`, #1259)의 재료 — 이 실험이 만들어진 뒤 그 제출들에 발급된 실험 실행 토큰
+    (프록시가 요청마다 센 합)과 한 번 호출 칸(벤더 직접 호출, 칸 하나 = 요청 하나). 결과로 남지 않은 인프라 실패 칸의
+    토큰도 든다 — 돈은 썼다. 같은 제출·같은 때 다른 실험을 돌렸으면 그 토큰도 섞인다(토큰은 실험 이름을 모른다)."""
+
+    submissions = set(experiment.runs.values_list("submission_id", flat=True))
+    submissions |= {s.pk for s in eligible_submissions(experiment.contest, experiment.limit_submissions, experiment_pick(experiment))}
+    tokens = AgentRunToken.objects.filter(
+        purpose=AgentRunToken.PURPOSE_EXPERIMENT, submission_id__in=submissions, created_at__gte=experiment.created_at
+    ).order_by("created_at")
+    parts = [
+        BillPart(
+            source="proxy", vendor=t.vendor, model=t.model, at=t.created_at, requests=t.request_count,
+            input_tokens=t.input_tokens, cache_read_tokens=t.cache_read_tokens, cache_write_tokens=t.cache_write_tokens,
+            output_tokens=t.output_tokens, usd=t.spent_usd,
+        )
+        for t in tokens
+    ]
+    for run in experiment.runs.filter(row__startswith="single_call:").order_by("created_at"):
+        model = run.row.split(":", 1)[1]
+        parts.append(
+            BillPart(
+                source="direct", vendor=vendor_for(model), model=model, at=run.created_at, requests=1,
+                input_tokens=run.input_tokens, cache_read_tokens=0, cache_write_tokens=0,
+                output_tokens=run.output_tokens, usd=run.cost_usd,
+            )
+        )
+    return parts
+
+
+def experiment_pick(experiment: ScoringExperiment) -> Pick:
+    return "spread" if experiment.pick == "spread" else "id"
 
 
 # ── 칸 하나 ───────────────────────────────────────────────────────────────────────────────────────────
@@ -369,6 +453,7 @@ def _run_agent(submission: ContestSubmission, row: Row, inputs: _Inputs) -> Cell
         id_key=ID_KEY,
         evidence_required=lambda item: item.get("met") is True,
         pinned_model=(row.vendor, row.model),
+        total_budget_usd=cell_budget_usd(row),
     )
     try:
         with provided_snapshot(submission.pk, inputs.snapshot):
@@ -411,8 +496,19 @@ def _items(output: dict[str, JSON]) -> list[dict[str, JSON]]:
     return [item for item in items if isinstance(item, dict)] if isinstance(items, list) else []
 
 
+def _proxy_requests(record: dict[str, JSON]) -> int:
+    attempts = record.get("attempts")
+    total = 0
+    for attempt in attempts if isinstance(attempts, list) else []:
+        usage = attempt.get("proxy_usage") if isinstance(attempt, dict) else None
+        count = usage.get("request_count") if isinstance(usage, dict) else None
+        total += count if isinstance(count, int) else 0
+    return total
+
+
 def _loop_totals(record: dict[str, JSON]) -> tuple[int, int, Decimal]:
-    """우리 루프의 토큰·비용 — 루프가 벤더 응답에서 센 값(`_price_loop` 가 단가를 곱했다). 프록시가 센 값이 더 크면 그것."""
+    """우리 루프의 토큰·비용. 비용은 프록시가 요청마다 센 값이다(청구에 가장 가깝다, #1259). 루프가 센 비용은 합계 usage 에
+    단가를 곱한 근사라(`selfloop_scoring.LOOP_COST_BASIS`) 프록시 기록이 없을 때만 쓴다. 토큰은 큰 쪽."""
 
     loop = _loop(record)
     usage = loop.get("usage") if isinstance(loop.get("usage"), dict) else {}
@@ -420,7 +516,8 @@ def _loop_totals(record: dict[str, JSON]) -> tuple[int, int, Decimal]:
     tokens_out = int(usage.get("output_tokens") or 0)  # type: ignore[union-attr, arg-type]  # 기록 JSON
     loop_cost = Decimal(str(loop.get("cost_usd") or 0))
     proxy_in, proxy_out, proxy_cost = _proxy_totals(record)
-    return max(tokens_in, proxy_in), max(tokens_out, proxy_out), max(loop_cost, proxy_cost)
+    cost = proxy_cost if _proxy_requests(record) > 0 else loop_cost
+    return max(tokens_in, proxy_in), max(tokens_out, proxy_out), cost
 
 
 def _proxy_stop(record: dict[str, JSON]) -> str | None:
@@ -439,7 +536,8 @@ def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> 
     assert inputs.snapshot is not None
     try:
         outcome = run_selfloop_scoring(
-            submission, inputs.requirements, inputs.snapshot, vendor=row.vendor, model=row.model, purpose="experiment"
+            submission, inputs.requirements, inputs.snapshot, vendor=row.vendor, model=row.model, purpose="experiment",
+            budget_usd=cell_budget_usd(row),
         )
     except AgentRunHeld as held:
         stopped = _proxy_stop(held.record)
@@ -455,7 +553,7 @@ def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> 
     tokens_in, tokens_out, spent = _loop_totals(outcome.record)
     return CellResult(
         "scored", score=score, verdicts=verdicts, evidence_offered=offered + _dropped(outcome.record),
-        evidence_real=real, input_tokens=tokens_in, output_tokens=tokens_out, cost_usd=max(spent, outcome.cost_usd),
+        evidence_real=real, input_tokens=tokens_in, output_tokens=tokens_out, cost_usd=spent,
         model_version=outcome.model_version, record=outcome.record,
     )
 
@@ -532,7 +630,7 @@ class RowPlan:
     done: int
     low_usd: Decimal  # 남은 칸 전체의 비용 범위
     high_usd: Decimal
-    per_run_high_usd: Decimal
+    per_run_high_usd: Decimal  # 칸당 최대 — 칸을 시작하기 전에 남은 돈과 견준다(`per_cell_max`)
 
 
 @dataclass(frozen=True)
@@ -549,9 +647,15 @@ class Plan:
 
 
 def plan(
-    contest: Contest, rows: list[Row], *, repeat: int, limit: int | None, experiment: ScoringExperiment | None
+    contest: Contest,
+    rows: list[Row],
+    *,
+    repeat: int,
+    limit: int | None,
+    experiment: ScoringExperiment | None,
+    pick: Pick = "id",
 ) -> Plan:
-    submissions = eligible_submissions(contest, limit)
+    submissions = eligible_submissions(contest, limit, pick)
     done: set[tuple[int, str, int]] = set()
     observed: dict[str, list[Decimal]] = {}
     if experiment is not None:
@@ -571,8 +675,9 @@ def plan(
     row_plans = []
     for row in rows:
         pending = sum(1 for _s, r, _n in cells if r == row)
-        low, high = cost_range(row, observed.get(row.name, ()))
+        seen = observed.get(row.name, ())
+        low, high = cost_range(row, seen)
         row_plans.append(
-            RowPlan(row, pending, len(submissions) * repeat - pending, low * pending, high * pending, high)
+            RowPlan(row, pending, len(submissions) * repeat - pending, low * pending, high * pending, per_cell_max(row, seen))
         )
     return Plan(submissions, cells, row_plans, agent_experiment_daily_limit_usd(), spent_today_experiment_usd())

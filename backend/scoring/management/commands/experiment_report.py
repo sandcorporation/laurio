@@ -2,6 +2,7 @@
 
     python manage.py experiment_report contest3-r3-n16-1a2b3c4d               # 마크다운
     python manage.py experiment_report contest3-r3-n16-1a2b3c4d --format csv  # CSV
+    python manage.py experiment_report contest3-r3-n16-1a2b3c4d --bill          # 청구 대조(벤더·모델·UTC 시간 창)
 """
 
 from __future__ import annotations
@@ -10,8 +11,8 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from scoring.experiment import eligible_submissions, is_infra_failure
-from scoring.experiment_report import RunRow, limits_note, report_rows, to_csv, to_markdown
+from scoring.experiment import bill_parts, eligible_submissions, is_infra_failure
+from scoring.experiment_report import RunRow, bill_lines, bill_markdown, limits_note, report_rows, to_csv, to_markdown
 from scoring.models import ScoringExperiment
 
 
@@ -21,11 +22,21 @@ class Command(BaseCommand):
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("experiment")
         parser.add_argument("--format", choices=["md", "csv"], default="md")
+        parser.add_argument("--bill", action="store_true", help="보고표 대신 청구 대조표(벤더·모델·UTC 날짜·시간 창별 합)")
 
     def handle(self, *args: object, **options: object) -> None:
         experiment = ScoringExperiment.objects.filter(name=options["experiment"]).first()
         if experiment is None:
             raise CommandError(f"실험 {options['experiment']} 이 없다")
+        if options["bill"]:
+            notes = [
+                "에이전트·우리 루프는 프록시가 요청마다 센 실행 토큰의 합이다(토큰 발급 시각의 UTC 시간 창). 한 번 호출은 "
+                "칸 하나를 요청 하나로 센다(칸 기록 시각). OpenAI 의 입력은 캐시 읽기를 포함한다.",
+                "결과로 남지 않은 인프라 실패 칸의 토큰도 든다. 같은 제출에 같은 때 다른 실험을 돌렸으면 그 몫도 섞인다.",
+            ]
+            md = bill_markdown(f"청구 대조 — {experiment.name}", bill_lines(bill_parts(experiment)), notes)
+            self.stdout.write(md, ending="")
+            return
         runs = [
             RunRow(
                 submission_id=r.submission_id,

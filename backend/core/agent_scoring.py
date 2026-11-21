@@ -104,6 +104,9 @@ class AgentJob:
     load_snapshot: Callable[[], Snapshot] | None = None  # 박제본을 받는 길(`provided_snapshot` 이 없을 때)
     #: 플랫폼 키로 돌되 운영 설정 대신 이 벤더·모델로(방식 비교 실험, #1246). `class_key` 가 있으면 그쪽이 이긴다.
     pinned_model: tuple[Vendor, str] | None = None
+    #: 시도 전체(최초 + 재실행)에 거는 예산 하나(방식 비교 실험의 칸 예산, #1259). 둘째 시도의 토큰 예산은 이것에서 앞
+    #: 시도가 쓴 돈을 뺀 값이고, 남은 것이 없으면 재실행하지 않는다. 비면 지금처럼 시도마다 `RUN_BUDGET_USD`(운영 채점).
+    total_budget_usd: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -511,13 +514,15 @@ def agent_model(vendor: Vendor) -> str:
     return setting_value("LLM_OPENAI_MODEL") or _OPENAI_DEFAULT_MODEL
 
 
-def _attempt(job: AgentJob, *, vendor: Vendor, model: str, prompt: str, snapshot: Snapshot, index: _LineIndex) -> tuple[list[str], dict[str, JSON], JSON]:
+def _attempt(
+    job: AgentJob, *, vendor: Vendor, model: str, prompt: str, snapshot: Snapshot, index: _LineIndex, budget_usd: Decimal
+) -> tuple[list[str], dict[str, JSON], JSON]:
     issued = issue_run_token(
         submission_id=job.submission.id,
         purpose=job.purpose,
         vendor=vendor,
         model=model,
-        budget_usd=RUN_BUDGET_USD,
+        budget_usd=budget_usd,
         key_class_id=job.class_key.class_id if job.class_key is not None else None,
     )
     spec = RunSpec(
@@ -526,7 +531,7 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, prompt: str, snapshot
         prompt=prompt,
         output_schema=job.output_schema,
         run_token=issued.token,
-        max_budget_usd=float(RUN_BUDGET_USD),
+        max_budget_usd=float(budget_usd),
         timeout_seconds=ATTEMPT_TIMEOUT_SECONDS,
     )
     result = request_run(spec, snapshot.zip_bytes, timeout=ATTEMPT_HTTP_TIMEOUT_SECONDS)
@@ -567,15 +572,22 @@ def _attempt(job: AgentJob, *, vendor: Vendor, model: str, prompt: str, snapshot
     return problems, record, parsed.structured_output
 
 
-def _budget_spent(attempt: JSON) -> bool:
-    """프록시가 센 이 시도의 비용이 실행 예산에 닿았는가."""
+def _attempt_spent(attempt: JSON) -> Decimal | None:
+    """프록시가 센 이 시도의 비용."""
 
     usage = attempt.get("proxy_usage") if isinstance(attempt, dict) else None
     spent = usage.get("spent_usd") if isinstance(usage, dict) else None
     try:
-        return spent is not None and Decimal(str(spent)) >= RUN_BUDGET_USD
+        return None if spent is None else Decimal(str(spent))
     except ArithmeticError:
-        return False
+        return None
+
+
+def _budget_spent(attempt: JSON, budget_usd: Decimal) -> bool:
+    """프록시가 센 이 시도의 비용이 그 시도의 실행 예산에 닿았는가."""
+
+    spent = _attempt_spent(attempt)
+    return spent is not None and spent >= budget_usd
 
 
 def run_agent_job(job: AgentJob) -> AgentJobOutcome:
@@ -605,9 +617,19 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
     attempts: list[JSON] = []
     record["attempts"] = attempts
     problems: list[str] = []
+    spent_so_far = Decimal(0)
     for _ in range(MAX_ATTEMPTS):
+        if job.total_budget_usd is None:
+            budget = RUN_BUDGET_USD
+        else:
+            budget = job.total_budget_usd - spent_so_far
+            if budget <= 0:
+                problems = [*problems, "시도 전체 예산 소진 — 재실행하지 않는다"]
+                break
         try:
-            problems, attempt, output = _attempt(job, vendor=vendor, model=model, prompt=prompt, snapshot=snapshot, index=index)
+            problems, attempt, output = _attempt(
+                job, vendor=vendor, model=model, prompt=prompt, snapshot=snapshot, index=index, budget_usd=budget
+            )
         except agent_grader().RunRejected as exc:
             # 실행 전에 거절됐다(박제본이 너무 크다 등) — 다시 보내도 같다.
             attempts.append({"rejected": exc.reason})
@@ -624,7 +646,8 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
             return AgentJobOutcome(
                 structured_output=output, model_version=f"agent:{vendor}:{model}", record=record, prompt=prompt
             )
-        if _budget_spent(attempt):
+        spent_so_far += _attempt_spent(attempt) or Decimal(0)
+        if _budget_spent(attempt, budget):
             # 실행 예산을 다 쓰고 끊긴 시도는 다시 돌려도 같은 길을 헤맨다 — 재실행하면 예산을 한 번 더 쓴다(#1681).
             problems = [*problems, "실행 예산 소진 — 재실행하지 않는다"]
             break

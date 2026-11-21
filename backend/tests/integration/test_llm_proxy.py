@@ -389,8 +389,9 @@ def test_codex_stream_usage_is_recorded_and_summed():
     _run(vendor, body)
     usage = run_usage(issued.record_id)
     assert (usage.request_count, usage.usage.input_tokens, usage.usage.output_tokens) == (2, 8000, 2000)
-    # 2 × (4000×$0.25 + 1000×$2) / 100만
-    assert usage.spent_usd == Decimal("0.006")
+    assert usage.usage.cache_read_tokens == 200
+    # 2 × (3900×$0.25 + 캐시 100×$0.025 + 1000×$2) / 100만 — 요청마다 6자리로 반올림(0.0029775 → 0.002978, #1259)
+    assert usage.spent_usd == Decimal("0.005956")
 
 
 # --- 발급 ----------------------------------------------------------------------------------------

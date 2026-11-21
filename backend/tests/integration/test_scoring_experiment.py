@@ -7,16 +7,18 @@
 from __future__ import annotations
 
 import io
+import json
+from datetime import UTC
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.utils import timezone
 
 from contests.models import ContestSubmission
 from core import agent_scoring
-from core.agent_run_tokens import authorize, issue_run_token, spent_today_usd
+from core.agent_run_tokens import Grant, Usage, authorize, issue_run_token, record_usage, spent_today_usd, usage_cost_usd
 from core.models import AgentRunToken
 from policies.runtime_settings import AGENT_EXPERIMENT_DAILY_LIMIT_USD
 from scoring import agent_runner as ar
@@ -285,3 +287,167 @@ def test_three_infra_failures_in_a_row_stop_the_run(scored, monkeypatch, limit):
     with pytest.raises(CommandError, match="연속 3칸이라 멈췄다. 남은 칸 5개"):
         _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "5", "--confirm")
     assert len(calls) == 3 and not ScoringExperimentRun.objects.exists()
+
+
+# ── 돈의 상한(#1259) ──────────────────────────────────────────────────────────────────────────────────
+
+HAIKU_LOOP = "self_loop:claude-haiku-5-5"
+MINI_AGENT = "agent:gpt-4.1-mini"
+
+
+def _proxy_like_executor(monkeypatch, plan: list[tuple[int, Usage]], stdout) -> list[dict]:
+    """실행기 + 프록시 흉내 — 시도마다 (요청 수, 요청 하나의 usage). 실제 프록시처럼 요청 **전에** `authorize` 로 예산·하루
+    상한을 보고, 거절되면 그 시도를 멈추고, 받은 요청은 `record_usage` 로 요청마다 단가를 곱해 쌓는다."""
+
+    specs: list[dict] = []
+
+    def run(spec, repo_zip: bytes, *, timeout: float):
+        requests, usage = plan[len(specs)]
+        specs.append(dict(spec))
+        for _ in range(requests):
+            grant = authorize(spec["run_token"], vendor=spec["vendor"], model=spec["model"])
+            if not isinstance(grant, Grant):
+                break
+            record_usage(grant.record_id, usage)
+        return {
+            "run_id": f"r{len(specs)}", "cli_version": "fake", "exit_code": 0, "timed_out": False,
+            "duration_seconds": 1.0, "stdout_truncated": False, "stderr_tail": "", "stdout": stdout(spec),
+        }
+
+    monkeypatch.setattr(agent_scoring, "request_run", run)
+    return specs
+
+
+def _loop_stdout(rid: int, requests: int, per: Usage):
+    total = {
+        "requests": requests, "input_tokens": per.input_tokens * requests, "output_tokens": per.output_tokens * requests,
+        "cache_read_tokens": 0, "cache_write_tokens": 0,
+    }
+    verdict = {"requirement_id": rid, "met": True, "evidence": ["app.py:1"], "reason": "로그인 표식이 있다."}
+    loop = {"usage": total, "map": {"usage": total}, "requirements": [{"requirement_id": rid, "status": "resolved", "usage": total}]}
+    return lambda spec: json.dumps({"verdicts": [verdict], "loop": loop})
+
+
+def _spend_today(usd: str) -> None:
+    prior = issue_run_token(submission_id=1, purpose="experiment", vendor="openai", model="gpt-4.1-mini")
+    AgentRunToken.objects.filter(pk=prior.record_id).update(spent_usd=Decimal(usd))
+
+
+@pytest.mark.django_db
+def test_loop_cell_costs_what_the_proxy_counted_not_five_times_and_bill_lists_it(scored, monkeypatch, limit):
+    # 운영 617 의 꼴: Haiku 우리 루프 합계 176만 토큰, 요청 하나는 10만 미만(8.8만) — 할증이 붙지 않는다.
+    per = Usage(input_tokens=88_000, output_tokens=1_500)
+    rid = scored.contest.requirements.get().id
+    _proxy_like_executor(monkeypatch, [(20, per)], _loop_stdout(rid, 20, per))
+    limit("5")
+
+    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", HAIKU_LOOP, "--repeat", "1",
+                "--name", "bill", "--confirm")
+
+    run = ScoringExperimentRun.objects.get()
+    assert run.status == "scored", (run.problem, out)
+    # 요청마다 0.0088 + 0.00075 = 0.00955, 스무 번 = 0.191. 합계에 문턱을 걸면 5배(0.955)가 된다.
+    assert run.cost_usd == Decimal("0.191000") and run.input_tokens == 1_760_000
+    loop = run.record["attempts"][-1]["loop"]
+    assert loop["cost_basis"] == "sum_without_long_context" and Decimal(loop["cost_usd"]) == Decimal("0.191")
+
+    bill = _call("experiment_report", "bill", "--bill")
+    assert bill.startswith("# 청구 대조 — bill\n")
+    day = run.created_at.astimezone(UTC).strftime("%Y-%m-%d")
+    assert f"| anthropic | claude-haiku-5-5 | {day} |" in bill
+    assert "| 20 | 1760000 | 0 | 0 | 30000 | 0.191000 |" in bill and "| 합계 | | | | 20 | | | | | 0.191000 |" in bill
+
+
+@pytest.mark.django_db
+def test_agent_cell_attempts_share_one_cell_budget(scored, monkeypatch, limit):
+    # 요청 하나 = 입력 10만($0.04) + 출력 6250($0.01) = $0.05. 첫 시도는 $0.60 을 쓰고 틀린 꼴로 끝난다.
+    per = Usage(input_tokens=100_000, output_tokens=6_250)
+    specs = _proxy_like_executor(monkeypatch, [(12, per), (100, per)], lambda spec: "")
+    limit("5")
+
+    _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", MINI_AGENT, "--repeat", "1", "--confirm")
+
+    run = ScoringExperimentRun.objects.get()
+    assert run.status == "held" and len(specs) == 2
+    budgets = list(AgentRunToken.objects.filter(purpose="experiment").order_by("pk").values_list("budget_usd", "spent_usd"))
+    assert budgets == [(Decimal("1"), Decimal("0.6")), (Decimal("0.4"), Decimal("0.4"))]
+    assert specs[1]["max_budget_usd"] == pytest.approx(0.4)
+    assert run.cost_usd == Decimal("1.000000") <= ex.CELL_BUDGET_USD["agent"]
+
+
+@pytest.mark.django_db
+def test_a_cell_does_not_start_when_the_day_has_less_than_its_hard_cap(scored, monkeypatch, limit):
+    # 운영 11-21 의 순서: 남은 0.2524 > 추정 0.1792 라 시작했고 0.58 을 쓰다 끊겼다. 이제는 칸 예산($1)과 견준다.
+    specs = _proxy_like_executor(monkeypatch, [], lambda spec: pytest.fail("남은 돈이 칸 예산보다 적은데 시작했다"))
+    limit("5")
+    _spend_today("4.7476")
+
+    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "1", "--confirm")
+
+    assert "하루 상한에 닿아 멈췄다 — 남은 돈 0.2524 < 칸당 최대 1.0000" in out
+    assert not specs and not ScoringExperimentRun.objects.exists()
+    assert "self_loop:gpt-4.1-mini | 1 | 0 |" in out and "| 1.0000" in out  # 미리 보기의 칸당 최대도 칸 예산
+
+
+@pytest.mark.django_db
+def test_a_started_cell_is_cut_within_the_days_money_plus_one_request(scored, monkeypatch, limit):
+    # 칸 도중(나): 토큰 예산 = min(칸 예산, 남은 하루 돈). 시작 확인을 지나친 칸(동시에 다른 지출 등)도 하루 상한 앞에서 끊긴다.
+    per = Usage(input_tokens=100_000, output_tokens=18_750)  # 요청 하나 $0.07
+    one_request = usage_cost_usd("openai", "gpt-4.1-mini", per)
+    rid = scored.contest.requirements.get().id
+    _proxy_like_executor(monkeypatch, [(9, per)], _loop_stdout(rid, 9, per))  # 다 돌면 $0.63
+    limit("5")
+    _spend_today("4.7476")
+    experiment = ScoringExperiment.objects.create(
+        name="cut", contest=scored.contest, created_by="시험", rows=[LOOP], repeat=1, daily_limit_usd=Decimal("5")
+    )
+
+    ex.run_cell(experiment, scored, ex.parse_rows(LOOP)[0], 1, ex.load_inputs(scored))
+
+    token = AgentRunToken.objects.filter(purpose="experiment").latest("pk")
+    assert token.budget_usd == Decimal("0.2524")
+    assert ex.spent_today_experiment_usd() <= Decimal("5") + one_request  # 넘쳐도 요청 하나 몫
+    assert token.spent_usd == Decimal("0.28")  # 0.21 < 0.2524 라 넷째 요청까지 받고 끊긴다
+
+
+def test_openai_cached_input_is_priced_at_the_cache_rate():
+    # gpt-4.1-mini: 입력 $0.40, 캐시 입력 $0.10, 출력 $1.60 / 100만.
+    assert usage_cost_usd("openai", "gpt-4.1-mini", Usage(input_tokens=1_000_000, cache_read_tokens=800_000)) == Decimal("0.16")
+    # 운영 4.1-mini 실행 토큰 6개: 입력 879만 중 캐시 708만 — 입력 몫이 $3.52 가 아니라 $1.392.
+    assert usage_cost_usd("openai", "gpt-4.1-mini", Usage(input_tokens=8_790_000, cache_read_tokens=7_080_000)) == Decimal("1.392")
+    # 긴 프롬프트 할증(gpt-5.4, 27.2만 초과)은 캐시 입력에도 붙는다: 20만 × $5 + 10만 × $0.50.
+    assert usage_cost_usd("openai", "gpt-5.4", Usage(input_tokens=300_000, cache_read_tokens=100_000)) == Decimal("1.05")
+    # 표에 캐시 단가가 없는 모델은 입력 단가 그대로.
+    assert usage_cost_usd("openai", "gpt-4.1-nano", Usage(input_tokens=1_000_000, cache_read_tokens=1_000_000)) == Decimal("0.1")
+    # Anthropic 은 그대로(캐시 읽기 0.1배).
+    assert usage_cost_usd("anthropic", "claude-haiku-5-5", Usage(input_tokens=0, cache_read_tokens=50_000)) == Decimal("0.0005")
+
+
+def test_haiku_long_prompt_surcharge_is_per_request_and_off_for_sums():
+    one = Usage(input_tokens=88_000, output_tokens=1_500)
+    total = Usage(input_tokens=1_760_000, output_tokens=30_000)
+    assert usage_cost_usd("anthropic", "claude-haiku-5-5", one) * 20 == Decimal("0.191")
+    assert usage_cost_usd("anthropic", "claude-haiku-5-5", total) == Decimal("0.955")  # 합계에 걸면 5배
+    assert usage_cost_usd("anthropic", "claude-haiku-5-5", total, long_context=False) == Decimal("0.191")
+
+
+def test_spread_picks_evenly_across_the_score_order():
+    ranked = list(range(10, 20))
+    assert ex.spread(ranked, 4) == [10, 13, 16, 19]
+    assert ex.spread(ranked, 1) == [14]
+    assert ex.spread(ranked, 10) == ranked and ex.spread(ranked, 30) == ranked
+
+
+@pytest.mark.django_db
+def test_pick_is_kept_with_the_experiment(scored, monkeypatch, limit):
+    monkeypatch.setattr(ex, "_RUNNERS", {"single_call": lambda *a: ex.CellResult("scored", score=Decimal("50"), cost_usd=Decimal("0.01"))})
+    limit("5")
+    args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "1",
+            "--limit-submissions", "1", "--name", "p")
+
+    _call(*args, "--pick", "spread", "--confirm")
+
+    assert ScoringExperiment.objects.get(name="p").pick == "spread"
+    with pytest.raises(CommandError, match="--pick spread 로 만들어졌다"):
+        _call(*args, "--pick", "id")
+    assert "남은 호출 0칸" in _call(*args)  # --pick 을 빼면 실험에 남은 고르는 법으로

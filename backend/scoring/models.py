@@ -370,6 +370,9 @@ class ScoringExperiment(models.Model):
     rows = models.JSONField()  # ["agent:claude-sonnet-5-5", ...] — 첫째가 기준 줄
     repeat = models.PositiveSmallIntegerField()
     limit_submissions = models.PositiveIntegerField(null=True, blank=True)
+    #: `limit_submissions` 건을 고르는 법(#1259) — "id"(id 순 앞 N 건) 또는 "spread"(운영 점수 분위로 N 건). 이 값이 있기
+    #: 전에 만든 실험은 "id" 다 — 이어 돌려도 고른 집합이 바뀌지 않는다.
+    pick = models.CharField(max_length=10, default="id")
     daily_limit_usd = models.DecimalField(max_digits=10, decimal_places=4)  # 만들 때의 실험 하루 상한
     created_at = models.DateTimeField(auto_now_add=True)
 

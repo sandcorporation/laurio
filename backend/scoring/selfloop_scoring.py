@@ -63,16 +63,22 @@ class SelfLoopOutcome:
     cost_usd: Decimal  # 프록시가 센 이 실행의 합
 
 
+#: 루프 기록의 단계·요구사항별 비용이 어떻게 셌는지(#1259) — 루프는 요청마다가 아니라 합계 usage 만 남기므로, 요청 하나에
+#: 걸리는 긴 프롬프트 할증을 합계에 걸면 몇 배로 부푼다(Haiku 5.5 의 10만 토큰 초과 5배). 그래서 할증 없이 근사한다.
+#: 청구에 가까운 값은 프록시가 요청마다 센 `proxy_usage.spent_usd` 다.
+LOOP_COST_BASIS = "sum_without_long_context"
+
+
 def _usage_cost(vendor: Vendor, model: str, usage: JSON) -> str:
     if not isinstance(usage, dict):
         return "0"
     counts = {k: usage.get(k) for k in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")}
     ints = {k: v if isinstance(v, int) and not isinstance(v, bool) else 0 for k, v in counts.items()}
-    return str(usage_cost_usd(vendor, model, Usage(**ints)))
+    return str(usage_cost_usd(vendor, model, Usage(**ints), long_context=False))
 
 
 def _price_loop(vendor: Vendor, model: str, loop: dict[str, JSON]) -> None:
-    """단계·요구사항별 토큰에 비용(USD 문자열)을 붙인다 — 실행기는 단가를 모른다."""
+    """단계·요구사항별 토큰에 비용(USD 문자열)을 붙인다 — 실행기는 단가를 모른다. 합계 usage 라 할증 없는 근사다."""
 
     stage = loop.get("map")
     if isinstance(stage, dict):
@@ -82,6 +88,7 @@ def _price_loop(vendor: Vendor, model: str, loop: dict[str, JSON]) -> None:
         if isinstance(sub, dict):
             sub["cost_usd"] = _usage_cost(vendor, model, sub.get("usage"))
     loop["cost_usd"] = _usage_cost(vendor, model, loop.get("usage"))
+    loop["cost_basis"] = LOOP_COST_BASIS
 
 
 def _problems(output: JSON, expected: frozenset[int]) -> list[str]:
@@ -113,8 +120,10 @@ def run_selfloop_scoring(
     vendor: Vendor,
     model: str,
     purpose: Purpose = "scoring",
+    budget_usd: Decimal = RUN_BUDGET_USD,
 ) -> SelfLoopOutcome:
     """박제본 하나를 우리 루프로 채점한다. 판정이 안 난 요구사항이 있거나 루프가 멈췄으면 `AgentRunHeld`(기록 포함).
+    `budget_usd` 가 실행 토큰의 예산이다(실험은 칸 예산과 남은 하루 돈 중 작은 쪽, #1259).
     실행기 바쁨·닿지 못함·토큰 거절은 `run_agent_job` 처럼 그대로 위로 던진다."""
 
     prompt = selfloop_prompt()
@@ -131,7 +140,7 @@ def run_selfloop_scoring(
         "attempts": [],
     }
     issued = issue_run_token(
-        submission_id=submission.id, purpose=purpose, vendor=vendor, model=model, budget_usd=RUN_BUDGET_USD
+        submission_id=submission.id, purpose=purpose, vendor=vendor, model=model, budget_usd=budget_usd
     )
     spec = RunSpec(
         vendor=vendor,
@@ -139,7 +148,7 @@ def run_selfloop_scoring(
         prompt=prompt,
         output_schema=SCORING_OUTPUT_SCHEMA,
         run_token=issued.token,
-        max_budget_usd=float(RUN_BUDGET_USD),
+        max_budget_usd=float(budget_usd),
         timeout_seconds=LOOP_TIMEOUT_SECONDS,
         mode="selfloop",
         requirements=[{"id": r.requirement_id, "text": neutralize_untrusted(r.text)} for r in requirements],
