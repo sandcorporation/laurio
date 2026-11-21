@@ -542,9 +542,11 @@ append-only 저장되고, 통과·달성률 계산이 이 항목을 필수로 �
 닫은 점수인지(`model_version == PLATFORM_FAILURE_MODEL_VERSION`)를 서버가 판정해 싣는다(#679) —
 화면은 그 문자열을 다시 쓰지 않는다.
 tree-sitter 문법은 `tree-sitter-language-pack`으로 쓴다. **이 패키지는 문법을 설치 때가
-아니라 처음 쓸 때 인터넷에서 받으므로, 백엔드 이미지를 구울 때 `manage.py
-prefetch_syntax_grammars`로 여덟 언어 문법을 미리 넣는다**(`XDG_CACHE_HOME=/opt/codemit-cache`,
-CI 테스트 잡도 테스트 전에 같은 명령을 부른다). 채점 중에는 문법을 내려받지 않는다 — 문법이
+아니라 처음 쓸 때 인터넷에서 받으므로, 백엔드 이미지를 구울 때 `classroom/grammar_prefetch.py`
+로 아홉 문법을 미리 넣는다**(`XDG_CACHE_HOME=/opt/codemit-cache`, CI 테스트 잡도 테스트 전에
+`manage.py prefetch_syntax_grammars`로 같은 함수를 부른다). 이미지의 받기 층은 backend 소스
+복사 **앞**에 있고 그 파일 하나만 복사하므로(Django 를 가져오지 않는다) backend 파일이 바뀌어도
+CACHED 로 남고, 받기가 끊기면 언어마다 3회 다시 시도한다(#1205). 채점 중에는 문법을 내려받지 않는다 — 문법이
 캐시에 없는 언어의 파일은 AI 판정으로 넘어간다. backend·celery·events가 같은 Dockerfile을
 쓰므로 이미지가 함께 커졌다(문법 포함 약 692MB).
 
