@@ -220,6 +220,12 @@ def _clear_stale_seed_contests() -> int:
     hard_delete_e2e_fixture_rows(
         Score.objects.filter(submission__contestsubmission__contest_id__in=stale_contest_ids)
     )
+    # 상장도 PROTECT 다(#1131) — 다시 발급의 `replaced_by` 도 PROTECT 라 서로 가리키는 고리를 먼저 푼다.
+    from certificates.models import Certificate
+
+    stale_certificates = Certificate.objects.filter(contest_id__in=stale_contest_ids)
+    stale_certificates.update(replaced_by=None)
+    stale_certificates.delete()
     Contest.objects.filter(id__in=stale_contest_ids).delete()
     return len(stale_contest_ids)
 

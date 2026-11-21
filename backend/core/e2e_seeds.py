@@ -64,6 +64,12 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         options=frozenset({"only", "clear", "prune_other_runs", "run_id"}),
         required=frozenset({"run_id"}),
     ),
+    # 운영자 앱 상장 목록·취소 e2e(#1131) — 호출마다 새 공모전·새 유저라 줄 세울 일 없다.
+    "operator-certificates": SeedEntry(
+        command="seed_e2e_operator_certificates",
+        options=frozenset({"run_id"}),
+        serialized=False,
+    ),
     "operator-appeal": SeedEntry(
         command="seed_e2e_operator_appeal",
         # 이 시드도 `_own_title_prefix` 로 자기 것을 가르므로 run_id 를 받는다.

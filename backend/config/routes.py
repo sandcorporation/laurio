@@ -71,6 +71,7 @@ API_ROUTERS: tuple[Mount, ...] = (
     Mount("/operator", "policies.api.operator_router"),
     Mount("/operator", "policies.runtime_settings_api.runtime_settings_router"),
     Mount("/operator", "contests.operator_api.operator_router"),
+    Mount("/operator", "certificates.operator_api.operator_router"),
     Mount("/operator", "verification.operator_api.operator_router"),
     Mount("/operator", "classroom.template_operator_api.operator_router"),
     Mount("/operator", "classroom.usage_operator_api.usage_operator_router"),
