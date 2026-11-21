@@ -43,6 +43,7 @@ from ninja.pagination import PageNumberPagination, paginate
 
 from accounts.middleware import jwt_auth
 from contests.models import ContestSubmission, Requirement
+from contests.ports import CURRENT_SCORE, CURRENT_SCORE_RELATIONS, related
 from contests.scoring_hold import is_size_held
 from core.clock import Clock
 from core.operator_auth import OperatorAuth
@@ -201,7 +202,9 @@ def list_own_source_readings(request: HttpRequest, submission_id: int, **kwargs)
 def _get_appeal_or_404(appeal_id: int) -> Appeal:
     try:
         return Appeal.objects.select_related(
-            "submission__score", "submission__contestsubmission__contest", "ruling__ruled_by"
+            *(f"submission__{path}" for path in related(CURRENT_SCORE_RELATIONS)),
+            "submission__contestsubmission__contest",
+            "ruling__ruled_by",
         ).get(id=appeal_id)
     except Appeal.DoesNotExist as exc:
         raise HttpError(404, "이의제기를 찾을 수 없습니다.") from exc
@@ -223,7 +226,8 @@ def _serialize_ruling(ruling) -> RulingOut | None:
 
 def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
     # 「크기 초과」 보류 중에 낸 이의(#989 A2)는 Score 가 아직 없다 — 심사 종료 때 자동 0% 가 생긴다.
-    score = getattr(appeal.submission, "score", None)
+    # 정정됐으면 정정 값이 판정 필드에, 원래 점수·사유가 곁에 실린다(#1179, 스펙 #1178 결정 5).
+    score = CURRENT_SCORE.get()(appeal.submission)
     ruling = _ruling_of(appeal)
     return AppealDetailOut(
         id=appeal.id,
@@ -242,6 +246,12 @@ def _serialize_detail(appeal: Appeal) -> AppealDetailOut:
                 created_at=score.created_at,
                 scored_assets=resolve_scored_assets(score.scored_assets),
                 scoring_basis=scoring_basis_for(score.model_version),
+                corrected=score.corrected,
+                original_percentage=(
+                    None if score.original_percentage is None else str(score.original_percentage)
+                ),
+                original_model_version=score.original_model_version,
+                correction_reason=score.correction_reason,
             )
             if score is not None
             else None
@@ -338,7 +348,8 @@ def reveal_appeal_source(request, appeal_id: int):
     """
 
     appeal = _get_appeal_or_404(appeal_id)
-    score = getattr(appeal.submission, "score", None)
+    # 현재 점수의 프롬프트 — 정정됐으면 정정 채점에 실린 소스다(#1179).
+    score = CURRENT_SCORE.get()(appeal.submission)
     if score is None:
         # 「크기 초과」 보류 중에 낸 이의(#989 A2) — 채점에 실린 소스가 없다(벤더를 부르지 않았다).
         raise HttpError(404, "채점이 보류되어 채점에 쓰인 소스가 없습니다.")

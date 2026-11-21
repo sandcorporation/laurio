@@ -84,6 +84,7 @@ from verification.models import Verification
 from .images import ALLOWED_CONTEST_IMAGE_CONTENT_TYPES
 from .models import Contest, ContestSubmission, Evidence, Requirement, RequirementResponse
 from .ports import (
+    CURRENT_SCORE,
     NEXT_ACTION_RELATIONS,
     OWN_SCORE_RELATIONS,
     bonus_scores,
@@ -1222,7 +1223,8 @@ def get_own_score(request: HttpRequest, submission_id: int):
 
     submission = _get_owned_submission(request, submission_id)
 
-    score = getattr(submission, "score", None)
+    # 정정이 있으면 최신 끝난 정정이 현재 점수다(#1179) — 원래 Score 를 직접 읽지 않는다.
+    score = CURRENT_SCORE.get()(submission)
     if score is None:
         raise HttpError(404, "아직 채점되지 않았습니다.")
 

@@ -24,7 +24,7 @@ from __future__ import annotations
 from django.conf import settings
 from django.db import models
 
-from ledger.models import AppendOnlyError, AppendOnlyModel
+from ledger.models import AppendOnlyError, AppendOnlyModel, AppendOnlyQuerySet
 
 
 class Score(AppendOnlyModel):
@@ -74,6 +74,74 @@ class Score(AppendOnlyModel):
         return f"Score(submission={self.submission_id}, percentage={self.percentage})"
 
 
+class ScoreCorrectionQuerySet(AppendOnlyQuerySet):
+    pass
+
+
+class ScoreCorrection(models.Model):
+    """원래 `Score` 에 덧대는 정정 기록 하나(#1179, 스펙 #1178, ADR-0006 개정).
+
+    `Score` 는 제출당 하나이고 append-only 라 플랫폼 오류로 틀린 점수를 바로잡을 길이 없었다.
+    원래 행은 그대로 두고 이 행을 더한다 — 「현재 점수」는 끝난 정정 중 가장 나중 것, 없으면 원래
+    `Score` 다(`scoring.current.current_score`). 판정 필드는 `Score` 와 모양이 같아 응답 스키마가 그대로 돈다.
+
+    **한 번만 바뀐다.** 정정 채점은 시간이 걸리므로 「진행 중」으로 먼저 만들고, 채점이 끝나면 판정을
+    채워 「끝」으로, 실패하면 「실패」로 한 번 넘긴다. 끝·실패가 된 행은 다시 저장할 수 없고, 어떤 행도
+    지울 수 없다(대량 수정·삭제도 막는다). 정정 행 자체가 감사 기록이다 — 누가(`operator`)·언제·왜(`reason`)·
+    무엇으로(`prompt`·`model_version`).
+    """
+
+    class Status(models.TextChoices):
+        IN_PROGRESS = "in_progress", "진행 중"
+        DONE = "done", "끝"
+        FAILED = "failed", "실패"
+
+    score = models.ForeignKey(Score, related_name="corrections", on_delete=models.PROTECT)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.IN_PROGRESS)
+    # 판정 — `Score` 와 같은 필드. 「진행 중」·「실패」에는 비어 있다.
+    percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    model_version = models.CharField(max_length=200, blank=True, default="")
+    prompt = models.TextField(blank=True, default="")
+    reasoning = models.JSONField(default=list, blank=True)
+    scored_assets = models.JSONField(default=list, blank=True)
+    repository_reachability_check = models.JSONField(default=list, blank=True)
+    reason = models.TextField()
+    operator = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="score_corrections", on_delete=models.PROTECT
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    objects = models.Manager.from_queryset(ScoreCorrectionQuerySet)()
+
+    class Meta:
+        verbose_name = "점수 정정"
+        verbose_name_plural = "점수 정정"
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(status="done") | models.Q(percentage__isnull=False, finished_at__isnull=False),
+                name="score_correction_done_has_verdict",
+            ),
+            models.CheckConstraint(condition=~models.Q(reason=""), name="score_correction_reason_required"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            stored = type(self).objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            if stored != self.Status.IN_PROGRESS:
+                raise AppendOnlyError(
+                    f"ScoreCorrection({self.pk}) 은 이미 {stored} 다 — 끝·실패가 된 정정은 다시 저장할 수 없다. "
+                    "다시 바로잡으려면 새 정정을 더한다."
+                )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise AppendOnlyError("ScoreCorrection 은 감사 기록이라 지울 수 없다.")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ScoreCorrection(score={self.score_id}, status={self.status}, percentage={self.percentage})"
+
+
 def hard_delete_demo_seed_scores() -> int:
     """데모 시드가 심은 Contest 에 매달린 `Score` 만 append-only 가드를 우회해 지운다
     (#254, ADR-0064). 지운 행 수를 돌려준다.
@@ -99,9 +167,12 @@ def hard_delete_demo_seed_scores() -> int:
             "hard_delete_demo_seed_scores 가 호출됐다 — 데모 시드는 production 에 심지 "
             "않으므로 지울 데모 Score 도 없다. append-only 실데이터를 지우려는 시도로 취급한다."
         )
+    # 정정 행이 원래 Score 를 PROTECT 로 가리키므로 먼저 지운다(#1179) — 같은 표지로 범위를 고정한다.
+    corrections = ScoreCorrection.objects.filter(score__submission__contestsubmission__contest__is_demo_seed=True)
+    deleted_corrections, _ = models.QuerySet.delete(corrections)
     queryset = Score.objects.filter(submission__contestsubmission__contest__is_demo_seed=True)
     deleted, _ = models.QuerySet.delete(queryset)
-    return deleted
+    return deleted + deleted_corrections
 
 
 class ScoringAttempt(models.Model):

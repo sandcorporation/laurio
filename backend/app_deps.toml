@@ -17,7 +17,7 @@ plugs = []
 
 [appeals]
 group = "contest"
-uses = ["accounts", "contests", "core", "ledger", "notifications", "scoring", "submissions"]
+uses = ["accounts", "contests", "core", "ledger", "notifications", "submissions"]
 plugs = ["contests"]
 
 [awards]

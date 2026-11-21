@@ -44,6 +44,7 @@ from ledger.models import Account, EntrySide
 from ledger.services import LineInput, post_journal_entry
 from policies.models import PlatformPolicy
 from policies.scope import current_policy
+from scoring.current import with_current_score
 
 from core.scans import ScanSpec
 
@@ -81,16 +82,17 @@ def _create_distribution_for_contest(
             # 때와 실제로 잠그는 시점 사이에 Award가 끼어들었을 수 있다.
             return None
 
+        # 컷라인은 현재 점수로 가른다 — 정정이 있으면 최신 끝난 정정의 값(#1179).
         submissions = list(
-            ContestSubmission.objects.filter(contest=locked_contest).select_related(
-                "score", "developer__user"
+            with_current_score(ContestSubmission.objects.filter(contest=locked_contest)).select_related(
+                "developer__user"
             )
         )
         if not submissions:
             return None
 
         cutline = policy.distribution_cutline_percentage
-        qualifying = [s for s in submissions if hasattr(s, "score") and s.score.percentage >= cutline]
+        qualifying = [s for s in submissions if s.current_percentage is not None and s.current_percentage >= cutline]
 
         cutline_waived = False
         if not qualifying:

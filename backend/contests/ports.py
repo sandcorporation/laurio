@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from contests.models import Contest, ContestSubmission, Requirement
     from core.quality_review import BonusScore, QualityTotal
     from scoring.models import SubmissionQualityReview
+    from submissions.current_score import CurrentScore
+    from submissions.models import Submission
 
 #: `payments.services.sync_requested_payment_prize` — 진행 중(REQUESTED) 결제의 상금 스냅샷을 지금 상금으로
 SYNC_REQUESTED_PAYMENT_PRIZE: Slot[Callable[["Contest"], None]] = Slot("진행 중 결제 상금 맞추기", "payments.apps")
@@ -140,6 +142,12 @@ AppealState = Literal["none", "pending", "ruled"]
 
 #: `scoring.participation.is_scored` — 이 제출에 Score 가 있나(당겨 둔 관계만 본다)
 IS_SCORED: Slot[Callable[["ContestSubmission"], bool]] = Slot("채점 끝남", "scoring.apps")
+
+#: `scoring.current.current_score` — 이 제출의 현재 점수(정정이 있으면 최신 끝난 정정), 채점 전이면 None(#1179)
+CURRENT_SCORE: Slot[Callable[["Submission"], "CurrentScore | None"]] = Slot("현재 점수", "scoring.apps")
+
+#: 현재 점수가 걷는 관계(제출에서) — 앱 이름 → select_related 경로. 이의처럼 제출 너머에서 당기면 앞에 경로를 붙인다.
+CURRENT_SCORE_RELATIONS: Slots[tuple[str, ...]] = Slots("현재 점수가 당길 관계")
 
 #: `appeals.participation.appeal_state` — 이 제출의 이의 상태(당겨 둔 관계만 본다)
 APPEAL_STATE: Slot[Callable[["ContestSubmission"], AppealState]] = Slot("이의 상태", "appeals.apps")
