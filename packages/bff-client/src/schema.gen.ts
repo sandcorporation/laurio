@@ -8222,6 +8222,8 @@ export interface components {
          *     되고, 그 조합은 다시 화면의 파생 로직이다.
          */
         MySponsoredContestOut: {
+            /** Archived At */
+            archived_at?: string | null;
             /** Can Edit */
             can_edit: boolean;
             /** Contest Id */
@@ -8409,6 +8411,8 @@ export interface components {
          *     비어 있다.
          */
         OperatorFreeContestOut: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Deadline At
              * Format: date-time
@@ -8488,6 +8492,8 @@ export interface components {
          *     (유료 공모전의 순위·배분은 점수 정정·상장 화면이 맡는다).
          */
         OperatorPaidContestOut: {
+            /** Archived At */
+            archived_at?: string | null;
             /**
              * Deadline At
              * Format: date-time

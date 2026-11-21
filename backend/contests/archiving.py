@@ -12,11 +12,14 @@ PUBLISHED. 제출을 받은 PUBLISHED 를 보관하면 참가자가 낸 곳이 �
 
 from __future__ import annotations
 
+from datetime import datetime
+
+from django.contrib.auth.base_user import AbstractBaseUser
 from ninja.errors import HttpError
 
 from core.clock import Clock
 
-from .models import Contest
+from .models import Contest, ContestArchiveEvent
 
 _FINISHED = {Contest.Status.CLOSED, Contest.Status.AWARDED, Contest.Status.JUDGING_ENDED}
 
@@ -35,18 +38,27 @@ def archive_refusal(contest: Contest) -> str | None:
     return "지금 상태에서는 보관할 수 없습니다."
 
 
-def archive_contest(contest: Contest) -> Contest:
+def archive_contest(contest: Contest, *, actor: AbstractBaseUser | None, via: str) -> Contest:
+    """보관하고 기록을 한 행 남긴다. `actor` 는 계정(User), `via` 는 길의 이름이다."""
+
     refusal = archive_refusal(contest)
     if refusal is not None:
         raise HttpError(409, refusal)
-    contest.archived_at = Clock.now()
+    now = Clock.now()
+    contest.archived_at = now
     contest.save(update_fields=["archived_at"])
+    _record(contest, ContestArchiveEvent.Action.ARCHIVED, actor, via, now)
     return contest
 
 
-def unarchive_contest(contest: Contest) -> Contest:
+def unarchive_contest(contest: Contest, *, actor: AbstractBaseUser | None, via: str) -> Contest:
     if contest.archived_at is None:
         raise HttpError(409, "보관하지 않은 공모전입니다.")
     contest.archived_at = None
     contest.save(update_fields=["archived_at"])
+    _record(contest, ContestArchiveEvent.Action.UNARCHIVED, actor, via, Clock.now())
     return contest
+
+
+def _record(contest: Contest, action: str, actor: AbstractBaseUser | None, via: str, at: datetime) -> None:
+    ContestArchiveEvent.objects.create(contest=contest, action=action, actor=actor, via=via, occurred_at=at)

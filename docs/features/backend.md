@@ -856,6 +856,9 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 **보관**(`Contest.archived_at`, `contests.archiving`): 초안·끝난 공모전·제출 0건인 공개 공모전만.
 보관하면 공개 목록(`GET /api/contests`)·상세(소유자 말고는 404)·검색·홈 큐레이션·강의실 들여오기
 목록에서 빠진다. 상태는 바뀌지 않는다. 「내 공모전」과 운영자 무료 목록은 그대로 보인다.
+보관·해제할 때마다 `ContestArchiveEvent` 한 행이 남는다 — 누가(`actor`, 계정)·언제(`occurred_at`)·어느
+길(`via`, MCP 도구 이름)로. `ContestChange` 에 넣지 않은 까닭은 그쪽이 초안을 남기지 않고 행위자 칸이 없어서다.
+`GET /contests/mine`·`GET /operator/contests/free|paid` 는 행마다 `archived_at`(보관 중일 때만 값)을 싣는다.
 시험은 `tests/integration/test_contest_mcp.py`.
 
 ### 스토리지와 알림

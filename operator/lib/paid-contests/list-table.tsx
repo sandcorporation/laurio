@@ -9,7 +9,7 @@ import type { PaidContest } from "./types";
 // 유료 공모전 목록 표(#1212) — 각 줄에서 상장·점수 정정 화면으로 간다. 수상자·알림 칸은
 // 무료 공모전 목록 것이라 없다(유료는 순위·배분이 정정 화면 뒤에 있다).
 const COL = {
-  status: "w-[96px]",
+  status: "w-[230px]",
   deadline: "w-[200px]",
   prize: "w-[120px]",
   action: "w-[180px]",
@@ -32,7 +32,7 @@ function TableHead() {
 export function PaidContestListTable({ contests }: { contests: PaidContest[] }) {
   return (
     <div data-testid="paid-contest-list-table" className="border border-rule bg-surface">
-      <TableScroll minWidth={800}>
+      <TableScroll minWidth={830}>
         <TableHead />
         {contests.map((contest, i) => (
           <div
@@ -43,10 +43,15 @@ export function PaidContestListTable({ contests }: { contests: PaidContest[] }) 
             }`}
           >
             <div className="min-w-0 flex-1 truncate">{contest.title}</div>
-            <div className={`${COL.status} shrink-0`}>
+            <div className={`${COL.status} flex shrink-0 flex-col items-start gap-1`}>
               <Badge testId={`paid-contest-status-${contest.id}`}>
                 {freeContestStatusLabel(contest.status)}
               </Badge>
+              {contest.archived_at && (
+                <Badge tone="attention" testId={`paid-contest-archived-${contest.id}`}>
+                  보관됨 {new Date(contest.archived_at).toLocaleString("ko-KR", { dateStyle: "short", timeStyle: "short" })}
+                </Badge>
+              )}
             </div>
             <div className={`${COL.deadline} shrink-0 truncate font-mono text-[12.5px] text-ink/62`}>
               {new Date(contest.deadline_at).toLocaleString("ko-KR")}
