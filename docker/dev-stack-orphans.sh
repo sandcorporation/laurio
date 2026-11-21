@@ -46,7 +46,9 @@ e2e_stack_mark() {
 e2e_stack_unmark() { rm -f "$E2E_STATE_DIR/$1.owner" "$E2E_STATE_DIR/$1.keep"; }
 
 _e2e_pid_is_test_sh() {
-  [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null && ps -p "$1" -o command= 2>/dev/null | grep -q 'test\.sh'
+  [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null || return 1
+  # ps 가 없는 최소 이미지(검사 컨테이너)는 /proc 으로 읽는다.
+  { ps -p "$1" -o command= 2>/dev/null || tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null; } | grep -q 'test\.sh'
 }
 
 # 고아면 까닭을 한 줄 찍고 0, 아니면 1.
