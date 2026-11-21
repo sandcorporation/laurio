@@ -8307,7 +8307,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued" | "score_corrected" | "certificate_score_corrected";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
