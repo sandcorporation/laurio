@@ -13,6 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 from django.utils import timezone
 
@@ -112,7 +113,7 @@ def test_confirm_runs_cells_writes_only_experiment_tables_and_reports(scored, mo
     with serve(proxy):
         out = _call(
             "compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", f"{SINGLE},{LOOP}",
-            "--repeat", "2", "--name", "e1", "--by", "시험", "--confirm",
+            "--repeat", "2", "--name", "e1", "--by", "시험", "--cost-only", "--confirm",
         )
 
     assert "칸 4개를 돌렸다" in out, out
@@ -145,7 +146,7 @@ def test_stops_at_the_daily_limit_and_resumes_only_the_rest(scored, monkeypatch,
     monkeypatch.setattr(ex, "_RUNNERS", {"single_call": single})
     # 칸당 최대를 0.05 로 고정한다(추정값이 아니라 시험이 정한 값).
     monkeypatch.setattr(ex, "cost_range", lambda row, observed=(): (Decimal("0.05"), Decimal("0.05")))
-    args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "5", "--confirm")
+    args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "5", "--cost-only", "--confirm")
     limit("0.12")
 
     first = _call(*args)
@@ -168,11 +169,11 @@ def test_two_by_one_first_then_the_same_experiment_grows_to_three_rounds(scored,
     limit("1")
     base = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--name", "probe")
 
-    _call(*base, "--limit-submissions", "2", "--repeat", "1", "--confirm")
+    _call(*base, "--limit-submissions", "2", "--repeat", "1", "--cost-only", "--confirm")
     report = _call("experiment_report", "probe")
     assert "회차 1 — 잴 수 없음" in report and "제출 1 × 회차 3" in report and "| 0.0100 | 0.03 |" in report
 
-    out = _call(*base, "--repeat", "3", "--confirm")
+    out = _call(*base, "--repeat", "3", "--cost-only", "--confirm")
     assert "(이어서)" in out and "남은 호출 2칸" in out
     experiment = ScoringExperiment.objects.get(name="probe")
     assert (experiment.repeat, experiment.limit_submissions) == (3, None)
@@ -182,7 +183,7 @@ def test_two_by_one_first_then_the_same_experiment_grows_to_three_rounds(scored,
 @pytest.mark.django_db
 def test_limit_zero_runs_nothing(scored, monkeypatch):
     monkeypatch.setattr(ex, "_RUNNERS", {"single_call": lambda *a: pytest.fail("상한 0 인데 돌았다")})
-    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--confirm")
+    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--cost-only", "--confirm")
     assert "하루 상한에 닿아 멈췄다" in out
     assert not ScoringExperimentRun.objects.exists()
 
@@ -229,7 +230,7 @@ def test_unreachable_grader_makes_no_cells_even_with_confirm(scored, monkeypatch
     preview = _call(*args)
     assert "실행기 agent-grader:8003 에 닿지 못한다(URLError) — celery-worker 에서 돌린다" in preview
     with pytest.raises(CommandError, match="닿지 못한다.*한 칸도 만들지 않았다"):
-        _call(*args, "--confirm")
+        _call(*args, "--cost-only", "--confirm")
     assert not ScoringExperiment.objects.exists() and not ScoringExperimentRun.objects.exists()
     # 한 번 호출 줄만이면 실행기를 묻지 않는다.
     assert "실행기" not in _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE)
@@ -246,7 +247,7 @@ def test_infra_failures_rerun_and_model_failures_do_not(scored, monkeypatch, lim
     monkeypatch.setattr(ex, "_RUNNERS", {"single_call": single, "self_loop": loop_down})
     limit("5")
     args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", f"{SINGLE},{LOOP}", "--repeat", "2",
-            "--name", "pilot", "--confirm")
+            "--name", "pilot", "--cost-only", "--confirm")
 
     first = _call(*args)
 
@@ -285,7 +286,7 @@ def test_three_infra_failures_in_a_row_stop_the_run(scored, monkeypatch, limit):
     monkeypatch.setattr(ex, "_RUNNERS", {"self_loop": busy})
     limit("5")
     with pytest.raises(CommandError, match="연속 3칸이라 멈췄다. 남은 칸 5개"):
-        _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "5", "--confirm")
+        _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "5", "--cost-only", "--confirm")
     assert len(calls) == 3 and not ScoringExperimentRun.objects.exists()
 
 
@@ -342,7 +343,7 @@ def test_loop_cell_costs_what_the_proxy_counted_not_five_times_and_bill_lists_it
     limit("5")
 
     out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", HAIKU_LOOP, "--repeat", "1",
-                "--name", "bill", "--confirm")
+                "--name", "bill", "--cost-only", "--confirm")
 
     run = ScoringExperimentRun.objects.get()
     assert run.status == "scored", (run.problem, out)
@@ -365,7 +366,7 @@ def test_agent_cell_attempts_share_one_cell_budget(scored, monkeypatch, limit):
     specs = _proxy_like_executor(monkeypatch, [(12, per), (100, per)], lambda spec: "")
     limit("5")
 
-    _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", MINI_AGENT, "--repeat", "1", "--confirm")
+    _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", MINI_AGENT, "--repeat", "1", "--cost-only", "--confirm")
 
     run = ScoringExperimentRun.objects.get()
     assert run.status == "held" and len(specs) == 2
@@ -382,7 +383,7 @@ def test_a_cell_does_not_start_when_the_day_has_less_than_its_hard_cap(scored, m
     limit("5")
     _spend_today("4.7476")
 
-    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "1", "--confirm")
+    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "1", "--cost-only", "--confirm")
 
     assert "하루 상한에 닿아 멈췄다 — 남은 돈 0.2524 < 칸당 최대 1.0000" in out
     assert not specs and not ScoringExperimentRun.objects.exists()
@@ -445,9 +446,92 @@ def test_pick_is_kept_with_the_experiment(scored, monkeypatch, limit):
     args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "1",
             "--limit-submissions", "1", "--name", "p")
 
-    _call(*args, "--pick", "spread", "--confirm")
+    _call(*args, "--pick", "spread", "--cost-only", "--confirm")
 
     assert ScoringExperiment.objects.get(name="p").pick == "spread"
     with pytest.raises(CommandError, match="--pick spread 로 만들어졌다"):
         _call(*args, "--pick", "id")
     assert "남은 호출 0칸" in _call(*args)  # --pick 을 빼면 실험에 남은 고르는 법으로
+
+
+# ── 가를 수 없는 재료(#1261) ───────────────────────────────────────────────────────────────────────────
+
+
+def _fake_single(monkeypatch):
+    monkeypatch.setattr(ex, "_RUNNERS", {"single_call": lambda *a: ex.CellResult("scored", score=Decimal("100"), cost_usd=Decimal("0.01"))})
+
+
+@pytest.mark.django_db
+def test_preview_shows_each_picked_submission_score_and_unmet_counts(scored):
+    # 끝난 정정이 있으면 그 점수와 판정이 기대 점수다.
+    score = Score.objects.get(submission_id=scored.pk)
+    rid = scored.contest.requirements.get().id
+    ScoreCorrection.objects.create(
+        score=score, status=ScoreCorrection.Status.DONE, percentage=Decimal("0.00"), reason="시험",
+        operator=get_user_model().objects.first(), finished_at=timezone.now(),
+        reasoning=[{"requirement_id": rid, "is_met": False, "reasoning": "없다"}],
+    )
+
+    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "1")
+
+    assert "제출 | 운영 점수 | 미충족 필수 | 미충족 선택·가산" in out
+    assert f"\n{scored.pk} | 0.00 | 1 | 0\n" in out
+    assert "뽑힌 제출 1건의 기준 점수가 모두 0.00 — 방식을 가를 수 없다(--confirm 은 --cost-only 와만 돈다)." in out
+
+
+@pytest.mark.django_db
+def test_same_expected_scores_refuse_confirm_and_make_nothing(scored, monkeypatch, limit):
+    _fake_single(monkeypatch)
+    limit("1")
+    with pytest.raises(CommandError, match=r"뽑힌 제출 1건의 기준 점수가 모두 \S+ — 방식을 가를 수 없다.*--cost-only"):
+        _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "1", "--confirm")
+    assert not ScoringExperiment.objects.exists() and not ScoringExperimentRun.objects.exists()
+
+
+@pytest.mark.django_db
+def test_cost_only_runs_and_the_report_says_it_is_not_a_score_comparison(scored, monkeypatch, limit):
+    _fake_single(monkeypatch)
+    limit("1")
+    args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "1", "--name", "c")
+
+    assert "칸 1개를 돌렸다" in _call(*args, "--cost-only", "--confirm")
+
+    assert ScoringExperiment.objects.get(name="c").cost_only is True
+    md = _call("experiment_report", "c")
+    assert md.startswith("# 채점 방식 비교 — c\n\n- 비용 측정 전용 — 점수 비교 아님")
+    assert "미충족 재현율·오탐률은 「—」" in md
+
+
+@pytest.mark.django_db
+def test_scores_that_differ_pass_without_cost_only(scored, monkeypatch, limit):
+    _fake_single(monkeypatch)
+    limit("1")
+    monkeypatch.setattr(
+        ex, "materials",
+        lambda contest, subs: [ex.Material(scored.pk, Decimal("100"), 0, 0), ex.Material(scored.pk + 1, Decimal("50"), 1, 0)],
+    )
+
+    out = _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE, "--repeat", "1", "--name", "d", "--confirm")
+
+    assert "칸 1개를 돌렸다" in out and "방식을 가를 수 없다" not in out
+    assert ScoringExperiment.objects.get(name="d").cost_only is False
+    assert "비용 측정 전용" not in _call("experiment_report", "d")
+
+
+@pytest.mark.django_db
+def test_report_carries_requirement_verdict_agreement(scored, monkeypatch, limit):
+    rid = scored.contest.requirements.get().id
+    met = {SINGLE: True, LOOP: False}
+    monkeypatch.setattr(ex, "_RUNNERS", {
+        "single_call": lambda s, row, i: ex.CellResult("scored", score=Decimal("100"), cost_usd=Decimal("0.01"),
+                                                        verdicts=[{"requirement_id": rid, "met": met[row.name]}]),
+        "self_loop": lambda s, row, i: ex.CellResult("scored", score=Decimal("0"), cost_usd=Decimal("0.01"),
+                                                      verdicts=[{"requirement_id": rid, "met": met[row.name]}]),
+    })
+    limit("5")
+    _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", f"{SINGLE},{LOOP}", "--repeat", "1",
+          "--name", "v", "--cost-only", "--confirm")
+
+    md = _call("experiment_report", "v")
+    # 기준(한 번 호출)은 충족, 우리 루프는 미충족 — 필수 판정 일치 0%, 선택은 견줄 것이 없다.
+    assert f"| {LOOP} | 1 | 1 | 1 | 0 | 0 | 100.00 | 100.00 | — | 회차 1 — 잴 수 없음 | — | 0.0% | — | — | — | — | — |" in md

@@ -12,7 +12,18 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from scoring.experiment import bill_parts, eligible_submissions, is_infra_failure
-from scoring.experiment_report import RunRow, bill_lines, bill_markdown, limits_note, report_rows, to_csv, to_markdown
+from contests.models import Requirement
+from scoring.experiment_report import (
+    COST_ONLY_NOTE,
+    NO_TRUTH_NOTE,
+    RunRow,
+    bill_lines,
+    bill_markdown,
+    limits_note,
+    report_rows,
+    to_csv,
+    to_markdown,
+)
 from scoring.models import ScoringExperiment
 
 
@@ -48,17 +59,38 @@ class Command(BaseCommand):
                 evidence_real=r.evidence_real,
                 cost_usd=Decimal(r.cost_usd),
                 duration_seconds=r.duration_seconds,
+                verdicts=_verdicts(r.verdicts),
             )
             for r in experiment.runs.all()
             if not is_infra_failure(r.status, r.problem)  # 결과가 아니다(#1257) — 다음 실행에서 다시 돈다
         ]
         baseline = experiment.rows[0] if experiment.rows else ""
-        reports = report_rows(runs, baseline=baseline, row_names=experiment.rows)
+        required = frozenset(
+            Requirement.objects.filter(contest_id=experiment.contest_id, grade=Requirement.Grade.REQUIRED)
+            .values_list("pk", flat=True)
+        )
+        reports = report_rows(runs, baseline=baseline, row_names=experiment.rows, required_ids=required)
         repeat = max((r.round for r in runs), default=experiment.repeat)
         full = len(eligible_submissions(experiment.contest, None))  # 공모전에서 채점된 제출 전부
         if options["format"] == "csv":
             self.stdout.write(to_csv(reports, repeat=repeat, full_submissions=full), ending="")
             return
-        notes = [f"공모전 {experiment.contest_id} · 기준 줄 {baseline}", *limits_note(reports, repeat=repeat)]
+        notes = [
+            *([COST_ONLY_NOTE] if experiment.cost_only else []),
+            f"공모전 {experiment.contest_id} · 기준 줄 {baseline}",
+            *limits_note(reports, repeat=repeat),
+            NO_TRUTH_NOTE,
+        ]
         md = to_markdown(f"채점 방식 비교 — {experiment.name}", reports, notes, repeat=repeat, full_submissions=full)
         self.stdout.write(md, ending="")
+
+
+def _verdicts(raw: object) -> tuple[tuple[int, bool], ...]:
+    """칸 기록의 판정(`[{requirement_id, met, …}]`)을 (요구사항 id, 충족)으로 — 꼴이 다른 항목은 건너뛴다."""
+
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        rid = item.get("requirement_id") if isinstance(item, dict) else None
+        if isinstance(rid, int) and isinstance(item.get("met"), bool):
+            out.append((rid, item["met"]))
+    return tuple(out)

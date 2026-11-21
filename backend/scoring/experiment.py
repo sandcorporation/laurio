@@ -29,7 +29,7 @@ from django.conf import settings
 from django.db.models import Sum
 from django.utils import timezone
 
-from contests.models import Contest, ContestSubmission
+from contests.models import Contest, ContestSubmission, Requirement
 from core.adapters import is_fake_adapter_binding
 from core.agent_ports import agent_grader, price_for
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt
@@ -51,6 +51,7 @@ from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_lim
 
 from . import selfloop
 from .corrections import _fixed_inputs
+from .current import latest_done_correction
 from .experiment_report import BillPart
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
@@ -225,6 +226,53 @@ def eligible_submissions(contest: Contest, limit: int | None, pick: Pick = "id")
     else:
         ids = list(scores.order_by("submission_id").values_list("submission_id", flat=True)[:limit])
     return list(ContestSubmission.objects.filter(pk__in=ids).select_related("contest").order_by("pk"))
+
+
+# ── 재료 — 가를 수 있는가(#1261) ──────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Material:
+    """뽑힌 제출 하나의 기대 점수 — 운영 점수(끝난 정정이 있으면 그 점수)와 그 판정의 미충족 수."""
+
+    submission_id: int
+    score: Decimal
+    unmet_required: int
+    unmet_optional: int  # 선택·가산
+
+
+def materials(contest: Contest, submissions: Sequence[ContestSubmission]) -> list[Material]:
+    required = set(
+        Requirement.objects.filter(contest=contest, grade=Requirement.Grade.REQUIRED).values_list("pk", flat=True)
+    )
+    out = []
+    for score in Score.objects.filter(submission_id__in=[s.pk for s in submissions]).order_by("submission_id"):
+        correction = latest_done_correction(score)
+        current = correction if correction is not None and correction.percentage is not None else None
+        percentage = current.percentage if current is not None else score.percentage
+        reasoning = current.reasoning if current is not None else score.reasoning
+        unmet = [
+            item.get("requirement_id")
+            for item in (reasoning if isinstance(reasoning, list) else [])
+            if isinstance(item, dict) and item.get("is_met") is False
+        ]
+        out.append(
+            Material(
+                submission_id=score.submission_id,
+                score=Decimal(percentage),
+                unmet_required=sum(1 for rid in unmet if rid in required),
+                unmet_optional=sum(1 for rid in unmet if rid not in required),
+            )
+        )
+    return out
+
+
+def same_score(picked: Sequence[Material]) -> Decimal | None:
+    """뽑힌 재료의 기대 점수가 모두 같으면 그 점수 — 그 재료로는 방식을 가를 수 없다(`contest3-four-s4`: 16건 모두
+    100 이라 32칸·판정 704개가 전부 100·충족이었다). 하나뿐이어도 같다고 본다(순위도 차이도 잴 수 없다)."""
+
+    scores = {m.score for m in picked}
+    return next(iter(scores)) if len(scores) == 1 else None
 
 
 # ── 돈 ────────────────────────────────────────────────────────────────────────────────────────────────
