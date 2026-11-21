@@ -44,6 +44,8 @@ from storage.adapters.fake import FakeStorageAdapter
 #
 # 한도는 `CODEMIT_TEST_CPU_LIMIT`(초, 기본 1.0)이고 CI 는 1.5 를 준다. 0 이면
 # 끈다. Postgres 가 질의를 처리하는 시간은 다른 프로세스라 여기 잡히지 않는다.
+# 넘은 시험이 나오면 실행기 속도를 재서 한도에 1.0~1.5 배를 곱한다(#1163) —
+# 같은 일에 드는 CPU 초가 호스티드 실행기마다 2배 넘게 갈린다(`tests/cpu_speed.py`).
 
 _CPU_LIMIT_SECONDS = float(os.environ.get("CODEMIT_TEST_CPU_LIMIT", "1.0"))
 
@@ -126,11 +128,21 @@ def pytest_runtest_makereport(item, call):
         item.user_properties.append(("cpu_seconds", round(spent, 3)))
         report.user_properties.append(("cpu_seconds", round(spent, 3)))
         if _CPU_LIMIT_SECONDS > 0 and spent > _CPU_LIMIT_SECONDS and report.passed:
-            report.outcome = "failed"
-            report.longrepr = (
-                f"시험 본문이 CPU {spent:.2f}초를 썼다 — 한도 {_CPU_LIMIT_SECONDS:.2f}초"
-                " (CODEMIT_TEST_CPU_LIMIT). 원인을 찾아 줄인다; 한도를 늘리지 않는다."
-            )
+            # 넘은 그 자리에서 실행기 속도를 잰다 — 느린 실행기면 한도를 늘려 준다(#1163,
+            # `tests/cpu_speed.py`). 넘지 않은 시험에는 잴 일이 없다.
+            from tests.cpu_speed import measured_scale
+
+            scale = measured_scale()
+            item.user_properties.append(("cpu_scale", round(scale, 3)))
+            report.user_properties.append(("cpu_scale", round(scale, 3)))
+            limit = _CPU_LIMIT_SECONDS * scale
+            if spent > limit:
+                report.outcome = "failed"
+                report.longrepr = (
+                    f"시험 본문이 CPU {spent:.2f}초를 썼다 — 한도 {limit:.2f}초"
+                    f" (CODEMIT_TEST_CPU_LIMIT {_CPU_LIMIT_SECONDS:.2f} × 실행기 배율 {scale:.2f})."
+                    " 원인을 찾아 줄인다; 한도를 늘리지 않는다."
+                )
     return report
 
 

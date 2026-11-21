@@ -360,34 +360,24 @@ def test_withholding_tax_is_4_4_percent_of_paid_amount_not_3_3_percent(
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("prize", "withholding"),
+    [(249_999, 0), (250_000, 0), (250_001, 11_000)],
+    ids=["below", "at", "above"],
+)
 def test_withholding_is_zero_at_or_below_250000_won_and_nonzero_above_it(
-    client, category, landing_type
+    client, category, landing_type, prize, withholding
 ):
     """과세최저한(기타소득금액 5만원 이하 = 지급액 250,000원 이하)에서는
     원천징수가 없다. 250,000원 자체를 포함해 경계 셋(그 아래·그 값·그 위)을
-    모두 친다(#75) — 코드와 테스트가 경계의 같은 쪽에 서야 한다."""
+    모두 친다(#75) — 코드와 테스트가 경계의 같은 쪽에 서야 한다. 경계마다 시험
+    하나다 — 셋을 한 시험에서 끝까지 돌리면 CPU 한도에 붙었다(#1163)."""
 
-    _, dev_below, contest_below, _ = _ready_for_payout(
-        client, category, landing_type, dev_uid="dev-below", prize=249_999
-    )
-    payout_below = _request_payout(client, dev_below, contest_below["id"])
-    assert payout_below["withholding_tax_amount"] == 0
-    assert payout_below["net_amount"] == 249_999 - payout_below["platform_fee_amount"]
+    _, dev, contest, _ = _ready_for_payout(client, category, landing_type, prize=prize)
+    payout = _request_payout(client, dev, contest["id"])
 
-    _unfreeze()
-    _, dev_at, contest_at, _ = _ready_for_payout(
-        client, category, landing_type, dev_uid="dev-at", prize=250_000
-    )
-    payout_at = _request_payout(client, dev_at, contest_at["id"])
-    assert payout_at["withholding_tax_amount"] == 0
-
-    _unfreeze()
-    _, dev_above, contest_above, _ = _ready_for_payout(
-        client, category, landing_type, dev_uid="dev-above", prize=250_001
-    )
-    payout_above = _request_payout(client, dev_above, contest_above["id"])
-    assert payout_above["withholding_tax_amount"] == 11_000
-    assert payout_above["withholding_tax_amount"] > 0
+    assert payout["withholding_tax_amount"] == withholding
+    assert payout["net_amount"] == prize - payout["platform_fee_amount"] - withholding
 
 
 # --- Payout이 적용된 요율을 스냅샷에 기록한다 -------------------------------------
