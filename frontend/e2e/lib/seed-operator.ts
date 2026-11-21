@@ -155,6 +155,9 @@ export type SeededAppealForDetail = {
   // Developer 본인의 JWT — GET /api/submissions/{id}/source-readings(티켓 03)를
   // e2e가 직접 쳐서 "펼침이 실제로 열람 기록을 남겼는가"를 확인하는 데 쓴다.
   dev_access: string;
+  // 참가자 화면에 로그인할 때 쓰는 시드(`establishDeveloperSession`)와 정정 기록(#1184).
+  dev_login_seed: string;
+  correction: { original_percentage: string; percentage: string; reason: string } | null;
   status: "pending" | "upheld" | "rejected";
   ruling: SeededAppealRuling | null;
 };
@@ -167,9 +170,11 @@ export type SeededAppealForDetail = {
  * 만든다. */
 export async function seedE2eOperatorAppeal(
   rule?: "uphold" | "reject",
+  options: { corrected?: boolean } = {},
 ): Promise<SeededAppealForDetail> {
   return (await runSeedCommand("operator-appeal", {
     run_id: e2eRunId(),
+    ...(options.corrected ? { corrected: true } : {}),
     ...(rule ? { rule } : {}),
   })) as SeededAppealForDetail;
 }

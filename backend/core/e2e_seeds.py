@@ -79,7 +79,7 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
     "operator-appeal": SeedEntry(
         command="seed_e2e_operator_appeal",
         # 이 시드도 `_own_title_prefix` 로 자기 것을 가르므로 run_id 를 받는다.
-        options=frozenset({"rule", "run_id"}),
+        options=frozenset({"rule", "run_id", "corrected"}),
         # 개최자·개발자·공모전이 전부 호출마다 새 uuid 라 서로 부딪히지 않는다. 앞머리의
         # 「다른 실행이 남긴 것 걷기」는 스위트 시작에 global-setup 이 이미 한 번 해 둬서
         # 실행 도중에는 걸을 것이 없다. `rule` 을 주면 공유 심판 계정을 get_or_create

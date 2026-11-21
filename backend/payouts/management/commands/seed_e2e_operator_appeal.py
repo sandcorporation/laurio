@@ -29,12 +29,16 @@ from __future__ import annotations
 import json
 import uuid
 
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.test import Client
 from django.utils import timezone
 
 from core.e2e_guard import refuse_in_deployed_environment
+from scoring.models import Score, ScoreCorrection
 
 from .seed_e2e_operator_queues import (
     DEADLINE_OFFSET,
@@ -79,7 +83,27 @@ def _ruler_client() -> Client:
     return client
 
 
-def seed_appeal_for_detail(*, rule: str | None) -> dict:
+def _add_correction(submission_id: int) -> dict:
+    """정정 기록을 덧댄다(#1184) — 원래 점수와 달라야 화면이 둘을 가른다."""
+    score = Score.objects.get(submission_id=submission_id)
+    operator, _ = get_user_model().objects.get_or_create(username="e2e-correction-operator")
+    percentage = Decimal("50.00") if score.percentage == Decimal("100.00") else Decimal("100.00")
+    reason = "e2e 정정 — 채점 서버 오류로 다시 채점했습니다"
+    ScoreCorrection.objects.create(
+        score=score,
+        status=ScoreCorrection.Status.DONE,
+        percentage=percentage,
+        model_version="e2e-correction-model",
+        prompt="e2e 정정 프롬프트",
+        reasoning=score.reasoning,
+        reason=reason,
+        operator=operator,
+        finished_at=timezone.now(),
+    )
+    return {"original_percentage": str(score.percentage), "percentage": str(percentage), "reason": reason}
+
+
+def seed_appeal_for_detail(*, rule: str | None, corrected: bool = False) -> dict:
     client = Client()
     uid = uuid.uuid4().hex[:8]
     marker = f"e2e-source-marker-{uuid.uuid4().hex}"
@@ -108,6 +132,8 @@ def seed_appeal_for_detail(*, rule: str | None) -> dict:
     scoring_resp = client.post(SCORING_RUN_PENDING_URL, **_internal_headers())
     assert scoring_resp.status_code == 200, scoring_resp.content
 
+    correction = _add_correction(submission["id"]) if corrected else None
+
     # 이의 사유에 marker 를 넣으면 안 된다. 상세 화면은 사유를 정상적으로
     # 보여주므로, 사유에 marker 가 있으면 "펼치기 전 화면 어디에도 소스가
     # 없다"는 단언이 구현과 무관하게 **항상** 실패한다 — 픽스처가 자기
@@ -129,6 +155,8 @@ def seed_appeal_for_detail(*, rule: str | None) -> dict:
         "submission_id": submission["id"],
         "reason": reason,
         "dev_access": dev["access"],
+        "dev_login_seed": f"e2e-appealdetail-dev-{uid}",
+        "correction": correction,
         "source_marker": marker,
         "status": "pending",
         "ruling": None,
@@ -176,6 +204,11 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument(
+            "--corrected",
+            action="store_true",
+            help="채점 뒤 정정 기록을 덧대고 이의를 낸다(#1184).",
+        )
+        parser.add_argument(
             "--rule",
             choices=["uphold", "reject"],
             default=None,
@@ -199,6 +232,6 @@ class Command(BaseCommand):
         # 빈도가 크게 늘었으므로, 여기서도 같은 정리를 빠뜨리면 축적이 다시
         # 시작된다.
         _clear_stale_seed_contests()
-        result = seed_appeal_for_detail(rule=options.get("rule"))
+        result = seed_appeal_for_detail(rule=options.get("rule"), corrected=bool(options.get("corrected")))
         # 명령이 마지막 줄에 JSON 한 덩어리만 찍는다 — 다른 seed_e2e_* 명령과 같은 관용구.
         self.stdout.write(json.dumps(result))

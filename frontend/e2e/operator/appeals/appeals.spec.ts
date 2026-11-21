@@ -51,6 +51,22 @@ test.describe("이의 상세 — 사유와 Score 스냅샷", () => {
   });
 });
 
+test.describe("정정된 점수의 이의 상세(#1184)", () => {
+  test("원래 점수·정정 점수·사유가 함께 보인다", async ({ page }) => {
+    const [operator, seeded] = await Promise.all([
+      seedE2eOperator(),
+      seedE2eOperatorAppeal(undefined, { corrected: true }),
+    ]);
+    await establishOperatorSession(page, operator.username, E2E_OPERATOR_PASSWORD, `/appeals/${seeded.appeal_id}`);
+
+    const note = page.getByTestId("appeal-detail-score-correction");
+    await expect(note).toBeVisible();
+    await expect(page.getByTestId("appeal-detail-score-original")).toHaveText(`${seeded.correction!.original_percentage}%`);
+    await expect(page.getByTestId("appeal-detail-score-corrected-percentage")).toHaveText(`${seeded.correction!.percentage}%`);
+    await expect(page.getByTestId("appeal-detail-score-correction-reason")).toHaveText(seeded.correction!.reason);
+  });
+});
+
 test.describe("소스는 접혀 있다(#66 핵심, ADR-0022)", () => {
   test("펼치면 소스가 보이고, 그 행위가 Developer 쪽 열람 기록에 실제로 한 건을 남긴다", async ({
     page,

@@ -25,7 +25,7 @@ import {
   type SourceReading,
 } from "@/lib/appeals/use-appeal-page";
 import { supportEmail } from "@/lib/legal/contact";
-import { HiddenSummaryLine, modelLineOf } from "@/lib/submissions/score-summary";
+import { CorrectionNote, HiddenSummaryLine, modelLineOf } from "@/lib/submissions/score-summary";
 import { formatPoints, formatQualityTotal, type SubmissionQuality } from "@/lib/submissions/quality";
 import { badgeClass } from "@/lib/ui/classnames";
 
@@ -160,6 +160,7 @@ function ScoreSection({ score }: { score: OwnScore }) {
           (`model_version`의 sentinel)을 그대로 보여주지 않는다(#251).
           `scoring_basis`로만 갈린다 — `submit-score-model`과 같은 함수
           (`modelLineOf`)를 써서 두 화면이 같은 사유를 말하게 한다. */}
+      <CorrectionNote score={score} testIdPrefix="appeal-score" />
       <p className="text-sm text-ink/60" data-testid="appeal-score-model">
         {modelLineOf(score)}
       </p>
