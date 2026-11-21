@@ -22,6 +22,22 @@
 
 set -eu
 
+# **거절은 stdout 으로도 말한다.** 이 스크립트는 `eval "$(sh docker/dev-env.sh)"` 로 불리고,
+# 명령 치환 안의 종료코드는 eval 이 삼킨다 — stdout 이 빈 채 끝나면 오프셋 변수가 비어 뒤따른
+# `docker compose` 가 기본(0) 스택을 다시 만든다(#1146, #1124). 그래서 거절 때는 eval 이 실행할
+# 조각을 stdout 에 낸다: `docker` 를 실패하는 함수로 가려 `;` 로 이어진 compose 도 돌지 못하게
+# 하고, 마지막 `false` 가 `&&` 체인과 `set -e` 를 멈춘다. 다시 eval 해 성공하면 가림이 풀린다.
+refuse() {
+  {
+    echo "dev-env.sh: $1"
+    echo "  고칠 길: 빈 오프셋을 고르거나(CODEMIT_DEV_OFFSET=<0~9>, 비우면 경로 해시), 묵은 워크트리의 스택을 정리한다(git worktree remove, docker compose -p <프로젝트> down)."
+  } >&2
+  printf '%s\n' \
+    'docker() { echo "dev-env.sh 가 오프셋을 거절해 docker 를 돌리지 않는다 — 위 까닭을 고친 뒤 다시 eval 한다" >&2; return 1; }' \
+    'false'
+  exit 1
+}
+
 # **cwd 가 아니라 이 스크립트의 위치를 기준으로 삼는다.** 어디서 부르든 「이 체크아웃」이
 # 답이어야 한다 — cwd 로 판정하면 다른 디렉터리에서 부른 순간 남의 스택 값을 뱉는다.
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -33,8 +49,7 @@ if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   case "$CODEMIT_DEV_OFFSET" in
     [0-9]) offset=$CODEMIT_DEV_OFFSET ;;
     *)
-      echo "dev-env.sh: CODEMIT_DEV_OFFSET 은 0~9 여야 한다(받은 값: $CODEMIT_DEV_OFFSET)" >&2
-      exit 1
+      refuse "CODEMIT_DEV_OFFSET 은 0~9 여야 한다(받은 값: $CODEMIT_DEV_OFFSET)"
       ;;
   esac
   # 그 오프셋의 compose 프로젝트가 다른 체크아웃 것이면 멈춘다 — 남의 스택에 붙지 않는다.
@@ -46,8 +61,7 @@ if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
       case "$owner" in
         "$root" | "$root"/*) ;;
         *)
-          echo "dev-env.sh: 오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다" >&2
-          exit 1
+          refuse "오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다"
           ;;
       esac
     done
@@ -65,6 +79,7 @@ fi
 slot=$(( offset * 100 ))
 
 cat <<ENV
+unset -f docker 2>/dev/null || true
 export COMPOSE_PROJECT_NAME=codemit-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$offset" )
 export CODEMIT_DB_PORT=$(( 55432 + slot ))
 export CODEMIT_API_PORT=$(( 58000 + slot ))

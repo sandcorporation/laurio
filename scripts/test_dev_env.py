@@ -65,15 +65,46 @@ class DevOffset(unittest.TestCase):
         for bad in ("10", "-1", "a", "03"):
             r = self.run_env(bad)
             self.assertEqual(r.returncode, 1, bad)
-            self.assertEqual(r.stdout, "")
             self.assertIn("0~9", r.stderr)
+            self.assertIn("고칠 길", r.stderr)
+            self.assertNotIn("export ", r.stdout)
 
     def test_other_checkout_owns_offset(self) -> None:
         self.fake_docker("/somewhere/else/docker")
         r = self.run_env("4")
         self.assertEqual(r.returncode, 1)
-        self.assertEqual(r.stdout, "")
+        self.assertNotIn("export ", r.stdout)
         self.assertIn("/somewhere/else/docker", r.stderr)
+        self.assertIn("고칠 길", r.stderr)
+
+    def chain(self, offset: str, owner: str, tail: str) -> subprocess.CompletedProcess[str]:
+        """실제 호출 꼴(`eval "$(…)"` 뒤에 compose)을 흉내 낸다 — compose 대신 표식을 남기는 가짜 docker."""
+        d = self.bin / "docker"
+        d.write_text(f"#!/bin/sh\n[ \"$1\" = ps ] && {{ echo '{owner}'; exit 0; }}\necho COMPOSE_RAN\n")
+        d.chmod(d.stat().st_mode | stat.S_IEXEC)
+        env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "CODEMIT_DEV_OFFSET": offset}
+        cmd = f'eval "$(sh {self.script})"{tail}'
+        return subprocess.run(["bash", "-c", cmd], capture_output=True, text=True, env=env, timeout=60)
+
+    def test_rejected_offset_stops_compose(self) -> None:
+        for tail in (" && docker compose up", "; docker compose up", "\ndocker compose up"):
+            r = self.chain("4", "/somewhere/else/docker", tail)
+            self.assertNotIn("COMPOSE_RAN", r.stdout, repr(tail))
+            self.assertIn("/somewhere/else/docker", r.stderr)
+        r = self.chain("4", "/somewhere/else/docker", "\ndocker compose up\n")
+        self.assertNotIn("COMPOSE_RAN", r.stdout)
+        # set -e 로 도는 스크립트(scripts/test.sh)는 eval 에서 멈춘다.
+        r2 = subprocess.run(
+            ["bash", "-c", f'set -e\neval "$(sh {self.script})"\necho AFTER'],
+            capture_output=True, text=True, timeout=60,
+            env={**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "CODEMIT_DEV_OFFSET": "4"},
+        )
+        self.assertNotIn("AFTER", r2.stdout)
+        self.assertNotEqual(r2.returncode, 0)
+
+    def test_accepted_offset_runs_compose(self) -> None:
+        r = self.chain("4", "", " && docker compose up")
+        self.assertIn("COMPOSE_RAN", r.stdout, r.stderr)
 
     def test_own_checkout_owns_offset(self) -> None:
         self.fake_docker(str(self.root / "docker"))

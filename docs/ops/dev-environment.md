@@ -99,3 +99,10 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 **오프셋을 직접 고르려면** `CODEMIT_DEV_OFFSET=<0~9>` 를 준다(#1106) — 해시가 겹치거나 특정 포트가
 필요할 때. 범위 밖이면 멈추고, 그 오프셋의 compose 프로젝트(`codemit-dev-N`)가 다른 체크아웃의
 것이면(컨테이너 라벨 `com.docker.compose.project.working_dir` 로 판정) 멈춘다. 값이 없으면 위 규칙 그대로.
+
+**거절하면 뒤따르는 compose 도 돌지 않는다**(#1146). `eval "$(…)"` 는 명령 치환의 종료코드를 삼키므로,
+거절 때 스크립트는 stdout 으로 `docker` 를 실패하는 함수로 가리고 `false` 로 끝나는 조각을 내보낸다 —
+`;` 로 이어진 `docker compose` 도, `&&` 체인도, `set -e` 스크립트(`scripts/test.sh`)도 거기서 멈춘다.
+stderr 는 까닭(어느 체크아웃이 그 오프셋을 쥐었나)과 고칠 길(빈 오프셋 고르기·묵은 워크트리 정리)을 말한다.
+같은 셸에서 다시 `eval` 해 성공하면 가림이 풀린다. 이 옛 동작(빈 변수로 compose 가 기본 스택을 다시 만든다)이
+#1124 의 사고였다. 시험은 `python3 scripts/test_dev_env.py`.
