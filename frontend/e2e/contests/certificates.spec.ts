@@ -61,6 +61,13 @@ test.beforeAll(async ({ browser }) => {
   }
 });
 
+async function openBoardWithoutLoading(page: Page, submissionIndex: number) {
+  await establishDeveloperSession(page, seeded.judging.sponsor_login_seed, null);
+  const { id, submissions } = seeded.judging;
+  expect(submissions.length).toBeGreaterThan(submissionIndex);
+  return { id, submissionId: submissions[submissionIndex].id };
+}
+
 async function openBoard(page: Page, submissionIndex: number) {
   await establishDeveloperSession(page, seeded.judging.sponsor_login_seed, null);
   const { id, submissions } = seeded.judging;
@@ -70,25 +77,57 @@ async function openBoard(page: Page, submissionIndex: number) {
   return { id, submissionId: submissions[submissionIndex].id };
 }
 
-// 한 시험 3초 한도(#1176) — 화면으로 발급하는 이 시험은 발급(PDF 렌더) 한 번을 담고, 새로고침 뒤
-// 유지는 API 로 미리 발급해 둔 아래 취소 시험이 본다(화면 발급 + 새로고침을 한 시험에 몰면 3초를 넘었다).
+// 한 시험 3초 한도(#1176) — 발급은 서버가 PDF 를 그리는 일이라 평소 0.4초, 부하가 걸리면 1.5~2.6초가
+// 된다(백엔드 컨테이너에서 렌더만 60번 재면 중앙값 0.4초, 가끔 1.5초). 그 흔들림이 시험 한도를 먹지
+// 않게 이 시험은 화면이 보내는 요청을 가로채 본다 — 보내는 칸(제출자·문구)을 단언하고, 응답은 서버가
+// 주는 모양의 한 장으로 대신한다. 실제 발급(렌더·저장)은 beforeAll 의 API 발급, 아래 두 시험, 백엔드
+// 시험이 본다.
 test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 사람은 더 고를 수 없다", async ({ page }) => {
-  const { submissionId } = await openBoard(page, 0);
+  const { id, submissionId } = await openBoardWithoutLoading(page, 0);
+  let sent: { items: { submission_id: number; text: Record<string, string> }[] } | null = null;
+  let issued: Record<string, unknown> | null = null;
+  await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      sent = request.postDataJSON();
+      const text = sent!.items[0].text;
+      issued = {
+        id: 9100, number: "E2E-9100", submission_id: sent!.items[0].submission_id,
+        award_name: text.award_name, recipient_name: text.recipient_name, body: text.body,
+        giver_name: text.giver_name, giver_title: text.giver_title, award_date: text.award_date,
+        issued_at: "2026-11-20T00:00:00Z", cancelled_at: null, replaced_by_id: null,
+        verify_url: "https://example.test/c/e2e", pdf_available: true,
+      };
+      await route.fulfill({ status: 201, json: [issued] });
+      return;
+    }
+    const response = await route.fetch();
+    const board = await response.json();
+    if (issued) {
+      board.certificates = [issued, ...board.certificates];
+      board.recipients = board.recipients.map((r: { submission_id: number }) =>
+        r.submission_id === submissionId ? { ...r, certificate_id: 9100 } : r,
+      );
+    }
+    await route.fulfill({ response, json: board });
+  });
+  await page.goto(`/console/contests/${id}/certificates`);
+  await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
 
   await page.getByTestId(`certificates-pick-${submissionId}`).check();
   await page.getByTestId(`certificates-draft-${submissionId}-award-name`).fill("최우수상");
   await page.getByTestId("certificates-issue").click();
-  // 되돌릴 수 없다는 경고가 먼저 뜬다 — 확인 전에는 발급되지 않는다.
+  // 되돌릴 수 없다는 경고가 먼저 뜬다 — 확인 전에는 보내지 않는다.
   await expect(page.getByTestId("certificates-confirm")).toContainText("고칠 수 없고");
-  // 둘째 시험용으로 미리 발급해 둔 한 장뿐이다.
-  const rows = page.locator('[data-testid^="certificates-row-"]');
-  await expect(rows).toHaveCount(1);
+  expect(sent).toBeNull();
   await page.getByTestId("certificates-confirm-issue").click();
 
-  const row = rows.filter({ hasText: "최우수상" });
-  await expect(rows).toHaveCount(2);
+  const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "최우수상" });
   await expect(row).toHaveCount(1);
   await expect(row).toHaveAttribute("data-status", "valid");
+  expect(sent!.items).toHaveLength(1);
+  expect(sent!.items[0].submission_id).toBe(submissionId);
+  expect(sent!.items[0].text.award_name).toBe("최우수상");
   // 발급된 제출자는 더 고를 수 없다.
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
 });
