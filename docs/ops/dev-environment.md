@@ -111,7 +111,8 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 `.keep` 을 남겨 12시간까지(`CODEMIT_E2E_KEEP_MAX_SECONDS`) 봐준다. 걷기는 `dev-server.sh reap`(work 의 5분 타이머)과
 **`test.sh e2e` 시작 때**(타이머가 없는 mac)다. **티켓이 끝나면 `scripts/worktree-rm.sh <워크트리> [브랜치]`**
 — 그 워크트리를 주인으로 둔 스택을 먼저 내리고(`-e2e` 는 볼륨까지, dev 스택 볼륨은 남김) dev 서버를 멈춘 뒤
-워크트리·브랜치를 지운다. 손으로 `git worktree remove` 만 하면 스택이 고아로 남는다.
+워크트리·브랜치를 지운다. root 소유 파일이 남았으면 일회용 컨테이너로 지우고 이어 간다. dev 컨테이너가 pnpm 스토어를
+워크트리 `.pnpm-store` 에 root 로 쓰던 것은 compose 가 `npm_config_store_dir=/pnpm/store` 로 막는다(#1220). 손으로 `git worktree remove` 만 하면 스택이 고아로 남는다.
 
 **거절하면 뒤따르는 compose 도 돌지 않는다**(#1146). `eval "$(…)"` 는 명령 치환의 종료코드를 삼키므로,
 거절 때 스크립트는 stdout 으로 `docker` 를 실패하는 함수로 가리고 `false` 로 끝나는 조각을 내보낸다 —

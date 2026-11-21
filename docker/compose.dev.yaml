@@ -432,6 +432,9 @@ services:
       backend:
         condition: service_started
     environment:
+      # 스토어는 /pnpm/store 볼륨이다 — 이 줄이 없으면 pnpm 이 저장소(/app, 호스트 바인드 마운트)
+      # 아래 .pnpm-store 에 root 로 써서 워크트리를 못 지운다(#1220). /pnpm/store 마운트는 그 자리를 위한 것이다.
+      npm_config_store_dir: /pnpm/store
       # 로그인이 끝나고 강의실로 돌려보낼 때 대조하는 허용목록(#297 후속).
       # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
@@ -550,6 +553,9 @@ services:
       backend:
         condition: service_started
     environment:
+      # 스토어는 /pnpm/store 볼륨이다 — 이 줄이 없으면 pnpm 이 저장소(/app, 호스트 바인드 마운트)
+      # 아래 .pnpm-store 에 root 로 써서 워크트리를 못 지운다(#1220). /pnpm/store 마운트는 그 자리를 위한 것이다.
+      npm_config_store_dir: /pnpm/store
       CODEMIT_API_BASE_URL: http://backend:8000
       # dev에서는 비워 둔다 — backend/config/settings.py의 OPERATOR_WEB_ORIGIN도
       # dev에서는 비어 있고(IS_DEPLOYED_ENVIRONMENT가 아니라서 부팅 가드가 걸리지
@@ -594,6 +600,9 @@ services:
       events:
         condition: service_started
     environment:
+      # 스토어는 /pnpm/store 볼륨이다 — 이 줄이 없으면 pnpm 이 저장소(/app, 호스트 바인드 마운트)
+      # 아래 .pnpm-store 에 root 로 써서 워크트리를 못 지운다(#1220). /pnpm/store 마운트는 그 자리를 위한 것이다.
+      npm_config_store_dir: /pnpm/store
       CODEMIT_API_BASE_URL: http://backend:8000
       # 실시간 신호 SSE(ADR-0046, #379)만 이 주소로 간다 — 나머지 API는 전부
       # 위 `backend`(동기 gunicorn/runserver)를 그대로 친다. 강의실 BFF가
