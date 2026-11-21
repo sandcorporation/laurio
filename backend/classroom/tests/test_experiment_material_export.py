@@ -72,7 +72,8 @@ def test_export_reads_only_writes_0600_and_prints_only_count_and_size(client, tm
 
 
 @pytest.mark.django_db
-def test_export_holds_no_personal_fields_and_only_a_pseudonym(client, tmp_path):
+def test_export_holds_no_personal_fields_and_only_a_pseudonym(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(em, "TEMP_ROOTS", ())  # 시험 임시 폴더는 /tmp 아래일 수 있다(자리 규칙은 개발 환경 쪽 시험이 본다)
     sid = _scored_submission(client)
     out_path = tmp_path / "m.tar.gz"
     _export("--classroom-submissions", str(sid), "--name", "t1262", "--out", str(out_path))
