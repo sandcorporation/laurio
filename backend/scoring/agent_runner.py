@@ -717,6 +717,20 @@ def request_run(
         raise AgentGraderError(type(exc).__name__) from exc
 
 
+def check_health(*, service_url: str = DEFAULT_SERVICE_URL, timeout: float = 5) -> None:
+    """실행기의 `GET /health` 에 한 번 닿아 본다(#1257). 닿지 못했거나 `ok` 가 아니면 AgentGraderError."""
+
+    try:
+        with urllib.request.urlopen(service_url.rstrip("/") + "/health", timeout=timeout) as response:  # noqa: S310 — 내부 주소
+            body = json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        raise AgentGraderError(f"HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError) as exc:
+        raise AgentGraderError(type(exc).__name__) from exc
+    if not (isinstance(body, dict) and body.get("ok") is True):
+        raise AgentGraderError("health 응답이 ok 가 아니다")
+
+
 # ── 자가 점검·진입점 ──────────────────────────────────────────────────────────────────────────────────────
 
 

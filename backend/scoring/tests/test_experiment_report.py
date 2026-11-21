@@ -119,3 +119,17 @@ def test_one_round_report_says_stability_cannot_be_measured():
     assert "회차 1 — 흔들림은 잴 수 없다." in notes
     md = to_markdown("x", reports, notes, repeat=1, full_submissions=3)
     assert md.count("회차 1 — 잴 수 없음") == 2
+
+
+def test_a_row_without_measured_cost_is_not_measured_and_left_out_of_the_total():
+    # #1257: 실행기에 못 닿아 돈이 안 든 줄을 0.00 으로 세면 전체 예상 합계가 낮아 보인다.
+    agent = "agent:claude-haiku-5-5"
+    runs = [_run(1, BASELINE_ROW, 1, 80, cost="0.20"), _run(1, CHEAP, 1, None, status="failed", cost="0", offered=0, real=0)]
+    reports = report_rows(runs, baseline=BASELINE_ROW, row_names=[BASELINE_ROW, CHEAP, agent])
+
+    assert [r.row for r in reports] == [BASELINE_ROW, agent, CHEAP]
+    by_row = {r.row: r for r in reports}
+    assert by_row[CHEAP].cost_per_run is None and by_row[agent].runs == 0 and by_row[agent].cost_per_run is None
+    md = to_markdown("t", reports, [], repeat=1, full_submissions=10)
+    assert "줄 모두 합계 6.00 USD. 「실측 없음」 줄 2개는 합계에 없다." in md
+    assert f"| {CHEAP} | 0 | 1 | 0 | 0 | 1 |" in md and md.count("| 실측 없음 |") == 2

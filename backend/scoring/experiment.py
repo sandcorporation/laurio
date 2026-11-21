@@ -29,8 +29,16 @@ from contests.models import Contest, ContestSubmission
 from core.adapters import is_fake_adapter_binding
 from core.agent_ports import agent_grader, price_for
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt
-from core.agent_run_tokens import Usage, spent_today_usd, usage_cost_usd
-from core.agent_scoring import JSON, AgentJob, AgentRunHeld, Snapshot, provided_snapshot, run_agent_job
+from core.agent_run_tokens import RunTokenRefused, Usage, spent_today_usd, usage_cost_usd
+from core.agent_scoring import (
+    JSON,
+    AgentJob,
+    AgentRunHeld,
+    AgentVendorRefused,
+    Snapshot,
+    provided_snapshot,
+    run_agent_job,
+)
 from core.clock import Clock
 from core.llm_scoring import LLMScoringAdapter, RequirementInput, RequirementVerdict, ScoringInput, get_adapter
 from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_limit_usd, setting_value
@@ -68,8 +76,10 @@ DEFAULT_ROWS = (
 
 #: 칸 하나의 비용 추정에 쓰는 토큰 범위(입력, 출력) — 낮은·높은. 공모전 3 실측(#992, ADR-0082)에서 잡은 대략값이고,
 #: 실험이 이미 돈 칸이 있으면 그 줄의 실제 최소·최대가 이긴다. 에이전트·우리 루프의 높은 쪽은 실행 예산($1)으로 자른다.
+#: 한 번 호출의 높은 쪽은 공모전 3 실험 실측(#1257: 입력 100k~255k)을 덮는다 — 10만 토큰을 넘으면 Haiku 5.5 는 입력·출력
+#: 모두 5배 단가라(`classroom.scoring_cost`) 높은 쪽이 그 문턱 아래(옛 90k)에 있으면 칸당 최대가 열 배 가까이 작게 나온다.
 _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
-    "single_call": ((20_000, 1_000), (90_000, 4_000)),
+    "single_call": ((20_000, 1_000), (300_000, 4_000)),
     "agent": ((60_000, 2_000), (600_000, 15_000)),
     "self_loop": ((40_000, 2_000), (400_000, 12_000)),
 }
@@ -82,6 +92,60 @@ _RUN_BUDGET_USD: dict[Method, Decimal | None] = {
 
 class ExperimentError(Exception):
     """줄·공모전·실험 이름이 잘못됐다 — 명령이 그대로 보여 준다."""
+
+
+# ── 인프라 실패(#1257) ────────────────────────────────────────────────────────────────────────────────
+
+def infra_errors() -> tuple[type[Exception], ...]:
+    """방식의 실패가 아니라 인프라 실패인 예외 — 실행기에 닿지 못함·HTTP 오류(`AgentGraderError`)·바쁨(`AgentGraderBusy`),
+    실행 토큰 거절(`RunTokenRefused`), 벤더 계정 쪽 거절(`AgentVendorRefused` — 실행 도중 상한 429 가 CLI 에서 이렇게 온다).
+    실행기 예외는 `core.agent_ports` 에 등록된 실행 틀 모듈의 것이다(실행기를 직접 들이지 않는다)."""
+
+    grader = agent_grader()
+    return (grader.AgentGraderError, grader.AgentGraderBusy, RunTokenRefused, AgentVendorRefused)
+
+
+#: `problem` 이 이 이름으로 시작하는 `failed` 칸이 인프라 실패다(`infra_errors` 의 클래스 이름과 같다 — 시험이 지킨다).
+INFRA_PROBLEM_PREFIXES = ("AgentGraderError:", "AgentGraderBusy:", "RunTokenRefused:", "AgentVendorRefused:")
+#: 인프라 실패 칸의 상태 — `CellResult` 에만 쓰고 실험 표에는 남기지 않는다.
+INFRA = "infra"
+
+
+def grader_address() -> str:
+    """실행기 주소(`agent-grader:8003`) — 미리 보기·거절 문구에 쓴다."""
+
+    return agent_grader().DEFAULT_SERVICE_URL.removeprefix("http://")
+#: 연속으로 이만큼 인프라 실패면 멈춘다 — 실행기·프록시가 죽었는데 남은 칸을 다 부딪쳐 볼 까닭이 없다.
+MAX_CONSECUTIVE_INFRA_FAILURES = 3
+
+
+def is_infra_failure(status: str, problem: str) -> bool:
+    """실험 표에 남은 칸이 인프라 실패인가 — 지금은 그런 칸을 남기지 않지만, #1257 전에 `failed` 로 남은 칸
+    (`AgentGraderError: URLError` 등)을 같은 판정으로 끝나지 않은 칸으로 본다(데이터를 고치지 않고 규칙으로)."""
+
+    return status == ScoringExperimentRun.Status.FAILED and problem.startswith(INFRA_PROBLEM_PREFIXES)
+
+
+def needs_grader(rows: Sequence[Row]) -> bool:
+    """줄 가운데 실행기(`agent-grader`)를 부르는 것이 있는가 — 한 번 호출은 벤더를 직접 부른다."""
+
+    return any(row.method != "single_call" for row in rows)
+
+
+def probe_grader() -> None:
+    """실행기에 한 번 닿아 본다 — 시험이 바꿔 끼우는 자리."""
+
+    agent_grader().check_health()
+
+
+def grader_problem() -> str | None:
+    """실행기에 한 번 닿아 본다 — 닿으면 None, 아니면 사람이 읽을 까닭."""
+
+    try:
+        probe_grader()
+    except agent_grader().AgentGraderError as exc:
+        return f"실행기 {grader_address()} 에 닿지 못한다({exc}) — celery-worker 에서 돌린다"
+    return None
 
 
 @dataclass(frozen=True)
@@ -359,6 +423,18 @@ def _loop_totals(record: dict[str, JSON]) -> tuple[int, int, Decimal]:
     return max(tokens_in, proxy_in), max(tokens_out, proxy_out), max(loop_cost, proxy_cost)
 
 
+def _proxy_stop(record: dict[str, JSON]) -> str | None:
+    """우리 루프가 프록시 거절로 멈췄는가 — 실행 토큰 거절(401·403)이나 하루 상한 429. 실행 예산(`run_budget`) 429 는
+    방식이 예산 안에 못 끝낸 것이라 여기 들지 않는다."""
+
+    loop = _loop(record)
+    stopped = loop.get("stopped")
+    detail = str(loop.get("stop_detail") or "")
+    if stopped == "proxy_refused" or (stopped == "budget" and "daily_limit" in detail):
+        return f"실행 도중 프록시가 멈췄다({stopped}): {detail[:300]}"
+    return None
+
+
 def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> CellResult:
     assert inputs.snapshot is not None
     try:
@@ -366,6 +442,9 @@ def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> 
             submission, inputs.requirements, inputs.snapshot, vendor=row.vendor, model=row.model, purpose="experiment"
         )
     except AgentRunHeld as held:
+        stopped = _proxy_stop(held.record)
+        if stopped is not None:
+            return CellResult(INFRA, problem=stopped)
         tokens_in, tokens_out, spent = _loop_totals(held.record)
         return CellResult(
             "held", problem="; ".join(held.reasons), evidence_offered=_dropped(held.record), input_tokens=tokens_in,
@@ -384,10 +463,19 @@ def _run_self_loop(submission: ContestSubmission, row: Row, inputs: _Inputs) -> 
 _RUNNERS = {"single_call": _run_single_call, "agent": _run_agent, "self_loop": _run_self_loop}
 
 
+@dataclass(frozen=True)
+class InfraFailure:
+    """결과로 남기지 않은 칸 — 같은 인자로 다시 부르면 다시 돈다."""
+
+    problem: str
+
+
 def run_cell(
     experiment: ScoringExperiment, submission: ContestSubmission, row: Row, round_no: int, inputs: _Inputs | Exception
-) -> ScoringExperimentRun:
-    """칸 하나를 돌려 남긴다. 실패도 칸으로 남긴다(다시 돌리지 않는다 — 실패율이 보고표의 숫자다)."""
+) -> ScoringExperimentRun | InfraFailure:
+    """칸 하나를 돌려 남긴다. 방식의 실패(틀린 꼴·시간 초과 등)도 칸으로 남긴다(다시 돌리지 않는다 — 실패율이 보고표의
+    숫자다). 인프라 실패(`infra_errors()`·프록시 거절)는 남기지 않고 `InfraFailure` 를 돌려준다. #1257 전에 인프라 실패로
+    남은 칸 자리면 그 행을 이번 결과로 바꾼다."""
 
     started = time.monotonic()
     if isinstance(inputs, Exception):
@@ -397,14 +485,26 @@ def run_cell(
     else:
         try:
             result = _RUNNERS[row.method](submission, row, inputs)
+        except infra_errors() as exc:
+            result = CellResult(INFRA, problem=f"{type(exc).__name__}: {exc}"[:2000])
         except Exception as exc:  # noqa: BLE001 - 칸 하나의 실패가 실험 전체를 멈추지 않는다
             logger.warning("실험 %s 칸(제출 %s, %s, %s) 실패: %r", experiment.name, submission.pk, row.name, round_no, exc)
             result = CellResult("failed", problem=f"{type(exc).__name__}: {exc}"[:2000])
-    return ScoringExperimentRun.objects.create(
+    if result.status == INFRA:
+        logger.warning("실험 %s 칸(제출 %s, %s, %s) 인프라 실패: %s", experiment.name, submission.pk, row.name, round_no, result.problem)
+        return InfraFailure(result.problem)
+    run, _created = ScoringExperimentRun.objects.update_or_create(
         experiment=experiment,
         submission=submission,
         row=row.name,
         round=round_no,
+        defaults=_run_fields(result, started),
+    )
+    return run
+
+
+def _run_fields(result: CellResult, started: float) -> dict[str, object]:
+    return dict(
         status=result.status,
         score=result.score,
         verdicts=result.verdicts,
@@ -455,7 +555,9 @@ def plan(
     done: set[tuple[int, str, int]] = set()
     observed: dict[str, list[Decimal]] = {}
     if experiment is not None:
-        for run in experiment.runs.all().only("submission_id", "row", "round", "cost_usd", "status"):
+        for run in experiment.runs.all().only("submission_id", "row", "round", "cost_usd", "status", "problem"):
+            if is_infra_failure(run.status, run.problem):
+                continue  # 끝난 칸이 아니다 — 다시 돈다
             done.add((run.submission_id, run.row, run.round))
             if run.status != ScoringExperimentRun.Status.FAILED:
                 observed.setdefault(run.row, []).append(run.cost_usd)

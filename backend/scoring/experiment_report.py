@@ -136,7 +136,9 @@ def _row_report(name: str, rows: list[RunRow], baseline: dict[int, list[float]],
     offered = sum(r.evidence_offered for r in rows)
     real = sum(r.evidence_real for r in rows)
     durations = [r.duration_seconds for r in rows if r.status != "failed" and r.duration_seconds is not None]
-    cost = sum((r.cost_usd for r in rows), Decimal(0)) / len(rows) if rows else None
+    # 돈이 든 칸이 하나도 없으면 실측이 없다(#1257) — 0 으로 세면 전체 예상 합계를 낮춰 보인다.
+    measured = any(r.cost_usd > 0 for r in rows)
+    cost = sum((r.cost_usd for r in rows), Decimal(0)) / len(rows) if measured else None
     report = RowReport(
         row=name,
         submissions=len(per),
@@ -176,15 +178,16 @@ def _row_report(name: str, rows: list[RunRow], baseline: dict[int, list[float]],
     return RowReport(**{**report.__dict__, "passes": passes})
 
 
-def report_rows(runs: Sequence[RunRow], *, baseline: str = BASELINE_ROW) -> list[RowReport]:
-    """줄마다 보고 — 기준 줄이 맨 앞. 기준 줄이 없으면 점수 차·순위·흔들림·비용 기준은 판단하지 않는다(None)."""
+def report_rows(runs: Sequence[RunRow], *, baseline: str = BASELINE_ROW, row_names: Sequence[str] = ()) -> list[RowReport]:
+    """줄마다 보고 — 기준 줄이 맨 앞. 기준 줄이 없으면 점수 차·순위·흔들림·비용 기준은 판단하지 않는다(None).
+    `row_names`(실험의 줄)에 있는데 남은 칸이 없는 줄도 빈 줄로 보인다 — 빠지면 그 줄이 안 돈 것을 놓친다."""
 
-    by_row: dict[str, list[RunRow]] = {}
+    by_row: dict[str, list[RunRow]] = {name: [] for name in row_names}
     for r in runs:
         by_row.setdefault(r.row, []).append(r)
     base_rows = by_row.get(baseline, [])
     base_scores = _per_submission(base_rows)
-    base_report = _row_report(baseline, base_rows, base_scores, None) if base_rows else None
+    base_report = _row_report(baseline, base_rows, base_scores, None) if baseline in by_row else None
     out = [base_report] if base_report is not None else []
     out += [_row_report(name, rows, base_scores, base_report) for name, rows in sorted(by_row.items()) if name != baseline]
     return out
@@ -228,6 +231,9 @@ HEADERS = [
 ]
 
 
+NOT_MEASURED = "실측 없음"
+
+
 def full_estimate_usd(r: RowReport, full_submissions: int) -> Decimal | None:
     """이 줄을 공모전 전체(제출 N × 회차 3)로 돌리면 드는 돈 — 실측 건당 비용으로."""
 
@@ -240,7 +246,8 @@ def _cells(r: RowReport, *, repeat: int, full_submissions: int) -> list[str]:
         r.row, str(r.submissions), str(r.runs), str(r.scored), str(r.held), str(r.failed),
         _fmt(r.mean_diff, ".2f"), _fmt(r.max_diff, ".2f"), _fmt(r.spearman, ".3f"), stability,
         _fmt(None if r.evidence_rate is None else r.evidence_rate * 100, ".1f") + ("%" if r.evidence_rate is not None else ""),
-        _fmt(r.cost_per_run, "f"), _fmt(full_estimate_usd(r, full_submissions), "f"),
+        _fmt(r.cost_per_run, "f"),
+        NOT_MEASURED if (e := full_estimate_usd(r, full_submissions)) is None else format(e, "f"),
         _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),
         *(_mark(r.passes.get(k)) for k in CRITERIA),
     ]
@@ -251,7 +258,11 @@ def to_markdown(
 ) -> str:
     total = sum((e for r in reports if (e := full_estimate_usd(r, full_submissions)) is not None), Decimal(0))
     lines = [f"# {title}", "", *(f"- {n}" for n in notes)]
-    lines.append(f"- 전체 예상 = 실측 건당 비용 × 제출 {full_submissions} × 회차 {FULL_REPEAT} — 줄 모두 합계 {total:.2f} USD.")
+    unmeasured = sum(1 for r in reports if r.cost_per_run is None)
+    left_out = f" 「{NOT_MEASURED}」 줄 {unmeasured}개는 합계에 없다." if unmeasured else ""
+    lines.append(
+        f"- 전체 예상 = 실측 건당 비용 × 제출 {full_submissions} × 회차 {FULL_REPEAT} — 줄 모두 합계 {total:.2f} USD.{left_out}"
+    )
     lines += ["", "| " + " | ".join(HEADERS) + " |", "| " + " | ".join("---" for _ in HEADERS) + " |"]
     lines += ["| " + " | ".join(_cells(r, repeat=repeat, full_submissions=full_submissions)) + " |" for r in reports]
     return "\n".join(lines) + "\n"

@@ -10,7 +10,7 @@ from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from scoring.experiment import eligible_submissions
+from scoring.experiment import eligible_submissions, is_infra_failure
 from scoring.experiment_report import RunRow, limits_note, report_rows, to_csv, to_markdown
 from scoring.models import ScoringExperiment
 
@@ -39,9 +39,10 @@ class Command(BaseCommand):
                 duration_seconds=r.duration_seconds,
             )
             for r in experiment.runs.all()
+            if not is_infra_failure(r.status, r.problem)  # 결과가 아니다(#1257) — 다음 실행에서 다시 돈다
         ]
         baseline = experiment.rows[0] if experiment.rows else ""
-        reports = report_rows(runs, baseline=baseline)
+        reports = report_rows(runs, baseline=baseline, row_names=experiment.rows)
         repeat = max((r.round for r in runs), default=experiment.repeat)
         full = len(eligible_submissions(experiment.contest, None))  # 공모전에서 채점된 제출 전부
         if options["format"] == "csv":

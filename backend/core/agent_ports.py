@@ -70,7 +70,13 @@ class AgentGrader(Protocol):
     AgentGraderError: type[Exception]
     RunRejected: type[Exception]
 
+    DEFAULT_SERVICE_URL: str
+
     def request_run(self, spec: RunSpec, repo_zip: bytes, *, timeout: float) -> RunResult: ...
+
+    def check_health(self) -> None:
+        """실행기 `GET /health` 에 한 번 닿아 본다 — 못 닿으면 `AgentGraderError`(비교 실험이 칸 전에, #1257)."""
+        ...
 
     def extract_repo(self, zip_path: Path, dest: Path) -> str:
         """박제본을 실행기와 같은 규칙(링크·크기·항목 수)으로 푼다 — 비교 실험의 근거 확인(#1246)이 쓴다."""

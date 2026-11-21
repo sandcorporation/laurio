@@ -1195,7 +1195,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_OPENAI_MODEL` | 모델 이름 | 같은 셋 | `gpt-4o-mini` |
 | `LLM_OPENAI_TEMPERATURE` | 0~2 | 공모전 채점·완성도 | 0 |
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
-| `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 은 방침이 공모전 채점의 Anthropic 이전을 적은 개정의 시행일(`PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE` = 2026-11-27, #997) 0시(KST) 전에는 저장되지 않는다(422 `privacy_not_covered`) |
+| `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 도 시행일과 상관없이 저장되고 돈다(대표 결정 2026-11-20, `config/settings.py`). 방침 개정 시행일 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`(2026-11-27, #997)는 방침 화면 잠금 시험만 본다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
@@ -1230,8 +1230,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   모든 모델에 「1 점 이상은 파일을 Read 로 열어 보고, 근거는 Read 로 본 줄」 규칙 7·8 이 붙고(#1717), Haiku 계열이면
   채점의 엄격 규칙을 0~5 로 옮긴 규칙 9~11 이 더 붙는다(#1048, 강의실 완성도도 같다).
   기록의 `model_version` 은 `agent:<벤더>:<모델>`.
-- 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 은 방침 시행일
-  (2026-11-27) 전에 거절된다(#995·#997).
+- 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 도 방침 시행일
+  (2026-11-27) 전에 막지 않는다(대표 결정 2026-11-20 — 시행일은 방침 화면 잠금 시험만 본다).
 - **강의실**(#1036)은 클래스가 「에이전트」를 고르면(`Class.scoring_method`·`quality_method`) 판정 채점·완성도 검사가
   같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(Claude 키 → Claude Code). **에이전트를 고를 수 있는
   벤더는 `AGENT_VERIFIED_VENDORS` 한 곳이 정하고 지금은 Anthropic 뿐이다** — OpenAI 키(Codex)는 운영 실측(#1681)에서 예산에 끊겨
@@ -1261,8 +1261,12 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   `model_version`)에만 남긴다. 입력은 `Score` 의 처음 커밋으로 다시 받는다(정정 채점과 같은 길). `--confirm` 없이는 예상 호출
   수·줄별 비용 범위·실험 하루 상한·남은 돈만 찍는다. 에이전트·우리 루프의 실행 토큰은 용도 `experiment` 라 프록시가
   `AGENT_EXPERIMENT_DAILY_LIMIT_USD` 에 세고(운영 몫과 따로, 기본 0 = 꺼짐), 한 번 호출 비용은 표에 적어 같은 하루 합계에
-  넣는다. 상한에 닿으면 멈추고, 같은 인자로 다시 부르면 남은 칸만 돈다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
-  (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 실측 건당 비용과 전체(제출 N × 회차 3) 예상 금액, p50·p90,
+  넣는다. 상한에 닿으면 멈추고, 같은 인자로 다시 부르면 남은 칸만 돈다. 에이전트·우리 루프 줄이 있으면 실행기
+  (`agent-grader:8003`)의 health 에 먼저 닿아 보고, 못 닿으면 `--confirm` 이어도 칸을 만들지 않고 실패로 끝난다(#1257).
+  인프라 실패(실행기에 못 닿음·HTTP 오류·바쁨, 실행 토큰 거절, 벤더 계정 거절·실행 도중 상한 429)는 칸으로 남기지 않아 다음
+  실행에서 다시 돌고(그 전에 `failed` 로 남은 그런 칸도 같은 판정으로), 연속 3칸이면 멈춘다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
+  (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 실측 건당 비용과 전체(제출 N × 회차 3) 예상 금액(돈이 든 칸이
+  없는 줄은 「실측 없음」이고 합계에서 빠진다), p50·p90,
   문턱 여덟과 표본의 한계를 마크다운·CSV 로 낸다. 같은 `--name` 으로 회차·건수를 늘려 이어 갈 수 있다(먼저 2건 × 1회로 단가 실측). `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
 
 | 엔드포인트 | 하는 일 |
