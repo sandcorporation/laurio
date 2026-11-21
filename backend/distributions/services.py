@@ -45,6 +45,7 @@ from ledger.services import LineInput, post_journal_entry
 from policies.models import PlatformPolicy
 from policies.scope import current_policy
 from scoring.current import with_current_score
+from scoring.models import ScoreCorrection
 
 from core.scans import ScanSpec
 
@@ -163,6 +164,18 @@ def _create_distribution_for_contest(
 
 
 
+def is_prize_settled(contest: Contest) -> bool:
+    """이 공모전의 상금 배분이 끝났는가(#1180, 스펙 #1178) — 배분 행이 있거나 수상으로 끝났으면 참. 무료는 늘 거짓.
+
+    끝났으면 점수 정정은 기록만 남긴다 — 이미 만든 `Distribution`·`DistributionShare` 와 컷라인은 다시 계산하지 않는다
+    (돈은 대표가 따로 정한다). 운영자 화면이 정정 버튼 앞에서 이 판정을 그대로 보인다.
+    """
+
+    if contest.is_free:
+        return False
+    return contest.status == Contest.Status.AWARDED or Distribution.objects.filter(contest=contest).exists()
+
+
 def distribution_due_contests(as_of, policy):
     """`distribution_due_q` 를 적용한 Contest 질의."""
 
@@ -214,6 +227,10 @@ def _due_contests(as_of, ctx):
         # 큐가 "이 이의가 배분을 막고 있다" 를 보여줘야 한다(#74 스펙, ADR-0020 의 "돈이
         # 사라지는 경로를 만들지 않는다").
         .exclude(submissions__appeal__status=Appeal.Status.PENDING)
+        # **정정 채점이 도는 제출이 있어도 아직 배분하지 않는다**(#1180, 스펙 #1178) — 대기 이의와 같은 까닭이다.
+        # 정정이 끝나면 현재 점수(`scoring.current`)가 바뀌어 컷라인 판정이 달라질 수 있다. 끝·실패로 넘어가면
+        # 저절로 풀린다.
+        .exclude(submissions__score__corrections__status=ScoreCorrection.Status.IN_PROGRESS)
     )
 
 

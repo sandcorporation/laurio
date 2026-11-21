@@ -28,7 +28,8 @@ from tests.integration.test_scoring import (  # noqa: F401 - fixture 들을 이 
     landing_type,
 )
 
-CONTEST_SCANS = ("submission-scoring", "submission-quality-review")
+# 정정 채점(#1180)도 벤더를 부르는 공모전 채점이라 같은 스위치를 따른다.
+CONTEST_SCANS = ("submission-scoring", "score-correction", "submission-quality-review")
 
 
 def _off(monkeypatch):
