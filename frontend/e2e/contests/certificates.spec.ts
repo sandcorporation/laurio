@@ -8,9 +8,9 @@ import { seedE2eContests } from "../lib/seed";
 import { establishDeveloperSession } from "../lib/session";
 
 // 준비는 화면이 아니라 API 로 — 상장 한 장을 미리 발급해 둔다(렌더가 있어 한 번에 1초 안팎).
-async function issueViaApi(page: Page, id: number, submissionId: number): Promise<void> {
+async function issueViaApi(page: Page, id: number, submissionId: number, recipient = "홍길동"): Promise<void> {
   const { status, ms } = await page.evaluate(
-    async ({ url, submissionId }) => {
+    async ({ url, submissionId, recipient }) => {
       const board = await (await fetch(url)).json();
       const max: string = board.defaults.award_date_max;
       const today = new Date().toISOString().slice(0, 10);
@@ -24,7 +24,7 @@ async function issueViaApi(page: Page, id: number, submissionId: number): Promis
               submission_id: submissionId,
               text: {
                 award_name: "우수상",
-                recipient_name: "홍길동",
+                recipient_name: recipient,
                 body: "",
                 giver_name: board.defaults.giver_name,
                 giver_title: "",
@@ -36,7 +36,7 @@ async function issueViaApi(page: Page, id: number, submissionId: number): Promis
       });
       return { status: response.status, ms: Math.round(performance.now() - startedAt) };
     },
-    { url: `/api/backend/contests/${id}/certificates`, submissionId },
+    { url: `/api/backend/contests/${id}/certificates`, submissionId, recipient },
   );
   test.info().annotations.push({ type: "issue-post-ms", description: String(ms) });
   expect(status).toBe(201);
@@ -49,13 +49,14 @@ let seeded: Awaited<ReturnType<typeof seedE2eContests>>;
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(20_000); // 준비(시드·로그인·발급 렌더)는 시험 한도 밖이다 — 한도는 시험 본문에만 건다
   seeded = await seedE2eContests();
-  // 둘째 시험이 볼 상장은 여기서 미리 발급해 둔다 — 발급은 PDF 렌더라 가끔 2초를 넘고, 그 시간이
+  // 둘째·셋째 시험이 볼 상장 두 장은 여기서 미리 발급해 둔다 — 발급은 PDF 렌더라 가끔 2초를 넘고, 그 시간이
   // 시험 한도(3초)를 먹으면 안 된다(#1176).
   const page = await browser.newPage();
   try {
     await establishDeveloperSession(page, seeded.judging.sponsor_login_seed, null);
     await page.goto("/"); // 같은 출처 fetch 를 하려면 about:blank 를 벗어나야 한다
     await issueViaApi(page, seeded.judging.id, seeded.judging.submissions[1].id);
+    await issueViaApi(page, seeded.judging.id, seeded.judging.submissions[0].id, "김첫째");
   } finally {
     await page.close();
   }
@@ -103,12 +104,12 @@ test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 
     }
     const response = await route.fetch();
     const board = await response.json();
-    if (issued) {
-      board.certificates = [issued, ...board.certificates];
-      board.recipients = board.recipients.map((r: { submission_id: number }) =>
-        r.submission_id === submissionId ? { ...r, certificate_id: 9100 } : r,
-      );
-    }
+    // 이 제출자의 실제 상장(beforeAll 이 발급해 둔 것)은 가리고 아직 발급 전인 보드로 시작한다.
+    board.certificates = board.certificates.filter((c: { submission_id: number }) => c.submission_id !== submissionId);
+    board.recipients = board.recipients.map((r: { submission_id: number }) =>
+      r.submission_id === submissionId ? { ...r, certificate_id: issued ? 9100 : null } : r,
+    );
+    if (issued) board.certificates = [issued, ...board.certificates];
     await route.fulfill({ response, json: board });
   });
   await page.goto(`/console/contests/${id}/certificates`);
@@ -132,6 +133,34 @@ test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
 });
 
+test("발급한 상장 중 하나를 골라 받으면 버튼 글자와 받은 묶음이 고른 수와 맞는다", async ({ page }) => {
+  const { id } = await openBoard(page, 1);
+  const rows = page.locator('[data-testid^="certificates-row-"]');
+  await expect(rows).toHaveCount(2);
+  const bundle = page.getByTestId("certificates-bundle");
+  await expect(bundle).toHaveText("묶음 받기 (전체 2)");
+
+  const firstId = Number(((await rows.first().getAttribute("data-testid")) ?? "").replace("certificates-row-", ""));
+  await page.getByTestId(`certificates-select-${firstId}`).check();
+  await expect(bundle).toHaveText("고른 1장 받기");
+  const [response, download] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/bundle.pdf")),
+    page.waitForEvent("download"),
+    bundle.click(),
+  ]);
+  expect(response.url()).toContain(`ids=${firstId}`);
+  expect(response.status()).toBe(200);
+  // 고른 한 장만 든 묶음 — 쪽수가 1.
+  const file = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of file) chunks.push(chunk as Buffer);
+  expect(Buffer.concat(chunks).toString("latin1")).toMatch(/\/Count 1\b/);
+
+  // 고른 것을 풀면 전체로 돌아간다.
+  await page.getByTestId(`certificates-select-${firstId}`).uncheck();
+  await expect(bundle).toHaveText("묶음 받기 (전체 2)");
+});
+
 test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 거쳐 「취소됨」이 되어 그 사람은 다시 고를 수 있다", async ({ page }) => {
   const { submissionId } = await openBoard(page, 1);
 
@@ -143,6 +172,8 @@ test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 
   await expect(page.locator('[data-testid^="certificates-cancel-confirm-"]')).toContainText("되돌릴 수 없습니다");
   await page.locator('[data-testid^="certificates-cancel-go-"]').click();
   await expect(row).toHaveAttribute("data-status", "cancelled");
+  // 취소된 상장은 묶음에 고를 수 없다.
+  await expect(row.getByRole("checkbox")).toBeDisabled();
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeEnabled();
 });
 
@@ -179,6 +210,9 @@ test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기�
   await expect(page.getByTestId("certificates-reissue-9002")).toBeDisabled();
   await expect(page.getByTestId("certificates-cancel-9002")).toBeEnabled();
   await expect(page.getByTestId("certificates-download-9001")).toBeEnabled();
+  // 파일 없는 장은 묶음에 고를 수 없다.
+  await expect(page.getByTestId("certificates-select-9002")).toBeDisabled();
+  await expect(page.getByTestId("certificates-select-9001")).toBeEnabled();
   // 묶음에는 파일 있는 한 장만 센다.
-  await expect(page.getByTestId("certificates-bundle")).toHaveText("묶음 받기 (1)");
+  await expect(page.getByTestId("certificates-bundle")).toHaveText("묶음 받기 (전체 1)");
 });

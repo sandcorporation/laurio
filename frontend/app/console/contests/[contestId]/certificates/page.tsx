@@ -62,6 +62,8 @@ export default function ContestCertificatesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [cancelling, setCancelling] = useState<number | null>(null);
+  // 묶어 받을 발급된 상장 id. 비어 있으면 받을 수 있는 것 전부를 받는다.
+  const [bundlePicked, setBundlePicked] = useState<ReadonlySet<number>>(new Set());
   const [reissue, setReissue] = useState<{ id: number; text: CertificateTextIn } | null>(null);
 
   const reload = useCallback(async () => {
@@ -121,6 +123,15 @@ export default function ContestCertificatesPage() {
   const dateDefault = defaultAwardDate(defaults.award_date_min, defaults.award_date_max);
   const issuable = board.recipients.filter((r) => r.certificate_id === null);
   const validCount = bundleCount(board.certificates);
+  const downloadable = (c: CertificateOut) => c.cancelled_at === null && c.pdf_available;
+  // 목록이 다시 불렸을 때 이미 취소됐거나 사라진 장은 선택에서 뺀다.
+  const bundleIds = board.certificates.filter((c) => bundlePicked.has(c.id) && downloadable(c)).map((c) => c.id);
+  const toggleBundle = (id: number) => {
+    const next = new Set(bundlePicked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setBundlePicked(next);
+  };
   const pickedIds = new Set(picked.map((p) => p.submissionId));
 
   const togglePick = (submissionId: number, name: string) => {
@@ -440,10 +451,15 @@ export default function ContestCertificatesPage() {
               <button
                 type="button"
                 className="underline"
-                onClick={() => void download(api(contestId, "/bundle.pdf"), `certificates-${contestId}.pdf`)}
+                onClick={() =>
+                  void download(
+                    api(contestId, bundleIds.length > 0 ? `/bundle.pdf?ids=${bundleIds.join(",")}` : "/bundle.pdf"),
+                    `certificates-${contestId}.pdf`,
+                  )
+                }
                 data-testid="certificates-bundle"
               >
-                묶음 받기 ({validCount})
+                {bundleIds.length > 0 ? `고른 ${bundleIds.length}장 받기` : `묶음 받기 (전체 ${validCount})`}
               </button>
             ) : null
           }
@@ -464,13 +480,24 @@ export default function ContestCertificatesPage() {
                   data-status={status}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="break-all font-medium">
-                        {c.recipient_name} · {c.award_name}
-                      </span>
-                      <span className="font-mono text-xs text-ink/60">
-                        {c.number} · {formatDeadlineSeoul(c.issued_at)}
-                      </span>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        aria-label={`${c.recipient_name} 상장 선택`}
+                        checked={bundleIds.includes(c.id)}
+                        disabled={!downloadable(c)}
+                        onChange={() => toggleBundle(c.id)}
+                        data-testid={`certificates-select-${c.id}`}
+                      />
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="break-all font-medium">
+                          {c.recipient_name} · {c.award_name}
+                        </span>
+                        <span className="font-mono text-xs text-ink/60">
+                          {c.number} · {formatDeadlineSeoul(c.issued_at)}
+                        </span>
+                      </div>
                     </div>
                     <Badge tone={status === "valid" ? "verified" : "neutral"}>{STATUS_LABEL[status]}</Badge>
                   </div>
