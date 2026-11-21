@@ -19,6 +19,7 @@ import { formatDeadlineSeoul } from "@/lib/contest-format";
 import { fetchPdf, postForPdf, saveBlob } from "@/lib/certificates/pdf";
 import {
   ISSUE_BATCH_LIMIT,
+  bundleCount,
   certificateStatus,
   defaultAwardDate,
   type CertificateBoardOut,
@@ -119,7 +120,7 @@ export default function ContestCertificatesPage() {
   const { defaults } = board;
   const dateDefault = defaultAwardDate(defaults.award_date_min, defaults.award_date_max);
   const issuable = board.recipients.filter((r) => r.certificate_id === null);
-  const validCount = board.certificates.filter((c) => c.cancelled_at === null).length;
+  const validCount = bundleCount(board.certificates);
   const pickedIds = new Set(picked.map((p) => p.submissionId));
 
   const togglePick = (submissionId: number, name: string) => {
@@ -476,9 +477,15 @@ export default function ContestCertificatesPage() {
 
                   {status === "valid" ? (
                     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                      {c.pdf_available ? null : (
+                        <span className="text-ink/60" data-testid={`certificates-unavailable-${c.id}`}>
+                          받는 사람 탈퇴 — 파일 없음
+                        </span>
+                      )}
                       <button
                         type="button"
-                        className="underline"
+                        className="underline disabled:no-underline disabled:opacity-40"
+                        disabled={!c.pdf_available}
                         onClick={() => void download(api(contestId, `/${c.id}/pdf`), `certificate-${c.number}.pdf`)}
                         data-testid={`certificates-download-${c.id}`}
                       >
@@ -486,7 +493,8 @@ export default function ContestCertificatesPage() {
                       </button>
                       <button
                         type="button"
-                        className="underline"
+                        className="underline disabled:no-underline disabled:opacity-40"
+                        disabled={!c.pdf_available}
                         onClick={() => {
                           setReissue({
                             id: c.id,
