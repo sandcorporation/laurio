@@ -20,7 +20,7 @@
 #
 # 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다):
 #   - push: main 만. pull_request·pull_request_target 없음. GitHub 호스팅 실행기만. 액션은 SHA 고정. secrets 없음.
-#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만, issues: write 는 notify 잡에만.
+#   - 워크플로 기본 권한은 contents: read. packages: write 는 image 잡에만, contents: write 는 promote 잡에만, issues: write 는 notify·e2e_watch 잡에만.
 #   - GITHUB_TOKEN 의 push 는 다른 워크플로를 깨우지 않는다(production push 로 Actions 가 다시 돌지 않는다).
 #     저장소 웹훅(Jenkins)은 깨운다.
 name: release
@@ -192,6 +192,27 @@ jobs:
             body="${body}"$'\n\n'"직전 초록(production) \`${green}\` … 이번 \`${SHA}\`: https://github.com/${GH_REPO}/compare/${green}...${SHA}"
           fi
           bash scripts/ci/ci-issue.sh fail "$title" "$body"
+
+  # 매시 e2e 예약이 멈췄는지(#1122) — 예약은 부하 때 건너뛰어지므로 예약이 아닌 방아쇠(main 병합)에서 본다. 이미지·승격과 무관하다.
+  e2e_watch:
+    needs: main_only
+    if: ${{ !cancelled() && needs.main_only.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: 마지막 예약 실행이 오래됐는가
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
+        run: bash scripts/ci/e2e-stale.sh
 
   promote:
     needs: [main_only, image]

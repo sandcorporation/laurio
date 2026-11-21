@@ -77,7 +77,7 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertNotIn("pr-check.yml", code)
         self.assertNotIn("verified_tree", code)
         jobs = re.findall(r"(?m)^  ([\w-]+):\n", code.split("\njobs:\n", 1)[1])
-        self.assertEqual(sorted(jobs), ["cache", "cache-node", "image", "main_only", "notify", "promote"])
+        self.assertEqual(sorted(jobs), ["cache", "cache-node", "e2e_watch", "image", "main_only", "notify", "promote"])
         self.assertFalse((ROOT / "scripts" / "ci" / "verified_tree.py").exists())
         image = job_block(code, "image")
         self.assertIn("uses: ./.github/workflows/image.yml", image)
@@ -115,7 +115,7 @@ class ReleaseFlowTest(unittest.TestCase):
         release = read(WORKFLOWS / "release.yml")
         # 승격·이미지·알림은 모두 main_only success 를 기다린다 — main_only 하나를 막으면 다 멈춘다.
         self.assertIn(f"if: {only_upstream}", job_block(release, "main_only"))
-        for job in ("image", "cache", "cache-node", "notify", "promote"):
+        for job in ("image", "cache", "cache-node", "notify", "promote", "e2e_watch"):
             self.assertRegex(job_block(release, job), r"needs:\s*(main_only|\[main_only)")
         self.assertIn(f"if: {only_upstream}", job_block(read(WORKFLOWS / "image.yml"), "build"))
         # 캐시 잡만은 포크 main 에서도 돈다(#1116) — 포크 PR 검사의 층 캐시가 비어 e2e 조각마다 처음부터 굽던 것.
