@@ -103,6 +103,12 @@ class Watch(unittest.TestCase):
         run(api)
         self.assertEqual(api.cancelled, 0)
 
+    def test_one_done_glimpse_is_not_enough(self) -> None:
+        """plan 직후 뒤 잡이 아직 안 펼쳐진 틈 — 한 번의 「끝남」으로 나가지 않고 뒤에 난 실패를 잡는다."""
+        api = FakeApi([[job("plan")], [job("plan"), job("e2e web-1", conclusion="failure")]])
+        run(api)
+        self.assertEqual(api.cancelled, 1)
+
     def test_fork_pr_read_only_token_warns_and_ends(self) -> None:
         api = FakeApi([[job("agent-grader", conclusion="failure"), job("celery", "in_progress")]], cancel_status=403)
         logs = run(api)
