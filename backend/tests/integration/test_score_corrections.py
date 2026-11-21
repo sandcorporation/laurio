@@ -320,3 +320,6 @@ def test_a_correction_reports_the_certificates_issued_to_that_submission_and_kee
     _run_corrections(world)
     listed = operator.get(_corrections_url(seeded["contest_id"]), HTTP_ORIGIN=OPERATOR_ORIGIN).json()
     assert {c["submission_id"]: c["certificates_issued"] for c in listed["corrections"]}[seeded["failed_id"]] == 1
+    # 거는 화면이 고를 제출 목록 — 처음 채점 점수 그대로(정정이 끝나도 원래 점수가 남는다).
+    originals = {s["submission_id"]: s["original_percentage"] for s in listed["submissions"]}
+    assert originals == {seeded["honest_id"]: "100.00", seeded["failed_id"]: "0.00"}
