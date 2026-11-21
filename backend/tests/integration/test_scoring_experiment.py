@@ -41,6 +41,12 @@ def scored(client, category, landing_type):  # noqa: F811
     return submission
 
 
+@pytest.fixture(autouse=True)
+def grader_up(monkeypatch):
+    """실행기 health 는 닿는다고 둔다 — 실행은 시험마다 같은 프로세스로 바꿔 끼운다(#1257)."""
+    monkeypatch.setattr(ex, "check_health", lambda **_k: None)
+
+
 @pytest.fixture
 def limit(monkeypatch):
     monkeypatch.delenv(AGENT_EXPERIMENT_DAILY_LIMIT_USD, raising=False)
@@ -203,3 +209,79 @@ def test_experiment_tokens_have_their_own_daily_limit(limit):
     # 실험 몫은 운영 하루 합계에 세지 않고, 운영 몫은 실험 합계에 세지 않는다.
     AgentRunToken.objects.filter(pk=prod.record_id).update(spent_usd=Decimal("0.25"))
     assert spent_today_usd() == Decimal("0.25") and spent_today_usd(experiment=True) == Decimal("0.5")
+
+
+def _grader_down(**_k):
+    raise ar.AgentGraderError("URLError")
+
+
+@pytest.mark.django_db
+def test_unreachable_grader_makes_no_cells_even_with_confirm(scored, monkeypatch, limit):
+    from django.core.management.base import CommandError
+
+    monkeypatch.setattr(ex, "check_health", _grader_down)
+    monkeypatch.setattr(ex, "_RUNNERS", {"self_loop": lambda *a: pytest.fail("실행기에 못 닿는데 칸을 돌았다")})
+    limit("5")
+    args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "1")
+
+    preview = _call(*args)
+    assert "실행기 agent-grader:8003 에 닿지 못한다(URLError) — celery-worker 에서 돌린다" in preview
+    with pytest.raises(CommandError, match="닿지 못한다.*한 칸도 만들지 않았다"):
+        _call(*args, "--confirm")
+    assert not ScoringExperiment.objects.exists() and not ScoringExperimentRun.objects.exists()
+    # 한 번 호출 줄만이면 실행기를 묻지 않는다.
+    assert "실행기" not in _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", SINGLE)
+
+
+@pytest.mark.django_db
+def test_infra_failures_rerun_and_model_failures_do_not(scored, monkeypatch, limit):
+    def single(submission, row, inputs):
+        raise ValueError("응답이 스키마와 다르다")  # 모델이 틀린 꼴을 냈다 — 방식의 실패
+
+    def loop_down(submission, row, inputs):
+        raise ar.AgentGraderError("URLError")
+
+    monkeypatch.setattr(ex, "_RUNNERS", {"single_call": single, "self_loop": loop_down})
+    limit("5")
+    args = ("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", f"{SINGLE},{LOOP}", "--repeat", "2",
+            "--name", "pilot", "--confirm")
+
+    first = _call(*args)
+
+    assert first.count("인프라 실패(결과로 남기지 않는다)") == 2 and "인프라 실패 2칸은 남기지 않았다" in first
+    experiment = ScoringExperiment.objects.get(name="pilot")
+    assert sorted(experiment.runs.values_list("row", "status")) == [(SINGLE, "failed"), (SINGLE, "failed")]
+    # #1257 전 판은 인프라 실패도 `failed` 로 남겼다(운영 selfloop-pilot) — 같은 규칙으로 다시 돌아야 한다.
+    ScoringExperimentRun.objects.create(
+        experiment=experiment, submission=scored, row=LOOP, round=1, status="failed",
+        problem="AgentGraderError: URLError", created_at=timezone.now(),
+    )
+    assert f"| {LOOP} | 0 | 0 | 0 | 0 | 0 |" in _call("experiment_report", "pilot")  # 결과가 아니라 보고표에 없다
+
+    monkeypatch.setattr(ex, "_RUNNERS", {
+        "single_call": lambda *a: pytest.fail("모델 실패 칸을 다시 돌았다"),
+        "self_loop": lambda *a: ex.CellResult("scored", score=Decimal("90"), cost_usd=Decimal("0.02")),
+    })
+    second = _call(*args)
+
+    assert "남은 호출 2칸" in second and "칸 2개를 돌렸다" in second, second
+    runs = {(r.row, r.round): r.status for r in experiment.runs.all()}
+    assert runs == {(SINGLE, 1): "failed", (SINGLE, 2): "failed", (LOOP, 1): "scored", (LOOP, 2): "scored"}
+    assert f"| {LOOP} | 1 | 2 | 2 | 0 | 0 |" in _call("experiment_report", "pilot")
+
+
+@pytest.mark.django_db
+def test_three_infra_failures_in_a_row_stop_the_run(scored, monkeypatch, limit):
+    from django.core.management.base import CommandError
+
+    calls = []
+
+    def busy(*a):
+        calls.append(a)
+        raise ar.AgentGraderBusy("busy")
+
+    monkeypatch.setattr(ex, "_RUNNERS", {"self_loop": busy})
+    limit("5")
+    with pytest.raises(CommandError, match="연속 3칸이라 멈췄다. 남은 칸 5개"):
+        _call("compare_scoring_methods", "--contest", str(scored.contest_id), "--rows", LOOP, "--repeat", "5", "--confirm")
+    assert len(calls) == 3 and not ScoringExperimentRun.objects.exists()
