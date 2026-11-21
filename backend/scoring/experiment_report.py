@@ -7,6 +7,11 @@
 - 흔들림: 제출마다 회차 점수의 표본 표준편차, 그 평균(회차가 하나면 없음).
 - 근거 실재율: 모델이 낸 근거 중 박제본에 실재한 몫 — 우리 루프가 다시 물어 버린 근거(`evidence_dropped`)도 분모에 든다.
 - 건당 비용: 회차 하나의 평균 비용(실패·보류 포함 — 돈은 썼다). 시간은 끝난 회차의 p50·p90.
+- 요구사항 단위(#1261): 점수가 같아도 판정이 다를 수 있다(공모전 3 은 16건 모두 100 이라 점수로는 아무것도 못 갈랐다).
+  - 판정 일치율: (제출, 요구사항)마다 이 줄의 회차 판정과 기준 줄의 회차 판정을 모든 짝으로 견준 일치 몫, 그 평균.
+    필수와 선택(선택·가산)을 나눈다. 기준 줄 자신은 없음.
+  - 판정 흔들림: 채점된 회차가 둘 이상인 (제출, 요구사항) 가운데 회차마다 판정이 바뀐 몫. 필수·선택을 나눈다.
+  - 미충족 재현율·오탐률은 정답(알려진 미충족)이 있어야 잰다 — 운영 재료에는 없어 「—」다.
 """
 
 from __future__ import annotations
@@ -30,8 +35,14 @@ MIN_EVIDENCE_RATE = 0.95
 MAX_TROUBLE_RATE = 1 / 16  # 실패 + 보류
 COST_DIVISOR = 3  # 건당 비용 × 3 ≤ 기준 건당 비용(1/3 을 Decimal 로 나누면 끝자리가 잘린다)
 MAX_P90_SECONDS = 300.0
+#: 필수 판정 일치율 ≥ 이것(#1261). 평균 차 문턱(5점)을 판정 수로 옮긴 값이다 — 공모전 3 의 필수 14개에서 판정 하나가
+#: 다르면 점수가 100/14 ≈ 7.1점 움직이므로, 평균 차 5점은 제출당 0.7개 ≈ 필수의 5% 가 다른 것과 같다.
+MIN_REQUIRED_AGREEMENT = 0.95
+#: 필수 판정 흔들림 ≤ 기준 줄의 흔들림 + 이것(#1261). 점수 흔들림 문턱(기준 + 2점)을 같은 식으로 옮겼다 — 2점은 필수
+#: 14개에서 판정 0.28개 ≈ 2%p.
+FLIP_SLACK = 0.02
 FULL_REPEAT = 3  # 「전체」 예상 금액의 회차
-CRITERIA = ("diff", "max_diff", "spearman", "stability", "evidence", "trouble", "cost", "p90")
+CRITERIA = ("diff", "max_diff", "spearman", "stability", "evidence", "trouble", "cost", "p90", "agreement", "flip")
 
 
 @dataclass(frozen=True)
@@ -45,6 +56,7 @@ class RunRow:
     evidence_real: int
     cost_usd: Decimal
     duration_seconds: float | None
+    verdicts: tuple[tuple[int, bool], ...] = ()  # (요구사항 id, 충족) — 채점됐을 때만
 
 
 @dataclass(frozen=True)
@@ -65,6 +77,40 @@ class RowReport:
     p50_seconds: float | None
     p90_seconds: float | None
     passes: dict[str, bool | None]  # 문턱마다(`CRITERIA`), 판단 못 하면 None
+    agreement_required: float | None = None  # 기준 줄 대비 필수 판정 일치율
+    agreement_optional: float | None = None
+    flip_required: float | None = None  # 회차 사이 필수 판정 흔들림
+    flip_optional: float | None = None
+
+
+Verdicts = dict[tuple[int, int], list[bool]]  # (제출, 요구사항) → 회차마다의 충족
+
+
+def _verdicts(rows: Iterable[RunRow]) -> Verdicts:
+    out: Verdicts = {}
+    for r in rows:
+        if r.status == "scored":
+            for requirement_id, met in r.verdicts:
+                out.setdefault((r.submission_id, requirement_id), []).append(met)
+    return out
+
+
+def agreement(mine: Verdicts, base: Verdicts, *, required: frozenset[int], want_required: bool) -> float | None:
+    """(제출, 요구사항)마다 두 줄의 회차 판정을 모든 짝으로 견준 일치 몫의 평균. 견줄 것이 없으면 None."""
+
+    keys = [k for k in mine if k in base and (k[1] in required) == want_required]
+    if not keys:
+        return None
+    return mean(sum(a == b for a in mine[k] for b in base[k]) / (len(mine[k]) * len(base[k])) for k in keys)
+
+
+def flip_rate(mine: Verdicts, *, required: frozenset[int], want_required: bool) -> float | None:
+    """채점된 회차가 둘 이상인 (제출, 요구사항) 가운데 판정이 회차마다 같지 않은 몫. 그런 것이 없으면 None."""
+
+    keys = [k for k, v in mine.items() if len(v) >= 2 and (k[1] in required) == want_required]
+    if not keys:
+        return None
+    return sum(1 for k in keys if len(set(mine[k])) > 1) / len(keys)
 
 
 def _per_submission(rows: Iterable[RunRow]) -> dict[int, list[float]]:
@@ -128,8 +174,18 @@ def ci95_half_width(values: Sequence[float]) -> float | None:
     return t * stdev(values) / math.sqrt(len(values))
 
 
-def _row_report(name: str, rows: list[RunRow], baseline: dict[int, list[float]], base: RowReport | None) -> RowReport:
+def _row_report(
+    name: str,
+    rows: list[RunRow],
+    baseline: dict[int, list[float]],
+    base: RowReport | None,
+    *,
+    base_verdicts: Verdicts,
+    required: frozenset[int],
+) -> RowReport:
     per = _per_submission(rows)
+    mine = _verdicts(rows)
+    compared = base is not None
     common = sorted(set(per) & set(baseline))
     signed = [mean(per[s]) - mean(baseline[s]) for s in common]
     diffs = [abs(d) for d in signed]
@@ -157,6 +213,10 @@ def _row_report(name: str, rows: list[RunRow], baseline: dict[int, list[float]],
         p50_seconds=percentile(durations, 50),
         p90_seconds=percentile(durations, 90),
         passes={},
+        agreement_required=agreement(mine, base_verdicts, required=required, want_required=True) if compared else None,
+        agreement_optional=agreement(mine, base_verdicts, required=required, want_required=False) if compared else None,
+        flip_required=flip_rate(mine, required=required, want_required=True),
+        flip_optional=flip_rate(mine, required=required, want_required=False),
     )
     passes: dict[str, bool | None] = dict.fromkeys(CRITERIA)
     if report.runs:
@@ -176,21 +236,37 @@ def _row_report(name: str, rows: list[RunRow], baseline: dict[int, list[float]],
             passes["stability"] = report.stability <= base.stability + STABILITY_SLACK
         if report.cost_per_run is not None and base.cost_per_run:
             passes["cost"] = report.cost_per_run * COST_DIVISOR <= base.cost_per_run
+        if report.agreement_required is not None:
+            passes["agreement"] = report.agreement_required >= MIN_REQUIRED_AGREEMENT
+        if report.flip_required is not None and base.flip_required is not None:
+            passes["flip"] = report.flip_required <= base.flip_required + FLIP_SLACK
     return RowReport(**{**report.__dict__, "passes": passes})
 
 
-def report_rows(runs: Sequence[RunRow], *, baseline: str = BASELINE_ROW, row_names: Sequence[str] = ()) -> list[RowReport]:
-    """줄마다 보고 — 기준 줄이 맨 앞. 기준 줄이 없으면 점수 차·순위·흔들림·비용 기준은 판단하지 않는다(None).
-    `row_names`(실험의 줄)에 있는데 남은 칸이 없는 줄도 빈 줄로 보인다 — 빠지면 그 줄이 안 돈 것을 놓친다."""
+def report_rows(
+    runs: Sequence[RunRow],
+    *,
+    baseline: str = BASELINE_ROW,
+    row_names: Sequence[str] = (),
+    required_ids: frozenset[int] = frozenset(),
+) -> list[RowReport]:
+    """줄마다 보고 — 기준 줄이 맨 앞. 기준 줄이 없으면 점수 차·순위·흔들림·비용·판정 일치 기준은 판단하지 않는다(None).
+    `row_names`(실험의 줄)에 있는데 남은 칸이 없는 줄도 빈 줄로 보인다 — 빠지면 그 줄이 안 돈 것을 놓친다.
+    `required_ids` 는 공모전의 필수 요구사항 — 판정 일치율·흔들림을 필수와 그 밖으로 나눈다."""
 
     by_row: dict[str, list[RunRow]] = {name: [] for name in row_names}
     for r in runs:
         by_row.setdefault(r.row, []).append(r)
     base_rows = by_row.get(baseline, [])
     base_scores = _per_submission(base_rows)
-    base_report = _row_report(baseline, base_rows, base_scores, None) if baseline in by_row else None
+    common = {"base_verdicts": _verdicts(base_rows), "required": required_ids}
+    base_report = _row_report(baseline, base_rows, base_scores, None, **common) if baseline in by_row else None
     out = [base_report] if base_report is not None else []
-    out += [_row_report(name, rows, base_scores, base_report) for name, rows in sorted(by_row.items()) if name != baseline]
+    out += [
+        _row_report(name, rows, base_scores, base_report, **common)
+        for name, rows in sorted(by_row.items())
+        if name != baseline
+    ]
     return out
 
 
@@ -227,9 +303,13 @@ def _mark(value: bool | None) -> str:
 
 HEADERS = [
     "줄", "제출", "회차", "채점", "보류", "실패", "평균 차", "최대 차", "순위 일치", "흔들림", "근거 실재율",
+    "필수 판정 일치", "선택 판정 일치", "필수 판정 흔들림", "선택 판정 흔들림", "미충족 재현율", "오탐률",
     "실측 건당 비용(USD)", "전체 예상(USD)", "p50(초)", "p90(초)",
     "평균 차 ≤5", "최대 차 ≤15", "순위 ≥0.8", "흔들림 ≤기준+2", "근거 ≥95%", "실패·보류 ≤1/16", "비용 ≤기준/3", "p90 ≤300초",
+    "필수 일치 ≥95%", "필수 판정 흔들림 ≤기준+2%p",
 ]
+NO_TRUTH_NOTE = "정답(알려진 미충족)이 없는 재료 — 미충족 재현율·오탐률은 「—」."
+COST_ONLY_NOTE = "비용 측정 전용 — 점수 비교 아님(뽑힌 재료의 기준 점수가 모두 같았다)."
 
 
 NOT_MEASURED = "실측 없음"
@@ -241,12 +321,18 @@ def full_estimate_usd(r: RowReport, full_submissions: int) -> Decimal | None:
     return None if r.cost_per_run is None else (r.cost_per_run * full_submissions * FULL_REPEAT).quantize(Decimal("0.01"))
 
 
+def _pct(value: float | None) -> str:
+    return "—" if value is None else f"{value * 100:.1f}%"
+
+
 def _cells(r: RowReport, *, repeat: int, full_submissions: int) -> list[str]:
     stability = "회차 1 — 잴 수 없음" if repeat == 1 else _fmt(r.stability, ".2f")
     return [
         r.row, str(r.submissions), str(r.runs), str(r.scored), str(r.held), str(r.failed),
         _fmt(r.mean_diff, ".2f"), _fmt(r.max_diff, ".2f"), _fmt(r.spearman, ".3f"), stability,
-        _fmt(None if r.evidence_rate is None else r.evidence_rate * 100, ".1f") + ("%" if r.evidence_rate is not None else ""),
+        _pct(r.evidence_rate),
+        _pct(r.agreement_required), _pct(r.agreement_optional),
+        _pct(r.flip_required), _pct(r.flip_optional), "—", "—",
         _fmt(r.cost_per_run, "f"),
         NOT_MEASURED if (e := full_estimate_usd(r, full_submissions)) is None else format(e, "f"),
         _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),

@@ -373,6 +373,9 @@ class ScoringExperiment(models.Model):
     #: `limit_submissions` 건을 고르는 법(#1259) — "id"(id 순 앞 N 건) 또는 "spread"(운영 점수 분위로 N 건). 이 값이 있기
     #: 전에 만든 실험은 "id" 다 — 이어 돌려도 고른 집합이 바뀌지 않는다.
     pick = models.CharField(max_length=10, default="id", db_default="id")
+    #: 비용만 재는 실험(#1261) — 뽑힌 재료의 기대 점수가 모두 같아 방식을 가를 수 없는데 `--cost-only` 로 돌렸다.
+    #: 보고표 머리가 「비용 측정 전용 — 점수 비교 아님」이라고 말한다.
+    cost_only = models.BooleanField(default=False, db_default=False)
     daily_limit_usd = models.DecimalField(max_digits=10, decimal_places=4)  # 만들 때의 실험 하루 상한
     created_at = models.DateTimeField(auto_now_add=True)
 

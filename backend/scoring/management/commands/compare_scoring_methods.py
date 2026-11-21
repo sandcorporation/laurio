@@ -8,6 +8,9 @@
 회차·건수를 늘려 이어 갈 수 있다(먼저 `--limit-submissions 2 --repeat 1` 로 단가를 재고, 같은 이름으로 전체를 돌린다).
 운영 표(`Score`·`AgentRun`·`ScoreCorrection`·순위·지급)는 쓰지 않는다. 절차는 `docs/ops/scoring-experiment.md`.
 
+미리 보기는 뽑힌 제출마다 기대 점수(운영 점수)·미충족 수를 찍는다. 기대 점수가 모두 같으면 방식을 가를 수 없어
+`--confirm` 을 거절한다 — 비용만 잴 것이면 `--cost-only` 를 같이 준다(#1261, 보고표가 「점수 비교 아님」을 찍는다).
+
 에이전트·우리 루프 줄은 실행기(`agent-grader:8003`)에 닿는 컨테이너(운영은 celery-worker)에서 돌린다. `--confirm` 이면
 칸을 만들기 전에 실행기에 한 번 닿아 보고, 못 닿으면 한 칸도 돌지 않고 0 아닌 코드로 끝난다(#1257). 인프라 실패 칸
 (닿지 못함·바쁨·토큰 거절·상한 429)은 결과로 남기지 않고 같은 인자로 다시 부르면 다시 돈다 — 연속 3칸이면 멈춘다.
@@ -47,6 +50,10 @@ class Command(BaseCommand):
         parser.add_argument("--name", default=None, help="실험 이름. 비면 인자에서 만든다(같은 인자 = 같은 실험)")
         parser.add_argument("--by", default=None, help="만든 사람(기록용). 비면 OS 사용자")
         parser.add_argument("--confirm", action="store_true", help="이것이 있어야 모델을 부른다")
+        parser.add_argument(
+            "--cost-only", action="store_true",
+            help="뽑힌 재료의 기대 점수가 모두 같아도 돌린다 — 비용만 잰다(보고표가 점수 비교가 아니라고 찍는다)",
+        )
 
     def handle(self, *args: object, **options: object) -> None:
         contest_id = int(options["contest"])  # type: ignore[call-overload]  # argparse 가 int 로 줬다
@@ -75,7 +82,10 @@ class Command(BaseCommand):
 
         plan = ex.plan(contest, rows, repeat=repeat, limit=limit, experiment=experiment, pick=pick)
         grader = ex.grader_problem() if ex.needs_grader(rows) else None
+        picked = ex.materials(contest, plan.submissions)
+        same = ex.same_score(picked)
         self._preview(name, plan, repeat, resumed=experiment is not None)
+        self._materials(contest, picked, same, spread=pick == "spread" and limit is not None)
         if ex.needs_grader(rows):
             self.stdout.write(grader or f"실행기 {ex.grader_address()} 에 닿는다.")
         if not options["confirm"]:
@@ -86,6 +96,15 @@ class Command(BaseCommand):
             return
         if grader is not None and ex.needs_grader([row for _s, row, _n in plan.cells]):
             raise CommandError(f"{grader}. 한 칸도 만들지 않았다.")
+        cost_only = bool(options["cost_only"])
+        if same is not None and not cost_only:
+            raise CommandError(
+                f"뽑힌 제출 {len(picked)}건의 기준 점수가 모두 {same} — 방식을 가를 수 없다. 점수가 갈리는 재료를 고르거나, "
+                "비용만 잴 것이면 --cost-only 를 준다. 한 칸도 만들지 않았다."
+            )
+        if experiment is not None and cost_only and not experiment.cost_only:
+            experiment.cost_only = True
+            experiment.save(update_fields=["cost_only"])
         if experiment is not None and (experiment.repeat, experiment.limit_submissions) != (repeat, limit):
             # 같은 실험을 넓혀 이어 간다(먼저 2건 × 1회로 단가를 재고 전체로, 대장 #4345) — 끝난 칸은 다시 돌지 않는다.
             experiment.repeat, experiment.limit_submissions = repeat, limit
@@ -94,7 +113,7 @@ class Command(BaseCommand):
             experiment = ScoringExperiment.objects.create(
                 name=name, contest=contest, created_by=str(options["by"] or getpass.getuser()),
                 rows=[r.name for r in rows], repeat=repeat, limit_submissions=limit, pick=pick,
-                daily_limit_usd=plan.daily_limit_usd,
+                daily_limit_usd=plan.daily_limit_usd, cost_only=cost_only,
             )
         self._run(experiment, plan)
 
@@ -111,6 +130,16 @@ class Command(BaseCommand):
         w(f"실험 하루 상한 {plan.daily_limit_usd} USD · 오늘 쓴 돈 {plan.spent_today_usd:.4f} · 남은 돈 {plan.remaining_usd:.4f}")
         if plan.daily_limit_usd <= 0:
             w("실험 하루 상한이 0(꺼짐)이다 — 운영자 앱 운영 설정의 AGENT_EXPERIMENT_DAILY_LIMIT_USD 를 정해야 돈다.")
+
+    def _materials(self, contest: Contest, picked: list[ex.Material], same: Decimal | None, *, spread: bool) -> None:
+        w = self.stdout.write
+        w("제출 | 운영 점수 | 미충족 필수 | 미충족 선택·가산")
+        for m in picked:
+            w(f"{m.submission_id} | {m.score} | {m.unmet_required} | {m.unmet_optional}")
+        if same is not None:
+            w(f"뽑힌 제출 {len(picked)}건의 기준 점수가 모두 {same} — 방식을 가를 수 없다(--confirm 은 --cost-only 와만 돈다).")
+        if spread and ex.same_score(ex.materials(contest, ex.eligible_submissions(contest, None))) is not None:
+            w("--pick spread: 공모전의 채점된 제출 점수가 모두 같아 점수 분위로 고를 것이 없다 — id 순과 같다.")
 
     def _run(self, experiment: ScoringExperiment, plan: ex.Plan) -> None:
         per_run_high = {rp.row: rp.per_run_high_usd for rp in plan.rows}
