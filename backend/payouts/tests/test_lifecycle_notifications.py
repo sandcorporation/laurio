@@ -508,6 +508,81 @@ def test_judging_end_reminder_notifies_sponsor(client, category, landing_type):
     assert matching[0]["context"]["contest_id"] == contest["id"]
 
 
+# --- 보관된 공모전은 수명주기 알림이 없다 (#1235) -------------------------------
+
+
+def _archive(contest_id: int) -> None:
+    Contest.objects.filter(id=contest_id).update(archived_at=timezone.now())
+
+
+def _unarchive(contest_id: int) -> None:
+    Contest.objects.filter(id=contest_id).update(archived_at=None)
+
+
+def _count_of_type(client, access: str, notification_type) -> int:
+    return len(
+        [n for n in _my_notifications(client, access) if n["notification_type"] == notification_type]
+    )
+
+
+@pytest.mark.django_db
+def test_archived_contest_gets_no_deadline_reminder_until_unarchived(client, category, landing_type):
+    deadline = _base_now() + timedelta(hours=2)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _archive(contest["id"])
+    _freeze(
+        _safe_daytime_at_or_after(
+            deadline - timedelta(hours=current_policy().deadline_reminder_lead_hours)
+        )
+    )
+
+    result = _run_lifecycle_scan(client)
+    assert not any(r.get("event") == "deadline_reminder_sent" for r in result["results"])
+    assert _count_of_type(client, sponsor["access"], NotificationType.DEADLINE_REMINDER) == 0
+    # 건너뛰었다고 완료 표시를 찍지 않는다 — 그래야 보관을 풀면 다시 후보가 된다.
+    assert Contest.objects.get(id=contest["id"]).deadline_reminder_sent_at is None
+
+    _unarchive(contest["id"])
+    _run_lifecycle_scan(client)
+    assert _count_of_type(client, sponsor["access"], NotificationType.DEADLINE_REMINDER) == 1
+
+
+@pytest.mark.django_db
+def test_archived_contest_gets_no_judging_end_reminder_or_final_warning(
+    client, category, landing_type
+):
+    deadline = _base_now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client, category=category, deliverable_type=landing_type, deadline_at=deadline
+    )
+    _close_contest(client, contest, deadline=deadline)
+    _archive(contest["id"])
+
+    judging_ends_at = Contest.objects.get(id=contest["id"]).judging_ends_at
+    _freeze(
+        judging_ends_at
+        - timedelta(hours=current_policy().judging_end_reminder_lead_hours)
+        + timedelta(minutes=1)
+    )
+    _run_lifecycle_scan(client)
+    assert (
+        _count_of_type(client, sponsor["access"], NotificationType.JUDGING_PERIOD_ENDING_REMINDER)
+        == 0
+    )
+    assert Contest.objects.get(id=contest["id"]).judging_end_reminder_sent_at is None
+
+    # 심사 종료 전이는 보관과 무관하게 돈다 — 그 뒤 최종 경고 시각을 지나도 알림은 없다.
+    _end_judging_period(client, contest["id"])
+    _freeze(Contest.objects.get(id=contest["id"]).judging_ends_at + timedelta(days=30))
+    _run_lifecycle_scan(client)
+    assert (
+        _count_of_type(client, sponsor["access"], NotificationType.DISTRIBUTION_FINAL_WARNING) == 0
+    )
+    assert Contest.objects.get(id=contest["id"]).distribution_final_warning_sent_at is None
+
+
 # --- Distribution 최종 경고: 금액 명시 + 낮 시각 구성 ------------------------------
 
 
