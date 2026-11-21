@@ -1,16 +1,18 @@
 """`manage.py feedback_report` — 대장 전달(`scripts/feedback.sh`, #1240)이 운영 backend 에서 부른다 (#1239).
 
-읽기: `show <번호>` · `list [--limit N]`
+읽기: `show <번호>` · `summary <번호>` · `list [--limit N]`
 전달: `take [--limit N]` · `untake <번호>` · `mark-forwarded <번호>`
 쓰기: `status <번호> <상태> --note "<처리 글>"` — 운영자 화면과 같은 서비스 함수, 같은 알림.
+      `--note -` 면 처리 글을 표준 입력에서 읽는다(ssh 를 거치며 따옴표·한글이 깨지지 않게).
 
-`list`·`take` 는 번호·갈래·앱·받은 시각만 JSON 한 줄씩 낸다 — 내용·그림은 전달 메일에 싣지 않는다.
+`list`·`take`·`summary` 는 번호·갈래·앱·받은 시각만 JSON 한 줄씩 낸다 — 내용·그림은 전달 메일에 싣지 않는다.
 `show` 는 사람이 읽는 글이다(내용·상태·이력, 스크린샷은 있는지만).
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from argparse import ArgumentParser
 
 from django.core.management.base import BaseCommand, CommandError
@@ -41,7 +43,7 @@ class Command(BaseCommand):
         for name in ("list", "take"):
             p = sub.add_parser(name)
             p.add_argument("--limit", type=int, default=20)
-        for name in ("untake", "mark-forwarded"):
+        for name in ("summary", "untake", "mark-forwarded"):
             p = sub.add_parser(name)
             p.add_argument("report_id", type=int)
         status = sub.add_parser("status")
@@ -59,6 +61,11 @@ class Command(BaseCommand):
         elif action == "take":
             for report in services.take_reports(int(options["limit"])):
                 self.stdout.write(_summary(report))
+        elif action == "summary":
+            report = FeedbackReport.objects.filter(pk=int(options["report_id"])).first()
+            if report is None:
+                raise CommandError(f"제보 #{options['report_id']} 이(가) 없습니다.")
+            self.stdout.write(_summary(report))
         elif action == "untake":
             if not services.untake_report(int(options["report_id"])):
                 raise CommandError("되돌릴 제보가 없습니다(없거나 이미 전달됨).")
@@ -66,7 +73,10 @@ class Command(BaseCommand):
             if not services.mark_forwarded(int(options["report_id"])):
                 raise CommandError("표시할 제보가 없습니다(없거나 이미 전달됨).")
         elif action == "status":
-            self._status(int(options["report_id"]), str(options["to_status"]), str(options["note"]))
+            note = str(options["note"])
+            if note == "-":
+                note = sys.stdin.read()
+            self._status(int(options["report_id"]), str(options["to_status"]), note)
 
     def _show(self, report_id: int) -> None:
         report = FeedbackReport.objects.select_related("reporter").filter(pk=report_id).first()

@@ -232,3 +232,18 @@ def test_retention_scan_removes_only_expired_screenshots():
     _run_scan(operator)
     assert reporter.get(f"/api/feedback/reports/{open_id}").json()["has_screenshot"] is False
     assert FakeStorageAdapter().read_object(open_key, bucket=Bucket.PRIVATE) is None
+
+
+def test_command_summary_and_note_from_stdin(monkeypatch):
+    reporter = granted_reporter("fbr-stdin", operator_client("fbr-op-stdin"))
+    report_id = reporter.report(kind="suggestion", app="classroom", body="비밀 내용").json()["id"]
+
+    summary = json.loads(_command("summary", str(report_id)))
+    assert summary["id"] == report_id
+    assert (summary["kind"], summary["app"]) == ("suggestion", "classroom")
+    assert "비밀 내용" not in json.dumps(summary, ensure_ascii=False)
+
+    monkeypatch.setattr("sys.stdin", StringIO("반영했습니다 — \"따옴표\" 포함"))
+    _command("status", str(report_id), "deployed", "--note", "-")
+    detail = reporter.get(f"/api/feedback/reports/{report_id}").json()
+    assert detail["resolution_note"] == '반영했습니다 — "따옴표" 포함'
