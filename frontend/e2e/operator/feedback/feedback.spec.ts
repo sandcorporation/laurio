@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { backendBase } from "../../lib/feedback-permission";
 import { e2eRunId } from "../../lib/run-id";
 import { E2E_OPERATOR_PASSWORD, seedE2eOperator } from "../../lib/seed-operator";
 import { establishOperatorSession } from "../../lib/session";
@@ -8,10 +9,6 @@ import { establishOperatorSession } from "../../lib/session";
 // 준비(운영자·제보자 계정)는 시험 한도(3초) 밖 beforeAll 에서 한다. 제보자 로그인·제보는 backend 포트를 직접
 // 친다 — CI 의 운영자 조각은 공개 앱(53000)을 띄우지 않는다(seed-operator.ts 의 직접 호출과 같은 길).
 test.describe.configure({ mode: "serial" });
-
-function backendBase(): string {
-  return process.env.CODEMIT_API_BASE_URL ?? `http://127.0.0.1:${process.env.CODEMIT_API_PORT ?? "58000"}`;
-}
 
 let operatorName: string;
 let reporterEmail: string;
