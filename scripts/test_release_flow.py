@@ -161,6 +161,38 @@ class ReleaseFlowTest(unittest.TestCase):
         assert on
         self.assertRegex(on.group(1), r"(?m)^  merge_group:")
 
+    def test_one_failed_job_stops_the_run_and_result_still_judges(self) -> None:
+        """잡 하나가 실패하면 실행을 멈추고 「결과」가 곧바로 실패로 난다(#1139).
+
+        - matrix 안은 GitHub 의 fail-fast, 잡 사이는 `fail-fast` 잡(fail_fast.py watch)이 이 실행만 취소한다.
+        - 감시는 「결과」의 needs 가 아니다 — 판정에 끼지 않는다. 쓰기 권한(actions: write)은 이 잡에만.
+        - 「결과」는 취소돼도 돈다(잡·단계 모두 always()) — 필수 검사가 기다리는 중으로 남지 않고 거짓 초록도 없다.
+        - merge_group 실행마다 따로: 취소 대상은 GITHUB_RUN_ID 하나다.
+        """
+        pr = read(WORKFLOWS / "pr-check.yml")
+        code = "\n".join(re.sub(r"(^|\s)#.*", "", line) for line in pr.splitlines())
+        self.assertNotIn("fail-fast: false", code)
+        watcher = job_block(code, "fail-fast")
+        self.assertIn("fail_fast.py watch --skip 결과 --skip \"빨리 멈춤\"", watcher)
+        self.assertIn("name: 빨리 멈춤", watcher)
+        self.assertRegex(watcher, r"(?m)^\s+actions: write$")
+        self.assertNotIn("sub-checks.sh", watcher)
+        result = job_block(code, "result")
+        self.assertIn("name: 결과", result)
+        needs = re.search(r"needs: \[([^\]]*)\]", result)
+        assert needs
+        self.assertEqual([n.strip() for n in needs.group(1).split(",")], ["plan", "checks", "guard", "celery", "agent-grader", "e2e"])
+        self.assertRegex(result, r"(?m)^    if: always\(\)$")
+        steps = result.split("    steps:\n", 1)[1]
+        self.assertEqual(len(re.findall(r"(?m)^      - ", steps)), len(re.findall(r"(?m)^        if: always\(\)$|^      - if: always\(\)$", steps)))
+        self.assertNotIn("write", result)
+        self.assertIn("fail_fast.py summary", result)
+        for name in ("plan", "checks", "guard", "celery", "agent-grader", "e2e"):
+            with self.subTest(job=name):
+                self.assertNotIn("write", job_block(code, name))
+        script = (ROOT / "scripts" / "ci" / "fail_fast.py").read_text(encoding="utf-8")
+        self.assertIn("/actions/runs/{env['GITHUB_RUN_ID']}", script)
+
     def test_image_is_only_built_from_main_or_by_hand(self) -> None:
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "image.yml"))
         assert on

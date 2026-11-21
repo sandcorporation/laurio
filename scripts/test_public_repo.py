@@ -8,7 +8,8 @@
 - `.github/workflows/*.yml` 이 공개 저장소의 보안 규칙을 지킨다 — `pull_request_target` 없음, 호스팅 실행기만,
   secrets 없음(토큰은 `github.token` 하나), 워크플로 기본 권한 `contents: read`, 액션은 40자 SHA 로 고정(같은 저장소의
   `./.github/workflows/…` 재사용은 예외). 쓰기 권한은 승격 흐름(#938)의 정해진 자리에만 — `packages: write` 는 image
-  (image.yml 과 release.yml 의 image 잡), `contents: write` 는 release.yml 의 promote 잡, `issues: write` 는 같은 파일의 notify·e2e_watch 잡.
+  (image.yml 과 release.yml 의 image 잡), `contents: write` 는 release.yml 의 promote 잡, `issues: write` 는 같은 파일의 notify·e2e_watch 잡,
+  `actions: write` 는 pr-check.yml 의 fail-fast 잡(#1139, 실행 취소).
 
 CI 이미지에는 `.git`·`.github/` 가 없어(.dockerignore) pytest 가 아니라 이 스크립트를 호스트에서 부른다 —
 Actions 는 `plan` 잡, Jenkins 는 `scripts/ci/pr-check.sh`.
@@ -42,9 +43,10 @@ ALLOWED_WRITES = {
     ("release.yml", "notify"): {"issues"},
     ("release.yml", "e2e_watch"): {"issues"},  # 매시 e2e 예약이 멈췄는지(#1122)
     ("e2e.yml", "notify"): {"issues"},  # 매시 e2e 실패 알림(#1111, 본 저장소 #1015)
+    ("pr-check.yml", "fail-fast"): {"actions"},  # 잡 하나가 실패하면 실행 취소(#1139) — 시험 코드를 돌리지 않는 잡
 }
 # 잡마다 권한을 따로 적어도 되는 워크플로 — 승격 흐름은 잡마다 권한이 달라야 한다.
-JOB_PERMISSIONS_ALLOWED = {"release.yml", "e2e.yml"}
+JOB_PERMISSIONS_ALLOWED = {"release.yml", "e2e.yml", "pr-check.yml"}
 
 
 def permission_blocks(code: str) -> list[tuple[str, dict[str, str]]]:
