@@ -22,7 +22,7 @@ plugs = ["contests"]
 
 [awards]
 group = "contest"
-uses = ["accounts", "contests", "core", "ledger", "policies", "scoring", "storage", "submissions", "verification"]
+uses = ["accounts", "certificates", "contests", "core", "ledger", "policies", "scoring", "storage", "submissions", "verification"]
 plugs = ["contests", "core"]
 
 [certificates]

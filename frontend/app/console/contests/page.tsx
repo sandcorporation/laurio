@@ -193,6 +193,17 @@ function SponsoredContestCard({ row }: { row: SponsoredContestRow }) {
           제출 명단
         </Link>
 
+        {/* 상장 화면(#1129)은 마감 뒤에만 건다 — 백엔드도 마감 전·초안은 409 로 막는다. */}
+        {new Date(row.deadline_at).getTime() <= Date.now() && row.next_action !== "pay_to_publish" && row.next_action !== "publish_free_draft" ? (
+          <Link
+            className="text-sm underline"
+            href={`/console/contests/${row.contest_id}/certificates`}
+            data-testid={`my-contest-row-${row.contest_id}-certificates`}
+          >
+            상장
+          </Link>
+        ) : null}
+
         {/* 「결제해야 공개됩니다」가 갈 곳이 없었다(#86) — draft 인 채로 두면
             아무 일도 일어나지 않는데, 이 화면이 유일하게 그 사실을 말하는 자리다.
             canJudge와 같은 이유로 `next_action`을 직접 비교하지 않고 번역표를
