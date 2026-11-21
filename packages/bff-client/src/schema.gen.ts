@@ -8592,6 +8592,13 @@ export interface components {
              */
             can_appeal: boolean;
             /**
+             * Corrected
+             * @default false
+             */
+            corrected: boolean;
+            /** Correction Reason */
+            correction_reason?: string | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -8604,6 +8611,10 @@ export interface components {
             is_free: boolean;
             /** Model Version */
             model_version: string;
+            /** Original Model Version */
+            original_model_version?: string | null;
+            /** Original Percentage */
+            original_percentage?: string | null;
             /** Percentage */
             percentage: string;
             quality?: components["schemas"]["SubmissionQualityOut"] | null;
@@ -9806,12 +9817,23 @@ export interface components {
          */
         ScoreSnapshotOut: {
             /**
+             * Corrected
+             * @default false
+             */
+            corrected: boolean;
+            /** Correction Reason */
+            correction_reason?: string | null;
+            /**
              * Created At
              * Format: date-time
              */
             created_at: string;
             /** Model Version */
             model_version: string;
+            /** Original Model Version */
+            original_model_version?: string | null;
+            /** Original Percentage */
+            original_percentage?: string | null;
             /** Percentage */
             percentage: string;
             /** Reasoning */

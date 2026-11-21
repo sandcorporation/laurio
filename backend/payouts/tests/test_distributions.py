@@ -406,6 +406,43 @@ def test_only_submissions_clearing_cutline_receive_shares(client, category, land
 
 
 @pytest.mark.django_db
+def test_cutline_reads_the_corrected_score(client, category, landing_type):
+    """정정이 끝난 점수로 컷라인을 가른다(#1179) — 진행 중인 정정은 원래 점수 그대로다."""
+
+    from scoring.models import ScoreCorrection
+    from tests.score_corrections import correct
+
+    deadline = timezone.now() + timedelta(hours=1)
+    sponsor, contest = _publish_contest(
+        client,
+        category=category,
+        deliverable_type=landing_type,
+        deadline_at=deadline,
+        requirements=[{"text": "로그인 기능이 있다", "grade": "required"}],
+        prize=1_000_000,
+    )
+    requirement_id = contest["requirements"][0]["id"]
+    high = _submit(client, _verified_user(client, "dev-high", "dev-high-ci"), contest["id"], requirement_id=requirement_id, grounded=True)
+    low = _submit(client, _verified_user(client, "dev-low", "dev-low-ci"), contest["id"], requirement_id=requirement_id, grounded=False)
+    low_pending = _submit(
+        client, _verified_user(client, "dev-low2", "dev-low2-ci"), contest["id"], requirement_id=requirement_id, grounded=False
+    )
+
+    _close_contest(client, contest, deadline=deadline)
+    _run_scoring(client)
+    correct(high["id"], "10.00")
+    correct(low["id"], "90.00")
+    correct(low_pending["id"], "", status=ScoreCorrection.Status.IN_PROGRESS)
+    _end_judging_period(client, contest["id"])
+    _advance_past_distribution_wait(contest["id"])
+    _run_due_distributions(client)
+
+    distribution = Distribution.objects.get(contest_id=contest["id"])
+    assert distribution.qualifying_count == 1
+    assert [s.submission_id for s in DistributionShare.objects.filter(distribution=distribution)] == [low["id"]]
+
+
+@pytest.mark.django_db
 def test_cutline_is_a_db_adjustable_operating_parameter(client, category, landing_type):
     """같은 0% 제출작이 컷라인을 낮추면 배분 대상이 된다 — 컷라인이 상수가 아니라
     DB에서 읽는 운영 파라미터라는 증거다.

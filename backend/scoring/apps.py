@@ -61,6 +61,11 @@ class ScoringConfig(AppConfig):
         from . import participation
 
         ports.IS_SCORED.register(participation.is_scored)
+        # 현재 점수(#1179) — 공모전·이의 앱이 원래 Score 를 직접 읽지 않고 정정까지 반영한 값을 받는다.
+        from .current import CURRENT_SCORE_RELATIONS, current_score
+
+        ports.CURRENT_SCORE.register(current_score)
+        ports.CURRENT_SCORE_RELATIONS.register("scoring", CURRENT_SCORE_RELATIONS)
         ports.NEXT_ACTION_RELATIONS.register("scoring", participation.NEXT_ACTION_RELATIONS)
         ports.OWN_SCORE_RELATIONS.register("scoring", participation.OWN_SCORE_RELATIONS)
         STILL_TO_SCORE.register(participation.still_to_score)

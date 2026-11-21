@@ -193,6 +193,7 @@ def test_operator_free_contests_query_count_does_not_grow_with_rows(world):
 MY_PARTICIPATION = (13, 16)
 MY_SUBMISSION = 14
 SUBMISSION_DETAIL = 12
-OWN_SCORE = 7
+#: 끝난 정정을 한 번 묻는다(#1179, 7 → 8) — 현재 점수가 정정을 반영한다
+OWN_SCORE = 8
 #: 수상자 한 줄마다 한 번 묻는 것이 뒤집기 전부터 있다(3 → 4)
 FREE_CONTESTS = (3, 4)

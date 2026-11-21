@@ -56,7 +56,8 @@ from submissions.scoring_basis import (
 
 from .agent_runner import AgentGraderBusy
 from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentVendorRefused, note_scan_refusal, scan_refusal
-from .models import QualityReviewAttempt, Score, SubmissionBonusScore, SubmissionQualityReview
+from .current import CURRENT_SCORE_RELATIONS, current_score, with_current_score
+from .models import QualityReviewAttempt, SubmissionBonusScore, SubmissionQualityReview
 from .quality_agent import QualityReviewHeld, review_with_agent
 
 logger = logging.getLogger(__name__)
@@ -99,24 +100,27 @@ def points_by_requirement(contest_id: int) -> dict[int, int]:
     return dict(Requirement.objects.filter(contest_id=contest_id).values_list("id", "points"))
 
 
-def _submission_text(score: Score) -> str:
-    """Score 프롬프트에서 고정 지시문을 떼고 제출물 몫만 돌려준다(모듈 독스트링)."""
+def _submission_text(prompt: str) -> str:
+    """채점 프롬프트(현재 점수의 것)에서 고정 지시문을 떼고 제출물 몫만 돌려준다(모듈 독스트링)."""
 
-    start = score.prompt.find(_SUBMISSION_SECTION_HEADER)
-    return score.prompt[start:] if start >= 0 else score.prompt
+    start = prompt.find(_SUBMISSION_SECTION_HEADER)
+    return prompt[start:] if start >= 0 else prompt
 
 
 def _pending_quality(as_of, ctx):
     del as_of, ctx
     attempts = QualityReviewAttempt.objects.filter(submission=OuterRef("pk"))
     attempt_count = attempts.order_by().values("submission").annotate(count=Count("id")).values("count")
+    # AI 가 소스를 읽었나는 현재 점수의 model_version 으로 가른다 — 자동 0% 가 정정되면 리뷰 대상이 된다(#1179).
     return (
-        ContestSubmission.objects.filter(
-            contest__status__in=Contest.Status.SCOREABLE.statuses,
-            score__isnull=False,
-            quality_review__isnull=True,
+        with_current_score(
+            ContestSubmission.objects.filter(
+                contest__status__in=Contest.Status.SCOREABLE.statuses,
+                score__isnull=False,
+                quality_review__isnull=True,
+            )
         )
-        .exclude(score__model_version__in=SKIPPED_SCORE_MODEL_VERSIONS)
+        .exclude(current_model_version__in=SKIPPED_SCORE_MODEL_VERSIONS)
         .annotate(
             _has_requirement=Exists(
                 Requirement.objects.filter(contest=OuterRef("contest_id")).exclude(grade=Requirement.Grade.BONUS)
@@ -125,7 +129,7 @@ def _pending_quality(as_of, ctx):
             attempt_count=Coalesce(Subquery(attempt_count), 0),
         )
         .filter(_has_requirement=True, _permanent_failure=False, attempt_count__lt=QUALITY_FAILURE_LIMIT)
-        .select_related("contest", "score")
+        .select_related("contest", *CURRENT_SCORE_RELATIONS)
     )
 
 
@@ -140,7 +144,10 @@ def review_submission_once(submission: ContestSubmission) -> dict:
         agent = review_with_agent(submission, items)
         prompt, scores, model_version = agent.prompt, agent.scores, agent.model_version
     else:
-        source = _submission_text(submission.score)
+        score = current_score(submission)
+        if score is None:
+            raise LLMAdapterPermanentError("채점되지 않은 제출은 완성도를 매기지 않는다.")
+        source = _submission_text(score.prompt)
         prompt = build_prompt(
             title=contest.title, description="", guideline_text=_CONTEST_GUIDELINE, items=items, submission_text=source
         )
