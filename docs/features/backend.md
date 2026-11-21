@@ -974,7 +974,7 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 `POST /api/operator/contests/{id}/score-corrections` 가 `{reason, submission_ids?}` 를 받아(사유가 비면 422, 비운
 `submission_ids` 는 그 공모전에서 채점된 제출 전부, 다른 공모전의 제출이 섞이면 422) 제출마다 「진행 중」 정정 행을
 만들고 201 로 돌려준다 — Score 가 없거나 이미 진행 중 정정이 있는 제출은 `skipped` 에 까닭(`not_scored`·`in_progress`)과
-함께 남는다(진행 중은 Score 당 하나, DB 제약). `GET` 같은 주소는 그 공모전의 정정 전부를 최근 것부터 준다. 둘 다
+함께 남는다(진행 중은 Score 당 하나, DB 제약). `GET` 같은 주소는 그 공모전의 정정 전부를 최근 것부터 주고, 정정 대상으로 고를 채점된 제출 목록(`submissions` — 참가자·처음 채점 점수·모델 판)도 싣는다(#1183). 둘 다
 `prize_settled`(`distributions.services.is_prize_settled` — Distribution 이 있거나 AWARDED 면 참, 무료는 늘 거짓)와
 정정마다 정정 전 점수·정정 점수·`error`·그 제출에 발급돼 취소되지 않은 상장 수(`certificates_issued`, 정정은 상장을
 취소하지 않는다)를 싣는다. 채점은 `score-correction` 스캔(워커 안, 한도·스위치는 `submission-scoring` 과 같다)이 진행
