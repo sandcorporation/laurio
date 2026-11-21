@@ -20,7 +20,7 @@
 #   up                  계획대로 인프라를 세우고 새 이미지로 바꿔 끼운다 — prod 에서 backend 를 바꾸고
 #                       적용할 마이그레이션이 있으면 그 전에 DB 를 덤프한다(실패하면 멈춘다, #839)
 #   predeploy-dump      그 덤프만 — 적용할 마이그레이션이 있을 때만 뜬다(prod, 아래 dump_before_migrate)
-#   verify              컨테이너가 running 인지 본다
+#   verify              compose 의 서비스가 전부 running 인지 본다(없거나 멈췄으면 실패)
 #   health <서비스>      backend|events|search|pgbouncer 가 요청을 실제로 받는지 본다
 #   reindex             공모전 검색을 전체 재색인한다(검색·backend 를 바꾼 뒤)
 #   recreate-infra      db·redis 를 compose 의 이미지(digest)대로 다시 만든다 — 사람이 손으로만(#790)
@@ -779,6 +779,18 @@ django_answers() {
   $1 python -c "import os,urllib.request,sys; host=(os.environ.get('DJANGO_ALLOWED_HOSTS') or '').split(',')[0].strip() or '127.0.0.1'; req=urllib.request.Request('http://127.0.0.1:${2}/api/health?scope=ready', headers={'Host': host, 'X-Forwarded-Proto': 'https'}); sys.exit(0 if urllib.request.urlopen(req, timeout=3).status==200 else 1)" 2>/dev/null
 }
 
+# 컨테이너가 이미 죽었는가 — 죽었으면 상태를 찍고 0. exit·dead·restarting 이거나, running 이어도
+# 재시작한 적이 있으면(진입점이 죽어 `unless-stopped` 가 다시 띄운 것) 죽은 것이다. 갓 만든
+# backend·events 는 정상 기동에서 재시작하지 않는다(부팅 거부도 죽는 것이다, #83).
+container_gave_up() {
+  st=$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$1" 2>/dev/null) || { echo "사라졌다"; return 0; }
+  case "$st" in
+    "running 0"|"created 0") return 1 ;;
+  esac
+  echo "${st% *}, 재시작 ${st##* }번"
+  return 0
+}
+
 # **새 것을 먼저 띄우고 옛 것을 내린다**(#485). 예전에는 컨테이너를 내리고 새로 올려,
 # 배포마다 공개 앱이 13~16초 동안 500 을 냈다(당시 staging 실측, GlitchTip 64·74·75 —
 # BFF 재시도 예산 약 15.8초보다 길었다).
@@ -819,16 +831,29 @@ rolling_replace() {
     exit 1
   fi
 
-  i=0
+  # **한도는 벽시계 마감 시각이다**(#1189). 예전에는 30번×5초로 셌는데, 시도마다 `docker exec` 가
+  # 몇 초씩 더 걸려 「150초」 문구와 달리 245초를 기다렸다(#1166 리허설). 새 것이 이미 죽었으면
+  # (exit·재시작 반복) 응답할 일이 없으니 마감을 기다리지 않는다.
+  ready_limit=${ROLLING_READY_SECONDS:-150}
+  ready_interval=${ROLLING_READY_INTERVAL:-5}
+  deadline=$(( $(date +%s) + ready_limit ))
   until django_answers "docker exec $new" "$port"; do
-    i=$((i + 1))
-    if [ "$i" -ge 30 ]; then
-      echo "$svc 의 새 컨테이너가 150초 안에 응답하지 않았다 — 새 것을 지우고 옛 것을 그대로 둔다."
+    why=""
+    if gave_up=$(container_gave_up "$new"); then
+      why="죽었다($gave_up)"
+    elif [ "$(date +%s)" -ge "$deadline" ]; then
+      why="${ready_limit}초 안에 응답하지 않았다"
+    fi
+    if [ -n "$why" ]; then
+      echo "$svc 의 새 컨테이너가 $why — 새 것을 지우고 옛 것을 그대로 둔다."
       docker logs --tail 120 "$new" || true
       docker rm -f "$new" >/dev/null 2>&1 || true
       exit 1
     fi
-    sleep 5
+    left=$(( deadline - $(date +%s) ))
+    [ "$left" -lt "$ready_interval" ] || left=$ready_interval
+    [ "$left" -gt 0 ] || left=1
+    sleep "$left"
   done
   log "$svc 새 것 응답 확인 — 옛 것을 내린다"
 
@@ -1158,20 +1183,33 @@ cmd_verify() {
   # 부팅 거부는 이 저장소가 **의도한** 동작이다(#83, #96) — 어댑터 값이나 OAuth
   # 자격증명이 풀리지 않으면 컨테이너가 뜨지 않는다. 그러니 "떴다"를 실제로
   # 확인해야 하고, 죽었으면 로그를 남겨야 원인을 안다.
-  for svc in backend celery-worker events grader llm-proxy frontend operator classroom search pgbouncer agent-grader; do
-    cid=$($COMPOSE ps -q "$svc" 2>/dev/null | head -1)
-    if [ -z "$cid" ]; then
+  #
+  # **기대 목록은 compose 정의다**(#1189) — 배포 compose 의 서비스는 전부 늘 떠 있어야 한다(프로필도
+  # 일회성 서비스도 없다). 예전에는 손으로 적은 목록을 `ps -q`(실행 중인 것만)로 찾고 비면 「없다」만
+  # 찍고 넘어가, 끝나 버린 컨테이너(exit)와 아예 없는 서비스가 통과했다. 지금은 `ps -a` 로 멈춘
+  # 것까지 찾고, 없거나 running 이 아니면 실패다.
+  services=$($COMPOSE config --services) || { echo "compose 정의를 읽지 못했다"; exit 1; }
+  bad=0; n=0
+  for svc in $services; do
+    n=$((n + 1))
+    cids=$($COMPOSE ps -a -q "$svc" 2>/dev/null || true)
+    if [ -z "$cids" ]; then
       echo "[$svc] 컨테이너가 없다"
+      bad=1
       continue
     fi
-    state=$(docker inspect -f '{{.State.Status}}' "$cid")
-    if [ "$state" != "running" ]; then
-      echo "[$svc] 상태가 running 이 아니다: $state"
+    states=$(for c in $cids; do docker inspect -f '{{.State.Status}}' "$c"; done | sort -u | tr '\n' ' ')
+    case " $states" in
+      *" running "*) ;;
+      *)
+      echo "[$svc] 상태가 running 이 아니다: ${states% }"
       $COMPOSE logs --tail 80 "$svc" || true
-      exit 1
-    fi
+      bad=1
+      ;;
+    esac
   done
-  log "컨테이너 전부 running"
+  [ "$bad" = 0 ] || exit 1
+  log "컨테이너 전부 running (${n}개 서비스)"
 }
 
 # 서비스가 요청을 실제로 받는지 본다. 컨테이너가 running 인 것과 서버가
