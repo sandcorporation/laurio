@@ -10,7 +10,7 @@
 # 조각은 PR 검사와 같은 `e2e_plan.py --all`, Playwright 는 공식 이미지(#1109). 이미지 층·pnpm 캐시는 복원만 한다(저장은 release-cache.yml).
 # 이 워크플로가 저장하는 캐시는 e2e 조각 시간 기록(`e2e-durations-*`, durations 잡, #1112) 하나다.
 # main 에서 붉으면 고정 제목 이슈 「e2e 실패 — main 의 화면이 깨졌을 수 있다」를 열거나 댓글을 달고(직전 초록 sha … 이번 sha 비교 링크와
-# 그 사이 커밋), 초록이 되면 「복구됨」 댓글을 달고 닫는다. **제목을 바꾸지 않는다** — 조율자 점검(stall-check.sh)이 이 제목으로 찾는다.
+# 그 사이 커밋), 초록이 되면 「복구됨」 댓글을 달고 닫는다. 같은 잡이 씨앗 기록 낡음도 고정 이슈 「e2e 씨앗 기록이 낡았다」로 알린다(#1251). **제목을 바꾸지 않는다** — 조율자 점검(stall-check.sh)이 이 제목으로 찾는다.
 # 실제 실패 이슈는 본 저장소에서만 만든다(포크 #1084 는 알림 시험만).
 # 보안(공개 저장소): secrets 없음(github.token 하나), 호스팅 실행기, 액션 SHA 고정, 쓰기 권한은 notify 잡의 issues 하나(부르는 쪽 release.yml 의 e2e_dispatch 는 actions: write 하나).
 name: e2e
@@ -186,7 +186,7 @@ jobs:
 
   # e2e 조각 시간 기록(#1112) — 조각마다의 JSON 리포트를 직전 기록에 합쳐 Actions 캐시에 둔다. PR 검사·다음 시간의 계획 잡이
   # 가장 새 것을 복원한다. 커밋하지 않는다(대기열·PR 에 쓰기 권한을 더하지 않는다). 캐시 키는 실행마다 새것 — 캐시는 덮어쓸 수 없다.
-  # main 에서 저장한 캐시만 PR 이 읽는다(브랜치 수동 실행이 저장한 것은 그 브랜치 몫). 씨앗 기록을 다시 쓸 때는 산출물 e2e-durations 를 커밋한다.
+  # main 에서 저장한 캐시만 PR 이 읽는다(브랜치 수동 실행이 저장한 것은 그 브랜치 몫). 씨앗 기록을 다시 쓸 때는 산출물 e2e-durations 를 커밋한다 — 언제인지는 notify 의 「씨앗 기록 낡음」 이슈가 말한다(#1251).
   durations:
     needs: [gate, e2e]
     if: ${{ !cancelled() && needs.gate.outputs.run == '1' }}
@@ -274,3 +274,12 @@ jobs:
             body="${body}"$'\n\n'"그 사이 커밋:"$'\n'"$(gh api "repos/${GH_REPO}/compare/${green}...${SHA}" -q '.commits[]|"- \(.sha[0:8]) \(.commit.message|split("\n")[0])"' || true)"
           fi
           bash scripts/ci/ci-issue.sh fail "$title" "$body"
+      # 씨앗 기록 낡음(#1251) — 씨앗에 없는 시험이 문턱(SEED_SLACK)을 넘으면 고정 제목 이슈 「e2e 씨앗 기록이 낡았다」, 돌아오면 닫는다.
+      # PR 검사는 그 PR 이 더한 시험을 빼고 세니 main 의 빚은 여기서 알린다. e2e 결과와 상관없이 돈다(알림 시험은 빼고).
+      - name: 씨앗 기록 낡음
+        if: ${{ !cancelled() && (inputs.simulate || 'none') == 'none' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
+        run: bash scripts/ci/e2e-seed-stale.sh
