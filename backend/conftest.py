@@ -44,10 +44,21 @@ from storage.adapters.fake import FakeStorageAdapter
 #
 # 한도는 `CODEMIT_TEST_CPU_LIMIT`(초, 기본 1.0)이고 CI 는 1.5 를 준다. 0 이면
 # 끈다. Postgres 가 질의를 처리하는 시간은 다른 프로세스라 여기 잡히지 않는다.
-# 넘은 시험이 나오면 실행기 속도를 재서 한도에 1.0~1.5 배를 곱한다(#1163) —
-# 같은 일에 드는 CPU 초가 호스티드 실행기마다 2배 넘게 갈린다(`tests/cpu_speed.py`).
+# 넘은 시험이 나오면 실행기 속도만큼 한도에 1.0~1.5 배를 곱한다(#1163) — 같은 일에 드는
+# CPU 초가 호스티드 실행기마다 2배 넘게 갈린다. 속도는 이 프로세스가 앞서 돈 시험들이
+# 기준(최근 대기열 junit 의 시험별 중앙값)보다 얼마나 느렸나로 잰다(#1211, `tests/cpu_speed.py`).
 
 _CPU_LIMIT_SECONDS = float(os.environ.get("CODEMIT_TEST_CPU_LIMIT", "1.0"))
+_runner_pace = None
+
+
+def _pace():
+    global _runner_pace
+    if _runner_pace is None:
+        from tests.cpu_speed import RunnerPace, load_reference
+
+        _runner_pace = RunnerPace(load_reference())
+    return _runner_pace
 
 
 def _cpu_seconds() -> float:
@@ -127,14 +138,14 @@ def pytest_runtest_makereport(item, call):
         # item 의 목록을 복사한다 — item 에도 넣어야 junit 에 남는다(#701).
         item.user_properties.append(("cpu_seconds", round(spent, 3)))
         report.user_properties.append(("cpu_seconds", round(spent, 3)))
+        pace = _pace()
         if _CPU_LIMIT_SECONDS > 0 and spent > _CPU_LIMIT_SECONDS and report.passed:
-            # 넘은 그 자리에서 실행기 속도를 잰다 — 느린 실행기면 한도를 늘려 준다(#1163,
-            # `tests/cpu_speed.py`). 넘지 않은 시험에는 잴 일이 없다.
-            from tests.cpu_speed import measured_scale
-
-            scale = measured_scale()
-            item.user_properties.append(("cpu_scale", round(scale, 3)))
-            report.user_properties.append(("cpu_scale", round(scale, 3)))
+            # 앞서 돈 시험들로 잰 실행기 속도만큼 한도를 늘려 준다(#1163·#1211) — 이 시험
+            # 자신은 넣지 않는다(무거운 시험이 제 한도를 끌어올리지 않게).
+            scale = pace.scale()
+            for prop in (("cpu_scale", round(scale, 3)), ("cpu_scale_samples", pace.samples)):
+                item.user_properties.append(prop)
+                report.user_properties.append(prop)
             limit = _CPU_LIMIT_SECONDS * scale
             if spent > limit:
                 report.outcome = "failed"
@@ -143,7 +154,14 @@ def pytest_runtest_makereport(item, call):
                     f" (CODEMIT_TEST_CPU_LIMIT {_CPU_LIMIT_SECONDS:.2f} × 실행기 배율 {scale:.2f})."
                     " 원인을 찾아 줄인다; 한도를 늘리지 않는다."
                 )
+        pace.record(_cpu_key(item.nodeid), spent)
     return report
+
+
+def _cpu_key(nodeid: str) -> str:
+    from tests.cpu_speed import junit_key
+
+    return junit_key(nodeid)
 
 
 # --- 시험 DB 는 템플릿에서 복제한다 (#755) ------------------------------------------
