@@ -29,6 +29,7 @@ from .schemas import (
     CertificateOut,
     CertificateRecipientOut,
     CertificateTextIn,
+    CertificateVerifyOut,
 )
 
 router = Router(tags=["certificates"])
@@ -249,3 +250,37 @@ def reissue_certificate(request: HttpRequest, contest_id: int, certificate_id: i
     except services.CertificateRuleError as error:
         raise _rule_error(error) from error
     return 201, _certificate_out(certificate)
+
+
+@router.get("/certificates/verify/{token}", auth=None, response=CertificateVerifyOut)
+def verify_certificate(request: HttpRequest, token: str, response: HttpResponse):
+    """공개 확인(#1128) — 로그인 없이. 없는 토큰만 404 이고, 상장이 있다는 사실은 숨기지 않는다.
+
+    공모전 제품 스위치와 무관하다 — 이미 나간 상장의 진위는 제품을 꺼도 확인돼야 한다.
+    """
+
+    certificate = Certificate.objects.select_related("contest").filter(token=token).first()
+    if certificate is None:
+        raise HttpError(404, "상장을 찾을 수 없습니다.")
+    response["X-Robots-Tag"] = "noindex, nofollow"
+    response["Cache-Control"] = "no-store"
+    if certificate.recipient_hidden_at is not None:
+        return CertificateVerifyOut(state="hidden", number=certificate.number)
+    if certificate.cancelled_at is not None:
+        return CertificateVerifyOut(
+            state="cancelled",
+            number=certificate.number,
+            contest_title=certificate.contest.title,
+            cancelled_on=timezone.localtime(certificate.cancelled_at).date(),
+            reissued=certificate.replaced_by_id is not None,
+        )
+    return CertificateVerifyOut(
+        state="valid",
+        number=certificate.number,
+        contest_title=certificate.contest.title,
+        award_name=certificate.award_name,
+        recipient_name=certificate.recipient_name,
+        giver_name=certificate.giver_name,
+        giver_title=certificate.giver_title,
+        issued_on=timezone.localtime(certificate.issued_at).date(),
+    )

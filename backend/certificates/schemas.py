@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from ninja import Field, Schema
 
@@ -74,3 +75,23 @@ class CertificateBoardOut(Schema):
     recipients: list[CertificateRecipientOut]
     #: 발급한 것 전부(취소된 것 포함), 최근 것부터.
     certificates: list[CertificateOut]
+
+
+class CertificateVerifyOut(Schema):
+    """공개 확인 페이지 `/c/{token}`(#1128) — 상태마다 보여도 되는 칸만 채운다.
+
+    - `valid`: 번호·공모전·상·받는 사람·수여자·발급일
+    - `cancelled`: 번호·공모전·취소일, `reissued` 는 다시 발급됐는지(새 상장은 가리키지 않는다)
+    - `hidden`: 받는 사람이 닫았거나 탈퇴 — 번호만
+    """
+
+    state: Literal["valid", "cancelled", "hidden"]
+    number: str
+    contest_title: str | None = None
+    award_name: str | None = None
+    recipient_name: str | None = None
+    giver_name: str | None = None
+    giver_title: str | None = None
+    issued_on: date | None = None
+    cancelled_on: date | None = None
+    reissued: bool = False

@@ -16,7 +16,7 @@ describe("decideRobots (#394)", () => {
 
   it("스위치가 켜지면 콘솔·로그인만 막고 sitemap 을 알린다", () => {
     const result = decideRobots({ contestProductEnabled: true, origin: ORIGIN });
-    expect(result.rules).toEqual([{ userAgent: "*", allow: "/", disallow: ["/console", "/login"] }]);
+    expect(result.rules).toEqual([{ userAgent: "*", allow: "/", disallow: ["/console", "/login", "/c/"] }]);
     expect(result.sitemap).toBe(`${ORIGIN}/sitemap.xml`);
   });
 });
