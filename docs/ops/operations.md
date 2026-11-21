@@ -561,6 +561,8 @@ Orca automation 「GlitchTip prod 오류 진단」이 매분 precheck 를 돌려
 `pick.py` 도 그대로 쓴다)와, **사람이 직접 스킬을 부를 때의 옛 전 단계 모드**(재현·수정·티켓·PR)를 함께 말한다 —
 「세션」이 고치고 티켓을 연다는 서술은 후자다.
 
+**진입 스크립트(#1252).** precheck 도 세션도 주 체크아웃(`~/workspace/codemit`)에서 도는데 그것을 따라잡는 장치가 없어 26커밋 묵은 코드를 읽은 적이 있다. precheck 를 `scripts/automation-run.sh glitchtip-triage --ok 0,1 -- <pick.py 명령>` 으로 감싸면 체크아웃을 `origin/main` 으로 따라잡은 뒤 부르고(더럽거나 앞선 체크아웃은 건드리지 않고 대장에게 알린다), `--ok` 밖의 종료 코드는 대장 메일함에 드러난다 — 「제보 전달」 자동화와 같은 장치다(`docs/ops/feedback-relay.md`). `--ok` 는 `pick.py` 가 정상으로 쓰는 코드에 맞춘다(없음·있음 둘이면 0,1). 설정 바꾸기(`orca automations edit`)는 조율자 몫이다.
+
 **precheck 의 정본은 `ops-shared` 판 하나다**(저장소의 사본과 그 시험은 #981 에서 걷었다 — 고쳐도 자동화에 닿지 않는데 맞는 것처럼 보였다). 공개 저장소 CI 는 `ops-shared` 를 볼 수 없어 판정 시험도 저장소에 없다 — 시험은 `ops-shared/glitchtip/tests/test_pick.py` 에 있고 고치는 것은 대장 몫이다. 이 저장소의 코드가 걸려 있는 것은 하나뿐이다: 의도된 예외 이름 목록 `DELIBERATE_EXCEPTION_TYPES`(`PriceDriftAlert`) — 예외 이름을 바꾸면 대장에게.
 
 - **고르는 쪽과 판단하는 쪽을 가른다.** 이슈 제목·스택트레이스는 공개 DSN 으로 누구나
