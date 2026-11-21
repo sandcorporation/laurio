@@ -596,7 +596,9 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 원문은 없다. 보내지 않은 거절도 「마지막 계정 거절」(시각·벤더·종류, 같은 캐시에 30일)을 갱신하고, `GET /operator/runtime-settings` 의
 `last_account_refusal`(없으면 null)로 나간다. 캐시가 비면 기록 없음이고 다음 거절이 채운다. 경보 실패는 채점을 막지 않는다.
 시도 원본(구조화 출력·usage·턴·도구 호출 수·근거 검사 결과·지침 sha256)은 `AgentRun` 에 남고, 받아들였어도
-필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/scoring/agent-runs` 가 보인다. Score 의
+필수 전부 충족·전부 미충족이면 `review` 가 붙는다 — 둘 다 `GET /api/internal/agent-runs` 가 보인다(강의실 `ClassroomAgentRun` 과 한
+목록, 줄마다 `source` 가 `contest`·`classroom`이고 `contest_id` 또는 `class_id`·`problem_id` 가 찬다, #1167 — 출처마다 기능 앱이
+`core.agent_ports.AGENT_RUN_LISTERS` 에 목록을 올린다). Score 의
 `model_version` 은 `agent:<벤더>:<모델>`, 판정 이유는 「이유 근거: 경로:줄, …」(충족만, 근거 5개, 2000자)다. 지침·스키마는
 `core.agent_prompt`(공모전 3 재채점의 규칙 일곱에, 충족 전에 파일을 Read 로 열어 보고 근거는 Read 로 본 줄을 대라는
 규칙 8·9 — #1717, 모든 모델). **모델이 Haiku 계열(`claude-haiku-*`)이면 엄격 규칙 10~12 가 더 붙는다**(#1048 — 실제
@@ -1174,7 +1176,9 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   판정을 못 내 막았다(까닭 코드 `agent_vendor_unverified`, 호환 서버는 `compatible_server`; 클래스 응답의
   `grading_method_options` 와 PATCH 422 가 같은 코드를 싣는다. 이미 고른 값은 두고 한 번 호출로 돈다).
   모델은 문제의 채점 모델, 키는 그 클래스 키, 박제본은 채점 준비가 읽은 zip(아니면 보류). 기록은 `ClassroomAgentRun`
-  (공모전 `AgentRun` 과 같은 꼴). 판정 보류는 시도 기록 머리 `AgentScoringHold:` 로 채점 대기에서 빠지고 실패 상한에
+  (공모전 `AgentRun` 과 같은 꼴, 운영자 조회 `GET /api/internal/agent-runs` 에 `source=classroom` 으로 보인다). 지침은 공모전과 같은
+  규칙·요구사항에 첫머리만 클래스 말(「클래스 문제의 제출물」「참여자가 제출한 저장소」, 완성도는 「문제 제목」)이다 —
+  `audience="classroom"`(#1167). 공모전 지침 글자는 그대로다. 판정 보류는 시도 기록 머리 `AgentScoringHold:` 로 채점 대기에서 빠지고 실패 상한에
   세지 않는다(0% 로 굳히지 않는다). 완성도 보류는 「보류(…)」 실패 한 번으로 남는다(영구 아님, #1699). grader 는 에이전트 실행을 제 스레드에서
   돌리고 임대를 실행 전체(`AGENT_LEASE`, 14분)로 늘린다. 실행기와 실행 코드는 공유층(`core.agent_scoring`·
   `core.agent_prompt`·`core.quality_review_agent`)에 있고, 공모전 박제본 받기만 `scoring.agent_snapshot` 에 있다.

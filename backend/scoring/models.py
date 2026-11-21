@@ -140,7 +140,7 @@ class AgentRun(models.Model):
     `record` 는 `core.agent_scoring.run_agent_job` 이 만든 원본이다: 시도마다 구조화 출력·usage·턴·
     도구 호출 수·근거 검사 결과·거절 사유, 그리고 지침 sha256·벤더·모델·박제본 커밋.
     `review` 는 받아들였지만 사람이 한 번 더 볼 것(필수 전부 충족·전부 미충족)이다 — 운영자 조회
-    (`/api/internal/scoring/agent-runs`)가 보류와 함께 보여 준다.
+    (`/api/internal/agent-runs`)가 보류와 함께 보여 준다.
     """
 
     class Outcome(models.TextChoices):

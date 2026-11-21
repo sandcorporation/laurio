@@ -20,7 +20,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal, NotRequired, Protocol, TypedDict
 
-from core.registry import Slot
+from core.registry import Slot, Slots
 
 Vendor = Literal["anthropic", "openai"]
 
@@ -78,10 +78,40 @@ class ModelPrice(Protocol):
     def long_context_output_multiplier(self) -> float: ...
 
 
+AgentRunSource = Literal["contest", "classroom"]
+
+
+class AgentRunRow(TypedDict):
+    """운영자가 보는 에이전트 실행 기록 한 줄(#1000·#1167) — 원본(`record`)은 크므로 싣지 않는다.
+    `contest_id` 는 공모전 실행만, `class_id`·`problem_id` 는 강의실 실행만 채운다."""
+
+    source: AgentRunSource
+    id: int
+    submission_id: int
+    contest_id: int | None
+    class_id: int | None
+    problem_id: int | None
+    purpose: str
+    outcome: str
+    review: str
+    reasons: list[str]
+    model_version: str
+    attempts: int
+    created_at: str
+
+
+class AgentRunLister(Protocol):
+    """한 출처의 실행 기록을 최근 순으로 `limit` 개까지. `include_all` 이 거짓이면 사람이 볼 것(보류·review)만."""
+
+    def __call__(self, *, include_all: bool, limit: int) -> list[AgentRunRow]: ...
+
+
 ClassVendorKey = Callable[[int, str], str]
 PriceFor = Callable[[str], ModelPrice | None]
 
 
+#: 실행 기록 목록 — 출처(`contest`·`classroom`)마다 `scoring.apps`·`classroom.apps` 가 올린다(#1167).
+AGENT_RUN_LISTERS: Slots[AgentRunLister] = Slots("에이전트 실행 기록")
 #: 실행 틀 모듈 — `scoring.apps` 가 올린다.
 AGENT_GRADER: Slot[AgentGrader] = Slot("에이전트 채점 실행기", "scoring.apps")
 #: 클래스 키 풀기 — `classroom.apps` 가 올린다.

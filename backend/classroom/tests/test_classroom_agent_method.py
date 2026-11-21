@@ -29,6 +29,7 @@ from tests.classroom_scenarios import (
     create_class,
     create_open_problem,
     get_class,
+    internal_headers,
     join_class,
     login,
     mine,
@@ -44,6 +45,7 @@ from tests.integration.test_llm_proxy import FakeVendor, _claude, _stack
 CLASS_KEY = "sk-ant-test-instructor-key"  # leak-guard:allow — `set_anthropic_key` 의 가짜 키
 PLATFORM_KEY = "sk-ant-platform-key-must-not-be-used-0000"  # leak-guard:allow — 가짜 키
 HAIKU = "claude-haiku-5-5"
+AGENT_RUNS_URL = "/api/internal/agent-runs"
 
 
 @pytest.fixture(autouse=True)
@@ -221,6 +223,14 @@ def test_agent_scoring_of_a_claude_key_class_uses_the_class_key_through_the_prox
         assert CLASS_KEY not in text
         assert PLATFORM_KEY not in text
     assert get_class(client, owner["access"], class_id)["token_usage_total"] > 0
+    # #1167: 지침은 클래스 말이고, 실행은 운영자 실행 목록에 강의실 출처로 보인다.
+    assert spec["prompt"].startswith("당신은 클래스 문제의 제출물을 채점하는") and "공모전" not in spec["prompt"]
+    listed = client.get(f"{AGENT_RUNS_URL}?all=true", **internal_headers())
+    assert listed.status_code == 200
+    assert [
+        (r["source"], r["id"], r["submission_id"], r["class_id"], r["problem_id"], r["contest_id"], r["outcome"])
+        for r in listed.json()["runs"]
+    ] == [("classroom", run.id, run.submission_id, class_id, problem.id, None, "accepted")]
 
 
 def test_single_stays_the_default_path(client, db, monkeypatch):

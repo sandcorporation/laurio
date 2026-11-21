@@ -11,7 +11,7 @@ import copy
 import json
 from collections.abc import Sequence
 
-from core.agent_prompt import wants_strict_rules
+from core.agent_prompt import Audience, wants_strict_rules
 from core.quality_review import QualityItemInput, response_schema
 
 #: 근거 `경로:줄` 개수 상한 — 계약(#1000 댓글)의 「최대 5개」.
@@ -56,14 +56,31 @@ _HAIKU_RULES = [
 ]
 
 
-def build_agent_prompt(*, title: str, items: Sequence[QualityItemInput], model: str) -> str:
+#: 첫머리 두 줄(#1167). 공모전 글자는 운영에서 잰 그대로다 — 한 글자도 바꾸지 않는다(sha256 시험이 못 박는다).
+_OPENING: dict[Audience, tuple[str, str]] = {
+    "contest": (
+        "당신은 코딩 공모전 제출물의 완성도를 매기는 보조자입니다. 지금 작업 디렉터리는 참가자가 제출한 저장소"
+        "(마감 직전 커밋)입니다.",
+        "공모전 제목: {title}",
+    ),
+    "classroom": (
+        "당신은 클래스 문제의 제출물의 완성도를 매기는 보조자입니다. 지금 작업 디렉터리는 참여자가 제출한 저장소"
+        "(제출한 커밋)입니다.",
+        "문제 제목: {title}",
+    ),
+}
+
+
+def build_agent_prompt(
+    *, title: str, items: Sequence[QualityItemInput], model: str, audience: Audience = "contest"
+) -> str:
     """에이전트 지침 — 채점 지침(공모전 3 실측)과 같은 규칙에 0~5 척도를 얹는다. 저장소 글은 지침에 싣지 않는다
     (에이전트가 작업 디렉터리에서 직접 읽는다). 규칙 7·8(Read 로 열어 보고 매김, 근거는 Read 로 본 줄)은 모든 모델에 붙고(#1717), `model` 이 Haiku 계열이면 엄격 규칙 9~11 을 더 붙인다(#1048)."""
 
+    opening, title_line = _OPENING[audience]
     lines = [
-        "당신은 코딩 공모전 제출물의 완성도를 매기는 보조자입니다. 지금 작업 디렉터리는 참가자가 제출한 저장소"
-        "(마감 직전 커밋)입니다.",
-        f"공모전 제목: {title}",
+        opening,
+        title_line.format(title=title),
         f"아래 요구사항 {len(items)}개 각각에 대해, 저장소의 실제 구현 코드가 그 요구사항을 얼마나 잘 해냈는지"
         " 0~5 정수로 매깁니다.",
         "",

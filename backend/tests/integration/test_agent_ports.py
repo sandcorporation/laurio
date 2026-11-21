@@ -7,12 +7,14 @@ from typing import get_type_hints
 import pytest
 
 from classroom import scoring_connection, scoring_cost
+from classroom.agent_runs import classroom_agent_runs
 from classroom.submission_target_state import resolve_classroom_submission
 from contests.submission_target_state import resolve_contest_submission
 from core import agent_ports
 from core.registry import PortNotRegistered, Slot, Slots
 from handovers.services import build_asset_content_type
 from scoring import agent_runner
+from scoring.agent_runs import contest_agent_runs
 from submissions import resolvers
 
 
@@ -20,6 +22,10 @@ def test_django_setup_registers_every_port_with_the_feature_app_implementation()
     assert agent_ports.agent_grader() is agent_runner
     assert agent_ports.CLASS_VENDOR_KEY.get() is scoring_connection.agent_vendor_key
     assert agent_ports.PRICE_FOR.get() is scoring_cost.price_for
+    assert agent_ports.AGENT_RUN_LISTERS.as_dict() == {
+        "contest": contest_agent_runs,
+        "classroom": classroom_agent_runs,
+    }
     assert resolvers.BUILD_ASSET_CONTENT_TYPE.get() is build_asset_content_type
     assert resolvers.TARGET_SHAPES.as_dict() == {
         "submission": resolve_contest_submission,

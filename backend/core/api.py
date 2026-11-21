@@ -9,6 +9,7 @@ from django.db import connection, transaction
 from ninja import Router
 from ninja.errors import HttpError
 
+from .agent_ports import AGENT_RUN_LISTERS, AgentRunRow
 from .auth import InternalAuth
 from .e2e_seeds import E2E_SEED_REGISTRY
 from .scans import is_scan_active, run_all, run_scan
@@ -180,3 +181,19 @@ def _seed_options(request) -> dict:
         raise HttpError(400, "본문은 객체여야 합니다.")
     # 값이 None 인 키는 「안 줬다」로 본다 — 호출부가 선택 인자를 항상 실어 보내도 된다.
     return {key: value for key, value in body.items() if value is not None}
+
+
+AGENT_RUNS_LIMIT = 200
+
+
+@router.get("/agent-runs", auth=InternalAuth())
+def agent_runs(request, all: bool = False):  # noqa: A002 — 쿼리 이름
+    """에이전트 실행 기록(#1000) — 공모전·강의실 실행을 한 목록으로(#1167), 줄마다 출처(`source`)를 단다.
+    기본은 사람이 볼 것만: 보류(`held`)와, 받아들였지만 필수 전부 충족·전부 미충족이라 한 번 더 볼 것(`review`).
+    `?all=true` 면 받아들인 것까지 최근 순으로. 원본(`record`)은 크므로 싣지 않는다 — 시도 수·거절 사유만 낸다."""
+
+    rows: list[AgentRunRow] = []
+    for lister in AGENT_RUN_LISTERS.as_dict().values():
+        rows += lister(include_all=all, limit=AGENT_RUNS_LIMIT)
+    rows.sort(key=lambda row: (row["created_at"], row["id"]), reverse=True)
+    return {"runs": rows[:AGENT_RUNS_LIMIT]}
