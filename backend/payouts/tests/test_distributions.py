@@ -407,7 +407,8 @@ def test_only_submissions_clearing_cutline_receive_shares(client, category, land
 
 @pytest.mark.django_db
 def test_cutline_reads_the_corrected_score(client, category, landing_type):
-    """정정이 끝난 점수로 컷라인을 가른다(#1179) — 진행 중인 정정은 원래 점수 그대로다."""
+    """정정이 끝난 점수로 컷라인을 가른다(#1179) — 실패한 정정은 원래 점수 그대로다. 진행 중 정정은 배분을
+    붙잡는다(#1180, 아래 `test_score_corrections`)."""
 
     from scoring.models import ScoreCorrection
     from tests.score_corrections import correct
@@ -432,7 +433,7 @@ def test_cutline_reads_the_corrected_score(client, category, landing_type):
     _run_scoring(client)
     correct(high["id"], "10.00")
     correct(low["id"], "90.00")
-    correct(low_pending["id"], "", status=ScoreCorrection.Status.IN_PROGRESS)
+    correct(low_pending["id"], "", status=ScoreCorrection.Status.FAILED)
     _end_judging_period(client, contest["id"])
     _advance_past_distribution_wait(contest["id"])
     _run_due_distributions(client)

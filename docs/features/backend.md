@@ -884,7 +884,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 무엇을 | 스캔 |
 | --- | --- |
 | 상태 전이 | `contest-close` · `contest-judging-end` |
-| 채점 | `submission-scoring` · `scoring-size-hold-expiry`(#989 — 심사 종료까지 풀리지 않은 「크기 초과」 보류를 자동 0%) · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」·「크기 초과」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
+| 채점 | `submission-scoring` · `score-correction`(#1180 — 운영자가 건 진행 중 정정을 처음 커밋으로 다시 채점) · `scoring-size-hold-expiry`(#989 — 심사 종료까지 풀리지 않은 「크기 초과」 보류를 자동 0%) · `repository-visibility` · `classroom-submission-scoring`(#287) · `submission-quality-review`(#884 — Score 가 생긴 공모전 제출에 완성도를 한 번 매긴다. 「입력 없음」·「채점 실패」·「크기 초과」 자동 0% 는 건너뛰고, 실패는 이력을 남겨 5번 또는 영구 실패에서 멈춘다. 무료·유료 모두라 제품 스위치와 무관하다. `CONTEST_SCORING_METHOD=agent` 면 Score 프롬프트 대신 박제본을 채점과 같은 격리·프록시의 에이전트로 읽고(#1001) 항목마다 근거 `경로:줄` 을 근거 문장 끝에 붙인다 — model_version `agent:벤더:모델`, 두 번 다 받아들이는 조건을 어기면 보류(실패 이력 「보류(…)」 — 실패 한 번으로 세어 5회 상한 안에서 다시 집는다, #1699), 실행기가 바쁘거나 예산이 찼거나 벤더가 계정 쪽(사용 한도·빈도 제한·크레딧)으로 거절했으면 실패로 세지 않고 다음 스캔에 다시 집는다 — 계정 거절은 그 스캔의 남은 제출을 부르지 않는다(#1052). 채점 스캔처럼 celery 워커 안에서 돈다(#1686 — 실행기는 `agent-call` 망에서만 닿는다). 에이전트 시도 하나는 CLI 300초·HTTP 360초, 재시도까지 720초라 두 스캔의 워커 한도는 840초다.) |
 | 이미지 | `contest-image-optimization` |
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
@@ -970,7 +970,23 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 원래 Score 이고 `scoring.current` 하나로만 읽는다(공모전·이의 앱은 `contests.ports.CURRENT_SCORE`) — 배분
 컷라인·내 점수·이의 상세·이의 소스 펼침·완성도 대상 거르기가 그것을 쓴다. 「채점이 한 번 돌았나」(채점 대기·
 보류·이의 신청 가능)는 원래 Score 유무 그대로다. `tests/test_current_score_reads.py` 가 그 밖의 직접 읽기를
-막는다. 정정을 거는 API 는 아직 없다(#1180).
+막는다.
+
+**정정을 거는 길**(#1180, `distributions/correction_api.py`, 운영자 세션 — 등급 구분 없이 운영자 전원):
+`POST /api/operator/contests/{id}/score-corrections` 가 `{reason, submission_ids?}` 를 받아(사유가 비면 422, 비운
+`submission_ids` 는 그 공모전에서 채점된 제출 전부, 다른 공모전의 제출이 섞이면 422) 제출마다 「진행 중」 정정 행을
+만들고 201 로 돌려준다 — Score 가 없거나 이미 진행 중 정정이 있는 제출은 `skipped` 에 까닭(`not_scored`·`in_progress`)과
+함께 남는다(진행 중은 Score 당 하나, DB 제약). `GET` 같은 주소는 그 공모전의 정정 전부를 최근 것부터 준다. 둘 다
+`prize_settled`(`distributions.services.is_prize_settled` — Distribution 이 있거나 AWARDED 면 참, 무료는 늘 거짓)와
+정정마다 정정 전 점수·정정 점수·`error`·그 제출에 발급돼 취소되지 않은 상장 수(`certificates_issued`, 정정은 상장을
+취소하지 않는다)를 싣는다. 채점은 `score-correction` 스캔(워커 안, 한도·스위치는 `submission-scoring` 과 같다)이 진행
+중 정정을 집어 처음 채점과 같은 판정(에이전트·한 번 호출)으로 채운다. 입력만 다르다 — 저장소는 처음 채점이 받은
+커밋(`scored_assets.commit_sha` → 그때의 RepositorySnapshot → 고정 커밋)으로 받아 마감 뒤 push 가 섞이지 않고, 처음
+커밋을 모르는 저장소는 싣지 않는다. 소스 자료는 참가자가 올린 것만 싣는다(처음 채점이 만든 박제본은 빼고 다시 만들지도
+않는다). 보류·오류는 정정을 「실패」로 넘기고 `error` 에 까닭을 남긴다(처음 채점의 시도 기록·실패 상한에는 닿지 않고,
+다시 걸 수 있다). 벤더 계정 거절만 진행 중으로 두고 다음 실행에 미룬다. **진행 중 정정이 있는 공모전은 배분 스캔이
+건너뛴다**(대기 이의와 같은 틀). 배분이 끝난 공모전의 정정은 기록만 남는다 — 이미 만든 Distribution·몫·컷라인은 다시
+계산하지 않는다.
 
 **시연 영상은 보존 기간 뒤 파일만 파기된다**(ADR-0035). `demo-video-retention-purge`가
 이의 창의 끝(`judging_ends_at`) + `demo_video_retention_grace_days`가 지난 시연
@@ -1147,7 +1163,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
-| `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`) 스캔만 | **off** — 채점 스캔이 돌지 않는다 |
+| `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·정정 채점(`score-correction`, #1180) 스캔만 — 꺼지면 정정은 진행 중으로 기다린다 | **off** — 채점 스캔이 돌지 않는다 |
 | `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 
