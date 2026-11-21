@@ -46,7 +46,7 @@ from contests.models import Category, Contest, DeliverableType
 from contests.transitions import claim_contest_transition
 from ledger.models import hard_delete_e2e_fixture_rows
 from policies.scope import current_policy
-from scoring.models import Score
+from scoring.models import Score, ScoreCorrection
 
 CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
@@ -217,6 +217,10 @@ def _clear_stale_seed_contests() -> int:
     # 그 Score를 만나면 Contest 삭제가 `ProtectedError`로 막힌다. 이 Score는 이 명령
     # 자신이 이름 접두어로 격리해 심은 재현 가능한 픽스처일 뿐이라(ADR-0006이 지키려는
     # 실데이터 감사 추적이 아니다) `hard_delete_e2e_fixture_rows`로 먼저 지운다.
+    # 정정 기록(#1184)이 Score 를 PROTECT 로 잡으므로 그것부터 지운다.
+    hard_delete_e2e_fixture_rows(
+        ScoreCorrection.objects.filter(score__submission__contestsubmission__contest_id__in=stale_contest_ids)
+    )
     hard_delete_e2e_fixture_rows(
         Score.objects.filter(submission__contestsubmission__contest_id__in=stale_contest_ids)
     )

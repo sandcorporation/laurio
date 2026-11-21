@@ -4,6 +4,7 @@
 import { expect, test } from "@playwright/test";
 
 import { seedE2eContests } from "../lib/seed";
+import { seedE2eOperatorAppeal } from "../lib/seed-operator";
 import { establishDeveloperSession } from "../lib/session";
 
 async function login(page: import("@playwright/test").Page, seed: string): Promise<void> {
@@ -41,4 +42,15 @@ test("남의 제출이면 채점 결과가 보이지 않는다", async ({ page }
   // 403 은 404 와 달리 "화면 전체가 실패" 다 — 남의 점수가 새지 않는다.
   await expect(page.getByTestId("appeal-error")).toBeVisible();
   await expect(page.getByTestId("appeal-score")).toHaveCount(0);
+});
+
+test("정정된 점수면 정정됨·원래 점수·사유가 이의 화면에 보인다(#1184)", async ({ page }) => {
+  const seeded = await seedE2eOperatorAppeal(undefined, { corrected: true });
+  await login(page, seeded.dev_login_seed);
+
+  await page.goto(`/console/participation/${seeded.submission_id}/appeal`);
+  await expect(page.getByTestId("appeal-score-percentage")).toHaveText(`${seeded.correction!.percentage}%`);
+  await expect(page.getByTestId("appeal-score-correction")).toContainText("정정됨");
+  await expect(page.getByTestId("appeal-score-correction-original")).toHaveText(`${seeded.correction!.original_percentage}%`);
+  await expect(page.getByTestId("appeal-score-correction-reason")).toHaveText(seeded.correction!.reason);
 });

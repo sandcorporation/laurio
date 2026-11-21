@@ -25,6 +25,38 @@ export interface ScoreSummaryData {
   reasoning: unknown[];
   // 숨은 항목(#906) — 항목 문구는 오지 않고 개수만 온다.
   hidden_summary?: { total: number; met: number } | null;
+  // 점수 정정(#1184) — `percentage` 는 이미 정정된 현재 점수다. 정정되지 않았으면 셋 다 비어 있다.
+  corrected?: boolean;
+  original_percentage?: string | null;
+  correction_reason?: string | null;
+}
+
+export function CorrectionNote({
+  score,
+  testIdPrefix,
+}: {
+  score: Pick<ScoreSummaryData, "corrected" | "original_percentage" | "correction_reason">;
+  testIdPrefix: string;
+}) {
+  if (!score.corrected) return null;
+  return (
+    <div className="flex flex-col gap-1 border-l-2 border-rule pl-3 text-sm" data-testid={`${testIdPrefix}-correction`}>
+      <p>
+        <strong>정정됨</strong>
+        {score.original_percentage != null ? (
+          <>
+            {" · 원래 점수 "}
+            <span data-testid={`${testIdPrefix}-correction-original`}>{score.original_percentage}%</span>
+          </>
+        ) : null}
+      </p>
+      {score.correction_reason ? (
+        <p className="text-ink/70" data-testid={`${testIdPrefix}-correction-reason`}>
+          {score.correction_reason}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 export function HiddenSummaryLine({
@@ -98,6 +130,7 @@ export function ScoreSummary({
         필수 요건 달성률{" "}
         <strong data-testid={`${testIdPrefix}-percentage`}>{score.percentage}%</strong>
       </p>
+      <CorrectionNote score={score} testIdPrefix={testIdPrefix} />
       <p className="text-sm text-ink/70" data-testid={`${testIdPrefix}-model`}>
         {modelLineOf(score)}
       </p>
