@@ -47,7 +47,7 @@ plugs = []
 
 [distributions]
 group = "contest"
-uses = ["accounts", "appeals", "certificates", "contests", "core", "ledger", "policies", "scoring", "submissions"]
+uses = ["accounts", "appeals", "certificates", "contests", "core", "ledger", "notifications", "policies", "scoring", "submissions"]
 plugs = ["appeals", "contests", "core"]
 
 [handovers]
