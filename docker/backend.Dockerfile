@@ -13,6 +13,13 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 
 WORKDIR /app
 
+# 상장 PDF(#1126, certificates/rendering.py) 를 그리는 WeasyPrint 가 부르는 시스템 라이브러리 —
+# pango(글자 배치)와 harfbuzz-subset(PDF 에 넣을 글꼴 서브셋, 없으면 fontTools 로 돌아 몇 배 느리다).
+# 글꼴은 저장소에 담긴 것만 쓰므로 시스템 글꼴 패키지는 넣지 않는다.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # 락파일만 먼저 복사해 의존성 레이어를 캐시한다. 소스가 바뀌어도 재설치하지 않는다.
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \

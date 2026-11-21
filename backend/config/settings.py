@@ -173,6 +173,7 @@ INSTALLED_APPS = [
     "scoring",
     "repositories",
     "awards",
+    "certificates",
     "handovers",
     # distributions 가 payouts 앞이다(#1086) — 스캔 등록 순서 `distribution-create` → `distribution-share-payout`
     # (`payouts.distribution_payouts`)를 지킨다.

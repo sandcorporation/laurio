@@ -19,10 +19,12 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+# pango·harfbuzz-subset 은 상장 PDF 시험(#1126)이 쓴다 — backend.Dockerfile 과 같은 묶음.
 RUN ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
     && corepack enable \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /repo

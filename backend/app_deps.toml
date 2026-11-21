@@ -25,6 +25,11 @@ group = "contest"
 uses = ["accounts", "contests", "core", "ledger", "policies", "scoring", "storage", "submissions", "verification"]
 plugs = ["contests", "core"]
 
+[certificates]
+group = "contest"
+uses = ["accounts", "contests", "core"]
+plugs = []
+
 [classroom]
 group = "classroom"
 uses = ["accounts", "core", "notifications", "ops_metrics", "policies", "storage", "submissions"]
