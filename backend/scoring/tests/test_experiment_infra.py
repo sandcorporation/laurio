@@ -70,6 +70,7 @@ def test_self_loop_stopped_by_the_proxy_is_infra(monkeypatch, stopped, detail, s
         raise _held(stopped, detail)
 
     monkeypatch.setattr(ex, "run_selfloop_scoring", held)
+    monkeypatch.setattr(ex, "cell_budget_usd", lambda row: ex.CELL_BUDGET_USD["self_loop"])  # 남은 하루 돈은 DB 다(#1259)
     row = ex.parse_rows("self_loop:gpt-4.1-mini")[0]
     result = ex._run_self_loop(None, row, ex._Inputs([], [], [], object()))  # type: ignore[arg-type]  # 루프를 바꿔 끼웠다
     assert result.status == status
