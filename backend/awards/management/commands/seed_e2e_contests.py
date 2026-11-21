@@ -36,6 +36,7 @@ from django.utils import timezone
 
 from accounts.models import DeveloperProfile, SocialAccount, SponsorProfile
 from awards.models import Award
+from certificates.models import Certificate
 from contests.models import Category, Contest, ContestSubmission, DeliverableType, Evidence, Requirement, RequirementResponse
 from core.management.stdout_utf8 import write_stdout_utf8
 from ledger.models import hard_delete_e2e_fixture_rows
@@ -103,6 +104,14 @@ JUDGING_SCORE_MODEL_SENTINEL = "e2e-judging-score-model-should-never-leak-v1"
 # 시드 Contest 들처럼 ORM 으로 CLOSED 상태를 직접 만든다 — #13 백엔드 테스트가
 # 이 전이 자체는 이미 검증했으므로 여기서 다시 검증할 필요가 없다.
 JUDGING_SPONSOR_LOGIN_SEED = "e2e-judging-sponsor"
+
+
+def _delete_certificates(title_prefix: str) -> None:
+    """상장을 지운다 — `replaced_by` 가 자기 참조 PROTECT 라 먼저 끊는다(#1129)."""
+
+    certificates = Certificate.objects.filter(contest__title__startswith=title_prefix)
+    certificates.update(replaced_by=None)
+    certificates.delete()
 
 
 class Command(BaseCommand):
@@ -554,6 +563,8 @@ class Command(BaseCommand):
         # `[E2E] ` 와 `[E2E-w0] ` 를 함께 잡는 공통 조각. Award 를 먼저 지운다 —
         # `Award.submission` 이 PROTECT 라 Contest 부터 지우면 막힌다.
         stem = "[E2E"
+        # `Certificate.contest` 도 PROTECT 다(#1129) — 상장 화면 e2e 가 발급한 상장을 먼저 지운다.
+        _delete_certificates(stem)
         Award.objects.filter(contest__title__startswith=stem).delete()
         # `Score.submission` 도 이제 PROTECT 다(#240) — `handle` 안 심사 픽스처(judging)가
         # `Score.objects.create(...)`로 실제 Score 를 심으므로 먼저 지우지 않으면 Contest
@@ -591,6 +602,7 @@ class Command(BaseCommand):
         # 의 "Sponsor 본인은 Award할 수 있다" 테스트), Contest 를 삭제하기 전에
         # 그 Contest 에 걸린 Award 를 먼저 지워야 한다 — Handover.award 는 CASCADE
         # 라 Award 를 지우면 함께 정리된다.
+        _delete_certificates(self.prefix)
         Award.objects.filter(contest__title__startswith=self.prefix).delete()
         # `Score.submission` 도 PROTECT 다(#240, 위 `_prune_all_namespaces` 와 같은 이유) —
         # 심사 픽스처가 실제 Score 를 심으므로 Contest 를 지우기 전에 먼저 지운다.
