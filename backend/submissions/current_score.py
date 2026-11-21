@@ -35,3 +35,5 @@ class CurrentScore:
     original_percentage: Decimal | None = None
     original_model_version: str | None = None
     correction_reason: str | None = None
+    # 이 값을 낸 정정의 id — 완성도 리뷰가 판으로 단다(#1181). 정정되지 않았으면 None.
+    correction_id: int | None = None

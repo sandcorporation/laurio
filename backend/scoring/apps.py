@@ -51,11 +51,12 @@ class ScoringConfig(AppConfig):
         # 공모전 API 가 묻는 채점·완성도·가산 자리(#1086) — `contests.ports`
         from contests import ports
 
-        from .quality import bonus_scores, ranked_reviews, save_bonus_score
+        from .quality import bonus_scores, latest_review, ranked_reviews, save_bonus_score
         from .services import upload_source_over_budget
 
         ports.UPLOAD_SOURCE_OVER_BUDGET.register(upload_source_over_budget)
         ports.RANKED_REVIEWS.register(ranked_reviews)
+        ports.LATEST_QUALITY_REVIEW.register(latest_review)
         ports.BONUS_SCORES.register(bonus_scores)
         ports.SAVE_BONUS_SCORE.register(save_bonus_score)
 

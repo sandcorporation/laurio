@@ -56,6 +56,12 @@ RANKED_REVIEWS: Slot[
     Callable[[int, list[int]], "dict[int, tuple[SubmissionQualityReview, QualityTotal, int]]"]
 ] = Slot("완성도 순위", "scoring.apps")
 
+#: `scoring.quality.latest_review` — 제출 하나의 가장 나중 판 완성도 기록(#1181). 참가자 점수 화면이 읽는다.
+LATEST_QUALITY_REVIEW: Slot[Callable[[int], "SubmissionQualityReview | None"]] = Slot("최신 완성도", "scoring.apps")
+
+#: `distributions.services.is_prize_settled` — 상금 배분이 끝났나(#1180). 정정 판 완성도가 순위에 들지 가른다(#1181).
+PRIZE_SETTLED: Slot[Callable[["Contest"], bool]] = Slot("배분 끝남", "distributions.apps")
+
 #: `scoring.quality.bonus_scores` — 제출 id → 가산 항목마다의 개최자 점수(#905)
 BONUS_SCORES: Slot[Callable[[int, list[int]], "dict[int, list[BonusScore]]"]] = Slot("가산 점수", "scoring.apps")
 
@@ -81,6 +87,14 @@ def ranked_reviews(
     contest_id: int, submission_ids: list[int]
 ) -> dict[int, tuple[SubmissionQualityReview, QualityTotal, int]]:
     return RANKED_REVIEWS.get()(contest_id, submission_ids)
+
+
+def latest_quality_review(submission_id: int) -> SubmissionQualityReview | None:
+    return LATEST_QUALITY_REVIEW.get()(submission_id)
+
+
+def is_prize_settled(contest: Contest) -> bool:
+    return PRIZE_SETTLED.get()(contest)
 
 
 def bonus_scores(contest_id: int, submission_ids: list[int]) -> dict[int, list[BonusScore]]:

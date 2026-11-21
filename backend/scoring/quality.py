@@ -16,6 +16,11 @@
   박제본을 채점과 같은 격리·프록시로 읽는다. 두 번 다 받아들이는 조건을 어기면 **보류** — 실패 이력
   (`HELD_ERROR_PREFIX`) 한 줄을 남기고 0~5 를 지어내지 않는다. 영구 제외가 아니라 실패 한 번으로 세어
   `QUALITY_FAILURE_LIMIT` 안에서 다시 집는다(#1699 — 근거 한 곳 때문에 첫 실패에 영구 제외됐다). 실행기가 바쁘거나 예산이 찼으면 실패로 세지 않는다.
+- **판(#1181)**: 리뷰는 현재 점수의 판마다 하나다 — 원래 `Score` 판, 그리고 점수 정정이 끝나면 그 정정 판.
+  「정정이 끝나면」에 따로 줄을 걸지 않는다: 이 스캔이 「현재 판의 리뷰가 없는」 제출을 집으므로 정정이 끝난
+  다음 스캔이 정정 판의 prompt 로 다시 매긴다. 실패 상한·영구 실패도 판마다 센다. 개최자 「완성도 순위」는
+  순위에 드는(`ranked`) 판 중 가장 나중 것을 읽는다 — 정정 판은 쓸 때 상금 배분이 끝났으면(`is_prize_settled`)
+  순위에 들지 않는다(배분 끝난 공모전의 순위는 고정, 스펙 #1178). 참가자 점수 화면은 가장 나중 판을 읽는다.
 - **실패**: `QualityReviewAttempt` 에 남긴다. 영구 실패(`LLMAdapterPermanentError`)가 하나라도 있거나
   `QUALITY_FAILURE_LIMIT` 번 실패하면 더 집지 않는다. 0% 같은 대체값을 지어내지 않는다 — 완성도는 상금과
   무관하니 「없음」으로 남겨도 아무것도 막지 않는다.
@@ -27,10 +32,11 @@ import logging
 from datetime import datetime
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Exists, OuterRef, Subquery
+from django.db.models import Case, Count, Exists, OuterRef, Q, Subquery, When
 from django.db.models.functions import Coalesce
 
 from contests.models import Contest, ContestSubmission, Requirement
+from contests.ports import is_prize_settled
 from core.llm_scoring import LLMAdapterError, LLMAdapterPermanentError, get_adapter
 from core.quality_review import (
     BonusScore,
@@ -56,7 +62,7 @@ from submissions.scoring_basis import (
 
 from .agent_runner import AgentGraderBusy
 from core.agent_scoring import AGENT_JOB_MAX_SECONDS, AgentVendorRefused, note_scan_refusal, scan_refusal
-from .current import CURRENT_SCORE_RELATIONS, current_score, with_current_score
+from .current import CURRENT_SCORE_RELATIONS, current_score, with_current_correction, with_current_score
 from .models import QualityReviewAttempt, SubmissionBonusScore, SubmissionQualityReview
 from .quality_agent import QualityReviewHeld, review_with_agent
 
@@ -107,17 +113,28 @@ def _submission_text(prompt: str) -> str:
     return prompt[start:] if start >= 0 else prompt
 
 
+def _attempt_count(attempts):
+    return Coalesce(
+        Subquery(attempts.order_by().values("submission").annotate(count=Count("id")).values("count")), 0
+    )
+
+
 def _pending_quality(as_of, ctx):
     del as_of, ctx
+    # 판마다 따로 센다(#1181): 원래 판은 `correction` 이 비었고, 정정 판은 현재 정정 id 와 같다.
+    reviews = SubmissionQualityReview.objects.filter(submission=OuterRef("pk"))
     attempts = QualityReviewAttempt.objects.filter(submission=OuterRef("pk"))
-    attempt_count = attempts.order_by().values("submission").annotate(count=Count("id")).values("count")
+    original = attempts.filter(correction__isnull=True)
+    corrected = attempts.filter(correction_id=OuterRef("current_correction_id"))
+    on_original = Q(current_correction_id__isnull=True)
     # AI 가 소스를 읽었나는 현재 점수의 model_version 으로 가른다 — 자동 0% 가 정정되면 리뷰 대상이 된다(#1179).
     return (
-        with_current_score(
-            ContestSubmission.objects.filter(
-                contest__status__in=Contest.Status.SCOREABLE.statuses,
-                score__isnull=False,
-                quality_review__isnull=True,
+        with_current_correction(
+            with_current_score(
+                ContestSubmission.objects.filter(
+                    contest__status__in=Contest.Status.SCOREABLE.statuses,
+                    score__isnull=False,
+                )
             )
         )
         .exclude(current_model_version__in=SKIPPED_SCORE_MODEL_VERSIONS)
@@ -125,18 +142,42 @@ def _pending_quality(as_of, ctx):
             _has_requirement=Exists(
                 Requirement.objects.filter(contest=OuterRef("contest_id")).exclude(grade=Requirement.Grade.BONUS)
             ),
-            _permanent_failure=Exists(attempts.filter(permanent=True)),
-            attempt_count=Coalesce(Subquery(attempt_count), 0),
+            _reviewed_original=Exists(reviews.filter(correction__isnull=True)),
+            _reviewed_corrected=Exists(reviews.filter(correction_id=OuterRef("current_correction_id"))),
+            _permanent_original=Exists(original.filter(permanent=True)),
+            _permanent_corrected=Exists(corrected.filter(permanent=True)),
+            attempt_count=Case(
+                When(on_original, then=_attempt_count(original)), default=_attempt_count(corrected)
+            ),
         )
-        .filter(_has_requirement=True, _permanent_failure=False, attempt_count__lt=QUALITY_FAILURE_LIMIT)
+        .filter(
+            Q(on_original, _reviewed_original=False, _permanent_original=False)
+            | Q(~on_original, _reviewed_corrected=False, _permanent_corrected=False)
+        )
+        .filter(_has_requirement=True, attempt_count__lt=QUALITY_FAILURE_LIMIT)
         .select_related("contest", *CURRENT_SCORE_RELATIONS)
     )
 
 
-def review_submission_once(submission: ContestSubmission) -> dict:
-    """완성도를 한 번 매긴다. 이미 있으면 그대로 돌아온다. 실패는 `QualityReviewAttempt` 로 남긴다."""
+def _reviewed(submission_id: int, correction_id: int | None) -> bool:
+    return SubmissionQualityReview.objects.filter(submission_id=submission_id, correction_id=correction_id).exists()
 
-    if SubmissionQualityReview.objects.filter(submission_id=submission.id).exists():
+
+def _ranked(contest: Contest, submission_id: int, correction_id: int | None) -> bool:
+    """이 판의 리뷰가 개최자 순위에 드나 — 원래 판은 늘, 정정 판은 배분 전이거나 순위에 든 리뷰가 아직 없을 때."""
+
+    if correction_id is None or not is_prize_settled(contest):
+        return True
+    return not SubmissionQualityReview.objects.filter(submission_id=submission_id, ranked=True).exists()
+
+
+def review_submission_once(submission: ContestSubmission) -> dict:
+    """현재 점수의 판으로 완성도를 한 번 매긴다. 그 판이 이미 있으면 그대로 돌아온다. 실패는 부르는 쪽이
+    `QualityReviewAttempt` 로 남긴다."""
+
+    current = current_score(submission)
+    correction_id = current.correction_id if current is not None else None
+    if _reviewed(submission.id, correction_id):
         return {"submission_id": submission.id, "status": "already_reviewed"}
     contest = submission.contest
     items = requirement_inputs(list(Requirement.objects.filter(contest=contest).order_by("order", "id")))
@@ -144,10 +185,9 @@ def review_submission_once(submission: ContestSubmission) -> dict:
         agent = review_with_agent(submission, items)
         prompt, scores, model_version = agent.prompt, agent.scores, agent.model_version
     else:
-        score = current_score(submission)
-        if score is None:
+        if current is None:
             raise LLMAdapterPermanentError("채점되지 않은 제출은 완성도를 매기지 않는다.")
-        source = _submission_text(score.prompt)
+        source = _submission_text(current.prompt)
         prompt = build_prompt(
             title=contest.title, description="", guideline_text=_CONTEST_GUIDELINE, items=items, submission_text=source
         )
@@ -164,6 +204,8 @@ def review_submission_once(submission: ContestSubmission) -> dict:
         with transaction.atomic():
             SubmissionQualityReview.objects.create(
                 submission_id=submission.id,
+                correction_id=correction_id,
+                ranked=_ranked(contest, submission.id, correction_id),
                 checklist_fingerprint=checklist_fingerprint(items),
                 model_version=model_version,
                 prompt=prompt,
@@ -171,9 +213,15 @@ def review_submission_once(submission: ContestSubmission) -> dict:
                 **historical_columns(total),
             )
     except IntegrityError:
-        # 겹친 스캔이 먼저 썼다 — 하나만 남는다(OneToOne).
+        # 겹친 스캔이 먼저 썼다 — 판마다 하나만 남는다(모델 제약).
         return {"submission_id": submission.id, "status": "already_reviewed"}
     return {"submission_id": submission.id, "status": "reviewed", "raw_total": total.raw}
+
+
+def _attempt_version(submission: ContestSubmission) -> int | None:
+    """실패를 어느 판에 셀까 — 후보 질의가 붙인 현재 판(`_pending_quality`)."""
+
+    return getattr(submission, "current_correction_id", None)
 
 
 def _review_one(submission, as_of, ctx):
@@ -196,14 +244,21 @@ def _review_one(submission, as_of, ctx):
         # 두 번 다 받아들이는 조건을 어겼다 — 보류. 0~5 를 지어내지 않는다. 실패 한 번으로 세어 상한 안에서 다시 집는다
         # (#1699 — 영구로 두었더니 근거 한 곳의 형식 때문에 첫 실패에 빠졌다; 상한이 예산을 막는다).
         logger.warning("Submission(pk=%s) 완성도 에이전트 리뷰 보류: %s", submission.id, exc)
-        QualityReviewAttempt.objects.create(submission_id=submission.id, error=f"{HELD_ERROR_PREFIX}{exc}"[:2000])
+        QualityReviewAttempt.objects.create(
+            submission_id=submission.id,
+            correction_id=_attempt_version(submission),
+            error=f"{HELD_ERROR_PREFIX}{exc}"[:2000],
+        )
         return {"submission_id": submission.id, "status": "held", "error": str(exc)}
     except Exception as exc:  # noqa: BLE001 - 한 건의 실패가 배치를 막지 않는다.
         if not isinstance(exc, LLMAdapterError):
             logger.exception("Submission(pk=%s) 완성도 채점 중 예외, 다음 건으로 계속", submission.id)
         permanent = isinstance(exc, LLMAdapterPermanentError)
         QualityReviewAttempt.objects.create(
-            submission_id=submission.id, error=f"{type(exc).__name__}: {exc}"[:2000], permanent=permanent
+            submission_id=submission.id,
+            correction_id=_attempt_version(submission),
+            error=f"{type(exc).__name__}: {exc}"[:2000],
+            permanent=permanent,
         )
         return {
             "submission_id": submission.id,
@@ -287,16 +342,29 @@ def ranked_reviews(
     Σ(0~5 × 배점)으로, 같으면 같은 등수(`core.quality_review.competition_ranks`). 기록이 없는 제출은 결과에 없다."""
 
     points = points_by_requirement(contest_id)
-    reviews = list(SubmissionQualityReview.objects.filter(submission_id__in=submission_ids))
+    # 순위에 드는 판 중 가장 나중 것(#1181) — 배분이 끝난 뒤의 정정 판은 `ranked=False` 라 순위가 고정된다.
+    latest: dict[int, SubmissionQualityReview] = {}
+    for review in SubmissionQualityReview.objects.filter(submission_id__in=submission_ids, ranked=True).order_by(
+        "submission_id", "-id"
+    ):
+        latest.setdefault(review.submission_id, review)
+    reviews = list(latest.values())
     bonus = bonus_scores(contest_id, [r.submission_id for r in reviews])
     totals = [review_total(r, points, bonus[r.submission_id]) for r in reviews]
     ranks = competition_ranks([t.raw for t in totals])
     return {r.submission_id: (r, t, rank) for r, t, rank in zip(reviews, totals, ranks, strict=True)}
 
 
+def latest_review(submission_id: int) -> SubmissionQualityReview | None:
+    """제출 하나의 가장 나중 판 완성도 기록 — 참가자 점수 화면 몫(#1181). 순위와 무관해 `ranked` 를 보지 않는다."""
+
+    return SubmissionQualityReview.objects.filter(submission_id=submission_id).order_by("-id").first()
+
+
 __all__ = [
     "QUALITY_FAILURE_LIMIT",
     "bonus_scores",
+    "latest_review",
     "SUBMISSION_QUALITY_SCAN",
     "points_by_requirement",
     "ranked_reviews",

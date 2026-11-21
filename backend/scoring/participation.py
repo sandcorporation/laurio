@@ -1,6 +1,6 @@
 """공모전 판정이 묻는 채점 사실 — `scoring.apps` 가 `contests.ports` 와 `repositories.ports` 에 올린다(#1102).
 
-관계 이름(`score`·`quality_review`·`scoring_attempts`)은 이 앱의 모델이 연 역관계라 여기서만 적는다.
+관계 이름(`score`·`scoring_attempts`)은 이 앱의 모델이 연 역관계라 여기서만 적는다.
 """
 
 from __future__ import annotations
@@ -16,7 +16,8 @@ if TYPE_CHECKING:
 #: 「다음 행동」이 당길 관계
 NEXT_ACTION_RELATIONS = ("score",)
 #: 점수 화면이 당길 관계
-OWN_SCORE_RELATIONS = ("score", "quality_review")
+#: 완성도는 판마다 여럿이라(#1181) 당기지 않는다 — 화면이 `contests.ports.latest_quality_review` 로 묻는다.
+OWN_SCORE_RELATIONS = ("score",)
 
 
 def is_scored(submission: ContestSubmission) -> bool:

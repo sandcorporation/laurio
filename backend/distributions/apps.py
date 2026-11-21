@@ -29,6 +29,13 @@ class DistributionsConfig(AppConfig):
 
         NO_DISTRIBUTION_FILTER.register(no_distribution_q)
 
+        # 정정 판 완성도가 순위에 드는가(#1181) — 채점 앱이 배분 앱을 import 하지 않게 판정 하나를 올린다.
+        from contests.ports import PRIZE_SETTLED
+
+        from .services import is_prize_settled
+
+        PRIZE_SETTLED.register(is_prize_settled)
+
         # 배분 결과 알림 복구 스캔(#19, #138) — #1086 에서 contests 에서 옮겼다(이름 그대로)
         from .notice_recovery import NOTICE_RECOVERY_SCAN
 

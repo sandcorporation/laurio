@@ -72,7 +72,21 @@ def current_score(submission: Submission) -> CurrentScore | None:
         original_percentage=score.percentage,
         original_model_version=score.model_version,
         correction_reason=correction.reason,
+        correction_id=correction.pk,
     )
+
+
+def _latest_done(score_path: str) -> QuerySet[ScoreCorrection]:
+    return ScoreCorrection.objects.filter(
+        score=OuterRef(f"{score_path}__pk"), status=ScoreCorrection.Status.DONE
+    ).order_by("-id")
+
+
+def with_current_correction(queryset: QuerySet[M]) -> QuerySet[M]:
+    """제출 `queryset` 의 행에 현재 점수의 판 `current_correction_id`(끝난 정정 id, 없으면 None)를 붙인다 —
+    완성도 리뷰가 「이 판을 이미 매겼나」를 묻는다(#1181)."""
+
+    return queryset.annotate(current_correction_id=Subquery(_latest_done("score").values("id")[:1]))
 
 
 def with_current_score(queryset: QuerySet[M], *, path: str = "") -> QuerySet[M]:
@@ -83,9 +97,7 @@ def with_current_score(queryset: QuerySet[M], *, path: str = "") -> QuerySet[M]:
     """
 
     score = f"{path}score"
-    latest = ScoreCorrection.objects.filter(score=OuterRef(f"{score}__pk"), status=ScoreCorrection.Status.DONE).order_by(
-        "-id"
-    )
+    latest = _latest_done(score)
     return queryset.annotate(
         current_percentage=Coalesce(Subquery(latest.values("percentage")[:1]), F(f"{score}__percentage")),
         current_model_version=Coalesce(Subquery(latest.values("model_version")[:1]), F(f"{score}__model_version")),
