@@ -215,6 +215,17 @@ class OperatorFreeContestOut(Schema):
     winner: OperatorFreeContestWinnerOut | None
 
 
+class OperatorPaidContestOut(Schema):
+    """운영자 앱 유료 공모전 목록 한 줄 (#1212) — 상태·마감·상금. 수상자 자리는 없다
+    (유료 공모전의 순위·배분은 점수 정정·상장 화면이 맡는다)."""
+
+    id: int
+    title: str
+    status: str
+    deadline_at: datetime
+    prize: int
+
+
 class QuoteIn(Schema):
     deliverable_type_ids: list[int]
 

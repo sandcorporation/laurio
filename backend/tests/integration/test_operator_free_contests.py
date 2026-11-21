@@ -296,3 +296,57 @@ def test_non_operator_request_is_rejected():
     response = user_client.get(FREE_CONTESTS_URL)
 
     assert response.status_code in (401, 403), response.content
+
+
+# --- 유료 공모전 목록 (#1212) -------------------------------------------------
+
+PAID_CONTESTS_URL = "/api/operator/contests/paid"
+
+
+def test_paid_contest_list_shows_paid_and_excludes_free(client, category, landing_type):
+    deadline = timezone.now() + timedelta(hours=1)
+    _, free_contest = _free_published_contest(
+        client, host_uid="paid-list-free", deadline_at=deadline, category=category, landing_type=landing_type
+    )
+    sponsor = _hosted_user(client, "paid-list-sponsor")
+    verify_resp = client.post(
+        "/api/verification/verify",
+        data={"verification_token": "사람|1990-01-01|paid-list-ci|paid-list-di"},
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert verify_resp.status_code == 200, verify_resp.content
+    created = client.post(
+        CONTESTS_URL,
+        data={
+            "title": "유료 공모전 — 운영자 유료 목록",
+            "category_id": category.id,
+            "deliverable_type_ids": [landing_type.id],
+            "prize": 1_000_000,
+            "deadline_at": deadline.isoformat(),
+            "requirements": [{"text": "할 일을 추가·완료할 수 있다", "grade": "required"}],
+        },
+        content_type="application/json",
+        **_auth_header(sponsor["access"]),
+    )
+    assert created.status_code == 200, created.content
+    paid_id = created.json()["id"]
+
+    response = _operator_client("root-paid-list-viewer", superuser=False).get(PAID_CONTESTS_URL)
+
+    assert response.status_code == 200, response.content
+    items = response.json()
+    ids = {item["id"] for item in items}
+    assert free_contest["id"] not in ids
+    row = _row_for(items, paid_id)
+    assert row["title"] == "유료 공모전 — 운영자 유료 목록"
+    assert row["prize"] == 1_000_000
+
+
+def test_paid_contest_list_rejects_non_operator():
+    user_client = Client()
+    _login(user_client, "paid-list-not-operator")
+
+    response = user_client.get(PAID_CONTESTS_URL)
+
+    assert response.status_code in (401, 403), response.content

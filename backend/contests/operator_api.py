@@ -77,6 +77,7 @@ from .schemas import (
     OperatorCategoryOut,
     OperatorDeliverableTypeOut,
     OperatorFreeContestOut,
+    OperatorPaidContestOut,
     OperatorFreeContestWinnerOut,
     SetHostingPermissionIn,
 )
@@ -463,3 +464,25 @@ def list_free_contests(request: HttpRequest):
         .order_by("-created_at")
     )
     return 200, [_serialize_free_contest(contest) for contest in contests]
+
+
+# --- 유료 공모전 목록 (#1212) -------------------------------------------------
+#
+# `GET /operator/contests/paid` — 점수 정정·상장 화면으로 가는 길이다(정정이 순위·배분에
+# 닿는 것은 유료 공모전, 스펙 #1178). 무료 목록과 같이 `OperatorAuth` 만 받고 상태를 가리지 않는다.
+
+
+def _serialize_paid_contest(contest: Contest) -> OperatorPaidContestOut:
+    return OperatorPaidContestOut(
+        id=contest.id,
+        title=contest.title,
+        status=contest.status,
+        deadline_at=contest.deadline_at,
+        prize=contest.prize,
+    )
+
+
+@operator_router.get("/contests/paid", response={200: list[OperatorPaidContestOut]})
+def list_paid_contests(request: HttpRequest):
+    contests = Contest.objects.filter(is_free=False).order_by("-created_at")
+    return 200, [_serialize_paid_contest(contest) for contest in contests]
