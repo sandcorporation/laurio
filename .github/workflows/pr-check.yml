@@ -83,9 +83,12 @@ jobs:
           restore-keys: e2e-durations-
       - id: plan
         name: 무엇을 돌릴지
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
-          base=$(git merge-base origin/main HEAD 2>/dev/null || true)
+          # 기준은 PR 이 가는 브랜치와의 merge-base(#1210, pr-base.sh) — main 이면 예전과 같고, spec/* 로 가는 티켓 PR 은 그 PR 의 차이만.
           # 기준을 못 찾거나 HEAD 자신이면 「바뀐 것 없음」→ 전부 돈다(changed.sh)
+          base=$(bash scripts/ci/pr-base.sh "$PR_BASE")
           plan=$(bash scripts/ci/changed.sh "$base")
           echo "돌릴 것: $plan (기준 ${base:0:12})"
           tests=$(sed -n 's/^TESTS=//p' <<<"$plan"); back=$(sed -n 's/^BACK=//p' <<<"$plan"); front=$(sed -n 's/^FRONT=//p' <<<"$plan")
@@ -139,6 +142,7 @@ jobs:
           python3 scripts/test_pytest_plan.py
           python3 scripts/test_fail_fast.py
           python3 scripts/test_rerun_verdict.py
+          python3 scripts/test_spec_flow.py
           bash scripts/ci/promote_test.sh
           bash scripts/ci/wait-merged_test.sh
           bash scripts/ci/e2e_stale_test.sh
