@@ -47,4 +47,12 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       "보내는 OAuth 인가 주소다 — 인가 서버 메타데이터가 이 주소를 알리고, " +
       "이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
   },
+  {
+    route: "/feedback/[id]",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지
+      // 사용자에게 렌더링되는 화면 문자열이 아니다 — 이슈 번호가 바로 그 근거다.
+      "내 제보 상세(#1242)로 가는 링크는 공유 패키지(`@codemit/bff-client/feedback`)의 목록 행이 " +
+      "`detailHref` 로 받은 주소를 `<a href>` 에 넣어 낸다 — 이 앱 소스에는 리터럴 링크가 없어 스캐너가 못 본다.",
+  },
 ];

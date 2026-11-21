@@ -51,6 +51,10 @@ export function notificationHref(notification: NotificationRow): string | null {
       if (typeof classId !== "number") return null;
       return detailTabHref(classId, "instructors");
     }
+    case "classroom_feedback_status_changed": {
+      const reportId = context.report_id;
+      return typeof reportId === "number" ? `/feedback/${reportId}` : "/feedback";
+    }
     default:
       return null;
   }

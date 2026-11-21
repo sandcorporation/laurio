@@ -43,4 +43,12 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       "상장 확인 페이지(#1128, 스펙 #1071)는 상장 PDF 의 QR·확인 주소로만 닿는 곳이다 — " +
       "검색에도 싣지 않으므로(robots·X-Robots-Tag) 이 앱 안의 <Link>가 이어질 이유가 없다.",
   },
+  {
+    route: "/console/feedback/[id]",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지
+      // 사용자에게 렌더링되는 화면 문자열이 아니다 — 이슈 번호가 바로 그 근거다.
+      "내 제보 상세(#1241)로 가는 링크는 공유 패키지(`@codemit/bff-client/feedback`)의 목록 행이 " +
+      "`detailHref` 로 받은 주소를 `<a href>` 에 넣어 낸다 — 이 앱 소스에는 리터럴 링크가 없어 스캐너가 못 본다.",
+  },
 ];

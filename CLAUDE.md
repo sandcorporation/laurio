@@ -43,6 +43,7 @@ scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400�
 - [CI](docs/ops/ci.md) — PR 검사는 GitHub Actions(`pr-check.yml`, 이미지 층 캐시는 main 저장·PR 복원, #932), Jenkins PR 검사는 꺼졌다(2026-11-09). PR → 대기열(`bash scripts/ci/enqueue.sh <N>` 이 넣는다 — 자동 병합이 꺼져 `gh pr merge` 는 거절된다, 검사는 대기열 한 번 #1090·#1118) → `release.yml` 은 이미지·승격만(arm64 이미지 → `production`, #938) → `production` push 하나가 Jenkins 배포 하나.
 - [배포](docs/ops/deploy.md) — PR → main → production(= prod 배포) 체인, 되돌리기(revert PR · `ROLLBACK_SHA`), deploy.sh, 겹쳐 바꾸기, 풀러, 제품 스위치.
 - [운영](docs/ops/operations.md) — admin 없음, 백업, Prometheus·Loki·GlitchTip, GlitchTip 자동 진단.
+- [제보 전달](docs/ops/feedback-relay.md) — 운영 건의·버그 제보를 work Orca 자동화가 `scripts/feedback.sh` 로 대장 메일함에 넘긴다(번호·갈래·앱·시각만, #1240).
 - [커밋 훅](docs/ops/commit-hooks.md) — `.githooks/pre-commit` 이 하는 셋.
 
 ## Agent skills

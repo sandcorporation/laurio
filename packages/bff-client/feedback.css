@@ -1,0 +1,3 @@
+/* 제보 화면(`src/feedback`)을 Tailwind 스캔 대상에 넣는다 — markdown.css 와 같은 까닭이다.
+ * 두 앱의 `globals.css` 가 이 파일을 `@import` 한다. 경로는 이 파일 기준. */
+@source "./src/feedback";

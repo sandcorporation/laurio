@@ -143,6 +143,7 @@ jobs:
           python3 scripts/test_fail_fast.py
           python3 scripts/test_rerun_verdict.py
           python3 scripts/test_spec_flow.py
+          python3 scripts/test_feedback_relay.py
           bash scripts/ci/promote_test.sh
           bash scripts/ci/wait-merged_test.sh
           bash scripts/ci/e2e_stale_test.sh

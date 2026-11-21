@@ -57,6 +57,10 @@ export function describeNotification(
       return `제출하신 '${contestTitle}' 공모전의 점수를 플랫폼 오류로 다시 채점했습니다.`;
     case "certificate_score_corrected":
       return `주최하신 '${contestTitle}' 공모전에서 상장을 발급한 제출의 점수가 정정됐습니다 — 상장을 확인해주세요.`;
+    case "feedback_status_changed": {
+      const label = typeof context.status_label === "string" ? context.status_label : "";
+      return label ? `보내신 제보가 '${label}' 상태로 바뀌었습니다.` : "보내신 제보의 상태가 바뀌었습니다.";
+    }
     case "appeal_ruled":
       return "제기하신 이의 심판이 완료됐습니다.";
     case "new_contest_in_category":
@@ -82,11 +86,15 @@ export function describeNotification(
 }
 
 /** 알림에서 이어지는 화면 — 상장 알림(#1130)은 받는 사람의 상장 줄이 있는 내 참가 현황으로 간다. */
-export function notificationHref(notification: Pick<NotificationOut, "notification_type">): string | null {
+export function notificationHref(notification: Pick<NotificationOut, "notification_type"> & { context?: unknown }): string | null {
   switch (notification.notification_type) {
     case "certificate_issued":
     case "certificate_reissued":
       return "/console/participation";
+    case "feedback_status_changed": {
+      const reportId = (notification.context as { report_id?: unknown } | null | undefined)?.report_id;
+      return typeof reportId === "number" ? `/console/feedback/${reportId}` : "/console/feedback";
+    }
     default:
       return null;
   }

@@ -3,6 +3,8 @@
 /* 공유 마크다운 렌더러가 CSS 에서 필요한 것 — Tailwind 스캔 대상 등록과 코드블록
  * 하이라이팅 색이 그 파일 한 곳에 있다(강의실도 같은 파일을 들인다). */
 @import "@codemit/markdown/markdown.css";
+/* 제보 버튼·내 제보(@codemit/bff-client/feedback)가 부르는 유틸리티의 스캔 등록. */
+@import "@codemit/bff-client/feedback.css";
 
 /*
  * 토큰(app/tokens.css)을 실제 바탕·글꼴에 배선하는 곳. 리터럴 hex 는 여기서도

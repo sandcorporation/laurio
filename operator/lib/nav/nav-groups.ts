@@ -56,6 +56,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     items: [
       { label: "운영자 계정", href: "/operators", testId: "nav-operators" },
       { label: "개최 권한", href: "/hosting-permissions", testId: "nav-hosting-permissions" },
+      { label: "제보 권한", href: "/feedback-permissions", testId: "nav-feedback-permissions" },
+      { label: "제보", href: "/feedback-reports", testId: "nav-feedback-reports" },
       { label: "운영팀 알림", href: "/notifications", testId: "nav-notifications" },
       { label: "무료 공모전", href: "/contests/free", testId: "nav-free-contests" },
       { label: "유료 공모전", href: "/contests/paid", testId: "nav-paid-contests" },

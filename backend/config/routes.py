@@ -54,6 +54,7 @@ API_ROUTERS: tuple[Mount, ...] = (
     Mount("", "payouts.api.router"),
     Mount("", "appeals.api.router"),
     Mount("/notifications", "notifications.api.public_router"),
+    Mount("/feedback", "feedback.api.router"),
     Mount("/ledger", "ledger.api.router"),
     Mount("/classroom", "classroom.api.router"),
     Mount("/classroom", "classroom.template_api.router"),
@@ -77,6 +78,7 @@ API_ROUTERS: tuple[Mount, ...] = (
     Mount("/operator", "classroom.template_operator_api.operator_router"),
     Mount("/operator", "classroom.usage_operator_api.usage_operator_router"),
     Mount("/operator", "notifications.operator_api.operator_router"),
+    Mount("/operator", "feedback.operator_api.operator_router"),
     Mount("/operator", "ops_metrics.operator_api.ops_metrics_operator_router"),
     Mount("/storage", "storage.api.router"),
 )
