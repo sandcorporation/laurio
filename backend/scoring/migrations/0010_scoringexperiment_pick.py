@@ -10,6 +10,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="scoringexperiment",
             name="pick",
-            field=models.CharField(default="id", max_length=10),
+            field=models.CharField(db_default="id", default="id", max_length=10),
         ),
     ]
