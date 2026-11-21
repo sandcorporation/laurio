@@ -33,3 +33,6 @@ class DistributionsConfig(AppConfig):
         from .notice_recovery import NOTICE_RECOVERY_SCAN
 
         register_scan(NOTICE_RECOVERY_SCAN)
+
+        # 정정이 끝나면 참가자·개최자에게 알린다(#1182) — 정정 완료 훅(`scoring.corrections`)에 건다.
+        from . import correction_notices  # noqa: F401

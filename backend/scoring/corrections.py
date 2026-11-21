@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from django.contrib.auth.models import AbstractBaseUser
@@ -38,6 +38,24 @@ from .models import Score, ScoreCorrection
 from .services import AGENT_JOB_MAX_SECONDS, CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS, _judge
 
 logger = logging.getLogger(__name__)
+
+#: 정정이 「끝」으로 확정된 뒤(커밋 뒤) 한 번씩 부르는 줄 — 「정정이 끝나면」 할 일(알림·완성도 다시 돌리기)은 여기에 걸고
+#: `run_correction` 끝에 직접 넣지 않는다. 한 줄의 실패가 다른 줄과 정정 자체를 막지 않는다.
+CORRECTION_DONE_HOOKS: list[Callable[[ScoreCorrection], None]] = []
+
+
+def on_correction_done(hook: Callable[[ScoreCorrection], None]) -> Callable[[ScoreCorrection], None]:
+    CORRECTION_DONE_HOOKS.append(hook)
+    return hook
+
+
+def _fire_correction_done(correction_id: int) -> None:
+    correction = ScoreCorrection.objects.get(pk=correction_id)
+    for hook in CORRECTION_DONE_HOOKS:
+        try:
+            hook(correction)
+        except Exception:  # noqa: BLE001 - 후속 일 하나의 실패가 정정과 다른 후속 일을 되돌리면 안 된다.
+            logger.exception("ScoreCorrection(pk=%s) 정정 완료 후속 %s 실패", correction_id, hook.__name__)
 
 SKIP_NOT_SCORED = "not_scored"
 SKIP_IN_PROGRESS = "in_progress"
@@ -168,6 +186,7 @@ def run_correction(correction: ScoreCorrection) -> dict:
     correction.status = ScoreCorrection.Status.DONE
     correction.finished_at = Clock.now()
     correction.save()
+    transaction.on_commit(lambda: _fire_correction_done(correction.id))
     return {"correction_id": correction.id, "status": "done", "percentage": str(judged.percentage)}
 
 
