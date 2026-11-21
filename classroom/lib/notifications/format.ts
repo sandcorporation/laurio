@@ -62,6 +62,10 @@ export function describeNotification(notification: NotificationRow): string {
       const recipient = recipientSubject(context);
       return `${recipient} '${className}' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.`;
     }
+    case "classroom_feedback_status_changed": {
+      const label = typeof context.status_label === "string" ? context.status_label : "";
+      return label ? `보내신 제보가 '${label}' 상태로 바뀌었습니다.` : "보내신 제보의 상태가 바뀌었습니다.";
+    }
     default:
       return "새 알림이 있습니다.";
   }

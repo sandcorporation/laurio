@@ -115,3 +115,11 @@ describe("알림에서 이어지는 화면(#1130)", () => {
   });
 });
 
+
+describe("제보 상태 알림(#1241)", () => {
+  it("바뀐 상태를 말하고 그 제보 상세로 잇는다", () => {
+    const notification = row({ notification_type: "feedback_status_changed", context: { report_id: 12, status: "in_progress", status_label: "작업 중" } });
+    expect(describeNotification(notification)).toBe("보내신 제보가 '작업 중' 상태로 바뀌었습니다.");
+    expect(notificationHref(notification)).toBe("/console/feedback/12");
+  });
+});

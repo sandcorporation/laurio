@@ -11,6 +11,7 @@ import { classroomAppOrigin } from "@/lib/seo/origin";
 import { THEME_COOKIE, parseThemePreference, themeAttribute } from "@/lib/theme/preference";
 
 import { AccountMenu } from "./components/account-menu";
+import { FeedbackButton } from "./components/feedback-button";
 import { NotificationBell } from "./components/notification-bell";
 import { LogoMark } from "./components/logo-mark";
 import { SiteFooter } from "./components/site-footer";
@@ -129,6 +130,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             </header>
             {children}
             <SiteFooter />
+            <FeedbackButton />
           </EventStreamProvider>
         </MeProvider>
       </body>

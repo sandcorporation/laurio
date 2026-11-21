@@ -1,40 +1,11 @@
-import { type BrowserContext, expect, request as playwrightRequest, test } from "@playwright/test";
+import { type BrowserContext, expect, test } from "@playwright/test";
 
 import { e2eRunId } from "../lib/run-id";
-import { E2E_OPERATOR_PASSWORD, seedE2eOperator } from "../lib/seed-operator";
+import { setFeedbackPermission } from "../lib/feedback-permission";
 import { establishDeveloperSession, publicOrigin } from "../lib/session";
 
 // 제보 버튼 (#1241, 스펙 #1237) — 켠 계정은 버튼 → 캡처·가리기 → 보내기 → 내 제보에 접수로 보이고,
 // 끈 계정은 버튼이 없다. 권한은 운영자 API 로 켠다(시드 없음 — 사슬 A 의 계약 그대로).
-
-function operatorOrigin(): string {
-  return new URL(process.env.CODEMIT_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001").origin;
-}
-
-async function setFeedbackPermission(email: string, granted: boolean): Promise<void> {
-  const operator = await seedE2eOperator({ username: `e2e-fb-op-${e2eRunId()}`.slice(0, 40), superuser: true });
-  const origin = operatorOrigin();
-  const ctx = await playwrightRequest.newContext({ baseURL: origin });
-  try {
-    const login = await ctx.post("/api/auth/login", {
-      data: { username: operator.username, password: E2E_OPERATOR_PASSWORD },
-      headers: { origin },
-    });
-    expect(login.ok(), await login.text()).toBe(true);
-    const found = await ctx.get(`/api/backend/operator/feedback-permissions/search?q=${encodeURIComponent(email)}`);
-    expect(found.ok(), await found.text()).toBe(true);
-    const accounts = (await found.json()) as Array<{ user_id: number; email: string }>;
-    const account = accounts.find((item) => item.email === email);
-    expect(account, `계정 ${email}`).toBeTruthy();
-    const put = await ctx.post(`/api/backend/operator/feedback-permissions/${account!.user_id}`, {
-      data: { granted, reason: "e2e" },
-      headers: { origin },
-    });
-    expect(put.ok(), await put.text()).toBe(true);
-  } finally {
-    await ctx.dispose();
-  }
-}
 
 // 준비(계정·권한·제보 하나)는 시험 한도(3초) 밖 beforeAll 에서 한다 — 시험 본문은 화면 흐름만 잰다.
 test.describe.configure({ mode: "serial" });
