@@ -4135,6 +4135,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/feedback-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Feedback Reports */
+        get: operations["feedback_operator_api_list_feedback_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/feedback-reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Feedback Report */
+        get: operations["feedback_operator_api_get_feedback_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/feedback-reports/{report_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Change Feedback Status */
+        post: operations["feedback_operator_api_change_feedback_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/hosting-permissions": {
         parameters: {
             query?: never;
@@ -5876,6 +5927,19 @@ export interface components {
         CertificateVisibilityIn: {
             /** Hidden */
             hidden: boolean;
+        };
+        /** ChangeFeedbackStatusIn */
+        ChangeFeedbackStatusIn: {
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "received" | "in_progress" | "deployed" | "declined";
         };
         /**
          * ChecklistItemIn
@@ -8617,7 +8681,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued" | "score_corrected" | "certificate_score_corrected";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued" | "score_corrected" | "certificate_score_corrected" | "feedback_status_changed" | "classroom_feedback_status_changed";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -8691,6 +8755,92 @@ export interface components {
             code: string;
             /** Detail */
             detail: string;
+        };
+        /** OperatorFeedbackHistoryOut */
+        OperatorFeedbackHistoryOut: {
+            /** Actor */
+            actor: string;
+            /**
+             * Changed At
+             * Format: date-time
+             */
+            changed_at: string;
+            /** From Status */
+            from_status: string;
+            /** Note */
+            note: string;
+            /** To Status */
+            to_status: string;
+        };
+        /** OperatorFeedbackReportOut */
+        OperatorFeedbackReportOut: {
+            /** App */
+            app: string;
+            /** Body */
+            body: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Forwarded At */
+            forwarded_at: string | null;
+            /** Has Screenshot */
+            has_screenshot: boolean;
+            /** History */
+            history: components["schemas"]["OperatorFeedbackHistoryOut"][];
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /** Page Url */
+            page_url: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Reporter Email */
+            reporter_email: string;
+            /** Reporter Id */
+            reporter_id: number;
+            /** Resolution Note */
+            resolution_note: string;
+            /** Screen Height */
+            screen_height: number | null;
+            /** Screen Width */
+            screen_width: number | null;
+            /** Screenshot Url */
+            screenshot_url: string | null;
+            /** Status */
+            status: string;
+            /** User Agent */
+            user_agent: string;
+        };
+        /** OperatorFeedbackReportRowOut */
+        OperatorFeedbackReportRowOut: {
+            /** App */
+            app: string;
+            /** Body */
+            body: string;
+            /** Closed At */
+            closed_at: string | null;
+            /** Forwarded At */
+            forwarded_at: string | null;
+            /** Has Screenshot */
+            has_screenshot: boolean;
+            /** Id */
+            id: number;
+            /** Kind */
+            kind: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Reporter Email */
+            reporter_email: string;
+            /** Reporter Id */
+            reporter_id: number;
+            /** Status */
+            status: string;
         };
         /**
          * OperatorFreeContestOut
@@ -17131,6 +17281,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeedbackPermissionAccountOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    feedback_operator_api_list_feedback_reports: {
+        parameters: {
+            query?: {
+                status?: string;
+                app?: string;
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorFeedbackReportRowOut"][];
+                };
+            };
+        };
+    };
+    feedback_operator_api_get_feedback_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorFeedbackReportOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorErrorOut"];
+                };
+            };
+        };
+    };
+    feedback_operator_api_change_feedback_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeFeedbackStatusIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorFeedbackReportOut"];
                 };
             };
             /** @description Not Found */

@@ -16,6 +16,8 @@ from django.db import transaction
 from django.db.models import Q, QuerySet
 
 from core.clock import Clock
+from notifications.models import NotificationType
+from notifications.services import create_notification
 
 from . import screenshots
 from .models import (
@@ -23,6 +25,7 @@ from .models import (
     FeedbackPermission,
     FeedbackPermissionChange,
     FeedbackReport,
+    FeedbackStatusChange,
 )
 
 # 계정당 24시간(굴러가는 창) 안에 만들 수 있는 제보 수.
@@ -36,6 +39,10 @@ class FeedbackValidationError(Exception):
 
 class FeedbackConflictError(Exception):
     """이미 그 상태다 — 호출자는 409 로 옮긴다."""
+
+
+class FeedbackNotFoundError(Exception):
+    """없는 제보 — 호출자는 404 로 옮긴다."""
 
 
 class FeedbackRateLimitError(Exception):
@@ -139,3 +146,125 @@ def create_report(*, reporter: AbstractBaseUser, data: NewReport) -> FeedbackRep
             screenshot_key=data.screenshot_key,
             received_at=now,
         )
+
+
+# --- 상태 바꾸기 (#1239) ------------------------------------------------------
+
+COMMAND_ACTOR_LABEL = "대장(명령)"
+CLOSED_STATUSES = frozenset({FeedbackReport.Status.DEPLOYED, FeedbackReport.Status.DECLINED})
+
+
+def change_status(
+    *,
+    report_id: int,
+    to_status: str,
+    note: str,
+    operator: AbstractBaseUser | None,
+    actor_label: str,
+) -> FeedbackReport:
+    """운영자 화면과 관리 명령이 함께 부르는 단 하나의 길 — 이력 한 줄과 제보자 알림 한 건.
+
+    같은 상태로는 바꾸지 않는다(409) — 알림이 헛되이 나가지 않게. 처리 글이 있으면 제보의
+    「처리 글」도 그것으로 바꾼다. 배포됨·반려로 들어가면 종결 시각을 찍고, 다시 열면 지운다.
+    """
+
+    if to_status not in FeedbackReport.Status.values:
+        raise FeedbackValidationError("알 수 없는 상태입니다.")
+    note = note.strip()
+    now = Clock.now()
+
+    with transaction.atomic():
+        report = FeedbackReport.objects.select_for_update().filter(pk=report_id).first()
+        if report is None:
+            raise FeedbackNotFoundError("제보를 찾을 수 없습니다.")
+        if report.status == to_status:
+            raise FeedbackConflictError("이미 그 상태입니다.")
+
+        from_status = report.status
+        report.status = to_status
+        if note:
+            report.resolution_note = note
+        report.closed_at = now if to_status in CLOSED_STATUSES else None
+        report.save(update_fields=["status", "resolution_note", "closed_at"])
+        FeedbackStatusChange.objects.create(
+            report=report,
+            changed_by=operator,
+            actor_label=actor_label,
+            from_status=from_status,
+            to_status=to_status,
+            note=note,
+            changed_at=now,
+        )
+        notify_reporter(report)
+    return report
+
+
+# --- 대장 전달(#1240 이 부르는 관리 명령의 몫) -------------------------------
+
+# take 로 집은 뒤 이만큼 지나도 전달 표시가 없으면 다시 집힌다 — 전달이 중간에 죽은 경우.
+TAKE_LEASE = timedelta(minutes=15)
+
+
+def _pending(now) -> QuerySet:
+    return FeedbackReport.objects.filter(forwarded_at__isnull=True).filter(
+        Q(taken_at__isnull=True) | Q(taken_at__lte=now - TAKE_LEASE)
+    )
+
+
+def pending_reports(limit: int) -> list[FeedbackReport]:
+    """아직 전달되지 않았고 지금 누가 집고 있지 않은 제보 — 읽기만 한다."""
+
+    return list(_pending(Clock.now()).order_by("received_at", "id")[:limit])
+
+
+def take_reports(limit: int) -> list[FeedbackReport]:
+    """전달할 제보를 집는다 — 같은 제보를 두 번 내지 않게 집은 시각을 조건부로 찍는다."""
+
+    now = Clock.now()
+    taken: list[FeedbackReport] = []
+    with transaction.atomic():
+        candidates = (
+            _pending(now).select_for_update(skip_locked=True).order_by("received_at", "id")[:limit]
+        )
+        for report in candidates:
+            report.taken_at = now
+            report.save(update_fields=["taken_at"])
+            taken.append(report)
+    return taken
+
+
+def untake_report(report_id: int) -> bool:
+    """전달에 실패한 제보를 바로 다시 집히게 한다. 이미 전달된 것은 건드리지 않는다."""
+
+    return bool(
+        FeedbackReport.objects.filter(pk=report_id, forwarded_at__isnull=True).update(taken_at=None)
+    )
+
+
+def mark_forwarded(report_id: int) -> bool:
+    """전달을 마쳤다고 표시한다. 이미 표시된 것이면 False."""
+
+    return bool(
+        FeedbackReport.objects.filter(pk=report_id, forwarded_at__isnull=True).update(
+            forwarded_at=Clock.now()
+        )
+    )
+
+
+def notify_reporter(report: FeedbackReport) -> None:
+    """보낸 앱의 벨에 뜨는 유형으로 제보자에게 알린다."""
+
+    notification_type = (
+        NotificationType.CLASSROOM_FEEDBACK_STATUS_CHANGED
+        if report.app == FeedbackReport.App.CLASSROOM
+        else NotificationType.FEEDBACK_STATUS_CHANGED
+    )
+    create_notification(
+        recipient=report.reporter,
+        notification_type=notification_type,
+        context={
+            "report_id": report.pk,
+            "status": report.status,
+            "status_label": report.get_status_display(),
+        },
+    )

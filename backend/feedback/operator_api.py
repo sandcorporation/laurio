@@ -6,16 +6,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractBaseUser
 from django.http import HttpRequest
-from ninja import Router, Schema
+from ninja import Field, Router, Schema
 
 from core.operator_auth import OperatorAuth, SuperuserOperatorAuth
 
-from . import services
-from .models import FeedbackPermission, FeedbackPermissionChange
+from . import screenshots, services
+from .models import FeedbackPermission, FeedbackPermissionChange, FeedbackReport
 
 operator_router = Router(tags=["operator", "feedback"], auth=OperatorAuth())
 _SUPERUSER = SuperuserOperatorAuth()
@@ -124,3 +125,137 @@ def set_feedback_permission(request: HttpRequest, user_id: int, payload: SetFeed
     except services.FeedbackConflictError as exc:
         return 409, {"detail": str(exc), "code": "unchanged"}
     return 200, _account(user, granted=permission.is_granted)
+
+
+# --- 제보 (#1239) ---------------------------------------------------------------
+
+
+class OperatorFeedbackHistoryOut(Schema):
+    from_status: str
+    to_status: str
+    note: str
+    actor: str
+    changed_at: datetime
+
+
+class OperatorFeedbackReportRowOut(Schema):
+    id: int
+    kind: str
+    app: str
+    status: str
+    body: str
+    reporter_id: int
+    reporter_email: str
+    has_screenshot: bool
+    received_at: datetime
+    closed_at: datetime | None
+    forwarded_at: datetime | None
+
+
+class OperatorFeedbackReportOut(OperatorFeedbackReportRowOut):
+    page_url: str
+    user_agent: str
+    screen_width: int | None
+    screen_height: int | None
+    resolution_note: str
+    # 열 때마다 짧게 발급한다 — 없거나 보관 기한이 지나 지웠으면 null.
+    screenshot_url: str | None
+    history: list[OperatorFeedbackHistoryOut]
+
+
+class ChangeFeedbackStatusIn(Schema):
+    status: Literal["received", "in_progress", "deployed", "declined"]
+    note: str = Field("", max_length=4000)
+
+
+def _report_row(report: FeedbackReport) -> OperatorFeedbackReportRowOut:
+    return OperatorFeedbackReportRowOut(
+        id=report.pk,
+        kind=report.kind,
+        app=report.app,
+        status=report.status,
+        body=report.body,
+        reporter_id=report.reporter_id,
+        reporter_email=report.reporter.email,
+        has_screenshot=bool(report.screenshot_key),
+        received_at=report.received_at,
+        closed_at=report.closed_at,
+        forwarded_at=report.forwarded_at,
+    )
+
+
+def _report_detail(report: FeedbackReport) -> OperatorFeedbackReportOut:
+    screenshot_url = (
+        screenshots.request_download_url(report.screenshot_key).url if report.screenshot_key else None
+    )
+    return OperatorFeedbackReportOut(
+        **_report_row(report).dict(),
+        page_url=report.page_url,
+        user_agent=report.user_agent,
+        screen_width=report.screen_width,
+        screen_height=report.screen_height,
+        resolution_note=report.resolution_note,
+        screenshot_url=screenshot_url,
+        history=[
+            OperatorFeedbackHistoryOut(
+                from_status=change.from_status,
+                to_status=change.to_status,
+                note=change.note,
+                actor=change.actor_label,
+                changed_at=change.changed_at,
+            )
+            for change in report.status_changes.all()
+        ],
+    )
+
+
+@operator_router.get("/feedback-reports", response={200: list[OperatorFeedbackReportRowOut]})
+def list_feedback_reports(
+    request: HttpRequest, status: str = "", app: str = "", kind: str = ""
+):
+    reports = FeedbackReport.objects.select_related("reporter").order_by("-received_at", "-id")
+    if status:
+        reports = reports.filter(status=status)
+    if app:
+        reports = reports.filter(app=app)
+    if kind:
+        reports = reports.filter(kind=kind)
+    return 200, [_report_row(report) for report in reports[:200]]
+
+
+@operator_router.get(
+    "/feedback-reports/{report_id}",
+    response={200: OperatorFeedbackReportOut, 404: OperatorErrorOut},
+)
+def get_feedback_report(request: HttpRequest, report_id: int):
+    report = FeedbackReport.objects.select_related("reporter").filter(pk=report_id).first()
+    if report is None:
+        return 404, {"detail": "제보를 찾을 수 없습니다.", "code": "not_found"}
+    return 200, _report_detail(report)
+
+
+@operator_router.post(
+    "/feedback-reports/{report_id}/status",
+    response={
+        200: OperatorFeedbackReportOut,
+        404: OperatorErrorOut,
+        409: OperatorErrorOut,
+        422: OperatorErrorOut,
+    },
+)
+def change_feedback_status(request: HttpRequest, report_id: int, payload: ChangeFeedbackStatusIn):
+    try:
+        report = services.change_status(
+            report_id=report_id,
+            to_status=payload.status,
+            note=payload.note,
+            operator=request.auth,
+            actor_label=request.auth.get_username(),
+        )
+    except services.FeedbackNotFoundError as exc:
+        return 404, {"detail": str(exc), "code": "not_found"}
+    except services.FeedbackConflictError as exc:
+        return 409, {"detail": str(exc), "code": "unchanged"}
+    except services.FeedbackValidationError as exc:
+        return 422, {"detail": str(exc), "code": "invalid"}
+    return 200, _report_detail(report)

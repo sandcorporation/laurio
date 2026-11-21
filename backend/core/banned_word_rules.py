@@ -843,4 +843,9 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="권한 변경 사유 — 운영자 표면(spec #474).",
     ),
+    ("feedback", "ChangeFeedbackStatusIn", "note"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="제보 처리 글 — 운영자 표면(spec #474).",
+    ),
 }
