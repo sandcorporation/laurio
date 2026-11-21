@@ -28,7 +28,7 @@ plugs = ["contests", "core"]
 [certificates]
 group = "contest"
 uses = ["accounts", "contests", "core", "notifications", "storage"]
-plugs = []
+plugs = ["accounts"]
 
 [classroom]
 group = "classroom"

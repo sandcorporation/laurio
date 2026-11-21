@@ -163,6 +163,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Certificates
+         * @description 받는 사람의 상장(#1130). 다시 발급되어 바뀐 옛 상장은 빼고, 취소만 된 것은 「취소됨」으로 남긴다.
+         *
+         *     제품 스위치와 무관하다 — 이미 받은 상장은 제품을 꺼도 받을 수 있어야 한다.
+         */
+        get: operations["certificates_api_list_my_certificates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/verify/{token}": {
         parameters: {
             query?: never;
@@ -179,6 +201,43 @@ export interface paths {
         get: operations["certificates_api_verify_certificate"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/{certificate_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download My Certificate */
+        get: operations["certificates_api_download_my_certificate"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/{certificate_id}/visibility": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set My Certificate Visibility
+         * @description 확인 페이지 닫기/열기(스펙 결정 5) — 닫으면 확인 페이지가 번호만 보인다.
+         */
+        post: operations["certificates_api_set_my_certificate_visibility"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5515,6 +5574,11 @@ export interface components {
             issued_at: string;
             /** Number */
             number: string;
+            /**
+             * Pdf Available
+             * @default true
+             */
+            pdf_available: boolean;
             /** Recipient Name */
             recipient_name: string;
             /** Replaced By Id */
@@ -5595,6 +5659,11 @@ export interface components {
              * @enum {string}
              */
             state: "valid" | "cancelled" | "hidden";
+        };
+        /** CertificateVisibilityIn */
+        CertificateVisibilityIn: {
+            /** Hidden */
+            hidden: boolean;
         };
         /**
          * ChecklistItemIn
@@ -7986,6 +8055,33 @@ export interface components {
             decision: string;
             /** Note */
             note: string;
+        };
+        /**
+         * MyCertificateOut
+         * @description 받는 사람의 상장 줄(#1130) — 내 참가 현황의 제출 행에 붙는다.
+         */
+        MyCertificateOut: {
+            /** Award Name */
+            award_name: string;
+            /** Contest Id */
+            contest_id: number;
+            /** Contest Title */
+            contest_title: string;
+            /** Hidden */
+            hidden: boolean;
+            /** Id */
+            id: number;
+            /** Number */
+            number: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "valid" | "cancelled";
+            /** Submission Id */
+            submission_id: number;
+            /** Verify Url */
+            verify_url: string;
         };
         /**
          * MyParticipationOut
@@ -10678,6 +10774,26 @@ export interface operations {
             };
         };
     };
+    certificates_api_list_my_certificates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyCertificateOut"][];
+                };
+            };
+        };
+    };
     certificates_api_verify_certificate: {
         parameters: {
             query?: never;
@@ -10696,6 +10812,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CertificateVerifyOut"];
+                };
+            };
+        };
+    };
+    certificates_api_download_my_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                certificate_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    certificates_api_set_my_certificate_visibility: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                certificate_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateVisibilityIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyCertificateOut"];
                 };
             };
         };

@@ -1,4 +1,5 @@
 """공모전 상장(스펙 #1071) — 개최자 표면: 미리보기(#1126), 발급·목록·받기·묶음·취소·다시 발급(#1127).
+받는 사람 표면(#1130): 내 상장·PDF 받기·확인 페이지 닫기/열기. 공개 확인(#1128).
 
 미리보기는 발급본과 같은 틀로 그리되 「미리보기」 표시를 얹고 상장 번호·QR 자리에 예시 값을
 쓴다. 저장하지 않는다. 발급 규칙은 `services.py` 에 있다.
@@ -30,6 +31,8 @@ from .schemas import (
     CertificateRecipientOut,
     CertificateTextIn,
     CertificateVerifyOut,
+    CertificateVisibilityIn,
+    MyCertificateOut,
 )
 
 router = Router(tags=["certificates"])
@@ -142,6 +145,7 @@ def _certificate_out(certificate: Certificate) -> CertificateOut:
         cancelled_at=certificate.cancelled_at,
         replaced_by_id=certificate.replaced_by_id,
         verify_url=verify_url(certificate.token),
+        pdf_available=bool(certificate.pdf_object_key),
     )
 
 
@@ -202,7 +206,12 @@ def download_bundle(request: HttpRequest, contest_id: int):
     """유효한 상장 전부를 한 파일로 — 저장하지 않는다."""
 
     contest = _get_closed_owned_contest(request, contest_id)
-    certificates = list(Certificate.objects.filter(contest=contest, cancelled_at__isnull=True).order_by("id"))
+    # 받는 사람이 탈퇴해 파일을 파기한 장(#1130)은 묶음에서 뺀다.
+    certificates = list(
+        Certificate.objects.filter(contest=contest, cancelled_at__isnull=True)
+        .exclude(pdf_object_key="")
+        .order_by("id")
+    )
     if not certificates:
         raise HttpError(404, "발급한 상장이 없습니다.")
     try:
@@ -284,3 +293,68 @@ def verify_certificate(request: HttpRequest, token: str, response: HttpResponse)
         giver_title=certificate.giver_title,
         issued_on=timezone.localtime(certificate.issued_at).date(),
     )
+
+
+def _my_certificate(request: HttpRequest, certificate_id: int) -> Certificate:
+    """받는 사람 본인의 상장만 통과한다. 남의 것은 존재를 숨긴다(404)."""
+
+    certificate = (
+        Certificate.objects.select_related("contest")
+        .filter(id=certificate_id, recipient_id=request.auth_user.id)
+        .first()
+    )
+    if certificate is None:
+        raise HttpError(404, "상장을 찾을 수 없습니다.")
+    return certificate
+
+
+def _my_certificate_out(certificate: Certificate) -> MyCertificateOut:
+    return MyCertificateOut(
+        id=certificate.id,
+        submission_id=certificate.submission_id,
+        contest_id=certificate.contest_id,
+        contest_title=certificate.contest.title,
+        number=certificate.number,
+        award_name=certificate.award_name,
+        state="cancelled" if certificate.cancelled_at is not None else "valid",
+        hidden=certificate.recipient_hidden_at is not None,
+        verify_url=verify_url(certificate.token),
+    )
+
+
+@router.get("/certificates/mine", auth=jwt_auth, response=list[MyCertificateOut])
+def list_my_certificates(request: HttpRequest):
+    """받는 사람의 상장(#1130). 다시 발급되어 바뀐 옛 상장은 빼고, 취소만 된 것은 「취소됨」으로 남긴다.
+
+    제품 스위치와 무관하다 — 이미 받은 상장은 제품을 꺼도 받을 수 있어야 한다.
+    """
+
+    certificates = (
+        Certificate.objects.select_related("contest")
+        .filter(recipient_id=request.auth_user.id, replaced_by__isnull=True)
+        .order_by("-issued_at", "-id")
+    )
+    return [_my_certificate_out(certificate) for certificate in certificates]
+
+
+@router.get("/certificates/{certificate_id}/pdf", auth=jwt_auth)
+def download_my_certificate(request: HttpRequest, certificate_id: int):
+    certificate = _my_certificate(request, certificate_id)
+    if certificate.cancelled_at is not None:
+        raise HttpError(409, "취소된 상장입니다.")
+    try:
+        pdf = services.read_pdf(certificate)
+    except services.CertificateRuleError as error:
+        raise _rule_error(error) from error
+    return _pdf_response(pdf, f"certificate-{certificate.number}.pdf")
+
+
+@router.post("/certificates/{certificate_id}/visibility", auth=jwt_auth, response=MyCertificateOut)
+def set_my_certificate_visibility(request: HttpRequest, certificate_id: int, payload: CertificateVisibilityIn):
+    """확인 페이지 닫기/열기(스펙 결정 5) — 닫으면 확인 페이지가 번호만 보인다."""
+
+    certificate = _my_certificate(request, certificate_id)
+    certificate.recipient_hidden_at = Clock.now() if payload.hidden else None
+    certificate.save(update_fields=["recipient_hidden_at"])
+    return _my_certificate_out(certificate)
+

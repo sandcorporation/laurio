@@ -225,7 +225,18 @@ http(s)·호스트 있음·사용자 정보(`user:pass@`) 없음·2000자 이하
 | `GET …/certificates/bundle.pdf` | 유효한 상장 전부를 이은 한 파일(pypdf, 저장하지 않음). 없으면 404 |
 | `POST …/certificates/{cid}/cancel` | 취소. 이미 취소된 것은 409. 알리지 않는다 |
 | `POST …/certificates/{cid}/reissue` | 취소하고 새 번호로 다시 발급(칸 한 벌). 옛 것의 `replaced_by` 가 새 것을 가리킨다 |
+| `GET /api/certificates/mine` | 받는 사람(#1130) — 내 상장(제출 id·공모전·번호·상 이름·`valid`/`cancelled`·확인 페이지를 닫았는지·확인 주소). 다시 발급되어 바뀐 옛 상장은 빼고 취소만 된 것은 남긴다. 제품 스위치와 무관 |
+| `GET /api/certificates/{cid}/pdf` | 받는 사람 본인만 — 개최자가 받는 것과 같은 저장본. 남의 것 404, 취소된 것 409 |
+| `POST /api/certificates/{cid}/visibility` | 받는 사람이 확인 페이지를 닫는다/연다(`{"hidden": bool}` → `recipient_hidden_at`). 남의 것 404 |
 | `GET /api/certificates/verify/{token}` | **로그인 없이**(#1128) 확인 페이지가 부른다. 상태 셋 — `valid`(번호·공모전·상·받는 사람·수여자·발급일), `cancelled`(번호·공모전·취소일, 다시 발급됐는지만 — 새 상장은 가리키지 않는다), `hidden`(받는 사람이 닫음·탈퇴, 번호만). 없는 토큰만 404. `X-Robots-Tag: noindex, nofollow`. 공모전 제품 스위치와 무관하다 |
+
+받는 사람이 탈퇴하면(#1130, 스펙 G6) `user_withdrawn` 시그널을 받는 `certificates/withdrawal.py` 가 그
+사람의 상장 전부에 `recipient_hidden_at` 을 채우고 `recipient_name`·`pdf_object_key` 를 비우며, 커밋 뒤
+PDF 객체를 지운다(실패해도 탈퇴는 막지 않고 키를 오류 로그로 남긴다) — 이름이 박힌 파일이라 신원 값과
+함께 파기한다(`docs/legal/personal-data.md` 파기 표). 상장 행(번호·상·발급일)은 남는다. 확인 페이지는
+「확인할 수 없는 상장」이 되고, 개최자 쪽은 `CertificateOut.pdf_available=false` — 한 장 받기 404
+(「받는 사람이 탈퇴해 상장 파일이 없습니다.」), 묶음에서는 그 장을 빼고, 다시 발급은 409. 탈퇴한
+제출자에게는 새로 발급할 수 없다(409).
 
 발급 규칙(`certificates/services.py`): 받는 사람은 그 공모전의 제출자다(아니면 422), 한 사람은
 유효한 상장을 하나만 가진다(이미 있으면 409, DB 의 부분 유니크 제약이 같은 것을 막는다), 유효한

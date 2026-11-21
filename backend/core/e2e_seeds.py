@@ -52,6 +52,12 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         options=frozenset({"run_id"}),
         serialized=False,
     ),
+    # 받는 사람 상장 e2e(#1130) — 호출마다 새 공모전·개발자·상장, 이름이 갈려 줄 세울 일 없다.
+    "certificate": SeedEntry(
+        command="seed_e2e_certificate",
+        options=frozenset({"run_id"}),
+        serialized=False,
+    ),
     "operator": SeedEntry(
         command="seed_e2e_operator",
         # `superuser` 는 연다 — 운영자 앱의 일부 화면이 superuser 만 볼 수 있어

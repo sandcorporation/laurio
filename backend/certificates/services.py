@@ -120,6 +120,9 @@ def issue_certificates(*, contest: Contest, issuer, requests: list[IssueRequest]
             raise CertificateRuleError(422, "이 공모전에 제출한 사람에게만 발급할 수 있습니다.")
 
         recipients = {s.user_id for s in submissions.values()}
+        # 탈퇴한 사람(#1130)에게는 새로 발급하지 않는다 — 이름과 PDF 를 파기한 사람이다.
+        if ContestSubmission.objects.filter(id__in=submission_ids, user__is_active=False).exists():
+            raise CertificateRuleError(409, "탈퇴한 사람에게는 발급할 수 없습니다.")
         if Certificate.objects.filter(
             contest=contest, recipient_id__in=recipients, cancelled_at__isnull=True
         ).exists():
@@ -176,6 +179,8 @@ def reissue_certificate(
     with transaction.atomic():
         contest = _lock_contest(contest)
         old = _locked_valid(contest, certificate_id)
+        if not old.pdf_object_key:
+            raise CertificateRuleError(409, WITHDRAWN_MESSAGE)
         old.cancelled_at = Clock.now()
         old.cancelled_by = issuer
         old.save(update_fields=["cancelled_at", "cancelled_by"])
@@ -192,7 +197,13 @@ def reissue_certificate(
     return new
 
 
+#: 받는 사람이 탈퇴해 이름과 PDF 를 파기한 상장(#1130) — 파일이 없고 다시 발급할 수도 없다.
+WITHDRAWN_MESSAGE = "받는 사람이 탈퇴해 상장 파일이 없습니다."
+
+
 def read_pdf(certificate: Certificate) -> bytes:
+    if not certificate.pdf_object_key:
+        raise CertificateRuleError(404, WITHDRAWN_MESSAGE)
     pdf = get_storage_adapter().read_object(certificate.pdf_object_key, bucket=Bucket.PRIVATE)
     if pdf is None:
         raise CertificateRuleError(404, "상장 파일을 찾을 수 없습니다.")
