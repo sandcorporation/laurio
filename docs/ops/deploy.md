@@ -569,6 +569,14 @@ backend 를 바꿔 끼운 뒤에는 `deploy.sh reindex`(`manage.py
 rebuild_contest_search_index`)가 전체 재색인을 한 번 강제한다 — 매일 도는
 `contest-search-reindex` 스캔의 하루 제한을 기다리지 않는다.
 
+**세 앱은 backend 가 응답할 때까지 `node server.js` 를 띄우지 않는다**(#869). compose 의
+`depends_on: backend: service_started` 는 컨테이너 시작만 기다리고, 호스트 재부팅 때는 데몬이
+그것조차 지키지 않는다 — backend 가 8000 을 듣기까지 컨테이너 시작 뒤 약 36초(2026-11-04
+측정)라 BFF 재시도 예산(15.75초)을 넘기던 틈을 이미지 진입점
+(`docker/entrypoint/wait-for-backend.cjs`)이 메운다. 상한 `CODEMIT_BACKEND_WAIT_SECONDS`(기본
+120초)를 넘으면 앱을 그대로 띄운다. **배포의 교체 경로는 늘지 않는다** — 앱을 바꿀 때 backend 는
+이미 듣고 있어 첫 시도에 응답한다(전 0.36초 · 후 0.34초). 자세한 것은 `operations.md`.
+
 **연결 풀러(pgbouncer)가 죽으면 검색·이벤트 서비스와 반대로 배포가 실패로
 끝난다 — 그리고 그래야 맞다**(#453/#458). `backend`·`celery-worker`·
 `events`·`grader` 넷은 이제 DB 를 직접 가리키지 않고 `pgbouncer` 를
