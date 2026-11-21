@@ -53,6 +53,10 @@ export function describeNotification(
       return `참가하신 '${contestTitle}' 공모전의 상장이 발급되었습니다.`;
     case "certificate_reissued":
       return `참가하신 '${contestTitle}' 공모전의 상장이 다시 발급되었습니다.`;
+    case "score_corrected":
+      return `제출하신 '${contestTitle}' 공모전의 점수를 플랫폼 오류로 다시 채점했습니다.`;
+    case "certificate_score_corrected":
+      return `주최하신 '${contestTitle}' 공모전에서 상장을 발급한 제출의 점수가 정정됐습니다 — 상장을 확인해주세요.`;
     case "appeal_ruled":
       return "제기하신 이의 심판이 완료됐습니다.";
     case "new_contest_in_category":

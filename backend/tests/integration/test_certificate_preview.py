@@ -90,6 +90,69 @@ def test_preview_is_one_landscape_a4_page_marked_as_preview(client, closed):
         assert expected in text
 
 
+def _embedded_fonts(pdf: bytes) -> list[str]:
+    page = PdfReader(io.BytesIO(pdf)).pages[0]
+    # 서브셋 접두(`ABCDEF+`)는 담긴 글자에 따라 바뀐다 — 이름만 본다.
+    return sorted(str(font["/BaseFont"]).split("+", 1)[-1] for font in page["/Resources"]["/Font"].values())
+
+
+def test_sheets_drawn_one_after_another_each_carry_their_own_text_and_both_fonts(client, closed):
+    """글꼴 준비를 프로세스에서 한 번만 한다(#1196) — 앞 장의 글자·글꼴이 뒤 장에 새지 않는다."""
+
+    sponsor, contest, deadline = closed
+    names = ["김첫째", "박둘째", "이셋째"]
+
+    pdfs = [_preview(client, sponsor["access"], contest["id"], _fields(deadline, recipient_name=name)) for name in names]
+
+    for name, response in zip(names, pdfs, strict=True):
+        assert response.status_code == 200, response.content
+        text = PdfReader(io.BytesIO(response.content)).pages[0].extract_text().replace(" ", "")
+        assert name in text
+        assert [other for other in names if other != name and other in text] == []
+        assert _embedded_fonts(response.content) == ["Certificate-Serif", "Certificate-Serif-Bold"]
+
+
+def test_drawing_again_does_not_load_the_fonts_again(closed, monkeypatch):
+    """한 장 그리기가 매번 woff 두 개(3MB)를 풀어 0.3초를 쓰던 것(#1196) — 두 번째부터는 글꼴을 다시 풀지 않는다.
+
+    시간으로 재면 실행기 속도에 흔들린다(CI 가 이 머신의 세 배 느렸다) — woff 를 푸는 횟수를 센다.
+    """
+
+    from datetime import date
+
+    from weasyprint.text import fonts
+
+    from certificates import rendering
+
+    sheet = rendering.CertificateSheet(
+        text=rendering.CertificateText(
+            award_name="최우수상",
+            recipient_name="김코드밋",
+            body="위 사람은 뛰어난 완성도로 우수한 성과를 거두었기에 이 상장을 수여합니다.",
+            giver_name="홍길동",
+            giver_title="심사위원장",
+            award_date=date(2026, 11, 21),
+        ),
+        contest_title="상장 공모전",
+        number="2026-0001-001",
+        verify_url=rendering.verify_url("token"),
+    )
+    rendering.render_certificate_pdf(sheet)
+
+    unpacked: list[object] = []
+    real_ttfont = fonts.TTFont
+
+    def counting_ttfont(*args: object, **kwargs: object) -> object:
+        unpacked.append(args)
+        return real_ttfont(*args, **kwargs)
+
+    monkeypatch.setattr(fonts, "TTFont", counting_ttfont)
+    rendering.render_certificate_pdf(sheet)
+    rendering.render_certificate_pdf(sheet)
+
+    assert unpacked == []
+
+
 def test_preview_before_deadline_is_refused(client, published):
     sponsor, contest, deadline = published
 

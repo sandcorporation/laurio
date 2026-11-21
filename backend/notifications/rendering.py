@@ -96,6 +96,19 @@ def render_message(notification: Notification) -> str:
     if notification_type == NotificationType.CERTIFICATE_REISSUED:
         return f"{_BRAND_PREFIX} 참가하신 '{contest_title}' Contest의 상장이 다시 발급되었습니다. codemit에서 내려받으세요."
 
+    if notification_type == NotificationType.SCORE_CORRECTED:
+        return (
+            f"{_BRAND_PREFIX} 제출하신 '{contest_title}' Contest의 점수를 플랫폼 오류로 다시 채점했습니다. "
+            f"{context.get('original_percentage', '')}% → {context.get('percentage', '')}%. "
+            "codemit에서 확인하세요."
+        )
+
+    if notification_type == NotificationType.CERTIFICATE_SCORE_CORRECTED:
+        return (
+            f"{_BRAND_PREFIX} 주최하신 '{contest_title}' Contest에서 상장을 발급한 제출 {context.get('count', 1)}건의 "
+            "점수가 플랫폼 오류로 정정됐습니다. 상장은 자동으로 취소되지 않습니다 — codemit 상장 화면에서 확인해 주세요."
+        )
+
     if notification_type == NotificationType.APPEAL_RULED:
         return f"{_BRAND_PREFIX} 제기하신 이의 심판이 완료됐습니다. codemit에서 결과를 확인하세요."
 

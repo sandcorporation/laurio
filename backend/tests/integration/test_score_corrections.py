@@ -320,3 +320,61 @@ def test_a_correction_reports_the_certificates_issued_to_that_submission_and_kee
     _run_corrections(world)
     listed = operator.get(_corrections_url(seeded["contest_id"]), HTTP_ORIGIN=OPERATOR_ORIGIN).json()
     assert {c["submission_id"]: c["certificates_issued"] for c in listed["corrections"]}[seeded["failed_id"]] == 1
+    # 거는 화면이 고를 제출 목록 — 처음 채점 점수 그대로(정정이 끝나도 원래 점수가 남는다).
+    originals = {s["submission_id"]: s["original_percentage"] for s in listed["submissions"]}
+    assert originals == {seeded["honest_id"]: "100.00", seeded["failed_id"]: "0.00"}
+
+
+@pytest.mark.django_db
+def test_a_finished_correction_tells_the_participant_and_the_sponsor_when_a_certificate_was_issued(
+    world, django_capture_on_commit_callbacks
+):
+    """정정 알림(#1182) — 참가자에게 원래·새 점수, 상장이 발급된 제출이면 개최자에게 한 번. 상장은 그대로다."""
+
+    from notifications.models import Notification, NotificationType
+    from notifications.rendering import render_message
+
+    seeded = _contest_with_platform_failure(world, uid="corr-notice")
+    submission = ContestSubmission.objects.select_related("contest__sponsor").get(pk=seeded["failed_id"])
+    certificate = Certificate.objects.create(
+        contest=submission.contest,
+        submission=submission,
+        recipient=submission.user,
+        number="CORR-NOTICE-1",
+        token="corr-notice-token",
+        award_name="최우수상",
+        giver_name="홍길동",
+        award_date=timezone.localtime(seeded["deadline"]).date(),
+        pdf_object_key="certificates/corr-notice.pdf",
+        issued_at=timezone.now(),
+        issued_by=submission.contest.sponsor.user,
+    )
+    _request(_operator_client("op-corr-notice"), seeded["contest_id"], submission_ids=[seeded["failed_id"]])
+    assert not Notification.objects.filter(notification_type=NotificationType.SCORE_CORRECTED).exists()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        _run_corrections(world)
+
+    [to_participant] = Notification.objects.filter(notification_type=NotificationType.SCORE_CORRECTED)
+    assert to_participant.recipient_id == submission.developer.user_id
+    assert (to_participant.context["original_percentage"], to_participant.context["percentage"]) == ("0.00", "100.00")
+    assert "플랫폼 오류로 다시 채점" in render_message(to_participant)
+    assert "0.00% → 100.00%" in render_message(to_participant)
+    [to_sponsor] = Notification.objects.filter(notification_type=NotificationType.CERTIFICATE_SCORE_CORRECTED)
+    assert to_sponsor.recipient_id == submission.contest.sponsor.user_id
+    assert "자동으로 취소되지 않습니다" in render_message(to_sponsor)
+    certificate.refresh_from_db()
+    assert certificate.cancelled_at is None
+
+
+@pytest.mark.django_db
+def test_a_correction_without_a_certificate_does_not_notify_the_sponsor(world, django_capture_on_commit_callbacks):
+    from notifications.models import Notification, NotificationType
+
+    seeded = _contest_with_platform_failure(world, uid="corr-nocert")
+    _request(_operator_client("op-corr-nocert"), seeded["contest_id"], submission_ids=[seeded["failed_id"]])
+    with django_capture_on_commit_callbacks(execute=True):
+        _run_corrections(world)
+    assert Notification.objects.filter(notification_type=NotificationType.SCORE_CORRECTED).count() == 1
+    assert not Notification.objects.filter(notification_type=NotificationType.CERTIFICATE_SCORE_CORRECTED).exists()
+

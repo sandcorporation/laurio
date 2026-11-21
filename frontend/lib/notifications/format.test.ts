@@ -72,6 +72,17 @@ describe("describeNotification", () => {
     expect(reissued).toContain("다시 발급되었습니다");
   });
 
+  it("점수 정정 알림은 참가자와 개최자에게 각각 다른 문장이다(#1182)", () => {
+    const participant = describeNotification(
+      row({ notification_type: "score_corrected", context: { contest_title: "1182 공모전" } }),
+    );
+    const sponsor = describeNotification(
+      row({ notification_type: "certificate_score_corrected", context: { contest_title: "1182 공모전" } }),
+    );
+    expect(participant).toContain("플랫폼 오류로 다시 채점");
+    expect(sponsor).toContain("상장을 발급한 제출의 점수가 정정");
+  });
+
   it("운영팀 알림은 제목을 그대로 보여준다(#418)", () => {
     const text = describeNotification(
       row({ notification_type: "operator_notice", title: "기프티콘을 보내드립니다" }),

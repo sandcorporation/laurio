@@ -16,7 +16,7 @@ from certificates.models import Certificate
 from contests.models import Contest, ContestSubmission
 from core.operator_auth import OperatorAuth
 from scoring.corrections import CorrectionReasonRequired, request_corrections
-from scoring.models import ScoreCorrection
+from scoring.models import Score, ScoreCorrection
 
 from .services import is_prize_settled
 
@@ -51,13 +51,26 @@ class SkippedCorrectionOut(Schema):
     reason: str
 
 
+class ScoredSubmissionOut(Schema):
+    """정정 대상으로 고를 수 있는 제출 — 처음 채점 점수 그대로(정정 판정은 아래 `corrections` 에 있다)."""
+
+    submission_id: int
+    participant: str
+    original_percentage: str
+    original_model_version: str
+
+
 class ScoreCorrectionListOut(Schema):
     contest_id: int
     prize_settled: bool
+    submissions: list[ScoredSubmissionOut]
     corrections: list[ScoreCorrectionOut]
 
 
-class ScoreCorrectionRequestOut(ScoreCorrectionListOut):
+class ScoreCorrectionRequestOut(Schema):
+    contest_id: int
+    prize_settled: bool
+    corrections: list[ScoreCorrectionOut]
     skipped: list[SkippedCorrectionOut]
 
 
@@ -75,6 +88,27 @@ def _certificate_counts(submission_ids: list[int]) -> dict[int, int]:
         .annotate(n=Count("id"))
     )
     return {row["submission_id"]: row["n"] for row in rows}
+
+
+def _participant_name(user) -> str:
+    profile = getattr(user, "developer_profile", None)
+    return (profile.display_name if profile else "") or user.get_username()
+
+
+def _scored_submissions(contest: Contest) -> list[ScoredSubmissionOut]:
+    in_contest = ContestSubmission.objects.filter(contest=contest).values("pk")
+    scores = (
+        Score.objects.filter(submission_id__in=in_contest).select_related("submission__user__developer_profile").order_by("submission_id")
+    )
+    return [
+        ScoredSubmissionOut(
+            submission_id=s.submission_id,
+            participant=_participant_name(s.submission.user),
+            original_percentage=str(s.percentage),
+            original_model_version=s.model_version,
+        )
+        for s in scores
+    ]
 
 
 def _serialize(corrections: list[ScoreCorrection]) -> list[ScoreCorrectionOut]:
@@ -134,5 +168,6 @@ def list_score_corrections(request: HttpRequest, contest_id: int):
     return ScoreCorrectionListOut(
         contest_id=contest.id,
         prize_settled=is_prize_settled(contest),
+        submissions=_scored_submissions(contest),
         corrections=_serialize(corrections),
     )

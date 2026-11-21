@@ -97,6 +97,10 @@ class NotificationType(models.TextChoices):
     # 거래성이다: 받는 사람 본인의 제출에 대한 사실 통지다. 취소만 하면 알리지 않는다.
     CERTIFICATE_ISSUED = "certificate_issued", "상장 발급"
     CERTIFICATE_REISSUED = "certificate_reissued", "상장 다시 발급"
+    # 플랫폼 오류로 점수가 정정됐다(#1182, 스펙 #1178) — 참가자에게는 「다시 채점했다」(원래·새 점수),
+    # 상장이 발급된 제출이면 개최자에게는 「정정됐으니 상장을 확인하라」(자동 취소 없음). 둘 다 거래성이다.
+    SCORE_CORRECTED = "score_corrected", "점수 정정"
+    CERTIFICATE_SCORE_CORRECTED = "certificate_score_corrected", "상장 받은 제출의 점수 정정"
 
 
 #: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
@@ -284,6 +288,18 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
         "is_internal_only": False,
     },
     NotificationType.CERTIFICATE_REISSUED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
+    },
+    NotificationType.SCORE_CORRECTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": False,
+    },
+    NotificationType.CERTIFICATE_SCORE_CORRECTED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

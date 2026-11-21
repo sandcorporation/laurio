@@ -1,0 +1,14 @@
+[
+  {
+    "name": "minio 포트 프록시 시간 초과",
+    "pattern": "failed to start userland proxy for port mapping",
+    "count": 1,
+    "ticket": ""
+  },
+  {
+    "name": "tree-sitter 문법 목록 받기 시간 초과",
+    "pattern": "Failed to fetch manifest from https://github\\.com/.*/tree-sitter-language-pack",
+    "count": 0,
+    "ticket": "#1205"
+  }
+]
