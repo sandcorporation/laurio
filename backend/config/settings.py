@@ -918,6 +918,13 @@ DB_CONNECTION_ALERT_THRESHOLD = float(_env("DB_CONNECTION_ALERT_THRESHOLD", "0.8
 # 주기(기본 60초)보다 길어야 "1분마다 쏟아진다"는 문제가 사라진다.
 DB_CONNECTION_ALERT_INTERVAL_SECONDS = int(_env("DB_CONNECTION_ALERT_INTERVAL_SECONDS", "900"))
 
+# --- 발송 실패 운영 경보 (notifications.dispatch_alert, #1123) --------------------------
+# 최근 창 안의 실패 이력이 문턱 이상이거나, 한 유형의 알림이 문턱 이상인데 닿은 수신자가 0 이면
+# 운영 경보(`OPS_ALERT_DISCORD_WEBHOOK_URL`)로 올린다.
+NOTIFICATION_ALERT_WINDOW_MINUTES = int(_env("NOTIFICATION_ALERT_WINDOW_MINUTES", "60"))
+NOTIFICATION_ALERT_FAILURE_THRESHOLD = int(_env("NOTIFICATION_ALERT_FAILURE_THRESHOLD", "5"))
+NOTIFICATION_ALERT_ZERO_REACH_MIN = int(_env("NOTIFICATION_ALERT_ZERO_REACH_MIN", "3"))
+
 if _RUNNING_TESTS:
     # pytest 에는 Redis 가 없다(위 세션 캐시와 같은 전제, "테스트는 서로를 밟지
     # 않는다"). 태스크는 dev·CI 와 같이 eager 로 큐에 넣는 자리에서 돈다(#582) —

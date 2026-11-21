@@ -834,7 +834,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 조회수 | `contest-view-flush`(10분 주기, #446) — 바뀐 공모전만 Redis 에서 `Contest.view_count`(DB) 로 옮긴다 |
 | 환불 | `payment-refund-request` · `payment-refund-reconcile` |
 | 배분·지급 | `distribution-create` · `distribution-share-payout` · `handover-release` · `payout-awaits-you` · `seller-registration-recovery` |
-| 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` |
+| 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` · `notification-dispatch-alert`(#1123 — 5분 주기, 아래 「운영 경보」와 같은 디스코드 길로 발송 실패·수신자 0 을 올린다, `notifications.dispatch_alert`) |
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
 | 연결된 앱 | `classroom-connected-app-expiry`(#512 — 90일 동안 한 번도 부르지 않은 허락을 끊는다, 1시간 주기) · `classroom-oauth-client-cleanup`(아무도 허락하지 않은 채 하루가 지난 동적 등록을 지운다, 1시간 주기) |
 | 자료 | `demo-video-retention-purge` |
@@ -878,6 +878,7 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 `AlertState` 에 기록하고, 울리기 시작할 때와 해소될 때 한 번씩 디스코드 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`,
 비면 보내지 않는다)으로 보낸다. 같은 응답의 `alerts` 가 지금 울리는 목록(규칙·시작·값·기준)이다
 (`docs/ops/operations.md` 「운영 경보」).
+**발송 실패도 같은 길로 올린다(#1123).** 스캔 `notification-dispatch-alert`(5분)가 최근 60분의 `NotificationDispatch` 를 보고 실패 이력이 5건 이상이거나, 한 알림 유형이 3건 이상인데 성공 이력이 하나도 없으면(닿은 수신자 0) 울린다 — 글에는 건수·채널·알림 유형만 있다. 문턱은 `NOTIFICATION_ALERT_WINDOW_MINUTES`·`_FAILURE_THRESHOLD`·`_ZERO_REACH_MIN` 이다.
 같은 검사가 **느린 경로**(#971)도 본다 — 경로(메서드 + URL 패턴)마다 최근 30분 중앙값을 그 경로의 앞 14일 중앙값과
 견줘(3건 이상 · 1초 이상 · 5배 이상) 울리기 시작할 때 GlitchTip `warning` 경고 하나를 올린다(디스코드가 아니다). 매일
 00:10(서울) `ops_metrics.check_slow_routes_daily` 가 어제 하루를 같은 기준(1건 이상)으로 본다(`docs/ops/operations.md`
