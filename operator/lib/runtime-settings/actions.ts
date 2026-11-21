@@ -26,6 +26,10 @@ export function clearRuntimeSetting(key: string): Promise<ApiResult<RuntimeSetti
   return bffClient.post<RuntimeSettingSaveResult>(`${BASE}/${encodeURIComponent(key)}/clear`, {});
 }
 
+export function confirmRuntimeSetting(key: string): Promise<ApiResult<RuntimeSettingSaveResult>> {
+  return bffClient.post<RuntimeSettingSaveResult>(`${BASE}/${encodeURIComponent(key)}/confirm`, {});
+}
+
 export function probeRuntimeSetting(key: string, value: string): Promise<ApiResult<{ result: ProbeResult }>> {
   return bffClient.post<{ result: ProbeResult }>(`${BASE}/${encodeURIComponent(key)}/test`, { value });
 }
