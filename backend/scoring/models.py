@@ -107,7 +107,7 @@ class ScoreCorrection(models.Model):
     repository_reachability_check = models.JSONField(default=list, blank=True)
     reason = models.TextField()
     # 「실패」로 넘긴 까닭(#1180) — 운영자가 다시 걸지 판단한다. 「진행 중」·「끝」에는 비어 있다.
-    error = models.TextField(blank=True, default="")
+    error = models.TextField(blank=True, default="", db_default="")
     operator = models.ForeignKey(
         settings.AUTH_USER_MODEL, related_name="score_corrections", on_delete=models.PROTECT
     )

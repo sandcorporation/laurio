@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='scorecorrection',
             name='error',
-            field=models.TextField(blank=True, default=''),
+            field=models.TextField(blank=True, default='', db_default=''),
         ),
         migrations.AddConstraint(
             model_name='scorecorrection',
