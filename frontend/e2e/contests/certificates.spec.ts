@@ -49,7 +49,9 @@ async function openBoard(page: Page) {
   return { id, submissionId: submissions[0].id };
 }
 
-test("제출자를 골라 상장을 발급하면 새로고침 뒤에도 목록에 있다", async ({ page }) => {
+// 한 시험 3초 한도(#1176) — 화면으로 발급하는 이 시험은 발급(PDF 렌더) 한 번을 담고, 새로고침 뒤
+// 유지는 API 로 미리 발급해 둔 아래 취소 시험이 본다(화면 발급 + 새로고침을 한 시험에 몰면 3초를 넘었다).
+test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 사람은 더 고를 수 없다", async ({ page }) => {
   const { submissionId } = await openBoard(page);
 
   await page.getByTestId(`certificates-pick-${submissionId}`).check();
@@ -64,21 +66,19 @@ test("제출자를 골라 상장을 발급하면 새로고침 뒤에도 목록�
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("최우수상");
   await expect(row).toHaveAttribute("data-status", "valid");
-
-  await page.reload();
-  await expect(row).toHaveCount(1);
-  await expect(row).toHaveAttribute("data-status", "valid");
   // 발급된 제출자는 더 고를 수 없다.
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
 });
 
-test("발급한 상장을 취소한다 — 경고를 거쳐 「취소됨」이 되고 그 사람은 다시 고를 수 있다", async ({ page }) => {
+test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 거쳐 「취소됨」이 되어 그 사람은 다시 고를 수 있다", async ({ page }) => {
   const { id, submissionId } = await openBoard(page);
   await issueViaApi(page, id, submissionId);
   await page.reload();
 
   const row = page.locator('[data-testid^="certificates-row-"]');
+  await expect(row).toHaveCount(1);
   await expect(row).toHaveAttribute("data-status", "valid");
+  await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
   await row.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.locator('[data-testid^="certificates-cancel-confirm-"]')).toContainText("되돌릴 수 없습니다");
   await page.locator('[data-testid^="certificates-cancel-go-"]').click();
