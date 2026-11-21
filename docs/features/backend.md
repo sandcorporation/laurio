@@ -891,18 +891,24 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | `POST /api/feedback/reports` | 제보 만들기 — 갈래(`suggestion`·`bug`), 내용(4,000자), 앱(`contest`·`classroom`), 화면 주소, User-Agent, 화면 크기, 스크린샷 키(없어도 됨) |
 | `GET /api/feedback/reports` · `{id}` · `{id}/screenshot` | 내 제보 목록·상세(처리 글·상태 이력)·스크린샷 짧은 발급 |
 | `GET /api/operator/feedback-permissions` · `search` · `changes` · `POST {user_id}` | 운영자 — 켠 계정·찾기·변경 이력·켜기/끄기(최고 운영자, 사유 필수) |
+| `GET /api/operator/feedback-reports`(`status`·`app`·`kind` 거르기) · `{id}` · `POST {id}/status` | 운영자 — 제보 목록·상세(스크린샷 짧은 발급 포함)·상태와 처리 글 바꾸기 |
 
 **권한이 없으면 제보 표면 전부가 403** 이다(`permission` 만 예외). 남의 제보·스크린샷은 404.
 **하루 상한**: 계정당 최근 24시간에 20건, 넘으면 429. **스크린샷**: 올린 사람 접두어(`feedback-screenshot:<user_id>/`)
 가 아닌 키, 아직 올라오지 않은 키, 앞 바이트가 png/jpeg/webp 가 아닌 것, 5MB 를 넘는 것, 이미 다른 제보에 붙은 키는
 만들기에서 422. 열람 주소는 제보자 본인과 운영자에게만, 열 때마다 짧게 발급한다(목록엔 `has_screenshot` 만).
 상태는 접수(`received`) → 작업 중(`in_progress`) → 배포됨(`deployed`) | 반려(`declined`).
+상태가 바뀔 때마다 이력(누가·언제·전·후·처리 글)이 한 줄 남고 제보자에게 앱 안 알림이 한 건 간다(같은 상태로는
+409). 배포됨·반려로 들어가면 종결 시각을 찍는다. 운영자 화면과 관리 명령(`manage.py feedback_report status`, 누가 =
+「대장(명령)」)이 같은 서비스 함수를 부른다. 관리 명령은 그 밖에 `show`(읽기, 스크린샷은 있는지만)·`summary`·`list`·`take`(아직
+전달 안 된 것을 집어 번호·갈래·앱·받은 시각만 JSON 으로, 집은 뒤 15분 안에 전달 표시가 없으면 다시 나온다)·
+`untake`·`mark-forwarded` 를 둔다 — 대장 전달 길(`scripts/feedback.sh`, `docs/ops/feedback-relay.md`, #1240)이 쓴다.
 
-## 스스로 도는 일 — 스캔 31개
+## 스스로 도는 일 — 스캔 32개
 
 **시간은 시임이 아니라 주입 가능한 의존성이다**(ADR-0003). 시각이 지났다고 상태가 저절로
 바뀌지 않는다 — 스캔이 조건부 UPDATE 로 옮긴다. 등록부가 곧 beat 스케줄이고(beat 는 따로 뜨지 않고 celery-worker 안에서 `-B` 로 돈다, #859), 대부분 60초
-주기다 — 예외는 조회수 옮기기(10분)·검색 전체 재색인(하루 주기)·연결된 앱 정리 둘(1시간)이다(아래).
+주기다 — 예외는 조회수 옮기기(10분)·검색 전체 재색인(하루 주기)·연결된 앱 정리 둘과 제보 스크린샷 보관 기한(1시간)이다(아래).
 
 | 무엇을 | 스캔 |
 | --- | --- |
@@ -915,7 +921,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | 알림 | `notification-dispatch-deferred` · `notification-reclaim-stuck` · `deadline-reminder` · `judging-end-reminder` · `distribution-final-warning` · `award-result-notice-recovery` · `distribution-result-notice-recovery` · `notification-dispatch-alert`(#1123 — 5분 주기, 아래 「운영 경보」와 같은 디스코드 길로 발송 실패·수신자 0 을 올린다, `notifications.dispatch_alert`) |
 | 개인정보 | `identity-dormancy-purge` · `retained-identity-purge` |
 | 연결된 앱 | `classroom-connected-app-expiry`(#512 — 90일 동안 한 번도 부르지 않은 허락을 끊는다, 1시간 주기) · `classroom-oauth-client-cleanup`(아무도 허락하지 않은 채 하루가 지난 동적 등록을 지운다, 1시간 주기) |
-| 자료 | `demo-video-retention-purge` |
+| 자료 | `demo-video-retention-purge` · `feedback-screenshot-retention`(#1239 — 제보 스크린샷을 종결 30일 뒤 또는 받은 지 180일 뒤 지우고 키를 비운다, 글은 남긴다, 1시간 주기) |
 | 검색 | `contest-search-reindex`(#450 — 하루 주기, 다른 스캔과 다르다. 저장·변경 시점의 단건 색인은 스캔이 아니라 Celery 태스크 `contests.index_contest`가 맡는다, 아래 「바깥 세계」) |
 | 관측 | `db-connection-usage`(#455 — DB 연결 사용률이 임계(기본 80%)를 넘으면 오류 수집기로 보낸다. 넘은 상태가 이어지는 동안은 간격(기본 15분)에 한 번만 보낸다 — 둘 다 환경변수로 조절한다, `core.db_connection_scan`) |
 | 데모 | `scheduled-state-demo` |
@@ -1078,7 +1084,7 @@ CI의 `pytest` 잡이 매번 같은 텍스트를 재생성해 이 블록과 글�
 
 ## 알림
 
-종류는 스물이다 — 마감 임박 · 심사기간 종료 임박 · Distribution 최종 경고 · 결과 · 채점 완료 ·
+종류는 스물둘이다 — 제보 상태 변경 둘(#1239 — 공모전 앱에서 보낸 제보는 `feedback_status_changed`, 강의실 앱에서 보낸 것은 `classroom_feedback_status_changed` 로 갈라 보낸 앱의 벨에만 뜬다. 앱 안에서만 보인다) · 마감 임박 · 심사기간 종료 임박 · Distribution 최종 경고 · 결과 · 채점 완료 ·
 이의 심판 완료 · 관심 카테고리 신규 공모전 · 지급이 당신을 기다린다 · 강의실 제출
 채점 완료(#303, 낸 사람에게 매 시도마다 간다) · 강의실 채점 키 거부(#356, ADR-0045 — 벤더가
 그 클래스의 채점 키를 401·403으로 거절해 상태가 "거부됨"으로 **바뀌는 순간**에만 그

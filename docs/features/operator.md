@@ -439,6 +439,8 @@ p95·동시 채점 최대. 요청: 초당 요청·상태코드별 수(2xx~5xx �
 **신원 열람**(`/api/operator/retained-identities/*`)은 API 만 있다. 화면이 없는 조작은
 운영자가 HTTP 로 직접 친다.
 
+**건의·버그 제보**(`/api/operator/feedback-permissions*` 계정별 켜기·끄기, `/api/operator/feedback-reports*` 목록·상세·상태 바꾸기, #1238·#1239)는 아직 API 만 있다(화면은 스펙 #1237 사슬 B).
+
 **과제 개최 자격**은 화면도 API도 모델도 없다 — 과제를 접기로 하며(#358)
 화면(#360)·API(#361)·모델(#363)이 차례로 걷혔다.
 

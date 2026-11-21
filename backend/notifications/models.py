@@ -101,6 +101,10 @@ class NotificationType(models.TextChoices):
     # 상장이 발급된 제출이면 개최자에게는 「정정됐으니 상장을 확인하라」(자동 취소 없음). 둘 다 거래성이다.
     SCORE_CORRECTED = "score_corrected", "점수 정정"
     CERTIFICATE_SCORE_CORRECTED = "certificate_score_corrected", "상장 받은 제출의 점수 정정"
+    # 건의·버그 제보 상태 변경(#1239). 보낸 앱의 벨에 뜨도록 둘로 가른다 — 벨 판정이 유형 집합
+    # (`CLASSROOM_NOTIFICATION_TYPES`)이라 맥락 값으로는 가를 수 없다.
+    FEEDBACK_STATUS_CHANGED = "feedback_status_changed", "제보 상태 변경"
+    CLASSROOM_FEEDBACK_STATUS_CHANGED = "classroom_feedback_status_changed", "강의실 제보 상태 변경"
 
 
 #: 강의실 제품이 만드는 알림 유형 전부(#304) — 클래스 알림 화면·종 배지가 이
@@ -118,6 +122,7 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_DECLINED,
+        NotificationType.CLASSROOM_FEEDBACK_STATUS_CHANGED,
     }
 )
 
@@ -304,6 +309,19 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
         "is_promotional": False,
         "is_quiet_hours_exempt": False,
         "is_internal_only": False,
+    },
+    # 제보 상태 변경(#1239) — 앱 안에서만 보인다(문자 채널 없음, 운영팀 알림과 같은 성질).
+    NotificationType.FEEDBACK_STATUS_CHANGED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    NotificationType.CLASSROOM_FEEDBACK_STATUS_CHANGED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
     },
 }
 
