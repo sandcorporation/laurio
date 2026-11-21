@@ -394,6 +394,7 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   남기고 다음 검사가 다시 보낸다. 「발생」이 닿기 전에 해소되면 둘 다 버린다. 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`)이
   비면 보내지 않고 상태만 기록한다. 겹쳐 돈 검사는 advisory 잠금을 못 잡아 건너뛴다. 지금 울리는 목록은 같은
   `GET /api/operator/ops-metrics` 의 `alerts`(기간과 무관)로 콘솔 `/ops` 맨 위 패널에 보인다.
+- **발송 실패 경보(#1123, `ops_metrics.notification_dispatch_alert`).** 스캔 `notification-dispatch-alert`(5분 주기)가 같은 `AlertState`·디스코드 길로 규칙 둘을 본다 — `notification-dispatch-failures`(최근 창 안 실패 이력 ≥ 문턱)와 `notification-zero-reach`(한 알림 유형이 최소 건수 이상인데 성공 이력 0). 기본값: 창 60분(`NOTIFICATION_ALERT_WINDOW_MINUTES`), 실패 문턱 5건(`NOTIFICATION_ALERT_FAILURE_THRESHOLD`), 수신자 0 최소 3건(`NOTIFICATION_ALERT_ZERO_REACH_MIN`). 발생·해소를 한 번씩만 보내고 웹훅이 비면 조용하다. 글에는 건수·채널·알림 유형만 있고 수신자·주소는 없다.
 - **느린 경로 경고(#971, `ops_metrics.slow_route_check`).** 요청 지표(`RequestMinute` + 아직 옮기지 않은 Redis 분)를
   **경로(메서드 + URL 패턴)마다** 보고, 느리면 디스코드가 아니라 **GlitchTip 에 `warning` 경고**를 올린다 — 자동 진단이
   집는다(아래 「GlitchTip 자동 진단」). 판정은 순수 함수 `ops_metrics.slow_routes` 하나다(재생 스크립트도 같은 함수).
