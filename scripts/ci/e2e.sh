@@ -121,11 +121,25 @@ if [ "${CODEMIT_E2E_PLAYWRIGHT_IMAGE:-}" = 1 ]; then
   pw_pull=$!
 fi
 
+# 굽기는 minio·인프라 이미지 받기보다 먼저 배경으로 시작한다(#1171) — 예전에는 `up -d --build` 가 인프라 이미지를 다 받은 뒤에야
+# 굽기 시작해 그 앞 12~37초(중앙 26)가 굽기와 차례로 돌았다(#1165 측정). 받기는 네트워크·디스크, 굽기는 CPU 라 겹쳐도 서로 안 막는다.
+# 굽는 길이 아니면(CODEMIT_IMAGE_TAG: 이미 구운 이미지를 받는다) 건너뛴다.
+bake_pid=""; bake_started=$SECONDS
+if [ ${#build_flag[@]} -gt 0 ]; then
+  "${C[@]}" build backend "${apps[@]}" events grader >test-results/bake.log 2>&1 &
+  bake_pid=$!
+fi
+
 "${C[@]}" up -d minio >/dev/null
 CODEMIT_MINIO_PORT=$(read_port minio 9000)
 export CODEMIT_MINIO_PORT
 echo "스택 띄우는 중($project, ${CODEMIT_IMAGE_TAG:-여기서 굽는다})…"
-"${C[@]}" up -d ${build_flag[@]+"${build_flag[@]}"} "${apps[@]}" events grader || { echo "스택을 띄우지 못했다"; exit 1; }
+if [ -n "$bake_pid" ]; then
+  wait "$bake_pid" || { tail -n 60 test-results/bake.log; echo "이미지를 굽지 못했다"; exit 1; }
+  echo "굽기 $((SECONDS - bake_started))초(minio·이미지 받기와 겹쳐)"
+fi
+# 구운 뒤에는 `--build` 없이 띄운다 — 다시 굽기를 걸면 층이 CACHED 여도 이미지를 한 번 더 내보내고 들인다.
+"${C[@]}" up -d "${apps[@]}" events grader || { echo "스택을 띄우지 못했다"; exit 1; }
 # 이 실행이 띄운 이미지의 digest — 「e2e 가 본 이미지 = prod 에 간 이미지」를 나중에 맞춰 본다(#712).
 for service in backend "${apps[@]}"; do
   image=$("${C[@]}" images -q "$service" 2>/dev/null | head -n 1)
