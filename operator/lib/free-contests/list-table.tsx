@@ -15,7 +15,7 @@ const COL = {
   status: "w-[96px]",
   deadline: "w-[168px]",
   winner: "w-[160px]",
-  action: "w-[168px]",
+  action: "w-[260px]",
 };
 
 function TableHead() {
@@ -33,7 +33,7 @@ function TableHead() {
 export function FreeContestListTable({ contests }: { contests: FreeContest[] }) {
   return (
     <div data-testid="free-contest-list-table" className="border border-rule bg-surface">
-      <TableScroll minWidth={840}>
+      <TableScroll minWidth={940}>
         <TableHead />
         {contests.map((contest, i) => (
           <div
@@ -58,7 +58,14 @@ export function FreeContestListTable({ contests }: { contests: FreeContest[] }) 
             >
               {contest.winner ? contest.winner.nickname || contest.winner.email : "-"}
             </div>
-            <div className={`${COL.action} shrink-0`}>
+            <div className={`${COL.action} flex shrink-0 gap-2`}>
+              <Link
+                href={`/contests/${contest.id}/certificates`}
+                data-testid={`free-contest-certificates-${contest.id}`}
+                className="inline-block border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink"
+              >
+                상장
+              </Link>
               {contest.winner && (
                 <Link
                   href={operatorNoticeComposeHref(contest.winner)}

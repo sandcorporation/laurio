@@ -3778,6 +3778,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/operator/contests/{contest_id}/certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Contest Certificates */
+        get: operations["certificates_operator_api_list_contest_certificates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/operator/contests/{contest_id}/certificates/{certificate_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Contest Certificate */
+        post: operations["certificates_operator_api_cancel_contest_certificate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/operator/deliverable-types": {
         parameters: {
             query?: never;
@@ -8156,6 +8190,36 @@ export interface components {
             is_active: boolean;
             /** Name */
             name: string;
+        };
+        /** OperatorCertificateListOut */
+        OperatorCertificateListOut: {
+            /** Certificates */
+            certificates: components["schemas"]["OperatorCertificateOut"][];
+            /** Contest Id */
+            contest_id: number;
+            /** Contest Title */
+            contest_title: string;
+        };
+        /** OperatorCertificateOut */
+        OperatorCertificateOut: {
+            /** Award Name */
+            award_name: string;
+            /** Cancelled At */
+            cancelled_at: string | null;
+            /** Id */
+            id: number;
+            /** Issued At */
+            issued_at: string;
+            /** Number */
+            number: string;
+            /** Page Hidden */
+            page_hidden: boolean;
+            /** Recipient Name */
+            recipient_name: string;
+            /** Status */
+            status: string;
+            /** Verify Url */
+            verify_url: string;
         };
         /** OperatorCreateIn */
         OperatorCreateIn: {
@@ -15868,6 +15932,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OperatorFreeContestOut"][];
+                };
+            };
+        };
+    };
+    certificates_operator_api_list_contest_certificates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCertificateListOut"];
+                };
+            };
+        };
+    };
+    certificates_operator_api_cancel_contest_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contest_id: number;
+                certificate_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorCertificateOut"];
                 };
             };
         };

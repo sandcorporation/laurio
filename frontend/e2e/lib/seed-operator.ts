@@ -208,3 +208,30 @@ export async function ledgerEntryCount(contestId: number): Promise<number> {
   };
   return result.count;
 }
+
+export type SeededOperatorCertificates = {
+  contest_id: number;
+  sponsor_access: string;
+  certificates: { id: number; number: string; recipient_name: string }[];
+};
+
+/** `seed_e2e_operator_certificates` — 마감된 공모전 하나에 상장 둘이 발급된 상태(#1131).
+ * 호출마다 새 공모전이다. */
+export async function seedE2eOperatorCertificates(): Promise<SeededOperatorCertificates> {
+  return (await runSeedCommand("operator-certificates", {
+    run_id: e2eRunId(),
+  })) as SeededOperatorCertificates;
+}
+
+/** 개최자 쪽에서 본 그 공모전의 상장 번호별 취소 시각 — 운영자 취소가 개최자 표면에도 반영됐는지 본다. */
+export async function sponsorCertificateCancelled(
+  contestId: number,
+  sponsorAccess: string,
+): Promise<Record<string, string | null>> {
+  const res = await fetch(`http://127.0.0.1:${backendApiPort()}/api/contests/${contestId}/certificates`, {
+    headers: { Authorization: `Bearer ${sponsorAccess}` },
+  });
+  if (!res.ok) throw new Error(`상장 보드 조회 실패: ${res.status} ${await res.text()}`);
+  const board = (await res.json()) as { certificates: { number: string; cancelled_at: string | null }[] };
+  return Object.fromEntries(board.certificates.map((c) => [c.number, c.cancelled_at]));
+}

@@ -77,7 +77,7 @@ plugs = ["contests", "core"]
 
 [payouts]
 group = "contest"
-uses = ["accounts", "appeals", "awards", "contests", "core", "distributions", "handovers", "ledger", "notifications", "payments", "policies", "scoring", "storage", "submissions", "verification"]
+uses = ["accounts", "appeals", "awards", "certificates", "contests", "core", "distributions", "handovers", "ledger", "notifications", "payments", "policies", "scoring", "storage", "submissions", "verification"]
 plugs = ["accounts", "contests", "core"]
 
 [policies]
