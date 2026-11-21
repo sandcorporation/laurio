@@ -90,17 +90,28 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
 
 - **이미지 층**: buildx `type=local` 캐시를 `actions/cache` 에 얹는다(`docker/setup-buildx-action` 의 컨테이너 빌더, 그래서 `--load`).
   폴더는 이미지별 — `ci`(`checks`)·`backend`(`e2e`)·`frontend`·`operator`·`classroom`(`guard`) — 이고, 키는
-  `bk-<이름>-<Dockerfile·lockfile 해시>` 다. 복원은 `actions/cache/restore` 가 정확한 키 다음 `bk-<이름>-` 접두사로 가장 새 main 캐시를 받는다.
+  `ci`·`backend` 가 `bk-<이름>-<Dockerfile·lockfile 해시>`, **세 앱이 `bk-<앱>-<앱 빌드 문맥 해시>`** 다(#1137, `scripts/ci/bk-keys.sh` —
+  배포 ctx 태그와 같은 `image_context.py hash <앱> amd64`: 앱 폴더·packages·잠금 파일·Dockerfile 중 `.dockerignore` 가 남기는 것).
+  복원은 `actions/cache/restore` 가 정확한 키 다음 `bk-<이름>-` 접두사로 가장 새 main 캐시를 받는다. 해시는 「언제 새 세대를 저장하나」만
+  정하고, 층이 맞는지는 BuildKit 이 내용으로 가린다 — 직전 세대 뒤 바뀌지 않은 앱은 `COPY <앱>/`·`pnpm build` 가 `CACHED` 다.
+  예전 앱 키(Dockerfile·lockfile 해시)는 그 키가 처음 생긴 커밋의 소스를 담은 채 묵어, 문서만 바뀐 커밋에서도 세 앱이 처음부터 빌드됐다
+  (조각마다 셋이 140초 안팎, 실행 44784203397).
   `e2e`·`celery` 는 backend·세 앱 폴더를 모두 복원한다(compose 쪽 연결은 `docker/compose.ci-cache.yaml`).
 - **CI 이미지의 node_modules 층도 캐시에서 온다(#1081)**: `ci.Dockerfile` 은 워크스페이스 매니페스트만 먼저 넣고 `pnpm install` 한 뒤
   소스를 넣는다 — 의존이 같으면 설치 층이 캐시 적중이다. 워크스페이스 패키지를 더하면 그 `package.json` COPY 도 더한다
   (`scripts/test_ci_images.py` 가 어긋나면 막는다). 이미지를 한 번 굽어 잡들이 나눠 받는 길은 재 보니 걸림 경로가 늘어 접었다(#1081 댓글).
 - **저장은 main 에서만, release.yml 의 `cache`·`cache-node` 잡이 한다**(#1090) — PR·대기열(`gh-readonly-queue/…` ref)에서 만든 캐시는 그 ref
   안에서만 쓰여 다른 PR 에 소용이 없고 10GB 만 먹는다. 잡은 이름마다(ci·backend·frontend·operator·classroom) 정확한 키를 `lookup-only` 로 보고
-  **이미 있으면 받지도 굽지도 않는다** — 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이 바뀐 병합에서만 굽는다.
+  **이미 있으면 받지도 굽지도 않는다** — ci·backend 는 키 파일(`docker/*.Dockerfile`·`backend/uv.lock`·`pnpm-lock.yaml`)이, 세 앱은 그 앱의
+  빌드 문맥이 바뀐 병합에서만 굽는다.
   없으면 앞 세대(`bk-<이름>-` 접두사)를 복원해 `--output type=cacheonly` 로 층만 굽고 `/tmp/bk-new` 에 내보낸 뒤 복원 폴더 자리에 바꿔 끼워
-  저장한다(actions/cache 의 버전은 경로로 갈려 같은 경로여야 PR 이 받는다, 한 세대만 남는다). 저장소 쓰기 권한이 필요 없다 — GHA 캐시 백엔드
-  `type=gha` 는 쓰지 않는 까닭. 승격은 이 잡을 기다리지 않는다. 키는 `pr-check.yml` 의 복원 키와 같아야 한다(`test_release_flow.py`).
+  저장한다(actions/cache 의 버전은 경로로 갈려 같은 경로여야 PR 이 받는다, 한 세대만 남는다). 저장한 뒤 **같은 이름의 main 세대(`bk-<이름>-…`)를
+  가장 새 것부터 세 앱 3개·ci·backend 2개만 남기고 `gh cache delete` 로 지운다**(#1137). PR 검사는 자기 커밋(대기열·PR 의 머지 커밋)의
+  앱 빌드 문맥 해시로 **정확한 키**를 먼저 찾는다 — 앱을 안 바꾼 PR(최근 30개 중 19개)은 main 의 그 앱 세대와 해시가 같아 `COPY`·`pnpm build`
+  가 `CACHED` 이고, PR 을 딴 뒤 main 이 그 앱을 바꿨어도 그 세대가 남아 있으면 맞는다. 접두 복원은 그다음이다. 그래서 이 잡에만 `actions: write` 가 있고
+  (main push 로만 돌고 secrets 없음, `test_public_repo.py`), 이름마다 `concurrency` 로 한 줄로 세워 늦게 끝난 옛 커밋이 새 세대를 지우지
+  않게 한다. 지우지 못해도 잡은 초록이다(경고만). 층 캐시는 저장소 쓰기 권한 없이 읽고 쓴다 — GHA 캐시 백엔드 `type=gha` 는 쓰지 않는
+  까닭. 승격은 이 잡을 기다리지 않는다. 키는 `pr-check.yml`·`e2e.yml` 의 복원 키와 같아야 한다(`test_release_flow.py`).
 - **병렬화(#932)**: `checks` 는 `sub-checks.sh <묶음>` 으로 여섯 실행기 — `static`(Django·마이그레이션 호환·생성물·문서·언어 검사)·`pytest I/N`(전부면 6조각, PR 은 고른 시험의 시간만큼,
   파일별 시간 기록으로 고르게 — `pytest_shards.py`, 기록 갱신은 `pytest-durations-update.sh`, #1083)·`web`(단위 시험·typecheck). 인자 없이는 전부 돈다(로컬 길). `e2e` 는 `CODEMIT_E2E_TARGETS` 로
   `public operator`·`classroom` 두 실행기(일꾼 1개 그대로). Playwright `--shard` 대신 프로젝트 단위로 나눈 까닭은 `e2e-two-pass.sh` 의
@@ -114,8 +125,10 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
   같은 경로로 마운트한다. **이미지 판 ≠ lockfile 의 `@playwright/test` 면 시험 전에 실패한다**(`scripts/ci/playwright_image.py`, 시험
   `scripts/test_playwright_image.py` 가 plan 잡에서 돈다). `@playwright/test` 를 올리는 PR 은 이 파일의 태그·다이제스트도 같이 고친다
   (다이제스트 얻는 법은 스크립트 머리말). 로컬 `scripts/test.sh e2e` 는 그대로 호스트 Playwright 다.
-- **10GB**: 키가 lockfile·Dockerfile 해시라 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터 지운다.
-  `gh cache list` 합계를 가끔 본다.
+- **10GB**: 층 캐시는 세 앱 3세대(앱 하나 약 290MB)·ci·backend 2세대(약 440·150MB) — 합쳐 약 3.8GB 를 넘지 않는다. 새 세대를
+  저장한 cache 잡이 그 밖의 앞 세대를 지운다(#1137).
+  그 밖의 것(pnpm 저장소·e2e 시간 기록)은 키가 바뀔 때만 새 항목이 생기고, 안 쓰인 것은 GitHub 가 7일 뒤·한도 초과 때 오래된 것부터
+  지운다. `gh cache list` 합계를 가끔 본다.
 - 보안 규칙(`scripts/test_public_repo.py`)은 그대로다 — 액션 SHA 고정, `permissions: contents: read`, secrets 없음.
 
 (아래 표·글은 꺼진 Jenkins PR 검사의 기록이다.)

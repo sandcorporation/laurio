@@ -38,6 +38,7 @@ LOCAL_WORKFLOW_USES = re.compile(r"^\s*uses:\s*\./\.github/workflows/[\w.-]+\.ya
 ALLOWED_WRITES = {
     ("image.yml", ""): {"packages"},
     ("release.yml", "image"): {"packages"},
+    ("release.yml", "cache"): {"actions"},  # 층 캐시 앞 세대 지우기(#1137)
     ("release.yml", "promote"): {"contents"},
     ("release.yml", "notify"): {"issues"},
     ("release.yml", "e2e_watch"): {"issues"},  # 매시 e2e 예약이 멈췄는지(#1122)

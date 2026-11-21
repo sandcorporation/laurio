@@ -13,6 +13,7 @@ production. Jenkins 는 production 머리의 이미지를 받아 배포한다(Je
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -41,14 +42,20 @@ def resolve(key: str, name: str) -> str:
     return re.sub(r"\s+", "", key.replace("${{ matrix.app }}", name))
 
 
+APPS = ("frontend", "operator", "classroom")
+BK_KEYS_STEP = 'run: bash scripts/ci/bk-keys.sh >>"$GITHUB_OUTPUT"'
+
+
 def release_key(expr: str, name: str) -> str:
-    """release.yml cache 잡의 KEY 식(이름별 format(...) 셋)에서 그 이름이 고르는 키를 pr-check.yml 꼴로 쓴다."""
+    """release.yml cache 잡의 KEY 식에서 ci·backend 가 고르는 키를 pr-check.yml 꼴로 쓴다(세 앱은 bk-keys.sh, #1137)."""
     special = dict(re.findall(r"format\('bk-(\w+)-\{0\}', (hashFiles\([^)]*\))\)", expr))
-    if name in special:
-        return resolve(f"bk-{name}-${{{{ {special[name]} }}}}", name)
-    default = re.search(r"format\('bk-\{0\}-\{1\}', matrix\.name, (hashFiles\(.*\))\) \}\}$", expr)
-    assert default, expr
-    return resolve(f"bk-{name}-${{{{ {default.group(1)} }}}}", name)
+    assert name in special, (name, expr)
+    return resolve(f"bk-{name}-${{{{ {special[name]} }}}}", name)
+
+
+def app_restores(code: str) -> list[tuple[str, str]]:
+    """세 앱 층 캐시를 복원하는 단계마다 (path, key)."""
+    return re.findall(r"(?m)^          path: (/tmp/bk/(?:frontend|operator|classroom|\$\{\{ matrix\.app \}\}))\n          key: (.+)$", code)
 
 
 class ReleaseFlowTest(unittest.TestCase):
@@ -99,7 +106,7 @@ class ReleaseFlowTest(unittest.TestCase):
         names = re.findall(r"(?m)^          - \{ name: (\w+), target: [^}]*\}", cache)
         self.assertEqual(sorted(names), ["backend", "ci", "classroom", "frontend", "operator"])
         key_expr = re.sub(r"\s+", " ", re.search(r"(?ms)KEY: >-\n(.*?)\n        run:", cache).group(1)).strip()
-        for name in names:
+        for name in ("ci", "backend"):
             with self.subTest(cache=name):
                 self.assertIn(release_key(key_expr, name), {resolve(k, name) for k in restored})
         node = job_block(release, "cache-node")
@@ -107,6 +114,43 @@ class ReleaseFlowTest(unittest.TestCase):
             with self.subTest(cache=key):
                 self.assertIn(f"key: {key}", pr)
                 self.assertIn(f"key: {key}", node)
+
+    def test_app_layer_cache_keys_come_from_one_script(self) -> None:
+        """세 앱의 층 캐시 키는 저장·복원 모두 bk-keys.sh(앱 빌드 문맥 해시)에서 온다(#1137)."""
+        cache = job_block(read(WORKFLOWS / "release.yml"), "cache")
+        self.assertIn('bash scripts/ci/bk-keys.sh "$NAME"', cache)
+        self.assertRegex(re.search(r"(?ms)KEY: >-\n(.*?)\n        run:", cache).group(1), r"\|\| ''\s*\}\}$")
+        for workflow in ("pr-check.yml", "e2e.yml"):
+            code = read(WORKFLOWS / workflow)
+            restores = app_restores(code)
+            self.assertTrue(restores, workflow)
+            for path, key in restores:
+                with self.subTest(workflow=workflow, path=path):
+                    app = path.rsplit("/", 1)[1]
+                    want = "${{ steps.bk-keys.outputs[matrix.app] }}" if "matrix" in app else f"${{{{ steps.bk-keys.outputs.{app} }}}}"
+                    self.assertEqual(key, want)
+            for job in re.findall(r"(?ms)^  [\w-]+:\n.*?(?=^  [\w-]+:\n|\Z)", code.split("\njobs:\n", 1)[1]):
+                if "steps.bk-keys.outputs" in job:
+                    self.assertIn(BK_KEYS_STEP, job, workflow)
+                    self.assertLess(job.index(BK_KEYS_STEP), job.index("steps.bk-keys.outputs"))
+
+    def test_bk_keys_prints_one_key_per_app(self) -> None:
+        out = subprocess.run(["bash", str(ROOT / "scripts/ci/bk-keys.sh")], check=True, capture_output=True, text=True).stdout
+        keys = dict(line.split("=", 1) for line in out.splitlines())
+        self.assertEqual(sorted(keys), sorted(APPS))
+        for app, key in keys.items():
+            self.assertRegex(key, rf"^bk-{app}-[0-9a-f]{{16,}}$")
+
+    def test_release_cache_prunes_older_generations_one_name_at_a_time(self) -> None:
+        cache = job_block(read(WORKFLOWS / "release.yml"), "cache")
+        self.assertRegex(cache, r"permissions:\n\s+contents: read\n\s+actions: write\n")
+        self.assertIn("group: release-cache-${{ matrix.name }}", cache)
+        self.assertIn('gh cache list --ref refs/heads/main --key "bk-$NAME-"', cache)
+        self.assertIn('gh cache delete "$id"', cache)
+        # PR 이 자기 해시의 세대를 정확히 찾도록 여러 세대를 남긴다 — 새것부터 세어 KEEP 개 뒤만 지운다
+        self.assertIn("--sort created_at --order desc", cache)
+        self.assertIn('tail -n +"$((KEEP + 1))"', cache)
+        self.assertRegex(cache, r"KEEP: \$\{\{ \(matrix\.name == 'ci' \|\| matrix\.name == 'backend'\) && 2 \|\| 3 \}\}")
 
     def test_fork_does_not_publish_promote_schedule_or_open_issues(self) -> None:
         # 포크(#1084)에는 비밀값이 없지만 GITHUB_TOKEN 으로 운영 이미지 저장소에 올리고 production 을 옮기고 이슈를 열 수 있다.
@@ -125,7 +169,9 @@ class ReleaseFlowTest(unittest.TestCase):
             with self.subTest(fork_cache=job):
                 block = job_block(release, job)
                 self.assertIn(fork_cache, block)
-                self.assertNotRegex(block, r"(?m)^\s+permissions:")
+                # 넓히는 권한은 cache 잡의 actions: write(제 저장소의 앞 세대 캐시 지우기, #1137) 하나뿐이다
+                perms = re.findall(r"(?m)^    permissions:\n((?:      \w+: \w+\n)+)", block)
+                self.assertEqual(perms, ["      contents: read\n      actions: write\n"] if job == "cache" else [])
         for job in ("image", "notify", "promote"):
             with self.subTest(upstream_only=job):
                 self.assertNotIn("result == 'skipped'", job_block(release, job))

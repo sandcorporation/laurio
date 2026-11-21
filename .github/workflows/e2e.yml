@@ -109,6 +109,9 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
       - run: mkdir -p /tmp/bk && cd /tmp/bk && mkdir -p backend frontend operator classroom ci
+      - id: bk-keys
+        name: 이미지 층 캐시 키(앱 빌드 문맥 해시, #1137)
+        run: bash scripts/ci/bk-keys.sh >>"$GITHUB_OUTPUT"
       - id: bk-backend
         name: 이미지 층 캐시 복원(backend)
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
@@ -121,21 +124,21 @@ jobs:
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /tmp/bk/frontend
-          key: bk-frontend-${{ hashFiles('docker/frontend.Dockerfile','pnpm-lock.yaml') }}
+          key: ${{ steps.bk-keys.outputs.frontend }}
           restore-keys: bk-frontend-
       - id: bk-operator
         name: 이미지 층 캐시 복원(operator)
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /tmp/bk/operator
-          key: bk-operator-${{ hashFiles('docker/operator.Dockerfile','pnpm-lock.yaml') }}
+          key: ${{ steps.bk-keys.outputs.operator }}
           restore-keys: bk-operator-
       - id: bk-classroom
         name: 이미지 층 캐시 복원(classroom)
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: /tmp/bk/classroom
-          key: bk-classroom-${{ hashFiles('docker/classroom.Dockerfile','pnpm-lock.yaml') }}
+          key: ${{ steps.bk-keys.outputs.classroom }}
           restore-keys: bk-classroom-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
