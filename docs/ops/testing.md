@@ -223,7 +223,8 @@ PR 검사의 호스티드 실행기는 같은 일에 드는 CPU 초가 세 무�
 그 근처면 같은 방법을 먼저 본다.
 
 **상장 PDF 시험은 호스트에 `libharfbuzz-subset0` 이 있어야 한도 안이다**(#1126). WeasyPrint 는
-그것이 없으면 글꼴 서브셋을 fontTools 로 돌려 한 장에 CPU 1초를 넘긴다(있으면 0.3~0.4초).
+그것이 없으면 글꼴 서브셋을 fontTools 로 돌려 한 장에 CPU 1초를 넘긴다(있으면 프로세스의 첫 장
+0.3~0.4초, 다음 장부터 0.05초 남짓 — 글꼴 준비를 프로세스마다 한 번만 한다, #1196).
 pango 는 데스크톱 우분투에 이미 있다. 이미지(`backend`·`ci`)에는 Dockerfile 이 넣는다.
 
 **시험별 CPU 는 junit 의 `cpu_seconds` 로 본다** — PR 검사가 `test-results/backend-junit.xml` 에
