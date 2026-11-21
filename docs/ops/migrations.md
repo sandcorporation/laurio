@@ -35,7 +35,8 @@ cd backend && uv run python ../scripts/ci/migration_compat.py --base origin/main
 
 첫 PR 이 main 에 들어가 배포된 뒤 둘째 PR 을 연다. 둘째 PR 의 base 에는 첫 PR 의 상태 변경이 있으므로 검사가
 통과한다 — 같은 PR 에 둘을 넣으면 base 상태에 칸이 남아 있어 거절된다. 스펙 브랜치([스펙 브랜치](spec-branch.md))
-안에서 티켓 둘로 나눠도 스펙 → main PR 에서 하나가 되어 거절된다 — 정리 단계는 다음 스펙·다음 배포다.
+안에서 티켓 둘로 나눠도 스펙 → main PR 하나에 함께 들어가 거절된다 — 정리 단계는 다음 스펙·다음 배포다. 병렬 사슬이
+같은 앱에 마이그레이션을 더하면 `spec.py push` 가 거절한다(번호를 옮겨 다시 올린다).
 
 **칸 지우기**
 

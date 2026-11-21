@@ -1,6 +1,6 @@
-"""스펙 브랜치 흐름(#1210) — PR 검사의 기준(pr-base.sh)과 scripts/spec/spec.py 의 판정.
+"""스펙 브랜치 흐름(#1210, #1228) — PR 검사의 기준(pr-base.sh)과 scripts/spec/spec.py 의 판정.
 
-임시 git 저장소(맨 원격 하나 + 클론)로 기준 계산·start·sync 를 실제로 돌리고, gh 는 가짜 응답으로 merge-ticket·finish·report 를 본다.
+임시 git 저장소(맨 원격 하나 + 클론)로 기준 계산·start·sync 를 실제로 돌리고, push·finish·blame 도 실제 git 으로, gh 는 가짜 응답으로 finish·blame·report 를 본다.
 """
 
 from __future__ import annotations
@@ -96,53 +96,6 @@ class PrBaseTest(unittest.TestCase):
         self.assertEqual(self.base("ab" * 20), self.main)
 
 
-def checks(*runs: tuple[str, str | None, str]) -> str:
-    return json.dumps([{"id": i, "status": s, "conclusion": c, "started_at": t, "html_url": f"u{i}"}
-                       for i, (s, c, t) in enumerate(runs)])
-
-
-def pr(base: str = "spec/x", state: str = "OPEN", draft: bool = False) -> str:
-    return json.dumps({"number": 7, "baseRefName": base, "headRefOid": "f" * 40, "state": state, "isDraft": draft})
-
-
-class MergeTicketTest(unittest.TestCase):
-    def gh(self, view: str, runs: str) -> FakeGh:
-        return FakeGh([(["pr", "view"], view), (["check-runs", "check_name=결과"], runs), (["pr", "merge"], "")])
-
-    def refused(self, gh: FakeGh, word: str) -> None:
-        with self.assertRaises(spec.Refused) as e:
-            spec.merge_ticket("7", gh)
-        self.assertIn(word, str(e.exception))
-        self.assertFalse(gh.called("pr", "merge"))
-
-    def test_merges_green_spec_pr(self) -> None:
-        gh = self.gh(pr(), checks(("completed", "success", "2026-11-21T01:00:00Z")))
-        spec.merge_ticket("7", gh)
-        self.assertTrue(gh.called("pr", "merge", "7", "--squash", "--match-head-commit", "f" * 40))
-
-    def test_refuses_main_base(self) -> None:
-        self.refused(self.gh(pr(base="main"), checks(("completed", "success", "t"))), "enqueue.sh")
-
-    def test_refuses_red(self) -> None:
-        self.refused(self.gh(pr(), checks(("completed", "failure", "t"))), "failure")
-
-    def test_refuses_running_and_missing(self) -> None:
-        self.refused(self.gh(pr(), checks(("in_progress", None, "t"))), "아직")
-        self.refused(self.gh(pr(), "[]"), "없다")
-
-    def test_latest_run_decides(self) -> None:
-        self.refused(self.gh(pr(), checks(("completed", "success", "2026-11-21T01:00:00Z"),
-                                          ("completed", "failure", "2026-11-21T02:00:00Z"))), "failure")
-        gh = self.gh(pr(), checks(("completed", "failure", "2026-11-21T01:00:00Z"),
-                                  ("completed", "success", "2026-11-21T02:00:00Z")))
-        spec.merge_ticket("7", gh)
-        self.assertTrue(gh.called("pr", "merge"))
-
-    def test_refuses_closed_and_draft(self) -> None:
-        self.refused(self.gh(pr(state="MERGED"), checks(("completed", "success", "t"))), "MERGED")
-        self.refused(self.gh(pr(draft=True), checks(("completed", "success", "t"))), "초안")
-
-
 class GitFlowTest(unittest.TestCase):
     """start·sync — 맨 원격 하나와 클론 둘(사람 하나는 main 에, 하나는 스펙 워크트리에)."""
 
@@ -204,21 +157,192 @@ class GitFlowTest(unittest.TestCase):
         self.assertIn("spec/x 를 체크아웃한", str(e.exception))
 
 
-class FinishTest(unittest.TestCase):
-    def test_body_collects_closes_once(self) -> None:
-        tickets = [{"number": 12, "title": "둘", "body": "Closes #5\nRefs #1\nfixes #6"},
-                   {"number": 11, "title": "하나", "body": "Closes #5"}]
-        gh = FakeGh([(["--state", "merged"], json.dumps(tickets)), (["--state", "open"], "[]"),
-                     (["pr", "create"], "https://example.test/pull/20\n")])
-        out = spec.finish("x", None, gh)
+def ticket(root: Path, path: str, n: int | None, text: str = "y", subject: str | None = None) -> str:
+    msg = subject or f"티켓 {n} ({'#' + str(n) if n else '-'})"
+    if n is not None:
+        msg += f"\n\nSpec-Ticket: #{n}\nCo-Authored-By: t <t@t>"
+    return commit(root, path, text, msg)
+
+
+class SpecRepo(unittest.TestCase):
+    """맨 원격 하나 + main 클론(a, 조율자) + 작업자 워크트리 흉내 둘(w1·w2, origin/spec/x 에서 딴 로컬 브랜치)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        t = self.t = Path(self.tmp.name)
+        self.origin = t / "origin.git"
+        git(t, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        self.a = t / "a"
+        git(t, "clone", "-q", str(self.origin), str(self.a))
+        commit(self.a, "shared.txt", "base\n")
+        commit(self.a, "backend/a/tests/test_a.py", "base\n")
+        git(self.a, "push", "-q", "origin", "HEAD:main")
+        spec.start("x", cwd=self.a)
+        self.w1 = self.worker("w1")
+        self.w2 = self.worker("w2")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def worker(self, name: str) -> Path:
+        w = self.t / name
+        git(self.t, "clone", "-q", str(self.origin), str(w))
+        git(w, "checkout", "-q", "-b", f"t-{name}", "origin/spec/x")
+        return w
+
+    def spec_log(self, fmt: str = "%s") -> list[str]:
+        git(self.a, "fetch", "-q", "origin")
+        return git(self.a, "log", f"--format={fmt}", "origin/main..origin/spec/x").splitlines()
+
+
+class PushTest(SpecRepo):
+    def test_two_chains_land_without_pr(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 11)
+        ticket(self.w2, "frontend/two.ts", 12)
+        self.assertIn("push", spec.push("x", cwd=self.w1))
+        self.assertIn("#12", spec.push("x", cwd=self.w2))  # 앞선 w1 을 받아 합치고 올린다
+        log = self.spec_log()
+        self.assertIn("티켓 11 (#11)", log)
+        self.assertIn("티켓 12 (#12)", log)
+        ticket(self.w1, "backend/a/three.py", 13)
+        spec.push("x", cwd=self.w1)
+        self.assertIn("티켓 13 (#13)", self.spec_log())
+        self.assertIn("올릴 것 없음", spec.push("x", cwd=self.w1))
+
+    def test_overtaken_between_fetch_and_push_retries(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 11)
+        ticket(self.w2, "frontend/two.ts", 12)
+        raced = []
+
+        def race() -> None:
+            if not raced:
+                raced.append(1)
+                spec.push("x", cwd=self.w2)
+
+        out = spec.push("x", cwd=self.w1, before_push=race)
+        self.assertIn("2번째에", out)
+        self.assertEqual(len([s for s in self.spec_log() if s.startswith("티켓")]), 2)
+
+    def test_gives_up_after_tries(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 11)
+        k = iter(range(100))
+
+        def race() -> None:
+            ticket(self.w2, f"frontend/f{next(k)}.ts", 12)
+            spec.push("x", cwd=self.w2)
+
+        with self.assertRaises(spec.Refused) as e:
+            spec.push("x", cwd=self.w1, before_push=race)
+        self.assertIn(f"{spec.PUSH_TRIES}번", str(e.exception))
+
+    def test_refuses_dirty_tree(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 11)
+        (self.w1 / "backend/a/one.py").write_text("half\n")
+        with self.assertRaises(spec.Refused) as e:
+            spec.push("x", cwd=self.w1)
+        self.assertIn("더럽다", str(e.exception))
+        self.assertEqual(self.spec_log(), ["spec/x 착수"])
+
+    def test_refuses_commit_without_trailer(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 11)
+        ticket(self.w1, "backend/a/two.py", None, subject="꼬리말 없음")
+        with self.assertRaises(spec.Refused) as e:
+            spec.push("x", cwd=self.w1)
+        self.assertIn("꼬리말 없음", str(e.exception))
+        self.assertIn("Spec-Ticket", str(e.exception))
+        self.assertEqual(self.spec_log(), ["spec/x 착수"])
+
+    def test_refuses_conflict_and_names_files(self) -> None:
+        ticket(self.w1, "shared.txt", 11, "one\n")
+        ticket(self.w2, "shared.txt", 12, "two\n")
+        spec.push("x", cwd=self.w1)
+        with self.assertRaises(spec.Refused) as e:
+            spec.push("x", cwd=self.w2)
+        self.assertIn("충돌 1개", str(e.exception))
+        self.assertIn("shared.txt", str(e.exception))
+        self.assertNotIn("티켓 12 (#12)", self.spec_log())
+        (self.w2 / "shared.txt").write_text("both\n")
+        git(self.w2, "add", "shared.txt")
+        git(self.w2, "commit", "-q", "--no-edit")
+        spec.push("x", cwd=self.w2)  # merge 커밋은 꼬리말을 묻지 않는다
+        self.assertIn("티켓 12 (#12)", self.spec_log())
+
+
+    def test_refuses_migration_overlap(self) -> None:
+        ticket(self.w1, "backend/a/migrations/0002_one.py", 11)
+        ticket(self.w2, "backend/a/migrations/0002_two.py", 12)
+        ticket(self.w2, "backend/b/migrations/0002_b.py", 12)
+        spec.push("x", cwd=self.w1)
+        with self.assertRaises(spec.Refused) as e:
+            spec.push("x", cwd=self.w2)
+        self.assertIn("앱 backend/a)", str(e.exception))
+        git(self.w2, "merge", "-q", "--no-edit", "origin/spec/x")
+        git(self.w2, "mv", "backend/a/migrations/0002_two.py", "backend/a/migrations/0003_two.py")
+        git(self.w2, "commit", "-q", "-m", "번호 옮김\n\nSpec-Ticket: #12")
+        self.assertIn("push", spec.push("x", cwd=self.w2))
+
+
+class FinishTest(SpecRepo):
+    def gh(self) -> FakeGh:
+        return FakeGh([(["--state", "open"], "[]"), (["pr", "create"], "https://example.test/pull/20\n")])
+
+    def test_body_from_trailers(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 12)
+        ticket(self.w1, "backend/a/one2.py", 11)
+        spec.push("x", cwd=self.w1)
+        fix = ticket(self.w2, "frontend/two.ts", 12, subject="12 고침")
+        spec.push("x", cwd=self.w2)
+        gh = self.gh()
+        out = spec.finish("x", None, gh, cwd=self.a)
         self.assertIn("enqueue.sh 20 --wait", out)
+        self.assertIn("spec.py push x", out)  # 붉으면 같은 브랜치에 push → 같은 PR
+        self.assertIn("spec.py blame x", out)
         create = next(c for c in gh.calls if c[:2] == ["pr", "create"])
         body = create[create.index("--body") + 1]
-        self.assertEqual([ln for ln in body.splitlines() if ln.startswith("Closes")], ["Closes #5", "Closes #6"])
-        self.assertNotIn("#1\n", body.replace("Refs #1", ""))
-        self.assertLess(body.index("#11 하나"), body.index("#12 둘"))
-        self.assertEqual(create[create.index("--base") + 1], "main")
+        self.assertEqual([ln for ln in body.splitlines() if ln.startswith("Closes")], ["Closes #11", "Closes #12"])
+        self.assertIn(f"  - {fix[:12]} 12 고침", body)
+        self.assertLess(body.index("- #11"), body.index("- #12"))
+        self.assertNotIn("착수", body.split("##", 1)[1])
         self.assertEqual(create[create.index("--head") + 1], "spec/x")
+        self.assertFalse(gh.called("--state", "merged"))  # 티켓 PR 을 찾지 않는다
+
+    def test_refuses_empty_spec(self) -> None:
+        with self.assertRaises(spec.Refused):
+            spec.finish("x", None, self.gh(), cwd=self.a)
+
+    def test_open_pr_gets_new_body(self) -> None:
+        ticket(self.w1, "backend/a/one.py", 11)
+        spec.push("x", cwd=self.w1)
+        gh = FakeGh([(["--state", "open"], json.dumps([{"url": "https://example.test/pull/20"}])), (["pr", "edit"], "")])
+        self.assertIn("본문만", spec.finish("x", None, gh, cwd=self.a))
+        self.assertFalse(gh.called("pr", "create"))
+
+
+class BlameTest(SpecRepo):
+    def setUp(self) -> None:
+        super().setUp()
+        ticket(self.w1, "backend/a/tests/test_a.py", 11, "one\n")
+        self.last = ticket(self.w1, "backend/a/tests/test_a.py", 13, "three\n", subject="셋 (#13)")
+        ticket(self.w1, "frontend/e2e/page.spec.ts", 12)
+        spec.push("x", cwd=self.w1)
+
+    def test_by_path_names_last_ticket(self) -> None:
+        out = spec.blame("x", "backend/a/tests/test_a.py", cwd=self.a)
+        self.assertEqual(out, f"backend/a/tests/test_a.py ← #13 {self.last[:12]} 셋 (#13)")
+        self.assertIn("바꾸지 않았다", spec.blame("x", "shared.txt", cwd=self.a))
+
+    def test_by_run_reads_failed_log(self) -> None:
+        log = ("pytest (1)\tRun\t2026-11-21T01:00:00Z FAILED backend/a/tests/test_a.py::test_x - assert 1\n"
+               "e2e (frontend)\tRun\t2026-11-21T01:00:00Z   1) [chromium] › e2e/page.spec.ts:12:3 › 화면\n"
+               "x\ty\tz Traceback in /usr/lib/python3/site.py\n")
+        gh = FakeGh([(["run", "view", "4242", "--log-failed"], log)])
+        lines = spec.blame("x", "4242", gh, cwd=self.a).splitlines()
+        self.assertEqual([ln.split(" ← ")[0] for ln in lines], ["backend/a/tests/test_a.py", "frontend/e2e/page.spec.ts"])
+        self.assertIn("#12", lines[1])
+
+    def test_run_without_paths_refuses(self) -> None:
+        with self.assertRaises(spec.Refused):
+            spec.blame("x", "4242", FakeGh([(["--log-failed"], "boom\n")]), cwd=self.a)
 
 
 def runs(*items: tuple[int, str, str]) -> str:
@@ -234,11 +358,12 @@ class ReportTest(unittest.TestCase):
         main_pr = [{"number": 30, "headRefName": "spec/x", "state": "MERGED", "mergedAt": "2026-11-22T05:00:00Z",
                     "mergeCommit": {"oid": "m" * 40}}]
         commits = [cm("2026-11-21T01:00:00Z", "spec/x 착수\n\nSpec-Start: x"),
-                   cm("2026-11-21T03:00:00Z", "티켓"),
+                   cm("2026-11-21T03:00:00Z", "하나 (#21)\n\nSpec-Ticket: #21"),
+                   cm("2026-11-21T04:00:00Z", "둘 (#22)\n\nSpec-Ticket: #22\nSpec-Ticket: #23"),
+                   cm("2026-11-21T05:00:00Z", "둘 고침\n\nSpec-Ticket: #22"),
                    cm("2026-11-21T09:00:00Z", "spec/x ← main 따라잡기\n\nSpec-Sync-Conflicts: 2"),
                    cm("2026-11-22T01:00:00Z", "spec/x ← main 따라잡기\n\nSpec-Sync-Conflicts: 1")]
         gh = FakeGh([
-            (["pr list --base spec/x"], json.dumps([{"number": 21}, {"number": 22}, {"number": 23}])),
             (["pr list --head spec/x"], json.dumps(main_pr)),
             (["pulls/30/commits"], json.dumps(commits)),
             (["branch=spec/x", "event=pull_request"], runs((101, "spec/x", "2026-11-22T02:00:00Z"),

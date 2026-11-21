@@ -40,10 +40,11 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
 작업자는 전역 에이전트 `issue-worker` 다.
 일반 절차는 그쪽이 들고 있고, 이 저장소에만 해당하는 것은 여기 있다.
 
-- **스펙 티켓이면**(지시서가 `spec/<이름>` 을 준다, #1210) 워크트리는 `origin/spec/<이름>` 에서, PR 의 base 는
-  `spec/<이름>`, 병합은 「결과」 초록 뒤 `python3 scripts/spec/spec.py merge-ticket <PR>` 이다 — `enqueue.sh` 도 배포
-  대기도 없다(스펙 브랜치는 배포되지 않는다). `Closes #<티켓>` 은 PR 본문에 그대로 둔다 — `finish` 가 모아 main PR 에 옮긴다.
-  따라잡기는 `git merge origin/spec/<이름>`. 흐름 전체는 [스펙 브랜치](spec-branch.md).
+- **스펙 티켓이면**(지시서가 `spec/<이름>` 을 준다, #1210·#1228) PR 을 열지 않는다. 워크트리는 `origin/spec/<이름>` 에서
+  따고, 티켓 하나를 끝내면 로컬의 빠른 것(고친 곳의 시험·타입·린트·커밋 훅)만 돌려 커밋한다 — 제목에 `(#N)`, 꼬리말에
+  `Spec-Ticket: #N` 과 Co-Authored-By. 그리고 `python3 scripts/spec/spec.py push <이름>` 으로 스펙 브랜치에 올린 뒤 같은
+  워크트리에서 바로 다음 티켓으로 간다. CI 대기·`enqueue.sh`·배포 대기·이슈 닫기는 없다(마지막 PR 의 `Closes` 가 닫는다).
+  흐름 전체는 [스펙 브랜치](spec-branch.md).
 - **티켓 본문에 「건드리는 앱」 줄.** 앱 이름은 `backend/config/settings.py` 의 로컬 앱, 프런트는
   `frontend`·`operator`·`classroom`·`packages` 다. 조율자는 이 줄이 겹치지 않는 티켓만 동시에 띄우고,
   겹치면 앞 티켓이 main 에 들어간 뒤에 띄운다.
