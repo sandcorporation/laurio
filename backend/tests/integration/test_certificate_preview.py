@@ -112,11 +112,15 @@ def test_sheets_drawn_one_after_another_each_carry_their_own_text_and_both_fonts
         assert _embedded_fonts(response.content) == ["Certificate-Serif", "Certificate-Serif-Bold"]
 
 
-def test_drawing_again_does_not_load_the_fonts_again(closed):
-    """한 장 그리기가 매번 woff 두 개(3MB)를 풀어 0.3초를 쓰던 것(#1196) — 두 번째부터는 글꼴을 다시 풀지 않는다."""
+def test_drawing_again_does_not_load_the_fonts_again(closed, monkeypatch):
+    """한 장 그리기가 매번 woff 두 개(3MB)를 풀어 0.3초를 쓰던 것(#1196) — 두 번째부터는 글꼴을 다시 풀지 않는다.
 
-    import time
+    시간으로 재면 실행기 속도에 흔들린다(CI 가 이 머신의 세 배 느렸다) — woff 를 푸는 횟수를 센다.
+    """
+
     from datetime import date
+
+    from weasyprint.text import fonts
 
     from certificates import rendering
 
@@ -135,13 +139,18 @@ def test_drawing_again_does_not_load_the_fonts_again(closed):
     )
     rendering.render_certificate_pdf(sheet)
 
-    started = time.process_time()
-    for _ in range(3):
-        rendering.render_certificate_pdf(sheet)
-    per_sheet = (time.process_time() - started) / 3
+    unpacked: list[object] = []
+    real_ttfont = fonts.TTFont
 
-    # 글꼴을 매번 풀면 한 장 0.3초 남짓, 한 번만 풀면 0.05초 남짓이다(이 머신). CI 가 두 배 느려도 갈린다.
-    assert per_sheet < 0.15, f"한 장 {per_sheet:.3f}초"
+    def counting_ttfont(*args: object, **kwargs: object) -> object:
+        unpacked.append(args)
+        return real_ttfont(*args, **kwargs)
+
+    monkeypatch.setattr(fonts, "TTFont", counting_ttfont)
+    rendering.render_certificate_pdf(sheet)
+    rendering.render_certificate_pdf(sheet)
+
+    assert unpacked == []
 
 
 def test_preview_before_deadline_is_refused(client, published):
