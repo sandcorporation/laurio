@@ -1219,6 +1219,17 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   세지 않는다(0% 로 굳히지 않는다). 완성도 보류는 「보류(…)」 실패 한 번으로 남는다(영구 아님, #1699). grader 는 에이전트 실행을 제 스레드에서
   돌리고 임대를 실행 전체(`AGENT_LEASE`, 14분)로 늘린다. 실행기와 실행 코드는 공유층(`core.agent_scoring`·
   `core.agent_prompt`·`core.quality_review_agent`)에 있고, 공모전 박제본 받기만 `scoring.agent_snapshot` 에 있다.
+- **우리 루프(실험용, #1245, ADR-0083)** — `agent-grader` 의 셋째 갈래 `selfloop`(`scoring.selfloop`, 실행 요청의
+  `mode`). CLI 를 띄우지 않고 실행기가 `llm-proxy` 를 직접 부른다(Anthropic Messages tool use·OpenAI Responses function
+  calling, 어댑터 하나). ① 지도: 파일 트리와 요구사항 목록 → 요구사항마다 파일 후보(`submit_plan`). ② 요구사항마다 **새 문맥**
+  하위 루프: 그 요구사항 하나와 후보만 주고 읽기 도구(`list_dir`·`glob`·`grep` 50줄·`read_file` 한 번 20KB, 박제본 루트 밖·링크
+  밖은 거절, 같은 호출 반복은 막고 알린다)로 찾아 읽게 한 뒤 `submit_verdict`(`met`·`evidence`·`reason`)로만 판정을 받는다.
+  근거 `경로:줄` 은 코드가 박제본에서 확인한다(파일·줄 범위·빈 줄/주석/import 만은 아닌가) — 틀리면 실제 줄을 붙여 다시 묻고(2번),
+  그래도 틀리면 미충족 + 「근거 확인 불가」. 꼴이 깨지면 오류를 붙여 다시 묻고(2번), 글만 내면 한 번 재촉한다. 하위 루프마다 8턴,
+  실행 전체 300초, 예산은 프록시(실행 $1). 부르는 함수는 `scoring.selfloop_scoring.run_selfloop_scoring`(벤더·모델을 인자로 받는다,
+  `model_version` `agent:selfloop:<모델>`, 기록은 `AgentRun.record` 꼴 + 단계·요구사항별 토큰·비용·다시 물은 횟수·근거 탈락 수·시간,
+  판정이 안 난 요구사항이 있으면 보류). **운영 채점은 이것을 타지 않는다** — `CONTEST_SCORING_METHOD` 선택지에 없고, 부르는 곳은
+  방식 비교 실험(#1246)뿐이다.
 
 | 엔드포인트 | 하는 일 |
 | --- | --- |

@@ -25,6 +25,13 @@ from core.registry import Slot, Slots
 Vendor = Literal["anthropic", "openai"]
 
 
+class SelfLoopRequirement(TypedDict):
+    """`scoring.selfloop.Requirement` 와 같은 모양."""
+
+    id: int
+    text: str
+
+
 class RunSpec(TypedDict):
     """실행 하나의 요청 — `scoring.agent_runner.RunSpec` 과 같은 모양."""
 
@@ -35,6 +42,8 @@ class RunSpec(TypedDict):
     run_token: str
     max_budget_usd: float
     timeout_seconds: NotRequired[int]
+    mode: NotRequired[Literal["cli", "selfloop"]]  # #1245 — 없으면 cli
+    requirements: NotRequired[list[SelfLoopRequirement]]  # selfloop 일 때만
 
 
 class RunResult(TypedDict):

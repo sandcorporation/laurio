@@ -44,6 +44,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path, PurePosixPath
 from typing import Literal, NotRequired, TypedDict
 
+try:  # backend(Django) 에서는 `scoring` 패키지의 모듈이다
+    from scoring import selfloop
+except ImportError:  # 실행기 이미지 — /app/selfloop.py 가 옆에 있다(agent-grader.Dockerfile)
+    import selfloop  # type: ignore[no-redef]
+
 # ── 고정값 — 바꾸면 `docker/agent-grader.Dockerfile` 의 ARG 와 시험이 같이 바뀐다 ──────────────────────────
 CLAUDE_CODE_VERSION = "2.1.328"
 CODEX_VERSION = "0.170.0"
@@ -98,6 +103,10 @@ CREDENTIAL_PATHS = (
 
 Vendor = Literal["anthropic", "openai"]
 VENDORS: tuple[Vendor, ...] = ("anthropic", "openai")
+#: 실행 갈래 — `cli` 는 Claude Code·Codex, `selfloop` 은 우리 루프(#1245, `selfloop.py`).
+Mode = Literal["cli", "selfloop"]
+MODES: tuple[Mode, ...] = ("cli", "selfloop")
+MAX_SELFLOOP_REQUIREMENTS = 100
 
 
 class RunSpec(TypedDict):
@@ -110,6 +119,10 @@ class RunSpec(TypedDict):
     run_token: str
     max_budget_usd: float
     timeout_seconds: NotRequired[int]
+    #: 없으면 `cli`. `selfloop` 이면 `prompt` 는 하위 루프의 지침(system)이고 `requirements` 가 판정할 목록이다 —
+    #: `output_schema` 는 받지만 쓰지 않는다(판정 꼴은 루프의 제출 도구가 정한다).
+    mode: NotRequired[Mode]
+    requirements: NotRequired[list[selfloop.Requirement]]
 
 
 class RunResult(TypedDict):
@@ -374,7 +387,29 @@ def validate_spec(raw: object) -> RunSpec:
         if isinstance(timeout, bool) or not isinstance(timeout, int) or not 0 < timeout <= RUN_TIMEOUT_SECONDS:
             raise RunRejected("spec_bad_timeout_seconds")
         spec["timeout_seconds"] = timeout
+    mode = raw.get("mode", "cli")
+    if mode not in MODES:
+        raise RunRejected("spec_bad_mode")
+    if mode == "selfloop":
+        spec["mode"] = "selfloop"
+        spec["requirements"] = _selfloop_requirements(raw.get("requirements"))
     return spec
+
+
+def _selfloop_requirements(raw: object) -> list[selfloop.Requirement]:
+    if not isinstance(raw, list) or not 0 < len(raw) <= MAX_SELFLOOP_REQUIREMENTS:
+        raise RunRejected("spec_bad_requirements")
+    out: list[selfloop.Requirement] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise RunRejected("spec_bad_requirements")
+        rid, text = item.get("id"), item.get("text")
+        if isinstance(rid, bool) or not isinstance(rid, int) or not isinstance(text, str) or not text.strip():
+            raise RunRejected("spec_bad_requirements")
+        out.append({"id": rid, "text": text})
+    if len({r["id"] for r in out}) != len(out):
+        raise RunRejected("spec_bad_requirements")
+    return out
 
 
 @dataclass(frozen=True)
@@ -400,6 +435,8 @@ def execute_run(spec: RunSpec, repo_zip: Path, config: RunnerConfig) -> RunResul
     try:
         run_dir.mkdir(parents=True)
         prefix = extract_repo(repo_zip, repo)
+        if spec.get("mode") == "selfloop":
+            return _execute_selfloop(spec, repo, prefix, run_id, config)
         home.mkdir()
         tmp.mkdir()
         if spec["vendor"] == "openai":
@@ -437,6 +474,37 @@ def execute_run(spec: RunSpec, repo_zip: Path, config: RunnerConfig) -> RunResul
         }
     finally:
         _remove_tree(run_dir)
+
+
+def _execute_selfloop(spec: RunSpec, repo: Path, prefix: str, run_id: str, config: RunnerConfig) -> RunResult:
+    """우리 루프(#1245) — CLI 를 띄우지 않고 이 프로세스가 `llm-proxy` 를 부른다. 결과 꼴은 CLI 갈래와 같고
+    `stdout` 은 `selfloop.LoopOutput` JSON 하나다. 시간은 `timeout_seconds`(없으면 `selfloop.RUN_SECONDS`) 안에서
+    루프가 스스로 멈춘다."""
+
+    started = time.monotonic()
+    output = selfloop.run_selfloop(
+        vendor=spec["vendor"],
+        model=spec["model"],
+        token=spec["run_token"],
+        system=spec["prompt"],
+        requirements=spec.get("requirements", []),
+        root=repo,
+        transport=selfloop.http_transport(config.proxy_base_url),
+        seconds=spec.get("timeout_seconds", selfloop.RUN_SECONDS),
+    )
+    stdout = json.dumps(output, ensure_ascii=False)
+    return {
+        "run_id": run_id,
+        "vendor": spec["vendor"],
+        "cli_version": f"selfloop-{selfloop.SELFLOOP_VERSION}",
+        "exit_code": 0,
+        "timed_out": output["loop"]["stopped"] == "deadline",
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "repo_root_prefix": prefix,
+        "stdout": stdout,
+        "stdout_truncated": False,
+        "stderr_tail": "",
+    }
 
 
 class _Outcome(TypedDict):
