@@ -80,3 +80,13 @@ Status: Accepted (2026-10-28 결정)
 - 호환 서버(ADR-0058)는 바꾸지 않았다 — 인증 값은 여전히 OpenAI 칸을 같이 쓴다. 그래서 호환 서버를 저장하면
   넣어 둔 OpenAI 키는 지워지고(Claude 키는 남는다), 호환 서버에서 OpenAI 로는 스위치로 넘어갈 수 없다(키를
   다시 넣는다).
+
+## 개정 — 판정 스키마는 OpenAI 와 같지 않고 배열 모양이다 (#1273, 2026-11-22)
+
+위 결정의 「OpenAI 와 같은 판정 스키마」를 거둔다. #986 부터 OpenAI 스키마는 requirement_id 를 키로 한 객체(키 전부
+required)인데, Anthropic 은 구조화 출력 스키마를 문법으로 컴파일하고 이 모양은 키 24개부터 한도를 넘어 매번 400
+(`invalid_request_error`, 「The compiled grammar is too large…」)을 낸다 — 바이트가 아니라 키 수에 걸리고,
+`count_tokens` 로는 미리 알 수 없다. 그래서 Anthropic 만 #986 전의 배열 모양(항목마다 `requirement_id`)을 싣는다 —
+요구사항 수와 무관하게 크기가 같다. 배열은 빠뜨림·겹침을 스키마로 막지 못하므로 파서가 받은 뒤에 막는다: 하나라도
+빠지면 `LLMAdapterMissingVerdictError` 로 채점이 실패하고, 겹치면 거절하며, 요청에 없던 id 는 버린다. OpenAI 는 키
+객체를 그대로 쓴다(문서 한도 객체 속성 5,000개·중첩 10단계).

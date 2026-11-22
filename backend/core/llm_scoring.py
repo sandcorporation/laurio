@@ -456,7 +456,9 @@ def _openai_verdict_response_schema(
     객체**다 — 키마다 판정 하나, 키 전부가 `required`, 다른 키는 `additionalProperties: False`. 그러면
     구조화 출력이 요청에 실린 id 를 하나도 빠뜨리거나 겹치거나 지어낼 수 없다(공모전 3의 809 는 배열
     스키마에서 선택 요구사항 8개를 통째로 빠뜨렸다). 쓰는 키워드가 `properties`·`required`·
-    `additionalProperties` 뿐이라 OpenAI strict 와 Anthropic 구조화 출력이 모두 받는다.
+    `additionalProperties` 뿐이라 OpenAI strict 가 받는다(OpenAI 문서의 한도는 객체 속성 5,000개·중첩
+    10단계라 요구사항 수로는 닿지 않는다). Anthropic 은 이 모양을 쓰지 않는다 — 키 24개부터 문법 컴파일
+    한도를 넘는다(#1273, `core.llm_scoring_anthropic._verdict_schema`).
 
     주지 않으면 옛 배열 모양이다 — 그때는 `strict: True`가 타입만 강제하고(정수·불리언·문자열, 필수
     키), 빠짐·중복은 `_parse_openai_scoring_response`가 응답을 받은 뒤 직접 확인한다(그 검사는 두

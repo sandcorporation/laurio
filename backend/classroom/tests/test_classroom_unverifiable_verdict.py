@@ -184,7 +184,7 @@ def test_claude_scoring_asks_for_the_three_values_too(client, db, monkeypatch, s
 
     [(_, _, kwargs)] = [c for c in calls if c[0] == "POST"]
     schema = kwargs["json"]["output_config"]["format"]["schema"]
-    assert "verdict" in next(iter(schema["properties"]["verdicts"]["properties"].values()))["required"]
+    assert "verdict" in schema["properties"]["verdicts"]["items"]["required"]
     [attempt] = mine(client, participant["access"], class_id, problem.id)["submissions"]
     assert attempt["passed"] is False
     assert [(r["is_met"], r["verdict"]) for r in attempt["score"]["reasoning"]] == [(False, "unverifiable")]
