@@ -23,14 +23,13 @@ const SINGLE = {
 const NONE = { sample_count: 0, median: null, p90: null };
 
 function calcOf(
-  overrides: { method?: string; route?: string; staged?: boolean; escalationKrw?: number | null; agentKrw?: number | null } = {},
+  overrides: { method?: string; route?: string; staged?: boolean; agentKrw?: number | null } = {},
 ): ScoringCalculator {
-  const { method = "single", route = "single", staged = false, escalationKrw = null, agentKrw = 400 } = overrides;
+  const { method = "single", route = "single", staged = false, agentKrw = 400 } = overrides;
   // 금액·크기 글자에 쓰는 칸만 채운 흉내
   return {
     selection: { model_id: "m", method },
     staged: { enabled: staged },
-    escalation: { model_id: escalationKrw === null ? null : "big", per_submission_krw: escalationKrw ?? 0 },
     rows: [
       {
         vendor: "openai",
@@ -102,11 +101,8 @@ describe("계산기 글자(#1308)", () => {
   it("에이전트는 에이전트 금액이다", () => {
     expect(submissionAmount(calcOf({ method: "agent" }))).toBe(formatKrw(400));
   });
-  it("새 채점기와 재판정 모델이 함께 있을 때만 금액에 재판정 몫이 합쳐진다", () => {
-    const plain = submissionAmount(calcOf({ staged: true }));
-    expect(submissionAmount(calcOf({ staged: false, escalationKrw: 5000 }))).toBe(plain);
-    expect(submissionAmount(calcOf({ staged: true, escalationKrw: 5000 }))).toBe(formatKrw(138 + 5000));
-    expect(submissionAmount(calcOf({ staged: true, escalationKrw: 5000 }))).not.toBe(plain);
+  it("제출 한 건은 고른 모델 하나의 값이다", () => {
+    expect(submissionAmount(calcOf({ staged: true }))).toBe(formatKrw(138));
   });
   it("글자 수는 만 단위로", () => {
     expect(charsLabel(32_000)).toBe("3.2만 자");

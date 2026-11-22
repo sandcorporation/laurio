@@ -154,16 +154,10 @@ describe("탭(#1033)", () => {
     expect(settingsOfTab(all, "etc").map((s) => s.key)).toEqual(["LLM_OPENAI_TEMPERATURE", "NEW_KEY"]);
   });
 
-  it("강의실 채점 설정은 갈래·재사용 뒤에 이어 AI 채점 탭에 선다", () => {
-    const keys = [
-      "CLASSROOM_TWO_STEP_BUDGET_CHARS",
-      "CLASSROOM_SCORE_REUSE",
-      "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
-      "CLASSROOM_SCORING_PIPELINE",
-    ];
+  it("강의실 채점 설정은 재사용 뒤에 이어 AI 채점 탭에 선다", () => {
+    const keys = ["CLASSROOM_TWO_STEP_BUDGET_CHARS", "CLASSROOM_SCORE_REUSE", "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"];
     const rows = keys.map((key) => setting({ key }));
     expect(settingsOfTab(rows, "ai").map((s) => s.key)).toEqual([
-      "CLASSROOM_SCORING_PIPELINE",
       "CLASSROOM_SCORE_REUSE",
       "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
       "CLASSROOM_TWO_STEP_BUDGET_CHARS",
@@ -180,8 +174,6 @@ describe("탭(#1033)", () => {
   it("채점 방식 값은 뜻을 말한다", () => {
     const method = setting({ key: "CONTEST_SCORING_METHOD", kind: "choice", choices: ["single_call", "agent"] });
     expect(choiceOptions(method)?.map((o) => o.label)).toEqual(["—", "한 번 호출", "에이전트"]);
-    const pipeline = setting({ key: "CLASSROOM_SCORING_PIPELINE", kind: "choice", choices: ["single_call", "staged"] });
-    expect(choiceOptions(pipeline)?.map((o) => o.label)).toEqual(["—", "한 번 호출", "기계 판정 먼저"]);
   });
 });
 

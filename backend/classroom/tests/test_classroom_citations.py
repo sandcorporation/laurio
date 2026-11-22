@@ -157,22 +157,10 @@ def _sequence(monkeypatch, bodies: list[list[dict]], sent: list[dict]) -> None:
     monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
 
 
-def _set_escalation_model(client, ctx, model: str):
-    return client.patch(
-        f"{CLASSES_URL}/{ctx['class_id']}",
-        data={"escalation_model": model},
-        content_type="application/json",
-        **auth_header(ctx["access"]),
-    )
-
-
-def _escalation_world(client, monkeypatch, bodies, sent, *, model: str = "gpt-5"):
+def _suspect_world(client, monkeypatch, bodies, sent):
     with force_real_scoring_adapter():
         ctx = _world(client, [("진입점이 있다", None), ("인용이 없다", None)])
         good, doubtful = ctx["item_ids"]
-        if model:
-            saved = _set_escalation_model(client, ctx, model)
-            assert saved.status_code == 200, saved.content
         _sequence(monkeypatch, [b(good, doubtful) for b in bodies], sent)
         run_scan(client)
     return ctx, good, doubtful
@@ -185,90 +173,38 @@ def _first(good, doubtful):
     ]
 
 
-def test_a_suspect_item_alone_goes_to_the_escalation_model_once(client, db, monkeypatch, staged):  # noqa: F811
-    sent: list[dict] = []
-    ctx, good, doubtful = _escalation_world(
-        client,
-        monkeypatch,
-        [
-            _first,
-            lambda g, d: [{"requirement_id": d, "is_met": True, "reasoning": "다시", "citations": [_cite("repo-1a2b/src/app.py", 4)]}],
-        ],
-        sent,
-    )
+def test_a_suspect_item_stays_suspect_and_no_second_model_is_called(client, db, monkeypatch, staged):  # noqa: F811
+    """의심 재판정은 없앴다(#1310) — 의심 표시는 남고, 다른 모델로 다시 묻지 않는다."""
 
-    assert len(sent) == 2
-    assert sent[1]["model"] == "gpt-5"
-    prompt = {m["role"]: m["content"] for m in sent[1]["messages"]}["user"]
-    assert f"requirement_id={doubtful} " in prompt and f"requirement_id={good} " not in prompt
-    assert list(sent[1]["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["properties"]) == [str(doubtful)]
-    # 인용된 파일이 없으면 첫 판정과 같은 소스를 싣는다.
-    assert "# repo-1a2b/src/app.py\n1\timport os" in prompt
+    sent: list[dict] = []
+    ctx, good, doubtful = _suspect_world(client, monkeypatch, [_first], sent)
+
+    assert len(sent) == 1
     by_id = {r["checklist_item_id"]: r for r in ClassroomScore.objects.get().reasoning}
-    assert (by_id[doubtful]["verdict"], by_id[doubtful]["suspect"], by_id[doubtful]["escalated"]) == ("met", False, True)
-    assert "escalated" not in by_id[good]
-    shown = {v["checklist_item_id"]: v for v in instructor_submissions(client, ctx["access"], ctx["class_id"], ctx["problem_id"])[0]["score"]["reasoning"]}
-    assert shown[doubtful]["escalated"] is True and "escalated" not in shown[good]
+    assert (by_id[doubtful]["verdict"], by_id[doubtful]["suspect"]) == ("met", True)
+    assert "escalated" not in by_id[doubtful] and "escalated" not in by_id[good]
 
 
-def test_escalation_that_also_fails_the_check_leaves_unmet_and_suspect(client, db, monkeypatch, staged):  # noqa: F811
-    sent: list[dict] = []
-    _, _, doubtful = _escalation_world(
-        client,
-        monkeypatch,
-        [_first, lambda g, d: [{"requirement_id": d, "is_met": True, "reasoning": "다시", "citations": [_cite("nope.py", 1)]}]],
-        sent,
-    )
+def test_the_class_has_no_escalation_model(client, db):
+    """클래스 응답에 의심 재판정 칸이 없고, 옛 클라이언트가 보내도 저장하지 않는다(#1310)."""
 
-    assert len(sent) == 2
-    entry = next(r for r in ClassroomScore.objects.get().reasoning if r["checklist_item_id"] == doubtful)
-    assert (entry["verdict"], entry["is_met"], entry["suspect"], entry["escalated"]) == ("unmet", False, True, True)
-
-
-def test_no_escalation_while_the_class_leaves_it_off(client, db, monkeypatch, staged):  # noqa: F811
-    sent: list[dict] = []
-    ctx, _, _ = _escalation_world(client, monkeypatch, [_first], sent, model="")
-
-    assert len(sent) == 1
-    shown = client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()
-    assert (shown["escalation_model"], shown["staged_scoring"]) == ("", True)
-    assert "gpt-5" in shown["escalation_model_options"] and not any(
-        m.startswith("claude-") for m in shown["escalation_model_options"]
-    )
-
-
-def test_no_escalation_without_staged_even_when_the_class_picked_a_model(client, db, monkeypatch):
-    sent: list[dict] = []
-    ctx, _, _ = _escalation_world(client, monkeypatch, [_first], sent)
-
-    assert len(sent) == 1
-    shown = client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()
-    assert (shown["escalation_model"], shown["staged_scoring"]) == ("gpt-5", False)
-
-
-@pytest.mark.parametrize("model", ["claude-sonnet-5-5", "no-such-model", " gpt-5"])
-def test_saving_a_model_the_class_connection_cannot_use_is_rejected(client, db, model):
     ctx = _world(client, [("진입점이 있다", None)])
 
-    response = _set_escalation_model(client, ctx, model)
+    response = client.patch(
+        f"{CLASSES_URL}/{ctx['class_id']}",
+        data={"escalation_model": "gpt-5"},
+        content_type="application/json",
+        **auth_header(ctx["access"]),
+    )
 
-    assert response.status_code == 422, response.content
-    assert "의심 재판정 모델" in response.json()["detail"]
-    assert client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()["escalation_model"] == ""
-
-
-def test_clearing_the_model_turns_escalation_off(client, db):
-    ctx = _world(client, [("진입점이 있다", None)])
-    assert _set_escalation_model(client, ctx, "gpt-5").status_code == 200
-
-    response = _set_escalation_model(client, ctx, "")
-
-    assert response.status_code == 200 and response.json()["escalation_model"] == ""
+    assert response.status_code == 200, response.content
+    shown = client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()
+    assert not {"escalation_model", "escalation_model_options", "staged_scoring"} & (set(response.json()) | set(shown))
 
 
 def test_no_suspect_means_one_call(client, db, monkeypatch, staged):  # noqa: F811
     sent: list[dict] = []
-    _escalation_world(
+    _suspect_world(
         client,
         monkeypatch,
         [lambda g, d: [{**v, "is_met": False} for v in _first(g, d)]],

@@ -6177,16 +6177,6 @@ export interface components {
             /** Default Reasoning Effort */
             default_reasoning_effort: string;
             /**
-             * Escalation Model
-             * @default
-             */
-            escalation_model: string;
-            /**
-             * Escalation Model Options
-             * @default []
-             */
-            escalation_model_options: string[];
-            /**
              * Grading Method Options
              * @default []
              */
@@ -6274,11 +6264,6 @@ export interface components {
             /** Scoring Server Url */
             scoring_server_url?: string | null;
             /**
-             * Staged Scoring
-             * @default false
-             */
-            staged_scoring: boolean;
-            /**
              * Token Usage Estimated
              * @default 0
              */
@@ -6294,8 +6279,6 @@ export interface components {
             default_model_is_reasoning?: boolean | null;
             /** Default Reasoning Effort */
             default_reasoning_effort?: string | null;
-            /** Escalation Model */
-            escalation_model?: string | null;
             /** Instructor Display Name */
             instructor_display_name?: string | null;
             /** Name */
@@ -10705,8 +10688,6 @@ export interface components {
             source_files: number;
             /** Source From */
             source_from: string;
-            /** Suspect Rate */
-            suspect_rate: number;
         };
         /**
          * ScoringCalculatorDefaultsOut
@@ -10719,34 +10700,6 @@ export interface components {
             source_chars_median: number;
             /** Source Chars P90 */
             source_chars_p90: number;
-            /** Suspect Rate */
-            suspect_rate: number;
-        };
-        /** ScoringCalculatorEscalationAttemptOut */
-        ScoringCalculatorEscalationAttemptOut: {
-            /** Input Tokens */
-            input_tokens: number;
-            /** Krw */
-            krw: number;
-            /** Open Ended */
-            open_ended: boolean;
-            /** Output Tokens */
-            output_tokens: number;
-            /** Usd */
-            usd: number;
-        };
-        /**
-         * ScoringCalculatorEscalationOut
-         * @description 의심 재판정(#1291) — 클래스가 고른 모델. 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`(「끔」).
-         */
-        ScoringCalculatorEscalationOut: {
-            /** Model Id */
-            model_id?: string | null;
-            /** Per Submission Krw */
-            per_submission_krw: number;
-            per_suspect?: components["schemas"]["ScoringCalculatorEscalationAttemptOut"] | null;
-            /** Suspect Rate */
-            suspect_rate: number;
         };
         /** ScoringCalculatorModelOut */
         ScoringCalculatorModelOut: {
@@ -10769,7 +10722,6 @@ export interface components {
             agent_vendors: string[];
             assumptions: components["schemas"]["ScoringCalculatorAssumptionsOut"];
             defaults: components["schemas"]["ScoringCalculatorDefaultsOut"];
-            escalation: components["schemas"]["ScoringCalculatorEscalationOut"];
             /** Krw Per Usd */
             krw_per_usd: number;
             /** Min Sample Count */
@@ -10785,11 +10737,6 @@ export interface components {
         };
         /** ScoringCalculatorProblemOut */
         ScoringCalculatorProblemOut: {
-            /**
-             * Escalation Instruction Chars
-             * @default 0
-             */
-            escalation_instruction_chars: number;
             /** Id */
             id: number;
             /** Instruction Chars */
@@ -14489,7 +14436,6 @@ export interface operations {
                 source?: string | null;
                 source_chars?: number | null;
                 requirements?: number | null;
-                suspect_rate?: number | null;
             };
             header?: never;
             path: {

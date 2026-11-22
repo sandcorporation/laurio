@@ -269,11 +269,11 @@ def test_an_empty_class_prices_every_model_by_both_methods_and_no_cell_is_missin
         "source_chars_per_file": 1_600,
         "requirements": 6,
         "instruction_chars": scoring_calculator.assumed_instruction_chars(6),
-        "suspect_rate": 0.025,
         "requirements_from": "assumed",
         "source_from": "assumed",
     }
-    assert calc["escalation"]["model_id"] is None
+    # 의심 재판정은 없앴다(#1310) — 제출 한 건은 고른 모델 하나의 값이다.
+    assert "escalation" not in calc and "suspect_rate" not in calc["defaults"]
 
 
 def test_both_providers_are_offered_and_the_missing_key_is_marked(client, db):
@@ -360,7 +360,8 @@ def test_staged_makes_a_307k_single_call_cheaper_than_off(client, db, monkeypatc
     owner = login(client, uid="owner")
     class_id = create_class(client, owner["access"])
     off = _calc(client, owner["access"], class_id, source_chars=307_000)
-    monkeypatch.setenv("CLASSROOM_SCORING_PIPELINE", "staged")
+    # staged 는 운영에서 켤 수 없다(#1310) — 남은 셈을 덮으려고 갈래 함수만 바꿔 끼운다.
+    monkeypatch.setattr("classroom.scoring_calculator.classroom_scoring_pipeline", lambda: "staged")
 
     on = _calc(client, owner["access"], class_id, source_chars=307_000)
 
@@ -497,55 +498,3 @@ def test_three_agent_runs_put_the_measured_median_beside_the_unchanged_estimate(
     assert agent["measured_seconds"] == {"sample_count": 3, "median": 1.0, "p90": 1.0}
     # 다른 모델의 실측은 섞지 않는다.
     assert _row(calc, "claude-sonnet-5-5")["agent"]["measured_krw"]["median"] is None
-
-
-def _class_with_escalation(client, model: str) -> tuple[str, int]:
-    owner = login(client, uid="owner")
-    class_id = create_class(client, owner["access"])
-    create_open_problem(client, owner["access"], class_id, required_labels=["가", "나", "다"])
-    if model:
-        response = client.patch(
-            f"{CLASSES_URL}/{class_id}",
-            data={"escalation_model": model},
-            content_type="application/json",
-            **auth_header(owner["access"]),
-        )
-        assert response.status_code == 200, response.content
-    return owner["access"], class_id
-
-
-def test_the_escalation_line_prices_one_suspect_and_multiplies_by_the_assumed_rate_and_items(client, db, monkeypatch):
-    """의심 재판정 줄(#1291) — 고른 모델의 단가로 의심 한 건(같은 소스 + 항목 하나) × 비율(가정) × 항목 수."""
-
-    access, class_id = _class_with_escalation(client, "gpt-4.1")
-
-    calc = _calc(client, access, class_id)
-
-    escalation = calc["escalation"]
-    (problem,) = calc["problems"]
-    expected = scoring_cost.attempt_cost(
-        "gpt-4.1",
-        None,
-        prompt_chars=calc["selection"]["source_chars"] + problem["escalation_instruction_chars"],
-        output_tokens=scoring_calculator.OUTPUT_TOKENS_PER_REQUIREMENT,
-    )
-    assert escalation["model_id"] == "gpt-4.1"
-    assert escalation["per_suspect"]["usd"] == pytest.approx(expected.usd)
-    assert escalation["per_suspect"]["output_tokens"] == scoring_calculator.OUTPUT_TOKENS_PER_REQUIREMENT
-    assert escalation["suspect_rate"] == scoring_calculator.ASSUMED_SUSPECT_RATE
-    assert escalation["per_submission_krw"] == pytest.approx(
-        expected.usd * scoring_cost.KRW_PER_USD * 0.025 * problem["requirement_count"]
-    )
-    more = _calc(client, access, class_id, suspect_rate=0.1)
-    assert more["escalation"]["per_submission_krw"] == pytest.approx(escalation["per_submission_krw"] * 4)
-    monkeypatch.setitem(scoring_cost.PRICES, "gpt-4.1", scoring_cost.ModelPrice(input_usd_per_million=20.0, output_usd_per_million=80.0))
-    assert _calc(client, access, class_id)["escalation"]["per_suspect"]["usd"] == pytest.approx(expected.usd * 10)
-
-
-def test_no_escalation_line_while_it_is_off_or_for_the_other_provider(client, db):
-    access, class_id = _class_with_escalation(client, "")
-    off = _calc(client, access, class_id)["escalation"]
-    assert (off["model_id"], off["per_suspect"], off["per_submission_krw"]) == (None, None, 0)
-
-    access, class_id = _class_with_escalation(client, "gpt-4.1")
-    assert _calc(client, access, class_id, vendor="anthropic")["escalation"]["model_id"] is None

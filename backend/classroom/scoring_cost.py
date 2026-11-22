@@ -151,24 +151,6 @@ def price_for(model_id: str) -> ModelPrice | None:
     return PRICES.get(model_id) or PRICES.get(canonical_model_id(model_id))
 
 
-def escalation_models_for(connection_kind: str) -> list[str]:
-    """의심 재판정에 고를 수 있는 모델(#1285, #1291) — 그 연결의 프로바이더 단가표 모델만, 표 순서 그대로. Claude 키
-    연결은 Claude 모델, OpenAI 키는 그 밖의 모델이고, 호환 서버는 단가표가 없어 고를 수 없다(빈 목록)."""
-
-    if connection_kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
-        return [m for m in PRICES if is_claude_model_id(m)]
-    if connection_kind == Class.ScoringConnectionKind.OPENAI_KEY:
-        return [m for m in PRICES if not is_claude_model_id(m)]
-    return []
-
-
-def usable_escalation_model(class_obj: Class) -> str:
-    """이 클래스가 지금 쓸 의심 재판정 모델 — 꺼져 있거나 지금 연결로 쓸 수 없으면(저장 뒤 연결을 바꿨다) 빈 문자열."""
-
-    model = (class_obj.escalation_model or "").strip()
-    return model if model in escalation_models_for(class_obj.scoring_connection_kind) else ""
-
-
 def sum_known_krw(amounts: "list[float | None]") -> tuple[float, bool]:
     """여러 모델의 원화를 더한다 — (합계, 일부 미포함). 단가를 모르는 항목(`None`)은 합계에 넣지 않고
     `True` 로 알린다: 모르는 것을 0원으로 더해 합계가 작아 보이게 하지 않는다(#797)."""

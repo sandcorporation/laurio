@@ -256,7 +256,10 @@ def _world(client, items: list[tuple[str, dict | None]]) -> dict:
 
 @pytest.fixture
 def staged(monkeypatch):
-    monkeypatch.setenv("CLASSROOM_SCORING_PIPELINE", "staged")
+    """staged 는 2026-11-22 부터 운영에서 켤 수 없다(#1310) — 남은 staged 코드를 덮으려고 갈래 함수만 바꿔 끼운다."""
+
+    monkeypatch.setattr("classroom.scoring.classroom_scoring_pipeline", lambda: "staged")
+    monkeypatch.setattr("classroom.scoring_calculator.classroom_scoring_pipeline", lambda: "staged")
 
 
 def test_a_machine_only_problem_calls_no_vendor(client, db, monkeypatch, staged):
@@ -333,6 +336,36 @@ def test_single_call_ignores_the_rules(client, db, monkeypatch):
     assert len(sent) == 1
     score = ClassroomScore.objects.get()
     assert score.reasoning == [
+        {"checklist_item_id": ctx["item_ids"][0], "is_met": True, "verdict": "met", "reasoning": "판정 근거"}
+    ]
+
+
+def test_a_leftover_staged_setting_still_scores_with_one_call(client, db, monkeypatch):
+    """staged 는 영구히 꺼졌다(#1310) — 운영 DB 에 `CLASSROOM_SCORING_PIPELINE=staged` 행이, 환경변수에 같은 값이
+    남아 있어도 오류 없이 무시되고 한 번 호출로 돈다(기계 판정·출처 없음). 그 행은 이제 API 로 만들 수 없어 ORM 으로 둔다."""
+
+    from django.contrib.auth import get_user_model
+    from django.utils import timezone
+
+    from policies.models import RuntimeSetting
+
+    monkeypatch.setenv("CLASSROOM_SCORING_PIPELINE", "staged")
+    RuntimeSetting.objects.create(
+        key="CLASSROOM_SCORING_PIPELINE",
+        stored="staged",
+        updated_at=timezone.now(),
+        updated_by=get_user_model().objects.create_user(username="old-operator", password="pw-unused-1310"),
+    )
+    sent: list[dict] = []
+    with force_real_scoring_adapter():
+        ctx = _world(client, [("src/app.py 가 있다", {"kind": "path_exists", "path": "src/app.py"})])
+        respond_with_verdicts(
+            monkeypatch, [{"requirement_id": ctx["item_ids"][0], "is_met": True, "reasoning": "판정 근거"}], capture=sent
+        )
+        run_scan(client)
+
+    assert len(sent) == 1
+    assert ClassroomScore.objects.get().reasoning == [
         {"checklist_item_id": ctx["item_ids"][0], "is_met": True, "verdict": "met", "reasoning": "판정 근거"}
     ]
 

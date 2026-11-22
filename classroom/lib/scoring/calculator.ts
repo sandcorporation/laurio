@@ -17,11 +17,10 @@ export type CalculatorChoice = {
   source?: string;
   sourceChars?: number;
   requirements?: number;
-  suspectRate?: number;
 };
 
 /** 가정 칸 — 입력으로 바꿔 보는 것. */
-export type AssumptionField = "sourceChars" | "requirements" | "suspectRate";
+export type AssumptionField = "sourceChars" | "requirements";
 
 const QUERY_NAMES: [keyof CalculatorChoice, string][] = [
   ["vendor", "vendor"],
@@ -31,7 +30,6 @@ const QUERY_NAMES: [keyof CalculatorChoice, string][] = [
   ["source", "source"],
   ["sourceChars", "source_chars"],
   ["requirements", "requirements"],
-  ["suspectRate", "suspect_rate"],
 ];
 
 export function calculatorPath(classId: number, choice: CalculatorChoice): string {
@@ -93,16 +91,14 @@ export function selectedRow(calc: ScoringCalculator): CalculatorRow | undefined 
 }
 
 /**
- * 「제출 한 건」 — 고른 칸의 예상 금액. 한 번 호출이 입력 크기를 담지 못하면 보류 글자다.
- * 새 채점기가 켜져 있고 이 클래스에 재판정 모델이 있으면 그 몫을 같은 금액에 합친다(줄을 따로 두지 않는다).
+ * 「제출 한 건」 — 고른 칸(모델 하나)의 예상 금액. 한 번 호출이 입력 크기를 담지 못하면 보류 글자다.
  */
 export function submissionAmount(calc: ScoringCalculator): string {
   const row = selectedRow(calc);
   if (!row) return "";
   if (calc.selection.method === "agent" && row.agent.available && row.agent.krw != null) return formatKrw(row.agent.krw);
   if (row.single.route === "hold") return HOLD_TEXT;
-  const extra = calc.staged.enabled && calc.escalation.model_id ? calc.escalation.per_submission_krw : 0;
-  return formatKrw(row.single.krw + extra, row.single.open_ended);
+  return formatKrw(row.single.krw, row.single.open_ended);
 }
 
 /** 「담는 크기」 — 한 번 호출에 담을 수 있는 글자 수 · 소스 파일 수. */

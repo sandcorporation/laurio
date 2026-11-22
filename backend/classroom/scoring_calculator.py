@@ -13,8 +13,8 @@
 `classroom.scoring._build_prompt` 가 소스 없이 만드는 글자 수, 없으면 `INSTRUCTION_*` 상수), 출력은 요구사항 수 ×
 `OUTPUT_TOKENS_PER_REQUIREMENT`(추론하는 모델이면 강도별 추론 몫을 더한다). **감당 크기**는 채점이 실제로 쓰는
 `core.model_context.source_budget_bytes` 를 그대로 부른 값이다(바이트 → 글자는 `BYTES_PER_CHAR`). 소스가 그것을 넘으면
-자르지 않고 「크기 초과」 보류다(#989) — 채점하지 않으니 금액은 0 이다. 새 채점기(staged, 운영 설정
-`CLASSROOM_SCORING_PIPELINE`)가 켜져 있으면 「한 번 호출」 칸이 **실제로 돌 갈래의 셈**을 쓴다 — 두 걸음 문턱을 넘거나 모델
+자르지 않고 「크기 초과」 보류다(#989) — 채점하지 않으니 금액은 0 이다. 새 채점기(staged, 2026-11-22 부터 꺼짐
+고정 — `classroom_scoring_pipeline`)가 켜져 있으면 「한 번 호출」 칸이 **실제로 돌 갈래의 셈**을 쓴다 — 두 걸음 문턱을 넘거나 모델
 예산에 다 안 들어가면 두 걸음이고(1차 지시문만, 2차 소스는 상한까지), 기계 판정 몫은 출력 항목 수에서 뺀다.
 
 **에이전트**는 프로바이더별 토큰 꼴(`AGENT_TOKENS`) × 그 모델 단가(`core.agent_run_tokens.usage_cost_usd`)다. 입력·캐시
@@ -69,8 +69,6 @@ ASSUMED_SOURCE_CHARS_MEDIAN = 32_000
 ASSUMED_SOURCE_CHARS_P90 = 307_000
 #: 체크리스트 항목 수 — 운영 문제 64개의 항목 수 p50(p90 은 21).
 ASSUMED_REQUIREMENTS = 6
-#: 의심 비율 — dev 실험 에이전트 근거 인용 불일치 haiku 2.3%·sonnet 2.6%. staged 실측이 없어 「가정」이다.
-ASSUMED_SUSPECT_RATE = 0.025
 #: staged 에서 기계 판정(정적 검사)이 맡는 항목 몫 — 운영 실제 채점 가중 정적 몫 19%(조율자 #5332). 모델에게 묻는 항목에서 빠진다.
 MACHINE_JUDGED_SHARE = 0.19
 
@@ -78,8 +76,6 @@ MACHINE_JUDGED_SHARE = 0.19
 #: (2026-11-22: 1,287·1,363·1,478·1,719자 → 머리 약 1,250 + 항목당 약 40). 문제가 없는 클래스의 지시문 몫이다.
 INSTRUCTION_BASE_CHARS = 1_250
 INSTRUCTION_CHARS_PER_REQUIREMENT = 40
-#: 의심 재판정 한 건의 지시문 글자 수(항목 하나짜리 인용 프롬프트, 소스 없이) — 같은 고정 문제에서 1,434~1,436자.
-ESCALATION_INSTRUCTION_CHARS = 1_435
 
 #: 바이트 ↔ 글자 — 실제 채점은 소스를 **바이트**로 자른다(`scoring._scoring_source_files`, `source_budget_bytes`).
 #: 운영 제출 30건(truth30 가명 사본, `.git`·`node_modules` 뺀 UTF-8 파일)의 바이트/글자 p50 1.032, 최소 1.0, 최대 1.482,
@@ -151,8 +147,6 @@ class ProblemOption:
     #: 실측 소스 크기에 쓴 한 번 호출 시도 수.
     sample_count: int
     sources: tuple[SourceOption, ...]
-    #: 의심 재판정 한 건의 지시문 글자 수 — 가장 긴 항목 하나만 실은 인용 프롬프트(소스 없이).
-    escalation_instruction_chars: int = 0
 
 
 @dataclass(frozen=True)
@@ -215,19 +209,6 @@ class ModelRow:
 
 
 @dataclass(frozen=True)
-class Escalation:
-    """의심 재판정(#1291) — 모델이 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`(「끔」)."""
-
-    model_id: str | None
-    #: 의심 한 건을 다시 판정하는 예상.
-    per_suspect: scoring_cost.AttemptCost | None
-    #: 의심 비율(가정).
-    suspect_rate: float
-    #: 제출 한 건에 더해지는 예상(USD) = 의심 한 건 × 비율 × 항목 수. 꺼졌으면 0.
-    per_submission_usd: float
-
-
-@dataclass(frozen=True)
 class Selection:
     vendor: Vendor
     method: Method
@@ -245,7 +226,6 @@ class Assumptions:
     source_chars: int
     requirements: int
     instruction_chars: int
-    suspect_rate: float
     requirements_from: Literal["problem", "assumed", "custom"]
     source_from: Literal["problem", "assumed", "custom"]
 
@@ -256,7 +236,6 @@ class Overrides:
 
     source_chars: int | None = None
     requirements: int | None = None
-    suspect_rate: float | None = None
 
 
 @dataclass(frozen=True)
@@ -281,7 +260,6 @@ class Calculation:
     two_step_threshold_chars: int
     two_step_budget_chars: int
     agent_limits: AgentLimits
-    escalation: Escalation
 
     @property
     def selected(self) -> ModelRow:
@@ -326,22 +304,6 @@ def _instruction_chars(problem: Problem) -> int:
     return len(prompt)
 
 
-def _escalation_instruction_chars(problem: Problem) -> int:
-    """의심 재판정 프롬프트(`classroom.scoring._escalation_input`)에서 소스를 뺀 몫 — 항목 하나짜리 중 가장 긴 것."""
-
-    from .scoring import _build_prompt
-    from .syntax_check import DISABLED_SYNTAX_CHECK
-
-    submission = ClassroomSubmission(problem=problem)
-    return max(
-        (
-            len(_build_prompt(submission, [item], "", asset_kind="source", syntax_check=DISABLED_SYNTAX_CHECK, cite=True))
-            for item in problem.checklist_items.all()
-        ),
-        default=0,
-    )
-
-
 def _assumed_sources() -> tuple[SourceOption, ...]:
     return (
         SourceOption("median", ASSUMED_SOURCE_CHARS_MEDIAN, False),
@@ -373,7 +335,6 @@ def _problem_option(problem: Problem) -> ProblemOption:
         instruction_chars=instruction,
         sample_count=spread.sample_count,
         sources=sources,
-        escalation_instruction_chars=_escalation_instruction_chars(problem),
     )
 
 
@@ -609,14 +570,10 @@ def calculate(
         requirements = ASSUMED_REQUIREMENTS
         instruction = assumed_instruction_chars(requirements)
         requirements_from = "assumed"
-    escalation_instruction = (
-        problem.escalation_instruction_chars if problem is not None and problem.escalation_instruction_chars else ESCALATION_INSTRUCTION_CHARS
-    )
     assumptions = Assumptions(
         source_chars=source_chars,
         requirements=requirements,
         instruction_chars=instruction,
-        suspect_rate=overrides.suspect_rate if overrides.suspect_rate is not None and overrides.suspect_rate >= 0 else ASSUMED_SUSPECT_RATE,
         requirements_from=requirements_from,
         source_from=source_from,
     )
@@ -657,14 +614,6 @@ def calculate(
         source=source_key,
         source_chars=source_chars,
     )
-    escalated = escalation(
-        class_obj,
-        chosen_vendor,
-        source_chars=source_chars,
-        instruction_chars=escalation_instruction,
-        suspect_rate=assumptions.suspect_rate,
-        requirements=requirements,
-    )
     return Calculation(
         providers=providers,
         agent_vendors=tuple(v for v in VENDORS if v in AGENT_VERIFIED_VENDORS),
@@ -676,30 +625,4 @@ def calculate(
         two_step_threshold_chars=threshold,
         two_step_budget_chars=budget,
         agent_limits=_agent_limits(),
-        escalation=escalated,
     )
-
-
-def escalation(
-    class_obj: Class,
-    vendor: Vendor,
-    *,
-    source_chars: int,
-    instruction_chars: int,
-    suspect_rate: float,
-    requirements: int,
-) -> Escalation:
-    """클래스가 고른 의심 재판정 모델로 의심 한 건 — 그 모델이 고른 프로바이더 것이 아니면 셈하지 않는다(「끔」)."""
-
-    model_id = class_obj.escalation_model if class_obj.escalation_model in models_for(vendor) else None
-    if model_id is None:
-        return Escalation(model_id=None, per_suspect=None, suspect_rate=suspect_rate, per_submission_usd=0.0)
-    effort = scoring_cost.effort_for(model_id, class_obj.default_reasoning_effort or None)
-    output_tokens = OUTPUT_TOKENS_PER_REQUIREMENT
-    if effort is not None:
-        output_tokens += scoring_cost.REASONING_OUTPUT_TOKENS[effort] - scoring_cost.NON_REASONING_OUTPUT_TOKENS
-    cost = scoring_cost.attempt_cost(
-        model_id, effort, prompt_chars=source_chars + instruction_chars, output_tokens=output_tokens
-    )
-    per_submission = cost.usd * suspect_rate * requirements if cost is not None else 0.0
-    return Escalation(model_id=model_id, per_suspect=cost, suspect_rate=suspect_rate, per_submission_usd=per_submission)

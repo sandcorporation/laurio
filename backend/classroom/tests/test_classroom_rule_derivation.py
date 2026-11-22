@@ -11,7 +11,7 @@ import pytest
 
 from classroom import rule_derivation
 from classroom.models import ChecklistItem, Class, ClassroomScore
-from classroom.tests.test_classroom_machine_check import TREE, _item_url, _world
+from classroom.tests.test_classroom_machine_check import TREE, _item_url, _world, staged  # noqa: F401  # 갈래 바꿔 끼우기(#1310)
 from tests.classroom_scenarios import (
     CLASSES_URL,
     DERIVATION_PROMPT_HEAD,
@@ -37,9 +37,6 @@ APP_EXISTS = {"kind": "static", "rule": {"kind": "path_exists", "path": "**/src/
 RUNS = {"kind": "run", "rule": None}
 
 
-@pytest.fixture
-def staged(monkeypatch):
-    monkeypatch.setenv("CLASSROOM_SCORING_PIPELINE", "staged")
 
 
 class Vendor:

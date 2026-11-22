@@ -1,5 +1,5 @@
 """기계 판정(#1283, 스펙 #1282, CONTEXT.md 「기계 판정」) — 체크리스트 항목에 붙은 기계 확인 규칙을 코드가
-소스 트리에서 직접 확인한다. staged 채점 갈래(`classroom.scoring`, 운영 설정 `CLASSROOM_SCORING_PIPELINE`)만 쓴다.
+소스 트리에서 직접 확인한다. staged 채점 갈래(`classroom.scoring`, 2026-11-22 부터 꺼짐 고정 — `classroom_scoring_pipeline`)만 쓴다.
 
 규칙 꼴은 셋이다(정적 꼴만 — 빌드·시험 실행은 하지 않는다):
 
