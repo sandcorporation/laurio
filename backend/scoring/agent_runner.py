@@ -160,7 +160,7 @@ class RunResult(TypedDict):
     stderr_tail: str
     #: 실행 전이나 실패한 실행 뒤에 프록시에 닿지 못했으면 그 까닭(#1326), 닿았으면 None. 실행 전에 닿지 못하면
     #: CLI·루프를 띄우지 않는다(`exit_code` None, 빈 stdout).
-    proxy_unreachable: ProxyFailure | None
+    proxy_unreachable: NotRequired[ProxyFailure | None]
 
 
 class RunRejected(Exception):

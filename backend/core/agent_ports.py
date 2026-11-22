@@ -50,6 +50,10 @@ class RunSpec(TypedDict):
     repo_kind: NotRequired[RepoKind]  # #1278 — 없으면 repository. 백엔드는 늘 박제본의 `kind` 를 싣는다
 
 
+#: `scoring.agent_runner.ProxyFailure` — 실행기가 프록시에 닿지 못한 까닭(#1326).
+ProxyFailure = Literal["connection_refused", "name_resolution", "timeout", "connect_error"]
+
+
 class RunResult(TypedDict):
     """실행 하나의 결과 — `scoring.agent_runner.RunResult` 와 같은 모양."""
 
@@ -63,8 +67,8 @@ class RunResult(TypedDict):
     stdout: str
     stdout_truncated: bool
     stderr_tail: str
-    #: 실행기가 모델 호출 프록시에 닿지 못한 까닭(#1326) — `scoring.agent_runner.ProxyFailure`. 닿았으면 None.
-    proxy_unreachable: NotRequired[str | None]
+    #: 실행기가 모델 호출 프록시에 닿지 못한 까닭(#1326). 닿았으면 None. 이 칸이 없으면 프록시 확인 전 판의 실행기다.
+    proxy_unreachable: NotRequired[ProxyFailure | None]
 
 
 class AgentGrader(Protocol):
