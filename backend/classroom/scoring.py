@@ -62,6 +62,8 @@ Appeal을 모른다). **벤더가 키 자체를 거절했을 때(401·403,
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import sys
 import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -103,7 +105,13 @@ from policies.runtime_settings import classroom_score_reuse_enabled
 from core.model_context import source_budget_bytes
 from core.source_selection import SelectionOmission, select_source_files, select_source_files_with_omission
 from notifications.models import NotificationType
-from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_escalation_model, classroom_scoring_pipeline
+from policies.runtime_settings import (
+    CLASSROOM_PIPELINE_STAGED,
+    classroom_escalation_model,
+    classroom_scoring_pipeline,
+    classroom_two_step_budget_chars,
+    classroom_two_step_threshold_chars,
+)
 from notifications.services import create_notification, notify_safely
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
@@ -130,6 +138,7 @@ from .scoring_connection import (
     mark_verified,
     openai_key_connection,
 )
+from . import two_step
 from .syntax_check import DISABLED_SYNTAX_CHECK, SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
 from .verdicts import VERDICT_MET, VERDICT_UNMET, entry_from_model, reasoning_entry
 
@@ -841,6 +850,8 @@ class PreparedScoring:
     escalation_effort: str | None = None
     #: 이 시도가 낸 자료의 형식 — 의심 올림 프롬프트가 쓴다(#1285).
     asset_kind: str = ""
+    #: 두 걸음(#1286) — 있으면 `prompt`·`scoring_input` 은 1차(파일 고르기) 것이고, 벤더 호출이 2차를 짓는다.
+    two_step: two_step.TwoStepPlan | None = None
 
 
 @dataclass
@@ -861,14 +872,19 @@ class VendorOutcome:
     reused: ClassroomScore | None = None
     #: staged 의심 항목을 상위 모델로 다시 판정한 결과(#1285) — 올리지 않았거나 올림 호출이 실패했으면 None.
     escalation: ScoringOutput | None = None
+    #: 두 걸음의 1차(파일 고르기) 응답(#1286) — 토큰을 함께 센다.
+    selection: ScoringOutput | None = None
+    #: 두 걸음의 2차 준비(#1286) — 실은 파일·프롬프트가 이것이라 결과 쓰기가 이것으로 대조·저장한다.
+    second_step: PreparedScoring | None = None
 
 
 def reusable_outcome(prepared: PreparedScoring) -> VendorOutcome | None:
     """운영 설정 `CLASSROOM_SCORE_REUSE` 가 켜져 있고 같은 입력의 이전 점수가 있으면 벤더 대신 그것을 돌려준다(#1287).
     **DB 를 읽는다** — grader 는 DB 스레드에서 부른다. 에이전트 방식은 프롬프트가 입력 전부가 아니라 재사용하지 않는다."""
 
-    if prepared.agent or prepared.skip_vendor or not classroom_score_reuse_enabled():
-        # 기계 판정만인 채점(#1283)은 벤더를 부르지 않으니 재사용할 것이 없다.
+    if prepared.agent or prepared.skip_vendor or prepared.two_step is not None or not classroom_score_reuse_enabled():
+        # 기계 판정만인 채점(#1283)은 벤더를 부르지 않으니 재사용할 것이 없다. 두 걸음(#1286)은 1차 프롬프트가 소스
+        # 내용을 담지 않아 「같은 입력」을 프롬프트로 가릴 수 없다.
         return None
     source = score_reuse.find_by_prompt(
         prepared.problem,
@@ -899,6 +915,9 @@ class _Head:
     staged: bool = False
     #: staged 의심 올림 모델(#1285, 운영 설정 `CLASSROOM_ESCALATION_MODEL`) — 이 연결로 쓸 수 없으면 빈 문자열.
     escalation_model: str = ""
+    #: staged 두 걸음 문턱·2차 상한(#1286, 글자) — 문턱 0 이면 끔.
+    two_step_threshold: int = 0
+    two_step_budget: int = 0
 
 
 def _prepare_head(
@@ -964,6 +983,8 @@ def _prepare_head(
         pause_recheck=pause_recheck,
         staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
         escalation_model=_escalation_model_for(connection),
+        two_step_threshold=classroom_two_step_threshold_chars(),
+        two_step_budget=classroom_two_step_budget_chars(),
     )
 
 
@@ -1066,10 +1087,7 @@ def _escalated_entry(verdict: RequirementVerdict, sent_lines: Mapping[str, tuple
 def _numbered_source_text(files: list[SourceFile]) -> str:
     """staged 프롬프트의 소스(#1284) — 줄마다 번호를 붙여 모델이 `경로:줄` 로 인용할 수 있게 한다."""
 
-    return "\n\n".join(
-        f"# {f.path}\n" + "\n".join(f"{number}\t{line}" for number, line in enumerate(f.content.splitlines(), start=1))
-        for f in files
-    )
+    return two_step.numbered_source_text(files)
 
 
 def _staged_split(
@@ -1084,6 +1102,135 @@ def _staged_split(
     decided = {item_id: v for item_id, v in verdicts.items() if v.decided}
     machine_entries = tuple(_machine_entry(item.id, decided[item.id]) for item in checklist_items if item.id in decided)
     return [item for item in checklist_items if item.id not in decided], machine_entries
+
+
+def _two_step_plan(
+    head: _Head,
+    asked_items: list[ChecklistItem],
+    raw: bytes,
+    fallback_files: list[SourceFile],
+    omission: SelectionOmission,
+) -> two_step.TwoStepPlan | None:
+    """두 걸음으로 갈 것인가(#1286) — 판단 항목에 실을 소스(고를 수 있는 파일 전부, 줄 번호를 붙인 글자)가 문턱을 넘거나,
+    모델 예산에 다 들어가지 않으면(그때는 크기 초과 보류 #989 대신) 간다."""
+
+    candidates, _ = select_source_files_with_omission(
+        [(head.asset.id, head.asset.label, raw)], max_bytes=sys.maxsize
+    )
+    if not omission.any and len(two_step.numbered_source_text(candidates)) <= head.two_step_threshold:
+        return None
+    return two_step.TwoStepPlan(
+        files=tuple(candidates),
+        fallback_files=tuple(fallback_files),
+        item_ids=tuple(item.id for item in asked_items),
+        budget_chars=head.two_step_budget,
+        selection_prompt=_selection_prompt(head.submission, asked_items, candidates, asset_kind=head.asset.kind),
+        asset_id=head.asset.id,
+        asset_label=head.asset.label,
+    )
+
+
+def _selection_prompt(
+    submission: ClassroomSubmission, asked_items: list[ChecklistItem], files: list[SourceFile], *, asset_kind: str
+) -> str:
+    """두 걸음의 1차 프롬프트(#1286) — 문제·판단 항목·파일 목록만. 소스 내용은 싣지 않는다."""
+
+    problem = submission.problem
+    lines = [f"문제 제목: {problem.title}"]
+    if problem.description:
+        lines.append(f"문제 설명: {problem.description}")
+    lines.extend(["", two_step.SELECTION_RULE, "", "체크리스트:"])
+    for item in asked_items:
+        grade = "필수" if item.required else "선택"
+        lines.append(f"- requirement_id={item.id} ({grade}): {item.label}")
+    lines.extend(["", f"제출 형식: {asset_kind}", "", "파일 목록:", two_step.listing_text(files)])
+    return "\n".join(lines)
+
+
+def _second_step(prepared: PreparedScoring, selection: ScoringOutput) -> PreparedScoring:
+    """1차 응답으로 2차 준비를 짓는다(#1286) — 고른 파일만 상한 안에서, 없으면 지금의 소스 고르기로. DB 를 쓰지 않는다."""
+
+    plan = prepared.two_step
+    assert plan is not None
+    files = two_step.second_step_files(selection, plan)
+    asked = [item for item in prepared.checklist_items if item.id in set(plan.item_ids)]
+    prompt, scoring_input = _scoring_request(
+        prepared.submission,
+        asked,
+        _numbered_source_text(files),
+        files,
+        asset_id=plan.asset_id,
+        asset_label=plan.asset_label,
+        asset_kind=prepared.asset_kind,
+        syntax_check=prepared.syntax_check,
+        staged=True,
+    )
+    return dataclasses.replace(
+        prepared,
+        prompt=prompt,
+        scoring_input=scoring_input,
+        sent_files=tuple(files),
+        sent_lines={evidence_check.normalize_path(f.path): tuple(f.content.splitlines()) for f in files},
+    )
+
+
+def _scoring_request(
+    submission: ClassroomSubmission,
+    asked_items: list[ChecklistItem],
+    source_text: str,
+    sent_files: list[SourceFile],
+    *,
+    asset_id: int,
+    asset_label: str,
+    asset_kind: str,
+    syntax_check: SyntaxCheckPass,
+    staged: bool,
+) -> tuple[str, ScoringInput]:
+    """판정 요청 하나(프롬프트와 어댑터 입력) — 한 번 호출과 두 걸음의 2차(#1286)가 같이 쓴다. DB 를 쓰지 않는다."""
+
+    prompt = _build_prompt(
+        submission,
+        asked_items,
+        source_text,
+        asset_kind=asset_kind,
+        syntax_check=syntax_check,
+        cite=staged,
+    )
+    requirements = _requirement_inputs(asked_items)
+    # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
+    # prompt만 읽어 실제 벤더 요청에는 영향이 없지만(모듈 docstring),
+    # FakeClassroomScoringAdapter는 `source_files`에서 haystack을 만들어
+    # dev·CI에서도 이 항목을 결정적으로 흉내낼 수 있게 한다.
+    # staged(#1284)는 실은 파일을 그대로 둔다 — 흉내 어댑터가 실제 경로·줄로 인용을 낸다.
+    sent_source_files = (
+        list(sent_files)
+        if staged
+        else [SourceFile(path=f"asset-{asset_id}", content=source_text, asset_id=asset_id, asset_label=asset_label)]
+    )
+    source_files = [
+        *sent_source_files,
+        *syntax_check.extra_source_files(asset_id=asset_id, asset_label=asset_label),
+    ]
+    synthetic_requirement = syntax_check.synthetic_requirement()
+    if synthetic_requirement is not None:
+        requirements = [*requirements, synthetic_requirement]
+    scoring_input = ScoringInput(
+        submission_id=submission.id,
+        # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
+        # 그 값을 실제로 읽지 않는다(어댑터는 prompt·requirements만 본다) —
+        # 공유 dataclass를 건드리지 않으려고 problem.id로 채워 둔다.
+        contest_id=submission.problem_id,
+        prompt=prompt,
+        # OpenAIScoringAdapter는 이 필드를 읽지 않는다(prompt만 본다) — 채워 두는
+        # 이유는 FakeClassroomScoringAdapter가 소스 자체(체크리스트 문구가
+        # 나열된 prompt 전체가 아니라)만 검사 대상으로 삼기 위해서다(#340).
+        # `path`는 정체성 자리라 참가자가 붙인 자유 텍스트(`asset.label`)를
+        # 넣지 않는다(core.llm_scoring.SourceFile) — 그 문구는 `asset_label`이 쓰는 자리다.
+        source_files=source_files,
+        requirements=requirements,
+        ask_citations=staged,
+    )
+    return prompt, scoring_input
 
 
 def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
@@ -1154,6 +1301,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     source_text = source.text
     sent_files: list[SourceFile] = []
     sent_lines: dict[str, tuple[str, ...]] = {}
+    plan: two_step.TwoStepPlan | None = None
     if not uses_agent:
         # 한 번 호출 채점(#989): 소스를 이 모델의 예산으로 고르고, 다 들어가지 않으면 자르지 않고 벤더를 부르지
         # 않은 채 「크기 초과」 보류로 둔다. 지시문 몫에는 문법 검사 덧붙임(파서가 못 본 파일의 전문)이 든다.
@@ -1172,55 +1320,38 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
             sent_lines = {
                 evidence_check.normalize_path(f.path): tuple(f.content.splitlines()) for f in sent_files
             }
-        if omission.any:
+        if staged and asked_items and head.two_step_threshold > 0:
+            plan = _two_step_plan(head, asked_items, source.raw, sent_files, omission)
+        if omission.any and plan is None:
             detail = (
                 f"소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 (omitted_files={omission.omitted_files} "
                 f"omitted_bytes={omission.omitted_bytes} truncated_files={omission.truncated_files})"
             )
             return Concluded(apply=lambda: _record_size_hold(submission, model=model, detail=detail))
 
-    prompt = _build_prompt(
-        submission,
-        asked_items,
-        source_text,
-        asset_kind=asset.kind,
-        syntax_check=syntax_check,
-        cite=staged,
-    )
-    requirements = _requirement_inputs(asked_items)
-    # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
-    # prompt만 읽어 실제 벤더 요청에는 영향이 없지만(모듈 docstring),
-    # FakeClassroomScoringAdapter는 `source_files`에서 haystack을 만들어
-    # dev·CI에서도 이 항목을 결정적으로 흉내낼 수 있게 한다.
-    # staged(#1284)는 실은 파일을 그대로 둔다 — 흉내 어댑터가 실제 경로·줄로 인용을 낸다.
-    sent_source_files = (
-        list(sent_files)
-        if staged
-        else [SourceFile(path=f"asset-{asset.id}", content=source_text, asset_id=asset.id, asset_label=asset.label)]
-    )
-    source_files = [
-        *sent_source_files,
-        *syntax_check.extra_source_files(asset_id=asset.id, asset_label=asset.label),
-    ]
-    synthetic_requirement = syntax_check.synthetic_requirement()
-    if synthetic_requirement is not None:
-        requirements = [*requirements, synthetic_requirement]
-    scoring_input = ScoringInput(
-        submission_id=sid,
-        # ScoringInput.contest_id는 공모전 전용 필드지만 core.llm_scoring이
-        # 그 값을 실제로 읽지 않는다(어댑터는 prompt·requirements만 본다) —
-        # 공유 dataclass를 건드리지 않으려고 problem.id로 채워 둔다.
-        contest_id=problem.id,
-        prompt=prompt,
-        # OpenAIScoringAdapter는 이 필드를 읽지 않는다(prompt만 본다) — 채워 두는
-        # 이유는 FakeClassroomScoringAdapter가 소스 자체(체크리스트 문구가
-        # 나열된 prompt 전체가 아니라)만 검사 대상으로 삼기 위해서다(#340).
-        # `path`는 정체성 자리라 참가자가 붙인 자유 텍스트(`asset.label`)를
-        # 넣지 않는다(core.llm_scoring.SourceFile) — 그 문구는 `asset_label`이 쓰는 자리다.
-        source_files=source_files,
-        requirements=requirements,
-        ask_citations=staged,
-    )
+    if plan is not None:
+        prompt = plan.selection_prompt
+        scoring_input = ScoringInput(
+            submission_id=sid,
+            contest_id=problem.id,
+            prompt=prompt,
+            # 흉내 어댑터만 읽는다 — 문구가 든 파일을 「고른 파일」로 낸다. 실제 어댑터는 prompt(파일 목록)만 보낸다.
+            source_files=list(plan.files),
+            requirements=_requirement_inputs(asked_items),
+            ask_citations=True,
+        )
+    else:
+        prompt, scoring_input = _scoring_request(
+            submission,
+            asked_items,
+            source_text,
+            sent_files,
+            asset_id=asset.id,
+            asset_label=asset.label,
+            asset_kind=asset.kind,
+            syntax_check=syntax_check,
+            staged=staged,
+        )
     return PreparedScoring(
         submission=submission,
         owner=owner,
@@ -1238,9 +1369,10 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         snapshot=agent_grading.snapshot_of(source.raw, asset) if uses_agent else None,
         staged=staged,
         machine_entries=machine_entries,
-        sent_lines=sent_lines,
-        sent_files=tuple(sent_files),
+        sent_lines=sent_lines if plan is None else {},
+        sent_files=tuple(sent_files) if plan is None else (),
         asset_kind=asset.kind,
+        two_step=plan,
         escalation_model=head.escalation_model if staged else "",
         escalation_effort=(
             problem.effective_reasoning_effort()
@@ -1331,19 +1463,26 @@ def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
         return reused
     if prepared.agent:
         return _call_agent(prepared)
+    selection: ScoringOutput | None = None
     try:
-        output = _build_adapter(prepared).score(prepared.scoring_input)
+        adapter = _build_adapter(prepared)
+        if prepared.two_step is not None:
+            # 두 걸음(#1286): 1차로 파일을 고르고, 2차 준비로 갈아 끼운 뒤 같은 어댑터로 판정한다.
+            selection = adapter.score(prepared.scoring_input)
+            prepared = _second_step(prepared, selection)
+        output = adapter.score(prepared.scoring_input)
     except LLMAdapterError as exc:
-        return VendorOutcome(error=exc)
+        return VendorOutcome(error=exc, selection=selection)
+    second_step = prepared if selection is not None else None
     escalation_input = _escalation_input(prepared, output)
     if escalation_input is None:
-        return VendorOutcome(output=output)
+        return VendorOutcome(output=output, selection=selection, second_step=second_step)
     try:
         escalation = _build_adapter(prepared, model=prepared.escalation_model).score(escalation_input)
     except LLMAdapterError as exc:
         logger.warning("ClassroomSubmission(pk=%s) 의심 올림 실패 — 첫 판정을 쓴다: %s", prepared.submission.id, exc)
         escalation = None
-    return VendorOutcome(output=output, escalation=escalation)
+    return VendorOutcome(output=output, escalation=escalation, selection=selection, second_step=second_step)
 
 
 async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
@@ -1354,29 +1493,41 @@ async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
         return _machine_only_outcome()
     if prepared.agent:
         return await agent_grading.run_in_own_thread(_call_agent, prepared)
+    selection: ScoringOutput | None = None
     try:
         adapter = _build_adapter(prepared, asynchronous=True)
+        if prepared.two_step is not None:
+            # 두 걸음(#1286) — `call_vendor_sync` 와 같다.
+            selection = await adapter.score_async(prepared.scoring_input)
+            prepared = _second_step(prepared, selection)
         output = await adapter.score_async(prepared.scoring_input)
     except LLMAdapterError as exc:
-        return VendorOutcome(error=exc)
+        return VendorOutcome(error=exc, selection=selection)
+    second_step = prepared if selection is not None else None
     escalation_input = _escalation_input(prepared, output)
     if escalation_input is None:
-        return VendorOutcome(output=output)
+        return VendorOutcome(output=output, selection=selection, second_step=second_step)
     try:
         escalation_adapter = _build_adapter(prepared, asynchronous=True, model=prepared.escalation_model)
         escalation = await escalation_adapter.score_async(escalation_input)
     except LLMAdapterError as exc:
         logger.warning("ClassroomSubmission(pk=%s) 의심 올림 실패 — 첫 판정을 쓴다: %s", prepared.submission.id, exc)
         escalation = None
-    return VendorOutcome(output=output, escalation=escalation)
+    return VendorOutcome(output=output, escalation=escalation, selection=selection, second_step=second_step)
 
 
 def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> dict:
     """벤더가 돌려준 것을 DB 에 쓴다(#584) — 임대를 확인한 짧은 트랜잭션 안에서만 부른다.
     예전에 `score_classroom_submission_once` 의 `except` 사슬과 그 뒤가 하던 일 그대로다."""
 
+    if outcome.second_step is not None:
+        # 두 걸음(#1286) — 인용 대조·저장 프롬프트는 2차(실제로 판정한 소스) 것이다.
+        prepared = outcome.second_step
     submission, class_obj, problem = prepared.submission, prepared.class_obj, prepared.problem
     checklist_items, connection = prepared.checklist_items, prepared.connection
+    if outcome.selection is not None and outcome.error is not None:
+        # 1차는 돌았는데 2차가 실패했다 — 1차가 쓴 토큰은 남긴다(#1286).
+        _record_token_usage(class_obj, outcome.selection.total_tokens)
     exc = outcome.error
     if exc is not None:
         if isinstance(exc, LLMAdapterAuthError):
@@ -1462,12 +1613,21 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     if not prepared.skip_vendor:
         # 벤더를 부르지 않은 기계 판정만의 채점(#1283)은 토큰도, 키 확인도 없다.
         # 의심 올림(#1285) 호출의 토큰도 같은 사용량에 더한다.
-        used_tokens = output.total_tokens + (outcome.escalation.total_tokens if outcome.escalation else 0)
+        # 두 걸음(#1286)의 1차 호출 토큰도 더한다.
+        used_tokens = (
+            output.total_tokens
+            + (outcome.escalation.total_tokens if outcome.escalation else 0)
+            + (outcome.selection.total_tokens if outcome.selection else 0)
+        )
         estimated = False
         if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
             # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 사용량이 비니 예상
             # 비용과 같은 셈으로 어림해 더하고, 어림한 몫을 따로 남긴다. OpenAI 는 늘 usage 를 준다.
             used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
+            if prepared.two_step is not None:
+                used_tokens += scoring_cost.estimated_usage_tokens(
+                    prepared.two_step.selection_prompt, prepared.reasoning_effort
+                )
         _record_token_usage(class_obj, used_tokens, estimated=estimated)
         if prepared.pause_recheck:
             _clear_scoring_pause(class_obj)

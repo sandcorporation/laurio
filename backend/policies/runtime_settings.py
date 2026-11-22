@@ -86,6 +86,11 @@ SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 #: 강의실 채점 갈래의 키(#1283, 스펙 #1282) — `classroom_scoring_pipeline`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
 CLASSROOM_SCORING_PIPELINE = "CLASSROOM_SCORING_PIPELINE"
 CLASSROOM_ESCALATION_MODEL = "CLASSROOM_ESCALATION_MODEL"
+#: 강의실 staged 두 걸음의 문턱·2차 상한(#1286, 글자 수) — `classroom_two_step_threshold_chars`·`classroom_two_step_budget_chars`.
+CLASSROOM_TWO_STEP_THRESHOLD_CHARS = "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"
+DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS = 120_000
+CLASSROOM_TWO_STEP_BUDGET_CHARS = "CLASSROOM_TWO_STEP_BUDGET_CHARS"
+DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS = 60_000
 CLASSROOM_PIPELINE_SINGLE_CALL: Literal["single_call"] = "single_call"
 CLASSROOM_PIPELINE_STAGED: Literal["staged"] = "staged"
 
@@ -151,6 +156,24 @@ SPECS: dict[str, SettingSpec] = {
         # #1285: staged 에서 「의심」 항목만 다시 판정할 상위 모델. 비면 올리지 않는다. 클래스 키로 부르므로 그 키의
         # 프로바이더 단가표(`classroom.scoring_cost.PRICES`)에 있는 모델일 때만 쓴다.
         SettingSpec(CLASSROOM_ESCALATION_MODEL, "강의실 의심 올림 모델", "text", max_length=100),
+        # #1286: staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이 문턱을 넘으면 두 걸음 — 파일 목록으로 고르고
+        # 고른 파일만 2차 상한 안에서 싣는다. 문턱 0 이면 끈다(그때만 크기 초과 보류 #989 가 그대로다).
+        SettingSpec(
+            CLASSROOM_TWO_STEP_THRESHOLD_CHARS,
+            "강의실 두 걸음 문턱 (글자)",
+            "float",
+            default=str(DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS),
+            min_value=0.0,
+            max_value=10_000_000.0,
+        ),
+        SettingSpec(
+            CLASSROOM_TWO_STEP_BUDGET_CHARS,
+            "강의실 두 걸음 2차 상한 (글자)",
+            "float",
+            default=str(DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS),
+            min_value=1000.0,
+            max_value=10_000_000.0,
+        ),
         SettingSpec("ANTHROPIC_API_KEY", "Anthropic API 키", "secret", max_length=500),
         SettingSpec("LLM_ANTHROPIC_MODEL", "Claude 모델", "text", default="claude-sonnet-5-5", max_length=100),
         SettingSpec(
@@ -457,6 +480,29 @@ def classroom_escalation_model() -> str:
     """staged 의심 항목을 다시 판정할 상위 모델(#1285) — 비었으면 빈 문자열(올리지 않는다)."""
 
     return (setting_value(CLASSROOM_ESCALATION_MODEL) or "").strip()
+
+
+def _chars_setting(key: str, default: int, *, minimum: int) -> int:
+    raw = setting_value(key)
+    try:
+        value = float((raw or "").strip() or default)
+    except ValueError:
+        return default
+    if not math.isfinite(value) or value < minimum:  # NaN·무한·범위 밖(env 는 저장 검사를 지나지 않는다)
+        return default
+    return int(value)
+
+
+def classroom_two_step_threshold_chars() -> int:
+    """staged 두 걸음 문턱(#1286, 글자) — 0 이면 끔. 값이 없거나 읽을 수 없으면 기본값."""
+
+    return _chars_setting(CLASSROOM_TWO_STEP_THRESHOLD_CHARS, DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS, minimum=0)
+
+
+def classroom_two_step_budget_chars() -> int:
+    """staged 두 걸음 2차 상한(#1286, 글자) — 값이 없거나 읽을 수 없으면 기본값."""
+
+    return _chars_setting(CLASSROOM_TWO_STEP_BUDGET_CHARS, DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS, minimum=1)
 
 
 def contest_ai_scoring_enabled() -> bool:
