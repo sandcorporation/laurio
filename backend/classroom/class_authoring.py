@@ -22,7 +22,7 @@ from ninja.errors import HttpError
 
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
-from . import agent_grading
+from . import agent_grading, scoring_cost
 from .models import Class, ClassTemplate, ProblemTemplate, _generate_join_code
 from .problem_authoring import (
     reject_banned_public_text,
@@ -89,6 +89,10 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
         validate_scoring_model_choice(class_obj, payload.default_model, current_value=class_obj.default_model)
     if payload.default_reasoning_effort is not None:
         validate_reasoning_effort(payload.default_reasoning_effort)
+    if payload.escalation_model and payload.escalation_model not in scoring_cost.escalation_models_for(
+        class_obj.scoring_connection_kind
+    ):
+        raise HttpError(422, "이 채점 연결로 고를 수 없는 의심 재판정 모델입니다.")
     if Class.GradingMethod.AGENT in (payload.scoring_method, payload.quality_method):
         reason = agent_grading.unavailable_reason(class_obj)
         if reason is not None:
@@ -142,6 +146,9 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
     if payload.quality_method is not None:
         class_obj.quality_method = payload.quality_method
         update_fields.append("quality_method")
+    if payload.escalation_model is not None:
+        class_obj.escalation_model = payload.escalation_model
+        update_fields.append("escalation_model")
     if update_fields:
         class_obj.save(update_fields=update_fields)
     return class_obj

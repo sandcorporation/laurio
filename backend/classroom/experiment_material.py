@@ -31,7 +31,6 @@ from .scoring import (
     PreparedScoring,
     _build_prompt,
     _derive_rules,
-    _escalation_model_for,
     _Head,
     _machine_only,
     _numbered_source_text,
@@ -45,6 +44,7 @@ from .scoring import (
     call_vendor_sync,
     outcome_reasoning,
 )
+from . import scoring_cost
 from .scoring_connection import anthropic_key_connection, openai_key_connection
 from policies.runtime_settings import classroom_two_step_budget_chars, classroom_two_step_threshold_chars
 
@@ -230,17 +230,19 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
     asset = SubmissionAsset(id=1, kind=item.asset_kind, label="")
     anthropic = model.startswith("claude-")
     connection = (anthropic_key_connection if anthropic else openai_key_connection)(api_key or "")
+    class_obj = Class(id=0)
     head = _Head(
         submission=submission,
         owner="experiment",
-        class_obj=Class(id=0),
+        class_obj=class_obj,
         problem=problem,
         checklist_items=checklist,
         connection=connection,
         asset=asset,
         pause_recheck=False,
         staged=True,
-        escalation_model=_escalation_model_for(connection),
+        # 의심 재판정은 클래스 칸(#1291) — 사본 클래스는 비어 있어 끈다.
+        escalation_model=scoring_cost.usable_escalation_model(class_obj),
         two_step_threshold=classroom_two_step_threshold_chars(),
         two_step_budget=classroom_two_step_budget_chars(),
     )

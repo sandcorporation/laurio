@@ -46,6 +46,7 @@ from core.llm_scoring import LLMKeyCheckStatus
 from core.observability import tag_error_scope
 from core.quality_review import mask_hidden_quality_items
 from policies.services import get_current_policy
+from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import (
@@ -299,6 +300,9 @@ def _serialize_class(
         scoring_method=class_obj.scoring_method,
         quality_method=class_obj.quality_method,
         grading_method_options=_grading_method_options(class_obj),
+        escalation_model=class_obj.escalation_model,
+        escalation_model_options=scoring_cost.escalation_models_for(class_obj.scoring_connection_kind),
+        staged_scoring=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
         anthropic_key_selectable=(
             privacy_policy.anthropic_key_connection_open() if claude_selectable is None else claude_selectable
         ),
@@ -1507,6 +1511,7 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
                 "title": p.title,
                 "requirement_count": p.requirement_count,
                 "instruction_chars": p.instruction_chars,
+                "escalation_instruction_chars": p.escalation_instruction_chars,
                 "sample_count": p.sample_count,
                 "sources": [{"key": s.key, "chars": s.chars, "measured": s.measured} for s in p.sources],
             }
@@ -1535,6 +1540,21 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "usd": _spread_out(calc.agent.usd),
             "krw": _spread_out(calc.agent.usd, krw),
             "seconds": _spread_out(calc.agent.seconds),
+        },
+        "escalation": {
+            "model_id": calc.escalation.model_id,
+            "per_suspect": (
+                {
+                    "input_tokens": calc.escalation.per_suspect.input_tokens,
+                    "output_tokens": calc.escalation.per_suspect.output_tokens,
+                    "usd": calc.escalation.per_suspect.usd,
+                    "krw": calc.escalation.per_suspect.usd * krw,
+                    "open_ended": calc.escalation.per_suspect.open_ended,
+                }
+                if calc.escalation.per_suspect is not None
+                else None
+            ),
+            "suspect_rate": calc.escalation.suspect_rate,
         },
         "min_sample_count": scoring_cost.MIN_SAMPLE_COUNT,
         "krw_per_usd": krw,

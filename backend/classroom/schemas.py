@@ -46,6 +46,9 @@ class ClassPatchIn(Schema):
     scoring_method: Literal["single", "agent"] | None = None
     #: 완성도 검사의 방식(#1036) — 위와 같은 값·규칙.
     quality_method: Literal["single", "agent"] | None = None
+    #: 의심 재판정 모델(#1291) — 빈 문자열이면 끈다. 이 클래스 연결의 프로바이더 단가표 모델만 된다(아니면 422).
+    #: 생략하면 바꾸지 않는다.
+    escalation_model: str | None = Field(default=None, max_length=200)
 
 
 class GradingMethodOptionOut(Schema):
@@ -132,6 +135,12 @@ class ClassOut(Schema):
     quality_method: str = "single"
     #: 두 칸이 함께 쓰는 선택지와 고를 수 없는 까닭(#1036).
     grading_method_options: list[GradingMethodOptionOut] = []
+    #: 의심 재판정 모델(#1291) — 빈 문자열이면 꺼짐.
+    escalation_model: str = ""
+    #: 의심 재판정에 고를 수 있는 모델 — 지금 연결의 프로바이더 단가표 모델(호환 서버면 빈 목록).
+    escalation_model_options: list[str] = []
+    #: staged 채점 갈래가 켜져 있는가(운영 설정 `CLASSROOM_SCORING_PIPELINE`) — 거짓이면 의심 재판정이 돌지 않는다.
+    staged_scoring: bool = False
     #: 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일(KST 0시) 전에는 거짓이고
     #: 화면이 그 선택지를 보이지 않는다(저장 API 도 거절한다). 시행일이 지나면 저절로 참이다.
     anthropic_key_selectable: bool = False
@@ -341,6 +350,8 @@ class ScoringCalculatorProblemOut(Schema):
     title: str
     requirement_count: int
     instruction_chars: int
+    #: 의심 재판정 한 건의 지시문 글자 수(#1291).
+    escalation_instruction_chars: int = 0
     sample_count: int
     sources: list[ScoringCalculatorSourceOut]
 
@@ -374,6 +385,24 @@ class ScoringCalculatorAgentOut(Schema):
     seconds: ScoringCalculatorSpreadOut
 
 
+class ScoringCalculatorEscalationAttemptOut(Schema):
+    input_tokens: int
+    output_tokens: int
+    usd: float
+    krw: float
+    open_ended: bool
+
+
+class ScoringCalculatorEscalationOut(Schema):
+    """의심 재판정(#1291) — 클래스가 고른 모델. 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`."""
+
+    model_id: str | None = None
+    #: 의심 한 건을 그 모델로 다시 판정하는 예상.
+    per_suspect: ScoringCalculatorEscalationAttemptOut | None = None
+    #: 의심이 나는 비율 — 실측이 없으면 `None`(「실측 없음」).
+    suspect_rate: float | None = None
+
+
 class ScoringCalculatorOut(Schema):
     """채점 비용 계산기(#1270, CONTEXT.md 「예상 채점 비용」) — 고른 조합의 제출 한 건 예상과 고를 수 있는 값."""
 
@@ -384,6 +413,7 @@ class ScoringCalculatorOut(Schema):
     selection: ScoringCalculatorSelectionOut
     single: ScoringCalculatorSingleOut
     agent: ScoringCalculatorAgentOut
+    escalation: ScoringCalculatorEscalationOut
     min_sample_count: int
     krw_per_usd: int
 

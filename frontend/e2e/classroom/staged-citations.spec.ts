@@ -13,8 +13,8 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 // 이 된다. 기계 규칙(`path_exists app.py`) 항목은 기계 판정과 그 근거 경로가 보인다.
 
 const SETTING = "/api/operator/runtime-settings/CLASSROOM_SCORING_PIPELINE";
-// 의심 올림(#1285) — 흉내 어댑터는 다시 물어도 같은 주석 줄을 인용해 「미충족 + 의심 남음」이 된다.
-const ESCALATION = "/api/operator/runtime-settings/CLASSROOM_ESCALATION_MODEL";
+// 의심 재판정(#1285, #1291)은 강사가 클래스 설정에서 고른다 — 흉내 어댑터는 다시 물어도 같은 주석 줄을 인용해
+// 「미충족 + 의심 남음」이 된다.
 
 async function operatorRequest(): Promise<APIRequestContext> {
   const su = await seedE2eOperator({ username: `e2e-op-staged-${Date.now()}`, superuser: true });
@@ -33,13 +33,10 @@ test.describe("staged 판정 근거(#1284)", () => {
     operator = await operatorRequest();
     const saved = await operator.post(SETTING, { data: { value: "staged" } });
     expect(saved.ok(), await saved.text()).toBeTruthy();
-    const escalation = await operator.post(ESCALATION, { data: { value: "gpt-5" } });
-    expect(escalation.ok(), await escalation.text()).toBeTruthy();
   });
 
   test.afterAll(async () => {
     await operator.post(`${SETTING}/clear`, { data: {} });
-    await operator.post(`${ESCALATION}/clear`, { data: {} });
     await operator.dispose();
   });
 
@@ -59,6 +56,14 @@ test.describe("staged 판정 근거(#1284)", () => {
     expect(
       (await api.put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } })).ok(),
     ).toBeTruthy();
+    await page.goto(`/classes/${classId}/settings#scoring-method`);
+    const escalationSelect = page.getByTestId("escalation-model-select");
+    await expect(escalationSelect).toBeEnabled();
+    await escalationSelect.selectOption("gpt-5");
+    await expect(page.getByTestId("calculator-escalation-model")).toHaveText("gpt-5");
+    await page.reload();
+    await expect(page.getByTestId("escalation-model-select")).toHaveValue("gpt-5");
+    await expect(page.getByTestId("calculator-escalation-rate")).toHaveText("의심 비율 실측 없음");
     const problemId = (
       await (
         await api.post(`/api/backend/classroom/classes/${classId}/problems`, {

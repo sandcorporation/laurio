@@ -14,6 +14,10 @@
 `MIN_SAMPLE_COUNT` 건 미만이면 「실측 없음」(`None`)이다. 플랫폼 평균·실험 값은 넣지 않는다.
 
 **시간**: 한 번 호출 채점은 걸린 시간을 남기지 않는다 — 그래서 늘 「실측 없음」이다. 지어내지 않는다.
+
+**의심 재판정**(#1291): 클래스가 고른 의심 재판정 모델의 단가로 **의심 한 건당** 예상이다 — 입력은 같은 소스 크기
++ 항목 하나짜리 지시문(인용 규칙 포함, 가장 긴 항목), 출력은 요구사항 하나 몫이다. 의심이 나는 비율은 실측이 없어
+「실측 없음」(`None`)이다.
 """
 
 from __future__ import annotations
@@ -76,6 +80,8 @@ class ProblemOption:
     #: 실측 소스 크기에 쓴 한 번 호출 시도 수.
     sample_count: int
     sources: tuple[SourceOption, ...]
+    #: 의심 재판정 한 건의 지시문 글자 수 — 가장 긴 항목 하나만 실은 인용 프롬프트(소스 없이).
+    escalation_instruction_chars: int = 0
 
 
 @dataclass(frozen=True)
@@ -115,6 +121,17 @@ class Agent:
 
 
 @dataclass(frozen=True)
+class Escalation:
+    """의심 재판정(#1291) — 모델이 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`."""
+
+    model_id: str | None
+    #: 의심 한 건을 다시 판정하는 예상.
+    per_suspect: scoring_cost.AttemptCost | None
+    #: 의심이 나는 비율 — 실측이 없어 늘 `None`(「실측 없음」).
+    suspect_rate: float | None
+
+
+@dataclass(frozen=True)
 class Selection:
     vendor: Vendor
     method: Method
@@ -133,6 +150,7 @@ class Calculation:
     selection: Selection
     single: SingleCall
     agent: Agent
+    escalation: Escalation
 
 
 def percentile_spread(values: list[float]) -> Spread:
@@ -160,6 +178,22 @@ def _instruction_chars(problem: Problem) -> int:
     return len(prompt)
 
 
+def _escalation_instruction_chars(problem: Problem) -> int:
+    """의심 재판정 프롬프트(`classroom.scoring._escalation_input`)에서 소스를 뺀 몫 — 항목 하나짜리 중 가장 긴 것."""
+
+    from .scoring import _build_prompt
+    from .syntax_check import DISABLED_SYNTAX_CHECK
+
+    submission = ClassroomSubmission(problem=problem)
+    return max(
+        (
+            len(_build_prompt(submission, [item], "", asset_kind="source", syntax_check=DISABLED_SYNTAX_CHECK, cite=True))
+            for item in problem.checklist_items.all()
+        ),
+        default=0,
+    )
+
+
 def _problem_option(problem: Problem) -> ProblemOption:
     instruction = _instruction_chars(problem)
     prompts = (
@@ -184,6 +218,7 @@ def _problem_option(problem: Problem) -> ProblemOption:
         instruction_chars=instruction,
         sample_count=spread.sample_count,
         sources=sources,
+        escalation_instruction_chars=_escalation_instruction_chars(problem),
     )
 
 
@@ -308,9 +343,10 @@ def calculate(
     if problem is not None:
         sources = problem.sources
         instruction, requirements = problem.instruction_chars, problem.requirement_count
+        escalation_instruction = problem.escalation_instruction_chars
     else:
         sources = tuple(SourceOption(k, c, False) for k, c in zip(BAND_KEYS, scoring_cost.SOURCE_SIZE_BANDS))
-        instruction, requirements = 0, 0
+        instruction, requirements, escalation_instruction = 0, 0, 0
     picked = next((s for s in sources if s.key == source), sources[0] if sources[0].measured else sources[1])
 
     effort = scoring_cost.effort_for(model_id, class_obj.default_reasoning_effort or None)
@@ -339,4 +375,23 @@ def calculate(
             requirement_count=requirements,
         ),
         agent=Agent(available=agent_ok, usd=agent_usd, seconds=agent_seconds),
+        escalation=escalation(
+            class_obj, chosen_vendor, source_chars=picked.chars, instruction_chars=escalation_instruction
+        ),
     )
+
+
+def escalation(class_obj: Class, vendor: Vendor, *, source_chars: int, instruction_chars: int) -> Escalation:
+    """클래스가 고른 의심 재판정 모델로 의심 한 건 — 그 모델이 고른 프로바이더 것이 아니면 셈하지 않는다."""
+
+    model_id = class_obj.escalation_model if class_obj.escalation_model in models_for(vendor) else None
+    if model_id is None:
+        return Escalation(model_id=None, per_suspect=None, suspect_rate=None)
+    effort = scoring_cost.effort_for(model_id, class_obj.default_reasoning_effort or None)
+    output_tokens = OUTPUT_TOKENS_PER_REQUIREMENT
+    if effort is not None:
+        output_tokens += scoring_cost.REASONING_OUTPUT_TOKENS[effort] - scoring_cost.NON_REASONING_OUTPUT_TOKENS
+    cost = scoring_cost.attempt_cost(
+        model_id, effort, prompt_chars=source_chars + instruction_chars, output_tokens=output_tokens
+    )
+    return Escalation(model_id=model_id, per_suspect=cost, suspect_rate=None)

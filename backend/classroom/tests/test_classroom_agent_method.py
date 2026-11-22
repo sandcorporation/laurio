@@ -124,6 +124,19 @@ def _claude_key_class(client, monkeypatch, *, method: str | None = "agent"):
 # --- 설정 ---------------------------------------------------------------------------------------
 
 
+def test_a_claude_key_class_picks_only_claude_models_for_escalation(client, db, monkeypatch):
+    """의심 재판정 모델(#1291)은 그 연결의 프로바이더 단가표 모델만 — Claude 키면 Claude 모델."""
+
+    owner, _, class_id, _ = _claude_key_class(client, monkeypatch, method=None)
+
+    assert _patch_class(client, owner["access"], class_id, {"escalation_model": "gpt-5"}).status_code == 422
+    saved = _patch_class(client, owner["access"], class_id, {"escalation_model": "claude-sonnet-5-5"})
+    assert saved.status_code == 200, saved.content
+    body = get_class(client, owner["access"], class_id)
+    assert body["escalation_model"] == "claude-sonnet-5-5"
+    assert body["escalation_model_options"] and all(m.startswith("claude-") for m in body["escalation_model_options"])
+
+
 def test_methods_default_to_single_and_agent_is_open_for_a_claude_key_connection(client, db, monkeypatch):
     _anthropic_vendor(monkeypatch)
     owner = login(client, uid="owner")

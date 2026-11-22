@@ -15,6 +15,8 @@ from classroom.tests.test_classroom_machine_check import _world, staged  # noqa:
 from core import llm_scoring
 from core.llm_scoring_anthropic import _verdict_schema
 from tests.classroom_scenarios import (
+    CLASSES_URL,
+    auth_header,
     force_real_scoring_adapter,
     instructor_submissions,
     mine,
@@ -155,10 +157,22 @@ def _sequence(monkeypatch, bodies: list[list[dict]], sent: list[dict]) -> None:
     monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
 
 
-def _escalation_world(client, monkeypatch, bodies, sent):
+def _set_escalation_model(client, ctx, model: str):
+    return client.patch(
+        f"{CLASSES_URL}/{ctx['class_id']}",
+        data={"escalation_model": model},
+        content_type="application/json",
+        **auth_header(ctx["access"]),
+    )
+
+
+def _escalation_world(client, monkeypatch, bodies, sent, *, model: str = "gpt-5"):
     with force_real_scoring_adapter():
         ctx = _world(client, [("진입점이 있다", None), ("인용이 없다", None)])
         good, doubtful = ctx["item_ids"]
+        if model:
+            saved = _set_escalation_model(client, ctx, model)
+            assert saved.status_code == 200, saved.content
         _sequence(monkeypatch, [b(good, doubtful) for b in bodies], sent)
         run_scan(client)
     return ctx, good, doubtful
@@ -172,7 +186,6 @@ def _first(good, doubtful):
 
 
 def test_a_suspect_item_alone_goes_to_the_escalation_model_once(client, db, monkeypatch, staged):  # noqa: F811
-    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", "gpt-5")
     sent: list[dict] = []
     ctx, good, doubtful = _escalation_world(
         client,
@@ -199,7 +212,6 @@ def test_a_suspect_item_alone_goes_to_the_escalation_model_once(client, db, monk
 
 
 def test_escalation_that_also_fails_the_check_leaves_unmet_and_suspect(client, db, monkeypatch, staged):  # noqa: F811
-    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", "gpt-5")
     sent: list[dict] = []
     _, _, doubtful = _escalation_world(
         client,
@@ -213,17 +225,48 @@ def test_escalation_that_also_fails_the_check_leaves_unmet_and_suspect(client, d
     assert (entry["verdict"], entry["is_met"], entry["suspect"], entry["escalated"]) == ("unmet", False, True, True)
 
 
-@pytest.mark.parametrize("model", ["", "claude-sonnet-5-5", "no-such-model"])
-def test_no_escalation_without_a_usable_model(client, db, monkeypatch, staged, model):  # noqa: F811
-    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", model)
+def test_no_escalation_while_the_class_leaves_it_off(client, db, monkeypatch, staged):  # noqa: F811
     sent: list[dict] = []
-    _escalation_world(client, monkeypatch, [_first], sent)
+    ctx, _, _ = _escalation_world(client, monkeypatch, [_first], sent, model="")
 
     assert len(sent) == 1
+    shown = client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()
+    assert (shown["escalation_model"], shown["staged_scoring"]) == ("", True)
+    assert "gpt-5" in shown["escalation_model_options"] and not any(
+        m.startswith("claude-") for m in shown["escalation_model_options"]
+    )
+
+
+def test_no_escalation_without_staged_even_when_the_class_picked_a_model(client, db, monkeypatch):
+    sent: list[dict] = []
+    ctx, _, _ = _escalation_world(client, monkeypatch, [_first], sent)
+
+    assert len(sent) == 1
+    shown = client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()
+    assert (shown["escalation_model"], shown["staged_scoring"]) == ("gpt-5", False)
+
+
+@pytest.mark.parametrize("model", ["claude-sonnet-5-5", "no-such-model", " gpt-5"])
+def test_saving_a_model_the_class_connection_cannot_use_is_rejected(client, db, model):
+    ctx = _world(client, [("진입점이 있다", None)])
+
+    response = _set_escalation_model(client, ctx, model)
+
+    assert response.status_code == 422, response.content
+    assert "의심 재판정 모델" in response.json()["detail"]
+    assert client.get(f"{CLASSES_URL}/{ctx['class_id']}", **auth_header(ctx["access"])).json()["escalation_model"] == ""
+
+
+def test_clearing_the_model_turns_escalation_off(client, db):
+    ctx = _world(client, [("진입점이 있다", None)])
+    assert _set_escalation_model(client, ctx, "gpt-5").status_code == 200
+
+    response = _set_escalation_model(client, ctx, "")
+
+    assert response.status_code == 200 and response.json()["escalation_model"] == ""
 
 
 def test_no_suspect_means_one_call(client, db, monkeypatch, staged):  # noqa: F811
-    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", "gpt-5")
     sent: list[dict] = []
     _escalation_world(
         client,

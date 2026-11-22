@@ -5,6 +5,7 @@ import {
   agentOnlyLabel,
   calculatorPath,
   changeChoice,
+  escalationCost,
   NO_MEASUREMENT,
   sourceLabel,
   spreadKrw,
@@ -53,5 +54,20 @@ describe("라벨", () => {
   it("실측이 있으면 중앙·p90", () => {
     expect(spreadKrw({ sample_count: 3, median: 45, p90: 120 })).toBe("중앙 약 45원 · p90 약 120원");
     expect(spreadSeconds({ sample_count: 3, median: 40, p90: 150 })).toBe("중앙 40초 · p90 2.5분");
+  });
+});
+
+describe("escalationCost", () => {
+  it("꺼졌으면 줄이 없다", () => {
+    expect(escalationCost({ model_id: null, per_suspect: null, suspect_rate: null })).toBeNull();
+  });
+  it("고른 모델의 의심 한 건당 값과 실측 없는 비율", () => {
+    expect(
+      escalationCost({
+        model_id: "gpt-4.1",
+        per_suspect: { input_tokens: 1, output_tokens: 1, usd: 0.1, krw: 140, open_ended: false },
+        suspect_rate: null,
+      }),
+    ).toEqual({ model: "gpt-4.1", perSuspect: expect.stringMatching(/^의심 한 건당 /), rate: NO_MEASUREMENT });
   });
 });

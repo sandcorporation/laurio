@@ -85,7 +85,6 @@ SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 
 #: 강의실 채점 갈래의 키(#1283, 스펙 #1282) — `classroom_scoring_pipeline`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
 CLASSROOM_SCORING_PIPELINE = "CLASSROOM_SCORING_PIPELINE"
-CLASSROOM_ESCALATION_MODEL = "CLASSROOM_ESCALATION_MODEL"
 #: 강의실 staged 두 걸음의 문턱·2차 상한(#1286, 글자 수) — `classroom_two_step_threshold_chars`·`classroom_two_step_budget_chars`.
 CLASSROOM_TWO_STEP_THRESHOLD_CHARS = "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"
 DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS = 120_000
@@ -153,9 +152,6 @@ SPECS: dict[str, SettingSpec] = {
             max_length=20,
             choices=(CLASSROOM_PIPELINE_SINGLE_CALL, CLASSROOM_PIPELINE_STAGED),
         ),
-        # #1285: staged 에서 「의심」 항목만 다시 판정할 상위 모델. 비면 올리지 않는다. 클래스 키로 부르므로 그 키의
-        # 프로바이더 단가표(`classroom.scoring_cost.PRICES`)에 있는 모델일 때만 쓴다.
-        SettingSpec(CLASSROOM_ESCALATION_MODEL, "강의실 의심 올림 모델", "text", max_length=100),
         # #1286: staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이 문턱을 넘으면 두 걸음 — 파일 목록으로 고르고
         # 고른 파일만 2차 상한 안에서 싣는다. 문턱 0 이면 끈다(그때만 크기 초과 보류 #989 가 그대로다).
         SettingSpec(
@@ -474,12 +470,6 @@ def classroom_scoring_pipeline() -> Literal["single_call", "staged"]:
 
     value = (setting_value(CLASSROOM_SCORING_PIPELINE) or "").strip().lower()
     return CLASSROOM_PIPELINE_STAGED if value == CLASSROOM_PIPELINE_STAGED else CLASSROOM_PIPELINE_SINGLE_CALL
-
-
-def classroom_escalation_model() -> str:
-    """staged 의심 항목을 다시 판정할 상위 모델(#1285) — 비었으면 빈 문자열(올리지 않는다)."""
-
-    return (setting_value(CLASSROOM_ESCALATION_MODEL) or "").strip()
 
 
 def _chars_setting(key: str, default: int, *, minimum: int) -> int:

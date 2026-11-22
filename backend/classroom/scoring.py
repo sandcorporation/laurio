@@ -107,7 +107,6 @@ from core.source_selection import SelectionOmission, select_source_files, select
 from notifications.models import NotificationType
 from policies.runtime_settings import (
     CLASSROOM_PIPELINE_STAGED,
-    classroom_escalation_model,
     classroom_scoring_pipeline,
     classroom_two_step_budget_chars,
     classroom_two_step_threshold_chars,
@@ -937,7 +936,7 @@ class _Head:
     pause_recheck: bool
     #: staged 갈래(#1283) — 운영 설정은 DB 를 읽을 수 있어 앞 절반에서 읽는다(뒤 절반은 DB 를 쓰지 않는다).
     staged: bool = False
-    #: staged 의심 올림 모델(#1285, 운영 설정 `CLASSROOM_ESCALATION_MODEL`) — 이 연결로 쓸 수 없으면 빈 문자열.
+    #: staged 의심 재판정 모델(#1285, 클래스 칸 `Class.escalation_model`, #1291) — 꺼졌거나 이 연결로 쓸 수 없으면 빈 문자열.
     escalation_model: str = ""
     #: staged 두 걸음 문턱·2차 상한(#1286, 글자) — 문턱 0 이면 끔.
     two_step_threshold: int = 0
@@ -1006,25 +1005,10 @@ def _prepare_head(
         asset=asset,
         pause_recheck=pause_recheck,
         staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
-        escalation_model=_escalation_model_for(connection),
+        escalation_model=scoring_cost.usable_escalation_model(class_obj),
         two_step_threshold=classroom_two_step_threshold_chars(),
         two_step_budget=classroom_two_step_budget_chars(),
     )
-
-
-def _escalation_model_for(connection: ScoringConnection) -> str:
-    """의심 올림 모델(#1285) — 설정이 비었거나, 이 연결의 프로바이더 단가표에 없는 모델이면 빈 문자열(올리지 않는다).
-    Claude 키 연결은 `claude-` 모델만, OpenAI 키는 그 밖의 모델만, 호환 서버는 단가표가 없어 올리지 않는다."""
-
-    model = classroom_escalation_model()
-    if not model or scoring_cost.price_for(model) is None:
-        return ""
-    is_claude = scoring_cost.canonical_model_id(model).startswith("claude-")
-    if connection.kind == Class.ScoringConnectionKind.ANTHROPIC_KEY:
-        return model if is_claude else ""
-    if connection.kind == Class.ScoringConnectionKind.OPENAI_KEY:
-        return "" if is_claude else model
-    return ""
 
 
 #: staged 에서 벤더를 부르지 않고 기계 판정만으로 매긴 점수의 `model_version`(#1283).
