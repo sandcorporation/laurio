@@ -163,6 +163,8 @@ describe("탭(#1033)", () => {
   it("채점 방식 값은 뜻을 말한다", () => {
     const method = setting({ key: "CONTEST_SCORING_METHOD", kind: "choice", choices: ["single_call", "agent"] });
     expect(choiceOptions(method)?.map((o) => o.label)).toEqual(["—", "한 번 호출", "에이전트"]);
+    const pipeline = setting({ key: "CLASSROOM_SCORING_PIPELINE", kind: "choice", choices: ["single_call", "staged"] });
+    expect(choiceOptions(pipeline)?.map((o) => o.label)).toEqual(["—", "한 번 호출", "기계 판정 먼저"]);
   });
 });
 

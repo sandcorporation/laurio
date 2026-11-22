@@ -332,3 +332,47 @@ def test_single_call_ignores_the_rules(client, db, monkeypatch):
     assert score.reasoning == [
         {"checklist_item_id": ctx["item_ids"][0], "is_met": True, "verdict": "met", "reasoning": "판정 근거"}
     ]
+
+
+def test_reuse_takes_only_the_model_verdicts_and_judges_the_machine_items_again(client, db, monkeypatch, staged):
+    monkeypatch.setenv("CLASSROOM_SCORE_REUSE", "on")
+    sent: list[dict] = []
+    with force_real_scoring_adapter():
+        ctx = _world(
+            client,
+            [
+                ("README 의 설명이 친절하다", None),
+                ("src/app.py 가 있다", {"kind": "path_exists", "path": "src/app.py"}),
+            ],
+        )
+        judged, machine = ctx["item_ids"]
+        respond_with_verdicts(
+            monkeypatch,
+            [{"requirement_id": judged, "is_met": True, "reasoning": "판정 근거"}],
+            model="gpt-4.1-mini",  # 재사용은 요청한 모델이 매긴 점수만 찾는다
+            capture=sent,
+        )
+        run_scan(client)
+        # 그 사이 강사가 기계 규칙을 바꾼다 — 판단 항목·소스가 같아 프롬프트는 같다.
+        instructor = login(client, uid="instructor-1")
+        changed = client.patch(
+            _item_url(ctx["class_id"], ctx["problem_id"], machine),
+            data={"machine_rule": {"kind": "path_exists", "path": "Dockerfile"}},
+            content_type="application/json",
+            **auth_header(instructor["access"]),
+        )
+        assert changed.status_code == 200, changed.content
+        second = login(client, uid="participant-2")
+        join_class(client, second["access"], ctx["class_id"], instructor_access=instructor["access"])
+        submit_source(
+            client, second["access"], ctx["class_id"], ctx["problem_id"], participant_user_id=user_id("participant-2"), files=TREE
+        )
+        run_scan(client)
+
+    assert len(sent) == 1
+    first_score, reused = ClassroomScore.objects.order_by("id")
+    assert [(r["checklist_item_id"], r["verdict"], r["source"]) for r in reused.reasoning] == [
+        (judged, "met", "model"),
+        (machine, "unmet", "machine"),
+    ]
+    assert reused.reasoning[0]["reused_from_score_id"] == first_score.id

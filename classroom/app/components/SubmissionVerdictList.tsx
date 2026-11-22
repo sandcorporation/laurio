@@ -22,6 +22,11 @@ export function SubmissionVerdictList({
 }) {
   return (
     <ul data-testid={`${testIdPrefix}-verdicts`} className="flex flex-col gap-2">
+      {score.reused ? (
+        <li data-testid={`${testIdPrefix}-reused`}>
+          <Badge tone="neutral">같은 제출 재사용</Badge>
+        </li>
+      ) : null}
       {score.syntax_check ? (
         <li data-testid={`${testIdPrefix}-syntax-check`} className="flex gap-2.5">
           <span

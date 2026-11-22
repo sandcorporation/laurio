@@ -62,7 +62,7 @@ from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_lim
 from . import selfloop
 from .corrections import _fixed_inputs
 from .current import latest_done_correction
-from .experiment_report import BillPart
+from .experiment_report import TRUTH_ROW, BillPart
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
 from .selfloop_scoring import run_selfloop_scoring
@@ -371,6 +371,25 @@ def record_production(experiment: ScoringExperiment, subjects: Sequence[Material
                 created_at=Clock.now(),
             ),
         )
+
+
+def record_truth(experiment: ScoringExperiment, subjects: Sequence[MaterialSubject]) -> int:
+    """정답이 채워진 제출의 정답을 「정답:사람」 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로. 남긴 제출 수."""
+
+    count = 0
+    for s in subjects:
+        if not s.item.truth:
+            continue
+        count += 1
+        ScoringExperimentRun.objects.get_or_create(
+            experiment=experiment, submission=None, material_id=s.material_id, row=TRUTH_ROW, round=1,
+            defaults=dict(
+                status=ScoringExperimentRun.Status.SCORED,
+                verdicts=[{"requirement_id": t.checklist_item_id, "met": t.is_met} for t in s.item.truth],
+                created_at=Clock.now(),
+            ),
+        )
+    return count
 
 
 def vendor_key(vendor: ScoringVendor) -> str:

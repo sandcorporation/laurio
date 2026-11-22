@@ -127,6 +127,8 @@ export type ClassroomScore = {
   syntax_check: SyntaxCheckVerdict | null;
   // 숨은 항목(#906) — 문구 없이 개수만. 숨은 항목이 없으면 없거나 total 0.
   hidden_summary?: { total: number; met: number } | null;
+  // 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 true 가 된다.
+  reused?: boolean;
   created_at: string;
 };
 

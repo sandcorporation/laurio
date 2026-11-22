@@ -18,6 +18,8 @@ from core.clock import Clock
 from scoring.experiment_report import (
     COST_ONLY_NOTE,
     NO_TRUTH_NOTE,
+    TRUTH_NOTE,
+    TRUTH_ROW,
     RunRow,
     band_lines,
     bill_lines,
@@ -94,7 +96,11 @@ class Command(BaseCommand):
             *([COST_ONLY_NOTE] if experiment.cost_only else []),
             f"{source} · 기준 줄 {baseline}",
             *limits_note(reports, repeat=repeat),
-            NO_TRUTH_NOTE,
+            *(
+                [TRUTH_NOTE]
+                if any(r.row == TRUTH_ROW for r in runs)
+                else [NO_TRUTH_NOTE]
+            ),
         ]
         md = to_markdown(f"채점 방식 비교 — {experiment.name}", reports, notes, repeat=repeat, full_submissions=full)
         if production:

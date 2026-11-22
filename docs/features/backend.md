@@ -1209,6 +1209,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `AGENT_EXPERIMENT_DAILY_LIMIT_USD` | USD 0~1000(#1246) | 채점 방식 비교 실험의 하루(KST) 비용 상한 — 실행 토큰 용도 `experiment` 만 세고 운영 상한과 따로다. 0 이면 실험이 돌지 않는다 | 0 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·정정 채점(`score-correction`, #1180) 스캔만 — 꺼지면 정정은 진행 중으로 기다린다 | **off** — 채점 스캔이 돌지 않는다 |
+| `CLASSROOM_SCORE_REUSE` | on/off(#1287) | 강의실 채점이 같은 문제·같은 모델·같은 프롬프트의 이전 점수(플랫폼 자동 점수 제외)를 벤더 없이 그대로 쓴다 — 토큰 0, 강사 화면에 「같은 제출 재사용」. staged 갈래(`CLASSROOM_SCORING_PIPELINE`)면 모델 판정만 가져오고 기계 판정은 이번 것을 쓴다(#1283) | **off** — 매번 벤더를 부른다 |
 | `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 
@@ -1278,8 +1279,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   실행에서 다시 돌고(그 전에 `failed` 로 남은 그런 칸도 같은 판정으로), 연속 3칸이면 멈춘다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
   (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 실측 건당 비용과 전체(제출 N × 회차 3) 예상 금액(돈이 든 칸이
   없는 줄은 「실측 없음」이고 합계에서 빠진다), p50·p90,
-  요구사항 단위 판정 일치율(기준 줄 대비, 필수·선택)·회차 사이 판정 흔들림(필수·선택), 미충족 재현율·오탐률(정답이 없는
-  운영 재료라 「—」), 문턱 열과 표본의 한계를 마크다운·CSV 로 낸다(비용 측정 전용 실험은 머리에 「점수 비교 아님」, #1261). `--bill` 은 벤더·모델·UTC 날짜·시간 창별 요청·입력·캐시 읽기/쓰기·출력·금액
+  요구사항 단위 판정 일치율(기준 줄 대비, 필수·선택)·회차 사이 판정 흔들림(필수·선택), 항목 판정 정확도·미충족 재현율·오탐률(사본에 항목별 정답이 있을 때만 — `compare_scoring_methods --material <사본> --fill-truth <CSV>` 로
+  채운다, 없으면 「—」, #1288), 문턱 열과 표본의 한계를 마크다운·CSV 로 낸다(비용 측정 전용 실험은 머리에 「점수 비교 아님」, #1261). `--bill` 은 벤더·모델·UTC 날짜·시간 창별 요청·입력·캐시 읽기/쓰기·출력·금액
   (청구 대조)을 낸다. 같은 `--name` 으로 회차·건수를 늘려 이어 갈 수 있다(먼저 2건 × 1회로 단가 실측). `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
 - **채점 방식 실험의 사본 재료(#1262)** — 운영에서 `manage.py export_experiment_material --classroom-submissions <id,…> --name
   <이름> --out <파일>`(강의실 앱, 읽기만)이 운영 채점이 끝난 강의실 제출을 가명 사본 파일 하나(tar.gz, 0600)로 꺼낸다: 소스 바이트

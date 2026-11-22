@@ -56,6 +56,10 @@ class Command(BaseCommand):
     def add_arguments(self, parser: CommandParser) -> None:
         parser.add_argument("--contest", type=int, default=None)
         parser.add_argument("--material", default=None, help="사본 재료 파일(저장소 밖, 기본 ~/.cache/codemit-work/experiment-material/<이름>/)")
+        parser.add_argument(
+            "--fill-truth", default=None,
+            help="--material 과 함께: 항목별 정답 CSV(material_id,item_id,is_met — 가명 id 뿐, 원문·학생 정보 없음)를 사본에 채우고 끝낸다(모델을 부르지 않는다)",
+        )
         parser.add_argument("--purge-material", default=None, help="사본 재료 폴더 <이름> 을 지운다")
         parser.add_argument("--rows", default=None, help="방식:모델,… (첫째가 기준 줄). 비면 기본 줄 일곱")
         parser.add_argument("--repeat", type=int, default=3)
@@ -78,6 +82,11 @@ class Command(BaseCommand):
             raise CommandError("--contest · --material · --purge-material 중 하나만 준다")
         if options["purge_material"] is not None:
             self._purge(str(options["purge_material"]))
+            return
+        if options["fill_truth"] is not None and options["material"] is None:
+            raise CommandError("--fill-truth 는 --material 과 함께 쓴다")
+        if options["material"] is not None and options["fill_truth"] is not None:
+            self._fill_truth(Path(str(options["material"])).expanduser(), Path(str(options["fill_truth"])).expanduser())
             return
         if options["material"] is not None:
             self._handle_material(Path(str(options["material"])).expanduser(), options)
@@ -150,6 +159,18 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
         self.stdout.write(f"재료 {name} 을 지웠다." if gone else f"재료 {name} 이 없다({em.DEFAULT_ROOT}).")
 
+    def _fill_truth(self, path: Path, csv_path: Path) -> None:
+        """사본에 항목별 정답을 채운다(#1288) — 읽고 검사한 뒤에만 쓴다(거절이면 사본은 그대로)."""
+
+        repo_root = Path(settings.BASE_DIR).parent
+        try:
+            material = em.load(path, repo_root=repo_root)
+            truth = em.parse_truth_csv(csv_path.read_text(encoding="utf-8"), material.items)
+            filled = em.fill_truth(path, truth, repo_root=repo_root)
+        except (em.MaterialError, OSError, UnicodeDecodeError) as exc:
+            raise CommandError(str(exc)) from exc
+        self.stdout.write(f"정답을 채웠다 — 제출 {len(truth)}건(사본 전체 {filled}건에 정답 있음). 모델은 부르지 않았다.")
+
     def _handle_material(self, path: Path, options: dict[str, object]) -> None:
         repeat = int(options["repeat"])  # type: ignore[call-overload]  # argparse 가 int 로 줬다
         limit_raw = options["limit_submissions"]
@@ -216,6 +237,7 @@ class Command(BaseCommand):
             experiment.cost_only = experiment.cost_only or cost_only
             experiment.save(update_fields=["repeat", "limit_submissions", "cost_only"])
         ex.record_production(experiment, subjects)
+        ex.record_truth(experiment, subjects)
         inputs = {s.pk: ex.material_inputs(s.item) for s in subjects}
         with ex.real_vendor():
             self._run(experiment, plan, inputs)

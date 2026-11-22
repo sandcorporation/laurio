@@ -218,3 +218,112 @@ def test_purge_removes_the_material_folder(home):
     assert "재료 t1262 이 없다" in _call("compare_scoring_methods", "--purge-material", "t1262")
     with pytest.raises(CommandError, match="재료 이름이 아니다"):
         _call("compare_scoring_methods", "--purge-material", "../x")
+
+
+# ── 항목별 정답(#1288) ───────────────────────────────────────────────────────────────────────────────────
+
+
+def _truth_csv(tmp_path: Path, rows: list[tuple[str, int, str]], *, header: str = "material_id,item_id,is_met") -> Path:
+    path = tmp_path / "truth.csv"
+    path.write_text("\n".join([header, *(f"{m},{i},{v}" for m, i, v in rows)]) + "\n", encoding="utf-8")
+    return path
+
+
+def _full_truth(m1: str, m2: str) -> list[tuple[str, int, str]]:
+    return [(m1, REQ, "충족"), (m1, OPT, "미충족"), (m2, REQ, "미충족"), (m2, OPT, "미충족")]
+
+
+def _cells_of(md: str, row: str) -> dict[str, str]:
+    lines = [ln for ln in md.splitlines() if ln.startswith("|")]
+    header = [c.strip() for c in lines[0].strip("|").split("|")]
+    line = next(ln for ln in lines[2:] if ln.startswith(f"| {row} |"))
+    return dict(zip(header, [c.strip() for c in line.strip("|").split("|")], strict=True))
+
+
+@pytest.mark.django_db
+def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home, tmp_path):
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+
+    out = _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(_truth_csv(tmp_path, _full_truth(m1, m2))))
+
+    assert "정답을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
+    loaded = em.load(path, repo_root=Path("/nonexistent-repo-root"))
+    by_id = {i.material_id: i for i in loaded.items}
+    assert by_id[m1].truth == (em.TruthVerdict(REQ, True), em.TruthVerdict(OPT, False))
+    assert by_id[m2].truth == (em.TruthVerdict(REQ, False), em.TruthVerdict(OPT, False))
+    assert by_id[m1].source == items[0].source and stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "rows_of, reason",
+    [
+        (lambda m1, m2: [(m1, REQ, "충족")], "정답이 빠졌다"),
+        (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "충족"), ("0" * 12, REQ, "충족")], "재료에 없는 제출 id"),
+        (lambda m1, m2: [(m1, REQ, "충족"), (m1, 999, "충족")], "체크리스트에 없는 항목 id"),
+        (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "글쎄")], "충족 값을 읽을 수 없다"),
+        (lambda m1, m2: [(m1, REQ, "충족"), (m1, REQ, "충족")], "같은 칸이 두 번"),
+    ],
+)
+def test_a_bad_truth_csv_is_refused_and_leaves_the_material_alone(home, tmp_path, rows_of, reason):
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    before = path.read_bytes()
+
+    with pytest.raises(CommandError, match=reason):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+              str(_truth_csv(tmp_path, rows_of(items[0].material_id, items[1].material_id))))
+
+    assert path.read_bytes() == before
+
+
+@pytest.mark.django_db
+def test_truth_csv_with_student_columns_is_refused(home, tmp_path):
+    items = [_item(1, met=True)]
+    path = _material(home, items)
+    csv_path = _truth_csv(tmp_path, [], header="material_id,item_id,is_met,student_name")
+
+    with pytest.raises(CommandError, match="열은 material_id,item_id,is_met"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+
+@pytest.mark.django_db
+def test_fill_truth_needs_material():
+    with pytest.raises(CommandError, match="--material 과 함께"):
+        _call("compare_scoring_methods", "--contest", "1", "--fill-truth", "x.csv")
+
+
+@pytest.mark.django_db
+def test_report_fills_accuracy_recall_and_false_positive_rate_when_the_material_has_truth(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)  # 이 줄은 항목 REQ 를 늘 미충족으로 판정한다
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+          str(_truth_csv(tmp_path, _full_truth(items[0].material_id, items[1].material_id))))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "t", "--confirm")
+
+    md = _call("experiment_report", "t")
+
+    # 줄: 제출1 REQ(정답 충족)을 미충족으로 → 오답·오탐, 제출2 REQ(정답 미충족)은 미충족으로 → 정답·재현.
+    single = _cells_of(md, SINGLE)
+    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("50.0%", "100.0%", "100.0%")
+    # 운영 판정은 정답과 네 칸 모두 같다.
+    production = _cells_of(md, "운영:gpt-4.1-mini-2025-04-14")
+    assert (production["항목 판정 정확도"], production["미충족 재현율"], production["오탐률"]) == ("100.0%", "100.0%", "0.0%")
+    assert "정답:사람" not in md and "정답(알려진 미충족)이 없는 재료" not in md
+    assert "사람이 매긴 항목별 정답과 견준 값" in md
+
+
+@pytest.mark.django_db
+def test_report_without_truth_keeps_the_dash_cells_and_the_note(home, money, monkeypatch):
+    _fake_single(monkeypatch)
+    path = _material(home, [_item(1, met=True), _item(2, met=False)])
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "n", "--confirm")
+
+    md = _call("experiment_report", "n")
+
+    single = _cells_of(md, SINGLE)
+    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("—", "—", "—")
+    assert "정답(알려진 미충족)이 없는 재료" in md

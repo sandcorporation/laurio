@@ -6755,6 +6755,11 @@ export interface components {
             model_version: string;
             /** Reasoning */
             reasoning: components["schemas"]["ClassroomChecklistVerdictOut"][];
+            /**
+             * Reused
+             * @default false
+             */
+            reused: boolean;
             syntax_check?: components["schemas"]["ClassroomSyntaxCheckOut"] | null;
         };
         /** ClassroomSubmissionIn */
