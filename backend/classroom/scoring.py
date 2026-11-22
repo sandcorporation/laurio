@@ -113,7 +113,16 @@ from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import agent_grading, machine_check, pending_scoring, rule_derivation, score_reuse, scoring_calculator, scoring_cost
+from . import (
+    agent_grading,
+    machine_check,
+    pending_scoring,
+    platform_failures,
+    rule_derivation,
+    score_reuse,
+    scoring_calculator,
+    scoring_cost,
+)
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
@@ -632,11 +641,15 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
 #: 모양으로 멈추고, 같은 간격으로 다시 쳐 보고, 다시 확인한 시도가 채점되면 함께 풀린다.
 QUOTA_EXHAUSTED_AT = "scoring_quota_exhausted_at"
 SERVER_UNREACHABLE_AT = "scoring_server_unreachable_at"
-PAUSE_FIELDS = (QUOTA_EXHAUSTED_AT, SERVER_UNREACHABLE_AT)
+#: 셋째 멈춤(#1318) — 에이전트 실행기(플랫폼)에 닿지 않는다. 같은 모양으로 멈추고 같은 간격으로 다시 쳐 보지만,
+#: 강사의 키·연결 문제가 아니라 채점 대기 사유(「키」)에는 들지 않는다(`Class.scoring_platform_unavailable_at`).
+PLATFORM_UNAVAILABLE_AT = "scoring_platform_unavailable_at"
+PAUSE_FIELDS = (QUOTA_EXHAUSTED_AT, SERVER_UNREACHABLE_AT, PLATFORM_UNAVAILABLE_AT)
 
 _PAUSE_NOTIFICATIONS = {
     QUOTA_EXHAUSTED_AT: NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
     SERVER_UNREACHABLE_AT: NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE,
+    PLATFORM_UNAVAILABLE_AT: NotificationType.CLASSROOM_SCORING_PLATFORM_UNAVAILABLE,
 }
 
 
@@ -666,6 +679,13 @@ def _mark_scoring_paused(class_obj: Class, field: str) -> None:
             notification_type=_PAUSE_NOTIFICATIONS[field],
             context={"class_id": locked.id, "class_name": locked.name},
         )
+
+
+def _scoring_paused_any(class_obj: Class) -> bool:
+    """키·연결 쪽 멈춤(`Class.scoring_paused`)이나 플랫폼 멈춤(#1318) 가운데 하나라도 걸려 있는가 — 다시 확인 차례를
+    잡아야 하는가."""
+
+    return any(getattr(class_obj, field) is not None for field in PAUSE_FIELDS)
 
 
 def _claim_pause_recheck(class_obj: Class, *, as_of) -> bool:
@@ -778,7 +798,61 @@ def _finalize_platform_failure(submission: ClassroomSubmission, checklist_items:
         reasoning=reasoning,
     )
     _notify_submitter_of_score(submission, score, checklist_items)
+    _notify_owner_of_failure_cap(submission)
     return score
+
+
+#: 실패 상한 알림의 까닭 한 줄(#1318) — 마지막 시도 기록의 오류를 사람이 읽을 말로 줄인다. 원문 예외 문자열을 그대로
+#: 내지 않는다. 앞에서부터 처음 맞는 것을 쓴다.
+_FAILURE_REASONS: tuple[tuple[Callable[[ClassroomScoringAttempt], bool], str], ...] = (
+    (lambda a: a.rate_limited, "채점 모델 제공처가 요청 빈도를 거듭 제한했습니다"),
+    (lambda a: a.error.startswith("알 수 없는 채점 모델"), "문제의 채점 모델을 알 수 없습니다"),
+    (lambda a: "실행 토큰" in a.error, "에이전트 채점을 시작하지 못했습니다"),
+    (lambda a: "저장소" in a.error or "소스" in a.error, "제출한 소스나 저장소를 읽지 못했습니다"),
+    (
+        lambda a: any(word in a.error.lower() for word in ("timeout", "timed out", "시간 초과", "시간 안에")),
+        "채점 모델이 제한 시간 안에 답하지 않았습니다",
+    ),
+    (lambda a: a.permanent, "채점 모델이 이 요청을 받지 않았습니다"),
+)
+_FAILURE_REASON_FALLBACK = "채점 모델의 답을 받지 못했거나 읽지 못했습니다"
+
+
+def failure_cap_reason(attempt: ClassroomScoringAttempt | None) -> str:
+    """실패 상한에 닿은 시도의 까닭 한 줄 — 마지막 시도 기록으로 고른다(없으면 기본 문구)."""
+
+    if attempt is None:
+        return _FAILURE_REASON_FALLBACK
+    for matches, reason in _FAILURE_REASONS:
+        if matches(attempt):
+            return reason
+    return _FAILURE_REASON_FALLBACK
+
+
+def _notify_owner_of_failure_cap(submission: ClassroomSubmission) -> None:
+    """실패 상한으로 굳을 때마다 소유자에게 알린다(#1318) — 어느 문제의 어느 제출인지와 까닭 한 줄. 수신자는
+    소유자(`Class.instructor`)뿐이다(멈춤 알림과 같다). 알림이 실패해도 굳힌 점수는 그대로다(`notify_safely`)."""
+
+    problem = submission.problem
+    class_obj = problem.classroom
+    last = (
+        pending_scoring.exclude_holds(ClassroomScoringAttempt.objects.filter(submission=submission))
+        .order_by("-attempted_at", "-id")
+        .first()
+    )
+    notify_safely(
+        recipient=class_obj.instructor,
+        notification_type=NotificationType.CLASSROOM_SCORING_FAILURE_CAPPED,
+        context={
+            "class_id": class_obj.id,
+            "class_name": class_obj.name,
+            "problem_id": problem.id,
+            "problem_title": problem.title,
+            "submission_id": submission.id,
+            "attempt_number": submission.attempt_number,
+            "reason": failure_cap_reason(last),
+        },
+    )
 
 
 def _record_scoring_attempt(
@@ -1671,6 +1745,13 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             # 몸통이 깨진 것은 이 예외가 아니라 아래 `LLMAdapterError`(실패 시도)로 간다.
             _mark_scoring_paused(class_obj, SERVER_UNREACHABLE_AT)
             return {"submission_id": submission.id, "status": "server_unreachable"}
+        if isinstance(exc, agent_grading.AgentPlatformUnavailable):
+            # 에이전트 실행기에 닿지 않았다(#1318) — 플랫폼 탓이지 이 제출물의 결함이 아니다. 크레딧 소진과 같은
+            # 규율로 시도 기록을 남기지 않고(실패 상한·시도 횟수에 닿지 않는다) 그 클래스를 멈춘다. 오류 수집·운영
+            # 경보는 실패마다 남긴다(다시 확인이 또 실패해도 — 경보가 이어지는 동안은 한 번이다).
+            platform_failures.report(exc, product="classroom", model=prepared.model)
+            _mark_scoring_paused(class_obj, PLATFORM_UNAVAILABLE_AT)
+            return {"submission_id": submission.id, "status": "platform_unavailable"}
         if isinstance(exc, LLMAdapterInputTooLargeError):
             # 보낼 요청이 모델 컨텍스트를 넘었다 — 예산으로 고른 뒤에도 어댑터가 재어 막았거나 벤더가 거절했다(#989).
             # 미충족으로 굳히지 않고 반려한다(#1311) — 한도는 그 모델의 예산, 크기는 실은 소스다.
@@ -2033,7 +2114,7 @@ def prepare_claimed_head(submission_id: int, *, owner: str, as_of) -> _Head | Co
         problem_id=submission.problem_id,
     )
     pause_recheck = False
-    if class_obj.scoring_paused():
+    if _scoring_paused_any(class_obj):
         pause_recheck = _claim_pause_recheck(class_obj, as_of=as_of)
         if not pause_recheck:
             return _concluded({"submission_id": submission_id, "status": "scoring_paused"})

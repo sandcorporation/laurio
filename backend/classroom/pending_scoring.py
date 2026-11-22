@@ -190,6 +190,7 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
         .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(problem__classroom__scoring_quota_exhausted_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         .exclude(problem__classroom__scoring_server_unreachable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
+        .exclude(problem__classroom__scoring_platform_unavailable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         # 에이전트 채점 보류(#1036) — 다시 돌려 예산을 쓰지 않는다. 공모전 보류와 같다.
         .exclude(
             models.Exists(

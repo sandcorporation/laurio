@@ -130,6 +130,10 @@ class Class(models.Model):
     #: 다시 저장하면 지워지고, 스캔이 `QUOTA_RECHECK_INTERVAL` 마다 대기 시도 하나로 다시 쳐 본다.
     #: 닿았는데 늦거나 몸통이 깨진 것은 여기 오지 않는다(실패 시도로 센다).
     scoring_server_unreachable_at = models.DateTimeField(null=True, blank=True, default=None)
+    #: 에이전트 실행기(플랫폼)에 닿지 않는다고 마지막으로 확인한 시각(#1318) — null 이면 정상이다. 위 둘과 같은
+    #: 모양으로 멈추고 같은 간격으로 다시 쳐 보지만 **강사의 키·연결 문제가 아니다** — 채점 대기 사유(「키」)에도,
+    #: `scoring_paused`·`scoring_key_unusable` 에도 들지 않는다. 다시 확인한 시도가 채점되면 지워진다.
+    scoring_platform_unavailable_at = models.DateTimeField(null=True, blank=True, default=None)
     #: 이 채점 연결이 마지막으로 실제로 닿은 시각(#671, CONTEXT.md 「채점 연결」) — 화면의 「M/D 확인」.
     #: 키 저장 때 벤더가 받았을 때·호환 서버 저장·호환 서버 모델 시험 호출 통과·채점 성공이 찍고,
     #: 확인되지 않은 연결로 바뀌거나(벤더에 닿지 못한 키 저장) 소유권이 넘어가면 지운다. null 이면

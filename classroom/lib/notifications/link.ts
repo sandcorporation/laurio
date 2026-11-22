@@ -31,6 +31,22 @@ export function notificationHref(notification: NotificationRow): string | null {
       const base = `/classes/${classId}/problems/${problemId}/submit`;
       return submissionId === null ? base : `${base}#submission-${submissionId}`;
     }
+    // 실패 상한(#1318)은 소유자에게 가므로 강사의 제출 현황 화면, 그 시도 줄로 보낸다.
+    case "classroom_scoring_failure_capped": {
+      const classId = context.class_id;
+      const problemId = context.problem_id;
+      if (typeof classId !== "number" || typeof problemId !== "number") return null;
+
+      const submissionId = typeof context.submission_id === "number" ? context.submission_id : null;
+      const base = `/classes/${classId}/problems/${problemId}/submissions`;
+      return submissionId === null ? base : `${base}#submission-${submissionId}`;
+    }
+    // 플랫폼 장애 멈춤(#1318)은 강사가 고칠 것이 없다 — 설정이 아니라 클래스 화면으로.
+    case "classroom_scoring_platform_unavailable": {
+      const classId = context.class_id;
+      if (typeof classId !== "number") return null;
+      return detailTabHref(classId, "problems");
+    }
     case "classroom_scoring_key_rejected":
     case "classroom_scoring_quota_exhausted":
     case "classroom_scoring_server_unreachable": {
