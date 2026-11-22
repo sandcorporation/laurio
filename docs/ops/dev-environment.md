@@ -104,6 +104,10 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 `docker compose -p <프로젝트> down` 으로 내린 뒤(**볼륨은 지우지 않는다**) stderr 로 한 줄 알리고 그 오프셋을 쓴다.
 디렉터리가 있으면 위처럼 거절한다. `scripts/dev-server.sh reap`(5분 타이머)도 같은 판정(`docker/dev-stack-orphans.sh`)으로
 워크트리가 사라진 `codemit-dev*` 스택의 컨테이너를 내린다.
+**타이머가 없는 mac 은 `dev-env.sh` 가 시작 때 같은 판정으로 걷는다**(#1275) — `test.sh`(backend·e2e)와 dev 스택을
+띄우는 모든 길이 `eval "$(sh docker/dev-env.sh)"` 로 시작하니 오프셋을 받는 길(직접 지정·해시·주 워크트리)과 상관없이
+주인 디렉터리가 없는 `codemit-dev*` 스택의 컨테이너가 먼저 내려간다(볼륨은 남긴다, 알림은 stderr 한 줄). 전에는 직접
+지정한 오프셋만 주인을 봤고 해시 길은 보지 않아, 주인 워크트리를 지운 뒤에도 그 db 가 남아 다음 작업자가 그 위에 붙었다.
 
 **`-e2e` 스택은 일회용이라 주인 디렉터리가 있어도 걷는다**(#1192). `scripts/test.sh e2e` 는 띄우기 전에
 `~/.codemit/dev-servers/<프로젝트>.owner`(자기 pid)를 남기고, 셸이 SIGKILL 로 죽어 EXIT trap 이 안 돌면 그 pid 의
@@ -113,6 +117,9 @@ DB·Redis·MinIO·이벤트 서비스·세 앱(#276부터 강의실이, #379부�
 — 그 워크트리를 주인으로 둔 스택을 먼저 내리고(`-e2e` 는 볼륨까지, dev 스택 볼륨은 남김) dev 서버를 멈춘 뒤
 워크트리·브랜치를 지운다. root 소유 파일이 남았으면 일회용 컨테이너로 지우고 이어 간다. dev 컨테이너가 pnpm 스토어를
 워크트리 `.pnpm-store` 에 root 로 쓰던 것은 compose 가 `npm_config_store_dir=/pnpm/store` 로 막는다(#1220). 손으로 `git worktree remove` 만 하면 스택이 고아로 남는다.
+`worktree-rm.sh` 는 **어느 체크아웃의 사본으로 불러도, 지울 워크트리 안에 선 채로도 돈다**(#1275) — 필요한 헬퍼를 임시 폴더로
+옮겨 쓰고 git 은 `git-common-dir` 의 주 워크트리에서 부르니, mac 의 main 체크아웃이 묵어 스크립트가 없어도 작업자 워크트리의
+사본(`scripts/worktree-rm.sh <그 워크트리>`)으로 끝낼 수 있다. 주 워크트리 자체는 지우지 않는다. 시험은 `python3 scripts/test_worktree_rm.py`.
 
 **거절하면 뒤따르는 compose 도 돌지 않는다**(#1146). `eval "$(…)"` 는 명령 치환의 종료코드를 삼키므로,
 거절 때 스크립트는 stdout 으로 `docker` 를 실패하는 함수로 가리고 `false` 로 끝나는 조각을 내보낸다 —

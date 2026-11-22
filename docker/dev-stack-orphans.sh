@@ -25,6 +25,20 @@ dev_stack_down_orphan() {
   docker compose -p "$1" down --remove-orphans >/dev/null 2>&1 || docker ps -a -q --filter "label=com.docker.compose.project=$1" | xargs -r docker rm -f >/dev/null 2>&1 || true
 }
 
+# 주인 디렉터리가 사라진 모든 `codemit-dev*`(-e2e 아님) 스택을 내린다(볼륨은 남긴다). 내린 개수를 DEV_REAPED 에 둔다.
+# 타이머가 없는 mac 은 `dev-env.sh`(= test.sh·dev 스택을 띄우는 모든 길의 입구)가 시작 때 부른다(#1275).
+dev_stack_reap_orphans() {
+  DEV_REAPED=0
+  command -v docker >/dev/null 2>&1 || return 0
+  for _p in $(docker ps -a --filter "label=com.docker.compose.project" \
+      --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u | grep -E '^codemit-dev(-[0-9])?$' || true); do
+    if dev_stack_is_orphan "$_p"; then
+      echo "dev-env.sh: 주인 디렉터리가 사라진($(dev_stack_owners "$_p" | tr '\n' ' ')) 스택 $_p 를 내렸다(볼륨은 남겼다)" >&2
+      dev_stack_down_orphan "$_p"; DEV_REAPED=$((DEV_REAPED + 1))
+    fi
+  done
+}
+
 # ── e2e 스택(`<dev 프로젝트>-e2e`, #1192) ────────────────────────────────────────────────────
 # `-e2e` 스택은 늘 일회용이다 — `scripts/test.sh e2e` 가 띄우고 EXIT trap 으로 내린다. 그런데 셸이 SIGKILL 로
 # 죽으면(세션 종료·배경 셸 강제 종료·시간 초과) trap 이 안 돌아 스택이 남고, 위 판정은 주인 디렉터리가 있으면
