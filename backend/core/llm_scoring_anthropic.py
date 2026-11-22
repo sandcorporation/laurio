@@ -109,13 +109,20 @@ _SYSTEM_PROMPT = llm_scoring._OPENAI_SYSTEM_PROMPT + (
 )
 
 
-def _verdict_schema(*, allow_unverifiable: bool = False, requirement_ids: list[int] | None = None) -> dict:
-    """OpenAI 와 같은 판정 스키마(`core.llm_scoring._openai_verdict_response_schema` 의 `schema`) —
-    Anthropic 은 이름·strict 없이 스키마만 받는다. 강의실은 「확인 불가」를 받는 쪽이다(#811)."""
+def _verdict_schema(*, allow_unverifiable: bool = False) -> dict:
+    """판정 스키마 — OpenAI 의 **배열 모양**(`core.llm_scoring._openai_verdict_response_schema` 를
+    `requirement_ids` 없이 부른 `schema`). Anthropic 은 이름·strict 없이 스키마만 받는다. 강의실은 「확인
+    불가」를 받는 쪽이다(#811).
 
-    return llm_scoring._openai_verdict_response_schema(
-        allow_unverifiable=allow_unverifiable, requirement_ids=requirement_ids
-    )["schema"]
+    OpenAI 가 쓰는 「requirement_id 를 키로 한 객체」(#986)는 싣지 않는다 — Anthropic 은 구조화 출력
+    스키마를 문법으로 컴파일하는데, 키가 24개 이상이면 한도를 넘어 매번 400(`invalid_request_error`,
+    「The compiled grammar is too large…」)이 난다(#1273, 공모전·강의실 두 모양, haiku·sonnet 모두).
+    배열은 요구사항 수와 무관하게 크기가 같다. 대신 스키마가 빠뜨림·겹침을 막지 못하므로
+    `verdicts_from_content` 가 받은 뒤에 막는다 — 하나라도 빠지면 `LLMAdapterMissingVerdictError` 로
+    채점이 실패한다(공모전 3의 809 처럼 조용히 지나가지 않는다). 요청에 없던 id 의 판정은 버린다 — 판정
+    경로의 지금 동작이다(`core/tests/test_scoring_parser_paths.py`, #1125)."""
+
+    return llm_scoring._openai_verdict_response_schema(allow_unverifiable=allow_unverifiable)["schema"]
 
 
 def _headers(api_key: str, *, json_body: bool) -> dict[str, str]:
@@ -299,10 +306,7 @@ class AnthropicScoringAdapter:
         output_config: dict[str, Any] = {
             "format": {
                 "type": "json_schema",
-                "schema": _verdict_schema(
-                    allow_unverifiable=self._allow_unverifiable,
-                    requirement_ids=[r.requirement_id for r in scoring_input.requirements],
-                ),
+                "schema": _verdict_schema(allow_unverifiable=self._allow_unverifiable),
             }
         }
         if self._reasoning_effort is not None:
