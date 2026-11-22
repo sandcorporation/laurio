@@ -448,7 +448,8 @@ export interface paths {
          */
         put: operations["classroom_api_set_class_anthropic_key"];
         post?: never;
-        delete?: never;
+        /** Delete Class Anthropic Key */
+        delete: operations["classroom_api_delete_class_anthropic_key"];
         options?: never;
         head?: never;
         patch?: never;
@@ -561,8 +562,8 @@ export interface paths {
          *
          *     저장 전에 안전한 바깥 호출로 그 서버의 모델 목록을 한 번 받아 닿는지·인증이 맞는지 본다.
          *     거부·실패는 이유별 한 문장으로 422 이고, DB 의 기존 연결은 그대로 남는다. 인증 값은 OpenAI
-         *     키와 같은 칸에 암호화해 두고 끝 네 자리만 보인다 — 이전 연결(OpenAI 키)의 값은 덮여
-         *     지워진다. 응답 어디에도 인증 값 원문을 싣지 않는다.
+         *     키와 같은 칸에 암호화해 두고 끝 네 자리만 보인다 — 넣어 둔 OpenAI 키는 덮여 지워지고, Claude 키
+         *     (#1269)는 따로 살아 남는다. 응답 어디에도 인증 값 원문을 싣지 않는다.
          */
         put: operations["classroom_api_set_class_compatible_server"];
         post?: never;
@@ -803,7 +804,8 @@ export interface paths {
          */
         put: operations["classroom_api_set_class_openai_key"];
         post?: never;
-        delete?: never;
+        /** Delete Class Openai Key */
+        delete: operations["classroom_api_delete_class_openai_key"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1573,6 +1575,31 @@ export interface paths {
          */
         get: operations["classroom_api_list_class_scoring_models"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/classroom/classes/{class_id}/scoring-vendor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Class Scoring Vendor
+         * @description 채점 벤더 스위치(#1269) — 넣어 둔 OpenAI·Claude 키 가운데 어느 쪽으로 채점할지 고른다. 소유자 전용
+         *     (ADR-0055). 키가 없거나 거부된 쪽으로는 넘어가지 않는다(422). 벤더에 묻지 않는다 — 키는 저장할 때 확인했다.
+         *
+         *     넘어가면 키를 저장해 벤더가 바뀔 때(#795·#796)와 같다: 기본 모델이 그 벤더 것이 아니면 그 벤더의 기본
+         *     모델로 옮기고, 문제별로 고른 다른 벤더 모델은 클래스 기본으로 되돌린다. 점수가 있는 제출은 다시 채점하지
+         *     않는다(채점 대기는 점수 없는 제출만 집는다 — `classroom.pending_scoring`).
+         */
+        put: operations["classroom_api_set_class_scoring_vendor"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6077,6 +6104,7 @@ export interface components {
         };
         /** ClassOut */
         ClassOut: {
+            anthropic_key?: components["schemas"]["VendorKeyOut"] | null;
             /**
              * Anthropic Key Selectable
              * @default false
@@ -6135,6 +6163,7 @@ export interface components {
             my_instructor_display_name: string;
             /** Name */
             name: string;
+            openai_key?: components["schemas"]["VendorKeyOut"] | null;
             /** Openai Key Masked */
             openai_key_masked?: string | null;
             /** Openai Key Status */
@@ -10612,6 +10641,17 @@ export interface components {
             /** Label */
             label: string;
         };
+        /**
+         * ScoringVendorIn
+         * @description 채점 벤더 스위치(#1269) — 넣어 둔 키 가운데 어느 쪽으로 채점할지.
+         */
+        ScoringVendorIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "openai_key" | "anthropic_key";
+        };
         /** ScreenshotDownloadOut */
         ScreenshotDownloadOut: {
             /** Download Url */
@@ -11115,6 +11155,18 @@ export interface components {
             submissions: number;
             /** Submitters */
             submitters: number;
+        };
+        /**
+         * VendorKeyOut
+         * @description 넣어 둔 벤더 키 하나(#1269) — 값은 끝 네 자리 마스킹뿐이다.
+         */
+        VendorKeyOut: {
+            /** Masked */
+            masked: string;
+            /** Status */
+            status: string;
+            /** Switchable */
+            switchable: boolean;
         };
         /**
          * VerificationStartOut
@@ -11924,6 +11976,46 @@ export interface operations {
             };
         };
     };
+    classroom_api_delete_class_anthropic_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
     classroom_api_archive_class: {
         parameters: {
             query?: never;
@@ -12535,6 +12627,46 @@ export interface operations {
             };
             /** @description Unprocessable Content */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_delete_class_openai_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14022,6 +14154,59 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_set_class_scoring_vendor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoringVendorIn"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

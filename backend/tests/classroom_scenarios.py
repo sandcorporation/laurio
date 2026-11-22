@@ -120,6 +120,19 @@ def set_anthropic_key(client, access: str, class_id: int, key: str = "sk-ant-tes
     )
 
 
+def switch_scoring_vendor(client, access: str, class_id: int, kind: str, *, expect: int = 200) -> dict:
+    """채점 벤더 스위치(#1269) — 넣어 둔 OpenAI·Claude 키 가운데 어느 쪽으로 채점할지."""
+
+    response = client.put(
+        f"{CLASSES_URL}/{class_id}/scoring-vendor",
+        data={"kind": kind},
+        content_type="application/json",
+        **auth_header(access),
+    )
+    assert response.status_code == expect, response.content
+    return response.json()
+
+
 def get_class(client, access: str, class_id: int) -> dict:
     response = client.get(f"{CLASSES_URL}/{class_id}", **auth_header(access))
     assert response.status_code == 200, response.content

@@ -547,9 +547,14 @@ def _mark_scoring_key_rejected(class_obj: Class) -> None:
     newly_rejected = False
     with transaction.atomic():
         locked = Class.objects.select_for_update().get(pk=class_obj.pk)
-        if locked.openai_api_key_status != Class.ScoringKeyStatus.REJECTED:
-            locked.openai_api_key_status = Class.ScoringKeyStatus.REJECTED
-            locked.save(update_fields=["openai_api_key_status"])
+        # 거절당한 것은 채점을 보낸 그 연결의 키다(#1269) — 벤더를 기다리는 사이 스위치가 다른 키로
+        # 넘어갔으면 그 키를 거부됨으로 만들지 않는다.
+        if locked.scoring_connection_kind != class_obj.scoring_connection_kind:
+            return
+        status_field = locked.active_key_fields().status
+        if getattr(locked, status_field) != Class.ScoringKeyStatus.REJECTED:
+            setattr(locked, status_field, Class.ScoringKeyStatus.REJECTED)
+            locked.save(update_fields=[status_field])
             newly_rejected = True
 
     if newly_rejected:

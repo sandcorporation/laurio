@@ -172,11 +172,23 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
             models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)
             & models.Q(problem__classroom__scoring_server_url="")
         )
+        # 키 연결은 스위치가 고른 쪽 키 칸으로 가른다(#1269) — Claude 키 연결은 Claude 칸, 나머지는 OpenAI 칸.
         .exclude(
-            ~models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)
+            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.OPENAI_KEY)
             & models.Q(problem__classroom__openai_api_key_encrypted="")
         )
-        .exclude(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
+        .exclude(
+            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY)
+            & models.Q(problem__classroom__anthropic_api_key_encrypted="")
+        )
+        .exclude(
+            ~models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY)
+            & models.Q(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
+        )
+        .exclude(
+            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY)
+            & models.Q(problem__classroom__anthropic_api_key_status=Class.ScoringKeyStatus.REJECTED)
+        )
         .exclude(problem__scoring_model_rejected_at__isnull=False)
         .exclude(problem__classroom__scoring_quota_exhausted_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         .exclude(problem__classroom__scoring_server_unreachable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)

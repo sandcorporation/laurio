@@ -42,7 +42,14 @@ from .instructor_scope import class_scope, problem_scope
 from core.models import ConnectedApp
 
 #: 화면 응답에는 있지만 연결된 앱에게는 주지 않는 클래스 필드.
-_CLASS_FIELDS_WITHHELD = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked"}
+_CLASS_FIELDS_WITHHELD = {
+    "openai_key_masked",
+    "scoring_server_url",
+    "scoring_auth_masked",
+    # 넣어 둔 두 벤더 키의 마스킹(#1269)
+    "openai_key",
+    "anthropic_key",
+}
 
 
 def _as_screen_json(value):

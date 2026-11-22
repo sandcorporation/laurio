@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import secrets
+from dataclasses import dataclass
 from typing import Literal
 
 from django.conf import settings
@@ -26,6 +27,22 @@ from .grading_guidelines import DEFAULT_GRADING_STRICTNESS, GRADING_GUIDELINE_TE
 from .scoring_models import DEFAULT_REASONING_EFFORT, DEFAULT_SCORING_MODEL, REASONING_EFFORT_CHOICES
 
 LateStatus = Literal["recommended", "deadline"] | None
+
+
+@dataclass(frozen=True)
+class VendorKeyFields:
+    """채점 키 한 벌이 사는 칸 이름(#1269) — 암호문·끝 네 자리·상태. OpenAI 키와 Claude 키는 따로 산다.
+    호환 서버의 인증 값은 OpenAI 키 칸을 같이 쓴다(#601 그대로)."""
+
+    encrypted: str
+    last4: str
+    status: str
+
+
+OPENAI_KEY_FIELDS = VendorKeyFields("openai_api_key_encrypted", "openai_api_key_last4", "openai_api_key_status")
+ANTHROPIC_KEY_FIELDS = VendorKeyFields(
+    "anthropic_api_key_encrypted", "anthropic_api_key_last4", "anthropic_api_key_status"
+)
 
 
 def _generate_join_code() -> str:
@@ -89,6 +106,18 @@ class Class(models.Model):
     openai_api_key_status = models.CharField(
         max_length=10, choices=ScoringKeyStatus.choices, default=ScoringKeyStatus.UNVERIFIED
     )
+    #: Claude(Anthropic) 키 한 벌(#1269) — OpenAI 키 칸과 같은 규율(암호문만·끝 네 자리·저장 시점 확인 상태)로
+    #: 따로 둔다. 두 키를 다 넣어 두고 `scoring_connection_kind` 로 어느 쪽으로 채점할지 고른다. 예전(#795)에는
+    #: Claude 키가 OpenAI 키 칸을 같이 썼다 — `0042_class_anthropic_key` 가 그 값을 여기로 옮겼다.
+    #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸을 빼먹어도 된다(ADR-0053).
+    anthropic_api_key_encrypted = models.TextField(blank=True, default="", db_default="")
+    anthropic_api_key_last4 = models.CharField(max_length=4, blank=True, default="", db_default="")
+    anthropic_api_key_status = models.CharField(
+        max_length=10,
+        choices=ScoringKeyStatus.choices,
+        default=ScoringKeyStatus.UNVERIFIED,
+        db_default=ScoringKeyStatus.UNVERIFIED,
+    )
     #: 벤더가 이 키의 크레딧이 바닥났다고 마지막으로 답한 시각(#586) — null 이면 정상이다.
     #: 키 상태(`openai_api_key_status`)와 따로 둔다: 키는 그대로 유효하고 충전하면 같은 키로
     #: 이어진다. 값이 있으면 채점 대기 사유는 「키」다(`scoring_key_unusable`). 소유자가 키를
@@ -107,8 +136,9 @@ class Class(models.Model):
     #: 아직 확인된 적 없는 연결이다. 채점 여부를 정하지 않는다 — 보이기만 한다.
     scoring_connection_verified_at = models.DateTimeField(null=True, blank=True, default=None)
 
-    #: 채점 연결의 종류(#599). 키 칸들(`openai_api_key_*`)과 크레딧 소진 시각은 이 연결의
-    #: 인증 값과 상태다 — 키 상태(ADR-0045)·크레딧 멈춤(ADR-0057)은 연결의 상태로 읽힌다.
+    #: 채점 연결의 종류(#599) — 「OpenAI」·「Claude」 스위치(#1269)와 셋째 선택 「호환 서버」. 이 값이 고른
+    #: 키 칸(`active_key_fields`)과 크레딧 소진 시각이 이 연결의 인증 값과 상태다 — 키 상태(ADR-0045)·크레딧
+    #: 멈춤(ADR-0057)은 연결의 상태로 읽힌다. 고르지 않은 쪽 키는 넣어 둔 채 쉰다.
     scoring_connection_kind = models.CharField(
         max_length=20,
         choices=ScoringConnectionKind.choices,
@@ -201,7 +231,34 @@ class Class(models.Model):
         if self.scoring_connection_kind == self.ScoringConnectionKind.COMPATIBLE_SERVER:
             # 호환 서버는 인증 값을 비워 둘 수 있다(#601) — 연결이 있는가는 주소로 가른다.
             return bool((self.scoring_server_url or "").strip())
-        return bool((self.openai_api_key_encrypted or "").strip())
+        return bool((getattr(self, self.active_key_fields().encrypted) or "").strip())
+
+    def active_key_fields(self) -> VendorKeyFields:
+        """지금 연결이 쓰는 키 칸(#1269) — Claude 키 연결이면 Claude 칸, 아니면(OpenAI 키·호환 서버) OpenAI 칸."""
+
+        return key_fields_for(self.scoring_connection_kind)
+
+    def active_key_status(self) -> str:
+        return getattr(self, self.active_key_fields().status)
+
+    def stored_vendor_key(self, kind: str) -> tuple[str, str] | None:
+        """넣어 둔 벤더 키의 (끝 네 자리, 상태)(#1269) — 없으면 `None`. 호환 서버 연결 동안 OpenAI 칸은 서버의
+        인증 값이라 OpenAI 키가 없는 것으로 본다."""
+
+        if kind == self.ScoringConnectionKind.OPENAI_KEY and (
+            self.scoring_connection_kind == self.ScoringConnectionKind.COMPATIBLE_SERVER
+        ):
+            return None
+        fields = key_fields_for(kind)
+        if not (getattr(self, fields.encrypted) or "").strip():
+            return None
+        return getattr(self, fields.last4), getattr(self, fields.status)
+
+    def vendor_key_switchable(self, kind: str) -> bool:
+        """스위치가 이 벤더로 넘어갈 수 있는가(#1269) — 그 키가 있고 거부되지 않았을 때만."""
+
+        stored = self.stored_vendor_key(kind)
+        return stored is not None and stored[1] != self.ScoringKeyStatus.REJECTED
 
     def scoring_paused(self) -> bool:
         """채점이 다시 확인을 기다리며 멈춰 있는가(#586, #603) — 크레딧 소진이나 호환 서버
@@ -219,9 +276,15 @@ class Class(models.Model):
 
         return (
             not self.has_scoring_key()
-            or self.openai_api_key_status == self.ScoringKeyStatus.REJECTED
+            or self.active_key_status() == self.ScoringKeyStatus.REJECTED
             or (self.scoring_paused() and not ignore_pause)
         )
+
+
+def key_fields_for(kind: str) -> VendorKeyFields:
+    """연결 종류가 쓰는 키 칸(#1269) — Claude 키만 따로, 나머지(OpenAI 키·호환 서버)는 OpenAI 칸."""
+
+    return ANTHROPIC_KEY_FIELDS if kind == Class.ScoringConnectionKind.ANTHROPIC_KEY else OPENAI_KEY_FIELDS
 
 
 class Problem(models.Model):

@@ -142,6 +142,10 @@ ROUTES: list[Route] = [
     ),
     Route("set_class_openai_key", "put", lambda w: f"{_c(w)}/openai-key", lambda w: {"api_key": "sk-new"}, 200, owner_only=True),
     Route("set_class_anthropic_key", "put", lambda w: f"{_c(w)}/anthropic-key", lambda w: {"api_key": "sk-ant-new"}, 200, owner_only=True),
+    Route("delete_class_openai_key", "delete", lambda w: f"{_c(w)}/openai-key", None, 200, owner_only=True),
+    Route("delete_class_anthropic_key", "delete", lambda w: f"{_c(w)}/anthropic-key", None, 200, owner_only=True),
+    # 키가 없는 클래스라 소유자는 422(문을 지나 검증에서 멈춘다), 공동 강사는 문에서 403.
+    Route("set_class_scoring_vendor", "put", lambda w: f"{_c(w)}/scoring-vendor", lambda w: {"kind": "anthropic_key"}, 422, owner_only=True),
     Route("set_class_compatible_server", "put", lambda w: f"{_c(w)}/compatible-server", lambda w: {"server_url": "https://llm.example.com/v1"}, 200, owner_only=True),
     Route("copy_class_view", "post", lambda w: f"{_c(w)}/copy", None, 201),
     Route("list_class_scoring_models", "get", lambda w: f"{_c(w)}/scoring-models", None, 200),
