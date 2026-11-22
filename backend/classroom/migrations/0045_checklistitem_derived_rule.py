@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("classroom", "0043_checklistitem_machine_rule"),
+        ("classroom", "0044_class_escalation_model"),
     ]
 
     operations = [
