@@ -468,6 +468,16 @@ CLASS_OUTPUT_SCHEMA = {
         "default_model": {"type": "string", "description": "기본 채점 모델"},
         "default_model_is_reasoning": {"type": "boolean"},
         "default_reasoning_effort": {"type": "string", "description": "기본 추론 강도(low·medium·high)"},
+        "escalation_model": {"type": "string", "description": "의심 재판정 모델 — 빈 문자열이면 꺼짐"},
+        "escalation_model_options": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "의심 재판정에 고를 수 있는 모델 — 지금 채점 연결의 프로바이더 단가표 모델(호환 서버면 없음)",
+        },
+        "staged_scoring": {
+            "type": "boolean",
+            "description": "staged 채점이 켜져 있는가 — 거짓이면 의심 재판정 모델을 골라도 다시 판정하지 않는다",
+        },
         "has_openai_key": {
             "type": "boolean",
             "description": "채점 연결(OpenAI 키·Claude 키·호환 서버)이 들어 있는가 — 이름은 예전 그대로다",

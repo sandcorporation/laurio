@@ -153,6 +153,7 @@ def test_settings_change_only_what_was_sent_and_refuse_like_the_screen(client, d
             "instructor_display_name": "새 강사 이름",
             "default_model": "gpt-4o",
             "default_reasoning_effort": "high",
+            "escalation_model": "gpt-5",
         },
     )["class"]
     screen = get_class(client, instructor["access"], class_id)
@@ -161,10 +162,13 @@ def test_settings_change_only_what_was_sent_and_refuse_like_the_screen(client, d
         "instructor_display_name",
         "default_model",
         "default_reasoning_effort",
+        "escalation_model",
+        "escalation_model_options",
     ):
         assert updated[field] == screen[field], field
     assert screen["name"] == "웹 스터디"  # 보내지 않은 칸은 그대로
     assert screen["default_model"] == "gpt-4o"
+    assert screen["escalation_model"] == "gpt-5"
 
     def screen_patch(payload: dict) -> str:
         return _screen_detail(
@@ -175,6 +179,7 @@ def test_settings_change_only_what_was_sent_and_refuse_like_the_screen(client, d
 
     for payload in (
         {"default_model": "not-a-real-model"},
+        {"escalation_model": "claude-sonnet-5-5"},
         {"instructor_display_name": "관리자"},
         {"name": "씨발 스터디"},
     ):

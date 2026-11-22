@@ -233,3 +233,50 @@ def test_three_agent_runs_give_the_median_and_p90_of_that_model(client, db, monk
     # 다른 모델의 실측은 섞지 않는다.
     sonnet = _calc(client, owner["access"], class_id, vendor="anthropic", model="claude-sonnet-5-5")
     assert sonnet["agent"]["usd"]["median"] is None
+
+
+def _class_with_escalation(client, model: str) -> tuple[str, int]:
+    owner = login(client, uid="owner")
+    class_id = create_class(client, owner["access"])
+    create_open_problem(client, owner["access"], class_id, required_labels=["가", "나", "다"])
+    if model:
+        response = client.patch(
+            f"{CLASSES_URL}/{class_id}",
+            data={"escalation_model": model},
+            content_type="application/json",
+            **auth_header(owner["access"]),
+        )
+        assert response.status_code == 200, response.content
+    return owner["access"], class_id
+
+
+def test_the_escalation_line_prices_one_suspect_at_the_chosen_model_and_has_no_measured_rate(client, db, monkeypatch):
+    """의심 재판정 줄(#1291) — 고른 모델의 단가로 의심 한 건(같은 소스 + 항목 하나), 비율은 「실측 없음」."""
+
+    access, class_id = _class_with_escalation(client, "gpt-4.1")
+
+    calc = _calc(client, access, class_id)
+
+    escalation = calc["escalation"]
+    (problem,) = calc["problems"]
+    assert problem["escalation_instruction_chars"] > 0
+    expected = scoring_cost.attempt_cost(
+        "gpt-4.1",
+        None,
+        prompt_chars=calc["selection"]["source_chars"] + problem["escalation_instruction_chars"],
+        output_tokens=scoring_calculator.OUTPUT_TOKENS_PER_REQUIREMENT,
+    )
+    assert escalation["model_id"] == "gpt-4.1"
+    assert escalation["per_suspect"]["usd"] == pytest.approx(expected.usd)
+    assert escalation["per_suspect"]["output_tokens"] == scoring_calculator.OUTPUT_TOKENS_PER_REQUIREMENT
+    assert escalation["suspect_rate"] is None
+    monkeypatch.setitem(scoring_cost.PRICES, "gpt-4.1", scoring_cost.ModelPrice(input_usd_per_million=20.0, output_usd_per_million=80.0))
+    assert _calc(client, access, class_id)["escalation"]["per_suspect"]["usd"] == pytest.approx(expected.usd * 10)
+
+
+def test_no_escalation_line_while_it_is_off_or_for_the_other_provider(client, db):
+    access, class_id = _class_with_escalation(client, "")
+    assert _calc(client, access, class_id)["escalation"] == {"model_id": None, "per_suspect": None, "suspect_rate": None}
+
+    access, class_id = _class_with_escalation(client, "gpt-4.1")
+    assert _calc(client, access, class_id, vendor="anthropic")["escalation"]["model_id"] is None
