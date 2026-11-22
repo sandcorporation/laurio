@@ -122,7 +122,7 @@ export function singleNote(single: CalculatorSingleCell, staged: CalculatorStage
 }
 
 function capacityNote(single: CalculatorSingleCell): string {
-  return `감당 ${capacityLabel(single.capacity_chars)} · 한글 위주 ${capacityLabel(single.capacity_chars_hangul)}`;
+  return `감당 ${capacityLabel(single.capacity_chars)} · 한글 주석 많음 ${capacityLabel(single.capacity_chars_hangul)}`;
 }
 
 /** 에이전트 칸의 둘째 줄 — 실측이 있으면 중앙, 없으면 가정한 시간만. */

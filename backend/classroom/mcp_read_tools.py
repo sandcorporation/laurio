@@ -334,7 +334,7 @@ _PER_SUBMISSION_ESTIMATE = {
         },
         "single_call_capacity_chars_hangul": {
             "type": "integer",
-            "description": "글자당 바이트 최대로 셈한 감당 글자 수 — 한글 위주 소스",
+            "description": "글자당 바이트 최대로 셈한 감당 글자 수 — 한글 주석 많음 소스",
         },
         "single_call_route": {"type": "string", "enum": ["single", "two_step", "hold"]},
         "agent_krw": {"type": ["integer", "null"], "description": "에이전트 예상 — 못 받는 프로바이더면 null"},

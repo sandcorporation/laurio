@@ -92,7 +92,7 @@ ESCALATION_INSTRUCTION_CHARS = 1_435
 #: 전체 합 1.006(조율자 2026-11-22). 코드 위주 제출은 바이트 ≈ 글자라 p50 을 쓴다. 감당 글자 = 감당 바이트 ÷ 이 값.
 BYTES_PER_CHAR = 1.03
 
-#: 글자당 바이트 최대 — 같은 30건의 최대 1.482(한글 위주 제출). 화면의 「한글 위주」 감당 글자 수만 이 값으로 셈하고,
+#: 글자당 바이트 최대 — 같은 30건의 최대 1.482(한글 주석 많음 제출). 화면의 「한글 주석 많음」 감당 글자 수만 이 값으로 셈하고,
 #: 「보류」 판정은 `BYTES_PER_CHAR` 그대로다.
 BYTES_PER_CHAR_MAX = 1.48
 
@@ -181,7 +181,7 @@ class SingleCall:
     fits: bool
     #: 한 번 호출에 담을 수 있는 소스 글자 수 — `source_budget_bytes` 를 `BYTES_PER_CHAR` 로 나눈 값.
     capacity_chars: int
-    #: 글자당 바이트를 `BYTES_PER_CHAR_MAX` 로 셈한 감당 글자 수(한글 위주 소스).
+    #: 글자당 바이트를 `BYTES_PER_CHAR_MAX` 로 셈한 감당 글자 수(한글 주석 많음 소스).
     capacity_chars_hangul: int
     route: Route
     #: 가정한 걸린 시간(초).
@@ -421,7 +421,7 @@ def capacity_chars(model_id: str, *, instruction_chars: int) -> int:
 
 
 def capacity_chars_hangul(model_id: str, *, instruction_chars: int) -> int:
-    """`capacity_chars` 와 같은 바이트 예산을 글자당 바이트 최대로 나눈 값 — 한글 위주 소스가 담기는 글자 수."""
+    """`capacity_chars` 와 같은 바이트 예산을 글자당 바이트 최대로 나눈 값 — 한글 주석 많음 소스가 담기는 글자 수."""
 
     return int(source_budget_bytes(model_id, instruction_bytes=instruction_chars) // BYTES_PER_CHAR_MAX)
 
