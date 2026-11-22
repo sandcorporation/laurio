@@ -10628,8 +10628,6 @@ export interface components {
             open_ended: boolean;
             /** Output Tokens */
             output_tokens: number;
-            /** Requirement Limit */
-            requirement_limit?: number | null;
             seconds: components["schemas"]["ScoringCalculatorSpreadOut"];
             /** Usd */
             usd: number;

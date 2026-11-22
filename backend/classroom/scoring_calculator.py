@@ -45,10 +45,6 @@ OUTPUT_TOKENS_PER_REQUIREMENT = scoring_cost.NON_REASONING_OUTPUT_TOKENS // 25
 #: `SOURCE_SIZE_BANDS` 의 이름 — 작음·보통·큼.
 BAND_KEYS: tuple[SourceKey, ...] = ("small", "medium", "large")
 
-#: Claude 한 번 호출이 요구사항 이 수 이상이면 벤더가 400(compiled grammar is too large)을 낸다(#1273). #1273 이
-#: 고쳐지면 이 값을 `None` 으로 둔다 — 화면은 값이 있을 때만 「요구사항 N개 이상 불가」를 단다.
-CLAUDE_SINGLE_REQUIREMENT_LIMIT: int | None = 24
-
 _AGENT_SAMPLE_LIMIT = 500
 
 
@@ -106,8 +102,6 @@ class SingleCall:
     open_ended: bool
     #: 소스가 모델 컨텍스트에 다 들어가는가 — 아니면 채점이 「크기 초과」 보류다(#989).
     fits: bool
-    #: 이 조합이 벤더 쪽에서 막히는 요구사항 수(#1273) — 막히지 않으면 `None`.
-    requirement_limit: int | None
     #: 걸린 시간 실측 — 한 번 호출은 남기지 않아 늘 「실측 없음」.
     seconds: Spread
 
@@ -222,7 +216,6 @@ def single_call(
     model_id: str,
     reasoning_effort: str | None,
     *,
-    vendor: Vendor,
     source_chars: int,
     instruction_chars: int,
     requirement_count: int,
@@ -236,14 +229,12 @@ def single_call(
     )
     if cost is None:  # pragma: no cover - 모델 목록이 단가표에서 온다.
         raise ValueError(f"단가표에 없는 모델: {model_id}")
-    limit = CLAUDE_SINGLE_REQUIREMENT_LIMIT if vendor == "anthropic" else None
     return SingleCall(
         input_tokens=cost.input_tokens,
         output_tokens=cost.output_tokens,
         usd=cost.usd,
         open_ended=cost.open_ended,
         fits=source_chars <= source_budget_bytes(model_id, instruction_bytes=instruction_chars),
-        requirement_limit=limit if limit is not None and requirement_count >= limit else None,
         seconds=Spread(sample_count=0, median=None, p90=None),
     )
 
@@ -343,7 +334,6 @@ def calculate(
         single=single_call(
             model_id,
             effort,
-            vendor=chosen_vendor,
             source_chars=picked.chars,
             instruction_chars=instruction,
             requirement_count=requirements,

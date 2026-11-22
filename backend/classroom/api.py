@@ -1497,7 +1497,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "krw": calc.single.usd * krw,
             "open_ended": calc.single.open_ended,
             "fits": calc.single.fits,
-            "requirement_limit": calc.single.requirement_limit,
             "seconds": _spread_out(calc.single.seconds),
         },
         "agent": {

@@ -361,8 +361,6 @@ class ScoringCalculatorSingleOut(Schema):
     open_ended: bool
     #: 소스가 모델 컨텍스트에 다 들어가는가 — 거짓이면 채점은 「크기 초과」 보류다.
     fits: bool
-    #: 벤더가 막는 요구사항 수(#1273) — 막히지 않으면 `None`.
-    requirement_limit: int | None = None
     seconds: ScoringCalculatorSpreadOut
 
 

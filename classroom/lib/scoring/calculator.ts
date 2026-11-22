@@ -94,7 +94,3 @@ export function headline(calc: ScoringCalculator): string {
   if (calc.selection.method === "agent") return spreadKrw(calc.agent.krw);
   return formatKrw(calc.single.krw, calc.single.open_ended);
 }
-
-export function requirementLimitLabel(limit: number): string {
-  return `요구사항 ${limit}개 이상 불가`;
-}

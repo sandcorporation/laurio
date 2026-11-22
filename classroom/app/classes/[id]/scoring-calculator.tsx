@@ -16,7 +16,6 @@ import {
   headline,
   NO_MEASUREMENT,
   providerLabel,
-  requirementLimitLabel,
   sourceLabel,
   spreadKrw,
   spreadSeconds,
@@ -177,11 +176,6 @@ export function ScoringCalculator({ classId }: { classId: number }) {
           <span data-testid="calculator-headline" className="text-[18px] text-ink">
             {headline(calc)}
           </span>
-          {selection.method === "single" && calc.single.requirement_limit != null ? (
-            <span data-testid="calculator-requirement-limit">
-              <Badge tone="error">{requirementLimitLabel(calc.single.requirement_limit)}</Badge>
-            </span>
-          ) : null}
         </Field>
       </div>
 

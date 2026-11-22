@@ -37,7 +37,6 @@ def _single(model: str = "gpt-4.1-mini", *, source: int = 30_000, instruction: i
     return scoring_calculator.single_call(
         model,
         None,
-        vendor=scoring_calculator.vendor_of_model(model),
         source_chars=source,
         instruction_chars=instruction,
         requirement_count=requirements,
@@ -73,7 +72,7 @@ def test_the_single_call_price_follows_the_price_table(monkeypatch):
 
 def test_a_reasoning_model_adds_the_effort_share_on_top_of_the_requirements():
     claude = scoring_calculator.single_call(
-        "claude-sonnet-5-5", "medium", vendor="anthropic", source_chars=10_000, instruction_chars=0, requirement_count=4
+        "claude-sonnet-5-5", "medium", source_chars=10_000, instruction_chars=0, requirement_count=4
     )
 
     assert claude.output_tokens == (
@@ -86,14 +85,6 @@ def test_a_reasoning_model_adds_the_effort_share_on_top_of_the_requirements():
 def test_a_source_past_the_model_context_does_not_fit():
     assert _single(source=30_000).fits is True
     assert _single(source=20_000_000).fits is False
-
-
-def test_claude_single_call_marks_the_requirement_limit_and_openai_does_not():
-    limit = scoring_calculator.CLAUDE_SINGLE_REQUIREMENT_LIMIT
-    assert limit is not None
-    assert _single("claude-haiku-5-5", requirements=limit).requirement_limit == limit
-    assert _single("claude-haiku-5-5", requirements=limit - 1).requirement_limit is None
-    assert _single("gpt-4.1-mini", requirements=limit).requirement_limit is None
 
 
 def test_a_spread_needs_the_minimum_sample_count():
