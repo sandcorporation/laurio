@@ -47,7 +47,8 @@ GitHub 에서 switchboard 로 바로 쏘는 길은 없어, work 의 Orca 자동�
 넘긴다(`scripts/ci/ci_red_relay.py`). [제보 전달](feedback-relay.md)과 같은 꼴이고 같은 `automation-run.sh` 로 감싼다.
 
 - 열린 이슈를 처음 보면 한 통 — 번호·종류·sha·run 링크만. 이어지는 실패(댓글)는 다시 보내지 않는다. 보낸 이슈가 닫히면 「복구·닫힘」 한 통.
-- 기록은 `~/.cache/codemit-automation/ci-red-relay.json`. 처음 보는 닫힌 이슈는 보내지 않는다.
+- 기록은 `~/.cache/codemit-automation/ci-red-relay.json`(처음 켤 때 `mark` 가 만든다). 처음 보는 닫힌 이슈는 보내지 않는다.
+  기록이 없거나 깨졌으면 아무것도 보내지 않고 기록만 다시 만든 뒤 3 으로 끝난다 — 열린 이슈를 한꺼번에 다시 보내지 않고, 건너뛴 번호는 한 통으로 드러난다.
 - 보낼 것을 precheck 가 직접 보내고 늘 1 로 끝난다 — 에이전트를 띄우지 않는다. gh 조회 실패(2)·메일 실패(3)는 `automation-run.sh` 가
   대장 메일함에 드러내고, 못 보낸 이슈는 다음 분에 다시 보낸다.
 - 받는 곳 `CODEMIT_CI_RED_RELAY_TO`(기본 `sandcorp/boss`), 프로필 `CODEMIT_CI_RED_RELAY_PROFILE`(기본 `codemit-coordinator`),

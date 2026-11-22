@@ -8,7 +8,9 @@
 - 열린 이슈를 처음 보면 메일 한 통 — 번호·종류·sha·run 링크만. 이어지는 실패는 같은 이슈의 댓글이라 메일이 다시 가지 않는다.
 - 보낸 이슈가 닫히면 「복구·닫힘」 한 통(마지막 댓글의 sha·run).
 - 기록은 상태 파일(`CODEMIT_CI_RED_RELAY_STATE`, 기본 ~/.cache/codemit-automation/ci-red-relay.json) — {번호: open|closed}.
-  처음 보는 닫힌 이슈는 보내지 않는다.
+  처음 보는 닫힌 이슈는 보내지 않는다. 처음 켤 때는 `mark` 로 만든다.
+- 상태 파일이 없거나 깨졌으면 아무것도 보내지 않고 지금 상태를 기록만 한 뒤 3 으로 끝난다 — 열린 이슈를 한꺼번에 다시
+  보내지 않고(중복 폭주 없음), 무엇을 건너뛰었는지는 표준오류 한 줄로 automation-run.sh 가 대장에게 한 번 드러낸다.
 
 switchboard 가 0 으로 끝나고 「#번호」 줄을 찍어야 보낸 것이다(scripts/feedback.sh 와 같다). 못 보낸 이슈는 기록하지 않아
 다음 분에 다시 시도한다. 종료 코드: 1 정상(보낼 것을 다 보냈거나 없었다) · 2 gh 조회 실패 · 3 메일 실패가 있었다.
@@ -86,12 +88,13 @@ def last_comment(n: int, gh: Gh) -> str:
     return comments[-1].get("body", "") if comments else ""
 
 
-def load(path: Path) -> dict[str, str]:
+def load(path: Path) -> dict[str, str] | None:
+    """기록. 없거나 깨졌으면 None."""
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
-        return {}
-    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+        return None
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else None
 
 
 def save(path: Path, state: dict[str, str]) -> None:
@@ -107,7 +110,14 @@ def relay(state_path: Path, gh: Gh = _gh, send: Send = _send, *, dry: bool = Fal
     except (RuntimeError, ValueError) as e:
         print(f"ci-red 이슈 조회 실패: {e}", file=sys.stderr)
         return 2
-    state = load(state_path)
+    loaded = load(state_path)
+    if loaded is None and not dry:
+        relay(state_path, gh, send, dry=True)
+        opened = [f"#{i['number']}" for i in found if i["state"] == "OPEN"]
+        print(f"상태 파일({state_path})이 없거나 깨져 다시 만들었다 — 보내지 않고 기록만 했다. 지금 열린 것: "
+              f"{' '.join(opened) or '없음'}", file=sys.stderr)
+        return 3
+    state = loaded or {}
     failed = 0
     for i in found:
         key, kind = str(i["number"]), kind_of(i["title"])

@@ -180,6 +180,7 @@ class RelayChainTest(unittest.TestCase):
             "GITHUB_STEP_SUMMARY": str(self.d / "summary"),
             "HOME": str(self.d),
         }
+        (self.d / "relay.json").write_text("{}")  # 처음 켤 때 `mark` 가 만든다
 
     def notify(self, mode: str, **env: str) -> None:
         r = subprocess.run(["bash", str(NOTIFY), mode], env={**self.env, **env}, text=True, capture_output=True, check=False)
@@ -264,6 +265,23 @@ class RelayChainTest(unittest.TestCase):
         subprocess.run(["bash", str(HERE / "ci" / "ci-issue.sh"), "fail", "release 이미지 실패 — production 승격·배포 멈춤", "x"],
                        env=self.env, check=True, capture_output=True)
         self.assertEqual(self.relay(), [])
+
+    def test_missing_or_broken_state_does_not_flood(self) -> None:
+        """기록이 사라지거나 깨져도 열린 이슈를 한꺼번에 다시 보내지 않는다 — 기록만 다시 만들고 3 으로 한 번 드러낸다."""
+        self.fail(SHA_A, 11)
+        self.notify("direct", SHA=SHA_B, UNMARKED=SHA_B[:12])
+        self.assertEqual(len(self.relay()), 2)
+        for broken in (None, "{깨짐"):
+            state = self.d / "relay.json"
+            if broken is None:
+                state.unlink()
+            else:
+                state.write_text(broken)
+            self.assertEqual(self.relay(want=3), [])
+            self.assertEqual(self.relay(), [])
+        self.notify("result", KIND="hotfix", RESULT="success", SHA=SHA_C)  # 다시 만든 기록으로도 복구는 간다
+        [mail] = self.relay()
+        self.assertIn("복구", mail["subject"])
 
     def test_gh_failure_is_exit_two(self) -> None:
         def broken(args: Sequence[str]) -> str:
