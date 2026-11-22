@@ -964,6 +964,8 @@ class Concluded:
     안에서 `conclude_scoring` 이 부른다)."""
 
     apply: Callable[[], dict]
+    #: 왜 벤더 없이 끝났나 — 정정 채점(#1317)은 `apply` 를 부르지 않고(원래 시도에 쓰지 않는다) 이 까닭만 남긴다.
+    reason: str = ""
 
 
 @dataclass
@@ -1006,7 +1008,7 @@ def reusable_outcome(prepared: PreparedScoring) -> VendorOutcome | None:
 
 
 def _concluded(result: dict) -> Concluded:
-    return Concluded(apply=lambda: result)
+    return Concluded(apply=lambda: result, reason=str(result.get("status", "")))
 
 
 @dataclass
@@ -1092,6 +1094,38 @@ def _prepare_head(
         # staged 진입점(#1283). 2026-11-22 기준 판정 비교(제출 30건)에서 한 번 호출과 정확도가 같았고(86.0% 대 86.2%,
         # 83.5% 대 84.4%) 시간은 2~3배, 돈은 1.1~1.5배였다. 의심 재판정은 정확도를 낮췄고 만점 제출 한 건을 0점으로
         # 만들었다. 그래서 영구히 끈다(대표 결정) — `classroom_scoring_pipeline` 은 늘 `single_call` 이다.
+        staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
+        two_step_threshold=two_step.THRESHOLD_CHARS,
+        two_step_budget=two_step.BUDGET_CHARS,
+    )
+
+
+def prepare_correction_head(submission: ClassroomSubmission, *, owner: str) -> _Head | str:
+    """정정 채점(#1317)의 준비 앞 절반 — 처음 채점의 `_prepare_head` 와 같은 것을 읽되 「이미 채점됨」·실패 상한은
+    보지 않는다(정정은 원래 점수가 있는 시도에 건다). 뒤 절반(`prepare_tail`)·벤더 호출은 처음 채점과 같다 — 클래스
+    채점 방식·못 담는 제출물 설정·지금의 문제 모델을 그대로 탄다. 채점할 수 없으면 까닭(글)을 돌려준다 — 원래
+    시도에는 아무것도 쓰지 않는다."""
+
+    problem = Problem.objects.select_related("classroom").get(pk=submission.problem_id)
+    class_obj = problem.classroom
+    checklist_items = list(problem.checklist_items.exclude(grade=ChecklistGrade.BONUS))
+    reason = pending_scoring.blocking_reason(class_obj, problem, ignore_pause=True)
+    if reason == pending_scoring.NO_API_KEY:
+        return "클래스 채점 키가 없다"
+    if reason == pending_scoring.MODEL_REJECTED:
+        return "클래스 키가 이 문제의 채점 모델을 거부했다"
+    connection = connection_for(class_obj)
+    if connection is None:
+        return "클래스 채점 키가 없다"
+    return _Head(
+        submission=submission,
+        owner=owner,
+        class_obj=class_obj,
+        problem=problem,
+        checklist_items=checklist_items,
+        connection=connection,
+        asset=submission.assets.get(),
+        pause_recheck=False,
         staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
         two_step_threshold=two_step.THRESHOLD_CHARS,
         two_step_budget=two_step.BUDGET_CHARS,
@@ -1349,7 +1383,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
             _record_scoring_attempt(submission, error=source.error)
             return {"submission_id": sid, "status": source.failure_status}
 
-        return Concluded(apply=_source_failed)
+        return Concluded(apply=_source_failed, reason=f"소스를 읽지 못했다: {source.error}")
 
     # 문법 검사 기본 항목(#408/#409, #464) — 강사가 이 문제에서 꺼 두면(#410)
     # `syntax_check.needs_ai_fallback`이 애초에 거짓이다. 켜져 있으면 파서가
@@ -1378,7 +1412,8 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
                 error=f"알 수 없는 채점 모델: {model!r}",
                 permanent=True,
                 status_if_not_capped="failed_permanently",
-            )
+            ),
+            reason=f"알 수 없는 채점 모델: {model!r}",
         )
 
     # 추론 모델(GPT-5 이후)일 때만 뜻이 있다(#402, CONTEXT.md 「추론 강도」) —
@@ -1398,7 +1433,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
             _mark_scoring_model_rejected(problem)
             return {"submission_id": sid, "status": "model_rejected"}
 
-        return Concluded(apply=_agent_model_rejected)
+        return Concluded(apply=_agent_model_rejected, reason=f"에이전트가 받지 않는 모델: {model!r}")
     staged = head.staged and not uses_agent
     # staged(#1293): 규칙이 없거나 글이 바뀐 항목은 여기서 한 번 도출한다 — 소스 스레드(DB 없음)의 동기 호출.
     derivation = _derive_rules(head, model) if staged else None
@@ -1465,7 +1500,8 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
                         class_obj,
                         derivation,
                         lambda: _record_rejection(submission, source_chars=source_chars, limit_chars=limit_chars),
-                    )
+                    ),
+                    reason=f"반려 — 한 번 호출로 담을 수 없다(소스 {source_chars}자, 한도 {limit_chars}자)",
                 )
 
     if plan is not None:
@@ -1810,6 +1846,28 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     assert output is not None
     if isinstance(outcome.agent, agent_grading.AgentAccepted):
         agent_grading.record_run(submission.id, "scoring", outcome.agent)
+    _charge_vendor_usage(prepared, outcome, output)
+
+    reasoning = outcome_reasoning(prepared, output)
+    syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
+    score = ClassroomScore.objects.create(
+        submission=submission,
+        model_version=output.model_version,
+        prompt=prepared.prompt,
+        # 두 걸음이면 재사용(#1296)이 찾는 입력 지문 — 2차 준비도 계획·항목을 그대로 들고 있어 같은 값이다.
+        input_fingerprint=two_step_fingerprint(prepared),
+        reasoning=reasoning,
+        syntax_check_result=syntax_check_result,
+        unseen_files=prepared.unseen_files,
+    )
+    return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
+
+
+def _charge_vendor_usage(prepared: PreparedScoring, outcome: VendorOutcome, output: ScoringOutput) -> None:
+    """벤더가 판정을 돌려줬을 때의 장부 — 토큰을 더하고, 멈춤을 풀고, 키를 확인됨으로 둔다. 처음 채점과 정정
+    채점(#1317)이 같이 쓴다(둘 다 클래스 키를 썼다)."""
+
+    class_obj, connection = prepared.class_obj, prepared.connection
     if not prepared.skip_vendor:
         # 벤더를 부르지 않은 기계 판정만의 채점(#1283)은 토큰도, 키 확인도 없다.
         # 두 걸음(#1286)의 1차 호출 토큰도 더한다.
@@ -1827,20 +1885,6 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         if prepared.pause_recheck:
             _clear_scoring_pause(class_obj)
         mark_verified(class_obj.pk, connection)
-
-    reasoning = outcome_reasoning(prepared, output)
-    syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
-    score = ClassroomScore.objects.create(
-        submission=submission,
-        model_version=output.model_version,
-        prompt=prepared.prompt,
-        # 두 걸음이면 재사용(#1296)이 찾는 입력 지문 — 2차 준비도 계획·항목을 그대로 들고 있어 같은 값이다.
-        input_fingerprint=two_step_fingerprint(prepared),
-        reasoning=reasoning,
-        syntax_check_result=syntax_check_result,
-        unseen_files=prepared.unseen_files,
-    )
-    return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
 
 
 def outcome_reasoning(prepared: PreparedScoring, output: ScoringOutput) -> list[dict]:

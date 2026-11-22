@@ -23,6 +23,11 @@ export function SubmissionVerdictList({
 }) {
   return (
     <ul data-testid={`${testIdPrefix}-verdicts`} className="flex flex-col gap-2">
+      {score.corrected ? (
+        <li data-testid={`${testIdPrefix}-corrected`}>
+          <Badge tone="neutral">정정됨</Badge>
+        </li>
+      ) : null}
       {score.reused ? (
         <li data-testid={`${testIdPrefix}-reused`}>
           <Badge tone="neutral">같은 제출 재사용</Badge>

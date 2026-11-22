@@ -454,8 +454,8 @@ def test_class_detail_skips_scoring_prompts_and_query_count_stays_flat(
     respond_with_verdict(monkeypatch, second.item_id, is_met=False)
     run_scan(client)
 
-    # 인증 둘·클래스 하나·집계 여섯·직렬화(제출 유무·템플릿·시계 둘·소유권 이전) — 지금 14개다.
-    assert len(before) <= 14
+    # 인증 둘·클래스 하나·집계 일곱(끝난 정정 하나, #1317)·직렬화(제출 유무·템플릿·시계 둘·소유권 이전) — 지금 15개다.
+    assert len(before) <= 15
     with django_assert_max_num_queries(len(before)):
         detail = get_class(client, owner["access"], class_id)
     assert detail["scored_attempt_count"] == 4

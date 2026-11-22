@@ -93,6 +93,13 @@ E2E_SEED_REGISTRY: dict[str, SeedEntry] = {
         # 쓰지 않는다; 쓰게 되면 이 값을 다시 켠다.
         serialized=False,
     ),
+    # 강의실 「다시 채점」 e2e(#1317) — 그 시도 하나에 「채점 실패」 점수를 심는다. 시도마다 따로라 줄 세울 일 없다.
+    "classroom-failed-score": SeedEntry(
+        command="seed_e2e_classroom_failed_score",
+        options=frozenset({"submission_id"}),
+        required=frozenset({"submission_id"}),
+        serialized=False,
+    ),
     # **심지 않고 걷기만 하는 것도 여기 둔다** (#183). 스위트 시작에 한 번 불려
     # e2e 가 남긴 Category·DeliverableType 을 지우고 정책 단일 행을 기준값으로
     # 되돌린다 — Contest 를 걷는 `contests --prune-all-namespaces` 와 같은 시점,

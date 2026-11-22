@@ -915,6 +915,10 @@ class ClassroomScore(models.Model):
     이 우회의 근거 전부이므로 넓히지 않는다 — 참여자의 시도에 달린 채점은 어떤
     경로로도 지워지지 않는다. 남는 위험은 이 모델 자신의 실수뿐이라 인스턴스
     단위 가드로 충분하다.
+
+    **지우지 않는다 — 정정은 덧댄다**(#1317, ADR-0006 개정 절). 플랫폼 오류로 틀린 점수(예: 실행기에 닿지
+    못해 찍힌 실패 상한 점수)는 강사가 `ClassroomScoreCorrection` 을 덧대 바로잡는다. 이 행은 그대로 남고,
+    「현재 점수」는 끝난 정정 중 가장 나중 것이다 — 판정 필드는 `classroom.current_score` 로만 읽는다.
     """
 
     # related_name이 "score"가 아니라 "classroom_score"다 — `ClassroomSubmission`이
@@ -972,6 +976,78 @@ class ClassroomScore(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassroomScore(submission={self.submission_id})"
+
+
+class ClassroomScoreCorrection(models.Model):
+    """원래 `ClassroomScore` 에 덧대는 정정 기록 하나(#1317) — 공모전 `scoring.ScoreCorrection`(#1179)과 같은 꼴이되
+    **다른 테이블이다**(강의실은 공모전 가족을 가리킬 수 없다, ADR-0037·0039).
+
+    클래스 소유자(강사)가 사유와 함께 「진행 중」으로 걸고(`classroom.score_corrections.request_corrections`), grader 가 처음
+    채점과 같은 판정 길로 채워 「끝」으로, 보류·반려·오류면 「실패」로 한 번 넘긴다. 끝·실패가 된 행은 다시 저장할
+    수 없고 어떤 행도 지울 수 없다. 「현재 점수」는 끝난 정정 중 가장 나중 것, 없으면 원래 점수다
+    (`classroom.current_score`). 판정 필드는 `ClassroomScore` 와 모양이 같다.
+
+    `lease_owner`·`lease_until` 은 grader 가 이 행을 집었다는 표시다 — 벤더 쪽 거절(크레딧·빈도·실행기 바쁨)로
+    미룰 때는 주인 없이 `lease_until` 만 미래로 둬 그때까지 다시 집지 않는다.
+    """
+
+    class Status(models.TextChoices):
+        IN_PROGRESS = "in_progress", "진행 중"
+        DONE = "done", "끝"
+        FAILED = "failed", "실패"
+
+    score = models.ForeignKey(ClassroomScore, related_name="corrections", on_delete=models.PROTECT)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.IN_PROGRESS)
+    # 판정 — `ClassroomScore` 와 같은 필드. 「진행 중」·「실패」에는 비어 있다.
+    model_version = models.CharField(max_length=200, blank=True, default="")
+    prompt = models.TextField(blank=True, default="")
+    reasoning = models.JSONField(default=list, blank=True)
+    syntax_check_result = models.JSONField(null=True, blank=True, default=None)
+    unseen_files = models.PositiveIntegerField(default=0)
+    reason = models.TextField()
+    #: 「실패」로 넘긴 까닭 — 운영자가 다시 걸지 판단한다.
+    error = models.TextField(blank=True, default="")
+    #: 건 사람 — 클래스 소유자(강사)다. 비용도 그 클래스 키다.
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="classroom_score_corrections", on_delete=models.PROTECT
+    )
+    lease_owner = models.CharField(max_length=64, blank=True, default="")
+    lease_until = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "강의실 점수 정정"
+        verbose_name_plural = "강의실 점수 정정"
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(status="done") | models.Q(finished_at__isnull=False),
+                name="classroom_score_correction_done_finished",
+            ),
+            models.CheckConstraint(condition=~models.Q(reason=""), name="classroom_score_correction_reason_required"),
+            # 한 점수에 진행 중 정정은 하나다 — 둘이면 어느 판정이 「현재」인지가 끝난 순서로 갈린다.
+            models.UniqueConstraint(
+                fields=["score"],
+                condition=models.Q(status="in_progress"),
+                name="classroom_score_correction_one_in_progress",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            stored = type(self).objects.filter(pk=self.pk).values_list("status", flat=True).first()
+            if stored != self.Status.IN_PROGRESS:
+                raise ValueError(
+                    f"ClassroomScoreCorrection({self.pk}) 은 이미 {stored} 다 — 끝·실패가 된 정정은 다시 저장할 수 "
+                    "없다. 다시 바로잡으려면 새 정정을 더한다."
+                )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("ClassroomScoreCorrection 은 감사 기록이라 지울 수 없다.")
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassroomScoreCorrection(score={self.score_id}, status={self.status})"
 
 
 class ProblemTemplate(models.Model):

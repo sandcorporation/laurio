@@ -1225,6 +1225,8 @@ class ClassroomScoreOut(Schema):
     hidden_summary: ClassroomHiddenSummaryOut | None = None
     #: 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 채운다. 원본이 누구인지는 어디에도 싣지 않는다.
     reused: bool = False
+    #: 정정(#1317)으로 바뀐 점수인가 — 끝난 정정의 판정을 보이고 있다.
+    corrected: bool = False
     #: 「들어가는 파일만으로 채점」(#1311)이 보지 못한 파일 수 — 0 이면 다 봤다.
     unseen_files: int = 0
 
@@ -1375,7 +1377,8 @@ class ClassroomRosterGridOut(Schema):
 
 class ClassroomRecentAttemptOut(Schema):
     """클래스의 최근 시도 한 줄(#632) — 강사 전용. `status`는 격자 칸과 같은 낱말이다:
-    "passed" | "attempted_not_passed" | "scoring" | "needs_setup"."""
+    "passed" | "attempted_not_passed" | "scoring" | "needs_setup", 그리고 실패 상한 점수(`platform-auto`)면
+    "scoring_failed"(#1317)."""
 
     id: int
     member_id: int
@@ -1387,6 +1390,18 @@ class ClassroomRecentAttemptOut(Schema):
     submitted_at: datetime
     #: 늦음 단계(#941) — `ClassroomSubmissionOut.late` 와 같은 셈.
     late: LateStatus
+
+
+class ClassroomAttemptRowOut(ClassroomRecentAttemptOut):
+    """「제출」 화면(#1317)의 한 줄 — 「최근 제출」 줄에 「다시 채점」을 걸 수 있나를 더한다."""
+
+    correctable: bool
+
+
+class ClassroomAttemptPageOut(Schema):
+    rows: list[ClassroomAttemptRowOut]
+    page: int
+    has_next: bool
 
 
 class ClassroomInstructorSubmissionOut(Schema):
