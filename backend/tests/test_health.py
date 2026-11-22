@@ -130,3 +130,45 @@ def test_started_heartbeat_keeps_refreshing_key(memory_store, monkeypatch, tmp_p
         heartbeat.time.sleep(0.02)  # wait-ok: 스레드의 다음 박동을 기다리는 폴링(사건 대기)
 
     assert memory_store.exists(key)
+
+
+# --- beat 생존(#1344) -------------------------------------------------------------------------------------------
+
+
+def test_beat_role_is_a_known_signal():
+    assert "beat" in heartbeat.ROLES
+
+
+def test_worker_alive_but_beat_silent_is_503_naming_beat(client, settings):
+    """worker 스레드 신호는 살아 있고 beat 가 쏜 작업이 한 번도 신호를 갱신하지 않은 상태."""
+    settings.HEALTH_REQUIRED_WORKERS = ["celery", "grader", "beat"]
+    heartbeat.beat("celery")
+    heartbeat.beat("grader")
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 503
+    assert response.json() == {"status": "error", "failed": ["beat"]}
+
+
+def test_beat_task_refreshes_beat_signal_and_its_own_file(client, settings, monkeypatch, tmp_path):
+    from core import tasks
+
+    monkeypatch.setattr(heartbeat, "BEAT_FILE", tmp_path / "beat-hb")
+    settings.HEALTH_REQUIRED_WORKERS = ["celery", "grader", "beat"]
+    heartbeat.beat("celery")
+    heartbeat.beat("grader")
+
+    tasks.beat_heartbeat()
+
+    assert (tmp_path / "beat-hb").exists()
+    assert client.get("/api/health").status_code == 200
+
+
+def test_beat_schedule_fires_the_beat_heartbeat_task():
+    from config.celery import SCHEDULED_JOBS
+
+    entry = SCHEDULED_JOBS["core:beat-heartbeat"]
+    assert entry["task"] == "core.beat_heartbeat"
+    assert entry["schedule"] <= 30
+    assert entry["options"]["expires"] <= 30

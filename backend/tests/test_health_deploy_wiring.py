@@ -11,10 +11,10 @@ import pytest
 from tests.test_deploy_celery_beat_in_worker import DEPLOY, _compose
 
 
-def test_prod_backend_requires_both_worker_signals():
+def test_prod_backend_requires_all_worker_signals():
     env = _compose("compose.prod.yaml")["services"]["backend"]["environment"]
 
-    assert env["HEALTH_REQUIRED_WORKERS"] == "celery,grader"
+    assert env["HEALTH_REQUIRED_WORKERS"] == "celery,grader,beat"
 
 
 @pytest.mark.parametrize("name", ["celery-worker", "grader"])
@@ -35,3 +35,10 @@ def test_only_backend_requires_signals():
 def test_deploy_health_probe_uses_ready_scope():
     assert "/api/health?scope=ready" in DEPLOY
     assert "/api/health'" not in DEPLOY
+
+
+def test_celery_worker_healthcheck_also_watches_beat_signal_file():
+    test = _compose("compose.prod.yaml")["services"]["celery-worker"]["healthcheck"]["test"][-1]
+
+    assert "/tmp/codemit-heartbeat-beat" in test
+    assert "-120 seconds" in test

@@ -84,3 +84,12 @@ def run_scan(name: str) -> dict:
         return run_scan_in_worker(name)
     return call_internal(f"/api/internal/scans/{name}", timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
+
+
+@shared_task(name="core.beat_heartbeat", ignore_result=True)
+def beat_heartbeat() -> None:
+    """beat 가 일정대로 쏘고 worker 가 받아 돈다는 신호(#1344) — `/api/health` 의 `beat` 와 컨테이너 healthcheck 가 본다."""
+
+    from core import heartbeat
+
+    heartbeat.beat_tick()

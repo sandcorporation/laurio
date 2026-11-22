@@ -4,6 +4,8 @@
   갱신한다(TTL 90초). 채점 한 건이 LLM 을 오래 기다려도 신호가 멈추지 않도록 채점 루프(asyncio)나 celery 태스크와
   묶지 않는다. 키가 없으면 그 역할이 죽었거나 멈췄거나 redis 에 못 닿는 것이다.
 - 같은 때에 파일 `/tmp/codemit-heartbeat` 의 mtime 을 만진다 — 컨테이너 healthcheck 가 redis 없이 이 파일만 본다.
+- 세 번째 신호 `beat`(#1344)는 스레드가 아니라 **beat 가 30초마다 쏘는 작업**(`core.beat_heartbeat`)이 worker 안에서
+  돌 때 갱신한다(TTL 120초, 파일 `/tmp/codemit-heartbeat-beat`). beat 만 죽으면 이 신호만 끊긴다.
 - 스레드가 살아 있다는 신호지 태스크 소비를 증명하지는 않는다.
 
 시험은 프로세스 안 흉내 저장소를 쓴다(`HEALTH_STORE=memory`, 세션·운영 지표와 같은 이유).
@@ -26,7 +28,10 @@ INTERVAL_SECONDS = 15.0
 TTL_SECONDS = 90
 SOCKET_TIMEOUT = 1.0
 HEARTBEAT_FILE = Path("/tmp/codemit-heartbeat")  # noqa: S108 — 컨테이너 안 healthcheck 전용
-ROLES = ("celery", "grader")
+BEAT_FILE = Path("/tmp/codemit-heartbeat-beat")  # noqa: S108 — 컨테이너 안 healthcheck 전용
+#: beat 신호는 beat 가 30초마다 쏘는 작업(`core.beat_heartbeat`)이 갱신한다 — 틱 셋(120초)을 놓쳐야 끊긴 것으로 본다.
+BEAT_TTL_SECONDS = 120
+ROLES = ("celery", "grader", "beat")
 
 
 class HeartbeatStore(Protocol):
@@ -84,11 +89,19 @@ def store() -> HeartbeatStore:
     )
 
 
-def beat(role: str, *, client: HeartbeatStore | None = None, path: Path | None = None) -> None:
+def beat(
+    role: str, *, client: HeartbeatStore | None = None, path: Path | None = None, ttl: int = TTL_SECONDS
+) -> None:
     """신호 한 번. 파일은 redis 가 끊겨도 만진다 — redis 장애는 health 의 redis 점검이 따로 잡는다."""
 
     (path or HEARTBEAT_FILE).touch()
-    (client or store()).set(KEY_PREFIX + role, "1", ex=TTL_SECONDS)
+    (client or store()).set(KEY_PREFIX + role, "1", ex=ttl)
+
+
+def beat_tick(*, client: HeartbeatStore | None = None) -> None:
+    """beat 가 쏜 작업이 worker 에서 실제로 돈 신호(#1344). 스레드 신호(`celery`)는 beat 가 죽어도 이어지므로 따로 둔다."""
+
+    beat("beat", client=client, path=BEAT_FILE, ttl=BEAT_TTL_SECONDS)
 
 
 def _run(role: str, interval: float, stop: threading.Event) -> None:
