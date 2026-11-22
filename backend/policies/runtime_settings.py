@@ -85,6 +85,7 @@ SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 
 #: 강의실 채점 갈래의 키(#1283, 스펙 #1282) — `classroom_scoring_pipeline`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
 CLASSROOM_SCORING_PIPELINE = "CLASSROOM_SCORING_PIPELINE"
+CLASSROOM_ESCALATION_MODEL = "CLASSROOM_ESCALATION_MODEL"
 CLASSROOM_PIPELINE_SINGLE_CALL: Literal["single_call"] = "single_call"
 CLASSROOM_PIPELINE_STAGED: Literal["staged"] = "staged"
 
@@ -147,6 +148,9 @@ SPECS: dict[str, SettingSpec] = {
             max_length=20,
             choices=(CLASSROOM_PIPELINE_SINGLE_CALL, CLASSROOM_PIPELINE_STAGED),
         ),
+        # #1285: staged 에서 「의심」 항목만 다시 판정할 상위 모델. 비면 올리지 않는다. 클래스 키로 부르므로 그 키의
+        # 프로바이더 단가표(`classroom.scoring_cost.PRICES`)에 있는 모델일 때만 쓴다.
+        SettingSpec(CLASSROOM_ESCALATION_MODEL, "강의실 의심 올림 모델", "text", max_length=100),
         SettingSpec("ANTHROPIC_API_KEY", "Anthropic API 키", "secret", max_length=500),
         SettingSpec("LLM_ANTHROPIC_MODEL", "Claude 모델", "text", default="claude-sonnet-5-5", max_length=100),
         SettingSpec(
@@ -447,6 +451,12 @@ def classroom_scoring_pipeline() -> Literal["single_call", "staged"]:
 
     value = (setting_value(CLASSROOM_SCORING_PIPELINE) or "").strip().lower()
     return CLASSROOM_PIPELINE_STAGED if value == CLASSROOM_PIPELINE_STAGED else CLASSROOM_PIPELINE_SINGLE_CALL
+
+
+def classroom_escalation_model() -> str:
+    """staged 의심 항목을 다시 판정할 상위 모델(#1285) — 비었으면 빈 문자열(올리지 않는다)."""
+
+    return (setting_value(CLASSROOM_ESCALATION_MODEL) or "").strip()
 
 
 def contest_ai_scoring_enabled() -> bool:

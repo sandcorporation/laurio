@@ -104,6 +104,8 @@ export type ChecklistVerdict = {
   citations?: VerdictCitation[];
   evidence?: string[];
   suspect?: boolean;
+  // 의심 항목을 상위 모델로 다시 판정했다(#1285).
+  escalated?: boolean;
 };
 
 // 모델 판정의 근거 인용 하나(#1284) — 보낸 소스와 대조해 경로가 있고 줄 범위가 파일 안이면 matched.

@@ -769,7 +769,7 @@ def _staged_verdict_fields(entry: Mapping[str, object]) -> dict[str, object]:
     """저장된 staged 판정 항목(#1283·#1284)의 출처·근거 인용·기계 근거·의심. single_call 항목에는 없어 빈 dict."""
 
     fields: dict[str, object] = {}
-    for key in ("source", "citations", "evidence", "suspect"):
+    for key in ("source", "citations", "evidence", "suspect", "escalated"):
         if key in entry:
             fields[key] = entry[key]
     return fields

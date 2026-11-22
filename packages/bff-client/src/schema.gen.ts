@@ -6418,6 +6418,8 @@ export interface components {
             checklist_item_id: number;
             /** Citations */
             citations?: components["schemas"]["ClassroomVerdictCitationOut"][] | null;
+            /** Escalated */
+            escalated?: boolean | null;
             /** Evidence */
             evidence?: string[] | null;
             /** Is Met */

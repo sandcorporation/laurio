@@ -135,3 +135,98 @@ def test_malformed_citations_are_dropped_not_failed():
         citations=True,
     )
     assert [(c.path, c.start_line, c.end_line) for c in parsed[1].citations] == [("a.py", 1, 2)]
+
+
+# ── 의심 올림(#1285) ──────────────────────────────────────────────────────────────────────────────────────
+
+
+def _sequence(monkeypatch, bodies: list[list[dict]], sent: list[dict]) -> None:
+    from tests.classroom_scenarios import FakeVendorResponse, openai_verdicts_body
+
+    queue = list(bodies)
+
+    def _handler(*args, **kwargs):
+        sent.append(kwargs["json"])
+        return FakeVendorResponse(200, openai_verdicts_body(queue.pop(0), total_tokens=10))
+
+    monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
+
+
+def _escalation_world(client, monkeypatch, bodies, sent):
+    with force_real_scoring_adapter():
+        ctx = _world(client, [("진입점이 있다", None), ("인용이 없다", None)])
+        good, doubtful = ctx["item_ids"]
+        _sequence(monkeypatch, [b(good, doubtful) for b in bodies], sent)
+        run_scan(client)
+    return ctx, good, doubtful
+
+
+def _first(good, doubtful):
+    return [
+        {"requirement_id": good, "is_met": True, "reasoning": "근거", "citations": [_cite("repo-1a2b/src/app.py", 3)]},
+        {"requirement_id": doubtful, "is_met": True, "reasoning": "근거", "citations": []},
+    ]
+
+
+def test_a_suspect_item_alone_goes_to_the_escalation_model_once(client, db, monkeypatch, staged):  # noqa: F811
+    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", "gpt-5")
+    sent: list[dict] = []
+    ctx, good, doubtful = _escalation_world(
+        client,
+        monkeypatch,
+        [
+            _first,
+            lambda g, d: [{"requirement_id": d, "is_met": True, "reasoning": "다시", "citations": [_cite("repo-1a2b/src/app.py", 4)]}],
+        ],
+        sent,
+    )
+
+    assert len(sent) == 2
+    assert sent[1]["model"] == "gpt-5"
+    prompt = {m["role"]: m["content"] for m in sent[1]["messages"]}["user"]
+    assert f"requirement_id={doubtful} " in prompt and f"requirement_id={good} " not in prompt
+    assert list(sent[1]["response_format"]["json_schema"]["schema"]["properties"]["verdicts"]["properties"]) == [str(doubtful)]
+    # 인용된 파일이 없으면 첫 판정과 같은 소스를 싣는다.
+    assert "# repo-1a2b/src/app.py\n1\timport os" in prompt
+    by_id = {r["checklist_item_id"]: r for r in ClassroomScore.objects.get().reasoning}
+    assert (by_id[doubtful]["verdict"], by_id[doubtful]["suspect"], by_id[doubtful]["escalated"]) == ("met", False, True)
+    assert "escalated" not in by_id[good]
+    shown = {v["checklist_item_id"]: v for v in instructor_submissions(client, ctx["access"], ctx["class_id"], ctx["problem_id"])[0]["score"]["reasoning"]}
+    assert shown[doubtful]["escalated"] is True and "escalated" not in shown[good]
+
+
+def test_escalation_that_also_fails_the_check_leaves_unmet_and_suspect(client, db, monkeypatch, staged):  # noqa: F811
+    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", "gpt-5")
+    sent: list[dict] = []
+    _, _, doubtful = _escalation_world(
+        client,
+        monkeypatch,
+        [_first, lambda g, d: [{"requirement_id": d, "is_met": True, "reasoning": "다시", "citations": [_cite("nope.py", 1)]}]],
+        sent,
+    )
+
+    assert len(sent) == 2
+    entry = next(r for r in ClassroomScore.objects.get().reasoning if r["checklist_item_id"] == doubtful)
+    assert (entry["verdict"], entry["is_met"], entry["suspect"], entry["escalated"]) == ("unmet", False, True, True)
+
+
+@pytest.mark.parametrize("model", ["", "claude-sonnet-5-5", "no-such-model"])
+def test_no_escalation_without_a_usable_model(client, db, monkeypatch, staged, model):  # noqa: F811
+    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", model)
+    sent: list[dict] = []
+    _escalation_world(client, monkeypatch, [_first], sent)
+
+    assert len(sent) == 1
+
+
+def test_no_suspect_means_one_call(client, db, monkeypatch, staged):  # noqa: F811
+    monkeypatch.setenv("CLASSROOM_ESCALATION_MODEL", "gpt-5")
+    sent: list[dict] = []
+    _escalation_world(
+        client,
+        monkeypatch,
+        [lambda g, d: [{**v, "is_met": False} for v in _first(g, d)]],
+        sent,
+    )
+
+    assert len(sent) == 1

@@ -13,6 +13,8 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 // 이 된다. 기계 규칙(`path_exists app.py`) 항목은 기계 판정과 그 근거 경로가 보인다.
 
 const SETTING = "/api/backend/operator/runtime-settings/CLASSROOM_SCORING_PIPELINE";
+// 의심 올림(#1285) — 흉내 어댑터는 다시 물어도 같은 주석 줄을 인용해 「미충족 + 의심 남음」이 된다.
+const ESCALATION = "/api/backend/operator/runtime-settings/CLASSROOM_ESCALATION_MODEL";
 
 async function operatorRequest(): Promise<APIRequestContext> {
   const su = await seedE2eOperator({ username: `e2e-op-staged-${Date.now()}`, superuser: true });
@@ -30,10 +32,13 @@ test.describe("staged 판정 근거(#1284)", () => {
     operator = await operatorRequest();
     const saved = await operator.post(SETTING, { data: { value: "staged" } });
     expect(saved.ok(), await saved.text()).toBeTruthy();
+    const escalation = await operator.post(ESCALATION, { data: { value: "gpt-5" } });
+    expect(escalation.ok(), await escalation.text()).toBeTruthy();
   });
 
   test.afterAll(async () => {
     await operator.post(`${SETTING}/clear`, { data: {} });
+    await operator.post(`${ESCALATION}/clear`, { data: {} });
     await operator.dispose();
   });
 
@@ -95,6 +100,8 @@ test.describe("staged 판정 근거(#1284)", () => {
     await expect(verdicts).toContainText("기계 판정");
     await expect(page.getByTestId(`${row}-citation-${judged}-0`)).toHaveText("app.py:1 — 맞지 않음");
     await expect(page.getByTestId(`${row}-suspect-${judged}`)).toHaveText("의심");
+    await expect(page.getByTestId(`${row}-escalated-${judged}`)).toHaveText("올림");
+    await expect(verdicts).toContainText("미충족");
     await expect(page.getByTestId(`${row}-evidence-${machine}-0`)).toHaveText("app.py");
     await expect(page.getByTestId(`${row}-suspect-${machine}`)).toHaveCount(0);
   });

@@ -1203,6 +1203,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 도 시행일과 상관없이 저장되고 돈다(대표 결정 2026-11-20, `config/settings.py`). 방침 개정 시행일 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`(2026-11-27, #997)는 방침 화면 잠금 시험만 본다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
 | `CLASSROOM_SCORING_PIPELINE` | `single_call`·`staged`(#1283, ADR-0084) | 강의실 채점(클래스 키, 한 번 호출 방식) — `staged` 면 기계 확인 규칙이 있는 항목을 코드가 먼저 판정하고 남은 항목만 모델에 보낸다. 모델 판정은 근거 인용(#1284)을 받아 대조하고 맞는 인용 없는 충족에 「의심」을 단다. 에이전트 방식 클래스는 보지 않는다 | `single_call` — 알 수 없는 값도 `single_call` |
+| `CLASSROOM_ESCALATION_MODEL` | 모델 이름(#1285) | 강의실 staged 의 「의심」 항목만 이 모델로 한 번 다시 판정(클래스 키, 그 프로바이더 단가표에 있는 모델만) | (비면 올리지 않는다) |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |

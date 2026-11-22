@@ -69,6 +69,14 @@ export function SubmissionVerdictList({
                   <Badge tone="neutral">{SOURCE_LABEL[verdict.source]}</Badge>
                 </>
               ) : null}
+              {verdict.escalated ? (
+                <>
+                  {" "}
+                  <span data-testid={`${testIdPrefix}-escalated-${verdict.checklist_item_id}`}>
+                    <Badge tone="neutral">올림</Badge>
+                  </span>
+                </>
+              ) : null}
               {verdict.suspect ? (
                 <>
                   {" "}

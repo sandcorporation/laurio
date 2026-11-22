@@ -1043,7 +1043,7 @@ class ClassroomVerdictCitationOut(Schema):
     matched: bool
 
 
-_STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect")
+_STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect", "escalated")
 
 
 class ClassroomChecklistVerdictOut(Schema):
@@ -1063,6 +1063,8 @@ class ClassroomChecklistVerdictOut(Schema):
     evidence: list[str] | None = None
     #: 충족인데 맞는 인용이 하나도 없다 — 판정은 그대로이고 표시만 한다.
     suspect: bool | None = None
+    #: 의심 항목을 상위 모델로 다시 판정한 결과다(#1285).
+    escalated: bool | None = None
 
     # 반환 형을 적지 않는다 — 적으면 pydantic 이 그 형으로 직렬화 스키마를 지어 OpenAPI 가 이 모델의 칸을 잃는다.
     @model_serializer(mode="wrap")
