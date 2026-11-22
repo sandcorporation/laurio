@@ -78,7 +78,7 @@ class AutomationRun(unittest.TestCase):
         _git(self.pusher, "push", "-q", "origin", "main")
         return _git(self.pusher, "rev-parse", "HEAD")
 
-    def run_script(self, *extra: str, repeat_secs: int = 3600) -> subprocess.CompletedProcess:
+    def env(self, repeat_secs: int = 3600, lock_wait: int = 60) -> dict[str, str]:
         env = {
             **os.environ,
             "FAKE": str(self.fake),
@@ -86,8 +86,13 @@ class AutomationRun(unittest.TestCase):
             "CODEMIT_AUTOMATION_STATE_DIR": str(self.state),
             "CODEMIT_AUTOMATION_REPEAT_SECS": str(repeat_secs),
             "CODEMIT_SWITCHBOARD": str(self.fake / "switchboard"),
+            "CODEMIT_AUTOMATION_LOCK_WAIT": str(lock_wait),
         }
         env.pop("SWITCHBOARD_PROFILE", None)
+        return env
+
+    def run_script(self, *extra: str, repeat_secs: int = 3600, lock_wait: int = 60) -> subprocess.CompletedProcess:
+        env = self.env(repeat_secs, lock_wait)
         return subprocess.run(
             ["bash", str(SCRIPT), "feedback-relay", *extra, "--", str(self.fake / "cmd.sh")],
             env=env, capture_output=True, text=True, timeout=30,
@@ -257,6 +262,53 @@ class AutomationRun(unittest.TestCase):
         cause, ts = (self.state / "feedback-relay.state").read_text().split()
         self.assertEqual(cause, "rc2")
         self.assertLess(abs(int(ts) - time.time()), 60)
+
+    # --- 잠금(#1280) --------------------------------------------------------------
+
+    def lock_path(self) -> Path:
+        return self.checkout / ".git" / "codemit-fetch.lock"
+
+    def test_two_parallel_catch_ups_both_succeed_right_after_main_moves(self) -> None:
+        new = self.push_new_commit()
+        procs = [
+            subprocess.Popen(
+                ["bash", str(SCRIPT), f"job{i}", "--", str(self.fake / "cmd.sh")],
+                env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            for i in range(2)
+        ]
+        results = [(p.returncode, err) for p, (_, err) in ((p, p.communicate(timeout=30)) for p in procs)]
+        self.assertEqual([rc for rc, _ in results], [0, 0], results)
+        self.assertEqual(self.ran(), [new, new])
+        self.assertEqual(self.mails(), [])
+
+    def test_lock_held_fails_with_its_own_cause_and_does_not_run(self) -> None:
+        import fcntl
+
+        self.lock_path().touch()
+        with open(self.lock_path(), "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            started = time.time()
+            result = self.run_script(lock_wait=1)
+        self.assertLess(time.time() - started, 15)
+        self.assertEqual(result.returncode, 70)
+        self.assertIn("잠금 대기 초과", result.stderr)
+        self.assertEqual(self.ran(), [])
+        self.assertEqual(len(self.mails()), 1)  # 재시도로 숨기지 않고 한 통 알린다
+        self.assertIn("잠금 대기 초과", " ".join(self.mails()[0]["argv"]))
+
+    def test_fetch_helper_shares_the_lock(self) -> None:
+        import fcntl
+
+        helper = SCRIPT.parent / "git-fetch-locked.sh"
+        env = {**self.env(), "CODEMIT_FETCH_REPO": str(self.checkout), "CODEMIT_FETCH_LOCK_WAIT": "1"}
+        ok = subprocess.run(["bash", str(helper), "-q", "origin", "main"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ok.returncode, 0, ok.stderr)
+        with open(self.lock_path(), "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            blocked = subprocess.run(["bash", str(helper), "-q", "origin", "main"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(blocked.returncode, 75)
+        self.assertIn("잠금 대기 초과", blocked.stderr)
 
 
 if __name__ == "__main__":

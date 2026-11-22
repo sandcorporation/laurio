@@ -35,6 +35,12 @@ Orca 는 precheck 가 0 이 아니면 무엇이든 `skipped_precheck` 로 넘기
   체크아웃에서 다른 세션이 main 에 커밋하기도 해서 그 커밋을 버리면 안 된다. 따라잡기에 실패하면 본 명령을 돌리지
   않고 70 으로 끝난다(묵은 코드로 도는 것이 조용한 고장이다). 에이전트(`take`·`forward`)는 같은 체크아웃에서 precheck 직후
   돌므로 같은 최신 코드를 본다.
+- **잠금(#1280)**: 같은 저장소를 자동화 여럿이 매분 같은 순간에 따라잡고 조율자·작업자도 fetch 해서, origin/main 이 움직인
+  첫 분에 `incorrect old value provided` 로 지는 쪽이 났다. 따라잡기 전체(fetch + ff-only)가 `<git-common-dir>/codemit-fetch.lock`
+  (`flock`) 안에서 돈다. `CODEMIT_AUTOMATION_LOCK_WAIT`(기본 60초) 안에 못 잡으면 재시도 없이 「잠금 대기 초과」로 실패한다.
+  조율자·작업자의 사실 확인 fetch 는 `scripts/git-fetch-locked.sh -q origin main` 으로 같은 잠금을 쓴다.
+- **원격 실패 까닭(#1280)**: `feedback.sh` 가 운영 호출에 실패하면 진짜 종료 코드와 까닭(`원격 실패 rc=143: 시그널(15)로 종료됐다(배포 중 컨테이너
+  교체로 보인다)`)을 표준오류에 남긴다. `check` 의 종료 코드는 그대로 2 이고, 다시 시도하지 않는다. 알림의 표준오류 끝에 이 줄이 실린다.
 - **알림**: `--ok` 밖의 종료 코드(기본 0·1 밖: 127·2·3…)와 따라잡기 실패는 `sandcorp/boss` 로 한 통. 같은 원인은
   처음 한 번, 이어지면 1시간마다 한 번(`CODEMIT_AUTOMATION_REPEAT_SECS`), 정상으로 돌아오면 「회복」 한 통. 메일은
   `feedback.sh forward` 와 같은 프로필·task 환경변수를 쓴다. 메일을 못 보냈으면 상태를 남기지 않아 다음 분에 다시 시도한다.

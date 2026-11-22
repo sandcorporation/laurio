@@ -16,6 +16,10 @@
 # 아니면 건드리지 않고 알린다 — 이 체크아웃에서 다른 세션이 main 에 커밋하기도 한다. 그 커밋을 버리지 않는다.
 # (따라잡기에 실패하면 본 명령을 돌리지 않는다. 묵은 코드로 도는 것이 조용한 고장이다.)
 #
+# 잠금(#1280): 같은 저장소를 매분 자동화 여럿이 따라잡고 조율자·작업자도 fetch 한다. 같은 순간 fetch 하면 ref 갱신이
+# 경합해 「incorrect old value provided」로 진다. 따라잡기 전체(fetch + ff-only)를 `<git-common-dir>/codemit-fetch.lock`
+# 안에서 돈다 — scripts/git-fetch-locked.sh 와 같은 파일. 못 잡으면 재시도 없이 「잠금 대기 초과」로 실패한다.
+#
 # 알림: 같은 원인(sync·rc<코드>)은 처음 한 번, 이어지면 1시간마다 한 번. 정상으로 돌아오면 한 번.
 # 상태는 `~/.cache/codemit-automation/<이름>.state` 한 파일(`원인 마지막_알림_epoch`).
 # 메일 꼴은 scripts/feedback.sh forward 와 같은 프로필·task 환경변수를 쓴다.
@@ -26,6 +30,7 @@ STATE_DIR="${CODEMIT_AUTOMATION_STATE_DIR:-$HOME/.cache/codemit-automation}"
 REMOTE="${CODEMIT_AUTOMATION_REMOTE:-origin}"
 BRANCH="${CODEMIT_AUTOMATION_BRANCH:-main}"
 REPEAT_SECS="${CODEMIT_AUTOMATION_REPEAT_SECS:-3600}"
+LOCK_WAIT="${CODEMIT_AUTOMATION_LOCK_WAIT:-60}"
 RELAY_TO="${CODEMIT_FEEDBACK_RELAY_TO:-sandcorp/boss}"
 RELAY_PROFILE="${CODEMIT_FEEDBACK_RELAY_PROFILE:-codemit-coordinator}"
 RELAY_TASK="${CODEMIT_FEEDBACK_RELAY_TASK:-codemit-feedback}"
@@ -68,7 +73,11 @@ recovered() {
 # 따라잡기 — 성공이면 0, 실패면 까닭 한 줄을 표준출력에 내고 1.
 catch_up() {
   cd "$REPO" 2>/dev/null || { echo "체크아웃을 찾지 못했다: $REPO"; return 1; }
-  local cur err
+  local cur err common
+  command -v flock >/dev/null || { echo "flock 이 없다"; return 1; }
+  common="$(git rev-parse --path-format=absolute --git-common-dir)" || { echo "git 저장소가 아니다: $REPO"; return 1; }
+  exec 9>"$common/codemit-fetch.lock"  # 서브셸이 끝나면 잠금도 풀린다.
+  flock -w "$LOCK_WAIT" 9 || { echo "잠금 대기 초과: ${LOCK_WAIT}초 안에 $common/codemit-fetch.lock 을 못 잡았다"; return 1; }
   cur="$(git symbolic-ref --short -q HEAD || true)"
   [ "$cur" = "$BRANCH" ] || { echo "체크아웃이 $BRANCH 에 있지 않다(${cur:-분리된 HEAD})"; return 1; }
   err="$(git fetch -q "$REMOTE" "$BRANCH" 2>&1)" || { echo "git fetch 실패: $(printf '%s' "$err" | tail -n 3)"; return 1; }

@@ -26,6 +26,9 @@ while args and args[0] == "-o":
 host, command = args[0], " ".join(args[1:])
 with open(os.path.join(fake, "ssh.log"), "a") as log:
     log.write(json.dumps({"host": host, "command": command}, ensure_ascii=False) + "\n")
+rcfile = os.path.join(fake, "ssh-rc")
+if os.path.exists(rcfile):
+    sys.exit(int(open(rcfile).read()))  # 배포 중 컨테이너 교체: 말없이 시그널 코드로 죽는다
 if os.path.exists(os.path.join(fake, "ssh-down")):
     print("ssh: connect to host oracle: Connection timed out", file=sys.stderr)
     sys.exit(255)
@@ -138,6 +141,15 @@ class FeedbackRelay(unittest.TestCase):
     def test_check_is_two_when_production_is_unreachable(self) -> None:
         (self.fake / "ssh-down").touch()
         self.assertEqual(self.run_script("check").returncode, 2)
+
+    def test_check_keeps_remote_exit_code_and_reason_on_stderr(self) -> None:
+        for rc, reason in ((143, "시그널(15)"), (137, "시그널(9)"), (255, "ssh"), (3, "컨테이너가 없다"), (1, "운영 명령")):
+            (self.fake / "ssh-rc").write_text(str(rc))
+            result = self.run_script("check")
+            self.assertEqual(result.returncode, 2)  # precheck 꼴(0·1·2)은 그대로
+            self.assertIn(f"원격 실패 rc={rc}", result.stderr)
+            self.assertIn(reason, result.stderr)
+        self.assertEqual(len(self.ssh_calls()), 5)  # check 마다 ssh 한 번 — 다시 시도하지 않는다
 
     def test_reads_go_through_oracle_backend_found_by_label(self) -> None:
         self.run_script("list")
