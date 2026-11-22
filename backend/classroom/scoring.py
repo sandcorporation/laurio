@@ -1018,7 +1018,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         syntax_check=syntax_check,
         pause_recheck=head.pause_recheck,
         agent=uses_agent,
-        snapshot=agent_grading.snapshot_of(source.raw, asset.id) if uses_agent else None,
+        snapshot=agent_grading.snapshot_of(source.raw, asset) if uses_agent else None,
     )
 
 

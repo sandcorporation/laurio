@@ -24,6 +24,8 @@ from typing import Literal, NotRequired, Protocol, TypedDict
 from core.registry import Slot, Slots
 
 Vendor = Literal["anthropic", "openai"]
+#: `scoring.agent_runner.RepoKind` — 박제본이 GitHub zipball(`repository`, 최상위 폴더를 벗긴다)인가 올린 zip(`upload`)인가(#1278).
+RepoKind = Literal["repository", "upload"]
 
 
 class SelfLoopRequirement(TypedDict):
@@ -45,6 +47,7 @@ class RunSpec(TypedDict):
     timeout_seconds: NotRequired[int]
     mode: NotRequired[Literal["cli", "selfloop"]]  # #1245 — 없으면 cli
     requirements: NotRequired[list[SelfLoopRequirement]]  # selfloop 일 때만
+    repo_kind: NotRequired[RepoKind]  # #1278 — 없으면 repository. 백엔드는 늘 박제본의 `kind` 를 싣는다
 
 
 class RunResult(TypedDict):
@@ -78,7 +81,7 @@ class AgentGrader(Protocol):
         """실행기 `GET /health` 에 한 번 닿아 본다 — 못 닿으면 `AgentGraderError`(비교 실험이 칸 전에, #1257)."""
         ...
 
-    def extract_repo(self, zip_path: Path, dest: Path) -> str:
+    def extract_repo(self, zip_path: Path, dest: Path, *, repo_kind: RepoKind) -> str:
         """박제본을 실행기와 같은 규칙(링크·크기·항목 수)으로 푼다 — 비교 실험의 근거 확인(#1246)이 쓴다."""
         ...
 

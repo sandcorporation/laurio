@@ -42,7 +42,7 @@ from core.quality_review import QualityItemInput, QualityItemScore, parse_conten
 
 from core import agent_scoring
 from core.agent_prompt import ID_KEY, ITEMS_KEY, SCORING_OUTPUT_SCHEMA, build_scoring_prompt, scoring_reasoning
-from core.agent_ports import agent_grader
+from core.agent_ports import RepoKind, agent_grader
 from core.agent_scoring import (
     AGENT_JOB_MAX_SECONDS,
     AgentVendorRefused,
@@ -52,6 +52,8 @@ from core.agent_scoring import (
 from core.quality_review_agent import ID_KEY as QUALITY_ID_KEY
 from core.quality_review_agent import ITEMS_KEY as QUALITY_ITEMS_KEY
 from core.quality_review_agent import agent_response_schema, build_agent_prompt, needs_evidence, with_evidence
+
+from submissions.models import SubmissionAsset
 
 from .models import Class, ClassroomAgentRun, ClassroomSubmission
 from .pending_scoring import AGENT_SCORING_HOLD_ERROR_PREFIX
@@ -117,12 +119,14 @@ def _class_key(class_obj: Class, model: str) -> agent_scoring.ClassKey:
     return agent_scoring.ClassKey(class_id=class_obj.pk, vendor=vendor, model=model)
 
 
-def snapshot_of(raw: bytes | None, asset_id: int) -> Snapshot | None:
-    """채점 준비가 읽은 소스 바이트를 박제본으로 — zip(저장소 clone·zip 소스)일 때만."""
+def snapshot_of(raw: bytes | None, asset: SubmissionAsset) -> Snapshot | None:
+    """채점 준비가 읽은 소스 바이트를 박제본으로 — zip(저장소 clone·zip 소스)일 때만. 저장소 자산이면 GitHub
+    zipball 이라 실행기가 최상위 폴더를 벗기고, 소스 자산이면 그대로 푼다(#1278)."""
 
     if raw is None or not zipfile.is_zipfile(io.BytesIO(raw)):
         return None
-    return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset_id)
+    kind: RepoKind = "repository" if asset.kind == SubmissionAsset.Kind.REPOSITORY else "upload"
+    return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.pk, kind=kind)
 
 
 def _loader(snapshot: Snapshot | None) -> Callable[[], Snapshot]:

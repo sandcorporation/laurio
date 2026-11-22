@@ -555,7 +555,7 @@ def prepare_tail(head: QualityHead) -> PreparedQuality | QualityConcluded:
         prompt=prompt,
         quality_input=QualityInput(submission_id=sid, prompt=prompt, items=tuple(items), source_text=source.text),
         agent=uses_agent,
-        snapshot=agent_grading.snapshot_of(source.raw, head.asset.id) if uses_agent else None,
+        snapshot=agent_grading.snapshot_of(source.raw, head.asset) if uses_agent else None,
     )
 
 
