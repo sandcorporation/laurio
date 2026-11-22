@@ -444,7 +444,11 @@ uvicorn 11.0초 → **2.5초**. 그래서 `rolling_replace` 가 옛 것을 내�
 내리고 backend 도 내리므로 그 구간은 backend 자체가 없다 — 마이그레이션 시간 + 90초 이상 503 이 이어질 수 있다.
 
 **beat 는 celery-worker 안에서 돈다**(#859) — 따로 띄우던 `celery-beat` 컨테이너를 걷었다(oracle
-메모리 153MiB). worker 는 `-B --schedule /tmp/celerybeat-schedule --concurrency 2` 로 뜬다. 그래서
+메모리 153MiB). worker 는 `-B --concurrency 2` 로 뜬다. beat 일정은 파일 없이 메모리에만 있다
+(`CELERY_BEAT_SCHEDULER = celery.beat:Scheduler`, #1329 — 옛 일정 파일 밑의 `dbm.sqlite3` 가 「locking
+protocol」로 beat 프로세스를 죽인 적이 있다). 그래서 worker 가 새로 뜨면 60초 스캔은 60초 뒤, 시각 작업은 다음
+그 시각에 첫 발사하고, 내려가 있던 동안 놓친 시각 작업을 뒤늦게 쏘지 않는다 — 파일도 /tmp 라 배포마다 사라졌으니
+배포 때는 전과 같다. 그래서
 **celery-worker 는 replica 를 늘리지 않는다** — 늘리면 beat 가 그만큼 늘어 주기 작업이 겹쳐 쏘인다.
 늘려야 하면 beat 를 다시 떼어 낸다. compose 에서 사라진 옛 `celery-beat` 컨테이너는 `deploy.sh` 의
 `retire_orphan_services` 가 마이그레이션·새 worker 보다 먼저 걷는다(채점 고아와 같은 자리). prefork

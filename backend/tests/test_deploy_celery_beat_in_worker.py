@@ -44,14 +44,35 @@ def test_no_compose_file_defines_a_separate_beat(name):
 
 
 @pytest.mark.parametrize("name", ["compose.prod.yaml", "compose.dev.yaml"])
-def test_the_worker_runs_beat_with_a_writable_schedule_and_a_fixed_pool(name):
+def test_the_worker_runs_beat_with_the_configured_scheduler_and_a_fixed_pool(name):
     command = _compose(name)["services"]["celery-worker"]["command"]
     args = command.split()
     assert "-B" in args
-    # 작업 디렉터리(/app)가 아니라 /tmp — 앱 사용자가 바뀌어도 쓸 수 있는 자리다.
-    assert args[args.index("--schedule") + 1].startswith("/tmp/")
+    # 일정 저장소는 설정 한 자리(`CELERY_BEAT_SCHEDULER`)가 정한다(#1329) — 명령이 파일·스케줄러를 덮지 않는다.
+    assert not {"-s", "--schedule", "-S", "--scheduler"} & set(args), command
+    assert not [a for a in args if a.startswith(("--schedule=", "--scheduler="))], command
     # 없으면 prefork 자식이 코어 수만큼 생긴다(oracle 4개, 자식 하나 약 160MiB).
     assert args[args.index("--concurrency") + 1] == "2"
+
+
+def test_embedded_beat_keeps_no_schedule_file(tmp_path: Path):
+    """`-B` 의 beat 가 만드는 스케줄러는 일정 파일을 만들지 않는다(#1329).
+
+    옛 PersistentScheduler 는 일정 파일을 `shelve` 로 열었고 그 밑이 Python 3.13+ 의 `dbm.sqlite3`(WAL)라, 주기
+    sync 가 「locking protocol」을 내면 beat 프로세스만 죽고 worker 는 산 채로 주기 작업이 멈췄다. worker 가
+    beat 에 넘기는 값(`WorkController` 의 `either('beat_scheduler', …)`)과 같이 설정에서 스케줄러를 고른다."""
+
+    from celery.beat import Scheduler, Service
+
+    from config.celery import app
+
+    service = Service(app, schedule_filename=str(tmp_path / "celerybeat-schedule"), scheduler_cls=app.conf.beat_scheduler)
+    scheduler = service.scheduler  # 여기서 setup_schedule 이 돈다(옛 저장소는 이때 파일을 만들었다)
+    assert type(scheduler) is Scheduler
+    assert "ops-metrics:flush" in scheduler.schedule
+    scheduler._do_sync()  # CI 에서 죽은 바로 그 자리 — 주기 sync
+    service.sync()  # 종료 때의 close
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_deploy_no_longer_names_the_beat_service_anywhere_but_the_orphan_sweep():

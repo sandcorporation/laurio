@@ -865,6 +865,13 @@ INTERNAL_API_BASE_URL = _env("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
 CELERY_BROKER_URL = _env("CELERY_BROKER_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = _env("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
 CELERY_TIMEZONE = TIME_ZONE
+# **beat 일정은 메모리에만 둔다**(#1329). celery 기본(PersistentScheduler)은 일정 파일을 `shelve` 로 여는데,
+# Python 3.13 부터 그 밑이 `dbm.sqlite3`(WAL)이라 beat 가 주기 sync 에서 「locking protocol」로 죽은 적이 있다
+# (PR #1321 대기열의 celery 잡 — beat 프로세스만 죽고 worker 는 살아 주기 작업이 조용히 멈춘다). 파일이 주던 것은
+# 「프로세스를 다시 띄워도 마지막 실행 시각을 기억한다」뿐인데, 파일이 컨테이너 /tmp 라 배포(컨테이너 재생성)마다
+# 이미 사라졌고 일정 자체는 `config/celery.py` 가 코드에서 만든다. worker 의 `-B` 는 이 값을 읽으므로 compose 에
+# `--schedule`·`--scheduler` 를 주지 않는다(tests/test_deploy_celery_beat_in_worker.py 가 본다).
+CELERY_BEAT_SCHEDULER = "celery.beat:Scheduler"
 # **dev·CI 는 태스크를 큐에 넣는 자리에서 그대로 돌린다**(#582, ADR-0056) — 공모전 이미지 최적화 같은
 # 일반 태스크가 워커 없이 도는 모양이다. 강의실 채점은 Celery 가 아니라 grader 가 한다(#584,
 # 아래 `CLASSROOM_GRADER_*`). dev compose 의 celery-worker·beat 는 이 값을 false 로 받는다 —
