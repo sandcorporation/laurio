@@ -362,7 +362,7 @@ def test_report_fills_accuracy_recall_and_false_positive_rate_when_the_material_
     # 운영 판정은 정답과 네 칸 모두 같다.
     production = _cells_of(md, "운영:gpt-4.1-mini-2025-04-14")
     assert (production["기준 판정과의 일치"], production["기준 미충족 재현율"], production["기준 대비 오탐률"]) == ("100.0%", "100.0%", "0.0%")
-    assert "정답:사람" not in md and "정답(알려진 미충족)이 없는 재료" not in md
+    assert "정답:사람" not in md and "기준 판정(알려진 미충족)이 없는 재료" not in md
     assert "항목별 기준 판정과 견준 값" in md
 
 
@@ -376,4 +376,4 @@ def test_report_without_truth_keeps_the_dash_cells_and_the_note(home, money, mon
 
     single = _cells_of(md, SINGLE)
     assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("—", "—", "—")
-    assert "정답(알려진 미충족)이 없는 재료" in md
+    assert "기준 판정(알려진 미충족)이 없는 재료" in md
