@@ -1208,6 +1208,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `AGENT_EXPERIMENT_DAILY_LIMIT_USD` | USD 0~1000(#1246) | 채점 방식 비교 실험의 하루(KST) 비용 상한 — 실행 토큰 용도 `experiment` 만 세고 운영 상한과 따로다. 0 이면 실험이 돌지 않는다 | 0 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·정정 채점(`score-correction`, #1180) 스캔만 — 꺼지면 정정은 진행 중으로 기다린다 | **off** — 채점 스캔이 돌지 않는다 |
+| `CLASSROOM_SCORE_REUSE` | on/off(#1287) | 강의실 채점이 같은 문제·같은 모델·같은 프롬프트의 이전 점수(플랫폼 자동 점수 제외)를 벤더 없이 그대로 쓴다 — 토큰 0, 강사 화면에 「같은 제출 재사용」 | **off** — 매번 벤더를 부른다 |
 | `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 

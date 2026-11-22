@@ -164,6 +164,7 @@ from .schemas import (
 from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality
+from .score_reuse import score_reused
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -782,6 +783,7 @@ def _serialize_score(
         ],
         syntax_check=_serialize_syntax_check(score.syntax_check_result),
         created_at=score.created_at,
+        reused=hidden_items is None and score_reused(score),
         hidden_summary=(
             None
             if hidden_items is None

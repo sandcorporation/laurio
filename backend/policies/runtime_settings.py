@@ -69,6 +69,9 @@ class SettingSpec:
 
 #: 공모전 AI 채점 스위치의 키(#991) — `contest_ai_scoring_enabled`.
 CONTEST_AI_SCORING = "CONTEST_AI_SCORING"
+
+#: 강의실 채점 재사용 스위치의 키(#1287) — `classroom_score_reuse_enabled`.
+CLASSROOM_SCORE_REUSE = "CLASSROOM_SCORE_REUSE"
 #: 공모전 완성도 리뷰 스위치의 키(#1033) — `contest_quality_review_enabled`. 채점 스위치와 따로 켜고 끈다.
 CONTEST_AI_QUALITY_REVIEW = "CONTEST_AI_QUALITY_REVIEW"
 
@@ -151,6 +154,8 @@ SPECS: dict[str, SettingSpec] = {
         # **값이 없으면 꺼짐** — 처리기를 다시 켜는 배포가 공모전 채점까지 켜지 않게 했다. 켜려면 화면에서
         # 「on」을 저장한다(dev·시험은 환경변수로 켠다).
         SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점", "switch", default="off", max_length=3),
+        # #1287: 같은 문제·같은 모델·같은 프롬프트의 이전 강의실 점수를 벤더 없이 재사용한다. 값이 없으면 꺼짐.
+        SettingSpec(CLASSROOM_SCORE_REUSE, "강의실 채점 재사용", "switch", default="off", max_length=3),
         # #1033: 완성도 리뷰(`submission-quality-review` 스캔)만 여닫는 스위치. 값이 없으면 꺼짐.
         SettingSpec(CONTEST_AI_QUALITY_REVIEW, "공모전 완성도 리뷰", "switch", default="off", max_length=3),
         # #1221: 운영 스위치가 기본값과 다르거나 켜져 있던 것이 꺼진 채 이만큼 지나면 하루 한 번 알린다.
@@ -426,6 +431,12 @@ def contest_ai_scoring_enabled() -> bool:
     """공모전 AI 채점 스캔이 지금 도는가(#991) — 스캔의 `enabled` 콜백이라 호출마다 다시 읽는다."""
 
     return switch_on(CONTEST_AI_SCORING)
+
+
+def classroom_score_reuse_enabled() -> bool:
+    """강의실 채점이 같은 입력의 이전 점수를 재사용하는가(#1287) — 채점마다 다시 읽는다."""
+
+    return switch_on(CLASSROOM_SCORE_REUSE)
 
 
 def contest_quality_review_enabled() -> bool:

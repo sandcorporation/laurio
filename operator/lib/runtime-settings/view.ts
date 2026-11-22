@@ -122,6 +122,7 @@ export const SETTINGS_TABS: { id: SettingsTabId; label: string; keys: readonly s
       "ANTHROPIC_API_KEY",
       "CONTEST_AI_SCORING",
       "CONTEST_AI_QUALITY_REVIEW",
+      "CLASSROOM_SCORE_REUSE",
       "AGENT_SCORING_DAILY_LIMIT_USD",
     ],
   },

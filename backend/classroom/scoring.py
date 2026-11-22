@@ -97,6 +97,7 @@ from core.observability import tag_error_scope
 from core.quality_review import QualityInput, QualityItemScore, QualityOutput
 from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
+from policies.runtime_settings import classroom_score_reuse_enabled
 from core.model_context import source_budget_bytes
 from core.source_selection import select_source_files, select_source_files_with_omission
 from notifications.models import NotificationType
@@ -106,7 +107,7 @@ from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import agent_grading, pending_scoring, scoring_cost
+from . import agent_grading, pending_scoring, score_reuse, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
@@ -804,6 +805,23 @@ class VendorOutcome:
     error: LLMAdapterError | None = None
     #: 에이전트 방식이면 그 실행 결과(#1036) — 받아들였으면 `output` 도 차 있고, 보류면 `output` 이 비어 있다.
     agent: agent_grading.AgentResult | None = None
+    #: 같은 입력의 이전 점수를 재사용했으면 그 점수(#1287) — 벤더를 부르지 않았다.
+    reused: ClassroomScore | None = None
+
+
+def reusable_outcome(prepared: PreparedScoring) -> VendorOutcome | None:
+    """운영 설정 `CLASSROOM_SCORE_REUSE` 가 켜져 있고 같은 입력의 이전 점수가 있으면 벤더 대신 그것을 돌려준다(#1287).
+    **DB 를 읽는다** — grader 는 DB 스레드에서 부른다. 에이전트 방식은 프롬프트가 입력 전부가 아니라 재사용하지 않는다."""
+
+    if prepared.agent or not classroom_score_reuse_enabled():
+        return None
+    source = score_reuse.find_by_prompt(
+        prepared.problem,
+        model=prepared.model,
+        prompt=prepared.prompt,
+        exclude_submission_id=prepared.submission.id,
+    )
+    return None if source is None else VendorOutcome(reused=source)
 
 
 def _concluded(result: dict) -> Concluded:
@@ -1059,6 +1077,9 @@ def _call_agent(prepared: PreparedScoring) -> VendorOutcome:
 def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
     """벤더 호출(동기) — 시험·즉시 채점 시임이 쓴다. 어댑터가 던진 `LLMAdapterError` 를 값으로 돌려준다."""
 
+    reused = reusable_outcome(prepared)
+    if reused is not None:
+        return reused
     if prepared.agent:
         return _call_agent(prepared)
     try:
@@ -1146,6 +1167,17 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         logger.warning("ClassroomSubmission(pk=%s) %s", submission.id, message)
         _record_scoring_attempt(submission, error=message)
         return {"submission_id": submission.id, "status": "held", "error": message}
+    if outcome.reused is not None:
+        # 벤더를 부르지 않았다(#1287) — 토큰 0, 키 확인·일시 중지 해제도 하지 않는다(키를 쓰지 않았다).
+        source = outcome.reused
+        score = ClassroomScore.objects.create(
+            submission=submission,
+            model_version=source.model_version,
+            prompt=prepared.prompt,
+            reasoning=score_reuse.reasoning_of_reuse(source),
+            syntax_check_result=source.syntax_check_result,
+        )
+        return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
     output = outcome.output
     assert output is not None
     if isinstance(outcome.agent, agent_grading.AgentAccepted):

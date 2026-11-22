@@ -1025,6 +1025,8 @@ class ClassroomScoreOut(Schema):
     created_at: datetime
     #: 참여자 응답에서만 채운다(#906) — `reasoning` 에서 숨은 항목은 빠지고 이 요약만 남는다. 강사 응답은 None.
     hidden_summary: ClassroomHiddenSummaryOut | None = None
+    #: 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 채운다. 원본이 누구인지는 어디에도 싣지 않는다.
+    reused: bool = False
 
 
 class ClassroomSubmissionOut(Schema):
