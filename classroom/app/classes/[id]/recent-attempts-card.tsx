@@ -32,11 +32,24 @@ function AttemptMark({ status }: { status: RecentAttemptStatus }) {
   );
 }
 
-/** 시도 한 줄 — 「최근 제출」 카드와 「제출」 화면(#1317)이 같이 쓴다. `action` 은 줄 끝에 붙는다(「다시 채점」). */
-export function AttemptLine({ attempt, testId, action }: { attempt: RecentAttemptRow; testId: string; action?: ReactNode }) {
+/** 시도 한 줄 — 「최근 제출」 카드와 「제출」 화면(#1317)이 같이 쓴다. `action` 은 줄 끝에 붙는다(「다시 채점」).
+ * `toggle` 을 주면 줄 본문이 펼침 단추가 되고(#1334), 펼쳤을 때 `detail` 이 줄 아래에 붙는다. */
+export function AttemptLine({
+  attempt,
+  testId,
+  action,
+  toggle,
+  detail,
+}: {
+  attempt: RecentAttemptRow;
+  testId: string;
+  action?: ReactNode;
+  toggle?: { expanded: boolean; onToggle: () => void };
+  detail?: ReactNode;
+}) {
   const status = STATUS_LABEL[attempt.status];
-  return (
-    <li data-testid={testId} className="flex items-center gap-2.5 px-4 py-2.5">
+  const body = (
+    <>
       <AttemptMark status={attempt.status} />
       <span className="min-w-0 flex-1 truncate text-[13px]">
         {attempt.member_display_name} <span className="text-ink/45">·</span>{" "}
@@ -46,7 +59,27 @@ export function AttemptLine({ attempt, testId, action }: { attempt: RecentAttemp
         <span className={`text-[12px] ${status.className}`}>{withLate(status.label, attempt.late)}</span>
         <span className="block text-[11px] text-ink/30">{formatRelativeTime(attempt.submitted_at)}</span>
       </span>
-      {action}
+    </>
+  );
+  return (
+    <li data-testid={testId}>
+      <div className="flex items-center gap-2.5 px-4 py-2.5">
+        {toggle ? (
+          <button
+            type="button"
+            data-testid={`${testId}-toggle`}
+            aria-expanded={toggle.expanded}
+            onClick={toggle.onToggle}
+            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+          >
+            {body}
+          </button>
+        ) : (
+          body
+        )}
+        {action}
+      </div>
+      {toggle?.expanded && detail ? <div className="border-t border-rule px-4 py-3">{detail}</div> : null}
     </li>
   );
 }

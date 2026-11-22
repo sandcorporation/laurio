@@ -10,11 +10,18 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { Card, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
-import { requestRegrade, useClassAttempts, type ClassAttemptRow } from "@/lib/classes/use-class-attempts";
+import {
+  classAttemptVerdictsPath,
+  requestRegrade,
+  useClassAttempts,
+  type ClassAttemptRow,
+  type ClassAttemptVerdicts,
+} from "@/lib/classes/use-class-attempts";
 import { useClass } from "@/lib/classes/use-class";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { calculatorPath, submissionAmount, type ScoringCalculator } from "@/lib/scoring/calculator";
 
+import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
 import { AttemptLine } from "../recent-attempts-card";
 
 function RegradeDialog({
@@ -76,6 +83,41 @@ function RegradeDialog({
   );
 }
 
+// 펼친 줄의 판정(#1334) — 펼칠 때 그 제출 하나만 읽는다. 채점 전·실패면 판정 대신 빈 글자.
+function AttemptVerdicts({ classId, attempt }: { classId: number; attempt: ClassAttemptRow }) {
+  const { state } = useBackendQuery<ClassAttemptVerdicts>(bffClient, classAttemptVerdictsPath(classId, attempt.id));
+  const testId = `class-attempt-${attempt.id}`;
+  if (state.status === "loading") {
+    return (
+      <p data-testid={`${testId}-verdicts-loading`} className="text-[12.5px] text-ink/45">
+        불러오는 중...
+      </p>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <p data-testid={`${testId}-verdicts-error`} className="text-[12.5px] text-error">
+        불러오지 못했습니다.
+      </p>
+    );
+  }
+  const { score, checklist_items: items } = state.data;
+  if (score === null) {
+    return (
+      <p data-testid={`${testId}-verdicts-empty`} className="text-[12.5px] text-ink/45">
+        —
+      </p>
+    );
+  }
+  return (
+    <SubmissionVerdictList
+      score={score}
+      checklistLabelById={new Map(items.map((item) => [item.id, item.label]))}
+      testIdPrefix={testId}
+    />
+  );
+}
+
 function ClassAttempts() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
@@ -85,6 +127,7 @@ function ClassAttempts() {
   const [target, setTarget] = useState<ClassAttemptRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   useClassroomTabTitle({
     screenName: "제출",
@@ -140,6 +183,11 @@ function ClassAttempts() {
                     key={attempt.id}
                     attempt={attempt}
                     testId={`class-attempt-${attempt.id}`}
+                    toggle={{
+                      expanded: expandedId === attempt.id,
+                      onToggle: () => setExpandedId(expandedId === attempt.id ? null : attempt.id),
+                    }}
+                    detail={<AttemptVerdicts classId={classId} attempt={attempt} />}
                     action={
                       attempt.correctable ? (
                         <button

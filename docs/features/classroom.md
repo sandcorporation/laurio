@@ -122,6 +122,9 @@ data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippe
 「제출」 화면(`/classes/{id}/submissions`, `GET /api/classroom/classes/{id}/attempts?page=`)이다: 카드와 같은 줄·최신순·
 한 쪽 20줄이고, 범위 안 줄에만 「다시 채점」이 붙는다. 누르면 확인 창이 「학생 · 문제」와 예상 금액 한 줄(「예상 비용」
 카드와 같은 셈 — 지금 조합으로 그 문제의 제출 한 건)을 보이고, 확인하면 사유 없이 건다(사유는 「채점 실패 다시 채점」).
+줄 본문을 누르면 그 자리에서 펼쳐져 그 시도의 항목별 판정이 보이고(참여자 화면·문제별 제출 화면과 같은 `SubmissionVerdictList`),
+다시 누르면 접힌다(#1334). 펼칠 때 그 시도 하나만 `GET .../attempts/{submission_id}/verdicts` 로 읽고, 정정이 끝난 시도는
+정정 뒤 현재 판정(「정정됨」)이다. 채점 전이면 「—」. 강사·공동 강사만 열리고 학생 소스·제출 값은 싣지 않는다.
 
 **그 키의 OpenAI 크레딧이 떨어졌을 때도(429 `insufficient_quota`) 자동 미달로 굳지
 않는다**(#586, ADR-0057) — 실패로 세지 않고 대기 사유 「키」로 멈추며, 그동안 그 클래스의
