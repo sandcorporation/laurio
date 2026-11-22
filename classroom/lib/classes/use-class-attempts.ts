@@ -9,6 +9,7 @@ import { useBackendQuery } from "@codemit/bff-client";
 import { bffClient } from "@/lib/bff/client";
 import { ATTEMPT_SCORED, type StreamEvent } from "@/lib/events/types";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
+import type { ClassroomScore } from "@/lib/submissions/api";
 import type { RecentAttemptRow } from "@/lib/classes/use-recent-attempts";
 
 export type ClassAttemptRow = RecentAttemptRow & { correctable: boolean };
@@ -17,6 +18,16 @@ export type ClassAttemptPage = { rows: ClassAttemptRow[]; page: number; has_next
 
 export function classAttemptsPath(classId: number, page: number): string {
   return `/api/backend/classroom/classes/${classId}/attempts?page=${page}`;
+}
+
+/** 줄을 펼쳤을 때(#1334) 그 시도 하나의 현재 판정 — 채점 전이면 `score` 가 null. */
+export type ClassAttemptVerdicts = {
+  score: ClassroomScore | null;
+  checklist_items: { id: number; label: string }[];
+};
+
+export function classAttemptVerdictsPath(classId: number, submissionId: number): string {
+  return `/api/backend/classroom/classes/${classId}/attempts/${submissionId}/verdicts`;
 }
 
 const FALLBACK_POLL_MS = 30_000;

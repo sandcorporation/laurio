@@ -12,8 +12,18 @@ async function seedCertificate(): Promise<SeededCertificate> {
   return (await runSeed("certificate", { run_id: e2eRunId() })) as SeededCertificate;
 }
 
+// 발급은 서버가 PDF 를 그리는 일이라 1.8초까지 걸린다 — 시험 본문(3초 한도)에서 하면 화면 흐름이 한도를 넘는다(#1342).
+// 두 시험이 볼 상장은 한도 밖 beforeAll 에서 심는다(시험마다 다른 받는 사람).
+let closing: SeededCertificate;
+let notified: SeededCertificate;
+test.beforeAll(async () => {
+  test.setTimeout(30_000);
+  closing = await seedCertificate();
+  notified = await seedCertificate();
+});
+
 test("받는 사람이 PDF 를 받고 확인 페이지를 닫으면 확인 페이지가 「확인할 수 없는 상장」이 된다", async ({ page }) => {
-  const seeded = await seedCertificate();
+  const seeded = closing;
   await establishDeveloperSession(page, seeded.developer_uid);
 
   const row = page.getByTestId(`certificate-row-${seeded.certificate_id}`);
@@ -36,7 +46,7 @@ test("받는 사람이 PDF 를 받고 확인 페이지를 닫으면 확인 페�
 });
 
 test("상장 알림에서 내 참가 현황으로 간다", async ({ page }) => {
-  const seeded = await seedCertificate();
+  const seeded = notified;
   await establishDeveloperSession(page, seeded.developer_uid, "/console/notifications");
 
   const link = page.locator('[data-testid^="notification-link-"]');

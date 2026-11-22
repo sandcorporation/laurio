@@ -2,8 +2,10 @@
 
 `CLAUDE.md` 의 부록이다 — 거기서 앵커로 가리키고, 같은 「지금」을 말한다.
 
-로컬 게이트는 셋이다 — **바꾼 자리의 백엔드 시험**(`scripts/test.sh backend <파일…>`,
-400개까지), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. **전체 시험은
+로컬 게이트는 셋이다 — **바꾼 파일이 고른 시험**(`scripts/test.sh affected` — 백엔드·vitest·e2e 를 파일 단위로 골라 돈다,
+[테스트](testing.md) 「로컬 시험 고르기」), **세 앱 `typecheck`**, **에이전트가 브라우저로 걸어본 결과**. 첫째는 장치가 지킨다 —
+pre-push 훅이 push 할 내 커밋이 `affected` 가 시험한 내용 그대로인지 보고, 돌리지 않았거나 시험 뒤 고쳤으면 거절한다(#1331,
+[커밋 훅](commit-hooks.md)). 급하면 커밋 꼬리말 `Local-Tests-Skipped: <까닭>` — 커밋에 남아 PR 에 보인다. **전체 시험은
 브랜치 PR 의 CI 로 본다**(2026-10-02) — 브랜치를 push 하고 `main` 으로 PR 을 연다. GitHub
 Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 가드·e2e·celery 를 돈다(Jenkins PR 검사는 2026-11-09 에 꺼졌다, #932 — 「CI」 문서).
 **GitHub Actions `PR 검사` 의 「결과」 잡(`gh pr checks <PR>`·`gh run watch`)이 초록이면(2026-11-09 #930 — Jenkins PR 검사는 기다리지 않는다) 작업자가 `bash scripts/ci/enqueue.sh <PR> --wait` 로
@@ -12,7 +14,8 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
 --workflow release.yml`), `production` push 가 Jenkins 배포 잡(`codemit/deploy`)을 깨운다. 그다음
 `python3 ~/.claude/skills/issue-track/scripts/wait-deploy.py --job codemit/deploy --pr <PR>` 로 배포 잡의 GitHub 상태
 `sandcorp/deploy` 를 끝까지 기다려 결과를 보고한다(문서만이면 교체 없이 초록 — release 가 몇 분 걸리니 그만큼 늦게 시작한다).
-`main` 에 직접 push 하지 않는다(PR 검사 없이 release 가 돈다). PR 검사의 실패 줄은 Actions 실행 로그
+`main` 에 직접 push 하지 않는다(PR 검사 없이 release 가 돈다). 이제 막히지 않는다 — 계정이 ruleset 을 우회한다(2026-11-23,
+[배포 길 셋](deploy-paths.md) 「대표 몫」). 핫픽스 길은 대장 지시서로만 쓴다. PR 검사의 실패 줄은 Actions 실행 로그
 (`gh run view <id> --log-failed`)에서 본다.
 
 **push 를 빠뜨리면 CI 는 아무것도 보지 않는다.** 실제로 그런 적이 있다 — 하루 작업 20커밋이

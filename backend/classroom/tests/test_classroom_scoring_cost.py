@@ -236,7 +236,8 @@ def test_every_model_the_key_can_use_appears_in_catalog_order_with_a_row_per_rea
 
 
 def test_the_current_setting_gets_a_row_even_without_a_price(client, db, monkeypatch):
-    monkeypatch.delitem(scoring_cost.PRICES, "gpt-4o")
+    # delitem 은 되돌릴 때 gpt-4o 를 표 끝에 다시 넣어 같은 프로세스의 뒤 시험의 순서 비교를 깬다 — 표를 통째로 바꿔 끼운다.
+    monkeypatch.setattr(scoring_cost, "PRICES", {k: v for k, v in scoring_cost.PRICES.items() if k != "gpt-4o"})
     instructor = login(client, uid="instructor-1")
     class_id = create_class(client, instructor["access"])
     patch_class(client, instructor["access"], class_id, {"default_model": "gpt-4o"})

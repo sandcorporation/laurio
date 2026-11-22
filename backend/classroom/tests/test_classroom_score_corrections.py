@@ -357,3 +357,35 @@ def test_the_class_attempts_page_marks_only_the_latest_capped_attempt_as_correct
     # 새 시도가 생겨 `newer` 는 더 이상 최근 시도가 아니다.
     assert [(r["id"], r["correctable"]) for r in second["rows"]] == [(newer, False), (older, False)]
     assert second["has_next"] is False
+
+
+def test_the_class_attempt_verdicts_show_the_current_score_of_one_attempt_without_the_source(client, db, monkeypatch):
+    """「제출」 화면 줄을 펼칠 때(#1334) — 채점 전엔 판정이 없고, 실패 상한 점수는 플랫폼 실패로, 정정이 끝나면 정정 뒤 판정."""
+
+    ctx = _capped_submission(client)
+    item_id = ctx["problem"].item_id
+
+    def verdicts(access: str | None = None, submission_id: int | None = None):
+        return client.get(
+            f"{CLASSES_URL}/{ctx['class_id']}/attempts/{ctx['submission_id'] if submission_id is None else submission_id}/verdicts",
+            **auth_header(access or ctx["instructor"]["access"]),
+        )
+
+    body = verdicts().json()
+    assert body["score"] is None
+    assert item_id in [item["id"] for item in body["checklist_items"]]
+
+    _cap(client, monkeypatch, ctx)
+    body = verdicts().json()
+    assert body["score"]["is_platform_failure"] is True and body["score"]["corrected"] is False
+
+    _request(client, ctx, [ctx["submission_id"]])
+    respond_with_verdict(monkeypatch, item_id, is_met=True, total_tokens=120)
+    assert run_correction_inline(ClassroomScoreCorrection.objects.get().pk)["status"] == "done"
+    body = verdicts().json()
+    assert body["score"]["corrected"] is True and body["score"]["is_platform_failure"] is False
+    assert all(v["is_met"] for v in body["score"]["reasoning"])
+    assert not {"value", "download_url", "commit_sha"} & set(body)
+
+    assert verdicts(ctx["participant"]["access"]).status_code == 404
+    assert verdicts(submission_id=0).status_code == 404

@@ -45,6 +45,33 @@ scripts/test.sh backend tests/test_x.py   # 호스트에서 돈다 — 포트는
 macOS 기본 환경(bash 3.2, `nproc`·`taskset`·`flock` 없음)에서도 같은 명령이 돈다 —
 코어 수는 `sysctl`, 칸은 디렉터리 잠금으로 잡고 CPU 고정은 건너뛴다(#1006).
 
+**로컬 시험 고르기 — `scripts/test.sh affected`(#1330).** 바뀐 파일(기준 커밋 뒤의 커밋·커밋하지 않은 변경·새 파일)에서
+백엔드·vitest·e2e 를 골라 돈다. `--list` 는 고르기만, `--only backend,vitest,e2e` 로 좁힌다. 기준을 주지 않으면
+`origin/main`·`origin/spec/*` 가운데 HEAD 와 가장 가까운 것이다. 고른 시험마다 까닭이 한 줄 붙고, 고르지 못한 것은
+`!` 줄로 말한다. PR 검사의 고르기(`pytest_plan.py`·`e2e_plan.py`, 앱 단위로 넓다)와 따로다 — 이쪽은 파일 단위로 좁다.
+
+| 종류 | 고르는 것 |
+| --- | --- |
+| 백엔드 1단 | 바뀐 시험 파일 · 가드 시험(`scripts/affected_tests.py` 의 `GUARDS` 표 — 소스를 훑거나 선언·계약을 대조하는 시험, 파일 또는 가드인 함수만) |
+| 백엔드 2단 | 바뀐 모듈을 import 하거나 경로 문자열로 가리키는 시험. 1·2단 합이 400개를 넘으면 1단만 돈다 |
+| vitest | 바뀐 파일에서 import 를 거꾸로 따라 닿는 `*.test.ts(x)`. 워크스페이스 설정(package.json·tsconfig·vitest.config)이면 그 워크스페이스 전부. `*.gen.ts` 는 고르지 않는다 |
+| e2e | 바뀐 스펙 · 바뀐 e2e 도우미를 import 하는 스펙 · 바뀐 화면 파일에서 가장 가까운 `.tsx` 의 `data-testid` 를 쓰거나 가장 가까운 page·layout 의 라우트로 `goto` 하는 스펙 · HTTP 겉면(`api`·`schemas`·`urls`)이 바뀐 백엔드 앱의 e2e 폴더. 스펙을 못 찾거나 루트 레이아웃·middleware 에 닿으면 그 앱의 e2e 전부 |
+| 고르지 않음 | 문서 · 공통 경로(`scripts/`·`docker/`·루트 — 가드는 고른다) · 백엔드 안쪽 모듈만 바뀐 때의 e2e — 모두 PR 검사가 넓게 돈다 |
+
+**TDD 순서**: 고칠 자리의 시험을 먼저 쓰고 그 파일만 돈다(`scripts/test.sh backend <파일>`, `pnpm --filter <앱> exec vitest run <파일>`,
+`scripts/test.sh e2e <스펙>`) → 초록이 되면 `scripts/test.sh affected` 로 바뀐 파일이 고른 셋을 한 번에 → push. 빠른 되풀이는
+`--only backend` 처럼 좁혀도 되지만, push 전 마지막 한 번은 고른 종류를 다 돈다 — pre-push 훅이 그 기록을 본다
+([커밋 훅](commit-hooks.md) 「로컬 고르기 기록」).
+
+가드 시험을 새로 만들면 `GUARDS` 에 더한다 — 표의 시험·함수가 사라지면 `tests/test_local_affected_tests.py` 가 빨갛다.
+그 시험이 #1305·#1309·#1315·#1328 에서 PR 검사에서야 빨갛던 시험·스펙이 골라지는 것을 붙들고 있다.
+
+로컬 e2e 시간(work, 칸 하나 = 4코어, `class-settings.spec.ts` 한 파일 11시험, 2026-11-23): 스택 없이 시작 **63초**(이미지
+층 캐시가 찬 굽기 + 띄우기 + 시험 16초), `CODEMIT_E2E_KEEP=1` 로 남긴 스택에 되풀이 **74초·67초**(시험 10초). 되풀이도
+`up --build` 의 캐시 확인과 health 대기를 다시 하므로 거의 줄지 않는다 — 시간의 대부분이 시험 밖이다. 층 캐시가 빈
+굽기는 재지 않았다. 흔들림을 보려고 되풀이할 때는 `--repeat-each` 를 쓰지 않는다 — 실행 토큰(`e2eRunId`)이 스위트에
+하나라 같은 계정을 다시 켜는 스펙이 「unchanged」로 실패한다(#1333). 스위트 실행을 따로 한다.
+
 dev compose의 `db` 서비스는 호스트 포트로 이미 노출돼 있으므로 호스트의 `uv run
 pytest`가 그 DB에 직접 붙는다 — 컨테이너를 거칠 이유가 없다.
 

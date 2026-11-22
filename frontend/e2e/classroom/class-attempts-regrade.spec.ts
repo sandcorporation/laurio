@@ -95,3 +95,20 @@ test("「다시 채점」은 확인 창을 거쳐 걸리고, 새로고침 뒤 �
   await expect(row).not.toContainText("채점 실패");
   await expect(page.getByTestId(`regrade-${submissionId}`)).toHaveCount(0);
 });
+
+test("줄을 누르면 정정된 현재 판정이 펼쳐지고, 다시 누르면 접히며, 쪽 넘김·다시 채점 단추는 그대로다 (#1334)", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+  await page.goto(`/classes/${classId}/submissions`);
+  const toggle = page.getByTestId(`class-attempt-${submissionId}-toggle`);
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByTestId(`class-attempt-${submissionId}-verdicts`)).toHaveCount(0);
+
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId(`class-attempt-${submissionId}-verdicts`)).toBeVisible();
+  await expect(page.getByTestId(`class-attempt-${submissionId}-corrected`)).toBeVisible();
+  await expect(page.getByTestId(`class-attempt-${submissionId}-verdicts`)).toContainText("충족");
+
+  await toggle.click();
+  await expect(page.getByTestId(`class-attempt-${submissionId}-verdicts`)).toHaveCount(0);
+});

@@ -307,7 +307,8 @@ def test_get_class_and_get_problem_carry_a_short_cost_estimate_for_the_current_s
     assert problem_estimate["ratio_to_gpt_4_1_mini"] == 1.0
 
     # 카탈로그의 모델은 모두 단가가 있다(#617) — 단가표에서 하나를 빼 「단가 모름」을 만든다.
-    monkeypatch.delitem(scoring_cost.PRICES, "gpt-4o")
+    # delitem 은 되돌릴 때 gpt-4o 를 표 끝에 다시 넣어 같은 프로세스의 뒤 시험의 순서 비교를 깬다 — 표를 통째로 바꿔 끼운다.
+    monkeypatch.setattr(scoring_cost, "PRICES", {k: v for k, v in scoring_cost.PRICES.items() if k != "gpt-4o"})
     patch_class(client, access, class_id, {"default_model": "gpt-4o"})
     unpriced = _structured(client, token, "get_class", class_id=class_id)["scoring_cost_estimate"]
     assert unpriced == {
