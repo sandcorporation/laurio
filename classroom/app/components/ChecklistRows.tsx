@@ -18,7 +18,15 @@ import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
 import { type ChecklistReorderSave, createChecklistMover } from "@/lib/problems/checklist-reorder";
 import { BONUS_RATER_LABEL, type ChecklistGrade, GRADE_LABEL, nextGrade } from "@/lib/problems/grade";
 
-export type ChecklistRowItem = { key: string | number; label: string; grade: ChecklistGrade; points: number; hidden?: boolean };
+export type ChecklistRowItem = {
+  key: string | number;
+  label: string;
+  grade: ChecklistGrade;
+  points: number;
+  hidden?: boolean;
+  /** 기계 확인 규칙이 있다(#1294) — 「기계 확인」 배지. */
+  machineChecked?: boolean;
+};
 
 /** 등급 배지 버튼 — 누를 때마다 필수 → 선택 → 가산(#905). 가산이면 「강사가 매김」이 붙는다. */
 export function GradeToggle({
@@ -241,6 +249,15 @@ export function ChecklistRows({
                 </option>
               ))}
             </select>
+            {item.machineChecked ? (
+              // 좁은 화면에서는 항목 칸을 지키려고 다음 줄로 내린다.
+              <span
+                data-testid={`${testId}-machine-badge`}
+                className="flex shrink-0 basis-full pl-[30px] sm:basis-auto sm:pl-0"
+              >
+                <Badge tone="neutral">기계 확인</Badge>
+              </span>
+            ) : null}
             {onHiddenChange ? (
               <label className="flex shrink-0 basis-full items-center gap-1 pl-[30px] text-xs text-ink/70 sm:basis-auto sm:pl-0">
                 <input

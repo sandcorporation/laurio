@@ -6436,6 +6436,8 @@ export interface components {
             evidence?: string[] | null;
             /** Is Met */
             is_met: boolean;
+            /** Machine Note */
+            machine_note?: string | null;
             /** Reasoning */
             reasoning: string;
             /** Source */

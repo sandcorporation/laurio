@@ -44,6 +44,7 @@ import {
   createChecklistItem,
   deleteChecklistItem,
   hideProblem,
+  isMachineChecked,
   openProblem,
   reopenProblem,
   reorderChecklistItems,
@@ -660,6 +661,7 @@ export default function EditProblemPage() {
                         grade: item.grade,
                         points: item.points,
                         hidden: item.hidden,
+                        machineChecked: isMachineChecked(item),
                       }))}
                       listTestId="checklist-items"
                       rowTestId={(item) => `checklist-item-${item.key}`}

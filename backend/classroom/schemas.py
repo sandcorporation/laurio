@@ -1047,7 +1047,7 @@ class ClassroomVerdictCitationOut(Schema):
     matched: bool
 
 
-_STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect", "escalated")
+STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect", "escalated", "machine_note")
 
 
 class ClassroomChecklistVerdictOut(Schema):
@@ -1069,12 +1069,14 @@ class ClassroomChecklistVerdictOut(Schema):
     suspect: bool | None = None
     #: 의심 항목을 상위 모델로 다시 판정한 결과다(#1285).
     escalated: bool | None = None
+    #: 기계 미충족이라 모델에게 넘긴 「AI 판정 필요」 항목의 기계 메모(#1294, 「기계 확인: …」) — 판정은 모델 것이다.
+    machine_note: str | None = None
 
     # 반환 형을 적지 않는다 — 적으면 pydantic 이 그 형으로 직렬화 스키마를 지어 OpenAPI 가 이 모델의 칸을 잃는다.
     @model_serializer(mode="wrap")
     def _drop_unset_staged(self, handler: SerializerFunctionWrapHandler):
         data: dict[str, object] = handler(self)
-        for key in _STAGED_VERDICT_KEYS:
+        for key in STAGED_VERDICT_KEYS:
             if data.get(key) is None:
                 data.pop(key, None)
         return data

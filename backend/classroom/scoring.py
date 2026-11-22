@@ -65,7 +65,7 @@ import contextlib
 import dataclasses
 import sys
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -382,8 +382,11 @@ def _build_prompt(
     asset_kind: str,
     syntax_check: SyntaxCheckPass,
     cite: bool = False,
+    machine_notes: Mapping[int, str] | None = None,
+    machine_confirmed: Sequence[str] = (),
 ) -> str:
     problem = submission.problem
+    machine_notes = machine_notes or {}
     guideline_text = effective_grading_guideline_text(
         problem.grading_strictness, problem.grading_guideline_text
     )
@@ -419,10 +422,19 @@ def _build_prompt(
     )
     lines.append(f'"""{guideline_text}"""')
     lines.append("")
+    if machine_confirmed:
+        # staged(#1294) — 「기계 확인 완료」 항목은 목록으로만 보인다. 판정을 요청하지 않는다.
+        lines.append(MACHINE_CONFIRMED_HEAD)
+        lines.extend(f"- {label}" for label in machine_confirmed)
+        lines.append("")
+    if machine_notes:
+        lines.append(MACHINE_NOTE_RULE)
+        lines.append("")
     lines.append("체크리스트:")
     for item in checklist_items:
         grade = "필수" if item.required else "선택"
-        lines.append(f"- requirement_id={item.id} ({grade}): {item.label}")
+        note = machine_notes.get(item.id)
+        lines.append(f"- requirement_id={item.id} ({grade}): {item.label}" + (f" [{note}]" if note else ""))
     # 문법 검사 기본 항목(#409) — 파서가 판정하지 못한 파일만 AI에게 묻는다
     # (파서가 이미 오류를 찾았거나 검사가 꺼져 있으면 이 줄 자체가 생기지
     # 않는다, `SyntaxCheckPass.checklist_line`). 채점 지침(위)과 무관하게,
@@ -445,6 +457,14 @@ def _build_prompt(
     lines.extend(syntax_check.source_section_lines())
     return "\n".join(lines)
 
+
+#: staged 프롬프트의 「기계 확인 완료」 목록 머리(#1294).
+MACHINE_CONFIRMED_HEAD = "기계 확인 완료 — 코드가 이미 확인한 항목입니다. 판정하지 않습니다:"
+#: staged 프롬프트의 「AI 판정 필요」 메모 지시(#1294) — 짧게, 메모가 판정을 대신하지 않는다는 것만.
+MACHINE_NOTE_RULE = (
+    "[기계 확인: …] 은 코드가 정해진 경로·문자열로 확인하지 못했다는 메모일 뿐 판정이 아닙니다. "
+    "소스를 직접 읽고 판정하세요."
+)
 
 #: staged 프롬프트의 근거 인용 지시(#1284).
 CITATION_RULE = (
@@ -839,6 +859,8 @@ class PreparedScoring:
     staged: bool = False
     #: staged 의 기계 판정 항목(`ClassroomScore.reasoning` 모양, 출처 `machine`) — 모델 판정과 합친다.
     machine_entries: tuple[dict, ...] = ()
+    #: staged 의 기계 미충족·판정 불가 항목 id → 메모(#1294) — 모델에게 넘긴 「AI 판정 필요」 항목. 판정 항목에 `machine_note` 로 남는다.
+    machine_notes: Mapping[int, str] = field(default_factory=dict)
     #: 모델에게 물을 것이 없다(staged, 판단 항목 0개) — 벤더를 부르지 않는다(토큰 0).
     skip_vendor: bool = False
     #: staged 가 프롬프트에 실은 파일(정규화한 경로 → 줄들, #1284) — 모델이 낸 근거 인용을 이것과 대조한다.
@@ -1092,17 +1114,50 @@ def _numbered_source_text(files: list[SourceFile]) -> str:
     return two_step.numbered_source_text(files)
 
 
-def _staged_split(
-    checklist_items: list[ChecklistItem], raw: bytes
-) -> tuple[list[ChecklistItem], tuple[dict, ...]]:
-    """staged 의 기계 판정(#1283) — (모델에게 물을 항목, 기계가 정한 판정 항목). 규칙이 없거나 「판정 불가」인 항목은
-    모델에게 간다. 규칙은 강사 규칙이 먼저, 없으면 도출 규칙(#1293, `rule_derivation.current_rule`)."""
+@dataclass(frozen=True)
+class StagedSplit:
+    """staged 의 기계 판정 결과(#1283, #1294, CONTEXT.md 「기계 확인 완료」·「AI 판정 필요」)."""
+
+    #: 모델에게 물을 항목 — 판단·실행 필요·판정 불가, 그리고 기계 미충족(「AI 판정 필요」).
+    asked_items: list[ChecklistItem]
+    #: 기계 충족으로 확정한 판정 항목(출처 `machine`, 「기계 확인 완료」).
+    machine_entries: tuple[dict, ...]
+    #: 기계 미충족·판정 불가 항목 id → 기계가 본 것 한 줄(「기계 확인: …」). 프롬프트와 판정 항목에 붙는다.
+    machine_notes: Mapping[int, str]
+
+
+def _staged_plan(checklist_items: list[ChecklistItem], raw: bytes) -> StagedSplit:
+    """staged 의 기계 판정 — 규칙은 강사 규칙이 먼저, 없으면 도출 규칙(#1293, `rule_derivation.current_rule`).
+    **충족만 확정한다**(#1294). 미충족·판정 불가(읽을 수 없음·시간 초과)는 확정하지 않고 기계가 본 것을 메모로 달아
+    모델에게 넘긴다 — 경로·대소문자가 조금 달라 규칙이 못 찾은 것을 학생이 잃지 않게."""
 
     rules = ((item.id, rule_derivation.current_rule(item)) for item in checklist_items)
     verdicts = machine_check.judge_items(((item_id, rule) for item_id, rule in rules if rule), raw)
-    decided = {item_id: v for item_id, v in verdicts.items() if v.decided}
-    machine_entries = tuple(_machine_entry(item.id, decided[item.id]) for item in checklist_items if item.id in decided)
-    return [item for item in checklist_items if item.id not in decided], machine_entries
+    met = {item_id: v for item_id, v in verdicts.items() if v.verdict == machine_check.MET}
+    notes = {item_id: _machine_note(v) for item_id, v in verdicts.items() if item_id not in met}
+    return StagedSplit(
+        asked_items=[item for item in checklist_items if item.id not in met],
+        machine_entries=tuple(_machine_entry(item.id, met[item.id]) for item in checklist_items if item.id in met),
+        machine_notes=notes,
+    )
+
+
+def _confirmed_labels(checklist_items: list[ChecklistItem], machine_entries: tuple[dict, ...]) -> list[str]:
+    confirmed = {entry["checklist_item_id"] for entry in machine_entries}
+    return [item.label for item in checklist_items if item.id in confirmed]
+
+
+def _machine_note(verdict: machine_check.MachineVerdict) -> str:
+    return "기계 확인: " + verdict.reasoning.removeprefix("기계 판정 — ")
+
+
+def _staged_split(
+    checklist_items: list[ChecklistItem], raw: bytes
+) -> tuple[list[ChecklistItem], tuple[dict, ...]]:
+    """(모델에게 물을 항목, 기계 충족 판정 항목) — `_staged_plan` 에서 메모를 뺀 것(실험 재료가 쓴다)."""
+
+    split = _staged_plan(checklist_items, raw)
+    return split.asked_items, split.machine_entries
 
 
 def _two_step_plan(
@@ -1165,6 +1220,8 @@ def _second_step(prepared: PreparedScoring, selection: ScoringOutput) -> Prepare
         asset_kind=prepared.asset_kind,
         syntax_check=prepared.syntax_check,
         staged=True,
+        machine_notes=prepared.machine_notes,
+        machine_confirmed=_confirmed_labels(prepared.checklist_items, prepared.machine_entries),
     )
     return dataclasses.replace(
         prepared,
@@ -1186,6 +1243,8 @@ def _scoring_request(
     asset_kind: str,
     syntax_check: SyntaxCheckPass,
     staged: bool,
+    machine_notes: Mapping[int, str] | None = None,
+    machine_confirmed: Sequence[str] = (),
 ) -> tuple[str, ScoringInput]:
     """판정 요청 하나(프롬프트와 어댑터 입력) — 한 번 호출과 두 걸음의 2차(#1286)가 같이 쓴다. DB 를 쓰지 않는다."""
 
@@ -1196,6 +1255,8 @@ def _scoring_request(
         asset_kind=asset_kind,
         syntax_check=syntax_check,
         cite=staged,
+        machine_notes=machine_notes,
+        machine_confirmed=machine_confirmed,
     )
     requirements = _requirement_inputs(asked_items)
     # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
@@ -1296,9 +1357,13 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     # staged(#1293): 규칙이 없거나 글이 바뀐 항목은 여기서 한 번 도출한다 — 소스 스레드(DB 없음)의 동기 호출.
     derivation = _derive_rules(head, model) if staged else None
     # staged(#1283): 기계 규칙이 정한 항목은 빼고, 남은 항목(판단·판정 불가)만 모델에게 묻는다.
-    asked_items, machine_entries = (
-        _staged_split(checklist_items, source.raw) if staged else (checklist_items, ())
+    split = (
+        _staged_plan(checklist_items, source.raw)
+        if staged
+        else StagedSplit(asked_items=checklist_items, machine_entries=(), machine_notes={})
     )
+    asked_items, machine_entries, machine_notes = split.asked_items, split.machine_entries, split.machine_notes
+    confirmed = _confirmed_labels(checklist_items, machine_entries)
     if staged and not asked_items and syntax_check.synthetic_requirement() is None:
         return _machine_only(
             head, syntax_check=syntax_check, model=model, machine_entries=machine_entries, derivation=derivation
@@ -1312,7 +1377,14 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         # 않은 채 「크기 초과」 보류로 둔다. 지시문 몫에는 문법 검사 덧붙임(파서가 못 본 파일의 전문)이 든다.
         instruction_bytes = len(
             _build_prompt(
-                submission, asked_items, "", asset_kind=asset.kind, syntax_check=syntax_check, cite=staged
+                submission,
+                asked_items,
+                "",
+                asset_kind=asset.kind,
+                syntax_check=syntax_check,
+                cite=staged,
+                machine_notes=machine_notes,
+                machine_confirmed=confirmed,
             ).encode("utf-8")
         )
         sent_files, omission = _scoring_source_files(
@@ -1360,6 +1432,8 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
             asset_kind=asset.kind,
             syntax_check=syntax_check,
             staged=staged,
+            machine_notes=machine_notes,
+            machine_confirmed=confirmed,
         )
     return PreparedScoring(
         submission=submission,
@@ -1378,6 +1452,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         snapshot=agent_grading.snapshot_of(source.raw, asset) if uses_agent else None,
         staged=staged,
         machine_entries=machine_entries,
+        machine_notes=machine_notes,
         sent_lines=sent_lines if plan is None else {},
         sent_files=tuple(sent_files) if plan is None else (),
         asset_kind=asset.kind,
@@ -1740,6 +1815,9 @@ def _merge_staged(prepared: PreparedScoring, model_entries: list[dict]) -> list[
     """staged(#1283): 모델 판정(출처 `model`)과 기계 판정(출처 `machine`)을 체크리스트 순서로 합친다."""
 
     by_id = {entry["checklist_item_id"]: {**entry, "source": SOURCE_MODEL} for entry in model_entries}
+    for item_id, note in prepared.machine_notes.items():
+        if item_id in by_id:
+            by_id[item_id]["machine_note"] = note
     by_id.update({entry["checklist_item_id"]: entry for entry in prepared.machine_entries})
     ordered = [by_id.pop(item.id) for item in prepared.checklist_items if item.id in by_id]
     return ordered + list(by_id.values())

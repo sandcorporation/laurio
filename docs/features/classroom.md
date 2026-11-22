@@ -134,9 +134,12 @@ data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippe
 
 **staged 갈래**(#1283, ADR-0084, CONTEXT.md 「기계 판정」) — 운영 설정 `CLASSROOM_SCORING_PIPELINE` 이 `staged` 이고
 클래스의 채점 방식이 한 번 호출이면, 기계 확인 규칙(`ChecklistItem.machine_rule`)이 있는 항목을 먼저 코드가 소스 트리에서
-판정한다(`classroom.machine_check`). 정한 항목은 빼고 남은 항목(판단·판정 불가)만 지금 프롬프트로 모델에 보낸다. 두 결과를
+판정한다(`classroom.machine_check`). **충족만 확정한다**(「기계 확인 완료」, #1294) — 그 항목은 프롬프트에 라벨 목록으로만
+싣고 판정을 요청하지 않는다. 미충족·판정 불가는 확정하지 않고 「AI 판정 필요」로 모델에게 넘기며 체크리스트 줄 끝에 기계 메모
+(`[기계 확인: …]`)를 붙이고(메모가 판정을 대신하지 않는다는 지시 한 줄과 함께), 판정 항목에 `machine_note` 로 남긴다. 남은
+항목(판단·실행 필요·판정 불가·기계 미충족)만 지금 프롬프트로 모델에 보낸다. 두 결과를
 체크리스트 순서로 합쳐 `ClassroomScore` 하나를 만들고, 항목마다 `source`(`machine`·`model`)를, 기계 판정에는 `evidence`
-(경로[:줄])를 함께 남긴다. 판단 항목이 없으면 벤더를 부르지 않는다(토큰 0, `model_version` `machine-check-v1`).
+(경로[:줄])를 함께 남긴다. 모델에게 물을 항목이 없으면 벤더를 부르지 않는다(토큰 0, `model_version` `machine-check-v1`).
 `single_call`(기본)이면 규칙을 보지 않고 지금과 같다. 규칙은 강사 API(항목 만들기·고치기의 `machine_rule`, 고치기에서 null 이면
 지움)·MCP(`add_checklist_item`·`update_checklist_item`)로 읽고 쓰고, 참여자 응답에는 늘 null 이다. 같은 클래스 문제 복사는
 규칙을 옮기고 템플릿은 옮기지 않는다.

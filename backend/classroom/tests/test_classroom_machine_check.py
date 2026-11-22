@@ -22,6 +22,7 @@ from tests.classroom_scenarios import (
     create_class,
     create_open_problem,
     force_real_scoring_adapter,
+    instructor_submissions,
     join_class,
     login,
     mine,
@@ -266,7 +267,7 @@ def test_a_machine_only_problem_calls_no_vendor(client, db, monkeypatch, staged)
             client,
             [
                 ("src/app.py 가 있다", {"kind": "path_exists", "path": "src/app.py"}),
-                ("Dockerfile 이 있다", {"kind": "path_exists", "path": "Dockerfile"}),
+                ("시험 폴더가 있다", {"kind": "path_exists", "path": "tests/*.py"}),
             ],
         )
         run_scan(client)
@@ -276,7 +277,7 @@ def test_a_machine_only_problem_calls_no_vendor(client, db, monkeypatch, staged)
     assert score.model_version == "machine-check-v1"
     assert [(r["checklist_item_id"], r["verdict"], r["source"]) for r in score.reasoning] == [
         (ctx["item_ids"][0], "met", "machine"),
-        (ctx["item_ids"][1], "unmet", "machine"),
+        (ctx["item_ids"][1], "met", "machine"),
     ]
     shown = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])["submissions"][0]
     assert all(v["reasoning"].startswith("기계 판정 — ") for v in shown["score"]["reasoning"])
@@ -309,6 +310,8 @@ def test_a_mixed_problem_sends_only_the_judgment_items(client, db, monkeypatch, 
     prompt = {m["role"]: m["content"] for m in sent[0]["messages"]}["user"]
     assert f"requirement_id={judged} " in prompt
     assert f"requirement_id={undetermined} " in prompt
+    # 확인하지 못함도 미충족처럼 메모와 함께 모델에게 간다(#1294).
+    assert "설정이 올바르다 [기계 확인: " in prompt
     assert f"requirement_id={machine} " not in prompt
     score = ClassroomScore.objects.get()
     assert [(r["checklist_item_id"], r["verdict"], r["source"]) for r in score.reasoning] == [
@@ -357,7 +360,7 @@ def test_reuse_takes_only_the_model_verdicts_and_judges_the_machine_items_again(
         instructor = login(client, uid="instructor-1")
         changed = client.patch(
             _item_url(ctx["class_id"], ctx["problem_id"], machine),
-            data={"machine_rule": {"kind": "path_exists", "path": "Dockerfile"}},
+            data={"machine_rule": {"kind": "file_contains", "path": "src/*.py", "text": "def main"}},
             content_type="application/json",
             **auth_header(instructor["access"]),
         )
@@ -373,6 +376,44 @@ def test_reuse_takes_only_the_model_verdicts_and_judges_the_machine_items_again(
     first_score, reused = ClassroomScore.objects.order_by("id")
     assert [(r["checklist_item_id"], r["verdict"], r["source"]) for r in reused.reasoning] == [
         (judged, "met", "model"),
-        (machine, "unmet", "machine"),
+        (machine, "met", "machine"),
     ]
+    assert "def main" in reused.reasoning[1]["reasoning"]
     assert reused.reasoning[0]["reused_from_score_id"] == first_score.id
+
+
+def test_an_unmet_rule_is_not_final_and_goes_to_the_model_with_a_note(client, db, monkeypatch, staged):
+    """#1294 — 기계 충족만 확정한다. 미충족은 「AI 판정 필요」로 메모와 함께 모델에게 가고, 모델 판정이 최종이다."""
+
+    sent: list[dict] = []
+    with force_real_scoring_adapter():
+        ctx = _world(
+            client,
+            [
+                ("src/app.py 가 있다", {"kind": "path_exists", "path": "src/app.py"}),
+                ("README 가 있다", {"kind": "path_exists", "path": "README*"}),
+            ],
+        )
+        confirmed, unmet = ctx["item_ids"]
+        respond_with_verdicts(
+            monkeypatch, [{"requirement_id": unmet, "is_met": True, "reasoning": "docs/readme.txt 에 설명이 있다"}], capture=sent
+        )
+        run_scan(client)
+
+    assert len(sent) == 1
+    prompt = {m["role"]: m["content"] for m in sent[0]["messages"]}["user"]
+    assert f"requirement_id={confirmed} " not in prompt
+    assert "기계 확인 완료" in prompt and "- src/app.py 가 있다" in prompt
+    assert f"requirement_id={unmet} (필수): README 가 있다 [기계 확인: 경로 `README*` 에 맞는 파일이 소스에 없다.]" in prompt
+    assert "판정이 아닙니다" in prompt
+    score = ClassroomScore.objects.get()
+    assert [(r["checklist_item_id"], r["verdict"], r["source"]) for r in score.reasoning] == [
+        (confirmed, "met", "machine"),
+        (unmet, "met", "model"),
+    ]
+    assert score.reasoning[1]["machine_note"] == "기계 확인: 경로 `README*` 에 맞는 파일이 소스에 없다."
+
+    seen = instructor_submissions(client, ctx["access"], ctx["class_id"], ctx["problem_id"])[0]["score"]["reasoning"]
+    assert [v.get("machine_note") for v in seen] == [None, "기계 확인: 경로 `README*` 에 맞는 파일이 소스에 없다."]
+    shown = mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem_id"])["submissions"][0]
+    assert all("machine_note" not in v for v in shown["score"]["reasoning"])

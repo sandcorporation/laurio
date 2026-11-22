@@ -66,7 +66,12 @@ export function SubmissionVerdictList({
               {verdict.source ? (
                 <>
                   {" "}
-                  <Badge tone="neutral">{SOURCE_LABEL[verdict.source]}</Badge>
+                  <span
+                    data-testid={`${testIdPrefix}-source-${verdict.checklist_item_id}`}
+                    title={verdict.machine_note}
+                  >
+                    <Badge tone="neutral">{SOURCE_LABEL[verdict.source]}</Badge>
+                  </span>
                 </>
               ) : null}
               {verdict.escalated ? (

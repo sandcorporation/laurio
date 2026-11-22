@@ -106,6 +106,8 @@ export type ChecklistVerdict = {
   suspect?: boolean;
   // 의심 항목을 상위 모델로 다시 판정했다(#1285).
   escalated?: boolean;
+  /** 기계 미충족·확인 못 함이라 모델에게 넘긴 항목의 기계 메모(#1294) — 「AI 판정」 배지의 툴팁. */
+  machine_note?: string;
 };
 
 // 모델 판정의 근거 인용 하나(#1284) — 보낸 소스와 대조해 경로가 있고 줄 범위가 파일 안이면 matched.
