@@ -1427,7 +1427,7 @@ def _machine_only(
     )
 
 
-def _derive_rules(head: _Head, model: str) -> rule_derivation.Derivation | None:
+def _derive_rules(head: _Head, model: str, *, mode: str | None = None) -> rule_derivation.Derivation | None:
     """staged 규칙 도출(#1293) — 강사 규칙이 없고 도출이 없거나 글이 바뀐 항목만 모아 이 시도의 연결로 한 번 묻는다.
     받은 결과는 이 시도의 항목(메모리)에 바로 얹어 이번 판정에 쓰고, 저장은 결과 쓰기(`_save_derivation`)가 한다.
     실패(벤더 오류·형식 오류)는 채점을 막지 않는다 — 그 항목들은 규칙 없이 가고 다음 채점이 다시 묻는다."""
@@ -1444,6 +1444,7 @@ def _derive_rules(head: _Head, model: str) -> rule_derivation.Derivation | None:
             connection=head.connection,
             model=derive_model,
             log_context={"class_id": head.class_obj.id, "problem_id": head.problem.id},
+            mode=mode,  # 채점 방식 실험(#1295)만 준다
         )
         output = adapter.score(scoring_input)
     except LLMAdapterError as exc:

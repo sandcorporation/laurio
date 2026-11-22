@@ -224,6 +224,30 @@ def test_classroom_staged_runs_beside_classroom_call_and_splits_machine_from_mod
     assert next(line for line in md.splitlines() if line.startswith(f"| {CLASSROOM} |")).endswith("| — | — |")
 
 
+@pytest.mark.django_db
+def test_classroom_staged_derives_per_cell_and_adds_the_derivation_cost(monkeypatch):
+    from classroom import rule_derivation
+
+    asked = []
+
+    def derive(head, model, *, mode=None):
+        asked.append((model, mode, [c.id for c in head.checklist_items]))
+        for c in head.checklist_items:  # 사본에 도출이 없어 칸마다 이 항목들에 얹는다
+            if c.id == OPT:
+                c.derived_rule = {"kind": "path_exists", "path": "main.py"}
+                c.derived_kind = rule_derivation.KIND_STATIC
+                c.derived_text_hash = rule_derivation.label_hash(c.label)
+        return rule_derivation.Derivation(results=(), total_tokens=300, input_tokens=200, output_tokens=100, model="gpt-4.1-nano")
+
+    monkeypatch.setattr(classroom_material, "_derive_rules", derive)
+    result = classroom_material.experiment_staged_call(_staged_item(1, rule=True), model="gpt-4.1-mini", api_key=None)
+
+    assert asked == [("gpt-4.1-mini", "fake", [REQ, OPT])]
+    assert ("gpt-4.1-nano", 200, 100) in result.extra_usage
+    assert set(result.machine_ids) == {REQ, OPT}  # 도출 규칙이 선택 항목도 기계가 정하게 했다
+    assert [v.checklist_item_id for v in result.verdicts] == [REQ, OPT]
+
+
 def test_classroom_staged_needs_material():
     with pytest.raises(ex.ExperimentError, match="사본 재료"):
         ex.parse_rows(STAGED)

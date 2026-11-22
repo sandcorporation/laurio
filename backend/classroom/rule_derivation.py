@@ -83,6 +83,10 @@ class Derivation:
     results: tuple[Derived, ...]
     total_tokens: int = 0
     failed: bool = False
+    #: 채점 방식 실험(#1295)이 비용을 단가로 셀 때 쓴다 — 도출 호출의 입력·출력 토큰과 부른 모델.
+    input_tokens: int = 0
+    output_tokens: int = 0
+    model: str = ""
 
 
 def label_hash(label: str) -> str:
@@ -161,7 +165,13 @@ def parse_output(output: ScoringOutput, items: Sequence[DerivableItem], *, model
             continue
         kind, rule = _parse_one(by_id[item.id])
         results.append(Derived(item_id=item.id, kind=kind, rule=rule, text_hash=label_hash(item.label), model=model))
-    return Derivation(results=tuple(results), total_tokens=output.total_tokens)
+    return Derivation(
+        results=tuple(results),
+        total_tokens=output.total_tokens,
+        input_tokens=output.input_tokens,
+        output_tokens=output.output_tokens,
+        model=model,
+    )
 
 
 def _parse_one(text: str) -> tuple[DerivedKind, machine_check.MachineRule | None]:
