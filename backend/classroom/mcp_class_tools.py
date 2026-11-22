@@ -132,6 +132,18 @@ _UPDATE_CLASS_INPUT = _object(
             "enum": [v for v, _ in REASONING_EFFORT_CHOICES],
             "description": "기본 추론 강도(low·medium·high) — 채점 모델이 추론 모델일 때만 뜻이 있다.",
         },
+        "oversize_policy": {
+            "type": "string",
+            "enum": ["reject", "agent", "partial"],
+            "description": (
+                "한 번 호출로 못 담는 제출물 — reject(반려: 점수 없이 돌려보내 학생이 다시 낸다), agent(그 시도만 "
+                "oversize_agent_model 로 에이전트 채점), partial(들어가는 파일만으로 채점). 호환 서버 연결은 agent 를 못 고른다."
+            ),
+        },
+        "oversize_agent_model": {
+            "type": "string",
+            "description": "oversize_policy 가 agent 일 때의 모델 — get_class 의 agent_models 가운데 하나. agent 면 비울 수 없다.",
+        },
     },
     ["class_id"],
 )

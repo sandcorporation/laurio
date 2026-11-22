@@ -10,7 +10,9 @@ export function vendorLabel(kind: ClassRow["scoring_connection_kind"]): VendorLa
   return null;
 }
 
-export const UNAVAILABLE_TOOLTIP: Record<"compatible_server" | "agent_vendor_unverified", string> = {
+export const UNAVAILABLE_TOOLTIP: Record<"compatible_server", string> = {
   compatible_server: "호환 서버",
-  agent_vendor_unverified: "OpenAI 키는 확인 전",
 };
+
+/** 지금 기본 모델로는 에이전트를 고를 수 없을 때의 툴팁(#1311) — OpenAI 는 gpt-5-mini 이상만 받는다. */
+export const AGENT_MODEL_TOOLTIP = "gpt-5-mini 이상";

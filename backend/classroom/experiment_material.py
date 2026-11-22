@@ -45,8 +45,8 @@ from .scoring import (
     call_vendor_sync,
     outcome_reasoning,
 )
+from . import two_step
 from .scoring_connection import anthropic_key_connection, openai_key_connection
-from policies.runtime_settings import classroom_two_step_budget_chars, classroom_two_step_threshold_chars
 
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, run_syntax_check
 
@@ -244,8 +244,8 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
         asset=asset,
         pause_recheck=False,
         staged=True,
-        two_step_threshold=classroom_two_step_threshold_chars(),
-        two_step_budget=classroom_two_step_budget_chars(),
+        two_step_threshold=two_step.THRESHOLD_CHARS,
+        two_step_budget=two_step.BUDGET_CHARS,
     )
     syntax_check = run_syntax_check(item.source, enabled=problem.syntax_check_enabled)
     mode = "fake" if api_key is None else (ANTHROPIC_SCORING_ADAPTER if anthropic else OPENAI_SCORING_ADAPTER)

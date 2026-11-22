@@ -20,7 +20,7 @@ from django.test import override_settings
 
 from classroom import scoring_connection
 from classroom.models import Class, ClassroomScore, ClassroomScoringAttempt
-from classroom.pending_scoring import SIZE_HOLD_ERROR_PREFIX
+from classroom.pending_scoring import REJECTED_ERROR_PREFIX
 from classroom.tests.test_classroom_connected_apps import _connect
 from classroom.tests.test_classroom_mcp_read_tools import _structured
 from core.crypto import encrypt
@@ -266,11 +266,9 @@ def test_scoring_goes_to_the_vendor_the_switch_picks_with_that_vendors_key(clien
     assert headers["x-api-key"] == CLAUDE_KEY
 
 
-def test_switching_rescores_nothing_that_has_a_score_and_picks_up_only_the_size_held(
-    client, db, monkeypatch, real_adapter
-):
-    """스위치로 채점 모델이 바뀌면 다시 집히는 것은 점수 없는 제출뿐이다 — 「크기 초과」 보류(#989)는 그 모델일
-    때만 빠지므로 새 벤더 모델로 다시 시도한다. 점수가 있는 제출은 벤더를 다시 부르지 않는다(강사 돈)."""
+def test_switching_rescores_nothing_that_has_a_score_or_was_rejected(client, db, monkeypatch, real_adapter):
+    """스위치로 채점 모델이 바뀌어도 점수가 있는 제출은 벤더를 다시 부르지 않는다(강사 돈). 반려(#1311)된 제출도
+    다시 집지 않는다 — 학생이 새로 낸다(예전의 「크기 초과」 보류 #989 는 모델이 바뀌면 다시 집혔다)."""
 
     _vendors(monkeypatch)
     owner, participant, class_id, problem = _scoring_setup(client)
@@ -284,7 +282,7 @@ def test_switching_rescores_nothing_that_has_a_score_and_picks_up_only_the_size_
     run_scan(client)
     assert ClassroomScore.objects.filter(submission_id=scored_id).exists()
     assert ClassroomScoringAttempt.objects.filter(
-        submission_id=held_id, error__startswith=SIZE_HOLD_ERROR_PREFIX
+        submission_id=held_id, error__startswith=REJECTED_ERROR_PREFIX
     ).exists()
     scored_attempts = ClassroomScoringAttempt.objects.filter(submission_id=scored_id).count()
 
@@ -293,11 +291,11 @@ def test_switching_rescores_nothing_that_has_a_score_and_picks_up_only_the_size_
     run_scan(client)
     run_scan(client)
 
-    assert len(_posts(calls)) == 1, "점수 있는 제출을 다시 채점했거나 보류를 두 번 불렀다"
-    assert ClassroomScore.objects.filter(submission_id=held_id).exists()
+    assert _posts(calls) == [], "점수 있는 제출이나 반려된 제출을 다시 채점했다"
+    assert not ClassroomScore.objects.filter(submission_id=held_id).exists()
     assert ClassroomScoringAttempt.objects.filter(submission_id=scored_id).count() == scored_attempts
-    statuses = [s["status"] for s in mine(client, participant["access"], class_id, problem.id)["submissions"]]
-    assert statuses == ["scored", "scored"]
+    rows = mine(client, participant["access"], class_id, problem.id)["submissions"]
+    assert [(r["status"], r["pending_reason"]) for r in rows] == [("pending", "rejected"), ("scored", None)]
 
 
 # --- 기존 값 옮기기 ------------------------------------------------------------------------

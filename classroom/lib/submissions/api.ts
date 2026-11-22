@@ -146,6 +146,8 @@ export type ClassroomScore = {
   hidden_summary?: { total: number; met: number } | null;
   // 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 true 가 된다.
   reused?: boolean;
+  // 「들어가는 파일만으로 채점」(#1311)이 보지 못한 파일 수 — 0 이면 다 봤다.
+  unseen_files?: number;
   created_at: string;
 };
 
@@ -155,9 +157,12 @@ export type SubmissionStatus = "pending" | "scored";
 
 // "no_api_key"(#346) | "model_rejected"(#403) | `null`. `status`가 "pending"일 때만
 // 채워진다 — 강사가 채점 키를 아직 넣지 않았으면 "no_api_key", 키는 있는데 이 문제의
-// 채점 모델을 그 키로 못 쓰면 "model_rejected"다(#629 로 사유가 둘이 됐다). "size_held"(#989)는 이 시도의
-// 채점 요청이 지금 채점 모델의 컨텍스트를 넘어 보류됐다는 뜻이다 — 강사가 모델을 바꾸면 다시 채점된다.
-export type PendingReason = "no_api_key" | "model_rejected" | "size_held" | null;
+// 채점 모델을 그 키로 못 쓰면 "model_rejected"다(#629 로 사유가 둘이 됐다). "rejected"(#1311)는 이 시도가 한 번
+// 호출로 못 담겨 반려됐다는 뜻이다 — 점수 없이 끝났고 학생이 다시 낸다(사유는 `rejection`).
+export type PendingReason = "no_api_key" | "model_rejected" | "rejected" | null;
+
+// 반려 사유(#1311) — 채점이 그때 잰 소스 크기와 한 번 호출 한도(글자).
+export type SubmissionRejection = { source_chars: number; limit_chars: number };
 
 export type ClassroomSubmissionRow = {
   id: number;
@@ -180,6 +185,7 @@ export type ClassroomSubmissionRow = {
   // 제출 시각의 늦음 단계(#941) — 저장된 값이 아니라 응답마다 다시 셈한 것.
   late: LateStatus;
   pending_reason: PendingReason;
+  rejection?: SubmissionRejection | null;
   // 「공모전에도 내기」로 낸 시도면 그 결과(#549), 끄고 낸 시도면 null.
   contest_entry: AttemptContestEntry | null;
 };
@@ -278,6 +284,7 @@ export type InstructorSubmissionRow = {
   // (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
   // 멈춘 것"을 구별해야 한다.
   pending_reason: PendingReason;
+  rejection?: SubmissionRejection | null;
   // 「공모전에도 내기」로 낸 시도면 그 결과(#550). 근거·공모전 점수·수상은 없다.
   contest_entry: AttemptContestEntry | null;
   // 이 시도가 지금 그 공모전의 제출인가 — 켜고 낸 가장 최근 시도이고 그 뒤에 직접 고치지 않았다.

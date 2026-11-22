@@ -168,7 +168,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
     marks = entry_marks(problems)
     submissions_by_key: dict[tuple[int, int], list[ClassroomSubmission]] = {}
     for submission in (
-        pending_scoring.with_size_held(ClassroomSubmission.objects.filter(problem__in=problems, member__in=members))
+        pending_scoring.with_rejection(ClassroomSubmission.objects.filter(problem__in=problems, member__in=members))
         .select_related("classroom_score")
         .order_by("-attempt_number")
     ):
@@ -500,7 +500,7 @@ _REPORT_OUTPUT = {
                                         "passed": {"type": "boolean", "description": "이 시도가 통과인가"},
                                         "pending_reason": {
                                             "type": ["string", "null"],
-                                            "description": "채점을 기다리는 이유 — no_api_key·model_rejected, 없으면 null",
+                                            "description": "채점을 기다리는 이유 — no_api_key·model_rejected, 반려된 시도면 rejected(#1311), 없으면 null",
                                         },
                                         "met_count": {**_NULLABLE_COUNT, "description": "충족한 체크리스트 항목 수(점수). 미채점이면 null"},
                                         "item_count": {**_NULLABLE_COUNT, "description": "판정된 체크리스트 항목 수. 미채점이면 null"},

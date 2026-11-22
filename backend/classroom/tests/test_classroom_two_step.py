@@ -10,7 +10,7 @@ import pytest
 
 from classroom import two_step
 from classroom.models import ClassroomScore, ClassroomScoringAttempt
-from classroom.pending_scoring import SIZE_HOLD_ERROR_PREFIX
+from classroom.pending_scoring import REJECTED_ERROR_PREFIX
 from classroom import score_reuse
 from classroom.tests.test_classroom_machine_check import TREE, _world, staged  # noqa: F401 - fixture
 from core.llm_scoring import Citation, RequirementVerdict, ScoringOutput, SourceFile
@@ -93,7 +93,7 @@ def _judge(app, test):
 
 @pytest.fixture
 def low_threshold(monkeypatch):
-    monkeypatch.setenv("CLASSROOM_TWO_STEP_THRESHOLD_CHARS", "100")
+    monkeypatch.setattr(two_step, "THRESHOLD_CHARS", 100)
 
 
 def test_the_same_source_twice_reuses_both_steps(client, db, monkeypatch, staged, low_threshold):  # noqa: F811
@@ -201,7 +201,7 @@ def test_an_empty_selection_falls_back_to_the_usual_source_choice(client, db, mo
 
 def test_the_second_step_is_cut_to_the_budget_in_item_order(client, db, monkeypatch, staged, low_threshold):  # noqa: F811
     app_chars = len(two_step.numbered_file_text(SourceFile(path=APP, content="import os\n\ndef main():\n    print('hello')\n", asset_id=0)))
-    monkeypatch.setenv("CLASSROOM_TWO_STEP_BUDGET_CHARS", str(app_chars + 2 + len(f"# {TOML}\n1\t[tool.ruff]")))
+    monkeypatch.setattr(two_step, "BUDGET_CHARS", app_chars + 2 + len(f"# {TOML}\n1\t[tool.ruff]"))
     sent: list[dict] = []
     _scan(client, monkeypatch, [_pick([APP], [TOML, CONFIG]), _judge], sent)
 
@@ -211,14 +211,15 @@ def test_the_second_step_is_cut_to_the_budget_in_item_order(client, db, monkeypa
     assert f"# {CONFIG}" not in second
 
 
-def test_off_keeps_the_size_hold(client, db, monkeypatch, staged):  # noqa: F811
-    monkeypatch.setenv("CLASSROOM_TWO_STEP_THRESHOLD_CHARS", "0")
+def test_off_keeps_the_oversize_policy(client, db, monkeypatch, staged):  # noqa: F811
+    monkeypatch.setattr(two_step, "THRESHOLD_CHARS", 0)
+    monkeypatch.setattr("classroom.scoring_calculator.source_budget_bytes", lambda model, *, instruction_bytes: 5)
     monkeypatch.setattr("classroom.scoring.source_budget_bytes", lambda model, *, instruction_bytes: 5)
     sent: list[dict] = []
     _scan(client, monkeypatch, [], sent)
 
     assert sent == []
-    assert ClassroomScoringAttempt.objects.filter(error__startswith=SIZE_HOLD_ERROR_PREFIX).exists()
+    assert ClassroomScoringAttempt.objects.filter(error__startswith=REJECTED_ERROR_PREFIX).exists()
 
 
 def test_on_goes_two_steps_instead_of_holding_what_the_model_cannot_take(client, db, monkeypatch, staged):  # noqa: F811
@@ -227,7 +228,7 @@ def test_on_goes_two_steps_instead_of_holding_what_the_model_cannot_take(client,
     _scan(client, monkeypatch, [_pick([APP], []), _judge], sent)
 
     assert len(sent) == 2
-    assert not ClassroomScoringAttempt.objects.filter(error__startswith=SIZE_HOLD_ERROR_PREFIX).exists()
+    assert not ClassroomScoringAttempt.objects.filter(error__startswith=REJECTED_ERROR_PREFIX).exists()
     assert ClassroomScore.objects.exists()
 
 

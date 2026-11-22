@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RuntimeSetting, RuntimeSettingChange } from "./types";
 import {
+  SETTINGS_TABS,
   accountRefusalText,
   canClear,
   canProbe,
@@ -154,15 +155,10 @@ describe("탭(#1033)", () => {
     expect(settingsOfTab(all, "etc").map((s) => s.key)).toEqual(["LLM_OPENAI_TEMPERATURE", "NEW_KEY"]);
   });
 
-  it("강의실 채점 설정은 재사용 뒤에 이어 AI 채점 탭에 선다", () => {
-    const keys = ["CLASSROOM_TWO_STEP_BUDGET_CHARS", "CLASSROOM_SCORE_REUSE", "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"];
-    const rows = keys.map((key) => setting({ key }));
-    expect(settingsOfTab(rows, "ai").map((s) => s.key)).toEqual([
-      "CLASSROOM_SCORE_REUSE",
-      "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
-      "CLASSROOM_TWO_STEP_BUDGET_CHARS",
-    ]);
-    expect(settingsOfTab(rows, "etc")).toEqual([]);
+  it("강의실 재사용 스위치는 AI 채점 탭, 걷어 낸 두 걸음 설정(#1311)은 탭에 없다", () => {
+    const rows = ["CLASSROOM_SCORE_REUSE", "AGENT_SCORING_DAILY_LIMIT_USD"].map((key) => setting({ key }));
+    expect(settingsOfTab(rows, "ai").map((s) => s.key)).toEqual(["CLASSROOM_SCORE_REUSE", "AGENT_SCORING_DAILY_LIMIT_USD"]);
+    expect(SETTINGS_TABS.flatMap((t) => t.keys).some((k) => k.startsWith("CLASSROOM_TWO_STEP"))).toBe(false);
   });
 
   it("주소의 탭 값이 없거나 모르면 첫 탭이다", () => {

@@ -36,7 +36,8 @@ export function submissionStats(
   let waiting = 0;
   for (const row of rows) {
     if (row.passed) passedMembers.add(row.member_id);
-    if (row.status === "pending") {
+    // 반려(#1311)는 기다리는 것이 아니라 끝난 시도다 — 어느 쪽에도 세지 않는다.
+    if (row.status === "pending" && row.pending_reason !== "rejected") {
       if (row.pending_reason) waiting += 1;
       else scoring += 1;
     }

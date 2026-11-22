@@ -106,19 +106,14 @@ from policies.runtime_settings import classroom_score_reuse_enabled
 from core.model_context import source_budget_bytes
 from core.source_selection import SelectionOmission, select_source_files, select_source_files_with_omission
 from notifications.models import NotificationType
-from policies.runtime_settings import (
-    CLASSROOM_PIPELINE_STAGED,
-    classroom_scoring_pipeline,
-    classroom_two_step_budget_chars,
-    classroom_two_step_threshold_chars,
-)
+from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 from notifications.services import create_notification, notify_safely
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import agent_grading, machine_check, pending_scoring, rule_derivation, score_reuse, scoring_cost
+from . import agent_grading, machine_check, pending_scoring, rule_derivation, score_reuse, scoring_calculator, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
@@ -133,6 +128,7 @@ from .models import (
 )
 from .scoring_connection import (
     ScoringConnection,
+    agent_vendor_of,
     anthropic_key_connection,
     connection_for,
     mark_verified,
@@ -795,14 +791,22 @@ def _record_scoring_attempt(
     ClassroomScoringAttempt.objects.create(submission=submission, error=error[:2000], permanent=permanent)
 
 
-def _record_size_hold(submission: ClassroomSubmission, *, model: str, detail: str) -> dict:
-    """「크기 초과」 보류(#989) — 보류 표식을 단 시도 기록 하나. 같은 모델인 동안 채점 대기에서 빠지고 실패
-    상한에 세지 않는다(`classroom.pending_scoring.SIZE_HOLD_ERROR_PREFIX`). 벤더를 다시 부르지 않는다."""
+def _record_rejection(submission: ClassroomSubmission, *, source_chars: int, limit_chars: int) -> dict:
+    """반려(#1311) — 반려 표식을 단 시도 기록 하나. 점수를 만들지 않고(0점이 아니다), 다시 집지 않으며, 실패 상한에
+    세지 않는다(`classroom.pending_scoring.REJECTED_ERROR_PREFIX`). 벤더를 부르지 않는다."""
 
-    message = pending_scoring.size_hold_error(model, detail)
-    logger.warning("ClassroomSubmission(pk=%s) %s", submission.id, message)
+    message = pending_scoring.rejection_error(source_chars=source_chars, limit_chars=limit_chars)
+    logger.info("ClassroomSubmission(pk=%s) %s", submission.id, message)
     _record_scoring_attempt(submission, error=message)
-    return {"submission_id": submission.id, "status": "held", "error": message}
+    return {"submission_id": submission.id, "status": "rejected", "error": message}
+
+
+def _source_chars(raw: bytes, asset: SubmissionAsset) -> int:
+    """반려 사유의 「소스 약 N자」 — 예산 없이 고른 소스 전체(채점이 싣는 파일 후보)를 계산기와 같은 셈
+    (`BYTES_PER_CHAR`)으로 글자로. 반려할 때만 부른다."""
+
+    files, _ = select_source_files_with_omission([(asset.id, asset.label, raw)], max_bytes=sys.maxsize)
+    return int(sum(len(f.content.encode("utf-8")) for f in files) // scoring_calculator.BYTES_PER_CHAR)
 
 
 def _finalize_if_capped(
@@ -851,8 +855,11 @@ class PreparedScoring:
     scoring_input: ScoringInput
     syntax_check: SyntaxCheckPass
     pause_recheck: bool
-    #: 에이전트 방식으로 채점하는가(#1036, `classroom.agent_grading.uses_agent`).
+    #: 에이전트로 채점하는가 — 에이전트 방식 클래스(#1036, `classroom.agent_grading.uses_agent`)이거나, 한 번 호출로
+    #: 못 담아 「에이전트로 채점」(#1311)으로 넘긴 시도.
     agent: bool = False
+    #: 「들어가는 파일만으로 채점」(#1311)이 싣지 못한 파일 수 — 점수 기록(`ClassroomScore.unseen_files`)에 남는다.
+    unseen_files: int = 0
     #: 에이전트에게 줄 박제본 — 준비가 읽은 소스 바이트(zip 일 때만, 에이전트 방식일 때만).
     snapshot: agent_grading.Snapshot | None = None
     #: staged 갈래인가(#1283, 2026-11-22 부터 꺼짐 고정) — 판정 항목에 출처(`source`)를 남긴다.
@@ -1010,8 +1017,8 @@ def _prepare_head(
         # 83.5% 대 84.4%) 시간은 2~3배, 돈은 1.1~1.5배였다. 의심 재판정은 정확도를 낮췄고 만점 제출 한 건을 0점으로
         # 만들었다. 그래서 영구히 끈다(대표 결정) — `classroom_scoring_pipeline` 은 늘 `single_call` 이다.
         staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
-        two_step_threshold=classroom_two_step_threshold_chars(),
-        two_step_budget=classroom_two_step_budget_chars(),
+        two_step_threshold=two_step.THRESHOLD_CHARS,
+        two_step_budget=two_step.BUDGET_CHARS,
     )
 
 
@@ -1308,6 +1315,14 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     )
 
     uses_agent = agent_grading.uses_agent(class_obj, "scoring")
+    if uses_agent and not agent_grading.agent_model_allowed(agent_vendor_of(class_obj), model):
+        # 에이전트가 받지 않는 모델이 이미 저장돼 있다(#1311, 예: OpenAI 의 nano) — 모델 거부(#403)와 같은 길로 채점
+        # 대기에서 빼고 까닭을 보인다. 강사가 모델을 바꾸면 풀린다.
+        def _agent_model_rejected() -> dict:
+            _mark_scoring_model_rejected(problem)
+            return {"submission_id": sid, "status": "model_rejected"}
+
+        return Concluded(apply=_agent_model_rejected)
     staged = head.staged and not uses_agent
     # staged(#1293): 규칙이 없거나 글이 바뀐 항목은 여기서 한 번 도출한다 — 소스 스레드(DB 없음)의 동기 호출.
     derivation = _derive_rules(head, model) if staged else None
@@ -1327,6 +1342,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     sent_files: list[SourceFile] = []
     sent_lines: dict[str, tuple[str, ...]] = {}
     plan: two_step.TwoStepPlan | None = None
+    unseen_files = 0
     if not uses_agent:
         # 한 번 호출 채점(#989): 소스를 이 모델의 예산으로 고르고, 다 들어가지 않으면 자르지 않고 벤더를 부르지
         # 않은 채 「크기 초과」 보류로 둔다. 지시문 몫에는 문법 검사 덧붙임(파서가 못 본 파일의 전문)이 든다.
@@ -1355,15 +1371,26 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         if staged and asked_items and head.two_step_threshold > 0:
             plan = _two_step_plan(head, asked_items, source.raw, sent_files, omission)
         if omission.any and plan is None:
-            detail = (
-                f"소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 (omitted_files={omission.omitted_files} "
-                f"omitted_bytes={omission.omitted_bytes} truncated_files={omission.truncated_files})"
-            )
-            return Concluded(
-                apply=lambda: _with_derivation(
-                    class_obj, derivation, lambda: _record_size_hold(submission, model=model, detail=detail)
+            # 한 번 호출로 못 담는다 — 클래스의 「한 번 호출로 못 담는 제출물」(#1311)대로 간다. 크기는 여기(비동기 채점
+            # 안)에서만 잰다.
+            policy = agent_grading.oversize_policy(class_obj)
+            if policy == Class.OversizePolicy.PARTIAL:
+                # 예산에 든 파일만으로 한 번 호출 채점 — 빠진·잘린 파일 수를 점수에 남긴다.
+                unseen_files = omission.omitted_files + omission.truncated_files
+            elif policy == Class.OversizePolicy.AGENT:
+                # 그 시도만 에이전트 채점으로 넘긴다 — 모델은 클래스의 에이전트용 모델이다.
+                uses_agent, model = True, class_obj.oversize_agent_model
+                source_text, sent_files, sent_lines = source.text, [], {}
+            else:
+                source_chars = _source_chars(source.raw, asset)
+                limit_chars = scoring_calculator.capacity_chars(model, instruction_chars=instruction_bytes)
+                return Concluded(
+                    apply=lambda: _with_derivation(
+                        class_obj,
+                        derivation,
+                        lambda: _record_rejection(submission, source_chars=source_chars, limit_chars=limit_chars),
+                    )
                 )
-            )
 
     if plan is not None:
         prompt = plan.selection_prompt
@@ -1404,6 +1431,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         syntax_check=syntax_check,
         pause_recheck=head.pause_recheck,
         agent=uses_agent,
+        unseen_files=unseen_files,
         snapshot=agent_grading.snapshot_of(source.raw, asset) if uses_agent else None,
         staged=staged,
         machine_entries=machine_entries,
@@ -1644,9 +1672,14 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             _mark_scoring_paused(class_obj, SERVER_UNREACHABLE_AT)
             return {"submission_id": submission.id, "status": "server_unreachable"}
         if isinstance(exc, LLMAdapterInputTooLargeError):
-            # 보낼 요청이 모델 컨텍스트를 넘었다 — 어댑터가 재어 막았거나 벤더가 거절했다(#989). 제출물의 실패가
-            # 아니므로 미충족으로 굳히지 않고 「크기 초과」 보류로 둔다. 강사가 모델을 바꾸면 다시 집힌다.
-            return _record_size_hold(submission, model=prepared.model, detail=str(exc))
+            # 보낼 요청이 모델 컨텍스트를 넘었다 — 예산으로 고른 뒤에도 어댑터가 재어 막았거나 벤더가 거절했다(#989).
+            # 미충족으로 굳히지 않고 반려한다(#1311) — 한도는 그 모델의 예산, 크기는 실은 소스다.
+            sent = sum(len(f.content.encode("utf-8")) for f in prepared.sent_files) or len(prepared.prompt.encode("utf-8"))
+            return _record_rejection(
+                submission,
+                source_chars=int(sent // scoring_calculator.BYTES_PER_CHAR),
+                limit_chars=scoring_calculator.capacity_chars(prepared.model, instruction_chars=0),
+            )
         if isinstance(exc, LLMAdapterRateLimitedError):
             return _record_rate_limited(submission, checklist_items, error=str(exc))
         if isinstance(exc, LLMAdapterPermanentError):
@@ -1687,6 +1720,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             input_fingerprint=two_step_fingerprint(prepared),
             reasoning=reused_reasoning,
             syntax_check_result=source.syntax_check_result,
+            unseen_files=prepared.unseen_files,
         )
         return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
     output = outcome.output
@@ -1721,6 +1755,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         input_fingerprint=two_step_fingerprint(prepared),
         reasoning=reasoning,
         syntax_check_result=syntax_check_result,
+        unseen_files=prepared.unseen_files,
     )
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
 

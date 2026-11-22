@@ -45,7 +45,8 @@ export function ScoringCalculator({ classId }: { classId: number }) {
   const change = (field: keyof CalculatorChoice, value: string | number | undefined) =>
     setChoice((current) => changeChoice({ ...fromSelection(calc), ...current }, field, value));
   const provider = calc.providers.find((p) => p.vendor === selection.vendor);
-  const agentOk = calc.agent_vendors.includes(selection.vendor);
+  // 에이전트는 모델마다 다르다(#1311) — OpenAI 는 gpt-5-mini 이상만.
+  const agentOk = calc.rows.some((r) => r.model_id === selection.model_id && r.agent.available);
 
   return (
     <div data-testid="scoring-calculator" className="flex flex-col gap-4">

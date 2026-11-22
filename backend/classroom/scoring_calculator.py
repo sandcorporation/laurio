@@ -13,16 +13,16 @@
 `classroom.scoring._build_prompt` 가 소스 없이 만드는 글자 수, 없으면 `INSTRUCTION_*` 상수), 출력은 요구사항 수 ×
 `OUTPUT_TOKENS_PER_REQUIREMENT`(추론하는 모델이면 강도별 추론 몫을 더한다). **감당 크기**는 채점이 실제로 쓰는
 `core.model_context.source_budget_bytes` 를 그대로 부른 값이다(바이트 → 글자는 `BYTES_PER_CHAR`). 소스가 그것을 넘으면
-자르지 않고 「크기 초과」 보류다(#989) — 채점하지 않으니 금액은 0 이다. 새 채점기(staged, 2026-11-22 부터 꺼짐
+클래스의 「한 번 호출로 못 담는 제출물」(#1311)대로 간다 — 반려면 금액이 없고, 일부만이면 한도까지 실은 금액
+(`partial_usd`), 에이전트면 그 모델의 에이전트 예상이다. 새 채점기(staged, 2026-11-22 부터 꺼짐
 고정 — `classroom_scoring_pipeline`)가 켜져 있으면 「한 번 호출」 칸이 **실제로 돌 갈래의 셈**을 쓴다 — 두 걸음 문턱을 넘거나 모델
 예산에 다 안 들어가면 두 걸음이고(1차 지시문만, 2차 소스는 상한까지), 기계 판정 몫은 출력 항목 수에서 뺀다.
 
 **에이전트**는 프로바이더별 토큰 꼴(`AGENT_TOKENS`) × 그 모델 단가(`core.agent_run_tokens.usage_cost_usd`)다. 입력·캐시
 몫은 가정 제출 크기에 비례해 늘린다. 실측(그 클래스 키로 돈 지난 실행의 `proxy_usage.spent_usd`·`duration_seconds` 합의
-중앙·p90)은 `MIN_SAMPLE_COUNT` 건 이상일 때만 옆에 붙는다. 에이전트를 못 받는 프로바이더(`AGENT_VERIFIED_VENDORS` 밖)는
-「지원 안 함」이다.
+중앙·p90)은 `MIN_SAMPLE_COUNT` 건 이상일 때만 옆에 붙는다. 에이전트를 못 받는 모델(`agent_grading.agent_model_allowed`
+밖 — OpenAI 의 gpt-5-mini 아래)은 「지원 안 함」이다.
 
-**의심 재판정**(#1291): 클래스가 고른 의심 재판정 모델의 단가로 **의심 한 건당** 예상 × 의심 비율(가정) × 항목 수다.
 """
 
 from __future__ import annotations
@@ -37,23 +37,18 @@ from core import agent_scoring
 from core.agent_run_tokens import Usage, usage_cost_usd
 from core.agent_scoring import JSON
 from core.model_context import BYTES_PER_TOKEN, context_window_tokens, source_budget_bytes
-from policies.runtime_settings import (
-    CLASSROOM_PIPELINE_STAGED,
-    classroom_scoring_pipeline,
-    classroom_two_step_budget_chars,
-    classroom_two_step_threshold_chars,
-)
+from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 
-from . import scoring_cost
-from .agent_grading import AGENT_VERIFIED_VENDORS
+from . import agent_grading, scoring_cost, two_step
 from .models import ANTHROPIC_KEY_FIELDS, OPENAI_KEY_FIELDS, Class, ClassroomAgentRun, ClassroomScore, ClassroomSubmission, Problem
 from .scoring_models import is_claude_model_id
 
 Vendor = Literal["openai", "anthropic"]
 Method = Literal["single", "agent"]
 SourceKey = Literal["median", "p90", "custom"]
-#: 한 번 호출 칸이 실제로 가는 길 — single 한 번에 담김, two_step 두 걸음(staged), hold 담지 못해 「크기 초과」 보류.
-Route = Literal["single", "two_step", "hold"]
+#: 한 번 호출 칸이 실제로 가는 길 — single 한 번에 담김, two_step 두 걸음(staged), over 담지 못함(클래스의 「한 번 호출로
+#: 못 담는 제출물」대로 간다 — 반려·에이전트·일부만, #1311).
+Route = Literal["single", "two_step", "over"]
 
 VENDORS: tuple[Vendor, ...] = ("openai", "anthropic")
 
@@ -90,7 +85,7 @@ BYTES_PER_CHAR = 1.03
 SOURCE_CHARS_PER_FILE = 1_600
 
 #: 글자당 바이트 최대 — 같은 30건의 최대 1.482(한글 주석 많음 제출). 화면의 「한글 주석 많음」 감당 글자 수만 이 값으로 셈하고,
-#: 「보류」 판정은 `BYTES_PER_CHAR` 그대로다.
+#: 「담지 못함」 판정은 `BYTES_PER_CHAR` 그대로다.
 BYTES_PER_CHAR_MAX = 1.48
 
 #: 한 번 호출 채점의 걸린 시간(초) — work dev 실험 `scoring_scoringexperimentrun.duration_seconds` p50. 「가정」이다.
@@ -169,10 +164,10 @@ class Spread:
 class SingleCall:
     input_tokens: int
     output_tokens: int
-    #: 이 칸의 예상(USD) — 「크기 초과」 보류면 채점하지 않으니 0 이다.
+    #: 이 칸의 예상(USD) — 담지 못하면(`over`) 0 이다(그때 금액은 `partial_usd`·에이전트 칸이 말한다).
     usd: float
     open_ended: bool
-    #: 소스가 모델 컨텍스트에 다 들어가는가 — 아니면 staged 가 아닐 때 채점이 「크기 초과」 보류다(#989).
+    #: 소스가 모델 컨텍스트에 다 들어가는가 — 아니면 staged 가 아닐 때 클래스의 「한 번 호출로 못 담는 제출물」대로 간다.
     fits: bool
     #: 한 번 호출에 담을 수 있는 소스 글자 수 — `source_budget_bytes` 를 `BYTES_PER_CHAR` 로 나눈 값.
     capacity_chars: int
@@ -184,13 +179,15 @@ class SingleCall:
     route: Route
     #: 가정한 걸린 시간(초).
     seconds: float
+    #: 담지 못할 때(`over`) 「들어가는 파일만」이 한도까지 실었을 때의 예상(USD, #1311) — 담기면 `usd` 와 같다.
+    partial_usd: float = 0.0
 
 
 @dataclass(frozen=True)
 class Agent:
-    #: 이 프로바이더로 에이전트를 고를 수 있는가(`AGENT_VERIFIED_VENDORS`) — 아니면 「지원 안 함」.
+    #: 이 모델로 에이전트를 고를 수 있는가(`agent_grading.agent_model_allowed`) — 아니면 「지원 안 함」.
     available: bool
-    #: 가정 토큰 꼴 × 그 모델 단가 — 못 받는 프로바이더만 `None`.
+    #: 가정 토큰 꼴 × 그 모델 단가 — 못 받는 모델만 `None`.
     usd: float | None
     #: 가정한 걸린 시간(초).
     seconds: float | None
@@ -260,6 +257,11 @@ class Calculation:
     two_step_threshold_chars: int
     two_step_budget_chars: int
     agent_limits: AgentLimits
+    #: 이 클래스가 한 번 호출로 못 담는 제출물에 지금 하는 일(#1311, `agent_grading.oversize_policy`).
+    oversize_policy: str = "reject"
+    #: 「에이전트로 채점」이면 그 모델과 그 모델의 에이전트 예상(USD) — 아니면 빈 값.
+    oversize_agent_model: str = ""
+    oversize_agent_usd: float | None = None
 
     @property
     def selected(self) -> ModelRow:
@@ -382,7 +384,7 @@ def files_of_chars(chars: int) -> int:
 
 
 def fits_source_bytes(model_id: str, *, source_bytes: int, instruction_chars: int) -> bool:
-    """소스가 `source_bytes` 바이트일 때 한 번 호출에 다 들어가는가 — 채점의 「크기 초과」 보류 판정과 같은 예산이다."""
+    """소스가 `source_bytes` 바이트일 때 한 번 호출에 다 들어가는가 — 채점이 「한 번 호출로 못 담는 제출물」로 가르는 것과 같은 예산이다."""
 
     return source_bytes <= source_budget_bytes(model_id, instruction_bytes=instruction_chars)
 
@@ -413,16 +415,29 @@ def single_call(
     hangul = capacity_chars_hangul(model_id, instruction_chars=instruction_chars)
     fits = fits_source_bytes(model_id, source_bytes=source_chars * BYTES_PER_CHAR, instruction_chars=instruction_chars)
     two_step = staged and two_step_threshold_chars > 0 and (source_chars > two_step_threshold_chars or not fits)
-    route: Route = "two_step" if two_step else ("single" if fits else "hold")
+    route: Route = "two_step" if two_step else ("single" if fits else "over")
     seconds = ASSUMED_SINGLE_SECONDS * (2 if two_step else 1)
 
-    if route == "hold":
-        cost = scoring_cost.attempt_cost(model_id, reasoning_effort, prompt_chars=0, output_tokens=0)
-        if cost is None:  # pragma: no cover - 모델 목록이 단가표에서 온다.
+    if route == "over":
+        # 한 번 호출로는 채점하지 않는다 — 「들어가는 파일만」이면 한도까지 실은 금액이다(#1311).
+        partial = scoring_cost.attempt_cost(
+            model_id, reasoning_effort, prompt_chars=instruction_chars + capacity, output_tokens=output_tokens
+        )
+        if partial is None:  # pragma: no cover - 모델 목록이 단가표에서 온다.
             raise ValueError(f"단가표에 없는 모델: {model_id}")
-        hangul = capacity_chars_hangul(model_id, instruction_chars=instruction_chars)
         return SingleCall(
-            0, 0, 0.0, cost.open_ended, fits, capacity, hangul, files_of_chars(capacity), files_of_chars(hangul), route, 0.0
+            0,
+            0,
+            0.0,
+            partial.open_ended,
+            fits,
+            capacity,
+            hangul,
+            files_of_chars(capacity),
+            files_of_chars(hangul),
+            route,
+            0.0,
+            partial_usd=partial.usd,
         )
     prompt_chars = instruction_chars + (min(source_chars, two_step_budget_chars) if two_step else source_chars)
     cost = scoring_cost.attempt_cost(model_id, reasoning_effort, prompt_chars=prompt_chars, output_tokens=output_tokens)
@@ -448,6 +463,7 @@ def single_call(
         capacity_files_hangul=files_of_chars(hangul),
         route=route,
         seconds=seconds,
+        partial_usd=usd,
     )
 
 
@@ -546,7 +562,7 @@ def calculate(
     vendor_models = models_for(chosen_vendor)
     if model_id not in vendor_models:
         model_id = class_obj.default_model if class_obj.default_model in vendor_models else vendor_models[0]
-    agent_ok = chosen_vendor in AGENT_VERIFIED_VENDORS
+    agent_ok = agent_grading.agent_model_allowed(chosen_vendor, model_id)
     chosen_method = _as_method(method) or _as_method(class_obj.scoring_method) or "single"
     if chosen_method == "agent" and not agent_ok:
         chosen_method = "single"
@@ -579,7 +595,7 @@ def calculate(
     )
 
     staged = classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED
-    threshold, budget = classroom_two_step_threshold_chars(), classroom_two_step_budget_chars()
+    threshold, budget = two_step.THRESHOLD_CHARS, two_step.BUDGET_CHARS
     measured = agent_runs_by_model(class_obj)
     empty = Spread(0, None, None)
     rows: list[ModelRow] = []
@@ -596,7 +612,7 @@ def calculate(
                 two_step_threshold_chars=threshold,
                 two_step_budget_chars=budget,
             )
-            if row_vendor in AGENT_VERIFIED_VENDORS:
+            if agent_grading.agent_model_allowed(row_vendor, row_model):
                 usd, seconds = agent_estimate(row_vendor, row_model, source_chars=source_chars, instruction_chars=instruction)
                 run_usd, run_seconds = measured.get(scoring_cost.canonical_model_id(row_model), (empty, empty))
                 agent = Agent(True, usd, seconds, run_usd, run_seconds)
@@ -614,9 +630,16 @@ def calculate(
         source=source_key,
         source_chars=source_chars,
     )
+    policy = agent_grading.oversize_policy(class_obj)
+    oversize_model = class_obj.oversize_agent_model if policy == Class.OversizePolicy.AGENT else ""
+    oversize_usd = (
+        agent_estimate(_current_vendor(class_obj), oversize_model, source_chars=source_chars, instruction_chars=instruction)[0]
+        if oversize_model
+        else None
+    )
     return Calculation(
         providers=providers,
-        agent_vendors=tuple(v for v in VENDORS if v in AGENT_VERIFIED_VENDORS),
+        agent_vendors=tuple(v for v in VENDORS if any(agent_grading.agent_model_allowed(v, m) for m in models_for(v))),
         problems=problems,
         selection=selection,
         assumptions=assumptions,
@@ -625,4 +648,7 @@ def calculate(
         two_step_threshold_chars=threshold,
         two_step_budget_chars=budget,
         agent_limits=_agent_limits(),
+        oversize_policy=policy,
+        oversize_agent_model=oversize_model,
+        oversize_agent_usd=oversize_usd,
     )

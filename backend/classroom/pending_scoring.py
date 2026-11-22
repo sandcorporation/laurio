@@ -19,7 +19,6 @@ from datetime import timedelta
 
 from django.db import models
 from django.db.models import Count, QuerySet
-from django.db.models.functions import Concat
 
 from .models import Class, ClassroomScoringAttempt, ClassroomSubmission, Problem
 
@@ -31,31 +30,43 @@ NO_API_KEY = "no_api_key"
 #: 세지 않는다 — 받아들이는 조건이 두 번 다 어긋났다는 것이지 제출물이 실패한 것이 아니다. 0% 로 굳히지 않는다.
 AGENT_SCORING_HOLD_ERROR_PREFIX = "AgentScoringHold:"
 
-#: 「크기 초과」 보류 표식(#989) — 공모전(`scoring.services.SCORING_HOLD_ERROR_PREFIX`)과 같은 값. 채점 요청이 그 모델
-#: 컨텍스트에 들어가지 않았다. 기록은 `size_hold_error` 꼴(머리 뒤에 ` model=<모델> `)이라, 그 시도는 **같은 모델**인
-#: 동안만 채점 대기에서 빠진다 — 강사가 문제·클래스 모델을 바꾸면 다음 스캔이 다시 집는다. 실패 상한에 세지 않는다.
-SIZE_HOLD_ERROR_PREFIX = "SourceOverBudgetHold:"
+#: 반려 표식(#1311, CONTEXT.md 「반려」) — 클래스가 「반려」를 고른 채 소스가 한 번 호출에 다 들어가지 않았다. 모델을
+#: 부르지 않았고 점수도 없다. 그 시도는 다시 집지 않고(학생이 새로 낸다) 실패 상한·시도 횟수에 세지 않는다. 기록은
+#: `rejection_error` 꼴(머리 뒤에 그때 잰 소스 글자 수와 한도)이다. 예전의 「크기 초과」 보류(#989)를 대신한다.
+REJECTED_ERROR_PREFIX = "SourceOverBudgetRejected:"
 
-#: 실패 상한·시도 횟수에 세지 않는 보류 표식.
-HOLD_PREFIXES = (AGENT_SCORING_HOLD_ERROR_PREFIX, SIZE_HOLD_ERROR_PREFIX)
+#: 실패 상한·시도 횟수에 세지 않는 표식.
+HOLD_PREFIXES = (AGENT_SCORING_HOLD_ERROR_PREFIX, REJECTED_ERROR_PREFIX)
 
 
-def size_hold_error(model: str, detail: str) -> str:
-    """「크기 초과」 보류 기록의 `error` — 머리와 모델을 앞에 둔다(`pending_submissions` 가 머리로 거른다)."""
+def rejection_error(*, source_chars: int, limit_chars: int) -> str:
+    """반려 기록의 `error` — 화면이 `parse_rejection` 으로 사유 한 줄을 다시 짓는다."""
 
-    return f"{SIZE_HOLD_ERROR_PREFIX} model={model} {detail}"
+    return f"{REJECTED_ERROR_PREFIX} source_chars={source_chars} limit_chars={limit_chars}"
+
+
+def parse_rejection(error: str | None) -> tuple[int, int] | None:
+    """반려 기록에서 (소스 글자 수, 한도 글자 수) — 반려 기록이 아니거나 읽을 수 없으면 `None`."""
+
+    if not error or not error.startswith(REJECTED_ERROR_PREFIX):
+        return None
+    fields = dict(part.split("=", 1) for part in error[len(REJECTED_ERROR_PREFIX) :].split() if "=" in part)
+    try:
+        return int(fields["source_chars"]), int(fields["limit_chars"])
+    except (KeyError, ValueError):
+        return None
 
 
 def exclude_holds(queryset: QuerySet) -> QuerySet:
-    """`error` 가 보류 표식으로 시작하는 시도 기록을 뺀다 — 실패 상한·시도 횟수가 쓴다."""
+    """`error` 가 보류·반려 표식으로 시작하는 시도 기록을 뺀다 — 실패 상한·시도 횟수가 쓴다."""
 
     for prefix in HOLD_PREFIXES:
         queryset = queryset.exclude(error__startswith=prefix)
     return queryset
 MODEL_REJECTED = "model_rejected"
-#: 이 시도의 채점 요청이 지금 채점 모델의 컨텍스트를 넘어 보류됐다(#989) — 시도마다 다르다(위 둘은 클래스·문제 단위).
-SIZE_HELD = "size_held"
-REASONS = (NO_API_KEY, MODEL_REJECTED, SIZE_HELD)
+#: 이 시도가 반려됐다(#1311) — 시도마다다(위 둘은 클래스·문제 단위). 채점 대기가 아니라 끝난 시도다.
+REJECTED = "rejected"
+REASONS = (NO_API_KEY, MODEL_REJECTED, REJECTED)
 
 
 def blocking_reason(class_obj: Class, problem: Problem, *, ignore_pause: bool = False) -> str | None:
@@ -83,42 +94,29 @@ def can_be_scored(class_obj: Class, problem: Problem) -> bool:
     return blocking_reason(class_obj, problem) is None
 
 
-def pending_reason(score, class_obj: Class, problem: Problem, *, size_held: bool = False) -> str | None:
+def pending_reason(score, class_obj: Class, problem: Problem, *, rejected: bool = False) -> str | None:
     """참여자용 `.../mine`·강사용 제출 현황이 읽는 값(#346, #403) — 이미
-    채점됐으면(`score`가 있으면) 언제나 `None`이다. `size_held` 는 그 시도가 「크기 초과」로 보류됐는가
-    (`with_size_held` 가 단 값, #989) — 키·모델 사유가 먼저다."""
+    채점됐으면(`score`가 있으면) 언제나 `None`이다. `rejected` 는 그 시도가 반려됐는가(`with_rejection` 이 단
+    `rejection_error`, #1311) — 반려는 끝난 일이라 키·모델 사유보다 먼저다."""
 
     if score is not None:
         return None
-    return blocking_reason(class_obj, problem) or (SIZE_HELD if size_held else None)
+    if rejected:
+        return REJECTED
+    return blocking_reason(class_obj, problem)
 
 
-def _size_held_exists() -> models.Exists:
-    """바깥 행(`ClassroomSubmission`, `held_scoring_model` 을 단)에 지금 채점 모델의 「크기 초과」 보류 기록이 있는가."""
-
-    return models.Exists(
-        ClassroomScoringAttempt.objects.filter(
-            submission=models.OuterRef("pk"),
-            error__startswith=Concat(
-                models.Value(f"{SIZE_HOLD_ERROR_PREFIX} model="),
-                models.OuterRef("held_scoring_model"),
-                models.Value(" "),
-                output_field=models.TextField(),
-            ),
-        )
+def _rejected_attempts() -> QuerySet[ClassroomScoringAttempt]:
+    return ClassroomScoringAttempt.objects.filter(
+        submission=models.OuterRef("pk"), error__startswith=REJECTED_ERROR_PREFIX
     )
 
 
-def with_size_held(queryset: QuerySet[ClassroomSubmission]) -> QuerySet[ClassroomSubmission]:
-    """시도마다 `size_held`(지금 채점 모델 — 문제 모델, 비면 클래스 기본 모델 — 로 「크기 초과」 보류됐는가)를
-    단다(#989). 스캔 후보(`pending_submissions`)와 화면(`pending_reason`)이 같은 식을 쓴다."""
+def with_rejection(queryset: QuerySet[ClassroomSubmission]) -> QuerySet[ClassroomSubmission]:
+    """시도마다 `rejection_error`(반려 기록의 `error`, 없으면 `None`)를 단다(#1311). 스캔 후보(`pending_submissions`)와
+    화면(`pending_reason`·사유 한 줄)이 같은 식을 쓴다."""
 
-    return queryset.annotate(
-        held_scoring_model=models.Case(
-            models.When(problem__model="", then=models.F("problem__classroom__default_model")),
-            default=models.F("problem__model"),
-        )
-    ).annotate(size_held=_size_held_exists())
+    return queryset.annotate(rejection_error=models.Subquery(_rejected_attempts().values("error")[:1]))
 
 
 def needs_setup(class_obj: Class, problem: Problem) -> bool:
@@ -164,9 +162,9 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
     )
 
     return (
-        with_size_held(ClassroomSubmission.objects.filter(classroom_score__isnull=True))
-        # 「크기 초과」 보류(#989) — 그 모델이 지금도 이 문제의 채점 모델이면 다시 돌리지 않는다.
-        .exclude(size_held=True)
+        ClassroomSubmission.objects.filter(classroom_score__isnull=True)
+        # 반려(#1311) — 다시 돌리지 않는다. 학생이 새로 낸 시도가 채점된다.
+        .exclude(models.Exists(_rejected_attempts()))
         # 채점 연결이 없는 클래스 — `Class.has_scoring_key` 와 같은 기준(호환 서버는 주소로, #601).
         .exclude(
             models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)

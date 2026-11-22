@@ -19,17 +19,31 @@ const SINGLE = {
   capacity_files_hangul: 1_250,
   route: "single",
   seconds: 5,
+  partial_krw: 138,
 };
 const NONE = { sample_count: 0, median: null, p90: null };
 
 function calcOf(
-  overrides: { method?: string; route?: string; staged?: boolean; agentKrw?: number | null } = {},
+  overrides: {
+    method?: string;
+    route?: string;
+    staged?: boolean;
+    agentKrw?: number | null;
+    oversize?: { policy: string; agent_model: string; agent_krw: number | null };
+  } = {},
 ): ScoringCalculator {
-  const { method = "single", route = "single", staged = false, agentKrw = 400 } = overrides;
+  const {
+    method = "single",
+    route = "single",
+    staged = false,
+    agentKrw = 400,
+    oversize = { policy: "reject", agent_model: "", agent_krw: null },
+  } = overrides;
   // 금액·크기 글자에 쓰는 칸만 채운 흉내
   return {
     selection: { model_id: "m", method },
     staged: { enabled: staged },
+    oversize,
     rows: [
       {
         vendor: "openai",
@@ -95,8 +109,14 @@ describe("계산기 글자(#1308)", () => {
     expect(submissionAmount(calcOf())).toMatch(/^약 [\d,]+원$/);
     expect(capacityText(calcOf())).toBe("300만 자 · 소스 파일 약 1,875개");
   });
-  it("담지 못하면 금액 자리에 보류", () => {
-    expect(submissionAmount(calcOf({ route: "hold" }))).toBe("담지 못함 — 보류");
+  it("담지 못하면 클래스 설정대로 금액 옆에 낱말 하나(#1311)", () => {
+    expect(submissionAmount(calcOf({ route: "over" }))).toBe("담지 못함 — 반려");
+    expect(
+      submissionAmount(calcOf({ route: "over", oversize: { policy: "agent", agent_model: "gpt-5-mini", agent_krw: 900 } })),
+    ).toBe(`${formatKrw(900)} · 에이전트`);
+    expect(
+      submissionAmount(calcOf({ route: "over", oversize: { policy: "partial", agent_model: "", agent_krw: null } })),
+    ).toBe(`${formatKrw(138)} · 일부만`);
   });
   it("에이전트는 에이전트 금액이다", () => {
     expect(submissionAmount(calcOf({ method: "agent" }))).toBe(formatKrw(400));

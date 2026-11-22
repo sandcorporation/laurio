@@ -83,11 +83,6 @@ CONTEST_SCORING_METHOD = "CONTEST_SCORING_METHOD"
 SCORING_METHOD_SINGLE_CALL: Literal["single_call"] = "single_call"
 SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 
-#: 강의실 staged 두 걸음의 문턱·2차 상한(#1286, 글자 수) — `classroom_two_step_threshold_chars`·`classroom_two_step_budget_chars`.
-CLASSROOM_TWO_STEP_THRESHOLD_CHARS = "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"
-DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS = 120_000
-CLASSROOM_TWO_STEP_BUDGET_CHARS = "CLASSROOM_TWO_STEP_BUDGET_CHARS"
-DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS = 60_000
 CLASSROOM_PIPELINE_SINGLE_CALL: Literal["single_call"] = "single_call"
 CLASSROOM_PIPELINE_STAGED: Literal["staged"] = "staged"
 
@@ -139,24 +134,6 @@ SPECS: dict[str, SettingSpec] = {
             default=SCORING_METHOD_SINGLE_CALL,
             max_length=20,
             choices=(SCORING_METHOD_SINGLE_CALL, SCORING_METHOD_AGENT),
-        ),
-        # #1286: staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이 문턱을 넘으면 두 걸음 — 파일 목록으로 고르고
-        # 고른 파일만 2차 상한 안에서 싣는다. 문턱 0 이면 끈다(그때만 크기 초과 보류 #989 가 그대로다).
-        SettingSpec(
-            CLASSROOM_TWO_STEP_THRESHOLD_CHARS,
-            "강의실 두 걸음 문턱 (자)",
-            "float",
-            default=str(DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS),
-            min_value=0.0,
-            max_value=10_000_000.0,
-        ),
-        SettingSpec(
-            CLASSROOM_TWO_STEP_BUDGET_CHARS,
-            "강의실 두 걸음 2차 상한 (자)",
-            "float",
-            default=str(DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS),
-            min_value=1000.0,
-            max_value=10_000_000.0,
         ),
         SettingSpec("ANTHROPIC_API_KEY", "Anthropic API 키", "secret", max_length=500),
         SettingSpec("LLM_ANTHROPIC_MODEL", "Claude 모델", "text", default="claude-sonnet-5-5", max_length=100),
@@ -463,29 +440,6 @@ def classroom_scoring_pipeline() -> Literal["single_call", "staged"]:
     """
 
     return CLASSROOM_PIPELINE_SINGLE_CALL
-
-
-def _chars_setting(key: str, default: int, *, minimum: int) -> int:
-    raw = setting_value(key)
-    try:
-        value = float((raw or "").strip() or default)
-    except ValueError:
-        return default
-    if not math.isfinite(value) or value < minimum:  # NaN·무한·범위 밖(env 는 저장 검사를 지나지 않는다)
-        return default
-    return int(value)
-
-
-def classroom_two_step_threshold_chars() -> int:
-    """staged 두 걸음 문턱(#1286, 글자) — 0 이면 끔. 값이 없거나 읽을 수 없으면 기본값."""
-
-    return _chars_setting(CLASSROOM_TWO_STEP_THRESHOLD_CHARS, DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS, minimum=0)
-
-
-def classroom_two_step_budget_chars() -> int:
-    """staged 두 걸음 2차 상한(#1286, 글자) — 값이 없거나 읽을 수 없으면 기본값."""
-
-    return _chars_setting(CLASSROOM_TWO_STEP_BUDGET_CHARS, DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS, minimum=1)
 
 
 def contest_ai_scoring_enabled() -> bool:

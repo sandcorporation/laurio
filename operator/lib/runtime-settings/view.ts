@@ -123,8 +123,6 @@ export const SETTINGS_TABS: { id: SettingsTabId; label: string; keys: readonly s
       "CONTEST_AI_SCORING",
       "CONTEST_AI_QUALITY_REVIEW",
       "CLASSROOM_SCORE_REUSE",
-      "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
-      "CLASSROOM_TWO_STEP_BUDGET_CHARS",
       "AGENT_SCORING_DAILY_LIMIT_USD",
     ],
   },
