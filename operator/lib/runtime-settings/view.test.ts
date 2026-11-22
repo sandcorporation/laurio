@@ -154,6 +154,25 @@ describe("탭(#1033)", () => {
     expect(settingsOfTab(all, "etc").map((s) => s.key)).toEqual(["LLM_OPENAI_TEMPERATURE", "NEW_KEY"]);
   });
 
+  it("강의실 채점 설정은 갈래·재사용 뒤에 이어 AI 채점 탭에 선다", () => {
+    const keys = [
+      "CLASSROOM_TWO_STEP_BUDGET_CHARS",
+      "CLASSROOM_ESCALATION_MODEL",
+      "CLASSROOM_SCORE_REUSE",
+      "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
+      "CLASSROOM_SCORING_PIPELINE",
+    ];
+    const rows = keys.map((key) => setting({ key }));
+    expect(settingsOfTab(rows, "ai").map((s) => s.key)).toEqual([
+      "CLASSROOM_SCORING_PIPELINE",
+      "CLASSROOM_SCORE_REUSE",
+      "CLASSROOM_ESCALATION_MODEL",
+      "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
+      "CLASSROOM_TWO_STEP_BUDGET_CHARS",
+    ]);
+    expect(settingsOfTab(rows, "etc")).toEqual([]);
+  });
+
   it("주소의 탭 값이 없거나 모르면 첫 탭이다", () => {
     expect(tabFromParam("limits")).toBe("limits");
     expect(tabFromParam(null)).toBe("ai");

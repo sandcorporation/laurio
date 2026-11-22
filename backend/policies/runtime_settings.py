@@ -160,7 +160,7 @@ SPECS: dict[str, SettingSpec] = {
         # 고른 파일만 2차 상한 안에서 싣는다. 문턱 0 이면 끈다(그때만 크기 초과 보류 #989 가 그대로다).
         SettingSpec(
             CLASSROOM_TWO_STEP_THRESHOLD_CHARS,
-            "강의실 두 걸음 문턱 (글자)",
+            "강의실 두 걸음 문턱 (자)",
             "float",
             default=str(DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS),
             min_value=0.0,
@@ -168,7 +168,7 @@ SPECS: dict[str, SettingSpec] = {
         ),
         SettingSpec(
             CLASSROOM_TWO_STEP_BUDGET_CHARS,
-            "강의실 두 걸음 2차 상한 (글자)",
+            "강의실 두 걸음 2차 상한 (자)",
             "float",
             default=str(DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS),
             min_value=1000.0,
