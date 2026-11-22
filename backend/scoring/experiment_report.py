@@ -59,6 +59,9 @@ class RunRow:
     cost_usd: Decimal
     duration_seconds: float | None
     verdicts: tuple[tuple[int, bool], ...] = ()  # (요구사항 id, 충족) — 채점됐을 때만
+    #: staged 줄(#1295)만 — 기계가 정한 항목 수·모델에 간 항목 수. 다른 줄은 None.
+    machine_items: int | None = None
+    model_items: int | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,9 @@ class RowReport:
     item_accuracy: float | None = None  # 정답과 판정이 같은 칸의 몫
     unmet_recall: float | None = None  # 정답이 미충족인 칸 가운데 미충족으로 판정한 몫
     false_positive_rate: float | None = None  # 정답이 충족인 칸 가운데 미충족으로 판정한 몫(오탐)
+    # staged 줄(#1295)만 — 채점된 칸 평균. 다른 줄은 None.
+    machine_items: float | None = None
+    model_items: float | None = None
 
 
 Verdicts = dict[tuple[int, int], list[bool]]  # (제출, 요구사항) → 회차마다의 충족
@@ -225,6 +231,7 @@ def _row_report(
     measured = any(r.cost_usd > 0 for r in rows)
     cost = sum((r.cost_usd for r in rows), Decimal(0)) / len(rows) if measured else None
     accuracy, recall, false_positive = truth_scores(mine, truth) if truth else (None, None, None)
+    staged = [r for r in rows if r.status == "scored" and r.machine_items is not None and r.model_items is not None]
     report = RowReport(
         row=name,
         submissions=len(per),
@@ -249,6 +256,8 @@ def _row_report(
         item_accuracy=accuracy,
         unmet_recall=recall,
         false_positive_rate=false_positive,
+        machine_items=mean(r.machine_items for r in staged) if staged else None,  # type: ignore[misc]  # staged 는 None 을 걸렀다
+        model_items=mean(r.model_items for r in staged) if staged else None,  # type: ignore[misc]
     )
     passes: dict[str, bool | None] = dict.fromkeys(CRITERIA)
     if report.runs:
@@ -341,6 +350,7 @@ HEADERS = [
     "실측 건당 비용(USD)", "전체 예상(USD)", "p50(초)", "p90(초)",
     "평균 차 ≤5", "최대 차 ≤15", "순위 ≥0.8", "흔들림 ≤기준+2", "근거 ≥95%", "실패·보류 ≤1/16", "비용 ≤기준/3", "p90 ≤300초",
     "필수 일치 ≥95%", "필수 판정 흔들림 ≤기준+2%p",
+    "기계 확정 항목 수", "모델에 간 항목 수",
 ]
 NO_TRUTH_NOTE = "정답(알려진 미충족)이 없는 재료 — 미충족 재현율·오탐률은 「—」."
 TRUTH_NOTE = (
@@ -376,6 +386,7 @@ def _cells(r: RowReport, *, repeat: int, full_submissions: int) -> list[str]:
         NOT_MEASURED if (e := full_estimate_usd(r, full_submissions)) is None else format(e, "f"),
         _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),
         *(_mark(r.passes.get(k)) for k in CRITERIA),
+        _fmt(r.machine_items, ".1f"), _fmt(r.model_items, ".1f"),
     ]
 
 

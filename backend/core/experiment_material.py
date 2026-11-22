@@ -51,6 +51,8 @@ class ChecklistEntry:
     grade: str  # "required" | "optional" (가산은 운영 채점이 읽지 않아 담지 않는다)
     hidden: bool
     points: int
+    #: 강사가 단 기계 규칙(#1295) — `classroom_staged` 줄이 기계 판정에 쓴다. 규칙이 없는 항목은 키가 없다.
+    machine_rule: dict[str, object] | None = None  # `ChecklistItem.machine_rule` 그대로(저장 스키마가 검증한 JSON)
 
 
 @dataclass(frozen=True)
@@ -149,7 +151,7 @@ def _item_json(item: Item) -> bytes:
         "material_id": item.material_id,
         "asset_kind": item.asset_kind,
         "problem": item.problem.__dict__,
-        "checklist": [c.__dict__ for c in item.checklist],
+        "checklist": [{k: v for k, v in c.__dict__.items() if k != "machine_rule" or v is not None} for c in item.checklist],
         "verdicts": [v.__dict__ for v in item.verdicts],
         "model_version": item.model_version,
         **({"truth": [t.__dict__ for t in item.truth]} if item.truth else {}),
@@ -315,6 +317,10 @@ class ClassroomCallResult:
     model_version: str = ""
     problem: str = ""
     prompt: str = ""
+    #: staged 줄(#1295) — 기계가 정한 항목 id(나머지는 모델에 갔다). 한 번 호출 줄은 비어 있다.
+    machine_ids: tuple[int, ...] = ()
+    #: `model` 이 아닌 모델로 부른 호출(의심 올림)의 (모델, 입력 토큰, 출력 토큰) — 비용을 그 모델 단가로 더한다.
+    extra_usage: tuple[tuple[str, int, int], ...] = ()
 
 
 class ClassroomExperimentCall(Protocol):
@@ -324,6 +330,8 @@ class ClassroomExperimentCall(Protocol):
 
 
 CLASSROOM_EXPERIMENT_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 채점 한 번 호출(실험)", "classroom.apps")
+#: 강의실 staged 갈래(#1295) — 같은 모양, 기계 판정·근거 인용·의심 올림·두 걸음을 운영 설정대로 돈다(재사용은 끈다).
+CLASSROOM_EXPERIMENT_STAGED_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 staged 채점(실험)", "classroom.apps")
 
 
 # ── 항목별 정답(#1288) ────────────────────────────────────────────────────────────────────────────────

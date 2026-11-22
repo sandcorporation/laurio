@@ -179,6 +179,56 @@ def test_classroom_call_uses_the_classroom_prompt_and_goes_real_only_on_confirm(
     assert scores == {em.pseudonym("t1262", 1): Decimal("100.00"), em.pseudonym("t1262", 2): Decimal("0.00")}
 
 
+def _staged_item(n: int, *, rule: bool) -> em.Item:
+    base = _item(n, met=rule)
+    first = em.ChecklistEntry(
+        REQ, "main.py 가 있다", "required", False, 1, machine_rule={"kind": "path_exists", "path": "main.py"} if rule else None
+    )
+    return em.Item(**{**base.__dict__, "checklist": (first, base.checklist[1])})
+
+
+STAGED = "classroom_staged:gpt-4.1-mini"
+
+
+@pytest.mark.django_db
+def test_classroom_staged_runs_beside_classroom_call_and_splits_machine_from_model(home, money, monkeypatch):
+    from classroom import scoring as classroom_scoring
+
+    modes = []
+
+    def adapter(**kwargs):
+        modes.append(kwargs["mode"])
+        return FakeClassroomScoringAdapter()
+
+    monkeypatch.setattr(classroom_scoring, "_scoring_adapter", adapter)
+    monkeypatch.setattr(classroom_material, "_scoring_adapter", adapter)
+    path = _material(home, [_staged_item(1, rule=True), _staged_item(2, rule=False)])
+
+    out = _call("compare_scoring_methods", "--material", str(path), "--rows", f"{CLASSROOM},{STAGED}", "--repeat", "1")
+    assert STAGED in out and CLASSROOM in out and "--confirm 이 없어 모델을 부르지 않았다." in out and not modes
+
+    _call("compare_scoring_methods", "--material", str(path), "--rows", f"{CLASSROOM},{STAGED}", "--repeat", "1", "--name", "s", "--confirm")
+
+    staged = {r.material_id: r for r in ScoringExperimentRun.objects.filter(row=STAGED)}
+    assert len(ScoringExperimentRun.objects.filter(row=CLASSROOM)) == 2 and len(staged) == 2
+    for run in staged.values():
+        assert len(run.verdicts) == 2  # 기계 확정 + 모델 = 항목 수
+    sources = lambda n: [v["source"] for v in staged[em.pseudonym("t1262", n)].verdicts]  # noqa: E731
+    assert sources(1) == ["machine", "model"] and sources(2) == ["model", "model"]
+    assert staged[em.pseudonym("t1262", 1)].verdicts[0]["met"] is True
+
+    md = _call("experiment_report", "s")
+    assert "| 기계 확정 항목 수 | 모델에 간 항목 수 |" in md.replace("---", "").replace("  ", " ") or "기계 확정 항목 수" in md
+    row = next(line for line in md.splitlines() if line.startswith(f"| {STAGED} |"))
+    assert row.endswith("| 0.5 | 1.5 |")
+    assert next(line for line in md.splitlines() if line.startswith(f"| {CLASSROOM} |")).endswith("| — | — |")
+
+
+def test_classroom_staged_needs_material():
+    with pytest.raises(ex.ExperimentError, match="사본 재료"):
+        ex.parse_rows(STAGED)
+
+
 def test_classroom_call_needs_material():
     with pytest.raises(ex.ExperimentError, match="사본 재료"):
         ex.parse_rows(CLASSROOM)
