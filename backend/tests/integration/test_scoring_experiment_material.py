@@ -527,68 +527,10 @@ def test_classroom_staged_confirms_only_met_and_sends_the_machine_note_like_prod
     assert REQ in [v.checklist_item_id for v in result.verdicts]
 
 
-def test_staged_row_grammar_takes_an_escalation_model_after_a_plus():
-    rows = ex.parse_rows("classroom_staged:gpt-4.1-mini+gpt-5,classroom_staged:gpt-4.1-mini", material=True)
-    assert [(r.name, r.escalation) for r in rows] == [
-        ("classroom_staged:gpt-4.1-mini+gpt-5", "gpt-5"),
-        ("classroom_staged:gpt-4.1-mini", ""),
-    ]
-    for bad in (
-        "classroom_staged:gpt-4.1-mini+claude-sonnet-4-5",  # 다른 프로바이더 단가표
-        "classroom_staged:gpt-4.1-mini+no-such-model",
-        "classroom_staged:gpt-4.1-mini+",
-        "classroom_call:gpt-4.1-mini+gpt-5",
-    ):
-        with pytest.raises(ex.ExperimentError):
-            ex.parse_rows(bad, material=True)
+def test_staged_rows_take_no_escalation_model():
+    """의심 재판정은 없앴다(#1310) — `+<올림 모델>` 줄은 모르는 모델로 거절된다."""
 
-
-def test_escalation_share_raises_only_the_high_side_of_the_preview():
-    plain, with_esc = ex.parse_rows("classroom_staged:gpt-4.1-mini,classroom_staged:gpt-4.1-mini+gpt-5", material=True)
-    (low_a, high_a), (low_b, high_b) = ex.cost_range(plain), ex.cost_range(with_esc)
-    assert low_a == low_b and high_b > high_a
-
-
-def test_staged_call_sends_only_the_doubtful_items_to_the_escalation_model(monkeypatch):
-    seen = []
-    real = classroom_material.call_vendor_sync
-
-    def spy(prepared, **kwargs):
-        seen.append(prepared.escalation_model)
-        return real(prepared, **kwargs)
-
-    monkeypatch.setattr(classroom_material, "call_vendor_sync", spy)
-    on = classroom_material.experiment_staged_call(_staged_item(2, rule=False), model="gpt-4.1-mini", api_key=None, escalation_model="gpt-5")
-    off = classroom_material.experiment_staged_call(_staged_item(2, rule=False), model="gpt-4.1-mini", api_key=None)
-    other_provider = classroom_material.experiment_staged_call(
-        _staged_item(2, rule=False), model="gpt-4.1-mini", api_key=None, escalation_model="claude-sonnet-4-5"
-    )
-    assert seen == ["gpt-5", "", ""]  # 사본 Class 가 usable_escalation_model 로 걸러 준다
-    assert on.status == off.status == other_provider.status == "scored"
-
-
-def test_escalation_row_calls_the_escalation_model_for_suspect_items_and_bills_it(monkeypatch):
-    from dataclasses import replace
-
-    from classroom import scoring as classroom_scoring
-
-    class Uncited(FakeClassroomScoringAdapter):
-        """1차 호출은 충족이라면서 근거를 못 대 — 그 항목이 의심이 된다."""
-
-        def score(self, scoring_input):
-            out = super().score(scoring_input)
-            return replace(out, verdicts=[replace(v, citations=()) for v in out.verdicts])
-
-    seen = []
-
-    def adapter(**kwargs):
-        seen.append(kwargs["model"])
-        return FakeClassroomScoringAdapter() if kwargs["model"] == "gpt-5" else Uncited()
-
-    monkeypatch.setattr(classroom_scoring, "_scoring_adapter", adapter)
-    monkeypatch.setattr(classroom_material, "_scoring_adapter", adapter)
-    result = classroom_material.experiment_staged_call(
-        _item(1, met=True), model="gpt-4.1-mini", api_key=None, escalation_model="gpt-5"
-    )
-    assert seen.count("gpt-5") == 1  # 의심 항목이 있어도 올림은 한 번
-    assert [m for m, _, _ in result.extra_usage if m == "gpt-5"] == ["gpt-5"]
+    (row,) = ex.parse_rows("classroom_staged:gpt-4.1-mini", material=True)
+    assert row.name == "classroom_staged:gpt-4.1-mini"
+    with pytest.raises(ex.ExperimentError):
+        ex.parse_rows("classroom_staged:gpt-4.1-mini+gpt-5", material=True)

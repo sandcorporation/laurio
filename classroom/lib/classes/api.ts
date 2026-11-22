@@ -67,11 +67,6 @@ export type ClassRow = {
   quality_method: GradingMethod;
   // 방식 선택지 — 고를 수 없으면 까닭 코드가 함께 온다.
   grading_method_options: GradingMethodOption[];
-  // 의심 재판정 모델(#1291) — 빈 문자열이면 꺼짐. 고를 수 있는 모델은 지금 연결의 프로바이더 단가표 모델(호환 서버면 빈 목록).
-  escalation_model: string;
-  escalation_model_options: string[];
-  // staged 채점이 켜져 있는가 — 꺼져 있으면 의심 재판정이 돌지 않는다.
-  staged_scoring: boolean;
   // 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일 전에는 false, 지나면 백엔드가 true 로 준다.
   anthropic_key_selectable: boolean;
   // 호환 서버의 호스트 — 공동 강사도 읽는다.
@@ -159,8 +154,6 @@ export function updateClass(
     default_model_is_reasoning: boolean;
     scoring_method: GradingMethod;
     quality_method: GradingMethod;
-    // 의심 재판정 모델(#1291) — 빈 문자열이면 끈다.
-    escalation_model: string;
   }>,
 ): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);

@@ -47,7 +47,6 @@ from core.model_context import context_window_tokens
 from core.observability import tag_error_scope
 from core.quality_review import mask_hidden_quality_items
 from policies.services import get_current_policy
-from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 from storage.adapters import get_storage_adapter
 from storage.filenames import build_download_filename, safe_download_base_name
 from submissions.models import (
@@ -301,9 +300,6 @@ def _serialize_class(
         scoring_method=class_obj.scoring_method,
         quality_method=class_obj.quality_method,
         grading_method_options=_grading_method_options(class_obj),
-        escalation_model=class_obj.escalation_model,
-        escalation_model_options=scoring_cost.escalation_models_for(class_obj.scoring_connection_kind),
-        staged_scoring=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
         anthropic_key_selectable=(
             privacy_policy.anthropic_key_connection_open() if claude_selectable is None else claude_selectable
         ),
@@ -1531,7 +1527,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
                 "title": p.title,
                 "requirement_count": p.requirement_count,
                 "instruction_chars": p.instruction_chars,
-                "escalation_instruction_chars": p.escalation_instruction_chars,
                 "sample_count": p.sample_count,
                 "sources": [{"key": s.key, "chars": s.chars, "measured": s.measured} for s in p.sources],
             }
@@ -1552,7 +1547,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "source_chars_per_file": scoring_calculator.SOURCE_CHARS_PER_FILE,
             "requirements": a.requirements,
             "instruction_chars": a.instruction_chars,
-            "suspect_rate": a.suspect_rate,
             "requirements_from": a.requirements_from,
             "source_from": a.source_from,
         },
@@ -1560,7 +1554,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "source_chars_median": scoring_calculator.ASSUMED_SOURCE_CHARS_MEDIAN,
             "source_chars_p90": scoring_calculator.ASSUMED_SOURCE_CHARS_P90,
             "requirements": scoring_calculator.ASSUMED_REQUIREMENTS,
-            "suspect_rate": scoring_calculator.ASSUMED_SUSPECT_RATE,
         },
         "rows": [
             {
@@ -1591,22 +1584,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "attempts": calc.agent_limits.attempts,
             "budget_usd": calc.agent_limits.budget_usd,
         },
-        "escalation": {
-            "model_id": calc.escalation.model_id,
-            "per_suspect": (
-                {
-                    "input_tokens": calc.escalation.per_suspect.input_tokens,
-                    "output_tokens": calc.escalation.per_suspect.output_tokens,
-                    "usd": calc.escalation.per_suspect.usd,
-                    "krw": calc.escalation.per_suspect.usd * krw,
-                    "open_ended": calc.escalation.per_suspect.open_ended,
-                }
-                if calc.escalation.per_suspect is not None
-                else None
-            ),
-            "suspect_rate": calc.escalation.suspect_rate,
-            "per_submission_krw": calc.escalation.per_submission_usd * krw,
-        },
         "min_sample_count": scoring_cost.MIN_SAMPLE_COUNT,
         "krw_per_usd": krw,
     }
@@ -1627,7 +1604,6 @@ def get_class_scoring_calculator(
     source: str | None = None,
     source_chars: int | None = None,
     requirements: int | None = None,
-    suspect_rate: float | None = None,
 ):
     """「클래스 설정 › 채점 방식」의 채점 비용 예상표(#1270·#1304). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합·
     기본 가정으로 채운다(가정을 바꿔 본 값은 저장하지 않는다). 남의 클래스는 404다."""
@@ -1643,7 +1619,6 @@ def get_class_scoring_calculator(
         overrides=scoring_calculator.Overrides(
             source_chars=source_chars,
             requirements=requirements,
-            suspect_rate=suspect_rate,
         ),
     )
     return 200, serialize_scoring_calculator(calc)

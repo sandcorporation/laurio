@@ -13,6 +13,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import Client
+from django.utils import timezone
 
 from contests.requirement_chat import OpenAIRequirementChatAdapter
 from core.llm_scoring import OpenAIScoringAdapter, get_adapter
@@ -22,6 +23,7 @@ from policies.runtime_settings import (
     FALLBACK_TTL_SECONDS,
     MemoryVersionStore,
     RuntimeSettingsReader,
+    classroom_scoring_pipeline,
     setting_value,
     version_store,
 )
@@ -267,6 +269,22 @@ def test_invalid_values_are_refused_without_echo(su, key, value, code):
 
 def test_unknown_setting_is_404(su):
     assert _post(su, "/SECRET_KEY", value="x").status_code == 404
+
+
+def test_the_classroom_pipeline_setting_is_gone_and_a_leftover_row_is_ignored(su):
+    """staged 꺼짐 고정(#1310) — 운영 DB 에 남은 `CLASSROOM_SCORING_PIPELINE` 행이 있어도 목록·읽기가 오류 없이 돌고
+    그 줄은 보이지 않는다. 새로 저장할 수도 없다."""
+
+    RuntimeSetting.objects.create(
+        key="CLASSROOM_SCORING_PIPELINE",
+        stored="staged",
+        updated_at=timezone.now(),
+        updated_by=get_user_model().objects.get(username="rs_super"),
+    )
+
+    assert "CLASSROOM_SCORING_PIPELINE" not in _settings(su)
+    assert classroom_scoring_pipeline() == "single_call"
+    assert _post(su, "/CLASSROOM_SCORING_PIPELINE", value="staged").status_code == 404
 
 
 # --- 권한 ----------------------------------------------------------------------

@@ -347,19 +347,3 @@ def test_a_connected_app_reads_only_kind_and_host_and_cannot_change_the_connecti
     tool_names = {tool["name"] for tool in _rpc(client, token, "tools/list").json()["result"]["tools"]}
     assert not {name for name in tool_names if "key" in name or "server" in name or "connection" in name}
     assert Class.objects.get(id=class_id).scoring_server_url == SERVER_URL
-
-
-def test_a_compatible_server_class_cannot_pick_an_escalation_model(client, db, monkeypatch):
-    """호환 서버는 단가표가 없어 의심 재판정을 고를 수 없다(#1291)."""
-
-    _, instructor, class_id, saved = _class_with_compatible_server(client, monkeypatch, model_ids=SERVER_MODELS)
-    assert saved["escalation_model_options"] == []
-
-    response = client.patch(
-        f"{CLASSES_URL}/{class_id}",
-        data={"escalation_model": "gpt-4o-mini"},
-        content_type="application/json",
-        **auth_header(instructor["access"]),
-    )
-
-    assert response.status_code == 422, response.content

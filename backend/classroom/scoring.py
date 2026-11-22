@@ -855,7 +855,7 @@ class PreparedScoring:
     agent: bool = False
     #: 에이전트에게 줄 박제본 — 준비가 읽은 소스 바이트(zip 일 때만, 에이전트 방식일 때만).
     snapshot: agent_grading.Snapshot | None = None
-    #: staged 갈래인가(#1283, 운영 설정 `CLASSROOM_SCORING_PIPELINE`) — 판정 항목에 출처(`source`)를 남긴다.
+    #: staged 갈래인가(#1283, 2026-11-22 부터 꺼짐 고정) — 판정 항목에 출처(`source`)를 남긴다.
     staged: bool = False
     #: staged 의 기계 판정 항목(`ClassroomScore.reasoning` 모양, 출처 `machine`) — 모델 판정과 합친다.
     machine_entries: tuple[dict, ...] = ()
@@ -865,12 +865,9 @@ class PreparedScoring:
     skip_vendor: bool = False
     #: staged 가 프롬프트에 실은 파일(정규화한 경로 → 줄들, #1284) — 모델이 낸 근거 인용을 이것과 대조한다.
     sent_lines: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    #: staged 가 프롬프트에 실은 파일 그대로(#1285) — 의심 올림이 인용된 파일만 골라 다시 싣는다.
+    #: staged 가 프롬프트에 실은 파일 그대로(#1285).
     sent_files: tuple[SourceFile, ...] = ()
-    #: 의심 올림(#1285) — 모델·추론 강도. 모델이 비면 올리지 않는다.
-    escalation_model: str = ""
-    escalation_effort: str | None = None
-    #: 이 시도가 낸 자료의 형식 — 의심 올림 프롬프트가 쓴다(#1285).
+    #: 이 시도가 낸 자료의 형식(#1285).
     asset_kind: str = ""
     #: 두 걸음(#1286) — 있으면 `prompt`·`scoring_input` 은 1차(파일 고르기) 것이고, 벤더 호출이 2차를 짓는다.
     two_step: two_step.TwoStepPlan | None = None
@@ -894,8 +891,6 @@ class VendorOutcome:
     agent: agent_grading.AgentResult | None = None
     #: 같은 입력의 이전 점수를 재사용했으면 그 점수(#1287) — 벤더를 부르지 않았다.
     reused: ClassroomScore | None = None
-    #: staged 의심 항목을 상위 모델로 다시 판정한 결과(#1285) — 올리지 않았거나 올림 호출이 실패했으면 None.
-    escalation: ScoringOutput | None = None
     #: 두 걸음의 1차(파일 고르기) 응답(#1286) — 토큰을 함께 센다.
     selection: ScoringOutput | None = None
     #: 두 걸음의 2차 준비(#1286) — 실은 파일·프롬프트가 이것이라 결과 쓰기가 이것으로 대조·저장한다.
@@ -943,10 +938,8 @@ class _Head:
     connection: ScoringConnection
     asset: SubmissionAsset
     pause_recheck: bool
-    #: staged 갈래(#1283) — 운영 설정은 DB 를 읽을 수 있어 앞 절반에서 읽는다(뒤 절반은 DB 를 쓰지 않는다).
+    #: staged 갈래(#1283) — 2026-11-22 부터 영구히 꺼져 있다(`classroom_scoring_pipeline` 의 주석).
     staged: bool = False
-    #: staged 의심 재판정 모델(#1285, 클래스 칸 `Class.escalation_model`, #1291) — 꺼졌거나 이 연결로 쓸 수 없으면 빈 문자열.
-    escalation_model: str = ""
     #: staged 두 걸음 문턱·2차 상한(#1286, 글자) — 문턱 0 이면 끔.
     two_step_threshold: int = 0
     two_step_budget: int = 0
@@ -1013,8 +1006,10 @@ def _prepare_head(
         connection=connection,
         asset=asset,
         pause_recheck=pause_recheck,
+        # staged 진입점(#1283). 2026-11-22 기준 판정 비교(제출 30건)에서 한 번 호출과 정확도가 같았고(86.0% 대 86.2%,
+        # 83.5% 대 84.4%) 시간은 2~3배, 돈은 1.1~1.5배였다. 의심 재판정은 정확도를 낮췄고 만점 제출 한 건을 0점으로
+        # 만들었다. 그래서 영구히 끈다(대표 결정) — `classroom_scoring_pipeline` 은 늘 `single_call` 이다.
         staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
-        escalation_model=scoring_cost.usable_escalation_model(class_obj),
         two_step_threshold=classroom_two_step_threshold_chars(),
         two_step_budget=classroom_two_step_budget_chars(),
     )
@@ -1045,60 +1040,6 @@ def _model_entry_staged(verdict: RequirementVerdict, sent_lines: Mapping[str, tu
     ]
     suspect = entry["verdict"] == VERDICT_MET and not any(c["matched"] for c in citations)
     return {**entry, "citations": citations, "suspect": suspect}
-
-
-def _suspect_ids(output: ScoringOutput, sent_lines: Mapping[str, tuple[str, ...]]) -> list[int]:
-    """첫 판정에서 「의심」인 항목(#1285) — 저장 때와 같은 셈(`_model_entry_staged`)."""
-
-    return [
-        v.requirement_id
-        for v in output.verdicts
-        if v.requirement_id != SYNTAX_CHECK_ITEM_ID and _model_entry_staged(v, sent_lines)["suspect"]
-    ]
-
-
-def _escalation_input(prepared: PreparedScoring, output: ScoringOutput) -> ScoringInput | None:
-    """의심 항목만 상위 모델에 다시 물을 입력(#1285) — 올리지 않으면 None. 실을 소스는 그 항목들이 인용한 파일(보낸
-    소스에 있는 것)이고, 인용된 파일이 하나도 없으면 첫 판정과 같은 소스다. 한 시도에 한 번뿐이다(여기서만 부른다)."""
-
-    if not prepared.staged or not prepared.escalation_model:
-        return None
-    suspect = set(_suspect_ids(output, prepared.sent_lines))
-    if not suspect:
-        return None
-    cited = {
-        evidence_check.normalize_path(c.path)
-        for v in output.verdicts
-        if v.requirement_id in suspect
-        for c in v.citations
-    }
-    files = [f for f in prepared.sent_files if evidence_check.normalize_path(f.path) in cited] or list(prepared.sent_files)
-    items = [item for item in prepared.checklist_items if item.id in suspect]
-    prompt = _build_prompt(
-        prepared.submission,
-        items,
-        _numbered_source_text(files),
-        asset_kind=prepared.asset_kind,
-        syntax_check=DISABLED_SYNTAX_CHECK,
-        cite=True,
-    )
-    return ScoringInput(
-        submission_id=prepared.submission.id,
-        contest_id=prepared.problem.id,
-        prompt=prompt,
-        source_files=files,
-        requirements=_requirement_inputs(items),
-        ask_citations=True,
-    )
-
-
-def _escalated_entry(verdict: RequirementVerdict, sent_lines: Mapping[str, tuple[str, ...]]) -> dict:
-    """상위 모델의 판정(#1285)이 그 항목의 최종이다. 상위 모델도 맞는 인용 없이 충족이라 하면 「미충족 + 의심 남음」."""
-
-    entry = {**_model_entry_staged(verdict, sent_lines), "escalated": True}
-    if entry["suspect"]:
-        entry = {**entry, **reasoning_entry(entry["checklist_item_id"], verdict=VERDICT_UNMET, reasoning=entry["reasoning"])}
-    return entry
 
 
 def _numbered_source_text(files: list[SourceFile]) -> str:
@@ -1472,12 +1413,6 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         asset_kind=asset.kind,
         two_step=plan,
         derivation=derivation,
-        escalation_model=head.escalation_model if staged else "",
-        escalation_effort=(
-            problem.effective_reasoning_effort()
-            if staged and head.escalation_model and connection.sends_reasoning_effort(head.escalation_model, marked_reasoning=False)
-            else None
-        ),
     )
 
 
@@ -1576,15 +1511,13 @@ def _machine_only_outcome() -> VendorOutcome:
     return VendorOutcome(output=ScoringOutput(verdicts=[], model_version=MACHINE_ONLY_MODEL_VERSION))
 
 
-def _build_adapter(
-    prepared: PreparedScoring, *, asynchronous: bool = False, model: str | None = None, mode: str | None = None
-) -> LLMScoringAdapter:
-    """`model` 을 주면 의심 올림(#1285) — 그 모델과 그 모델의 추론 강도로 만든다. `mode` 는 채점 방식 실험(#1295)만 준다."""
+def _build_adapter(prepared: PreparedScoring, *, asynchronous: bool = False, mode: str | None = None) -> LLMScoringAdapter:
+    """`mode` 는 채점 방식 실험(#1295)만 준다."""
 
     return _scoring_adapter(
         connection=prepared.connection,
-        model=model or prepared.model,
-        reasoning_effort=prepared.escalation_effort if model else prepared.reasoning_effort,
+        model=prepared.model,
+        reasoning_effort=prepared.reasoning_effort,
         asynchronous=asynchronous,
         log_context={"class_id": prepared.class_obj.id, "problem_id": prepared.problem.id},
         mode=mode,
@@ -1637,15 +1570,7 @@ def call_vendor_sync(prepared: PreparedScoring, *, reuse: bool = True, mode: str
     except LLMAdapterError as exc:
         return VendorOutcome(error=exc, selection=selection)
     second_step = prepared if selection is not None else None
-    escalation_input = _escalation_input(prepared, output)
-    if escalation_input is None:
-        return VendorOutcome(output=output, selection=selection, second_step=second_step)
-    try:
-        escalation = _build_adapter(prepared, model=prepared.escalation_model, mode=mode).score(escalation_input)
-    except LLMAdapterError as exc:
-        logger.warning("ClassroomSubmission(pk=%s) 의심 올림 실패 — 첫 판정을 쓴다: %s", prepared.submission.id, exc)
-        escalation = None
-    return VendorOutcome(output=output, escalation=escalation, selection=selection, second_step=second_step)
+    return VendorOutcome(output=output, selection=selection, second_step=second_step)
 
 
 async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
@@ -1667,16 +1592,7 @@ async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
     except LLMAdapterError as exc:
         return VendorOutcome(error=exc, selection=selection)
     second_step = prepared if selection is not None else None
-    escalation_input = _escalation_input(prepared, output)
-    if escalation_input is None:
-        return VendorOutcome(output=output, selection=selection, second_step=second_step)
-    try:
-        escalation_adapter = _build_adapter(prepared, asynchronous=True, model=prepared.escalation_model)
-        escalation = await escalation_adapter.score_async(escalation_input)
-    except LLMAdapterError as exc:
-        logger.warning("ClassroomSubmission(pk=%s) 의심 올림 실패 — 첫 판정을 쓴다: %s", prepared.submission.id, exc)
-        escalation = None
-    return VendorOutcome(output=output, escalation=escalation, selection=selection, second_step=second_step)
+    return VendorOutcome(output=output, selection=selection, second_step=second_step)
 
 
 def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> dict:
@@ -1779,13 +1695,8 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         agent_grading.record_run(submission.id, "scoring", outcome.agent)
     if not prepared.skip_vendor:
         # 벤더를 부르지 않은 기계 판정만의 채점(#1283)은 토큰도, 키 확인도 없다.
-        # 의심 올림(#1285) 호출의 토큰도 같은 사용량에 더한다.
         # 두 걸음(#1286)의 1차 호출 토큰도 더한다.
-        used_tokens = (
-            output.total_tokens
-            + (outcome.escalation.total_tokens if outcome.escalation else 0)
-            + (outcome.selection.total_tokens if outcome.selection else 0)
-        )
+        used_tokens = output.total_tokens + (outcome.selection.total_tokens if outcome.selection else 0)
         estimated = False
         if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
             # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 사용량이 비니 예상
@@ -1800,7 +1711,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             _clear_scoring_pause(class_obj)
         mark_verified(class_obj.pk, connection)
 
-    reasoning = outcome_reasoning(prepared, output, outcome.escalation)
+    reasoning = outcome_reasoning(prepared, output)
     syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
     score = ClassroomScore.objects.create(
         submission=submission,
@@ -1814,17 +1725,14 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
 
 
-def outcome_reasoning(prepared: PreparedScoring, output: ScoringOutput, escalation: ScoringOutput | None) -> list[dict]:
-    """모델 응답(과 의심 올림 응답)을 판정 항목(`ClassroomScore.reasoning` 모양)으로 — 결과 쓰기와 채점 방식 실험(#1295)이 함께 쓴다."""
+def outcome_reasoning(prepared: PreparedScoring, output: ScoringOutput) -> list[dict]:
+    """모델 응답을 판정 항목(`ClassroomScore.reasoning` 모양)으로 — 결과 쓰기와 채점 방식 실험(#1295)이 함께 쓴다."""
 
     reasoning = [
         _model_entry_staged(v, prepared.sent_lines) if prepared.staged else entry_from_model(v)
         for v in output.verdicts
         if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
-    if escalation is not None:
-        escalated = {v.requirement_id: _escalated_entry(v, prepared.sent_lines) for v in escalation.verdicts}
-        reasoning = [escalated.get(entry["checklist_item_id"], entry) for entry in reasoning]
     if prepared.staged:
         reasoning = _merge_staged(prepared, reasoning)
     return reasoning

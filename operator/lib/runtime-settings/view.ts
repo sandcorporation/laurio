@@ -51,7 +51,6 @@ const CHOICE_LABELS: Record<string, string> = {
   anthropic: "Anthropic (Claude Code)",
   single_call: "한 번 호출",
   agent: "에이전트",
-  staged: "기계 판정 먼저",
 };
 
 /** 선택 상자의 항목(#994) — `choice` 가 아니면 null. 첫 항목 「—」는 고르지 않음(저장하지 않는다). */
@@ -123,7 +122,6 @@ export const SETTINGS_TABS: { id: SettingsTabId; label: string; keys: readonly s
       "ANTHROPIC_API_KEY",
       "CONTEST_AI_SCORING",
       "CONTEST_AI_QUALITY_REVIEW",
-      "CLASSROOM_SCORING_PIPELINE",
       "CLASSROOM_SCORE_REUSE",
       "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
       "CLASSROOM_TWO_STEP_BUDGET_CHARS",

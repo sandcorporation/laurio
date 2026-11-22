@@ -83,8 +83,6 @@ CONTEST_SCORING_METHOD = "CONTEST_SCORING_METHOD"
 SCORING_METHOD_SINGLE_CALL: Literal["single_call"] = "single_call"
 SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 
-#: 강의실 채점 갈래의 키(#1283, 스펙 #1282) — `classroom_scoring_pipeline`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
-CLASSROOM_SCORING_PIPELINE = "CLASSROOM_SCORING_PIPELINE"
 #: 강의실 staged 두 걸음의 문턱·2차 상한(#1286, 글자 수) — `classroom_two_step_threshold_chars`·`classroom_two_step_budget_chars`.
 CLASSROOM_TWO_STEP_THRESHOLD_CHARS = "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"
 DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS = 120_000
@@ -141,16 +139,6 @@ SPECS: dict[str, SettingSpec] = {
             default=SCORING_METHOD_SINGLE_CALL,
             max_length=20,
             choices=(SCORING_METHOD_SINGLE_CALL, SCORING_METHOD_AGENT),
-        ),
-        # #1283: 강의실 채점(클래스 키)을 지금처럼 한 번 호출(`single_call`)로 할지, 기계 판정을 먼저 하고 판단 항목만
-        # 모델에 보내는 `staged` 로 할지. 에이전트 방식 클래스는 이 값을 보지 않는다.
-        SettingSpec(
-            CLASSROOM_SCORING_PIPELINE,
-            "강의실 채점 갈래",
-            "choice",
-            default=CLASSROOM_PIPELINE_SINGLE_CALL,
-            max_length=20,
-            choices=(CLASSROOM_PIPELINE_SINGLE_CALL, CLASSROOM_PIPELINE_STAGED),
         ),
         # #1286: staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이 문턱을 넘으면 두 걸음 — 파일 목록으로 고르고
         # 고른 파일만 2차 상한 안에서 싣는다. 문턱 0 이면 끈다(그때만 크기 초과 보류 #989 가 그대로다).
@@ -466,10 +454,15 @@ def contest_scoring_method() -> Literal["single_call", "agent"]:
 
 
 def classroom_scoring_pipeline() -> Literal["single_call", "staged"]:
-    """강의실 채점 갈래(#1283) — `staged` 일 때만 staged, 그 밖(없음·알 수 없는 값)은 `single_call`."""
+    """강의실 채점 갈래(#1283) — 늘 `single_call` 이다. staged 는 영구히 꺼져 있다(#1310).
 
-    value = (setting_value(CLASSROOM_SCORING_PIPELINE) or "").strip().lower()
-    return CLASSROOM_PIPELINE_STAGED if value == CLASSROOM_PIPELINE_STAGED else CLASSROOM_PIPELINE_SINGLE_CALL
+    2026-11-22 기준 판정 비교(제출 30건)에서 staged 는 한 번 호출과 정확도가 같았고(86.0% 대 86.2%, 83.5% 대 84.4%)
+    시간은 2~3배, 돈은 1.1~1.5배였다. 의심 재판정은 정확도를 낮췄고 만점 제출 한 건을 0점으로 만들었다. 그래서 영구히
+    끈다(대표 결정). 켜고 끄던 운영 설정(`CLASSROOM_SCORING_PIPELINE`)은 없앴고, 운영 DB·환경변수에 남은 값은 읽지
+    않는다(`_load_from_db` 는 모르는 키를 건너뛴다). staged 코드는 남아 있고 시험이 이 함수를 바꿔 끼워 덮는다.
+    """
+
+    return CLASSROOM_PIPELINE_SINGLE_CALL
 
 
 def _chars_setting(key: str, default: int, *, minimum: int) -> int:

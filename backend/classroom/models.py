@@ -186,10 +186,6 @@ class Class(models.Model):
     #: (`classroom.scoring_connection.ScoringConnection.sends_reasoning_effort`). 「OpenAI 키」
     #: 연결은 이 값을 보지 않는다 — 이름으로 판단한다. db_default: ADR-0053.
     default_model_marked_reasoning = models.BooleanField(default=False, db_default=False)
-    #: 의심 재판정 모델(#1291, ADR-0084) — staged 갈래에서 「의심」 항목만 이 모델로 한 번 다시 판정한다. 빈 값이면
-    #: 끈다(기본). 강사가 고르고 이 클래스의 연결(강사 키)로 돈다 — 그 연결의 프로바이더 단가표에 있는 모델만 저장된다
-    #: (`classroom.scoring_cost.escalation_models_for`). db_default: ADR-0053.
-    escalation_model = models.CharField(max_length=200, blank=True, default="", db_default="")
 
     #: 가입 링크의 코드(#279). 다시 뽑으면 이 값이 새 무작위 문자열로
     #: 바뀌어 이전 값은 어떤 클래스도 가리키지 않게 된다 — 그래서 별도
