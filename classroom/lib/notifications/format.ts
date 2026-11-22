@@ -39,13 +39,14 @@ export function describeNotification(notification: NotificationRow): string {
     }
     // 실패 상한으로 자동 미달이 됐다(#1318) — 어느 문제의 몇 번째 시도인지와 까닭 한 줄.
     case "classroom_scoring_failure_capped": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       const problemTitle =
         typeof context.problem_title === "string" ? context.problem_title : "문제";
       const attemptNumber =
         typeof context.attempt_number === "number" ? context.attempt_number : null;
       const attemptLabel = attemptNumber !== null ? `${attemptNumber}번째 시도` : "시도";
       const reason = typeof context.reason === "string" && context.reason ? ` — ${context.reason}` : "";
-      return `'${problemTitle}' ${attemptLabel}가 채점에 거듭 실패해 자동으로 미달 처리됐습니다${reason}.`;
+      return `'${className}' 클래스 '${problemTitle}' 문제 ${attemptLabel}가 채점에 거듭 실패해 자동으로 미달 처리됐습니다${reason}.`;
     }
     case "classroom_contest_entry_rejected": {
       const problemTitle =

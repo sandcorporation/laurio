@@ -175,10 +175,10 @@ describe("describeNotification — classroom_scoring_failure_capped", () => {
     const text = describeNotification(
       row({
         notification_type: "classroom_scoring_failure_capped",
-        context: { problem_title: "두 수의 합", attempt_number: 2, reason: "채점 모델이 제한 시간 안에 답하지 않았습니다" },
+        context: { class_name: "알고리즘 1반", problem_title: "두 수의 합", attempt_number: 2, reason: "채점 모델이 제한 시간 안에 답하지 않았습니다" },
       }),
     );
-    expect(text).toContain("'두 수의 합' 2번째 시도");
+    expect(text).toContain("'알고리즘 1반' 클래스 '두 수의 합' 문제 2번째 시도");
     expect(text).toContain("자동으로 미달");
     expect(text).toContain("제한 시간 안에 답하지 않았습니다");
   });
