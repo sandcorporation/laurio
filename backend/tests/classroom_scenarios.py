@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import uuid
 import zipfile
 from contextlib import contextmanager
@@ -633,6 +634,41 @@ def openai_success_body(
     )
 
 
+#: `classroom.rule_derivation.PROMPT_HEAD` 와 같은 값(시험 `test_classroom_rule_derivation` 이 맞춰 본다).
+DERIVATION_PROMPT_HEAD = "[기계 규칙 도출]"
+
+
+def is_derivation_request(payload: dict) -> bool:
+    """staged 의 규칙 도출 요청인가(#1293, `classroom.rule_derivation.PROMPT_HEAD`)."""
+
+    return DERIVATION_PROMPT_HEAD in json.dumps(payload, ensure_ascii=False)
+
+
+def derivation_item_ids(payload: dict) -> list[int]:
+    """도출 요청에 실린 항목 id — 프롬프트의 `- id N:` 줄."""
+
+    text = json.dumps(payload, ensure_ascii=False)
+    return [int(m) for m in re.findall(r"- id (\d+):", text)]
+
+
+def derivation_body(payload: dict, answers: dict[int, dict] | None = None, *, total_tokens: int = 0) -> dict:
+    """도출 요청에 대한 응답 — `answers` 에 없는 항목은 `{"kind": "judge", "rule": null}`."""
+
+    answers = answers or {}
+    return openai_verdicts_body(
+        [
+            {
+                "requirement_id": item_id,
+                "is_met": True,
+                "verdict": "met",
+                "reasoning": json.dumps(answers.get(item_id, {"kind": "judge", "rule": None}), ensure_ascii=False),
+            }
+            for item_id in derivation_item_ids(payload)
+        ],
+        total_tokens=total_tokens,
+    )
+
+
 def respond_with_verdicts(
     client_monkeypatch,
     verdicts: list[dict],
@@ -652,6 +688,9 @@ def respond_with_verdicts(
     body = openai_verdicts_body(verdicts, model=model, total_tokens=total_tokens)
 
     def _handler(*args, **kwargs):
+        if is_derivation_request(kwargs["json"]):
+            # staged 의 규칙 도출(#1293) — 판정 흉내와 섞지 않는다. 모두 「판단」으로 답하고 쌓지 않는다.
+            return FakeVendorResponse(200, derivation_body(kwargs["json"]))
         if capture is not None:
             capture.append(kwargs["json"])
         if capture_call is not None:

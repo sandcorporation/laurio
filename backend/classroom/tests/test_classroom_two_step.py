@@ -13,7 +13,15 @@ from classroom.models import ClassroomScore, ClassroomScoringAttempt
 from classroom.pending_scoring import SIZE_HOLD_ERROR_PREFIX
 from classroom.tests.test_classroom_machine_check import _world, staged  # noqa: F401 - fixture
 from core.llm_scoring import Citation, RequirementVerdict, ScoringOutput, SourceFile
-from tests.classroom_scenarios import FakeVendorResponse, force_real_scoring_adapter, get_class, openai_verdicts_body, run_scan
+from tests.classroom_scenarios import (
+    FakeVendorResponse,
+    derivation_body,
+    force_real_scoring_adapter,
+    get_class,
+    is_derivation_request,
+    openai_verdicts_body,
+    run_scan,
+)
 
 pytestmark = pytest.mark.usefixtures("reset_rate_limits")
 
@@ -34,6 +42,9 @@ def _scan(client, monkeypatch, bodies, sent: list[dict]) -> dict:
         queue = [b(*ctx["item_ids"]) for b in bodies]
 
         def _handler(*args, **kwargs):
+            if is_derivation_request(kwargs["json"]):
+                # staged 의 규칙 도출(#1293) — 모두 「판단」으로 답하고 판정 호출로 세지 않는다.
+                return FakeVendorResponse(200, derivation_body(kwargs["json"]))
             sent.append(kwargs["json"])
             return FakeVendorResponse(200, openai_verdicts_body(queue.pop(0), total_tokens=10))
 

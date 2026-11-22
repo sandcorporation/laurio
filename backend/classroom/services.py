@@ -210,6 +210,11 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
             points=item.points,
             hidden=item.hidden,
             machine_rule=item.machine_rule,
+            # 도출 규칙(#1293)은 글 해시에 묶여 있어 같은 글이면 그대로 맞다 — 복사본이 다시 묻지 않게 함께 옮긴다.
+            derived_rule=item.derived_rule,
+            derived_kind=item.derived_kind,
+            derived_text_hash=item.derived_text_hash,
+            derived_model=item.derived_model,
             order=item.order,
             # 공모전 문제의 항목은 복사본에서도 같은 Requirement 를 따라간다(#548).
             contest_requirement_id=item.contest_requirement_id,

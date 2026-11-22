@@ -852,6 +852,13 @@ class ChecklistItem(GradedChecklistFields):
     #: 기계 확인 규칙(#1283, CONTEXT.md 「기계 판정」) — 비면 「판단」 항목이다. 모양은 `classroom.schemas.MachineRuleIn`
     #: 이 검증한 dict(`classroom.machine_check.MachineRule`). staged 채점 갈래만 읽는다.
     machine_rule = models.JSONField(null=True, blank=True)
+    #: 도출 규칙(#1293, CONTEXT.md 「기계 확인 완료」) — staged 채점이 항목 글에서 스스로 도출해 둔 것. 강사 규칙
+    #: (`machine_rule`)이 있으면 도출하지 않는다. 종류가 `static` 일 때만 규칙이 차 있다(`run` 은 판단과 같다).
+    #: `derived_text_hash` 가 지금 글의 해시(`classroom.rule_derivation.label_hash`)와 다르면 다음 채점이 다시 도출한다.
+    derived_rule = models.JSONField(null=True, blank=True)
+    derived_kind = models.CharField(max_length=10, blank=True, default="")
+    derived_text_hash = models.CharField(max_length=64, blank=True, default="")
+    derived_model = models.CharField(max_length=100, blank=True, default="")
 
     class Meta(GradedChecklistFields.Meta):
         ordering = ["order", "id"]

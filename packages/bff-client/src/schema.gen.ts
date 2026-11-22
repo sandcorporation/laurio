@@ -6016,6 +6016,12 @@ export interface components {
         };
         /** ChecklistItemOut */
         ChecklistItemOut: {
+            /** Derived Kind */
+            derived_kind?: string | null;
+            /** Derived Rule */
+            derived_rule?: {
+                [key: string]: unknown;
+            } | null;
             /** Grade */
             grade: string;
             /**
@@ -6058,6 +6064,12 @@ export interface components {
          * @description 항목 만들기·고치기 응답 — 방금 저장한 그 항목이 걸렸을 때만 경고가 채워진다(#810).
          */
         ChecklistItemSavedOut: {
+            /** Derived Kind */
+            derived_kind?: string | null;
+            /** Derived Rule */
+            derived_rule?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Gradability Warnings
              * @default []

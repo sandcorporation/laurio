@@ -181,7 +181,7 @@ from .participation import (
 from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
-from . import scoring_calculator, scoring_cost
+from . import rule_derivation, scoring_calculator, scoring_cost
 from .scoring_model_catalog import cached_scoring_model_catalog, get_scoring_model_catalog, remember_model_ids
 from . import scoring_connection
 from .scoring_models import (
@@ -360,7 +360,18 @@ def _serialize_checklist_item(item: ChecklistItem, *, with_rule: bool = True) ->
         order=item.order,
         hidden=item.hidden,
         machine_rule=item.machine_rule if with_rule else None,
+        **(_derived_fields(item) if with_rule else {}),
     )
+
+
+def _derived_fields(item: ChecklistItem) -> dict[str, str | dict | None]:
+    """도출(#1293) — 강사 응답에만, 읽기 전용."""
+
+    current = rule_derivation.current_derivation(item)
+    if current is None:
+        return {}
+    kind, rule = current
+    return {"derived_kind": kind, "derived_rule": rule}
 
 
 def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool = True) -> ChecklistItemSavedOut:
@@ -376,6 +387,7 @@ def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool =
         order=item.order,
         hidden=item.hidden,
         machine_rule=item.machine_rule,
+        **_derived_fields(item),
         gradability_warnings=gradability_warnings([item]) if text_changed else [],
     )
 
