@@ -1487,9 +1487,9 @@ def _machine_only_outcome() -> VendorOutcome:
 
 
 def _build_adapter(
-    prepared: PreparedScoring, *, asynchronous: bool = False, model: str | None = None
+    prepared: PreparedScoring, *, asynchronous: bool = False, model: str | None = None, mode: str | None = None
 ) -> LLMScoringAdapter:
-    """`model` 을 주면 의심 올림(#1285) — 그 모델과 그 모델의 추론 강도로 만든다."""
+    """`model` 을 주면 의심 올림(#1285) — 그 모델과 그 모델의 추론 강도로 만든다. `mode` 는 채점 방식 실험(#1295)만 준다."""
 
     return _scoring_adapter(
         connection=prepared.connection,
@@ -1497,6 +1497,7 @@ def _build_adapter(
         reasoning_effort=prepared.escalation_effort if model else prepared.reasoning_effort,
         asynchronous=asynchronous,
         log_context={"class_id": prepared.class_obj.id, "problem_id": prepared.problem.id},
+        mode=mode,
     )
 
 
@@ -1524,19 +1525,20 @@ def _call_agent(prepared: PreparedScoring) -> VendorOutcome:
     return VendorOutcome(output=output, agent=result)
 
 
-def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
-    """벤더 호출(동기) — 시험·즉시 채점 시임이 쓴다. 어댑터가 던진 `LLMAdapterError` 를 값으로 돌려준다."""
+def call_vendor_sync(prepared: PreparedScoring, *, reuse: bool = True, mode: str | None = None) -> VendorOutcome:
+    """벤더 호출(동기) — 시험·즉시 채점 시임이 쓴다. 어댑터가 던진 `LLMAdapterError` 를 값으로 돌려준다.
+    `reuse=False`(재사용 끔)·`mode` 는 채점 방식 실험(#1295)만 준다 — 사본에는 이전 점수가 없고 DB 를 읽지 않는다."""
 
     if prepared.skip_vendor:
         return _machine_only_outcome()
-    reused = reusable_outcome(prepared)
+    reused = reusable_outcome(prepared) if reuse else None
     if reused is not None:
         return reused
     if prepared.agent:
         return _call_agent(prepared)
     selection: ScoringOutput | None = None
     try:
-        adapter = _build_adapter(prepared)
+        adapter = _build_adapter(prepared, mode=mode)
         if prepared.two_step is not None:
             # 두 걸음(#1286): 1차로 파일을 고르고, 2차 준비로 갈아 끼운 뒤 같은 어댑터로 판정한다.
             selection = adapter.score(prepared.scoring_input)
@@ -1549,7 +1551,7 @@ def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
     if escalation_input is None:
         return VendorOutcome(output=output, selection=selection, second_step=second_step)
     try:
-        escalation = _build_adapter(prepared, model=prepared.escalation_model).score(escalation_input)
+        escalation = _build_adapter(prepared, model=prepared.escalation_model, mode=mode).score(escalation_input)
     except LLMAdapterError as exc:
         logger.warning("ClassroomSubmission(pk=%s) 의심 올림 실패 — 첫 판정을 쓴다: %s", prepared.submission.id, exc)
         escalation = None
@@ -1706,18 +1708,7 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
             _clear_scoring_pause(class_obj)
         mark_verified(class_obj.pk, connection)
 
-    reasoning = [
-        _model_entry_staged(v, prepared.sent_lines) if prepared.staged else entry_from_model(v)
-        for v in output.verdicts
-        if v.requirement_id != SYNTAX_CHECK_ITEM_ID
-    ]
-    if outcome.escalation is not None:
-        escalated = {
-            v.requirement_id: _escalated_entry(v, prepared.sent_lines) for v in outcome.escalation.verdicts
-        }
-        reasoning = [escalated.get(entry["checklist_item_id"], entry) for entry in reasoning]
-    if prepared.staged:
-        reasoning = _merge_staged(prepared, reasoning)
+    reasoning = outcome_reasoning(prepared, output, outcome.escalation)
     syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
     score = ClassroomScore.objects.create(
         submission=submission,
@@ -1727,6 +1718,22 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         syntax_check_result=syntax_check_result,
     )
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
+
+
+def outcome_reasoning(prepared: PreparedScoring, output: ScoringOutput, escalation: ScoringOutput | None) -> list[dict]:
+    """모델 응답(과 의심 올림 응답)을 판정 항목(`ClassroomScore.reasoning` 모양)으로 — 결과 쓰기와 채점 방식 실험(#1295)이 함께 쓴다."""
+
+    reasoning = [
+        _model_entry_staged(v, prepared.sent_lines) if prepared.staged else entry_from_model(v)
+        for v in output.verdicts
+        if v.requirement_id != SYNTAX_CHECK_ITEM_ID
+    ]
+    if escalation is not None:
+        escalated = {v.requirement_id: _escalated_entry(v, prepared.sent_lines) for v in escalation.verdicts}
+        reasoning = [escalated.get(entry["checklist_item_id"], entry) for entry in reasoning]
+    if prepared.staged:
+        reasoning = _merge_staged(prepared, reasoning)
+    return reasoning
 
 
 def _merge_staged(prepared: PreparedScoring, model_entries: list[dict]) -> list[dict]:

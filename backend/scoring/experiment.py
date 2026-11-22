@@ -81,12 +81,13 @@ from .services import (
 
 logger = logging.getLogger(__name__)
 
-Method = Literal["single_call", "agent", "self_loop", "classroom_call"]
-METHODS: tuple[Method, ...] = ("single_call", "agent", "self_loop", "classroom_call")
+Method = Literal["single_call", "agent", "self_loop", "classroom_call", "classroom_staged"]
+METHODS: tuple[Method, ...] = ("single_call", "agent", "self_loop", "classroom_call", "classroom_staged")
 #: 벤더를 직접 부르는 방식(칸 하나 = 요청 하나) — 비용을 실험 표에 적고 하루 상한에 직접 더한다.
-DIRECT_METHODS: tuple[Method, ...] = ("single_call", "classroom_call")
+DIRECT_METHODS: tuple[Method, ...] = ("single_call", "classroom_call", "classroom_staged")
 #: 강의실 운영 채점과 같은 프롬프트·한 번 호출(#1262) — 사본 재료(`--material`)에서만 돈다.
-MATERIAL_ONLY_METHODS: tuple[Method, ...] = ("classroom_call",)
+#: `classroom_staged`(#1295)는 같은 사본에서 staged 갈래(기계 판정·인용·의심 올림·두 걸음)를 돈다.
+MATERIAL_ONLY_METHODS: tuple[Method, ...] = ("classroom_call", "classroom_staged")
 
 BASELINE = "agent:claude-sonnet-5-5"
 DEFAULT_ROWS = (
@@ -107,6 +108,8 @@ DEFAULT_ROWS = (
 _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
     "single_call": ((20_000, 1_000), (300_000, 4_000)),
     "classroom_call": ((20_000, 1_000), (300_000, 4_000)),
+    # 한 번 호출 하나 + 의심 올림·두 걸음·도출 호출 몫(#1295) — 높은 쪽은 한 번 호출의 두 배로 잡는다.
+    "classroom_staged": ((20_000, 1_000), (600_000, 8_000)),
     "agent": ((60_000, 2_000), (600_000, 15_000)),
     "self_loop": ((40_000, 2_000), (400_000, 12_000)),
 }
@@ -115,6 +118,7 @@ _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
 CELL_BUDGET_USD: dict[Method, Decimal | None] = {
     "single_call": None,
     "classroom_call": None,
+    "classroom_staged": None,
     "agent": AGENT_RUN_BUDGET_USD,
     "self_loop": SELFLOOP_RUN_BUDGET_USD,
 }
@@ -375,7 +379,7 @@ def record_production(experiment: ScoringExperiment, subjects: Sequence[Material
 
 
 def record_truth(experiment: ScoringExperiment, subjects: Sequence[MaterialSubject]) -> int:
-    """정답이 채워진 제출의 정답을 「정답:사람」 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로. 남긴 제출 수."""
+    """기준 판정이 채워진 제출의 기준 판정을 `TRUTH_ROW`(저장된 칸 이름 「정답:사람」은 그대로) 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로. 남긴 제출 수."""
 
     count = 0
     for s in subjects:
@@ -445,7 +449,7 @@ def spent_today_experiment_usd(now: datetime | None = None) -> Decimal:
 
 
 def _direct_rows() -> Q:
-    return Q(row__startswith="single_call:") | Q(row__startswith="classroom_call:")
+    return Q(row__startswith="single_call:") | Q(row__startswith="classroom_call:") | Q(row__startswith="classroom_staged:")
 
 
 def cost_range(row: Row, observed: Sequence[Decimal] = ()) -> tuple[Decimal, Decimal]:
@@ -740,6 +744,43 @@ def _run_classroom_call(submission: Subject, row: Row, inputs: _Inputs) -> CellR
     )
 
 
+def _run_classroom_staged(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
+    """강의실 staged 갈래(#1295) — 사본에서 기계 판정·인용·의심 올림·두 걸음을 운영 설정대로 돈다. 비용은 그 칸의 모든
+    호출(1차·2차·올림)을 그 호출 모델의 단가로 더한다. 판정마다 기계가 정했는가(`source`)를 남겨 보고표가 센다."""
+
+    if inputs.item is None:
+        return CellResult("failed", problem="classroom_staged 는 사본 재료에서만 돈다")
+    key = vendor_key(row.vendor) if _REAL_VENDOR.get() else None
+    out = em.CLASSROOM_EXPERIMENT_STAGED_CALL.get()(inputs.item, model=row.model, api_key=key or None)
+    if out.status != "scored":
+        return CellResult("held", problem=out.problem)
+    verdicts = [RequirementVerdict(requirement_id=v.checklist_item_id, is_met=v.is_met, reasoning=v.reasoning) for v in out.verdicts]
+    cost = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=out.input_tokens, output_tokens=out.output_tokens))
+    input_tokens, output_tokens = out.input_tokens, out.output_tokens
+    for model, tokens_in, tokens_out in out.extra_usage:
+        cost += usage_cost_usd(vendor_for(model), model, Usage(input_tokens=tokens_in, output_tokens=tokens_out))  # type: ignore[arg-type]
+        input_tokens, output_tokens = input_tokens + tokens_in, output_tokens + tokens_out
+    machine = set(out.machine_ids)
+    return CellResult(
+        "scored",
+        score=_percentage(requirements=inputs.requirements, verdicts=verdicts),
+        verdicts=[
+            {
+                "requirement_id": v.requirement_id,
+                "met": v.is_met,
+                "evidence": [],
+                "reason": v.reasoning,
+                "source": "machine" if v.requirement_id in machine else "model",
+            }
+            for v in verdicts
+        ],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost,
+        model_version=out.model_version,
+    )
+
+
 def _run_agent(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
     assert inputs.snapshot is not None
     requirements = inputs.requirements
@@ -863,6 +904,7 @@ _RUNNERS = {
     "agent": _run_agent,
     "self_loop": _run_self_loop,
     "classroom_call": _run_classroom_call,
+    "classroom_staged": _run_classroom_staged,
 }
 
 

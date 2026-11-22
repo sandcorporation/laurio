@@ -65,6 +65,7 @@ class Command(BaseCommand):
                 cost_usd=Decimal(r.cost_usd),
                 duration_seconds=r.duration_seconds,
                 verdicts=_verdicts(r.verdicts),
+                **_staged_counts(r.verdicts),
             )
             for r in experiment.runs.all()
             if not is_infra_failure(r.status, r.problem)  # 결과가 아니다(#1257) — 다음 실행에서 다시 돈다
@@ -106,6 +107,16 @@ class Command(BaseCommand):
         if production:
             md += band_lines(runs, production_row=production[0], row_names=[*experiment.rows, *production[1:]])
         self.stdout.write(md, ending="")
+
+
+def _staged_counts(raw: object) -> dict[str, int]:
+    """staged 줄(#1295)의 판정에 달린 출처(`source`)로 기계 확정·모델에 간 항목 수를 센다 — 출처가 없으면(다른 줄) 비운다."""
+
+    items = [i for i in raw if isinstance(i, dict) and i.get("source") in ("machine", "model")] if isinstance(raw, list) else []
+    if not items:
+        return {}
+    machine = sum(1 for i in items if i["source"] == "machine")
+    return {"machine_items": machine, "model_items": len(items) - machine}
 
 
 def _verdicts(raw: object) -> tuple[tuple[int, bool], ...]:

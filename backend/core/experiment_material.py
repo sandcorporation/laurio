@@ -51,6 +51,8 @@ class ChecklistEntry:
     grade: str  # "required" | "optional" (가산은 운영 채점이 읽지 않아 담지 않는다)
     hidden: bool
     points: int
+    #: 강사가 단 기계 규칙(#1295) — `classroom_staged` 줄이 기계 판정에 쓴다. 규칙이 없는 항목은 키가 없다.
+    machine_rule: dict[str, object] | None = None  # `ChecklistItem.machine_rule` 그대로(저장 스키마가 검증한 JSON)
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ class ProductionVerdict:
 
 @dataclass(frozen=True)
 class TruthVerdict:
-    """사람이 매긴 정답 — 항목 하나가 충족인가(#1288). 근거 글은 받지 않는다."""
+    """대장이 매긴 기준 판정 — 항목 하나가 충족인가(#1288). 근거 글은 받지 않는다."""
 
     checklist_item_id: int
     is_met: bool
@@ -90,7 +92,7 @@ class Item:
     checklist: tuple[ChecklistEntry, ...]
     verdicts: tuple[ProductionVerdict, ...]
     model_version: str
-    #: 항목별 정답(#1288) — 비었으면 정답이 없는 재료다. 명령 `compare_scoring_methods --fill-truth` 가 채운다.
+    #: 항목별 기준 판정(#1288) — 비었으면 기준 판정이 없는 재료다. 명령 `compare_scoring_methods --fill-truth` 가 채운다.
     truth: tuple[TruthVerdict, ...] = ()
 
     @property
@@ -149,7 +151,7 @@ def _item_json(item: Item) -> bytes:
         "material_id": item.material_id,
         "asset_kind": item.asset_kind,
         "problem": item.problem.__dict__,
-        "checklist": [c.__dict__ for c in item.checklist],
+        "checklist": [{k: v for k, v in c.__dict__.items() if k != "machine_rule" or v is not None} for c in item.checklist],
         "verdicts": [v.__dict__ for v in item.verdicts],
         "model_version": item.model_version,
         **({"truth": [t.__dict__ for t in item.truth]} if item.truth else {}),
@@ -315,6 +317,10 @@ class ClassroomCallResult:
     model_version: str = ""
     problem: str = ""
     prompt: str = ""
+    #: staged 줄(#1295) — 기계가 정한 항목 id(나머지는 모델에 갔다). 한 번 호출 줄은 비어 있다.
+    machine_ids: tuple[int, ...] = ()
+    #: `model` 이 아닌 모델로 부른 호출(의심 올림)의 (모델, 입력 토큰, 출력 토큰) — 비용을 그 모델 단가로 더한다.
+    extra_usage: tuple[tuple[str, int, int], ...] = ()
 
 
 class ClassroomExperimentCall(Protocol):
@@ -324,23 +330,25 @@ class ClassroomExperimentCall(Protocol):
 
 
 CLASSROOM_EXPERIMENT_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 채점 한 번 호출(실험)", "classroom.apps")
+#: 강의실 staged 갈래(#1295) — 같은 모양, 기계 판정·근거 인용·의심 올림·두 걸음을 운영 설정대로 돈다(재사용은 끈다).
+CLASSROOM_EXPERIMENT_STAGED_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 staged 채점(실험)", "classroom.apps")
 
 
-# ── 항목별 정답(#1288) ────────────────────────────────────────────────────────────────────────────────
+# ── 항목별 기준 판정(#1288) ────────────────────────────────────────────────────────────────────────────────
 
 _MET_WORDS = {"충족": True, "met": True, "true": True, "1": True, "미충족": False, "unmet": False, "false": False, "0": False}
 TRUTH_COLUMNS = ("material_id", "item_id", "is_met")
 
 
 def parse_truth_csv(text: str, items: Sequence[Item]) -> dict[str, tuple[TruthVerdict, ...]]:
-    """정답 CSV(`material_id,item_id,is_met`) → 가명 id 별 정답. **원문·학생 정보는 받지 않는다** — 열이 셋뿐이다.
+    """기준 판정 CSV(`material_id,item_id,is_met`) → 가명 id 별 기준 판정. **원문·학생 정보는 받지 않는다** — 열이 셋뿐이다.
 
     거절: 열이 다르다 · 모르는 가명 id · 그 제출의 체크리스트에 없는 항목 id · 같은 칸이 둘 · 충족 값을 못 읽는다 ·
-    CSV 에 나온 제출의 항목이 빠졌다(정답은 제출마다 체크리스트 전부여야 한다 — 일부만 있으면 정확도가 기울어진다)."""
+    CSV 에 나온 제출의 항목이 빠졌다(기준 판정은 제출마다 체크리스트 전부여야 한다 — 일부만 있으면 정확도가 기울어진다)."""
 
     reader = csv.DictReader(io.StringIO(text))
     if tuple(reader.fieldnames or ()) != TRUTH_COLUMNS:
-        raise MaterialError(f"정답 CSV 의 열은 {','.join(TRUTH_COLUMNS)} 이어야 한다")
+        raise MaterialError(f"기준 판정 CSV 의 열은 {','.join(TRUTH_COLUMNS)} 이어야 한다")
     by_id = {i.material_id: i for i in items}
     seen: dict[str, dict[int, bool]] = {}
     for line_no, row in enumerate(reader, start=2):
@@ -364,13 +372,13 @@ def parse_truth_csv(text: str, items: Sequence[Item]) -> dict[str, tuple[TruthVe
     for material_id, judged in seen.items():
         missing = sorted({c.id for c in by_id[material_id].checklist} - set(judged))
         if missing:
-            raise MaterialError(f"제출 {material_id} 의 항목 {missing} 정답이 빠졌다")
+            raise MaterialError(f"제출 {material_id} 의 항목 {missing} 기준 판정이 빠졌다")
         out[material_id] = tuple(TruthVerdict(i, judged[i]) for i in sorted(judged))
     return out
 
 
 def fill_truth(path: Path, truth: dict[str, tuple[TruthVerdict, ...]], *, repo_root: Path) -> int:
-    """사본 파일의 항목에 정답을 채워 같은 자리에 다시 쓴다(0600, 체크섬 새로). 채운 제출 수를 돌려준다."""
+    """사본 파일의 항목에 기준 판정을 채워 같은 자리에 다시 쓴다(0600, 체크섬 새로). 채운 제출 수를 돌려준다."""
 
     material = load(path, repo_root=repo_root)
     items = [dataclasses.replace(i, truth=truth.get(i.material_id, i.truth)) for i in material.items]

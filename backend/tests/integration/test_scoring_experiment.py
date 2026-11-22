@@ -499,7 +499,7 @@ def test_cost_only_runs_and_the_report_says_it_is_not_a_score_comparison(scored,
     assert ScoringExperiment.objects.get(name="c").cost_only is True
     md = _call("experiment_report", "c")
     assert md.startswith("# 채점 방식 비교 — c\n\n- 비용 측정 전용 — 점수 비교 아님")
-    assert "미충족 재현율·오탐률은 「—」" in md
+    assert "기준 미충족 재현율·기준 대비 오탐률은 「—」" in md
 
 
 @pytest.mark.django_db

@@ -179,6 +179,56 @@ def test_classroom_call_uses_the_classroom_prompt_and_goes_real_only_on_confirm(
     assert scores == {em.pseudonym("t1262", 1): Decimal("100.00"), em.pseudonym("t1262", 2): Decimal("0.00")}
 
 
+def _staged_item(n: int, *, rule: bool) -> em.Item:
+    base = _item(n, met=rule)
+    first = em.ChecklistEntry(
+        REQ, "main.py 가 있다", "required", False, 1, machine_rule={"kind": "path_exists", "path": "main.py"} if rule else None
+    )
+    return em.Item(**{**base.__dict__, "checklist": (first, base.checklist[1])})
+
+
+STAGED = "classroom_staged:gpt-4.1-mini"
+
+
+@pytest.mark.django_db
+def test_classroom_staged_runs_beside_classroom_call_and_splits_machine_from_model(home, money, monkeypatch):
+    from classroom import scoring as classroom_scoring
+
+    modes = []
+
+    def adapter(**kwargs):
+        modes.append(kwargs["mode"])
+        return FakeClassroomScoringAdapter()
+
+    monkeypatch.setattr(classroom_scoring, "_scoring_adapter", adapter)
+    monkeypatch.setattr(classroom_material, "_scoring_adapter", adapter)
+    path = _material(home, [_staged_item(1, rule=True), _staged_item(2, rule=False)])
+
+    out = _call("compare_scoring_methods", "--material", str(path), "--rows", f"{CLASSROOM},{STAGED}", "--repeat", "1")
+    assert STAGED in out and CLASSROOM in out and "--confirm 이 없어 모델을 부르지 않았다." in out and not modes
+
+    _call("compare_scoring_methods", "--material", str(path), "--rows", f"{CLASSROOM},{STAGED}", "--repeat", "1", "--name", "s", "--confirm")
+
+    staged = {r.material_id: r for r in ScoringExperimentRun.objects.filter(row=STAGED)}
+    assert len(ScoringExperimentRun.objects.filter(row=CLASSROOM)) == 2 and len(staged) == 2
+    for run in staged.values():
+        assert len(run.verdicts) == 2  # 기계 확정 + 모델 = 항목 수
+    sources = lambda n: [v["source"] for v in staged[em.pseudonym("t1262", n)].verdicts]  # noqa: E731
+    assert sources(1) == ["machine", "model"] and sources(2) == ["model", "model"]
+    assert staged[em.pseudonym("t1262", 1)].verdicts[0]["met"] is True
+
+    md = _call("experiment_report", "s")
+    assert "| 기계 확정 항목 수 | 모델에 간 항목 수 |" in md.replace("---", "").replace("  ", " ") or "기계 확정 항목 수" in md
+    row = next(line for line in md.splitlines() if line.startswith(f"| {STAGED} |"))
+    assert row.endswith("| 0.5 | 1.5 |")
+    assert next(line for line in md.splitlines() if line.startswith(f"| {CLASSROOM} |")).endswith("| — | — |")
+
+
+def test_classroom_staged_needs_material():
+    with pytest.raises(ex.ExperimentError, match="사본 재료"):
+        ex.parse_rows(STAGED)
+
+
 def test_classroom_call_needs_material():
     with pytest.raises(ex.ExperimentError, match="사본 재료"):
         ex.parse_rows(CLASSROOM)
@@ -248,7 +298,7 @@ def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home
 
     out = _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(_truth_csv(tmp_path, _full_truth(m1, m2))))
 
-    assert "정답을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
+    assert "기준 판정을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
     loaded = em.load(path, repo_root=Path("/nonexistent-repo-root"))
     by_id = {i.material_id: i for i in loaded.items}
     assert by_id[m1].truth == (em.TruthVerdict(REQ, True), em.TruthVerdict(OPT, False))
@@ -260,7 +310,7 @@ def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home
 @pytest.mark.parametrize(
     "rows_of, reason",
     [
-        (lambda m1, m2: [(m1, REQ, "충족")], "정답이 빠졌다"),
+        (lambda m1, m2: [(m1, REQ, "충족")], "기준 판정이 빠졌다"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "충족"), ("0" * 12, REQ, "충족")], "재료에 없는 제출 id"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, 999, "충족")], "체크리스트에 없는 항목 id"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "글쎄")], "충족 값을 읽을 수 없다"),
@@ -308,12 +358,12 @@ def test_report_fills_accuracy_recall_and_false_positive_rate_when_the_material_
 
     # 줄: 제출1 REQ(정답 충족)을 미충족으로 → 오답·오탐, 제출2 REQ(정답 미충족)은 미충족으로 → 정답·재현.
     single = _cells_of(md, SINGLE)
-    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("50.0%", "100.0%", "100.0%")
+    assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("50.0%", "100.0%", "100.0%")
     # 운영 판정은 정답과 네 칸 모두 같다.
     production = _cells_of(md, "운영:gpt-4.1-mini-2025-04-14")
-    assert (production["항목 판정 정확도"], production["미충족 재현율"], production["오탐률"]) == ("100.0%", "100.0%", "0.0%")
-    assert "정답:사람" not in md and "정답(알려진 미충족)이 없는 재료" not in md
-    assert "사람이 매긴 항목별 정답과 견준 값" in md
+    assert (production["기준 판정과의 일치"], production["기준 미충족 재현율"], production["기준 대비 오탐률"]) == ("100.0%", "100.0%", "0.0%")
+    assert "정답:사람" not in md and "기준 판정(알려진 미충족)이 없는 재료" not in md
+    assert "항목별 기준 판정과 견준 값" in md
 
 
 @pytest.mark.django_db
@@ -325,5 +375,5 @@ def test_report_without_truth_keeps_the_dash_cells_and_the_note(home, money, mon
     md = _call("experiment_report", "n")
 
     single = _cells_of(md, SINGLE)
-    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("—", "—", "—")
-    assert "정답(알려진 미충족)이 없는 재료" in md
+    assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("—", "—", "—")
+    assert "기준 판정(알려진 미충족)이 없는 재료" in md
