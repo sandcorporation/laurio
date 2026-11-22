@@ -9,8 +9,11 @@ import Link from "next/link";
 
 import { Card, CardHeader } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { knownOr } from "@/lib/util/known-or";
 import { withLate } from "@/lib/problems/due-dates";
 import { useRecentAttempts, type RecentAttemptRow, type RecentAttemptStatus } from "@/lib/classes/use-recent-attempts";
+
+const UNKNOWN_STATUS = { label: "확인 중", className: "text-ink/45" };
 
 const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: string }> = {
   passed: { label: "통과", className: "text-success" },
@@ -47,7 +50,7 @@ export function AttemptLine({
   toggle?: { expanded: boolean; onToggle: () => void };
   detail?: ReactNode;
 }) {
-  const status = STATUS_LABEL[attempt.status];
+  const status = knownOr(STATUS_LABEL, attempt.status, UNKNOWN_STATUS);
   const body = (
     <>
       <AttemptMark status={attempt.status} />
