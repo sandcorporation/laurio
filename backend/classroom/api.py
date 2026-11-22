@@ -1494,6 +1494,7 @@ def _single_cell_out(cell: scoring_calculator.SingleCall) -> dict[str, object]:
         "open_ended": cell.open_ended,
         "fits": cell.fits,
         "capacity_chars": cell.capacity_chars,
+        "capacity_chars_hangul": cell.capacity_chars_hangul,
         "route": cell.route,
         "seconds": cell.seconds,
     }

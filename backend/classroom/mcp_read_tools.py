@@ -203,6 +203,7 @@ def _per_submission(calc: scoring_calculator.Calculation) -> dict[str, str | int
         "source_chars": calc.selection.source_chars,
         "single_call_krw": round(row.single.usd * krw),
         "single_call_capacity_chars": row.single.capacity_chars,
+        "single_call_capacity_chars_hangul": row.single.capacity_chars_hangul,
         "single_call_route": row.single.route,
         "agent_krw": round(row.agent.usd * krw) if row.agent.usd is not None else None,
         "agent_krw_median": round(measured.median * krw) if measured.median is not None else None,
@@ -330,6 +331,10 @@ _PER_SUBMISSION_ESTIMATE = {
         "single_call_capacity_chars": {
             "type": "integer",
             "description": "이 모델이 한 번 호출에 담는 소스 글자 수 — 넘으면 채점하지 않고 보류한다",
+        },
+        "single_call_capacity_chars_hangul": {
+            "type": "integer",
+            "description": "글자당 바이트 최대로 셈한 감당 글자 수 — 한글 위주 소스",
         },
         "single_call_route": {"type": "string", "enum": ["single", "two_step", "hold"]},
         "agent_krw": {"type": ["integer", "null"], "description": "에이전트 예상 — 못 받는 프로바이더면 null"},

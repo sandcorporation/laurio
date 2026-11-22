@@ -116,9 +116,13 @@ export function capacityLabel(chars: number): string {
 
 /** 한 번 호출 칸의 둘째 줄 — 감당 크기와 이 크기에서 무슨 일이 생기는가. */
 export function singleNote(single: CalculatorSingleCell, staged: CalculatorStaged): string {
-  if (single.route === "hold") return `담지 못함 — 보류(채점 안 함) · 감당 ${capacityLabel(single.capacity_chars)}`;
+  if (single.route === "hold") return `담지 못함 — 보류(채점 안 함) · ${capacityNote(single)}`;
   if (single.route === "two_step") return `두 걸음 · 고른 파일 ${capacityLabel(staged.budget_chars)}까지 읽음`;
-  return `감당 ${capacityLabel(single.capacity_chars)}`;
+  return capacityNote(single);
+}
+
+function capacityNote(single: CalculatorSingleCell): string {
+  return `감당 ${capacityLabel(single.capacity_chars)} · 한글 위주 ${capacityLabel(single.capacity_chars_hangul)}`;
 }
 
 /** 에이전트 칸의 둘째 줄 — 실측이 있으면 중앙, 없으면 가정한 시간만. */

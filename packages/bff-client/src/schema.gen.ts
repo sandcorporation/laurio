@@ -10863,6 +10863,8 @@ export interface components {
         ScoringCalculatorSingleCellOut: {
             /** Capacity Chars */
             capacity_chars: number;
+            /** Capacity Chars Hangul */
+            capacity_chars_hangul: number;
             /** Fits */
             fits: boolean;
             /** Input Tokens */

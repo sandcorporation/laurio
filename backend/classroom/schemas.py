@@ -406,6 +406,8 @@ class ScoringCalculatorSingleCellOut(Schema):
     fits: bool
     #: 한 번 호출에 담을 수 있는 소스 글자 수 — 채점이 쓰는 `source_budget_bytes` 에서 나온다.
     capacity_chars: int
+    #: 글자당 바이트 최대(한글 위주)로 셈한 감당 글자 수 — 보이기만 하고 판정은 `capacity_chars` 기준이다.
+    capacity_chars_hangul: int
     #: single(한 번에 담김) | two_step(두 걸음, staged) | hold(담지 못해 「크기 초과」 보류 — 채점 안 함, 금액 0)
     route: str
     #: 가정한 걸린 시간(초).

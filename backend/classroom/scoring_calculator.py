@@ -92,6 +92,10 @@ ESCALATION_INSTRUCTION_CHARS = 1_435
 #: 전체 합 1.006(조율자 2026-11-22). 코드 위주 제출은 바이트 ≈ 글자라 p50 을 쓴다. 감당 글자 = 감당 바이트 ÷ 이 값.
 BYTES_PER_CHAR = 1.03
 
+#: 글자당 바이트 최대 — 같은 30건의 최대 1.482(한글 위주 제출). 화면의 「한글 위주」 감당 글자 수만 이 값으로 셈하고,
+#: 「보류」 판정은 `BYTES_PER_CHAR` 그대로다.
+BYTES_PER_CHAR_MAX = 1.48
+
 #: 한 번 호출 채점의 걸린 시간(초) — work dev 실험 `scoring_scoringexperimentrun.duration_seconds` p50. 「가정」이다.
 ASSUMED_SINGLE_SECONDS = 5.0
 #: 에이전트 한 건의 걸린 시간(초) 프로바이더별 — 같은 실험 p50(Claude 12.5, OpenAI 72.9 — gpt-5-mini 3건).
@@ -177,6 +181,8 @@ class SingleCall:
     fits: bool
     #: 한 번 호출에 담을 수 있는 소스 글자 수 — `source_budget_bytes` 를 `BYTES_PER_CHAR` 로 나눈 값.
     capacity_chars: int
+    #: 글자당 바이트를 `BYTES_PER_CHAR_MAX` 로 셈한 감당 글자 수(한글 위주 소스).
+    capacity_chars_hangul: int
     route: Route
     #: 가정한 걸린 시간(초).
     seconds: float
@@ -414,6 +420,18 @@ def capacity_chars(model_id: str, *, instruction_chars: int) -> int:
     return int(source_budget_bytes(model_id, instruction_bytes=instruction_chars) // BYTES_PER_CHAR)
 
 
+def capacity_chars_hangul(model_id: str, *, instruction_chars: int) -> int:
+    """`capacity_chars` 와 같은 바이트 예산을 글자당 바이트 최대로 나눈 값 — 한글 위주 소스가 담기는 글자 수."""
+
+    return int(source_budget_bytes(model_id, instruction_bytes=instruction_chars) // BYTES_PER_CHAR_MAX)
+
+
+def fits_source_bytes(model_id: str, *, source_bytes: int, instruction_chars: int) -> bool:
+    """소스가 `source_bytes` 바이트일 때 한 번 호출에 다 들어가는가 — 채점의 「크기 초과」 보류 판정과 같은 예산이다."""
+
+    return source_bytes <= source_budget_bytes(model_id, instruction_bytes=instruction_chars)
+
+
 def single_call(
     model_id: str,
     reasoning_effort: str | None,
@@ -437,7 +455,7 @@ def single_call(
     if effort is not None:
         output_tokens += scoring_cost.REASONING_OUTPUT_TOKENS[effort] - scoring_cost.NON_REASONING_OUTPUT_TOKENS
     capacity = capacity_chars(model_id, instruction_chars=instruction_chars)
-    fits = source_chars * BYTES_PER_CHAR <= source_budget_bytes(model_id, instruction_bytes=instruction_chars)
+    fits = fits_source_bytes(model_id, source_bytes=source_chars * BYTES_PER_CHAR, instruction_chars=instruction_chars)
     two_step = staged and two_step_threshold_chars > 0 and (source_chars > two_step_threshold_chars or not fits)
     route: Route = "two_step" if two_step else ("single" if fits else "hold")
     seconds = ASSUMED_SINGLE_SECONDS * (2 if two_step else 1)
@@ -446,7 +464,9 @@ def single_call(
         cost = scoring_cost.attempt_cost(model_id, reasoning_effort, prompt_chars=0, output_tokens=0)
         if cost is None:  # pragma: no cover - 모델 목록이 단가표에서 온다.
             raise ValueError(f"단가표에 없는 모델: {model_id}")
-        return SingleCall(0, 0, 0.0, cost.open_ended, fits, capacity, route, 0.0)
+        return SingleCall(
+            0, 0, 0.0, cost.open_ended, fits, capacity, capacity_chars_hangul(model_id, instruction_chars=instruction_chars), route, 0.0
+        )
     prompt_chars = instruction_chars + (min(source_chars, two_step_budget_chars) if two_step else source_chars)
     cost = scoring_cost.attempt_cost(model_id, reasoning_effort, prompt_chars=prompt_chars, output_tokens=output_tokens)
     if cost is None:  # pragma: no cover - 모델 목록이 단가표에서 온다.
@@ -466,6 +486,7 @@ def single_call(
         open_ended=cost.open_ended,
         fits=fits,
         capacity_chars=capacity,
+        capacity_chars_hangul=capacity_chars_hangul(model_id, instruction_chars=instruction_chars),
         route=route,
         seconds=seconds,
     )
