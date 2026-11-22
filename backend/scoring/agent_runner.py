@@ -31,15 +31,18 @@ import json
 import os
 import shutil
 import signal
+import socket
 import stat
 import subprocess
 import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -64,6 +67,8 @@ RUN_TIMEOUT_SECONDS = 600
 SERVICE_PORT = 8003
 DEFAULT_SERVICE_URL = f"http://agent-grader:{SERVICE_PORT}"
 DEFAULT_PROXY_BASE_URL = "http://llm-proxy:8002"  # #998 — `agent` 네트워크 안의 프록시
+#: 프록시에 TCP 로 닿는지 보는 데 기다리는 시간(#1326). 같은 네트워크 안이라 닿으면 바로 붙는다.
+PROXY_PROBE_TIMEOUT_SECONDS = 3.0
 
 # 박제본 상한. 다운로드 상한(#996 의 100MB)과 같은 크기의 압축본을 받고, 풀린 크기는 tmpfs·메모리 한도
 # 안에 둔다(동시 2 × 풀린 것 + CLI 둘). 넘으면 실행하지 않고 413/400 으로 돌려준다.
@@ -117,6 +122,10 @@ MODES: tuple[Mode, ...] = ("cli", "selfloop")
 #: 학생이 올린 zip(그대로 푼다). zip 모양으로 추측하지 않고 부르는 쪽이 아는 자산 종류로 정한다.
 RepoKind = Literal["repository", "upload"]
 REPO_KINDS: tuple[RepoKind, ...] = ("repository", "upload")
+#: 실행기가 모델 호출 프록시(`llm-proxy`)에 닿지 못한 까닭(#1326) — 결과의 `proxy_unreachable`. CLI 실패는 결과(200)에
+#: 담겨 오므로, 이 표식이 없으면 부르는 쪽은 프록시 불통을 제출의 받아들임 실패와 가를 수 없다.
+ProxyFailure = Literal["connection_refused", "name_resolution", "timeout", "connect_error"]
+ProxyProbe = Callable[[str], ProxyFailure | None]
 MAX_SELFLOOP_REQUIREMENTS = 100
 
 
@@ -149,6 +158,9 @@ class RunResult(TypedDict):
     stdout: str
     stdout_truncated: bool
     stderr_tail: str
+    #: 실행 전이나 실패한 실행 뒤에 프록시에 닿지 못했으면 그 까닭(#1326), 닿았으면 None. 실행 전에 닿지 못하면
+    #: CLI·루프를 띄우지 않는다(`exit_code` None, 빈 stdout).
+    proxy_unreachable: ProxyFailure | None
 
 
 class RunRejected(Exception):
@@ -166,6 +178,33 @@ class AgentGraderBusy(Exception):
 
 class AgentGraderError(Exception):
     """실행기에 닿지 못했거나 알 수 없는 응답 — 일시 실패로 센다."""
+
+
+# ── 프록시 닿음 확인(#1326) ───────────────────────────────────────────────────────────────────────────────
+
+
+def proxy_failure(exc: OSError) -> ProxyFailure:
+    """TCP 연결 실패 하나를 까닭으로."""
+
+    if isinstance(exc, socket.gaierror):
+        return "name_resolution"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, ConnectionRefusedError):
+        return "connection_refused"
+    return "connect_error"
+
+
+def probe_proxy(base_url: str) -> ProxyFailure | None:
+    """프록시 주소에 TCP 로 붙어 본다 — 이름 풀이·연결만 본다(HTTP 요청은 보내지 않는다). 닿으면 None."""
+
+    parts = urllib.parse.urlsplit(base_url)
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        with socket.create_connection((parts.hostname or "", port), timeout=PROXY_PROBE_TIMEOUT_SECONDS):
+            return None
+    except OSError as exc:
+        return proxy_failure(exc)
 
 
 # ── 고정 인자 ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -448,6 +487,7 @@ class RunnerConfig:
     work_root: Path = Path("/work")
     proxy_base_url: str = DEFAULT_PROXY_BASE_URL
     cli_path: str = CLI_PATH  # 시험은 가짜 `claude`·`codex` 가 든 폴더를 앞에 둔다
+    probe: ProxyProbe = probe_proxy  # 시험은 프록시 없이 도는 실행에 「닿음」을 넣는다
 
     @classmethod
     def from_env(cls) -> RunnerConfig:
@@ -466,6 +506,10 @@ def execute_run(spec: RunSpec, repo_zip: Path, config: RunnerConfig) -> RunResul
     try:
         run_dir.mkdir(parents=True)
         prefix = extract_repo(repo_zip, repo, repo_kind=spec.get("repo_kind", "repository"))
+        unreachable = config.probe(config.proxy_base_url)
+        if unreachable is not None:
+            # 프록시가 없으면 CLI·루프는 헤매다 실패할 뿐이다 — 띄우지 않고 까닭만 돌려준다.
+            return _proxy_unreachable_result(spec, run_id, prefix, unreachable)
         if spec.get("mode") == "selfloop":
             return _execute_selfloop(spec, repo, prefix, run_id, config)
         home.mkdir()
@@ -496,12 +540,15 @@ def execute_run(spec: RunSpec, repo_zip: Path, config: RunnerConfig) -> RunResul
         )
         timeout = spec.get("timeout_seconds", RUN_TIMEOUT_SECONDS)
         outcome = _run_process(argv, env=env, cwd=repo, stdin_text=spec["prompt"], timeout=timeout, out_dir=run_dir)
+        failed = outcome["timed_out"] or outcome["exit_code"] != 0
         return {
             "run_id": run_id,
             "vendor": spec["vendor"],
             "cli_version": version,
             "repo_root_prefix": prefix,
             **outcome,
+            # 실행 중에 프록시가 내려갔을 수 있다 — 실패한 실행만 다시 붙어 본다.
+            "proxy_unreachable": config.probe(config.proxy_base_url) if failed else None,
         }
     finally:
         _remove_tree(run_dir)
@@ -524,6 +571,12 @@ def _execute_selfloop(spec: RunSpec, repo: Path, prefix: str, run_id: str, confi
         seconds=spec.get("timeout_seconds", selfloop.RUN_SECONDS),
     )
     stdout = json.dumps(output, ensure_ascii=False)
+    loop = output["loop"]
+    failed = (
+        loop["stopped"] is not None
+        or bool(loop["map"]["failed"])
+        or len(output["verdicts"]) < len(spec.get("requirements", []))
+    )
     return {
         "run_id": run_id,
         "vendor": spec["vendor"],
@@ -535,6 +588,26 @@ def _execute_selfloop(spec: RunSpec, repo: Path, prefix: str, run_id: str, confi
         "stdout": stdout,
         "stdout_truncated": False,
         "stderr_tail": "",
+        # 루프는 호출 실패를 그 요구사항의 미판정으로 삼킨다 — 판정이 빠졌거나 멈췄으면 다시 붙어 본다.
+        "proxy_unreachable": config.probe(config.proxy_base_url) if failed else None,
+    }
+
+
+def _proxy_unreachable_result(spec: RunSpec, run_id: str, prefix: str, failure: ProxyFailure) -> RunResult:
+    selfloop_version = f"selfloop-{selfloop.SELFLOOP_VERSION}"
+    cli_version = CLAUDE_CODE_VERSION if spec["vendor"] == "anthropic" else CODEX_VERSION
+    return {
+        "run_id": run_id,
+        "vendor": spec["vendor"],
+        "cli_version": selfloop_version if spec.get("mode") == "selfloop" else cli_version,
+        "exit_code": None,
+        "timed_out": False,
+        "duration_seconds": 0.0,
+        "repo_root_prefix": prefix,
+        "stdout": "",
+        "stdout_truncated": False,
+        "stderr_tail": "",
+        "proxy_unreachable": failure,
     }
 
 

@@ -9,12 +9,14 @@ from __future__ import annotations
 import ast
 import hashlib
 import io
+import socket
 import json
 import stat
 import sys
 import threading
 import zipfile
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -70,7 +72,7 @@ def cli_dir(tmp_path: Path) -> Path:
 def config(tmp_path: Path, cli_dir: Path) -> ar.RunnerConfig:
     work = tmp_path / "work"
     work.mkdir()
-    return ar.RunnerConfig(work_root=work, proxy_base_url="http://proxy.test:8002", cli_path=f"{cli_dir}:/usr/bin:/bin")
+    return ar.RunnerConfig(work_root=work, proxy_base_url="http://proxy.test:8002", cli_path=f"{cli_dir}:/usr/bin:/bin", probe=_reachable)
 
 
 def _spec(vendor: ar.Vendor = "anthropic", **extra: object) -> ar.RunSpec:
@@ -648,3 +650,97 @@ def test_only_the_agent_scorer_calls_the_runner() -> None:
     services_text = (REPO_ROOT / "backend/scoring/services.py").read_text(encoding="utf-8")
     assert "from .agent_runner import AgentGraderBusy, AgentGraderError\n" in services_text
     assert "request_run" not in services_text
+
+
+# ── 프록시에 닿지 못함(#1326) ──────────────────────────────────────────────────────────────────────────────
+
+
+def _reachable(_url: str) -> ar.ProxyFailure | None:
+    return None
+
+
+class _Probes:
+    """`RunnerConfig.probe` 자리 — 차례로 답을 내고 몇 번 불렸는지 센다."""
+
+    def __init__(self, *answers: ar.ProxyFailure | None) -> None:
+        self.answers = list(answers)
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> ar.ProxyFailure | None:
+        self.urls.append(url)
+        return self.answers.pop(0)
+
+
+def _closed_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_probe_tells_a_closed_port_an_unknown_name_and_a_listening_proxy_apart() -> None:
+    assert ar.probe_proxy(f"http://127.0.0.1:{_closed_port()}") == "connection_refused"
+    assert ar.probe_proxy("http://llm-proxy.invalid:8002") == "name_resolution"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        assert ar.probe_proxy(f"http://127.0.0.1:{listener.getsockname()[1]}") is None
+
+
+@pytest.mark.parametrize(
+    ("error", "failure"),
+    [
+        (ConnectionRefusedError(), "connection_refused"),
+        (socket.gaierror(-2, "Name or service not known"), "name_resolution"),
+        (TimeoutError("timed out"), "timeout"),
+        (OSError(113, "No route to host"), "connect_error"),
+    ],
+)
+def test_each_connect_error_has_its_reason(error: OSError, failure: str) -> None:
+    assert ar.proxy_failure(error) == failure
+
+
+@pytest.mark.parametrize("vendor", ["anthropic", "openai"])
+def test_an_unreachable_proxy_before_the_run_starts_no_cli(tmp_path: Path, config: ar.RunnerConfig, vendor: ar.Vendor) -> None:
+    probes = _Probes("timeout")
+    result = ar.execute_run(_spec(vendor), _write_zip(tmp_path, _zip({"a.py": "1"})), replace(config, probe=probes))
+    assert result["proxy_unreachable"] == "timeout"
+    assert result["exit_code"] is None and result["stdout"] == ""
+    assert probes.urls == ["http://proxy.test:8002"]
+    assert list(config.work_root.iterdir()) == []
+
+
+def test_a_cli_that_fails_mid_run_is_checked_against_the_proxy_again(tmp_path: Path, config: ar.RunnerConfig) -> None:
+    fake = Path(config.cli_path.split(":")[0]) / "claude"
+    fake.write_text(fake.read_text().replace('os.environ.get("FAKE_EXIT", "0")', '"1"'))
+    probes = _Probes(None, "connection_refused")
+    result = ar.execute_run(_spec(), _write_zip(tmp_path, _zip({"a.py": "1"})), replace(config, probe=probes))
+    assert result["exit_code"] == 1
+    assert result["proxy_unreachable"] == "connection_refused"
+    assert len(probes.urls) == 2
+
+
+def test_a_cli_failure_with_the_proxy_up_is_not_marked(tmp_path: Path, config: ar.RunnerConfig) -> None:
+    fake = Path(config.cli_path.split(":")[0]) / "claude"
+    fake.write_text(fake.read_text().replace('os.environ.get("FAKE_EXIT", "0")', '"1"'))
+    probes = _Probes(None, None)
+    result = ar.execute_run(_spec(), _write_zip(tmp_path, _zip({"a.py": "1"})), replace(config, probe=probes))
+    assert result["exit_code"] == 1 and result["proxy_unreachable"] is None
+
+
+def test_a_clean_cli_run_probes_only_once(tmp_path: Path, config: ar.RunnerConfig) -> None:
+    probes = _Probes(None)
+    result = ar.execute_run(_spec(), _write_zip(tmp_path, _zip({"a.py": "1"})), replace(config, probe=probes))
+    assert result["exit_code"] == 0 and result["proxy_unreachable"] is None
+    assert len(probes.urls) == 1
+
+
+def test_a_self_loop_whose_proxy_goes_away_mid_run_is_marked(tmp_path: Path, config: ar.RunnerConfig) -> None:
+    # 실행 전에는 닿았는데(첫 확인) 루프의 호출은 모두 닫힌 포트에 부딪힌다 — 루프는 이를 미판정으로 삼키고 0 으로 끝난다.
+    url = f"http://127.0.0.1:{_closed_port()}"
+    probes = _Probes(None, "connection_refused")
+    spec = _spec(mode="selfloop", requirements=[{"id": 1, "text": "로그인이 있다"}])
+    result = ar.execute_run(spec, _write_zip(tmp_path, _zip({"a.py": "1"})), replace(config, proxy_base_url=url, probe=probes))
+    assert result["exit_code"] == 0
+    assert json.loads(result["stdout"])["verdicts"] == []
+    assert result["proxy_unreachable"] == "connection_refused"
+    assert probes.urls == [url, url]

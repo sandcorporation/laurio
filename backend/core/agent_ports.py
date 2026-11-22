@@ -63,6 +63,8 @@ class RunResult(TypedDict):
     stdout: str
     stdout_truncated: bool
     stderr_tail: str
+    #: 실행기가 모델 호출 프록시에 닿지 못한 까닭(#1326) — `scoring.agent_runner.ProxyFailure`. 닿았으면 None.
+    proxy_unreachable: NotRequired[str | None]
 
 
 class AgentGrader(Protocol):

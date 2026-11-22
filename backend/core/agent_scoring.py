@@ -178,6 +178,16 @@ class AgentRunHeld(Exception):
         self.record = record
 
 
+class AgentProxyUnreachable(AgentRunHeld):
+    """실행기가 모델 호출 프록시(`llm-proxy`)에 닿지 못했다(#1326) — 실행기가 결과에 단 표식(`proxy_unreachable`)으로
+    가른다. 제출 탓이 아니라 다시 돌리지 않는다. `AgentRunHeld` 의 하위라 이것을 따로 받지 않는 쪽(공모전 채점·실험)은
+    지금처럼 보류한다. 강의실 채점은 실행기에 닿지 못한 것(#1318)과 같은 플랫폼 탓으로 옮긴다."""
+
+    def __init__(self, failure: str, record: dict) -> None:
+        super().__init__([f"프록시에 닿지 못함: {failure}"], record)
+        self.failure = failure
+
+
 # ── 박제본 ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
@@ -570,6 +580,8 @@ def _attempt(
         "evidence_check": dict(evidence) if evidence is not None else None,
         "structured_output": parsed.structured_output,
         "problems": list(problems),
+        # 실행기가 프록시에 닿지 못했으면 그 까닭(#1326) — `run_agent_job` 이 재실행하지 않고 던진다.
+        "proxy_unreachable": result.get("proxy_unreachable"),
         # 계정 쪽 거절이면 그 본문(#1052) — `run_agent_job` 이 재실행하지 않고 미룸으로 던진다.
         "account_refusal": account_refusal(parsed.error_detail) if problems and parsed.error_detail else None,
     }
@@ -639,6 +651,11 @@ def run_agent_job(job: AgentJob) -> AgentJobOutcome:
             attempts.append({"rejected": exc.reason})
             raise AgentRunHeld([f"실행 거절: {exc.reason}"], record) from exc
         attempts.append(attempt)
+        unreachable = attempt.get("proxy_unreachable")
+        if isinstance(unreachable, str):
+            # 프록시에 닿지 못했다(#1326) — 제출 탓이 아니고 다시 돌려도 같은 자리에 부딪힌다.
+            record["accepted"] = False
+            raise AgentProxyUnreachable(unreachable, record)
         refusal = attempt.get("account_refusal")
         if isinstance(refusal, str):
             # 벤더 계정 쪽 거절(#1052) — 제출 탓이 아니고 다시 돌려도 같다. 받아들이는 조건 어긋남으로 세지 않는다.
