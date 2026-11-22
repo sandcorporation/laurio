@@ -1547,8 +1547,8 @@ export interface paths {
         };
         /**
          * Get Class Scoring Calculator
-         * @description 「클래스 설정 › 채점 방식」의 채점 비용 계산기(#1270). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합으로
-         *     채운다. 남의 클래스는 404다.
+         * @description 「클래스 설정 › 채점 방식」의 채점 비용 예상표(#1270·#1304). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합·
+         *     기본 가정으로 채운다(가정을 바꿔 본 값은 저장하지 않는다). 남의 클래스는 404다.
          */
         get: operations["classroom_api_get_class_scoring_calculator"];
         put?: never;
@@ -10658,13 +10658,77 @@ export interface components {
          * @enum {string}
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure" | "source_too_large";
-        /** ScoringCalculatorAgentOut */
-        ScoringCalculatorAgentOut: {
+        /** ScoringCalculatorAgentCellOut */
+        ScoringCalculatorAgentCellOut: {
             /** Available */
             available: boolean;
-            krw: components["schemas"]["ScoringCalculatorSpreadOut"];
-            seconds: components["schemas"]["ScoringCalculatorSpreadOut"];
-            usd: components["schemas"]["ScoringCalculatorSpreadOut"];
+            /** Krw */
+            krw?: number | null;
+            measured_krw: components["schemas"]["ScoringCalculatorSpreadOut"];
+            measured_seconds: components["schemas"]["ScoringCalculatorSpreadOut"];
+            /** Seconds */
+            seconds?: number | null;
+            /** Usd */
+            usd?: number | null;
+        };
+        /** ScoringCalculatorAgentLimitsOut */
+        ScoringCalculatorAgentLimitsOut: {
+            /** Attempt Seconds */
+            attempt_seconds: number;
+            /** Attempts */
+            attempts: number;
+            /** Budget Usd */
+            budget_usd: number;
+            /** Max Extracted Bytes */
+            max_extracted_bytes: number;
+            /** Max Zip Bytes */
+            max_zip_bytes: number;
+            /** Max Zip Entries */
+            max_zip_entries: number;
+        };
+        /**
+         * ScoringCalculatorAssumptionsOut
+         * @description 셈에 쓴 가정(#1304) — `*_from` 은 problem(그 문제의 값)·assumed(코드 기본값)·custom(강사가 바꿔 본 값).
+         */
+        ScoringCalculatorAssumptionsOut: {
+            /** Assignments */
+            assignments: number;
+            /** Instruction Chars */
+            instruction_chars: number;
+            /** Regrade Rate */
+            regrade_rate: number;
+            /** Requirements */
+            requirements: number;
+            /** Requirements From */
+            requirements_from: string;
+            /** Source Chars */
+            source_chars: number;
+            /** Source From */
+            source_from: string;
+            /** Students */
+            students: number;
+            /** Suspect Rate */
+            suspect_rate: number;
+        };
+        /**
+         * ScoringCalculatorDefaultsOut
+         * @description 가정의 코드 기본값 — 입력 칸의 자리 표시와 「기본값으로」에 쓴다.
+         */
+        ScoringCalculatorDefaultsOut: {
+            /** Assignments */
+            assignments: number;
+            /** Regrade Rate */
+            regrade_rate: number;
+            /** Requirements */
+            requirements: number;
+            /** Source Chars Median */
+            source_chars_median: number;
+            /** Source Chars P90 */
+            source_chars_p90: number;
+            /** Students */
+            students: number;
+            /** Suspect Rate */
+            suspect_rate: number;
         };
         /** ScoringCalculatorEscalationAttemptOut */
         ScoringCalculatorEscalationAttemptOut: {
@@ -10681,17 +10745,21 @@ export interface components {
         };
         /**
          * ScoringCalculatorEscalationOut
-         * @description 의심 재판정(#1291) — 클래스가 고른 모델. 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`.
+         * @description 의심 재판정(#1291) — 클래스가 고른 모델. 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`(「끔」).
          */
         ScoringCalculatorEscalationOut: {
             /** Model Id */
             model_id?: string | null;
+            /** Per Submission Krw */
+            per_submission_krw: number;
             per_suspect?: components["schemas"]["ScoringCalculatorEscalationAttemptOut"] | null;
             /** Suspect Rate */
-            suspect_rate?: number | null;
+            suspect_rate: number;
         };
         /** ScoringCalculatorModelOut */
         ScoringCalculatorModelOut: {
+            /** Context Tokens */
+            context_tokens: number;
             /** Id */
             id: string;
             /** Input Usd Per Million */
@@ -10701,12 +10769,14 @@ export interface components {
         };
         /**
          * ScoringCalculatorOut
-         * @description 채점 비용 계산기(#1270, CONTEXT.md 「예상 채점 비용」) — 고른 조합의 제출 한 건 예상과 고를 수 있는 값.
+         * @description 채점 비용 예상표(#1270·#1304, CONTEXT.md 「예상 채점 비용」) — 프로바이더 × 방식 × 모델의 제출 한 건 예상과 셈에 쓴 가정.
          */
         ScoringCalculatorOut: {
-            agent: components["schemas"]["ScoringCalculatorAgentOut"];
+            agent_limits: components["schemas"]["ScoringCalculatorAgentLimitsOut"];
             /** Agent Vendors */
             agent_vendors: string[];
+            assumptions: components["schemas"]["ScoringCalculatorAssumptionsOut"];
+            defaults: components["schemas"]["ScoringCalculatorDefaultsOut"];
             escalation: components["schemas"]["ScoringCalculatorEscalationOut"];
             /** Krw Per Usd */
             krw_per_usd: number;
@@ -10716,8 +10786,11 @@ export interface components {
             problems: components["schemas"]["ScoringCalculatorProblemOut"][];
             /** Providers */
             providers: components["schemas"]["ScoringCalculatorProviderOut"][];
+            /** Rows */
+            rows: components["schemas"]["ScoringCalculatorRowOut"][];
             selection: components["schemas"]["ScoringCalculatorSelectionOut"];
-            single: components["schemas"]["ScoringCalculatorSingleOut"];
+            semester: components["schemas"]["ScoringCalculatorSemesterOut"];
+            staged: components["schemas"]["ScoringCalculatorStagedOut"];
         };
         /** ScoringCalculatorProblemOut */
         ScoringCalculatorProblemOut: {
@@ -10748,6 +10821,15 @@ export interface components {
             /** Vendor */
             vendor: string;
         };
+        /** ScoringCalculatorRowOut */
+        ScoringCalculatorRowOut: {
+            agent: components["schemas"]["ScoringCalculatorAgentCellOut"];
+            /** Model Id */
+            model_id: string;
+            single: components["schemas"]["ScoringCalculatorSingleCellOut"];
+            /** Vendor */
+            vendor: string;
+        };
         /** ScoringCalculatorSelectionOut */
         ScoringCalculatorSelectionOut: {
             /** Method */
@@ -10765,8 +10847,22 @@ export interface components {
             /** Vendor */
             vendor: string;
         };
-        /** ScoringCalculatorSingleOut */
-        ScoringCalculatorSingleOut: {
+        /**
+         * ScoringCalculatorSemesterOut
+         * @description 「클래스 한 학기」 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율).
+         */
+        ScoringCalculatorSemesterOut: {
+            /** Per Submission Krw */
+            per_submission_krw: number;
+            /** Submissions */
+            submissions: number;
+            /** Total Krw */
+            total_krw: number;
+        };
+        /** ScoringCalculatorSingleCellOut */
+        ScoringCalculatorSingleCellOut: {
+            /** Capacity Chars */
+            capacity_chars: number;
             /** Fits */
             fits: boolean;
             /** Input Tokens */
@@ -10777,7 +10873,10 @@ export interface components {
             open_ended: boolean;
             /** Output Tokens */
             output_tokens: number;
-            seconds: components["schemas"]["ScoringCalculatorSpreadOut"];
+            /** Route */
+            route: string;
+            /** Seconds */
+            seconds: number;
             /** Usd */
             usd: number;
         };
@@ -10792,7 +10891,7 @@ export interface components {
         };
         /**
          * ScoringCalculatorSpreadOut
-         * @description 실측의 중앙·p90(#1270) — 표본이 `min_sample_count` 건 미만이면 둘 다 `None`(「실측 없음」).
+         * @description 실측의 중앙·p90(#1270) — 표본이 `min_sample_count` 건 미만이면 둘 다 `None`(실측 줄이 없다).
          */
         ScoringCalculatorSpreadOut: {
             /** Median */
@@ -10801,6 +10900,18 @@ export interface components {
             p90?: number | null;
             /** Sample Count */
             sample_count: number;
+        };
+        /**
+         * ScoringCalculatorStagedOut
+         * @description 새 채점기(staged)가 켜져 있는가와 두 걸음의 숫자 — 「한 번 호출」 열이 그 갈래의 셈을 쓴다.
+         */
+        ScoringCalculatorStagedOut: {
+            /** Budget Chars */
+            budget_chars: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Threshold Chars */
+            threshold_chars: number;
         };
         /**
          * ScoringCostAttemptOut
@@ -14391,6 +14502,12 @@ export interface operations {
                 model?: string | null;
                 problem_id?: number | null;
                 source?: string | null;
+                source_chars?: number | null;
+                requirements?: number | null;
+                students?: number | null;
+                assignments?: number | null;
+                regrade_rate?: number | null;
+                suspect_rate?: number | null;
             };
             header?: never;
             path: {

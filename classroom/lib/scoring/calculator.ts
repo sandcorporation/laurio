@@ -1,4 +1,4 @@
-// 채점 비용 계산기(#1270) — 셈은 백엔드(`classroom.scoring_calculator`)가 하고, 여기는 고른 값을 경로로 옮기고
+// 채점 비용 예상표(#1270·#1304) — 셈은 백엔드(`classroom.scoring_calculator`)가 하고, 여기는 바꿔 본 가정을 경로로 옮기고
 // 받은 값을 라벨로 바꾼다. 숫자를 따로 적지 않는다.
 import type { components } from "@codemit/bff-client";
 
@@ -6,41 +6,79 @@ import { formatKrw, formatManCount } from "./cost";
 
 export type ScoringCalculator = components["schemas"]["ScoringCalculatorOut"];
 export type CalculatorSpread = components["schemas"]["ScoringCalculatorSpreadOut"];
+export type CalculatorRow = components["schemas"]["ScoringCalculatorRowOut"];
+export type CalculatorSingleCell = components["schemas"]["ScoringCalculatorSingleCellOut"];
+export type CalculatorAgentCell = components["schemas"]["ScoringCalculatorAgentCellOut"];
 export type CalculatorMethod = "single" | "agent";
 export type CalculatorEscalation = components["schemas"]["ScoringCalculatorEscalationOut"];
+export type CalculatorStaged = components["schemas"]["ScoringCalculatorStagedOut"];
+export type CalculatorAgentLimits = components["schemas"]["ScoringCalculatorAgentLimitsOut"];
 
-export const NO_MEASUREMENT = "실측 없음";
-
-/** 고른 값 — 빈 칸은 백엔드가 지금 이 클래스의 조합으로 채운다. */
+/** 고른 칸과 바꿔 본 가정 — 빈 칸은 백엔드가 지금 이 클래스의 조합·기본 가정으로 채운다. */
 export type CalculatorChoice = {
   vendor?: string;
   method?: CalculatorMethod;
   model?: string;
   problemId?: number;
   source?: string;
+  sourceChars?: number;
+  requirements?: number;
+  students?: number;
+  assignments?: number;
+  regradeRate?: number;
+  suspectRate?: number;
 };
+
+/** 가정 칸 — 입력으로 바꿔 보는 것. */
+export type AssumptionField = "sourceChars" | "requirements" | "students" | "assignments" | "regradeRate" | "suspectRate";
+
+const QUERY_NAMES: [keyof CalculatorChoice, string][] = [
+  ["vendor", "vendor"],
+  ["method", "method"],
+  ["model", "model"],
+  ["problemId", "problem_id"],
+  ["source", "source"],
+  ["sourceChars", "source_chars"],
+  ["requirements", "requirements"],
+  ["students", "students"],
+  ["assignments", "assignments"],
+  ["regradeRate", "regrade_rate"],
+  ["suspectRate", "suspect_rate"],
+];
 
 export function calculatorPath(classId: number, choice: CalculatorChoice): string {
   const params = new URLSearchParams();
-  if (choice.vendor) params.set("vendor", choice.vendor);
-  if (choice.method) params.set("method", choice.method);
-  if (choice.model) params.set("model", choice.model);
-  if (choice.problemId !== undefined) params.set("problem_id", String(choice.problemId));
-  if (choice.source) params.set("source", choice.source);
+  for (const [field, name] of QUERY_NAMES) {
+    const value = choice[field];
+    if (value !== undefined && value !== "") params.set(name, String(value));
+  }
   const query = params.toString();
   return `/api/backend/classroom/classes/${classId}/scoring-calculator${query ? `?${query}` : ""}`;
 }
 
-/** 한 칸을 바꾼다 — 프로바이더를 바꾸면 모델을, 문제를 바꾸면 소스 크기를 비워 그 선택지의 처음 값으로 간다. */
+/** 한 칸을 바꾼다 — 문제를 바꾸면 소스 크기·항목 수를, 소스 크기를 고르면 입력한 글자 수를 비워 그 선택지의 처음 값으로 간다. */
 export function changeChoice(
   current: CalculatorChoice,
   field: keyof CalculatorChoice,
-  value: string | number,
+  value: string | number | undefined,
 ): CalculatorChoice {
-  if (field === "vendor") return { ...current, vendor: String(value), model: undefined };
-  if (field === "problemId") return { ...current, problemId: Number(value), source: undefined };
+  if (field === "problemId") {
+    return { ...current, problemId: Number(value), source: undefined, sourceChars: undefined, requirements: undefined };
+  }
+  if (field === "source") return { ...current, source: String(value), sourceChars: undefined };
   if (field === "method") return { ...current, method: value === "agent" ? "agent" : "single" };
-  return { ...current, [field]: String(value) };
+  if (field === "vendor") return { ...current, vendor: String(value), model: undefined };
+  if (value === undefined) return { ...current, [field]: undefined };
+  if (field === "model") return { ...current, model: String(value) };
+  return { ...current, [field]: Number(value) };
+}
+
+/** 입력 칸의 글자를 가정 값으로 — 비었거나 숫자가 아니면 `undefined`(기본값으로 돌아간다). */
+export function parseAssumption(text: string): number | undefined {
+  const trimmed = text.trim().replace(/,/g, "");
+  if (trimmed === "") return undefined;
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 const VENDOR_LABEL: Record<string, string> = { openai: "OpenAI", anthropic: "Claude" };
@@ -49,59 +87,89 @@ export function providerLabel(vendor: string): string {
   return VENDOR_LABEL[vendor] ?? vendor;
 }
 
-/** 에이전트를 고를 수 없는 프로바이더에 다는 짧은 까닭 — 되는 연결에서 읽는다(지금은 「Claude 키만」). */
-export function agentOnlyLabel(agentVendors: readonly string[]): string {
-  return `${agentVendors.map(providerLabel).join("·")} 키만`;
+const FROM_LABEL: Record<string, string> = { assumed: "가정", problem: "문제", custom: "입력" };
+
+/** 가정 값 옆의 작은 라벨 — 어디서 온 값인가. */
+export function fromLabel(from: string): string {
+  return FROM_LABEL[from] ?? from;
 }
 
-/** 에이전트 「되는 연결」 칸 — 「Claude 키」. */
-export function agentConnectionsLabel(agentVendors: readonly string[]): string {
-  return `${agentVendors.map(providerLabel).join("·")} 키`;
-}
+const SOURCE_LABEL: Record<string, string> = { median: "중앙", p90: "큰 쪽(p90)" };
 
-const SOURCE_LABEL: Record<string, string> = {
-  median: "제출 중앙",
-  p90: "제출 p90",
-  small: "작음",
-  medium: "보통",
-  large: "큼",
-};
-
-export function sourceLabel(source: { key: string; chars: number }): string {
-  return `${SOURCE_LABEL[source.key] ?? source.key} · ${formatManCount(source.chars)} 자`;
+export function sourceLabel(source: { key: string; chars: number; measured: boolean }): string {
+  return `${source.measured ? "제출" : "가정"} ${SOURCE_LABEL[source.key] ?? source.key} · ${formatManCount(source.chars)} 자`;
 }
 
 export function formatUsdPerMillion(input: number, output: number): string {
   return `입력 $${input} · 출력 $${output} / 100만 토큰`;
 }
 
-export function spreadKrw(spread: CalculatorSpread): string {
-  if (spread.median == null || spread.p90 == null) return NO_MEASUREMENT;
-  return `중앙 ${formatKrw(spread.median)} · p90 ${formatKrw(spread.p90)}`;
-}
-
-export function spreadSeconds(spread: CalculatorSpread): string {
-  if (spread.median == null || spread.p90 == null) return NO_MEASUREMENT;
-  return `중앙 ${formatSeconds(spread.median)} · p90 ${formatSeconds(spread.p90)}`;
-}
-
 function formatSeconds(seconds: number): string {
-  if (seconds < 60) return `${Math.round(seconds)}초`;
+  if (seconds < 60) return `${Math.round(seconds * 10) / 10}초`;
   return `${Math.round(seconds / 6) / 10}분`;
 }
 
-/** 고른 방식의 제출 한 건 예상. */
-export function headline(calc: ScoringCalculator): string {
-  if (calc.selection.method === "agent") return spreadKrw(calc.agent.krw);
-  return formatKrw(calc.single.krw, calc.single.open_ended);
+/** 감당 크기 — 한 번 호출에 담을 수 있는 소스 글자 수. */
+export function capacityLabel(chars: number): string {
+  return `${formatManCount(chars)} 자`;
 }
 
-/** 의심 재판정 줄(#1291) — 꺼졌으면 「끔」, 아니면 의심 한 건당 예상. 의심 비율은 실측이 생길 때까지 「실측 없음」. */
-export function escalationCost(escalation: CalculatorEscalation): { model: string; perSuspect: string; rate: string } | null {
+/** 한 번 호출 칸의 둘째 줄 — 감당 크기와 이 크기에서 무슨 일이 생기는가. */
+export function singleNote(single: CalculatorSingleCell, staged: CalculatorStaged): string {
+  if (single.route === "hold") return `담지 못함 — 보류(채점 안 함) · 감당 ${capacityLabel(single.capacity_chars)}`;
+  if (single.route === "two_step") return `두 걸음 · 고른 파일 ${capacityLabel(staged.budget_chars)}까지 읽음`;
+  return `감당 ${capacityLabel(single.capacity_chars)}`;
+}
+
+/** 에이전트 칸의 둘째 줄 — 실측이 있으면 중앙, 없으면 가정한 시간만. */
+export function agentNote(agent: CalculatorAgentCell): string {
+  const measured = agent.measured_krw;
+  if (measured.median != null && measured.p90 != null) {
+    const time = agent.measured_seconds.median != null ? ` · ${formatSeconds(agent.measured_seconds.median)}` : "";
+    return `실측 중앙 ${formatKrw(measured.median)}${time} (${measured.sample_count}건)`;
+  }
+  return agent.seconds != null ? `${formatSeconds(agent.seconds)} 가정` : "";
+}
+
+export function singleTimeLabel(single: CalculatorSingleCell): string {
+  return `${formatSeconds(single.seconds)} 가정`;
+}
+
+/** 「두 걸음」 줄 — staged 가 켜져 있을 때만. */
+export function twoStepLine(staged: CalculatorStaged): string {
+  return `${formatManCount(staged.threshold_chars)} 자 넘으면 두 걸음 — 고른 파일 ${formatManCount(staged.budget_chars)} 자까지 읽음`;
+}
+
+/** 에이전트가 소스를 통째로 싣지 않고 파일을 골라 읽는 상한 — 코드가 거는 숫자 그대로. */
+export function agentLimitsLine(limits: CalculatorAgentLimits): string {
+  const mb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))}MB`;
+  return [
+    `zip ${mb(limits.max_zip_bytes)}`,
+    `풀린 크기 ${mb(limits.max_extracted_bytes)}`,
+    `파일 ${formatManCount(limits.max_zip_entries)} 개`,
+    `시간 ${limits.attempt_seconds}초 × ${limits.attempts}회`,
+    `한 건 $${limits.budget_usd}`,
+  ].join(" · ");
+}
+
+/** 의심 재판정 줄(#1291) — 꺼졌으면 `null`(「끔」), 아니면 의심 한 건당 예상과 의심 비율(가정)·제출 한 건에 더해지는 값. */
+export function escalationCost(
+  escalation: CalculatorEscalation,
+): { model: string; perSuspect: string; rate: string; perSubmission: string } | null {
   if (!escalation.model_id || !escalation.per_suspect) return null;
   return {
     model: escalation.model_id,
     perSuspect: `의심 한 건당 ${formatKrw(escalation.per_suspect.krw, escalation.per_suspect.open_ended)}`,
-    rate: escalation.suspect_rate == null ? NO_MEASUREMENT : `${Math.round(escalation.suspect_rate * 100)}%`,
+    rate: `${Math.round(escalation.suspect_rate * 1000) / 10}%`,
+    perSubmission: `제출 한 건에 ${formatKrw(escalation.per_submission_krw)}`,
+  };
+}
+
+/** 「클래스 한 학기」 줄 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율). */
+export function semesterLine(calc: ScoringCalculator): { total: string; formula: string } {
+  const { assumptions, semester } = calc;
+  return {
+    total: formatKrw(semester.total_krw),
+    formula: `건당 ${formatKrw(semester.per_submission_krw)} × 학생 ${assumptions.students} × 과제 ${assumptions.assignments} × (1 + ${assumptions.regrade_rate})`,
   };
 }

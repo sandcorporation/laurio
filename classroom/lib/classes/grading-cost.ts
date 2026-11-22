@@ -1,4 +1,4 @@
-// 채점 연결의 벤더 라벨과 에이전트를 고를 수 없는 까닭(#1037). 건당 비용은 계산기(#1270, `lib/scoring/calculator`)가 단가표에서 셈한다.
+// 채점 연결의 벤더 라벨과 에이전트를 고를 수 없는 까닭(#1037). 건당 비용은 예상표(#1270·#1304, `lib/scoring/calculator`)가 단가표 × 가정으로 셈한다.
 import type { ClassRow } from "./api";
 
 export type VendorLabel = "OpenAI" | "Claude";

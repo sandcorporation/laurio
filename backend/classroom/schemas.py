@@ -316,7 +316,7 @@ class ScoringCostEstimateOut(Schema):
 
 
 class ScoringCalculatorSpreadOut(Schema):
-    """실측의 중앙·p90(#1270) — 표본이 `min_sample_count` 건 미만이면 둘 다 `None`(「실측 없음」)."""
+    """실측의 중앙·p90(#1270) — 표본이 `min_sample_count` 건 미만이면 둘 다 `None`(실측 줄이 없다)."""
 
     sample_count: int
     median: float | None = None
@@ -327,19 +327,21 @@ class ScoringCalculatorModelOut(Schema):
     id: str
     input_usd_per_million: float
     output_usd_per_million: float
+    #: 컨텍스트 창(토큰) — 단가표 모델은 전부 표에 있다.
+    context_tokens: int
 
 
 class ScoringCalculatorProviderOut(Schema):
     #: openai | anthropic
     vendor: str
-    #: 이 클래스에 그 프로바이더 키가 저장돼 있는가 — 없어도 고를 수 있고 화면은 「키 없음」을 단다.
+    #: 이 클래스에 그 프로바이더 키가 저장돼 있는가 — 없어도 표에 보이고 화면은 「키 없음」을 단다.
     has_key: bool
     #: 단가표(`scoring_cost.PRICES`)의 그 프로바이더 모델과 단가(USD / 100만 토큰).
     models: list[ScoringCalculatorModelOut]
 
 
 class ScoringCalculatorSourceOut(Schema):
-    #: median | p90(그 문제의 실측) | small | medium | large(크기 단계)
+    #: median | p90 — measured 가 참이면 그 문제의 실측, 아니면 가정(운영 p50·p90)
     key: str
     chars: int
     measured: bool
@@ -363,26 +365,94 @@ class ScoringCalculatorSelectionOut(Schema):
     model_id: str
     reasoning_effort: str | None = None
     problem_id: int | None = None
+    #: median | p90 | custom
     source: str
     source_chars: int
 
 
-class ScoringCalculatorSingleOut(Schema):
+class ScoringCalculatorAssumptionsOut(Schema):
+    """셈에 쓴 가정(#1304) — `*_from` 은 problem(그 문제의 값)·assumed(코드 기본값)·custom(강사가 바꿔 본 값)."""
+
+    source_chars: int
+    requirements: int
+    instruction_chars: int
+    students: int
+    assignments: int
+    regrade_rate: float
+    suspect_rate: float
+    requirements_from: str
+    source_from: str
+
+
+class ScoringCalculatorDefaultsOut(Schema):
+    """가정의 코드 기본값 — 입력 칸의 자리 표시와 「기본값으로」에 쓴다."""
+
+    source_chars_median: int
+    source_chars_p90: int
+    requirements: int
+    students: int
+    assignments: int
+    regrade_rate: float
+    suspect_rate: float
+
+
+class ScoringCalculatorSingleCellOut(Schema):
     input_tokens: int
     output_tokens: int
     usd: float
     krw: float
     open_ended: bool
-    #: 소스가 모델 컨텍스트에 다 들어가는가 — 거짓이면 채점은 「크기 초과」 보류다.
+    #: 소스가 모델 한 번 호출에 다 들어가는가.
     fits: bool
-    seconds: ScoringCalculatorSpreadOut
+    #: 한 번 호출에 담을 수 있는 소스 글자 수 — 채점이 쓰는 `source_budget_bytes` 에서 나온다.
+    capacity_chars: int
+    #: single(한 번에 담김) | two_step(두 걸음, staged) | hold(담지 못해 「크기 초과」 보류 — 채점 안 함, 금액 0)
+    route: str
+    #: 가정한 걸린 시간(초).
+    seconds: float
 
 
-class ScoringCalculatorAgentOut(Schema):
+class ScoringCalculatorAgentCellOut(Schema):
+    #: 거짓이면 「지원 안 함」 — 금액·시간이 `None`.
     available: bool
-    usd: ScoringCalculatorSpreadOut
-    krw: ScoringCalculatorSpreadOut
-    seconds: ScoringCalculatorSpreadOut
+    usd: float | None = None
+    krw: float | None = None
+    seconds: float | None = None
+    #: 그 클래스·그 모델의 지난 실행 실측 — 표본이 `min_sample_count` 건 미만이면 값이 `None`.
+    measured_krw: ScoringCalculatorSpreadOut
+    measured_seconds: ScoringCalculatorSpreadOut
+
+
+class ScoringCalculatorRowOut(Schema):
+    vendor: str
+    model_id: str
+    single: ScoringCalculatorSingleCellOut
+    agent: ScoringCalculatorAgentCellOut
+
+
+class ScoringCalculatorSemesterOut(Schema):
+    """「클래스 한 학기」 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율)."""
+
+    per_submission_krw: float
+    submissions: float
+    total_krw: float
+
+
+class ScoringCalculatorStagedOut(Schema):
+    """새 채점기(staged)가 켜져 있는가와 두 걸음의 숫자 — 「한 번 호출」 열이 그 갈래의 셈을 쓴다."""
+
+    enabled: bool
+    threshold_chars: int
+    budget_chars: int
+
+
+class ScoringCalculatorAgentLimitsOut(Schema):
+    max_zip_bytes: int
+    max_extracted_bytes: int
+    max_zip_entries: int
+    attempt_seconds: int
+    attempts: int
+    budget_usd: float
 
 
 class ScoringCalculatorEscalationAttemptOut(Schema):
@@ -394,25 +464,33 @@ class ScoringCalculatorEscalationAttemptOut(Schema):
 
 
 class ScoringCalculatorEscalationOut(Schema):
-    """의심 재판정(#1291) — 클래스가 고른 모델. 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`."""
+    """의심 재판정(#1291) — 클래스가 고른 모델. 꺼졌거나 고른 프로바이더의 모델이 아니면 `model_id`·`per_suspect` 가 `None`(「끔」)."""
 
     model_id: str | None = None
     #: 의심 한 건을 그 모델로 다시 판정하는 예상.
     per_suspect: ScoringCalculatorEscalationAttemptOut | None = None
-    #: 의심이 나는 비율 — 실측이 없으면 `None`(「실측 없음」).
-    suspect_rate: float | None = None
+    #: 의심 비율(가정).
+    suspect_rate: float
+    #: 제출 한 건에 더해지는 예상(원) — 의심 한 건 × 비율 × 항목 수.
+    per_submission_krw: float
 
 
 class ScoringCalculatorOut(Schema):
-    """채점 비용 계산기(#1270, CONTEXT.md 「예상 채점 비용」) — 고른 조합의 제출 한 건 예상과 고를 수 있는 값."""
+    """채점 비용 예상표(#1270·#1304, CONTEXT.md 「예상 채점 비용」) — 프로바이더 × 방식 × 모델의 제출 한 건 예상과 셈에 쓴 가정."""
 
     providers: list[ScoringCalculatorProviderOut]
     #: 에이전트를 고를 수 있는 프로바이더(`agent_grading.AGENT_VERIFIED_VENDORS`).
     agent_vendors: list[str]
     problems: list[ScoringCalculatorProblemOut]
+    #: 표시·학기 줄로 셈한 칸 — 처음 값은 지금 이 클래스의 조합이다.
     selection: ScoringCalculatorSelectionOut
-    single: ScoringCalculatorSingleOut
-    agent: ScoringCalculatorAgentOut
+    assumptions: ScoringCalculatorAssumptionsOut
+    defaults: ScoringCalculatorDefaultsOut
+    #: 단가표 모델 전부 × (한 번 호출·에이전트).
+    rows: list[ScoringCalculatorRowOut]
+    staged: ScoringCalculatorStagedOut
+    agent_limits: ScoringCalculatorAgentLimitsOut
+    semester: ScoringCalculatorSemesterOut
     escalation: ScoringCalculatorEscalationOut
     min_sample_count: int
     krw_per_usd: int
