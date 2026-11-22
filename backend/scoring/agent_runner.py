@@ -304,7 +304,7 @@ def extract_repo(zip_path: Path, dest: Path, *, repo_kind: RepoKind) -> str:
     """박제본을 `dest` 에 풀고 읽기 전용으로 돌린다. 벗긴 최상위 접두사(없으면 "")를 돌려준다.
     최상위 폴더는 `repo_kind="repository"`(zipball)일 때만 벗긴다 — 올린 zip 은 항목 이름 그대로다(#1278).
 
-    링크 항목은 만들지 않는다(밖을 가리킬 수 있다). 벤더·빌드 경로(`core.vendor_paths`)는 풀지 않는다(#1300).
+    링크 항목은 만들지 않는다(밖을 가리킬 수 있다). 벤더·빌드·VCS 폴더(`core.vendor_paths.EXCLUDED_DIR_FRAGMENTS`)는 풀지 않는다(#1300).
     크기·항목 수는 푸는 항목만, 압축 해제 전에 선언값으로, 풀면서 실제 바이트로 한 번 더 센다(선언값을 속인
     zip 폭탄)."""
 
@@ -326,19 +326,20 @@ def extract_repo(zip_path: Path, dest: Path, *, repo_kind: RepoKind) -> str:
                 continue
             members.append((info, rel))
         prefix = _common_root([rel for _, rel in members] + sorted(dirs), dirs) if repo_kind == "repository" else ""
-        # 벤더·빌드 경로(`.git/`·`node_modules/`·잠금 파일·바이너리)는 풀지 않는다(#1300) — 판정은 벗긴 뒤 경로로.
+        # 벤더·빌드·VCS 폴더(`.git/`·`node_modules/`·`dist/` …)는 풀지 않는다(#1300) — 잠금 파일·그림·데이터는 푼다.
+        # 판정은 벗긴 뒤 경로로.
         kept: list[tuple[zipfile.ZipInfo, PurePosixPath]] = []
         skipped_paths = skipped_bytes = 0
         for info, rel in members:
             if prefix:
                 rel = PurePosixPath(*rel.parts[1:])
-            if vendor_paths.is_vendor_path(rel.as_posix()):
+            if vendor_paths.is_vendor_dir_path(rel.as_posix()):
                 skipped_paths += 1
                 skipped_bytes += info.file_size
                 continue
             kept.append((info, rel))
         if skipped_paths:
-            sys.stderr.write(f"agent-grader extract skipped vendor paths={skipped_paths} bytes={skipped_bytes}\n")
+            sys.stderr.write(f"agent-grader extract skipped vendor dir paths={skipped_paths} bytes={skipped_bytes}\n")
         # 상한은 푸는 항목만 센다 — 선언값으로 먼저, 풀면서 실제 바이트로 한 번 더.
         if len(kept) > MAX_ZIP_ENTRIES:
             raise RunRejected("repo_zip_too_many_entries")

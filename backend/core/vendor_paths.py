@@ -1,7 +1,7 @@
 """「벤더·빌드」 경로 판정 — 사람이 쓰지 않은 것(의존성·빌드 산출물·VCS 기록·잠금 파일·바이너리).
 
 선별(`core.source_selection.excluded_kind` 의 `vendor` 묶음)과 에이전트 실행기(`agent-grader`
-의 박제본 풀기, #1300)가 이 파일 하나를 같이 쓴다. 실행기 이미지(`docker/agent-grader.Dockerfile`)에
+의 박제본 풀기 — 폴더 조각만, #1300)가 이 파일 하나를 같이 쓴다. 실행기 이미지(`docker/agent-grader.Dockerfile`)에
 옆 파일로 복사되므로 **표준 라이브러리만** 쓴다.
 """
 
@@ -38,11 +38,18 @@ EXCLUDED_DIR_FRAGMENTS = (
 )
 
 
-def is_vendor_path(path: str) -> bool:
-    """벤더·빌드 폴더 아래이거나, 잠금 파일·압축 번들·소스맵·바이너리면 참."""
+def is_vendor_dir_path(path: str) -> bool:
+    """벤더·빌드·VCS 폴더(`EXCLUDED_DIR_FRAGMENTS`) 아래면 참 — 에이전트 실행기는 이것만 풀지 않는다(#1300)."""
 
     lower = path.lower()
-    if any(fragment in lower for fragment in EXCLUDED_DIR_FRAGMENTS):
+    return any(fragment in lower for fragment in EXCLUDED_DIR_FRAGMENTS)
+
+
+def is_vendor_path(path: str) -> bool:
+    """벤더·빌드 폴더 아래이거나, 잠금 파일·압축 번들·소스맵·바이너리면 참(선별의 `vendor` 묶음)."""
+
+    if is_vendor_dir_path(path):
         return True
+    lower = path.lower()
     name = next((segment for segment in reversed(lower.split("/")) if segment), "")
     return bool(name) and (name in EXCLUDED_FILE_NAMES or lower.endswith(EXCLUDED_SUFFIXES))

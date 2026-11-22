@@ -313,21 +313,23 @@ _UPLOAD_WITH_HISTORY = {
 def test_extract_skips_history_and_vendor_paths_but_keeps_source_tests_and_docs(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """#1300: 올린 zip 의 `.git/`·`node_modules/`·잠금 파일은 풀지 않는다 — 시험·문서는 푼다."""
+    """#1300: 올린 zip 의 `.git/`·`node_modules/`·`dist/` 폴더는 풀지 않는다 — 잠금 파일·그림·시험·문서는 푼다."""
 
     dest = tmp_path / "repo"
     assert ar.extract_repo(_write_zip(tmp_path, _zip(_UPLOAD_WITH_HISTORY)), dest, repo_kind="upload") == ""
     kept = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
-    assert kept == ["app.py", "docs/guide.md", "package.json", "src/index.js", "tests/test_app.py"]
-    assert not (dest / ".git").exists() and not (dest / "node_modules").exists()
-    assert "skipped vendor paths=6" in capsys.readouterr().err
+    assert kept == [
+        "app.py", "docs/guide.md", "logo.png", "package-lock.json", "package.json", "src/index.js", "tests/test_app.py",
+    ]
+    assert not (dest / ".git").exists() and not (dest / "node_modules").exists() and not (dest / "web").exists()
+    assert "skipped vendor dir paths=4" in capsys.readouterr().err
 
 
 def test_extract_judges_vendor_paths_after_stripping_the_zipball_root(tmp_path: Path) -> None:
     data = _zip({"owner-repo-abc/app.py": "1", "owner-repo-abc/.git/HEAD": "x", "owner-repo-abc/yarn.lock": "x"})
     dest = tmp_path / "repo"
     assert ar.extract_repo(_write_zip(tmp_path, data), dest, repo_kind="repository") == "owner-repo-abc"
-    assert sorted(p.name for p in dest.iterdir()) == ["app.py"]
+    assert sorted(p.name for p in dest.iterdir()) == ["app.py", "yarn.lock"]
 
 
 def test_extract_keeps_a_zip_without_history_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -350,15 +352,19 @@ def test_extract_caps_count_only_what_is_extracted(tmp_path: Path, monkeypatch: 
 
 @pytest.mark.parametrize(
     "path",
-    [".git/HEAD", "a/node_modules/x.js", "dist/a.js", "pnpm-lock.yaml", "img/a.PNG", ".venv/lib/x.py",
+    [".git/HEAD", "a/node_modules/x.js", "dist/a.js", ".venv/lib/x.py", "final/.next/x.js", "pnpm-lock.yaml", "img/a.PNG",
      "app.py", "tests/t.py", "docs/a.md", "package.json", "README.md", "scratch/n.txt"],
 )
-def test_runner_vendor_judgment_is_the_selection_judgment(path: str) -> None:
-    """판정은 강의실·공모전 선별(`core.source_selection.excluded_kind`)과 한 자리다."""
+def test_runner_skips_exactly_the_selection_vendor_folders(path: str) -> None:
+    """폴더 조각은 강의실·공모전 선별(`core.source_selection.EXCLUDED_DIR_FRAGMENTS`)과 한 자리다 — 실행기는 그
+    폴더만 빼고, 선별은 그 폴더를 늘 `vendor` 로 뺀다."""
 
-    from core.source_selection import excluded_kind
+    from core.source_selection import EXCLUDED_DIR_FRAGMENTS, excluded_kind
 
-    assert ar.vendor_paths.is_vendor_path(path) == (excluded_kind(path) == "vendor")
+    in_folder = any(fragment in path.lower() for fragment in EXCLUDED_DIR_FRAGMENTS)
+    assert ar.vendor_paths.is_vendor_dir_path(path) == in_folder
+    if in_folder:
+        assert excluded_kind(path) == "vendor"
 
 
 def test_extract_refuses_what_is_not_a_zip(tmp_path: Path) -> None:
