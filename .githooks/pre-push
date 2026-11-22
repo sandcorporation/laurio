@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# #1331 — push 할 내 커밋이 `scripts/test.sh affected` 로 시험한 내용 그대로인지 본다(scripts/local_tests_gate.py).
+# 돌리지 않았거나 시험 뒤 고쳤으면 거절한다. 급하면 커밋 꼬리말 `Local-Tests-Skipped: <까닭>` — PR 에 남는다.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+exec python3 scripts/local_tests_gate.py pre-push "$@"

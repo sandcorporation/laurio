@@ -37,7 +37,7 @@ scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400�
 - [물어볼 때는 AskUserQuestion 으로](docs/ops/asking-questions.md) — 권장안을 첫째에, 선택지마다 대가를.
 - [어느 문서가 「지금」을 말하는가](docs/ops/which-docs-are-current.md) — ADR·이슈·스펙은 그 시점의 판단이다.
 - [개발 환경](docs/ops/dev-environment.md) — 이벤트 서비스·워크트리별 스택·dev 프로필(celery·search·pgbouncer)·마이그레이션.
-- [테스트](docs/ops/testing.md) — 호스트에서 돈다, `scripts/test.sh`, 앱 경계·금칙어 구조 테스트, 시드.
+- [테스트](docs/ops/testing.md) — 호스트에서 돈다, `scripts/test.sh`, push 전엔 `scripts/test.sh affected`(바뀐 파일이 고른 백엔드·vitest·e2e, pre-push 훅이 기록을 본다), 앱 경계·금칙어 구조 테스트, 시드.
 - [프론트엔드](docs/ops/frontend.md) — 워크스페이스·e2e 시임·워크트리 dev 서버·남길 e2e·토큰·Docker 함정.
 - [Next 프로덕션 빌드](docs/ops/next-build.md) — Turbopack, 지우면 안 되는 의존성 둘.
 - [CI](docs/ops/ci.md) — PR 검사는 GitHub Actions(`pr-check.yml`, 이미지 층 캐시는 main 저장·PR 복원, #932), Jenkins PR 검사는 꺼졌다(2026-11-09). PR → 대기열(`bash scripts/ci/enqueue.sh <N>` 이 넣는다 — 자동 병합이 꺼져 `gh pr merge` 는 거절된다, 검사는 대기열 한 번 #1090·#1118) → `release.yml` 은 이미지·승격만(arm64 이미지 → `production`, #938) → `production` push 하나가 Jenkins 배포 하나.

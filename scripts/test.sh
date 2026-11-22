@@ -3,6 +3,7 @@
 #
 #   scripts/test.sh backend [pytest 인자…]      예) scripts/test.sh backend tests/test_refunds.py -q
 #   scripts/test.sh e2e [playwright 인자…]      예) scripts/test.sh e2e --project=operator e2e/operator/appeals/appeals.spec.ts
+#   scripts/test.sh affected [--base <커밋>] [--list] [--only backend,vitest,e2e]   바뀐 파일에서 셋을 골라 돈다(#1330)
 #
 # - 기계 전체에서 동시에 둘까지 — 셋째부터는 빈 칸을 기다린다(flock, 워크트리가 달라도 같은 칸을 센다).
 # - 한 칸은 호스트 코어의 1/3 을 고정해서 쓴다(이 머신 12코어면 4) — pytest·Playwright 는 taskset,
@@ -34,8 +35,8 @@ CPUS=$((NCPU / 3))
 E2E_WORKERS=$(((CPUS + 1) / 2))
 LOCK_DIR="${CODEMIT_TEST_LOCK_DIR:-/tmp/codemit-test-slots}"
 
-usage() { sed -n '2,17p' "$0"; exit 2; }
-case "$kind" in backend|e2e|e2e-down) ;; *) usage ;; esac
+usage() { sed -n '2,18p' "$0"; exit 2; }
+case "$kind" in backend|e2e|e2e-down) ;; affected) exec python3 scripts/affected_tests.py "$@" ;; *) usage ;; esac
 
 eval "$(sh docker/dev-env.sh)"
 E2E_PROJECT="${COMPOSE_PROJECT_NAME}-e2e"
