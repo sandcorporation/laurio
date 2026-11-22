@@ -9,8 +9,11 @@ import Link from "next/link";
 
 import { Card, CardHeader } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { knownOr } from "@/lib/util/known-or";
 import { withLate } from "@/lib/problems/due-dates";
 import { useRecentAttempts, type RecentAttemptRow, type RecentAttemptStatus } from "@/lib/classes/use-recent-attempts";
+
+const UNKNOWN_STATUS = { label: "확인 중", className: "text-ink/45" };
 
 const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: string }> = {
   passed: { label: "통과", className: "text-success" },
@@ -34,7 +37,7 @@ function AttemptMark({ status }: { status: RecentAttemptStatus }) {
 
 /** 시도 한 줄 — 「최근 제출」 카드와 「제출」 화면(#1317)이 같이 쓴다. `action` 은 줄 끝에 붙는다(「다시 채점」). */
 export function AttemptLine({ attempt, testId, action }: { attempt: RecentAttemptRow; testId: string; action?: ReactNode }) {
-  const status = STATUS_LABEL[attempt.status];
+  const status = knownOr(STATUS_LABEL, attempt.status, UNKNOWN_STATUS);
   return (
     <li data-testid={testId} className="flex items-center gap-2.5 px-4 py-2.5">
       <AttemptMark status={attempt.status} />
