@@ -129,7 +129,7 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
   const plainClass = "border border-rule px-3 py-1.5 text-[13px] text-ink hover:border-ink disabled:opacity-40";
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 [--canvas-reserve:23rem] lg:[--canvas-reserve:8rem]">
       <div className="flex flex-wrap gap-2" role="toolbar" aria-label="그림 도구">
         <button type="button" data-testid="feedback-tool-redact" aria-pressed={tool === "redact"} className={toolClass(tool === "redact")} onClick={() => setTool("redact")}>
           가리기
@@ -156,7 +156,7 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
         className="cursor-crosshair touch-none border border-rule bg-paper"
         style={{
           aspectRatio: `${source.width} / ${source.height}`,
-          width: `min(100%, calc((100dvh - 23rem) * ${source.width / source.height}))`,
+          width: `min(100%, calc((100dvh - var(--canvas-reserve)) * ${source.width / source.height}))`,
         }}
       />
     </div>
