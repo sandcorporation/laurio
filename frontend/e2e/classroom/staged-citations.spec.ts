@@ -1,7 +1,7 @@
 import { type APIRequestContext, expect, request, test } from "@playwright/test";
 
 import { E2E_OPERATOR_PASSWORD, seedE2eOperator } from "../lib/seed-operator";
-import { operatorOrigin } from "../lib/session";
+import { backendBaseUrl } from "../lib/seed-http";
 import { classroomApi, establishClassroomSession } from "./lib/cross-app-session";
 
 // 강의실 — staged 채점 갈래의 판정 근거(#1283·#1284). 강사 제출 현황의 「판정」에 출처(기계·AI)와 근거 위치가
@@ -12,15 +12,16 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 // 문구가 처음 나오는 줄을 인용한다 — 그 줄이 주석이라 대조에서 맞지 않고(빈 줄·주석·import 는 근거가 아니다) 「의심」
 // 이 된다. 기계 규칙(`path_exists app.py`) 항목은 기계 판정과 그 근거 경로가 보인다.
 
-const SETTING = "/api/backend/operator/runtime-settings/CLASSROOM_SCORING_PIPELINE";
+const SETTING = "/api/operator/runtime-settings/CLASSROOM_SCORING_PIPELINE";
 // 의심 올림(#1285) — 흉내 어댑터는 다시 물어도 같은 주석 줄을 인용해 「미충족 + 의심 남음」이 된다.
-const ESCALATION = "/api/backend/operator/runtime-settings/CLASSROOM_ESCALATION_MODEL";
+const ESCALATION = "/api/operator/runtime-settings/CLASSROOM_ESCALATION_MODEL";
 
 async function operatorRequest(): Promise<APIRequestContext> {
   const su = await seedE2eOperator({ username: `e2e-op-staged-${Date.now()}`, superuser: true });
-  const origin = operatorOrigin();
-  const ctx = await request.newContext({ baseURL: origin, extraHTTPHeaders: { origin } });
-  const login = await ctx.post("/api/auth/login", { data: { username: su.username, password: E2E_OPERATOR_PASSWORD } });
+  // backend 직통 — classroom 조각은 operator 앱을 띄우지 않는다. dev·CI 의 backend 는 도착한 주소를 운영자 Origin 으로 본다.
+  const base = backendBaseUrl();
+  const ctx = await request.newContext({ baseURL: base, extraHTTPHeaders: { origin: new URL(base).origin } });
+  const login = await ctx.post("/api/operator/login", { data: { username: su.username, password: E2E_OPERATOR_PASSWORD } });
   expect(login.ok(), await login.text()).toBeTruthy();
   return ctx;
 }
