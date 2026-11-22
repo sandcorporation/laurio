@@ -88,13 +88,16 @@ cd backend && uv run python manage.py release_scoring_hold <제출 id> [<제출 
 
 **`/api/health` 는 db·redis·워커를 본다**(#949). 예전에는 늘 `{"status":"ok"}` 라 db·redis·celery-worker·
 grader 가 죽어도 200 이었다. 지금은 `SELECT 1`(statement_timeout 1초)·redis `PING`(소켓 1초)과, backend 에
-`HEALTH_REQUIRED_WORKERS=celery,grader`(compose.prod 의 backend 만)가 있을 때 두 워커의 생존 신호를 본다.
+`HEALTH_REQUIRED_WORKERS=celery,grader,beat`(compose.prod 의 backend 만)가 있을 때 세 신호를 본다.
 하나라도 실패면 **503 `{"status":"error","failed":["db"|"redis"|"celery"|"grader", …]}`**, 정상이면 200
 `{"status":"ok"}`. 호스트·버전·예외 원문은 내지 않는다. 신호는 celery-worker(beat 포함)·grader 프로세스 안의
 **별도 스레드**(`core/heartbeat.py`)가 15초마다 redis 키 `codemit:heartbeat:<역할>`(TTL 90초)을 갱신하고
 `/tmp/codemit-heartbeat` 의 mtime 을 만진다 — 채점 한 건이 LLM 을 오래 기다려도 멈추지 않는다. 컨테이너
 healthcheck(celery-worker·grader)는 그 파일이 90초 안에 갱신됐는지만 본다. 스레드가 산다는 신호지 태스크
-소비를 증명하지는 않는다. **`?scope=ready`** 는 db·redis 만 본다 — 배포 롤링·`deploy.sh health`·세 앱의
+소비를 증명하지는 않는다. **`beat` 신호(#1344)**는 스레드가 아니라 beat 가 30초마다 쏘는 작업(`core.beat_heartbeat`)이 worker 안에서 돌 때
+갱신한다(redis 키 TTL 120초, 파일 `/tmp/codemit-heartbeat-beat`) — worker 는 살아 있고 beat 만 죽으면(`-B` 는 같은 컨테이너) 이 신호만 끊겨
+`/api/health` 가 503 `failed:["beat"]`, celery-worker healthcheck 도 120초 뒤 unhealthy 다. 30초 주기·120초 한도는 틱 셋을 놓친
+뒤에야 울리게 한 값이다(한 틱이 worker 가 바빠 밀려도 거짓 경보가 없다). 개발·CI 는 요구하지 않는다. **`?scope=ready`** 는 db·redis 만 본다 — 배포 롤링·`deploy.sh health`·세 앱의
 `/healthz` 프로브가 이것을 쓴다(워커가 죽어도 api 가 배포에서 빠지지 않게). 공개 도메인의 **`https://<도메인>/api/health`**(공개 앱
 `app/api/health/route.ts`, GET 만)가 backend 의 전체 점검(워커 포함)을 돌려준다 — 외부 감시(Gatus)용. 코드는 200·503
 만, 본문은 `status`·`failed`(알려진 점검 이름만)로 걸러 내고, backend 에 못 닿으면 503 `failed:["backend"]`. `/healthz` 는

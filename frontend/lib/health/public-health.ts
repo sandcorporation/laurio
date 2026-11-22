@@ -3,7 +3,7 @@
 // (호스트·버전·내부 오류 문구가 backend 의 다른 응답 형태로 새는 것을 막는다).
 import type { BackendHealthReply } from "@codemit/bff-shared";
 
-const KNOWN_CHECKS = new Set(["db", "redis", "celery", "grader"]);
+const KNOWN_CHECKS = new Set(["db", "redis", "celery", "grader", "beat"]);
 
 export type PublicHealth = { status: number; body: { status: "ok" } | { status: "error"; failed: string[] } };
 

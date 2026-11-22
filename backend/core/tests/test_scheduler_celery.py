@@ -96,7 +96,8 @@ def test_ci_beat_interval_env_shortens_interval_scans_only(monkeypatch):
         scans = {n: e for n, e in short.items() if n.startswith("scan:")}
         assert scans and all(e["schedule"] == 10.0 for e in scans.values())
         for name, entry in SCHEDULED_JOBS.items():
-            assert isinstance(short[name]["schedule"], crontab)
+            if isinstance(entry["schedule"], crontab):  # 주기(초) 작업(beat 생존 신호 등)은 스캔처럼 줄어든다
+                assert isinstance(short[name]["schedule"], crontab)
     finally:
         monkeypatch.delenv("CODEMIT_CI_BEAT_INTERVAL_SECONDS")
         sync_beat_schedule()
