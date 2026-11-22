@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
-from classroom import scoring_calculator, scoring_cost
+from classroom import scoring, scoring_calculator, scoring_cost
 from core import model_context
 from classroom.tests.test_classroom_agent_method import _claude_stream, _Runner
 from classroom.tests.test_classroom_anthropic_key import _anthropic_vendor
@@ -28,6 +30,7 @@ from tests.classroom_scenarios import (
     set_anthropic_key,
     submit_repository,
     submit_source,
+    zip_bytes,
     user_id,
 )
 from tests.integration.test_llm_proxy import FakeVendor
@@ -106,6 +109,47 @@ def test_the_fit_is_judged_in_bytes_not_in_characters():
     assert _single(source=capacity).fits is True
     # 글자 수로는 예산 안처럼 보여도 바이트(× BYTES_PER_CHAR)로 바꾸면 넘는 경계 — 실제 채점은 바이트로 자른다.
     assert _single(source=capacity + 2).fits is False
+
+
+def _hangul_source(size_bytes: int) -> str:
+    """바이트가 글자보다 많은 파이썬 소스 — 한글 주석 줄에 영문 주석으로 바이트 수를 맞춘다."""
+
+    unit = "# 가나다\n"  # 12바이트 · 7글자
+    body = unit * (size_bytes // len(unit.encode()))
+    return body + "#" * (size_bytes - len(body.encode()))
+
+
+@pytest.mark.parametrize("delta, held", [(-1, False), (0, False), (1, True)])
+def test_a_hangul_source_is_held_by_the_scoring_exactly_when_the_calculator_says_it_does_not_fit(delta, held):
+    """한글 소스를 채점에 그대로 넣어 본다(모델은 부르지 않는다) — 채점의 「크기 초과」 보류(#989, `omission.any`)와
+    계산기의 한 번 호출 판정이 예산 바로 아래·위에서 같다. 계산기는 글자를 받으므로 바이트를 같은 예산에 직접 대 본다."""
+
+    model, instruction = "gpt-4o-mini", 3_000
+    budget = model_context.source_budget_bytes(model, instruction_bytes=instruction)
+    text = _hangul_source(budget + delta)
+    assert len(text.encode()) == budget + delta and len(text) < len(text.encode())  # 바이트 > 글자
+
+    _, omission = scoring._scoring_source_files(
+        zip_bytes({"main.py": text}), SimpleNamespace(id=1, label="s"), model=model, instruction_bytes=instruction
+    )
+    fits = scoring_calculator.fits_source_bytes(model, source_bytes=len(text.encode()), instruction_chars=instruction)
+
+    assert omission.any is held
+    assert fits is (not held)
+
+
+@pytest.mark.parametrize("delta", [-1_000, 1_000])
+def test_the_calculator_input_in_characters_is_the_bytes_over_bytes_per_char(delta):
+    """계산기 입력은 글자라 `바이트 ÷ BYTES_PER_CHAR` 로 넣으면 같은 판정이다 — 예산 1천 바이트 아래는 들어가고 위는 보류."""
+
+    model, instruction = "gpt-4o-mini", 3_000
+    budget = model_context.source_budget_bytes(model, instruction_bytes=instruction)
+    chars = int((budget + delta) / scoring_calculator.BYTES_PER_CHAR)
+
+    single = _single(model, source=chars, instruction=instruction)
+
+    assert single.fits is (delta < 0)
+    assert single.route == ("single" if delta < 0 else "hold")
 
 
 def test_every_priced_model_has_a_known_context_window():
@@ -221,6 +265,8 @@ def test_an_empty_class_prices_every_model_by_both_methods_and_no_cell_is_missin
     assert calc["agent_vendors"] == ["anthropic"]
     assert calc["assumptions"] == {
         "source_chars": 32_000,
+        "source_files": 20,
+        "source_chars_per_file": 1_600,
         "requirements": 6,
         "instruction_chars": scoring_calculator.assumed_instruction_chars(6),
         "students": 18,
@@ -264,6 +310,14 @@ def test_the_capacity_in_the_table_is_what_the_scoring_budget_gives(client, db):
     for row in calc["rows"]:
         budget = model_context.source_budget_bytes(row["model_id"], instruction_bytes=instruction)
         assert row["single"]["capacity_chars"] == int(budget // scoring_calculator.BYTES_PER_CHAR), row["model_id"]
+        assert row["single"]["capacity_chars_hangul"] == int(budget // 1.48), row["model_id"]
+        per_file = scoring_calculator.SOURCE_CHARS_PER_FILE
+        assert per_file == 1_600
+        assert row["single"]["capacity_files"] == round(row["single"]["capacity_chars"] / per_file), row["model_id"]
+        assert row["single"]["capacity_files_hangul"] == round(row["single"]["capacity_chars_hangul"] / per_file), row["model_id"]
+    assumptions = calc["assumptions"]
+    assert assumptions["source_chars_per_file"] == 1_600
+    assert assumptions["source_files"] == round(assumptions["source_chars"] / 1_600)
 
 
 def test_changing_the_assumptions_changes_the_values_and_a_source_past_the_capacity_is_held(client, db):

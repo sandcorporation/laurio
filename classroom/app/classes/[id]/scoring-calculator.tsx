@@ -17,6 +17,7 @@ import {
   formatUsdPerMillion,
   fromLabel,
   parseAssumption,
+  perFileLabel,
   providerLabel,
   semesterLine,
   singleNote,
@@ -122,6 +123,15 @@ function Assumptions({
           value={a.source_chars}
           onCommit={(value) => change("sourceChars", value)}
         />
+        <NumberInput
+          testId="calculator-source-files"
+          label="소스 파일 수"
+          value={a.source_files}
+          onCommit={(value) => change("sourceChars", value === undefined ? undefined : value * a.source_chars_per_file)}
+        />
+        <span data-testid="calculator-chars-per-file" className="text-xs text-ink/60">
+          {perFileLabel(a.source_chars_per_file)}
+        </span>
       </Field>
       <Field label="항목 수" tag={fromLabel(a.requirements_from)}>
         <NumberInput
