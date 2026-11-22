@@ -68,6 +68,9 @@ class TruthVerdict:
 
     checklist_item_id: int
     is_met: bool
+    #: 대장이 단 확신(`high`·`medium`·`low`, #1297) — 표에 열이 없거나 비었으면 빈 문자열(「확신 표시 없음」).
+    #: 근거(evidence)·메모(note) 글은 사본에 넣지 않는다.
+    confidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -154,7 +157,7 @@ def _item_json(item: Item) -> bytes:
         "checklist": [{k: v for k, v in c.__dict__.items() if k != "machine_rule" or v is not None} for c in item.checklist],
         "verdicts": [v.__dict__ for v in item.verdicts],
         "model_version": item.model_version,
-        **({"truth": [t.__dict__ for t in item.truth]} if item.truth else {}),
+        **({"truth": [{k: v for k, v in t.__dict__.items() if k != "confidence" or v} for t in item.truth]} if item.truth else {}),
     }
     return json.dumps(body, ensure_ascii=False, sort_keys=True).encode()
 
@@ -338,19 +341,25 @@ CLASSROOM_EXPERIMENT_STAGED_CALL: Slot[ClassroomExperimentCall] = Slot("강의�
 
 _MET_WORDS = {"충족": True, "met": True, "true": True, "1": True, "미충족": False, "unmet": False, "false": False, "0": False}
 TRUTH_COLUMNS = ("material_id", "item_id", "is_met")
+#: 표에 더 있어도 받는 열(#1297) — `confidence` 만 읽고 나머지(`evidence`·`note` 등 글)는 버린다.
+CONFIDENCE_VALUES = ("high", "medium", "low")
 
 
 def parse_truth_csv(text: str, items: Sequence[Item]) -> dict[str, tuple[TruthVerdict, ...]]:
-    """기준 판정 CSV(`material_id,item_id,is_met`) → 가명 id 별 기준 판정. **원문·학생 정보는 받지 않는다** — 열이 셋뿐이다.
+    """기준 판정 CSV(`material_id,item_id,is_met[,evidence,confidence,note]`) → 가명 id 별 기준 판정. **원문·학생 정보는
+    받지 않는다** — 앞 세 열과 `confidence` 만 읽고, 다른 열의 글(`evidence`·`note`)은 사본에 넣지 않는다.
 
-    거절: 열이 다르다 · 모르는 가명 id · 그 제출의 체크리스트에 없는 항목 id · 같은 칸이 둘 · 충족 값을 못 읽는다 ·
-    CSV 에 나온 제출의 항목이 빠졌다(기준 판정은 제출마다 체크리스트 전부여야 한다 — 일부만 있으면 정확도가 기울어진다)."""
+    거절: 앞 세 열이 다르다 · 모르는 가명 id · 그 제출의 체크리스트에 없는 항목 id · 같은 칸이 둘 · 충족 값을 못 읽는다 ·
+    모르는 확신 값 · 충족 칸이 일부만 비었다 · CSV 에 나온 제출의 항목이 빠졌다(기준 판정은 제출마다 체크리스트 전부여야
+    한다 — 일부만 있으면 정확도가 기울어진다). 한 제출의 충족 칸이 모두 비었으면 매기지 않은 제출이라 건너뛴다."""
 
     reader = csv.DictReader(io.StringIO(text))
-    if tuple(reader.fieldnames or ()) != TRUTH_COLUMNS:
-        raise MaterialError(f"기준 판정 CSV 의 열은 {','.join(TRUTH_COLUMNS)} 이어야 한다")
+    if tuple(reader.fieldnames or ())[: len(TRUTH_COLUMNS)] != TRUTH_COLUMNS:
+        raise MaterialError(f"기준 판정 CSV 의 앞 열은 {','.join(TRUTH_COLUMNS)} 이어야 한다")
     by_id = {i.material_id: i for i in items}
-    seen: dict[str, dict[int, bool]] = {}
+    seen: dict[str, dict[int, bool | None]] = {}
+    confidence: dict[str, dict[int, str]] = {}
+    blank_lines: dict[tuple[str, int], int] = {}
     for line_no, row in enumerate(reader, start=2):
         material_id = (row["material_id"] or "").strip()
         item = by_id.get(material_id)
@@ -362,18 +371,32 @@ def parse_truth_csv(text: str, items: Sequence[Item]) -> dict[str, tuple[TruthVe
             raise MaterialError(f"{line_no}행: 항목 id 가 숫자가 아니다") from exc
         if item_id not in {c.id for c in item.checklist}:
             raise MaterialError(f"{line_no}행: 그 제출의 체크리스트에 없는 항목 id {item_id}")
-        met = _MET_WORDS.get((row["is_met"] or "").strip().lower())
-        if met is None:
+        raw_met = (row["is_met"] or "").strip().lower()
+        met = None if not raw_met else _MET_WORDS.get(raw_met)
+        if raw_met and met is None:
             raise MaterialError(f"{line_no}행: 충족 값을 읽을 수 없다(충족·미충족·true·false)")
+        sure = (row.get("confidence") or "").strip().lower()
+        if sure and sure not in CONFIDENCE_VALUES:
+            raise MaterialError(f"{line_no}행: 확신 값을 읽을 수 없다({'·'.join(CONFIDENCE_VALUES)})")
         if item_id in seen.setdefault(material_id, {}):
             raise MaterialError(f"{line_no}행: 같은 칸이 두 번 있다(항목 id {item_id})")
         seen[material_id][item_id] = met
+        confidence.setdefault(material_id, {})[item_id] = sure
+        if met is None:
+            blank_lines[(material_id, item_id)] = line_no
     out: dict[str, tuple[TruthVerdict, ...]] = {}
     for material_id, judged in seen.items():
+        if all(v is None for v in judged.values()):
+            continue  # 매기지 않은 제출 — 모든 행이 비었다
+        blank = sorted(i for i, v in judged.items() if v is None)
+        if blank:
+            raise MaterialError(
+                f"제출 {material_id} 의 항목 {blank} 충족 값이 비었다({blank_lines[(material_id, blank[0])]}행 …) — 일부만 비울 수 없다"
+            )
         missing = sorted({c.id for c in by_id[material_id].checklist} - set(judged))
         if missing:
             raise MaterialError(f"제출 {material_id} 의 항목 {missing} 기준 판정이 빠졌다")
-        out[material_id] = tuple(TruthVerdict(i, judged[i]) for i in sorted(judged))
+        out[material_id] = tuple(TruthVerdict(i, bool(judged[i]), confidence[material_id][i]) for i in sorted(judged))
     return out
 
 

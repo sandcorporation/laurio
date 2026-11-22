@@ -108,8 +108,8 @@ DEFAULT_ROWS = (
 _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
     "single_call": ((20_000, 1_000), (300_000, 4_000)),
     "classroom_call": ((20_000, 1_000), (300_000, 4_000)),
-    # 한 번 호출 하나 + 의심 올림·두 걸음·도출 호출 몫(#1295) — 높은 쪽은 한 번 호출의 두 배로 잡는다.
-    "classroom_staged": ((20_000, 1_000), (600_000, 8_000)),
+    # 한 번 호출 하나 + 의심 올림·두 걸음 몫 + 도출 호출 몫(항목 글만 실어 입력 4천·출력 1천, 칸마다 새로 한다, #1295).
+    "classroom_staged": ((24_000, 2_000), (604_000, 9_000)),
     "agent": ((60_000, 2_000), (600_000, 15_000)),
     "self_loop": ((40_000, 2_000), (400_000, 12_000)),
 }
@@ -390,7 +390,10 @@ def record_truth(experiment: ScoringExperiment, subjects: Sequence[MaterialSubje
             experiment=experiment, submission=None, material_id=s.material_id, row=TRUTH_ROW, round=1,
             defaults=dict(
                 status=ScoringExperimentRun.Status.SCORED,
-                verdicts=[{"requirement_id": t.checklist_item_id, "met": t.is_met} for t in s.item.truth],
+                verdicts=[
+                    {"requirement_id": t.checklist_item_id, "met": t.is_met, **({"confidence": t.confidence} if t.confidence else {})}
+                    for t in s.item.truth
+                ],
                 created_at=Clock.now(),
             ),
         )

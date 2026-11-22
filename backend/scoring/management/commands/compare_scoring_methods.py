@@ -58,7 +58,7 @@ class Command(BaseCommand):
         parser.add_argument("--material", default=None, help="사본 재료 파일(저장소 밖, 기본 ~/.cache/codemit-work/experiment-material/<이름>/)")
         parser.add_argument(
             "--fill-truth", default=None,
-            help="--material 과 함께: 항목별 기준 판정 CSV(material_id,item_id,is_met — 가명 id 뿐, 원문·학생 정보 없음)를 사본에 채우고 끝낸다(모델을 부르지 않는다)",
+            help="--material 과 함께: 항목별 기준 판정 CSV(material_id,item_id,is_met[,evidence,confidence,note] — 가명 id 뿐, confidence 만 읽고 evidence·note 글은 사본에 넣지 않는다)를 사본에 채우고 끝낸다(모델을 부르지 않는다)",
         )
         parser.add_argument("--purge-material", default=None, help="사본 재료 폴더 <이름> 을 지운다")
         parser.add_argument("--rows", default=None, help="방식:모델,… (첫째가 기준 줄). 비면 기본 줄 일곱")

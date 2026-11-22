@@ -30,6 +30,7 @@ from .scoring import (
     ANTHROPIC_SCORING_ADAPTER,
     PreparedScoring,
     _build_prompt,
+    _derive_rules,
     _escalation_model_for,
     _Head,
     _machine_only,
@@ -211,7 +212,7 @@ def experiment_call(item: Item, *, model: str, api_key: str | None) -> Classroom
 def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> ClassroomCallResult:
     """강의실 운영 채점의 staged 갈래(#1283~#1286)를 사본 위에서 그대로 — 기계 판정(강사 규칙)·줄 번호 인용·의심 올림·큰
     제출 두 걸음을 운영 설정 기본값대로 돈다. 같은 입력 재사용(#1287)은 끈다(사본에는 이전 점수가 없다). 도출(#1293)은
-    사본에 도출 칸이 없어 칸마다 새로 하는 몫이다 — 아직 이 갈래에 잇지 않았다(강사 규칙만)."""
+    사본에 도출 칸이 없어 칸마다 새로 한다(`_derive_rules`, 저장하지 않고 그 호출의 비용을 칸에 더한다)."""
 
     problem = Problem(
         id=0,
@@ -244,6 +245,15 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
         two_step_budget=classroom_two_step_budget_chars(),
     )
     syntax_check = run_syntax_check(item.source, enabled=problem.syntax_check_enabled)
+    mode = "fake" if api_key is None else (ANTHROPIC_SCORING_ADAPTER if anthropic else OPENAI_SCORING_ADAPTER)
+    # 도출(#1293)은 사본에 도출 칸이 없어 칸마다 새로 한다 — 운영 채점이 prepare_tail 안에서 하는 것과 같다. 결과는 항목에 얹혀
+    # `_staged_split` 이 읽고, 저장은 하지 않는다. 그 호출의 토큰·비용도 이 칸에 더한다.
+    derivation = _derive_rules(head, model, mode=mode)
+    derive_usage: tuple[tuple[str, int, int], ...] = (
+        ((derivation.model or model, derivation.input_tokens, derivation.output_tokens),)
+        if derivation is not None and derivation.total_tokens
+        else ()
+    )
     asked_items, machine_entries = _staged_split(checklist, item.source)
     machine_ids = tuple(e["checklist_item_id"] for e in machine_entries)
     if not asked_items and syntax_check.synthetic_requirement() is None:
@@ -256,6 +266,7 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
             model_version=outcome.output.model_version,
             prompt=prepared.prompt,
             machine_ids=machine_ids,
+            extra_usage=derive_usage,
         )
     instruction_bytes = len(
         _build_prompt(submission, asked_items, "", asset_kind=asset.kind, syntax_check=syntax_check, cite=True).encode("utf-8")
@@ -318,13 +329,12 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
             else None
         ),
     )
-    mode = "fake" if api_key is None else (ANTHROPIC_SCORING_ADAPTER if anthropic else OPENAI_SCORING_ADAPTER)
     outcome = call_vendor_sync(prepared, reuse=False, mode=mode)
     if outcome.error is not None or outcome.output is None:
         return ClassroomCallResult("held", problem=str(outcome.error or "응답 없음"))
     scored = outcome.second_step or prepared
     output = outcome.output
-    extra: list[tuple[str, int, int]] = []
+    extra: list[tuple[str, int, int]] = list(derive_usage)
     if outcome.escalation is not None:
         extra.append((escalation_model, outcome.escalation.input_tokens, outcome.escalation.output_tokens))
     input_tokens = output.input_tokens + (outcome.selection.input_tokens if outcome.selection else 0)

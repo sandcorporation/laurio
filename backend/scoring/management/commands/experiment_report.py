@@ -25,6 +25,7 @@ from scoring.experiment_report import (
     bill_lines,
     bill_markdown,
     limits_note,
+    mismatch_lines,
     report_rows,
     to_csv,
     to_markdown,
@@ -66,6 +67,8 @@ class Command(BaseCommand):
                 duration_seconds=r.duration_seconds,
                 verdicts=_verdicts(r.verdicts),
                 **_staged_counts(r.verdicts),
+                soft_items=_soft_items(r.verdicts),
+                confidence_marked=_confidence_marked(r.verdicts),
             )
             for r in experiment.runs.all()
             if not is_infra_failure(r.status, r.problem)  # 결과가 아니다(#1257) — 다음 실행에서 다시 돈다
@@ -106,6 +109,7 @@ class Command(BaseCommand):
         md = to_markdown(f"채점 방식 비교 — {experiment.name}", reports, notes, repeat=repeat, full_submissions=full)
         if production:
             md += band_lines(runs, production_row=production[0], row_names=[*experiment.rows, *production[1:]])
+        md += mismatch_lines(runs, row_names=[*experiment.rows, *production])
         self.stdout.write(md, ending="")
 
 
@@ -117,6 +121,21 @@ def _staged_counts(raw: object) -> dict[str, int]:
         return {}
     machine = sum(1 for i in items if i["source"] == "machine")
     return {"machine_items": machine, "model_items": len(items) - machine}
+
+
+def _soft_items(raw: object) -> tuple[int, ...]:
+    """기준 판정 칸에서 확신이 `high` 가 아닌 항목 id(#1299) — 확신을 단 칸이 하나도 없으면 비운다(「—」로 둔다)."""
+
+    if not _confidence_marked(raw):
+        return ()
+    assert isinstance(raw, list)
+    return tuple(
+        i["requirement_id"] for i in raw if isinstance(i, dict) and i.get("confidence") != "high" and isinstance(i.get("requirement_id"), int)
+    )
+
+
+def _confidence_marked(raw: object) -> bool:
+    return isinstance(raw, list) and any(isinstance(i, dict) and i.get("confidence") for i in raw)
 
 
 def _verdicts(raw: object) -> tuple[tuple[int, bool], ...]:
