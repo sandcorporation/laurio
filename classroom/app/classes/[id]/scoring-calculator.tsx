@@ -256,7 +256,7 @@ function ModelTable({ calc, pick }: { calc: Calculation; pick: (row: CalculatorR
                     onClick={() => pick(row, "single")}
                   >
                     <span data-testid={`calculator-cost-${model.id}-single`} className="block text-ink">
-                      {formatKrw(row.single.krw, row.single.open_ended)}
+                      {row.single.route === "hold" ? "0원" : formatKrw(row.single.krw, row.single.open_ended)}
                     </span>
                     <span
                       data-testid={`calculator-note-${model.id}-single`}
