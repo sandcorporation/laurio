@@ -16,13 +16,15 @@ async function newClass(page: import("@playwright/test").Page, label: string) {
   return { api, classId: (await created.json()).id as number };
 }
 
-test("채점 연결은 「연결 없음」에서 시작해 키를 저장하면 상태 줄이 연결됨이 되고, 새로고침해도 남고, 바꾸기를 눌러야 폼이 열린다", async ({
+test("채점 연결은 「연결 없음」에서 시작해 OpenAI 키를 넣으면 상태 줄이 연결됨이 되고, 새로고침해도 남는다", async ({
   page,
 }) => {
   const { classId } = await newClass(page, "key");
   await page.goto(`/classes/${classId}/settings#scoring-key`);
 
   await expect(page.getByTestId("openai-key-status")).toContainText("연결 없음");
+  await expect(page.getByTestId("scoring-connection-kind-openai_key")).toBeDisabled();
+  await page.getByTestId("vendor-key-openai-change").click();
   await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
   await page.getByTestId("openai-key-submit").click();
 
@@ -30,34 +32,45 @@ test("채점 연결은 「연결 없음」에서 시작해 키를 저장하면 �
   await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
   await expect(page.getByTestId("scoring-connection-verified")).toHaveText(/^\d{1,2}\/\d{1,2} 확인$/);
   await expect(page.getByTestId("openai-key-input")).toHaveCount(0);
+  await expect(page.getByTestId("vendor-key-openai-masked")).toContainText("7f2a");
+  await expect(page.getByTestId("scoring-connection-kind-openai_key")).toHaveAttribute("aria-checked", "true");
 
   await page.reload();
   await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
   await expect(page.getByTestId("openai-key-input")).toHaveCount(0);
-  await page.getByTestId("scoring-connection-change").click();
+  await page.getByTestId("vendor-key-openai-change").click();
   await expect(page.getByTestId("openai-key-input")).toBeVisible();
 });
 
-test("「Claude(Anthropic) 키」를 고르고 저장하면 상태 줄이 그 종류와 끝 네 자리로 연결됨이 되고, 새로고침해도 남는다", async ({
+test("OpenAI·Claude 키를 둘 다 넣어 두고 스위치로 채점 벤더를 바꾸면 상태 줄과 모델 표가 따라가고, 새로고침해도 남는다", async ({
   page,
 }) => {
-  const { classId } = await newClass(page, "claude");
+  const { api, classId } = await newClass(page, "claude");
+  const key = await api.put(`/api/backend/classroom/classes/${classId}/openai-key`, {
+    data: { api_key: "sk-e2e-test-key-7f2a" },
+  });
+  expect(key.ok()).toBeTruthy();
   await page.goto(`/classes/${classId}/settings#scoring-key`);
 
-  // 방침 개정 시행일(#803) 전에는 선택지가 없고, 지나면 저절로 열린다 — 어느 쪽이든 이 시험이 맞아야 한다.
-  await expect(page.getByTestId("scoring-connection-kind-openai_key")).toBeVisible();
-  if ((await page.getByTestId("scoring-connection-kind-anthropic_key").count()) === 0) {
-    await expect(page.getByTestId("scoring-connection-kind-compatible_server")).toBeVisible();
+  // 방침 개정 시행일(#803) 전에는 Claude 키 줄과 선택지가 없고, 지나면 저절로 열린다 — 어느 쪽이든 이 시험이 맞아야 한다.
+  await expect(page.getByTestId("vendor-key-openai")).toBeVisible();
+  if ((await page.getByTestId("vendor-key-anthropic").count()) === 0) {
+    await expect(page.getByTestId("scoring-connection-kind-anthropic_key")).toHaveCount(0);
     return;
   }
-  await page.getByTestId("scoring-connection-kind-anthropic_key").click();
+  await expect(page.getByTestId("scoring-connection-kind-anthropic_key")).toBeDisabled();
+  await page.getByTestId("vendor-key-anthropic-change").click();
   await page.getByTestId("anthropic-key-input").fill("sk-ant-e2e-test-key-9c1d");
   await page.getByTestId("anthropic-key-submit").click();
 
-  await expect(page.getByTestId("anthropic-key-status")).toContainText("연결됨");
+  // 쉬는 쪽 키를 넣어도 채점은 OpenAI 그대로다.
+  await expect(page.getByTestId("vendor-key-anthropic-masked")).toContainText("9c1d");
+  await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
+
+  await page.getByTestId("scoring-connection-kind-anthropic_key").click();
   await expect(page.getByTestId("anthropic-key-status")).toContainText("Claude(Anthropic) 키");
   await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");
-  await expect(page.getByTestId("anthropic-key-input")).toHaveCount(0);
+  await expect(page.getByTestId("vendor-key-openai-masked")).toContainText("7f2a");
   // 새로고침 없이도 단가표에 있는 Claude 모델은 원화로 보인다(#801) — 비용은 연결이 바뀐 뒤에 다시 받는다.
   await expect(page.getByTestId("scoring-model-cost-claude-haiku-5-5")).toContainText("원");
   await expect(page.getByTestId("scoring-model-cost-claude-sonnet-5-5")).not.toContainText("단가 모름");
@@ -65,6 +78,12 @@ test("「Claude(Anthropic) 키」를 고르고 저장하면 상태 줄이 그 �
   await page.reload();
   await expect(page.getByTestId("anthropic-key-status")).toContainText("9c1d");
   await expect(page.getByTestId("scoring-model-cost-claude-haiku-5-5")).toContainText("원");
+
+  await page.getByTestId("scoring-connection-kind-openai_key").click();
+  await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
+  await page.reload();
+  await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
+  await expect(page.getByTestId("scoring-connection-kind-openai_key")).toHaveAttribute("aria-checked", "true");
 });
 
 test("기본 모델은 라디오 표에서 골라 저장하고, 새로고침해도 그 모델이 기본값이다", async ({ page }) => {

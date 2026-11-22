@@ -32,6 +32,7 @@ from tests.classroom_scenarios import (
     set_anthropic_key,
     set_key,
     submit_repository,
+    switch_scoring_vendor,
     transfer_ownership,
 )
 
@@ -108,7 +109,8 @@ def test_the_owner_saves_a_claude_key_and_sees_it_only_masked(client, db):
     assert body["default_model"] == "claude-haiku-5-5"
     assert body["default_model_is_reasoning"] is True
     stored = Class.objects.get(pk=class_id)
-    assert "secret" not in stored.openai_api_key_encrypted
+    assert "secret" not in stored.anthropic_api_key_encrypted
+    assert stored.anthropic_api_key_encrypted
 
 
 def test_a_co_instructor_cannot_save_it_and_reads_only_the_kind(client, db):
@@ -161,6 +163,7 @@ def test_switching_back_to_an_openai_key_moves_the_default_model_back(client, db
     set_anthropic_key(client, owner["access"], class_id)
 
     set_key(client, owner["access"], class_id, "sk-openai-key")
+    switch_scoring_vendor(client, owner["access"], class_id, "openai_key")
 
     body = get_class(client, owner["access"], class_id)
     assert body["scoring_connection_kind"] == "openai_key"
@@ -191,6 +194,7 @@ def test_switching_back_to_an_openai_key_returns_the_per_problem_claude_models_b
     claude = create_open_problem(client, owner["access"], class_id, title="클로드", model="claude-sonnet-5-5")
 
     set_key(client, owner["access"], class_id, "sk-openai-key")
+    switch_scoring_vendor(client, owner["access"], class_id, "openai_key")
 
     assert _problem_model(client, owner["access"], class_id, claude.id)["effective_model"] == "gpt-4.1-mini"
 

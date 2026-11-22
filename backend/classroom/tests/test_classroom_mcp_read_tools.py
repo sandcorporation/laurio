@@ -130,7 +130,8 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     # 화면에 없는 칸은 예상 채점 비용 하나다(#591) — 화면은 따로 `scoring-cost` 로 읽는다.
     class_estimate = tool_class.pop("scoring_cost_estimate")
     # 채점 연결의 값 조각(키 끝 네 자리, 호환 서버 주소·인증 가림, #605)은 화면에만 있다.
-    withheld = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked"}
+    # 넣어 둔 두 벤더 키의 마스킹(#1269)도 그렇다.
+    withheld = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked", "openai_key", "anthropic_key"}
     assert tool_class == {k: v for k, v in screen_class.items() if k not in withheld}
     assert class_estimate["model"] == screen_class["default_model"]
     assert tool_class["token_usage_total"] == screen_class["token_usage_total"]

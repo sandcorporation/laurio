@@ -191,6 +191,10 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         locked.openai_api_key_encrypted = ""
         locked.openai_api_key_last4 = ""
         locked.openai_api_key_status = Class.ScoringKeyStatus.UNVERIFIED
+        # Claude 키(#1269)도 넘긴 사람의 것이다 — 쉬고 있던 키도 함께 지운다.
+        locked.anthropic_api_key_encrypted = ""
+        locked.anthropic_api_key_last4 = ""
+        locked.anthropic_api_key_status = Class.ScoringKeyStatus.UNVERIFIED
         locked.scoring_quota_exhausted_at = None
         locked.scoring_server_unreachable_at = None
         locked.scoring_connection_verified_at = None
@@ -205,6 +209,9 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
                 "openai_api_key_encrypted",
                 "openai_api_key_last4",
                 "openai_api_key_status",
+                "anthropic_api_key_encrypted",
+                "anthropic_api_key_last4",
+                "anthropic_api_key_status",
                 "scoring_quota_exhausted_at",
                 "scoring_server_unreachable_at",
                 "scoring_connection_verified_at",

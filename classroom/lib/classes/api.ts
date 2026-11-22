@@ -22,6 +22,13 @@ export type PublishedClassTemplateSummary = {
   created_at: string;
 };
 
+export type VendorKey = {
+  masked: string;
+  status: "verified" | "unverified" | "rejected";
+  // 스위치가 이 벤더로 넘어갈 수 있는가 — 거부된 키면 false.
+  switchable: boolean;
+};
+
 export type ClassRow = {
   id: number;
   name: string;
@@ -50,8 +57,11 @@ export type ClassRow = {
   scoring_server_unreachable: boolean;
   // 채점 연결이 마지막으로 실제로 닿은 시각(#671) — 상태 한 줄의 「M/D 확인」. 없으면 null.
   scoring_connection_verified_at: string | null;
-  // 채점 연결의 종류(#601) — 「OpenAI 키」 또는 「호환 서버」.
+  // 채점 연결의 종류(#601, #1269) — 「OpenAI」·「Claude」 스위치 또는 「호환 서버」.
   scoring_connection_kind: "openai_key" | "anthropic_key" | "compatible_server";
+  // 넣어 둔 두 벤더 키(#1269) — 끝 네 자리·상태. 없으면 null(호환 서버 연결 동안의 OpenAI 키 포함).
+  openai_key: VendorKey | null;
+  anthropic_key: VendorKey | null;
   // 채점·완성도 검사 방식(#1036) — "single"(한 번 호출) | "agent"(에이전트).
   scoring_method: GradingMethod;
   quality_method: GradingMethod;
@@ -170,6 +180,19 @@ export function setAnthropicKey(classId: number, apiKey: string): Promise<ApiRes
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/anthropic-key`, "PUT", {
     api_key: apiKey,
   });
+}
+
+// 채점 벤더 스위치(#1269) — 넣어 둔 키 가운데 어느 쪽으로 채점할지. 키가 없거나 거부된 쪽은 422.
+export function switchScoringVendor(
+  classId: number,
+  kind: "openai_key" | "anthropic_key",
+): Promise<ApiResult<ClassRow>> {
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/scoring-vendor`, "PUT", { kind });
+}
+
+// 넣어 둔 벤더 키 하나를 지운다(#1269) — 지금 채점하는 쪽이면 그 클래스는 키 없음이 된다.
+export function deleteVendorKey(classId: number, provider: "openai" | "anthropic"): Promise<ApiResult<ClassRow>> {
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}/${provider}-key`, "DELETE");
 }
 
 // 채점 연결을 「호환 서버」로 저장한다(#601) — 서버가 저장 전에 그 주소에 한 번 닿아 보고,

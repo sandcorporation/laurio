@@ -57,6 +57,8 @@ from submissions.models import (
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
 from .models import (
+    ANTHROPIC_KEY_FIELDS,
+    OPENAI_KEY_FIELDS,
     LateStatus,
     ChecklistGrade,
     ChecklistItem,
@@ -67,6 +69,7 @@ from .models import (
     ClassTemplate,
     Problem,
     ProblemTemplate,
+    key_fields_for,
 )
 from .contest_entries import (
     EntryMarks,
@@ -136,6 +139,8 @@ from .schemas import (
     MemberRenameIn,
     MemberRenameOut,
     OpenAIKeyIn,
+    ScoringVendorIn,
+    VendorKeyOut,
     CompatibleServerIn,
     ProblemCopyIn,
     ProblemIn,
@@ -226,6 +231,18 @@ def _mask_from_last4(last4: str) -> str:
     return f"{_KEY_MASK_PREFIX}{last4}"
 
 
+def _vendor_key_out(class_obj: Class, kind: str) -> VendorKeyOut | None:
+    """넣어 둔 벤더 키 하나(#1269) — 끝 네 자리와 상태만, 쓰고 있지 않은 쪽 키도 싣는다."""
+
+    stored = class_obj.stored_vendor_key(kind)
+    if stored is None:
+        return None
+    last4, status = stored
+    return VendorKeyOut(
+        masked=_mask_from_last4(last4), status=status, switchable=class_obj.vendor_key_switchable(kind)
+    )
+
+
 def _published_template_summary(template) -> PublishedTemplateSummaryOut | None:
     if template is None:
         return None
@@ -268,10 +285,14 @@ def _serialize_class(
         default_reasoning_effort=class_obj.default_reasoning_effort,
         has_openai_key=has_key,
         openai_key_masked=(
-            _mask_from_last4(class_obj.openai_api_key_last4) if has_key and not compatible else None
+            _mask_from_last4(getattr(class_obj, class_obj.active_key_fields().last4))
+            if has_key and not compatible
+            else None
         ),
-        openai_key_status=class_obj.openai_api_key_status if has_key else None,
+        openai_key_status=class_obj.active_key_status() if has_key else None,
         scoring_connection_kind=class_obj.scoring_connection_kind,
+        openai_key=_vendor_key_out(class_obj, Class.ScoringConnectionKind.OPENAI_KEY),
+        anthropic_key=_vendor_key_out(class_obj, Class.ScoringConnectionKind.ANTHROPIC_KEY),
         scoring_method=class_obj.scoring_method,
         quality_method=class_obj.quality_method,
         grading_method_options=_grading_method_options(class_obj),
@@ -1029,13 +1050,29 @@ def _save_vendor_key(request: HttpRequest, class_obj: Class, api_key: str, *, ki
     if check_result == LLMKeyCheckStatus.REJECTED:
         raise HttpError(422, "이 채점 키를 벤더가 거절했습니다 — 키를 다시 확인해 저장해주세요.")
 
-    class_obj.openai_api_key_encrypted = encrypt(raw_key)
-    class_obj.openai_api_key_last4 = raw_key[-4:]
-    class_obj.openai_api_key_status = (
-        Class.ScoringKeyStatus.VERIFIED
-        if check_result == LLMKeyCheckStatus.VALID
-        else Class.ScoringKeyStatus.UNVERIFIED
+    # 두 키는 따로 산다(#1269). 저장한 키로 채점이 넘어가는 것은 그 벤더가 이미 고른 쪽이거나, 지금 연결로는
+    # 채점할 수 없을 때(키 없음·거부됨)뿐이다 — 쉬는 쪽 키를 바꿔 넣는다고 스위치가 넘어가 기본 모델·문제별
+    # 모델이 바뀌지 않게. 호환 서버 연결 동안 OpenAI 키를 저장하면 같은 칸을 덮으므로(#601) OpenAI 로 넘어간다.
+    current_kind = class_obj.scoring_connection_kind
+    selects = (
+        current_kind == kind
+        or class_obj.scoring_key_unusable(ignore_pause=True)
+        or (
+            kind == Class.ScoringConnectionKind.OPENAI_KEY
+            and current_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER
+        )
     )
+    fields = key_fields_for(kind)
+    setattr(class_obj, fields.encrypted, encrypt(raw_key))
+    setattr(class_obj, fields.last4, raw_key[-4:])
+    setattr(
+        class_obj,
+        fields.status,
+        Class.ScoringKeyStatus.VERIFIED if check_result == LLMKeyCheckStatus.VALID else Class.ScoringKeyStatus.UNVERIFIED,
+    )
+    if not selects:
+        _save_scoring_connection(request, class_obj, connection_changed=False)
+        return _serialize_class(class_obj, viewer_id=request.auth_user.id)
     # 벤더가 키를 받았을 때만 「확인」이다(#671) — 닿지 못해 미검증으로 저장한 키는 아직 확인된 적
     # 없는 새 연결이라 옛 연결의 확인 시각을 물려받지 않는다.
     class_obj.scoring_connection_verified_at = Clock.now() if check_result == LLMKeyCheckStatus.VALID else None
@@ -1076,28 +1113,133 @@ def _return_foreign_problem_models_to_default(class_obj: Class, kind: str) -> No
         )
 
 
-def _save_scoring_connection(request: HttpRequest, class_obj: Class, *, vendor_kind: str | None = None, **extra) -> None:
+def _save_scoring_connection(
+    request: HttpRequest,
+    class_obj: Class,
+    *,
+    vendor_kind: str | None = None,
+    connection_changed: bool = True,
+    **extra: object,
+) -> None:
     """`extra` 는 연결과 함께 바뀌는 다른 칸(벤더가 바뀌어 옮긴 기본 모델) — 바뀐 칸만 싣는다(다른 강사가
-    그사이 고친 값을 덮지 않게)."""
+    그사이 고친 값을 덮지 않게). `connection_changed` 가 거짓이면(쉬는 쪽 키만 바꿔 넣음, #1269) 지금 연결의
+    멈춤·확인 시각은 건드리지 않는다."""
 
+    if connection_changed:
+        # 호환 서버에 닿지 않아 멈춰 있었다면(#603) 다시 저장이 「고쳤다」는 신호다 — 저장 전
+        # 확인이 이미 그 서버에 닿았다.
+        extra.update(
+            scoring_quota_exhausted_at=None,
+            scoring_server_unreachable_at=None,
+            scoring_connection_verified_at=class_obj.scoring_connection_verified_at,
+        )
+    key_columns = {
+        name: getattr(class_obj, name)
+        for fields in (OPENAI_KEY_FIELDS, ANTHROPIC_KEY_FIELDS)
+        for name in (fields.encrypted, fields.last4, fields.status)
+    }
     with transaction.atomic():
         saved = classes_owned_by(request.auth_user.id).filter(id=class_obj.id).update(
             scoring_connection_kind=class_obj.scoring_connection_kind,
             scoring_server_url=class_obj.scoring_server_url,
-            openai_api_key_encrypted=class_obj.openai_api_key_encrypted,
-            openai_api_key_last4=class_obj.openai_api_key_last4,
-            openai_api_key_status=class_obj.openai_api_key_status,
-            scoring_quota_exhausted_at=None,
-            # 호환 서버에 닿지 않아 멈춰 있었다면(#603) 다시 저장이 「고쳤다」는 신호다 — 저장 전
-            # 확인이 이미 그 서버에 닿았다.
-            scoring_server_unreachable_at=None,
-            scoring_connection_verified_at=class_obj.scoring_connection_verified_at,
+            **key_columns,
             **extra,
         )
         if not saved:
             raise HttpError(403, OWNER_ONLY_MESSAGE)
         if vendor_kind is not None:
             _return_foreign_problem_models_to_default(class_obj, vendor_kind)
+
+
+_VENDOR_KEY_LABELS = {
+    Class.ScoringConnectionKind.OPENAI_KEY: "OpenAI 키",
+    Class.ScoringConnectionKind.ANTHROPIC_KEY: "Claude(Anthropic) 키",
+}
+
+
+@router.put(
+    "/classes/{class_id}/scoring-vendor",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut, 422: ErrorOut},
+    auth=jwt_auth,
+)
+def set_class_scoring_vendor(request: HttpRequest, class_id: int, payload: ScoringVendorIn):
+    """채점 벤더 스위치(#1269) — 넣어 둔 OpenAI·Claude 키 가운데 어느 쪽으로 채점할지 고른다. 소유자 전용
+    (ADR-0055). 키가 없거나 거부된 쪽으로는 넘어가지 않는다(422). 벤더에 묻지 않는다 — 키는 저장할 때 확인했다.
+
+    넘어가면 키를 저장해 벤더가 바뀔 때(#795·#796)와 같다: 기본 모델이 그 벤더 것이 아니면 그 벤더의 기본
+    모델로 옮기고, 문제별로 고른 다른 벤더 모델은 클래스 기본으로 되돌린다. 점수가 있는 제출은 다시 채점하지
+    않는다(채점 대기는 점수 없는 제출만 집는다 — `classroom.pending_scoring`)."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    kind = payload.kind
+    current_kind = class_obj.scoring_connection_kind
+    if kind == current_kind:
+        return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
+    if kind == Class.ScoringConnectionKind.ANTHROPIC_KEY and not privacy_policy.anthropic_key_connection_open():
+        raise HttpError(
+            422, f"Claude(Anthropic) 키 연결은 {privacy_policy.anthropic_key_connection_opens_label()}부터 쓸 수 있습니다."
+        )
+    if not class_obj.vendor_key_switchable(kind):
+        raise HttpError(422, f"넣어 둔 {_VENDOR_KEY_LABELS[kind]}가 없거나 벤더가 거절한 키입니다 — 키를 먼저 저장해주세요.")
+
+    class_obj.scoring_connection_kind = kind
+    if current_kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+        # 호환 서버의 주소·인증 값(OpenAI 키 칸)은 키 저장 때처럼 지운다(#601) — 남기면 OpenAI 키로 읽힌다.
+        class_obj.scoring_server_url = ""
+        class_obj.openai_api_key_encrypted = ""
+        class_obj.openai_api_key_last4 = ""
+        class_obj.openai_api_key_status = Class.ScoringKeyStatus.UNVERIFIED
+    # 다른 키로 넘어갔으니 옛 연결의 확인 시각·크레딧 멈춤은 물려받지 않는다(#671, #586).
+    class_obj.scoring_quota_exhausted_at = None
+    class_obj.scoring_server_unreachable_at = None
+    class_obj.scoring_connection_verified_at = None
+    extra = {}
+    if is_claude_model_id(class_obj.default_model) != (kind == Class.ScoringConnectionKind.ANTHROPIC_KEY):
+        class_obj.default_model = _DEFAULT_MODEL_FOR_KIND[kind]
+        extra["default_model"] = class_obj.default_model
+    _save_scoring_connection(request, class_obj, vendor_kind=kind, **extra)
+    return 200, _serialize_class(class_obj, viewer_id=request.auth_user.id)
+
+
+def _delete_vendor_key(request: HttpRequest, class_obj: Class, kind: str) -> ClassOut:
+    """넣어 둔 벤더 키 하나를 지운다(#1269). 지금 채점하는 쪽 키를 지우면 그 클래스는 키 없음이 된다(다른 쪽
+    키로 저절로 넘어가지 않는다 — 넘기는 것은 스위치다). 호환 서버 연결 동안 OpenAI 칸은 서버의 인증 값이라
+    OpenAI 키 지우기는 아무것도 하지 않는다."""
+
+    if class_obj.stored_vendor_key(kind) is None:
+        return _serialize_class(class_obj, viewer_id=request.auth_user.id)
+    fields = key_fields_for(kind)
+    setattr(class_obj, fields.encrypted, "")
+    setattr(class_obj, fields.last4, "")
+    setattr(class_obj, fields.status, Class.ScoringKeyStatus.UNVERIFIED)
+    active = class_obj.scoring_connection_kind == kind
+    if active:
+        class_obj.scoring_connection_verified_at = None
+        class_obj.scoring_quota_exhausted_at = None
+        class_obj.scoring_server_unreachable_at = None
+    _save_scoring_connection(request, class_obj, connection_changed=active)
+    return _serialize_class(class_obj, viewer_id=request.auth_user.id)
+
+
+@router.delete(
+    "/classes/{class_id}/openai-key",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def delete_class_openai_key(request: HttpRequest, class_id: int):
+    # 키 저장과 같다 — 보관 뒤에도 열어 두고, 소유자 전용이다(ADR-0055).
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    return 200, _delete_vendor_key(request, class_obj, Class.ScoringConnectionKind.OPENAI_KEY)
+
+
+@router.delete(
+    "/classes/{class_id}/anthropic-key",
+    response={200: ClassOut, 403: ErrorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def delete_class_anthropic_key(request: HttpRequest, class_id: int):
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
+    return 200, _delete_vendor_key(request, class_obj, Class.ScoringConnectionKind.ANTHROPIC_KEY)
 
 
 @router.put(
@@ -1110,8 +1252,8 @@ def set_class_compatible_server(request: HttpRequest, class_id: int, payload: Co
 
     저장 전에 안전한 바깥 호출로 그 서버의 모델 목록을 한 번 받아 닿는지·인증이 맞는지 본다.
     거부·실패는 이유별 한 문장으로 422 이고, DB 의 기존 연결은 그대로 남는다. 인증 값은 OpenAI
-    키와 같은 칸에 암호화해 두고 끝 네 자리만 보인다 — 이전 연결(OpenAI 키)의 값은 덮여
-    지워진다. 응답 어디에도 인증 값 원문을 싣지 않는다."""
+    키와 같은 칸에 암호화해 두고 끝 네 자리만 보인다 — 넣어 둔 OpenAI 키는 덮여 지워지고, Claude 키
+    (#1269)는 따로 살아 남는다. 응답 어디에도 인증 값 원문을 싣지 않는다."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=True).class_obj
 

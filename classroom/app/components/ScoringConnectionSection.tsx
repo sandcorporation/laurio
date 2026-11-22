@@ -1,15 +1,23 @@
 "use client";
 
 // 「채점 연결」(#601, CONTEXT.md 「채점 연결」) — 클래스 설정의 첫 구획(`#scoring-key`, 카드는 쪽이
-// 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: 「OpenAI 키」·「Claude(Anthropic) 키」 또는 「호환 서버」(소유자가
-// 바깥에 열어 둔 OpenAI 호환 주소와 Bearer 값). 상태 한 줄이 먼저 보이고(#636) 폼은 「바꾸기」 뒤에
-// 열린다. 공동 강사는 상태 한 줄만 본다(ADR-0055).
+// 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: OpenAI·Claude 키를 둘 다 넣어 두고 스위치로
+// 고르거나(#1269), 셋째 선택 「호환 서버」(소유자가 바깥에 열어 둔 OpenAI 호환 주소와 Bearer 값). 상태 한 줄이
+// 먼저 보이고(#636) 그 아래 스위치와 키 두 줄이 선다. 공동 강사는 상태 한 줄만 본다(ADR-0055).
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
-import { setAnthropicKey, setCompatibleServer, setOpenAIKey, type ClassRow } from "@/lib/classes/api";
-import { CLAUDE_KEY_LABEL, connectionKindOptions, initialConnectionKind, type ConnectionKind } from "@/lib/classes/connection-kinds";
+import {
+  deleteVendorKey,
+  setAnthropicKey,
+  setCompatibleServer,
+  setOpenAIKey,
+  switchScoringVendor,
+  type ClassRow,
+  type VendorKey,
+} from "@/lib/classes/api";
+import { CLAUDE_KEY_LABEL, connectionKindOptions, type ConnectionKind } from "@/lib/classes/connection-kinds";
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
@@ -69,31 +77,155 @@ function ConnectionStatus({ classroom }: { classroom: ClassRow }) {
   );
 }
 
-function KindChoice({
-  value,
-  onChange,
-  claudeSelectable,
+type VendorKind = "openai_key" | "anthropic_key";
+
+const VENDOR_LABELS: Record<ConnectionKind, string> = {
+  openai_key: "OpenAI",
+  anthropic_key: "Claude",
+  compatible_server: "호환 서버",
+};
+
+// 채점 벤더 스위치(#1269) — 넣어 둔 키 가운데 어느 쪽으로 채점할지. 키가 없거나 거부된 쪽은 고를 수 없다
+// (`VendorKey.switchable`, 서버도 거절한다). 「호환 서버」는 셋째 선택이다 — 누르면 서버 폼이 열리고 저장해야 넘어간다.
+function VendorSwitch({
+  classroom,
+  compatibleOpen,
+  onSwitch,
+  onCompatible,
+  busy,
 }: {
-  value: ConnectionKind;
-  onChange: (kind: ConnectionKind) => void;
-  claudeSelectable: boolean;
+  classroom: ClassRow;
+  compatibleOpen: boolean;
+  onSwitch: (kind: VendorKind) => void;
+  onCompatible: () => void;
+  busy: boolean;
 }) {
-  const options = connectionKindOptions(claudeSelectable);
+  const options = connectionKindOptions(classroom.anthropic_key_selectable);
+  const current = classroom.has_openai_key ? classroom.scoring_connection_kind : null;
   return (
-    <div role="radiogroup" aria-label="채점 연결" className="flex flex-wrap gap-2">
-      {options.map((option) => (
-        <button
-          key={option.kind}
-          type="button"
-          role="radio"
-          aria-checked={value === option.kind}
-          data-testid={`scoring-connection-kind-${option.kind}`}
-          onClick={() => onChange(option.kind)}
-          className={buttonClass(value === option.kind ? "primary" : "secondary")}
-        >
-          {option.label}
-        </button>
-      ))}
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <FieldLabel>채점</FieldLabel>
+      <div role="radiogroup" aria-label="채점 벤더" className="flex flex-wrap gap-2">
+        {options.map((option) => {
+          const vendorKey =
+            option.kind === "openai_key"
+              ? classroom.openai_key
+              : option.kind === "anthropic_key"
+                ? classroom.anthropic_key
+                : null;
+          const checked = option.kind === current || (option.kind === "compatible_server" && compatibleOpen);
+          const disabled = busy || (option.kind !== "compatible_server" && !vendorKey?.switchable);
+          return (
+            <button
+              key={option.kind}
+              type="button"
+              role="radio"
+              aria-checked={checked}
+              disabled={disabled}
+              data-testid={`scoring-connection-kind-${option.kind}`}
+              onClick={() => {
+                if (option.kind === "compatible_server") onCompatible();
+                else if (option.kind !== current) onSwitch(option.kind);
+              }}
+              className={buttonClass(checked ? "primary" : "secondary", "sm")}
+            >
+              {VENDOR_LABELS[option.kind]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const KEY_STATUS_BADGE: Record<VendorKey["status"], { label: string; tone: "verified" | "neutral" | "error" }> = {
+  verified: { label: "확인함", tone: "verified" },
+  unverified: { label: "미검증", tone: "neutral" },
+  rejected: { label: "거부됨", tone: "error" },
+};
+
+// 넣어 둔 벤더 키 한 줄(#1269) — 이름 · 끝 네 자리 · 상태 · 바꾸기 · 지우기. 키 값은 다시 보이지 않는다.
+function VendorKeyRow({
+  classroom,
+  provider,
+  onSaved,
+}: {
+  classroom: ClassRow;
+  provider: "openai" | "anthropic";
+  onSaved: () => void;
+}) {
+  const vendorKey = provider === "anthropic" ? classroom.anthropic_key : classroom.openai_key;
+  const label = provider === "anthropic" ? CLAUDE_KEY_LABEL : "OpenAI 키";
+  const [open, setOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    const active = classroom.scoring_connection_kind === `${provider}_key`;
+    if (!window.confirm(active ? `${label}를 지우면 채점이 멈춥니다.` : `${label}를 지웁니다.`)) return;
+    setDeleting(true);
+    setError(null);
+    const result = await deleteVendorKey(classroom.id, provider);
+    setDeleting(false);
+    if (result.ok) onSaved();
+    else setError(result.detail);
+  }
+
+  const badge = vendorKey ? KEY_STATUS_BADGE[vendorKey.status] : null;
+  return (
+    <div data-testid={`vendor-key-${provider}`} className="flex flex-col gap-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <p className={STATUS_CLASS}>
+          <span className="min-w-[132px]">{label}</span>
+          {vendorKey ? (
+            <>
+              <span data-testid={`vendor-key-${provider}-masked`} className="font-mono text-ink/60">
+                {vendorKey.masked}
+              </span>
+              {badge ? <Badge tone={badge.tone}>{badge.label}</Badge> : null}
+            </>
+          ) : (
+            <span className="text-ink/45">없음</span>
+          )}
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            data-testid={`vendor-key-${provider}-change`}
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+            className={buttonClass("secondary", "sm")}
+          >
+            {open ? "닫기" : vendorKey ? "바꾸기" : "넣기"}
+          </button>
+          {vendorKey ? (
+            <button
+              type="button"
+              data-testid={`vendor-key-${provider}-delete`}
+              disabled={deleting}
+              onClick={handleDelete}
+              className={buttonClass("secondary", "sm")}
+            >
+              지우기
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {error ? (
+        <ErrorNote>
+          <span data-testid={`vendor-key-${provider}-delete-error`}>{error}</span>
+        </ErrorNote>
+      ) : null}
+      {open ? (
+        <KeyForm
+          classId={classroom.id}
+          provider={provider}
+          onSaved={() => {
+            setOpen(false);
+            onSaved();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -282,22 +414,22 @@ export function ScoringConnectionSection({
   isOwner: boolean;
   onSaved: () => void;
 }) {
-  const [kind, setKind] = useState<ConnectionKind>(
-    initialConnectionKind(classroom.scoring_connection_kind, classroom.anthropic_key_selectable),
-  );
-  // 연결이 없으면 바꿀 것이 없다 — 폼이 처음부터 열려 있고, 있으면 「바꾸기」를 눌러야 열린다.
-  const [open, setOpen] = useState(!classroom.has_openai_key);
-  const switching = classroom.has_openai_key && kind !== classroom.scoring_connection_kind;
-  const formOpen = isOwner && open;
-  const currentLabel = {
-    openai_key: "OpenAI 키",
-    anthropic_key: CLAUDE_KEY_LABEL,
-    compatible_server: "호환 서버",
-  }[classroom.scoring_connection_kind];
-  const handleSaved = () => {
-    setOpen(false);
-    onSaved();
-  };
+  const compatible = classroom.has_openai_key && classroom.scoring_connection_kind === "compatible_server";
+  // 호환 서버 폼은 「호환 서버」를 누르거나(새로 잇기), 호환 서버 연결의 「바꾸기」로 열린다.
+  const [compatibleOpen, setCompatibleOpen] = useState(false);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
+  // 시행일 전에는(#803) Claude 키 줄을 보이지 않는다 — 이미 넣어 둔 키가 있으면 보인다.
+  const showClaude = classroom.anthropic_key_selectable || classroom.anthropic_key !== null;
+
+  async function handleSwitch(kind: VendorKind) {
+    setSwitching(true);
+    setSwitchError(null);
+    const result = await switchScoringVendor(classroom.id, kind);
+    setSwitching(false);
+    if (result.ok) onSaved();
+    else setSwitchError(result.detail);
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -307,36 +439,50 @@ export function ScoringConnectionSection({
           <span data-testid="openai-key-owner-only">
             <Badge>소유자만</Badge>
           </span>
-        ) : classroom.has_openai_key ? (
+        ) : compatible ? (
           <button
             type="button"
             data-testid="scoring-connection-change"
-            aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
+            aria-expanded={compatibleOpen}
+            onClick={() => setCompatibleOpen((value) => !value)}
             className={buttonClass("secondary", "sm")}
           >
-            {open ? "닫기" : "바꾸기"}
+            {compatibleOpen ? "닫기" : "바꾸기"}
           </button>
         ) : null}
       </div>
-      {formOpen ? (
+      {isOwner ? (
         <div className="flex flex-col gap-4 border-t border-rule pt-4">
-          <KindChoice value={kind} onChange={setKind} claudeSelectable={classroom.anthropic_key_selectable} />
-          {switching ? (
-            <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-warning">
-              {`저장하면 지금의 ${currentLabel}${classroom.scoring_connection_kind === "compatible_server" ? " 주소와 인증 값" : ""}이 지워집니다.`}
-            </p>
+          <VendorSwitch
+            classroom={classroom}
+            compatibleOpen={compatibleOpen && !compatible}
+            busy={switching}
+            onSwitch={handleSwitch}
+            onCompatible={() => setCompatibleOpen((value) => !value)}
+          />
+          {switchError ? (
+            <ErrorNote>
+              <span data-testid="scoring-vendor-error">{switchError}</span>
+            </ErrorNote>
           ) : null}
-          {kind === "openai_key" || kind === "anthropic_key" ? (
-            <KeyForm
-              key={kind}
-              classId={classroom.id}
-              provider={kind === "anthropic_key" ? "anthropic" : "openai"}
-              onSaved={handleSaved}
-            />
-          ) : (
-            <CompatibleServerForm classroom={classroom} onSaved={handleSaved} />
-          )}
+          {compatibleOpen ? (
+            <div className="flex flex-col gap-2.5">
+              {!compatible && classroom.openai_key ? (
+                <p data-testid="scoring-connection-switch-note" className="text-[12.5px] text-warning">
+                  호환 서버를 저장하면 OpenAI 키가 지워집니다.
+                </p>
+              ) : null}
+              <CompatibleServerForm
+                classroom={classroom}
+                onSaved={() => {
+                  setCompatibleOpen(false);
+                  onSaved();
+                }}
+              />
+            </div>
+          ) : null}
+          <VendorKeyRow classroom={classroom} provider="openai" onSaved={onSaved} />
+          {showClaude ? <VendorKeyRow classroom={classroom} provider="anthropic" onSaved={onSaved} /> : null}
         </div>
       ) : null}
     </div>

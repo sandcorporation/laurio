@@ -7,7 +7,9 @@
 
 연결 종류는 셋이다 — 「OpenAI 키」, 「호환 서버」(#601, ADR-0058), 「Claude(Anthropic) 키」(#795,
 ADR-0066). Claude 키는 주소가 Anthropic 으로 고정이고 어댑터가 따로다(`core.llm_scoring_anthropic`) —
-저장·암호화·끝 네 자리·상태 칸은 OpenAI 키와 같은 칸을 쓴다. 호환 서버는 강사가 적은
+암호문·끝 네 자리·상태 칸은 OpenAI 키와 따로 산다(#1269, `Class.anthropic_api_key_*`). 두 키를 다 넣어 두고
+`Class.scoring_connection_kind` 스위치로 어느 쪽으로 채점할지 고른다 — 이 모듈은 고른 쪽 칸만 읽는다
+(`Class.active_key_fields`). 호환 서버의 인증 값은 OpenAI 키 칸을 같이 쓴다. 호환 서버는 강사가 적은
 주소라 모든 왕복이 `core.safe_outbound.SafeOutbound` 를 거친다(`ScoringConnection.transport`):
 https·공인 IP 만, 푼 IP 로 직접 붙고, 리다이렉트를 따라가지 않는다. 저장할 때는
 `probe_compatible_server` 가 그 서버의 모델 목록을 한 번 받아 닿는지·인증이 맞는지 본다.
@@ -35,7 +37,7 @@ from core.llm_scoring import OPENAI_API_BASE_URL, AsyncTransport, Transport
 from core.llm_scoring_anthropic import ANTHROPIC_API_BASE_URL
 from core.safe_outbound import OutboundReason, OutboundRefused, SafeOutbound
 
-from .models import Class
+from .models import Class, key_fields_for
 from .scoring_models import is_claude_model_id, is_reasoning_model_id, matches_naming_rule
 
 #: 「OpenAI 키」 연결의 주소 — 공모전과 같은 OpenAI API 다.
@@ -122,7 +124,7 @@ def connection_for(class_obj: Class) -> ScoringConnection | None:
         return ScoringConnection(
             kind=Class.ScoringConnectionKind.ANTHROPIC_KEY,
             base_url=ANTHROPIC_API_BASE_URL,
-            _encrypted_auth=class_obj.openai_api_key_encrypted.strip(),
+            _encrypted_auth=class_obj.anthropic_api_key_encrypted.strip(),
         )
     return ScoringConnection(
         kind=Class.ScoringConnectionKind.OPENAI_KEY,
@@ -164,8 +166,9 @@ def mark_verified(class_id: int, connection: ScoringConnection) -> None:
     (다른 키·다른 서버로 다시 저장, 소유권 이전) 아무것도 하지 않는다 — 옛 연결의 성공은 새 연결의
     확인이 아니다. 암호문은 저장할 때마다 새로 만들어지므로 같은 연결인지를 그것으로 가른다."""
 
+    fields = key_fields_for(connection.kind)
     same_connection = Class.objects.filter(
-        pk=class_id, scoring_connection_kind=connection.kind, openai_api_key_encrypted=connection._encrypted_auth
+        pk=class_id, scoring_connection_kind=connection.kind, **{fields.encrypted: connection._encrypted_auth}
     )
     if connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
         same_connection = same_connection.filter(scoring_server_url=connection.base_url)
@@ -176,10 +179,12 @@ def mark_verified(class_id: int, connection: ScoringConnection) -> None:
     # 저장되므로 이 상태가 뜻이 없다.
     same_connection.update(
         scoring_connection_verified_at=Clock.now(),
-        openai_api_key_status=Case(
-            When(openai_api_key_status=Class.ScoringKeyStatus.UNVERIFIED, then=Value(Class.ScoringKeyStatus.VERIFIED)),
-            default=F("openai_api_key_status"),
-        ),
+        **{
+            fields.status: Case(
+                When(**{fields.status: Class.ScoringKeyStatus.UNVERIFIED}, then=Value(Class.ScoringKeyStatus.VERIFIED)),
+                default=F(fields.status),
+            )
+        },
     )
 
 

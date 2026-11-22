@@ -82,6 +82,16 @@ class OwnershipTransferIn(Schema):
     co_instructor_id: int
 
 
+class VendorKeyOut(Schema):
+    """넣어 둔 벤더 키 하나(#1269) — 값은 끝 네 자리 마스킹뿐이다."""
+
+    masked: str
+    #: "verified"|"unverified"|"rejected" — `Class.ScoringKeyStatus` 값 그대로.
+    status: str
+    #: 스위치가 이 벤더로 넘어갈 수 있는가 — 거부된 키면 거짓.
+    switchable: bool
+
+
 class ClassOut(Schema):
     id: int
     name: str
@@ -106,8 +116,12 @@ class ClassOut(Schema):
     has_openai_key: bool
     #: 「OpenAI 키」 연결의 끝 네 자리 마스킹 — 호환 서버면 `None`.
     openai_key_masked: str | None = None
-    #: 채점 연결의 종류(#601) — "openai_key" | "compatible_server".
+    #: 채점 연결의 종류(#601, #1269) — "openai_key" | "anthropic_key" | "compatible_server". 앞의 둘은 스위치다.
     scoring_connection_kind: str = "openai_key"
+    #: 넣어 둔 OpenAI 키(#1269) — 끝 네 자리 마스킹·상태. 없으면(호환 서버 연결 동안 포함) `None`.
+    openai_key: VendorKeyOut | None = None
+    #: 넣어 둔 Claude(Anthropic) 키(#1269) — 끝 네 자리 마스킹·상태. 없으면 `None`.
+    anthropic_key: VendorKeyOut | None = None
     #: 판정 채점의 방식(#1036) — "single"|"agent". 고른 값 그대로다(연결이 호환 서버로 바뀌었으면 그 사이
     #: 채점은 한 번 호출로 돈다 — `grading_method_options` 의 까닭이 그것을 말한다).
     scoring_method: str = "single"
@@ -176,6 +190,12 @@ class ClassOut(Schema):
 
 class OpenAIKeyIn(Schema):
     api_key: str = Field(min_length=1, max_length=400)
+
+
+class ScoringVendorIn(Schema):
+    """채점 벤더 스위치(#1269) — 넣어 둔 키 가운데 어느 쪽으로 채점할지."""
+
+    kind: Literal["openai_key", "anthropic_key"]
 
 
 class CompatibleServerIn(Schema):
