@@ -69,6 +69,15 @@ class Decide(unittest.TestCase):
         """감시 자신과 「결과」는 실패로도, 끝남으로도 세지 않는다."""
         self.assertEqual(decide([job("결과", conclusion="failure"), job("checks static", "in_progress")], SKIP), "wait")
 
+    def test_called_workflow_watches_only_its_own_jobs(self) -> None:
+        """after-push.yml 이 workflow_call 로 부르면(#1325) 잡 이름에 「check / 」 머리가 붙는다 — 자신·「결과」는 머리를 떼고
+        거르고, 부른 쪽의 잡(이 실행이 끝나야 도는 notify, 먼저 끝난 alert 의 실패)은 보지 않는다."""
+        jobs = [job("kind"), job("alert", conclusion="failure"), job("notify", "pending", None, None),
+                job("check / plan"), job("check / 빨리 멈춤", "in_progress"), job("check / 결과", "queued")]
+        self.assertEqual(decide(jobs, SKIP), "done")
+        jobs[3] = job("check / checks static", conclusion="failure")
+        self.assertEqual(decide(jobs, SKIP), "cancel")
+
 
 class Summary(unittest.TestCase):
     def test_first_line_is_the_earliest_failure_not_the_cancelled(self) -> None:

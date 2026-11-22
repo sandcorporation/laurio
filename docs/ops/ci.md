@@ -70,11 +70,12 @@ PR → pr-check.yml(바뀐 앱만, 「결과」 초록) → 병합 대기열 →
     전부는 병합 대기열이 돈다 — 배포 판정은 그 한 번이다(#1090). 기록 갱신(`pytest-durations-update.sh`)도 최근 초록 대기열 실행에서 받는다.
   - **release 를 끈 뒤 켜면**(그동안 병합된 main 머리는 다음 push 까지 안 나간다) `gh workflow run release.yml --ref main` 으로 한 번 돌린다(`workflow_dispatch`, #1018). main 이 아닌 ref 는 `main_only` 잡이 실패시켜 뒤 잡(승격 포함)이 모두 멈춘다.
   - **celery 잡**(#1020)은 `celery-worker` 와 그 의존(db·redis·minio·backend)만 띄운다 — Next 앱 셋·events·grader 는 굽지 않는다. beat 간격은 `compose.ci.yaml` 의 `CODEMIT_CI_BEAT_INTERVAL_SECONDS=10`(`config/celery.py` 가 주기 스캔에만 적용, 운영·dev 는 그대로 60초).
-  - **빨강 알림 = 라벨 `ci-red` 이슈**(`scripts/ci/ci-issue.sh`, release `notify`·e2e `notify` 잡, `issues: write` 하나): 종류(「release 이미지 실패」·「e2e 실패」)마다 열린 이슈는 하나, 이미 있으면 댓글. 본문에 실패 sha·run 링크·실패한 잡·직전 초록…이번 sha compare 링크. 다시 초록이면 「복구됨 <sha>」 댓글 후 닫는다 — **열린 `ci-red` 이슈 = 지금 빨강**이다. 라벨이 없으면 workflow 가 만든다. **담당**: 저장소 변수 `CI_RED_ASSIGNEE`(GitHub 계정, 설정은 대장 몫)가 있으면 이슈를 연 뒤 따로 담당으로 지정하고(실패는 경고, 이슈는 열린다), 담당 없는 열린 이슈에 댓글을 달 때도 지정한다 — GitHub 가 담당자에게 알린다. 비어 있으면 잡 요약에 경고만 남는다.
+  - **빨강 알림 = 라벨 `ci-red` 이슈**(`scripts/ci/ci-issue.sh`, release `notify`·e2e `notify`·after-push `alert`·`notify` 잡, `issues: write` 하나): 종류(「release 이미지 실패」·「e2e 실패」)마다 열린 이슈는 하나, 이미 있으면 댓글. 본문에 실패 sha·run 링크·실패한 잡·직전 초록…이번 sha compare 링크. 다시 초록이면 「복구됨 <sha>」 댓글 후 닫는다 — **열린 `ci-red` 이슈 = 지금 빨강**이다. 라벨이 없으면 workflow 가 만든다. **담당**: 저장소 변수 `CI_RED_ASSIGNEE`(GitHub 계정, 설정은 대장 몫)가 있으면 이슈를 연 뒤 따로 담당으로 지정하고(실패는 경고, 이슈는 열린다), 담당 없는 열린 이슈에 댓글을 달 때도 지정한다 — GitHub 가 담당자에게 알린다. 비어 있으면 잡 요약에 경고만 남는다.
   - **release 에서 image 가 실패하면**(arm64 굽기·arm64 부팅 가드): `promote` 가 돌지 않는다 → production 이 승격되지 않는다 → **배포가 없다**.
     PR 은 이미 병합됐으니 main 만 앞서 있다. 아는 쪽은 `ci-red` 이슈(제목 「release 이미지 실패 — production 승격·배포 멈춤」)를 보는 조율자·대표다. 고쳐서 main 에 새 커밋(또는 revert PR)이 병합되면 다음 승격이 이어 간다.
-- **release 는 검사하지 않는다 — 이미지와 승격만**(#1090). `pr-check.yml` 은 `pull_request`·`merge_group` 으로만 돌고 `push: main`·`workflow_call`
-  트리거가 없다(같은 커밋을 PR·release 에서 두 번 검사하던 것을 걷었다). release 는 image(`image.yml`)가 일곱 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서)
+- **release 는 검사하지 않는다 — 이미지와 승격만**(#1090). `pr-check.yml` 은 `pull_request`·`merge_group` 으로 돌고 `push: main` 트리거가 없다
+  (같은 커밋을 PR·release 에서 두 번 검사하던 것을 걷었다). 예외 하나: 대기열을 거치지 않고 main 에 오른 커밋(핫픽스 길·표식 없는 직접 push)은
+  `after-push.yml` 이 `workflow_call` 로 뒤따라 돌리고, 대기열 커밋은 그 `kind` 잡이 가려 다시 돌지 않는다(#1325) — [배포 길 셋](deploy-paths.md). release 는 image(`image.yml`)가 일곱 arm64 이미지를 굽고(문맥 해시 건너뛰기·부팅 가드·ctx 태그 — 「배포」 문서)
   초록이면 promote 가 `production` 을 그 sha 로 앞당긴다(`scripts/ci/promote.sh ff`). 실행은 `gh run list --workflow release.yml`.
 - 보안(공개 저장소, `scripts/test_public_repo.py`): `pull_request_target`·self-hosted 없음, secrets 없음(`github.token` 하나), 워크플로
   기본 권한 `contents: read`, **쓰기는 정해진 자리에만** — `packages: write` 는 image(image.yml·release.yml 의 image 잡), `contents: write`

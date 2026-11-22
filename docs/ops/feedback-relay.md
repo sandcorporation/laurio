@@ -47,6 +47,8 @@ Orca 는 precheck 가 0 이 아니면 무엇이든 `skipped_precheck` 로 넘기
 - 이 스크립트가 아직 없는 묵은 체크아웃(127)은 **한 번 손으로** `git pull --ff-only` 해야 시작된다. 그 뒤로는 스스로 따라간다.
 - 시험: `python3 scripts/test_automation_run.py`(진짜 git·가짜 switchboard, PR 검사가 돈다).
 
+같은 꼴로 「CI 빨강 전달」 자동화가 핫픽스 길의 ci-red 이슈를 넘긴다 — [배포 길 셋](deploy-paths.md).
+
 제목은 `[제보] codemit #<번호> <건의|버그> · <공모전|강의실>`, 본문 둘째 줄은 `scripts/feedback.sh show <번호>`.
 
 ## 손보기

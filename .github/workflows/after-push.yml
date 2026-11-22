@@ -1,0 +1,111 @@
+# main 뒤따른 검사(#1325) — 병합 대기열을 거치지 않고 main 에 오른 커밋에 PR 검사(pr-check.yml)를 뒤따라 돌리고, 실패·표식 없는
+# push 를 ci-red 이슈로 알린다. 배포는 막지 않는다 — release.yml 이 같은 push 로 따로 돈다(이미지 → production 승격 → Jenkins 배포).
+# 배포 길 셋(핫픽스·스펙·낱개 이슈)은 docs/ops/deploy-paths.md.
+#
+#   kind    push 를 가른다(scripts/ci/push_kind.py) — queue: 그 sha 로 merge_group 실행이 있었다(대기열이 검사한 머지 커밋이
+#           그대로 main 머리다) · hotfix: 올라온 커밋이 모두 `Hotfix:` 꼬리말 · direct: 그 밖(표식 없는 직접 push)
+#   alert   direct 면 곧바로 「표식 없는 main 직접 push — <sha>」 ci-red 이슈(검사를 기다리지 않는다)
+#   check   queue 가 아니면 pr-check.yml(workflow_call) — 대기열과 같은 묶음. queue 면 돌지 않는다(#1090: 같은 커밋을 두 번
+#           검사하지 않는다 — 대기열 커밋에서 이 워크플로가 쓰는 것은 kind·notify 두 잡 1분 남짓이다)
+#   notify  「핫픽스 뒤 검사 실패 — main 붉음」 ci-red 이슈 하나 — 실패면 열거나 댓글, 초록이면(또는 다음 대기열 커밋이면) 닫는다
+#           (scripts/ci/after-push-notify.sh). 대장 메일함으로는 work Orca 자동화가 넘긴다(scripts/ci/ci_red_relay.py).
+# 되돌리기는 하지 않는다 — 대장이 정한다.
+#
+# 보안 규칙(공개 저장소, scripts/test_public_repo.py 가 본다): push(main)만, 호스팅 실행기만, secrets 없음, 액션은 SHA 고정.
+# 기본 권한 contents: read. actions: read 는 kind·notify(실행 조회), actions: write 는 check 에만(pr-check.yml 의 빨리 멈춤이
+# 실행을 취소한다 — 부르는 쪽이 그 권한을 줘야 한다), issues: write 는 alert·notify 에만.
+name: main 뒤따른 검사
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    # 포크에서는 돌지 않는다(release.yml main_only 와 같은 까닭)
+    if: github.repository == 'sandcorporation/laurio'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      kind: ${{ steps.kind.outputs.kind }}
+      unmarked: ${{ steps.kind.outputs.unmarked }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0 # before..after 커밋의 꼬리말을 본다
+          persist-credentials: false
+      - id: kind
+        name: 대기열 · 핫픽스 · 표식 없음
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          out=$(python3 scripts/ci/push_kind.py --sha "$SHA" --before "$BEFORE")
+          echo "$out"
+          echo "$out" >>"$GITHUB_OUTPUT"
+
+  alert:
+    needs: kind
+    if: needs.kind.outputs.kind == 'direct'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: 표식 없는 직접 push 알림
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
+          SHA: ${{ github.sha }}
+          UNMARKED: ${{ needs.kind.outputs.unmarked }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/ci/after-push-notify.sh direct
+
+  check:
+    needs: kind
+    if: needs.kind.outputs.kind == 'hotfix' || needs.kind.outputs.kind == 'direct'
+    uses: ./.github/workflows/pr-check.yml
+    permissions:
+      contents: read
+      actions: write
+
+  notify:
+    needs: [kind, check]
+    # 검사가 실패·취소돼도 돈다. kind 가 실패하면 가를 수 없으니 돌지 않는다(이 실행이 빨갛게 남는다)
+    if: ${{ always() && needs.kind.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - if: always()
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: 결과를 이슈로
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CI_RED_ASSIGNEE: ${{ vars.CI_RED_ASSIGNEE }}
+          KIND: ${{ needs.kind.outputs.kind }}
+          RESULT: ${{ needs.check.result }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash scripts/ci/after-push-notify.sh result
