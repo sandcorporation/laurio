@@ -44,6 +44,13 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(git -C "$script_dir" rev-parse --show-toplevel)
 main_worktree=$(git -C "$script_dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
 
+# 어느 길로 오프셋을 받든 먼저 주인 없는 dev 스택을 내린다(#1275). 해시 길·주 워크트리 길은 주인을 보지 않아
+# 고아 db 가 그대로 남아 새 작업자가 그 위에 붙었다. stdout 은 eval 이 실행하니 알림은 stderr 로만 낸다.
+if command -v docker >/dev/null 2>&1; then
+  . "$script_dir/dev-stack-orphans.sh"
+  dev_stack_reap_orphans
+fi
+
 if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   # 사람이 오프셋을 직접 고른다(#1106). 0~9 의 한 자리 숫자만 받는다.
   case "$CODEMIT_DEV_OFFSET" in
