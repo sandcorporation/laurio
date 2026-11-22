@@ -109,7 +109,7 @@ _SYSTEM_PROMPT = llm_scoring._OPENAI_SYSTEM_PROMPT + (
 )
 
 
-def _verdict_schema(*, allow_unverifiable: bool = False) -> dict:
+def _verdict_schema(*, allow_unverifiable: bool = False, citations: bool = False) -> dict:
     """판정 스키마 — OpenAI 의 **배열 모양**(`core.llm_scoring._openai_verdict_response_schema` 를
     `requirement_ids` 없이 부른 `schema`). Anthropic 은 이름·strict 없이 스키마만 받는다. 강의실은 「확인
     불가」를 받는 쪽이다(#811).
@@ -122,7 +122,9 @@ def _verdict_schema(*, allow_unverifiable: bool = False) -> dict:
     채점이 실패한다(공모전 3의 809 처럼 조용히 지나가지 않는다). 요청에 없던 id 의 판정은 버린다 — 판정
     경로의 지금 동작이다(`core/tests/test_scoring_parser_paths.py`, #1125)."""
 
-    return llm_scoring._openai_verdict_response_schema(allow_unverifiable=allow_unverifiable)["schema"]
+    return llm_scoring._openai_verdict_response_schema(allow_unverifiable=allow_unverifiable, citations=citations)[
+        "schema"
+    ]
 
 
 def _headers(api_key: str, *, json_body: bool) -> dict[str, str]:
@@ -222,7 +224,12 @@ def _usage_int(usage: Any, key: str) -> int:
 
 
 def parse_messages_response(
-    body: Any, *, requirement_ids: list[int], submission_id: int, allow_unverifiable: bool = False
+    body: Any,
+    *,
+    requirement_ids: list[int],
+    submission_id: int,
+    allow_unverifiable: bool = False,
+    citations: bool = False,
 ) -> ScoringOutput:
     """Messages API 응답 → `ScoringOutput`. 잘렸거나 거절한 응답은 판정으로 쓰지 않는다."""
 
@@ -248,6 +255,7 @@ def parse_messages_response(
         submission_id=submission_id,
         vendor="Anthropic",
         allow_unverifiable=allow_unverifiable,
+        citations=citations,
     )
     usage = body.get("usage") or {}
     # 입력은 캐시 읽기·쓰기까지 모두 더한 것이 프롬프트 전체다(문서 「rate limits」) — 채점은 캐시를
@@ -306,7 +314,9 @@ class AnthropicScoringAdapter:
         output_config: dict[str, Any] = {
             "format": {
                 "type": "json_schema",
-                "schema": _verdict_schema(allow_unverifiable=self._allow_unverifiable),
+                "schema": _verdict_schema(
+                    allow_unverifiable=self._allow_unverifiable, citations=scoring_input.ask_citations
+                ),
             }
         }
         if self._reasoning_effort is not None:
@@ -342,6 +352,7 @@ class AnthropicScoringAdapter:
                 requirement_ids=[r.requirement_id for r in scoring_input.requirements],
                 submission_id=scoring_input.submission_id,
                 allow_unverifiable=self._allow_unverifiable,
+                citations=scoring_input.ask_citations,
             )
         except LLMAdapterError:
             raise

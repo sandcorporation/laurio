@@ -6416,10 +6416,18 @@ export interface components {
         ClassroomChecklistVerdictOut: {
             /** Checklist Item Id */
             checklist_item_id: number;
+            /** Citations */
+            citations?: components["schemas"]["ClassroomVerdictCitationOut"][] | null;
+            /** Evidence */
+            evidence?: string[] | null;
             /** Is Met */
             is_met: boolean;
             /** Reasoning */
             reasoning: string;
+            /** Source */
+            source?: ("machine" | "model") | null;
+            /** Suspect */
+            suspect?: boolean | null;
             /**
              * Verdict
              * @enum {string}
@@ -6840,6 +6848,20 @@ export interface components {
             judged_by: string;
             /** Reasoning */
             reasoning: string;
+        };
+        /**
+         * ClassroomVerdictCitationOut
+         * @description 모델 판정의 근거 인용 하나(#1284) — 보낸 소스에서 경로가 있고 줄 범위가 파일 안이면 `matched`.
+         */
+        ClassroomVerdictCitationOut: {
+            /** End Line */
+            end_line: number;
+            /** Matched */
+            matched: boolean;
+            /** Path */
+            path: string;
+            /** Start Line */
+            start_line: number;
         };
         /** CoInstructorAcceptIn */
         CoInstructorAcceptIn: {

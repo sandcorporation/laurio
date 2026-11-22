@@ -3,7 +3,7 @@
 // testid 는 `${testIdPrefix}-verdicts` · `-syntax-check` · `-syntax-check-finding-n`.
 import { Badge } from "@/app/components/ui";
 import type { ClassroomScore } from "@/lib/submissions/api";
-import { VERDICT_LABEL, verdictMarkerClass, verdictOf } from "@/lib/submissions/verdict";
+import { SOURCE_LABEL, VERDICT_LABEL, citationText, verdictMarkerClass, verdictOf } from "@/lib/submissions/verdict";
 
 // 판정 주체 표시(#409) — 파서 판정은 신뢰도가 높고(파이썬 표준 파서·tree-sitter), AI 판정은 파서가 없는
 // 언어이거나 크기·시간 제한에 걸렸을 때만 쓰인다.
@@ -63,7 +63,40 @@ export function SubmissionVerdictList({
                 {checklistLabelById.get(verdict.checklist_item_id) ?? "항목"}
               </span>{" "}
               <span className="text-ink/45">— {VERDICT_LABEL[value]}</span>
+              {verdict.source ? (
+                <>
+                  {" "}
+                  <Badge tone="neutral">{SOURCE_LABEL[verdict.source]}</Badge>
+                </>
+              ) : null}
+              {verdict.suspect ? (
+                <>
+                  {" "}
+                  <span data-testid={`${testIdPrefix}-suspect-${verdict.checklist_item_id}`}>
+                    <Badge tone="warning">의심</Badge>
+                  </span>
+                </>
+              ) : null}
               <span className="block text-ink/60">{verdict.reasoning}</span>
+              {verdict.citations?.map((citation, index) => (
+                <span
+                  key={`c${index}`}
+                  data-testid={`${testIdPrefix}-citation-${verdict.checklist_item_id}-${index}`}
+                  className={`block font-mono text-[12px] break-all ${citation.matched ? "text-ink/60" : "text-warning"}`}
+                >
+                  {citationText(citation)}
+                  {citation.matched ? "" : " — 맞지 않음"}
+                </span>
+              ))}
+              {verdict.evidence?.map((ref, index) => (
+                <span
+                  key={`e${index}`}
+                  data-testid={`${testIdPrefix}-evidence-${verdict.checklist_item_id}-${index}`}
+                  className="block font-mono text-[12px] break-all text-ink/60"
+                >
+                  {ref}
+                </span>
+              ))}
             </span>
           </li>
         );

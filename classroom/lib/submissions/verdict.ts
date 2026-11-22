@@ -16,6 +16,19 @@ export function verdictOf(verdict: { is_met: boolean; verdict?: VerdictValue | n
   return verdict.is_met ? "met" : "unmet";
 }
 
+// 판정 출처(#1283) — staged 갈래만 싣는다.
+export const SOURCE_LABEL: Record<"machine" | "model", string> = {
+  machine: "기계 판정",
+  model: "AI 판정",
+};
+
+// 근거 인용(#1284) — `경로:줄` 또는 `경로:줄-줄`.
+export function citationText(citation: { path: string; start_line: number; end_line: number }): string {
+  const lines =
+    citation.end_line === citation.start_line ? `${citation.start_line}` : `${citation.start_line}-${citation.end_line}`;
+  return `${citation.path}:${lines}`;
+}
+
 export function verdictFromMet(met: boolean): VerdictValue {
   return met ? "met" : "unmet";
 }

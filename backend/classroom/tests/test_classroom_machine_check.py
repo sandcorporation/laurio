@@ -250,7 +250,7 @@ def _world(client, items: list[tuple[str, dict | None]]) -> dict:
     submit_source(
         client, participant["access"], class_id, problem.id, participant_user_id=user_id("participant-1"), files=TREE
     )
-    return {"class_id": class_id, "problem_id": problem.id, "item_ids": item_ids, "participant": participant}
+    return {"class_id": class_id, "problem_id": problem.id, "item_ids": item_ids, "participant": participant, "access": access}
 
 
 @pytest.fixture

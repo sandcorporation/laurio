@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { VERDICT_LABEL, verdictFromMet, verdictMarkerClass, verdictOf } from "./verdict";
+import { VERDICT_LABEL, citationText, verdictFromMet, verdictMarkerClass, verdictOf } from "./verdict";
+
+describe("citationText", () => {
+  it("한 줄은 줄 번호 하나, 여러 줄은 범위", () => {
+    expect(citationText({ path: "src/app.py", start_line: 3, end_line: 3 })).toBe("src/app.py:3");
+    expect(citationText({ path: "src/app.py", start_line: 3, end_line: 9 })).toBe("src/app.py:3-9");
+  });
+});
 
 describe("verdictOf", () => {
   it("서버가 실은 세 값을 그대로 읽는다", () => {

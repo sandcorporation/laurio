@@ -5,7 +5,7 @@ import re
 from typing import Annotated, Literal
 
 from ninja import Field, Schema
-from pydantic import field_validator, model_validator
+from pydantic import SerializerFunctionWrapHandler, field_validator, model_serializer, model_validator
 
 from .grading_guidelines import GRADING_GUIDELINE_TEXT_MAX_LENGTH
 from .machine_check import MAX_PATTERN_CHARS, MAX_RULE_FIELD_CHARS
@@ -1034,6 +1034,18 @@ class ClassroomSubmissionIn(Schema):
     contest_entry: ContestEntryIn | None = None
 
 
+class ClassroomVerdictCitationOut(Schema):
+    """모델 판정의 근거 인용 하나(#1284) — 보낸 소스에서 경로가 있고 줄 범위가 파일 안이면 `matched`."""
+
+    path: str
+    start_line: int
+    end_line: int
+    matched: bool
+
+
+_STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect")
+
+
 class ClassroomChecklistVerdictOut(Schema):
     checklist_item_id: int
     #: 충족인가 — 확인 불가도 `false` 다(#811, 확인 불가는 충족이 아니다). 통과 규칙은 이 값만 본다.
@@ -1041,6 +1053,25 @@ class ClassroomChecklistVerdictOut(Schema):
     #: 세 갈래 판정(#811, ADR-0067) — 옛 기록은 `is_met` 에서 유도한다(`classroom.verdicts.verdict_of`).
     verdict: Literal["met", "unmet", "unverifiable"]
     reasoning: str
+    #: 아래 칸은 staged 갈래의 점수를 강사 응답으로 낼 때만 싣는다(#1284) — 값이 없으면 키째 빠져 single_call·참여자
+    #: 응답은 예전 바이트 그대로다.
+    #: 판정 출처 — 기계 규칙(`machine`)인가 모델(`model`)인가(#1283).
+    source: Literal["machine", "model"] | None = None
+    #: 모델 판정의 근거 인용과 대조 결과.
+    citations: list[ClassroomVerdictCitationOut] | None = None
+    #: 기계 판정의 근거(`경로` 또는 `경로:줄`).
+    evidence: list[str] | None = None
+    #: 충족인데 맞는 인용이 하나도 없다 — 판정은 그대로이고 표시만 한다.
+    suspect: bool | None = None
+
+    # 반환 형을 적지 않는다 — 적으면 pydantic 이 그 형으로 직렬화 스키마를 지어 OpenAPI 가 이 모델의 칸을 잃는다.
+    @model_serializer(mode="wrap")
+    def _drop_unset_staged(self, handler: SerializerFunctionWrapHandler):
+        data: dict[str, object] = handler(self)
+        for key in _STAGED_VERDICT_KEYS:
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 class ClassroomSyntaxCheckFindingOut(Schema):

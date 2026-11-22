@@ -63,8 +63,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from django.conf import settings
@@ -73,6 +73,8 @@ from django.db.models import Count
 from psycopg import errors as psycopg_errors
 
 from core.adapters import is_fake_adapter_binding, resolve_adapter
+from core import evidence_check
+from core.evidence_check import Citation
 from core.clock import Clock
 from core.events import collect_instead_of_publishing
 from core.llm_scoring import (
@@ -99,7 +101,7 @@ from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from core.scans import ScanSpec
 from policies.runtime_settings import classroom_score_reuse_enabled
 from core.model_context import source_budget_bytes
-from core.source_selection import select_source_files, select_source_files_with_omission
+from core.source_selection import SelectionOmission, select_source_files, select_source_files_with_omission
 from notifications.models import NotificationType
 from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 from notifications.services import create_notification, notify_safely
@@ -172,6 +174,16 @@ _PLATFORM_FAILURE_REASONING = (
 )
 
 
+def _fake_citations(scoring_input: ScoringInput, needle: str) -> tuple[Citation, ...]:
+    """흉내 어댑터의 근거 인용(#1284) — 문구가 처음 나오는 파일·줄."""
+
+    for source_file in scoring_input.source_files:
+        for number, line in enumerate(source_file.content.splitlines(), start=1):
+            if needle in line:
+                return (Citation(path=source_file.path, start_line=number, end_line=number),)
+    return ()
+
+
 class FakeClassroomScoringAdapter:
     """dev/CI 전용, 네트워크 없이 결정적으로 강의실 채점을 흉내낸다(#340, ADR-0043).
 
@@ -201,7 +213,10 @@ class FakeClassroomScoringAdapter:
             )
             verdicts.append(
                 RequirementVerdict(
-                    requirement_id=requirement.requirement_id, is_met=is_met, reasoning=reasoning
+                    requirement_id=requirement.requirement_id,
+                    is_met=is_met,
+                    reasoning=reasoning,
+                    citations=_fake_citations(scoring_input, needle) if is_met and scoring_input.ask_citations else (),
                 )
             )
         return ScoringOutput(verdicts=verdicts, model_version=self.model_version)
@@ -357,6 +372,7 @@ def _build_prompt(
     *,
     asset_kind: str,
     syntax_check: SyntaxCheckPass,
+    cite: bool = False,
 ) -> str:
     problem = submission.problem
     guideline_text = effective_grading_guideline_text(
@@ -411,10 +427,22 @@ def _build_prompt(
     # 둘 다 열린 문제에서는 문제의 값(목록)이 프롬프트 한 줄로 뭉개지지
     # 않는다.
     lines.append(f"제출 형식: {asset_kind}")
+    if cite:
+        # staged(#1284) — 근거를 줄글이 아니라 대조할 수 있는 위치로도 받는다.
+        lines.append(CITATION_RULE)
+        lines.append("")
     lines.append("제출된 소스:")
     lines.append(source_text if source_text.strip() else "(제출된 소스에서 읽을 수 있는 텍스트가 없습니다)")
     lines.extend(syntax_check.source_section_lines())
     return "\n".join(lines)
+
+
+#: staged 프롬프트의 근거 인용 지시(#1284).
+CITATION_RULE = (
+    "판정마다 근거가 된 소스 위치를 citations 에 담으세요. path 는 「# 」 뒤에 적힌 파일 경로 그대로, "
+    "start_line·end_line 은 각 줄 앞의 번호입니다. 충족이면 근거 줄을 하나 이상 대고, "
+    "미충족·확인 불가는 빈 배열이어도 됩니다."
+)
 
 
 class _SourceNotReady(Exception):
@@ -459,11 +487,19 @@ def _scoring_source_text(raw: bytes, asset: SubmissionAsset, *, model: str, inst
     지시문 몫을 뺀 값이다(`core.model_context.source_budget_bytes`, 공모전과 같다). 다 들어가지 않으면 자르지 않고
     무엇이 빠졌는지를 함께 돌려준다 — 부르는 쪽이 「크기 초과」 보류로 둔다."""
 
-    files, omission = select_source_files_with_omission(
+    files, omission = _scoring_source_files(raw, asset, model=model, instruction_bytes=instruction_bytes)
+    return _joined_source_text(files), omission
+
+
+def _scoring_source_files(
+    raw: bytes, asset: SubmissionAsset, *, model: str, instruction_bytes: int
+) -> tuple[list[SourceFile], SelectionOmission]:
+    """`_scoring_source_text` 의 파일 목록 판 — staged(#1284)는 줄 번호를 붙여 싣고 같은 파일로 인용을 대조한다."""
+
+    return select_source_files_with_omission(
         [(asset.id, asset.label, raw)],
         max_bytes=source_budget_bytes(model, instruction_bytes=instruction_bytes),
     )
-    return _joined_source_text(files), omission
 
 
 @dataclass(frozen=True)
@@ -796,6 +832,8 @@ class PreparedScoring:
     machine_entries: tuple[dict, ...] = ()
     #: 모델에게 물을 것이 없다(staged, 판단 항목 0개) — 벤더를 부르지 않는다(토큰 0).
     skip_vendor: bool = False
+    #: staged 가 프롬프트에 실은 파일(정규화한 경로 → 줄들, #1284) — 모델이 낸 근거 인용을 이것과 대조한다.
+    sent_lines: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass
@@ -931,6 +969,28 @@ def _machine_entry(item_id: int, verdict: machine_check.MachineVerdict) -> dict:
     return {**entry, "source": SOURCE_MACHINE, "evidence": list(verdict.evidence)}
 
 
+def _model_entry_staged(verdict: RequirementVerdict, sent_lines: Mapping[str, tuple[str, ...]]) -> dict:
+    """staged 의 모델 판정(#1284) — 근거 인용을 보낸 소스와 대조해 인용마다 맞는가(`matched`)를 남기고, 충족인데 맞는
+    인용이 하나도 없으면 「의심」(`suspect`)을 단다. 판정은 바꾸지 않는다(올리기는 다음 티켓 몫)."""
+
+    entry = entry_from_model(verdict)
+    citations = [
+        {**citation.as_dict(), "matched": evidence_check.citation_problem(sent_lines, citation) is None}
+        for citation in verdict.citations
+    ]
+    suspect = entry["verdict"] == VERDICT_MET and not any(c["matched"] for c in citations)
+    return {**entry, "citations": citations, "suspect": suspect}
+
+
+def _numbered_source_text(files: list[SourceFile]) -> str:
+    """staged 프롬프트의 소스(#1284) — 줄마다 번호를 붙여 모델이 `경로:줄` 로 인용할 수 있게 한다."""
+
+    return "\n\n".join(
+        f"# {f.path}\n" + "\n".join(f"{number}\t{line}" for number, line in enumerate(f.content.splitlines(), start=1))
+        for f in files
+    )
+
+
 def _staged_split(
     checklist_items: list[ChecklistItem], raw: bytes
 ) -> tuple[list[ChecklistItem], tuple[dict, ...]]:
@@ -1011,17 +1071,26 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     if staged and not asked_items and syntax_check.synthetic_requirement() is None:
         return _machine_only(head, syntax_check=syntax_check, model=model, machine_entries=machine_entries)
     source_text = source.text
+    sent_files: list[SourceFile] = []
+    sent_lines: dict[str, tuple[str, ...]] = {}
     if not uses_agent:
         # 한 번 호출 채점(#989): 소스를 이 모델의 예산으로 고르고, 다 들어가지 않으면 자르지 않고 벤더를 부르지
         # 않은 채 「크기 초과」 보류로 둔다. 지시문 몫에는 문법 검사 덧붙임(파서가 못 본 파일의 전문)이 든다.
         instruction_bytes = len(
             _build_prompt(
-                submission, asked_items, "", asset_kind=asset.kind, syntax_check=syntax_check
+                submission, asked_items, "", asset_kind=asset.kind, syntax_check=syntax_check, cite=staged
             ).encode("utf-8")
         )
-        source_text, omission = _scoring_source_text(
+        sent_files, omission = _scoring_source_files(
             source.raw, asset, model=model, instruction_bytes=instruction_bytes
         )
+        # staged(#1284): 줄 번호를 붙여 싣는다 — 번호 몫은 예산에 세지 않았다. 넘치면 어댑터가 보내기 전에 재어
+        # 「크기 초과」 보류로 둔다(#989, `ensure_request_fits`).
+        source_text = _numbered_source_text(sent_files) if staged else _joined_source_text(sent_files)
+        if staged:
+            sent_lines = {
+                evidence_check.normalize_path(f.path): tuple(f.content.splitlines()) for f in sent_files
+            }
         if omission.any:
             detail = (
                 f"소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 (omitted_files={omission.omitted_files} "
@@ -1035,19 +1104,21 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         source_text,
         asset_kind=asset.kind,
         syntax_check=syntax_check,
+        cite=staged,
     )
     requirements = _requirement_inputs(asked_items)
     # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
     # prompt만 읽어 실제 벤더 요청에는 영향이 없지만(모듈 docstring),
     # FakeClassroomScoringAdapter는 `source_files`에서 haystack을 만들어
     # dev·CI에서도 이 항목을 결정적으로 흉내낼 수 있게 한다.
+    # staged(#1284)는 실은 파일을 그대로 둔다 — 흉내 어댑터가 실제 경로·줄로 인용을 낸다.
+    sent_source_files = (
+        list(sent_files)
+        if staged
+        else [SourceFile(path=f"asset-{asset.id}", content=source_text, asset_id=asset.id, asset_label=asset.label)]
+    )
     source_files = [
-        SourceFile(
-            path=f"asset-{asset.id}",
-            content=source_text,
-            asset_id=asset.id,
-            asset_label=asset.label,
-        ),
+        *sent_source_files,
         *syntax_check.extra_source_files(asset_id=asset.id, asset_label=asset.label),
     ]
     synthetic_requirement = syntax_check.synthetic_requirement()
@@ -1067,6 +1138,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         # 넣지 않는다(core.llm_scoring.SourceFile) — 그 문구는 `asset_label`이 쓰는 자리다.
         source_files=source_files,
         requirements=requirements,
+        ask_citations=staged,
     )
     return PreparedScoring(
         submission=submission,
@@ -1085,6 +1157,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         snapshot=agent_grading.snapshot_of(source.raw, asset) if uses_agent else None,
         staged=staged,
         machine_entries=machine_entries,
+        sent_lines=sent_lines,
     )
 
 
@@ -1287,7 +1360,9 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         mark_verified(class_obj.pk, connection)
 
     reasoning = [
-        entry_from_model(v) for v in output.verdicts if v.requirement_id != SYNTAX_CHECK_ITEM_ID
+        _model_entry_staged(v, prepared.sent_lines) if prepared.staged else entry_from_model(v)
+        for v in output.verdicts
+        if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
     if prepared.staged:
         reasoning = _merge_staged(prepared, reasoning)

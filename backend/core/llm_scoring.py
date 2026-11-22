@@ -47,6 +47,7 @@ from django.conf import settings
 
 from core.adapters import is_fake_adapter_binding, resolve_adapter
 from core import quality_review
+from core.evidence_check import Citation
 from core.llm_metrics import observe_call, observe_call_async
 from core.safe_outbound import AsyncResponse, OutboundRefused, read_limited_async
 
@@ -87,6 +88,9 @@ class ScoringInput:
     prompt: str
     source_files: list[SourceFile]
     requirements: list[RequirementInput]
+    #: 판정마다 근거 인용(`citations`)을 받는가(#1284) — 강의실 staged 갈래만 켠다. 꺼져 있으면 요청 스키마·파싱이
+    #: 지금 그대로다(single_call·공모전).
+    ask_citations: bool = False
 
 
 #: 강의실 판정의 세 값(#811, ADR-0067). 공모전 판정은 이 값을 쓰지 않는다(`RequirementVerdict.verdict` 가 None).
@@ -104,6 +108,9 @@ class RequirementVerdict:
     #: 세 갈래 판정(#811) — 어댑터를 `allow_unverifiable=True` 로 만든 강의실 채점만 채운다. 공모전은 None.
     #: 채워졌으면 `is_met` 은 `verdict == "met"` 이다(확인 불가는 충족이 아니다).
     verdict: str | None = None
+    #: 근거 인용(#1284) — `ScoringInput.ask_citations` 로 물은 응답만 채운다. 꼴이 맞지 않는 인용은 버린다(판정을
+    #: 실패시키지 않는다 — 맞지 않는 인용은 대조에서 「의심」으로 남는다).
+    citations: tuple[Citation, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -443,8 +450,28 @@ _OPENAI_QUOTA_EXHAUSTED_LABELS = frozenset({"insufficient_quota", "credit_balanc
 #: 것」의 목록이 강의실 모듈(`classroom.gradability_hint`)에 있고 core 는 강의실을 모른다. 여기는 스키마뿐이다.
 
 
+#: 근거 인용 한 칸(#1284) — 경로와 줄 범위. strict 가 받는 키워드(`properties`·`required`·`additionalProperties`)만
+#: 쓴다 — Anthropic 문법 컴파일도 항목 수와 무관하게 크기가 같다(#1273 배열 모양 그대로).
+_CITATIONS_SCHEMA: dict = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer"},
+            "end_line": {"type": "integer"},
+        },
+        "required": ["path", "start_line", "end_line"],
+        "additionalProperties": False,
+    },
+}
+
+
 def _openai_verdict_response_schema(
-    *, allow_unverifiable: bool = False, requirement_ids: Sequence[int] | None = None
+    *,
+    allow_unverifiable: bool = False,
+    requirement_ids: Sequence[int] | None = None,
+    citations: bool = False,
 ) -> dict:
     """OpenAI Structured Outputs용 JSON 스키마.
 
@@ -472,6 +499,8 @@ def _openai_verdict_response_schema(
             else {"is_met": {"type": "boolean"}}
         ),
         "reasoning": {"type": "string"},
+        # 근거 인용(#1284, 강의실 staged) — 미충족은 빈 배열이어도 된다.
+        **({"citations": _CITATIONS_SCHEMA} if citations else {}),
     }
     if requirement_ids:
         verdict_item = {
@@ -509,16 +538,8 @@ def _openai_verdict_response_schema(
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "requirement_id": {"type": "integer"},
-                            **(
-                                {"verdict": {"type": "string", "enum": list(VERDICT_VALUES)}}
-                                if allow_unverifiable
-                                else {"is_met": {"type": "boolean"}}
-                            ),
-                            "reasoning": {"type": "string"},
-                        },
-                        "required": ["requirement_id", "verdict" if allow_unverifiable else "is_met", "reasoning"],
+                        "properties": {"requirement_id": {"type": "integer"}, **verdict_properties},
+                        "required": ["requirement_id", *verdict_properties],
                         "additionalProperties": False,
                     },
                 },
@@ -731,7 +752,12 @@ async def _openai_round_trip_async(
 
 
 def _parse_openai_scoring_response(
-    body: dict, *, requirement_ids: list[int], submission_id: int, allow_unverifiable: bool = False
+    body: dict,
+    *,
+    requirement_ids: list[int],
+    submission_id: int,
+    allow_unverifiable: bool = False,
+    citations: bool = False,
 ) -> ScoringOutput:
     """OpenAI 응답 본문을 검증하고 `ScoringOutput`으로 바꾼다.
 
@@ -783,6 +809,7 @@ def _parse_openai_scoring_response(
         submission_id=submission_id,
         vendor="OpenAI",
         allow_unverifiable=allow_unverifiable,
+        citations=citations,
     )
 
     model_used = body.get("model") or "unknown"
@@ -809,6 +836,7 @@ def verdicts_from_content(
     submission_id: int,
     vendor: str,
     allow_unverifiable: bool = False,
+    citations: bool = False,
 ) -> dict[int, RequirementVerdict]:
     """판정 JSON(`{"verdicts": [...]}`) 문자열을 검증해 requirement_id 별 판정으로 바꾼다 — OpenAI
     (`message.content`)와 Anthropic(`content` 의 text 블록, #795) 응답이 같은 규율을 쓴다. 규율은
@@ -895,7 +923,11 @@ def verdicts_from_content(
                 f"(submission={submission_id})."
             )
         verdict_by_id[requirement_id] = RequirementVerdict(
-            requirement_id=requirement_id, is_met=is_met, reasoning=reasoning.strip(), verdict=verdict
+            requirement_id=requirement_id,
+            is_met=is_met,
+            reasoning=reasoning.strip(),
+            verdict=verdict,
+            citations=_citations_of(raw.get("citations")) if citations else (),
         )
 
     missing = [rid for rid in requirement_ids if rid not in verdict_by_id]
@@ -907,6 +939,24 @@ def verdicts_from_content(
         )
 
     return verdict_by_id
+
+def _citations_of(raw: object) -> tuple[Citation, ...]:
+    """응답의 `citations` 배열 → 인용들(#1284). 꼴이 맞지 않는 칸(문자열 아닌 경로, 정수 아닌 줄)은 버린다."""
+
+    if not isinstance(raw, list):
+        return ()
+    picked: list[Citation] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        path, start, end = item.get("path"), item.get("start_line"), item.get("end_line")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
+            continue
+        picked.append(Citation(path=path.strip(), start_line=start, end_line=end))
+    return tuple(picked)
+
 
 def _usage_count(usage: Any, key: str) -> int:
     value = usage.get(key, 0) if isinstance(usage, dict) else 0
@@ -1014,6 +1064,7 @@ class OpenAIScoringAdapter:
                 "json_schema": _openai_verdict_response_schema(
                     allow_unverifiable=self._allow_unverifiable,
                     requirement_ids=[r.requirement_id for r in scoring_input.requirements],
+                    citations=scoring_input.ask_citations,
                 ),
             },
         }
@@ -1040,6 +1091,7 @@ class OpenAIScoringAdapter:
                 requirement_ids=requirement_ids,
                 submission_id=scoring_input.submission_id,
                 allow_unverifiable=self._allow_unverifiable,
+                citations=scoring_input.ask_citations,
             )
         except LLMAdapterError:
             raise

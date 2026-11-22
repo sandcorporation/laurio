@@ -31,7 +31,7 @@ export function publicOrigin(): string {
   return new URL(process.env.CODEMIT_E2E_BASE_URL ?? "http://127.0.0.1:53000").origin;
 }
 
-function operatorOrigin(): string {
+export function operatorOrigin(): string {
   return new URL(process.env.CODEMIT_OPERATOR_E2E_BASE_URL ?? "http://127.0.0.1:53001").origin;
 }
 

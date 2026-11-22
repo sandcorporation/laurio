@@ -139,7 +139,14 @@ data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippe
 (경로[:줄])를 함께 남긴다. 판단 항목이 없으면 벤더를 부르지 않는다(토큰 0, `model_version` `machine-check-v1`).
 `single_call`(기본)이면 규칙을 보지 않고 지금과 같다. 규칙은 강사 API(항목 만들기·고치기의 `machine_rule`, 고치기에서 null 이면
 지움)·MCP(`add_checklist_item`·`update_checklist_item`)로 읽고 쓰고, 참여자 응답에는 늘 null 이다. 같은 클래스 문제 복사는
-규칙을 옮기고 템플릿은 옮기지 않는다. 화면은 아직 없다.
+규칙을 옮기고 템플릿은 옮기지 않는다.
+
+staged 의 모델 판정은 **근거 인용**(#1284, CONTEXT.md 「근거 인용」)을 함께 받는다 — 프롬프트의 소스에 줄 번호를 붙이고,
+판정 스키마에 항목마다 `citations`(`path`·`start_line`·`end_line`, 미충족은 비어도 됨)를 더한다(Anthropic 도 배열 모양 그대로).
+받은 인용은 프롬프트에 실은 파일과 대조해 인용마다 `matched` 를, 충족인데 맞는 인용이 하나도 없으면 `suspect` 를 남긴다 —
+판정은 바꾸지 않는다. 강사 응답(제출 현황)의 판정에만 `source`·`citations`·`evidence`·`suspect` 가 실리고 화면은 「판정」을
+펼치면 출처 배지(「기계 판정」·「AI 판정」), 근거 위치(`경로:줄`, 맞지 않으면 「맞지 않음」), 「의심」 배지를 보인다.
+single_call 점수와 참여자 응답에는 이 키가 없다(예전 바이트 그대로).
 
 **채점 요청이 그 문제의 채점 모델 컨텍스트를 넘는 시도는 「크기 초과」로 보류한다**(#989) — 자르지도 미충족으로
 굳히지도 않는다. 대기 사유(`pending_reason`)는 `size_held` 이고 시도마다 다르다. 참여자 화면은 「채점 보류(크기
