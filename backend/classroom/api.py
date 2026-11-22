@@ -1552,9 +1552,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "source_chars_per_file": scoring_calculator.SOURCE_CHARS_PER_FILE,
             "requirements": a.requirements,
             "instruction_chars": a.instruction_chars,
-            "students": a.students,
-            "assignments": a.assignments,
-            "regrade_rate": a.regrade_rate,
             "suspect_rate": a.suspect_rate,
             "requirements_from": a.requirements_from,
             "source_from": a.source_from,
@@ -1563,9 +1560,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "source_chars_median": scoring_calculator.ASSUMED_SOURCE_CHARS_MEDIAN,
             "source_chars_p90": scoring_calculator.ASSUMED_SOURCE_CHARS_P90,
             "requirements": scoring_calculator.ASSUMED_REQUIREMENTS,
-            "students": scoring_calculator.ASSUMED_STUDENTS,
-            "assignments": scoring_calculator.ASSUMED_ASSIGNMENTS,
-            "regrade_rate": scoring_calculator.ASSUMED_REGRADE_RATE,
             "suspect_rate": scoring_calculator.ASSUMED_SUSPECT_RATE,
         },
         "rows": [
@@ -1596,11 +1590,6 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "attempt_seconds": calc.agent_limits.attempt_seconds,
             "attempts": calc.agent_limits.attempts,
             "budget_usd": calc.agent_limits.budget_usd,
-        },
-        "semester": {
-            "per_submission_krw": calc.semester.per_submission_usd * krw,
-            "submissions": calc.semester.submissions,
-            "total_krw": calc.semester.total_usd * krw,
         },
         "escalation": {
             "model_id": calc.escalation.model_id,
@@ -1638,9 +1627,6 @@ def get_class_scoring_calculator(
     source: str | None = None,
     source_chars: int | None = None,
     requirements: int | None = None,
-    students: int | None = None,
-    assignments: int | None = None,
-    regrade_rate: float | None = None,
     suspect_rate: float | None = None,
 ):
     """「클래스 설정 › 채점 방식」의 채점 비용 예상표(#1270·#1304). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합·
@@ -1657,9 +1643,6 @@ def get_class_scoring_calculator(
         overrides=scoring_calculator.Overrides(
             source_chars=source_chars,
             requirements=requirements,
-            students=students,
-            assignments=assignments,
-            regrade_rate=regrade_rate,
             suspect_rate=suspect_rate,
         ),
     )

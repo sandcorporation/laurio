@@ -214,18 +214,12 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
   await expect(page.getByTestId("calculator-cost-claude-haiku-5-5-agent")).toContainText("원");
   await expect(page.getByTestId("calculator-no-key-anthropic")).toHaveText("키 없음");
   await expect(page.getByTestId("calculator-no-key-openai")).toHaveCount(0);
-  // 지금 클래스의 조합(OpenAI·한 번 호출)이 표시돼 있고 학기 줄이 그 칸을 셈한다.
+  // 지금 클래스의 조합(OpenAI·한 번 호출)이 표시돼 있고, 학기 셈·학생 수·과제 수·재채점 칸은 없다.
   await expect(page.locator("[data-testid^=calculator-cell-][aria-pressed=true]")).toHaveCount(1);
-  await expect(page.getByTestId("calculator-semester-total")).toContainText("원");
-  await expect(page.getByTestId("calculator-semester-formula")).toContainText("학생 18 × 과제 8 × (1 + 0.58)");
-
-  // 가정을 바꾸면 값이 바뀐다 — 학생 수.
-  const total = page.getByTestId("calculator-semester-total");
-  const before = await total.textContent();
-  await page.getByTestId("calculator-students").fill("40");
-  await page.getByTestId("calculator-students").press("Enter");
-  await expect(total).not.toHaveText(before ?? "");
-  await expect(page.getByTestId("calculator-semester-formula")).toContainText("학생 40");
+  await expect(page.getByTestId("scoring-calculator")).not.toContainText("학기");
+  await expect(page.getByTestId("calculator-students")).toHaveCount(0);
+  await expect(page.getByTestId("calculator-assignments")).toHaveCount(0);
+  await expect(page.getByTestId("calculator-regrade-rate")).toHaveCount(0);
 
   // 제출 크기를 감당 크기보다 크게 넣으면 한 번 호출 칸에 「보류」가 뜬다.
   const cost = page.getByTestId("calculator-cost-gpt-4.1-mini-single");
@@ -234,9 +228,9 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
   await expect(page.getByTestId("calculator-note-gpt-4.1-mini-single")).toContainText("담지 못함 — 보류");
   await expect(cost).toContainText("0원");
 
-  // 다른 칸을 눌러 고르면 학기 줄이 그 칸을 따라간다.
+  // 다른 칸을 눌러 고르면 그 칸이 눌린 상태가 된다.
   await page.getByTestId("calculator-cell-claude-haiku-5-5-agent").click();
-  await expect(page.getByTestId("calculator-semester-model")).toHaveText("claude-haiku-5-5 · 에이전트");
+  await expect(page.getByTestId("calculator-cell-claude-haiku-5-5-agent")).toHaveAttribute("aria-pressed", "true");
 
   // 방식별 감당 크기는 코드의 숫자다.
   await expect(page.getByTestId("calculator-capacity-agent")).toContainText("zip 100MB · 풀린 크기 256MB · 파일 5만 개 · 시간 300초 × 2회 · 한 건 $1");

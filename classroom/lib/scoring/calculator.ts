@@ -23,14 +23,11 @@ export type CalculatorChoice = {
   source?: string;
   sourceChars?: number;
   requirements?: number;
-  students?: number;
-  assignments?: number;
-  regradeRate?: number;
   suspectRate?: number;
 };
 
 /** 가정 칸 — 입력으로 바꿔 보는 것. */
-export type AssumptionField = "sourceChars" | "requirements" | "students" | "assignments" | "regradeRate" | "suspectRate";
+export type AssumptionField = "sourceChars" | "requirements" | "suspectRate";
 
 const QUERY_NAMES: [keyof CalculatorChoice, string][] = [
   ["vendor", "vendor"],
@@ -40,9 +37,6 @@ const QUERY_NAMES: [keyof CalculatorChoice, string][] = [
   ["source", "source"],
   ["sourceChars", "source_chars"],
   ["requirements", "requirements"],
-  ["students", "students"],
-  ["assignments", "assignments"],
-  ["regradeRate", "regrade_rate"],
   ["suspectRate", "suspect_rate"],
 ];
 
@@ -176,14 +170,5 @@ export function escalationCost(
     perSuspect: `의심 한 건당 ${formatKrw(escalation.per_suspect.krw, escalation.per_suspect.open_ended)}`,
     rate: `${Math.round(escalation.suspect_rate * 1000) / 10}%`,
     perSubmission: `제출 한 건에 ${formatKrw(escalation.per_submission_krw)}`,
-  };
-}
-
-/** 「클래스 한 학기」 줄 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율). */
-export function semesterLine(calc: ScoringCalculator): { total: string; formula: string } {
-  const { assumptions, semester } = calc;
-  return {
-    total: formatKrw(semester.total_krw),
-    formula: `건당 ${formatKrw(semester.per_submission_krw)} × 학생 ${assumptions.students} × 과제 ${assumptions.assignments} × (1 + ${assumptions.regrade_rate})`,
   };
 }

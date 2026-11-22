@@ -39,9 +39,9 @@ describe("calculatorPath", () => {
   });
   it("고른 칸과 바꿔 본 가정을 쿼리로 싣는다", () => {
     expect(
-      calculatorPath(7, { vendor: "anthropic", method: "agent", model: "claude-haiku-5-5", problemId: 3, source: "p90", students: 10, regradeRate: 0 }),
+      calculatorPath(7, { vendor: "anthropic", method: "agent", model: "claude-haiku-5-5", problemId: 3, source: "p90", requirements: 10, suspectRate: 0 }),
     ).toBe(
-      "/api/backend/classroom/classes/7/scoring-calculator?vendor=anthropic&method=agent&model=claude-haiku-5-5&problem_id=3&source=p90&students=10&regrade_rate=0",
+      "/api/backend/classroom/classes/7/scoring-calculator?vendor=anthropic&method=agent&model=claude-haiku-5-5&problem_id=3&source=p90&requirements=10&suspect_rate=0",
     );
   });
 });
@@ -65,8 +65,8 @@ describe("changeChoice", () => {
     expect(changeChoice({ sourceChars: 99_000 }, "source", "p90")).toEqual({ source: "p90", sourceChars: undefined });
   });
   it("가정은 숫자로 옮기고 비우면 기본값으로 돌아간다", () => {
-    expect(changeChoice({}, "students", "30")).toEqual({ students: 30 });
-    expect(changeChoice({ students: 30 }, "students", undefined)).toEqual({ students: undefined });
+    expect(changeChoice({}, "requirements", "30")).toEqual({ requirements: 30 });
+    expect(changeChoice({ requirements: 30 }, "requirements", undefined)).toEqual({ requirements: undefined });
   });
 });
 
@@ -161,6 +161,16 @@ describe("두루뭉술한 말", () => {
       const source = readFileSync(join(root, file), "utf8");
       expect(source, file).not.toContain("모델 한도까지");
       expect(source, file).not.toContain("실측 없음");
+    }
+  });
+});
+
+describe("학기 셈 없음(#1308)", () => {
+  it("화면 코드에 학기 셈·학생 수·과제 수·재채점이 없다", () => {
+    const root = join(__dirname, "..", "..");
+    for (const file of ["lib/scoring/calculator.ts", "app/classes/[id]/scoring-calculator.tsx"]) {
+      const source = readFileSync(join(root, file), "utf8");
+      expect(source, file).not.toMatch(/학기|semester|학생 수|과제 수|재채점|regrade/i);
     }
   });
 });

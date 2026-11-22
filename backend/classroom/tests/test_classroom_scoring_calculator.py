@@ -269,9 +269,6 @@ def test_an_empty_class_prices_every_model_by_both_methods_and_no_cell_is_missin
         "source_chars_per_file": 1_600,
         "requirements": 6,
         "instruction_chars": scoring_calculator.assumed_instruction_chars(6),
-        "students": 18,
-        "assignments": 8,
-        "regrade_rate": 0.58,
         "suspect_rate": 0.025,
         "requirements_from": "assumed",
         "source_from": "assumed",
@@ -295,7 +292,6 @@ def test_both_providers_are_offered_and_the_missing_key_is_marked(client, db):
     # 키가 없는 Claude 도 고를 수 있고 에이전트는 Claude 일 때만 열린다.
     claude = _calc(client, owner["access"], class_id, vendor="anthropic", method="agent", model="claude-haiku-5-5")
     assert (claude["selection"]["model_id"], claude["selection"]["method"]) == ("claude-haiku-5-5", "agent")
-    assert claude["semester"]["per_submission_krw"] == pytest.approx(_row(claude, "claude-haiku-5-5")["agent"]["krw"])
     openai_agent = _calc(client, owner["access"], class_id, vendor="openai", method="agent")
     assert openai_agent["selection"]["method"] == "single"
 
@@ -349,16 +345,15 @@ def test_a_source_bigger_than_the_capacity_gets_the_hold_on_a_small_context_mode
     assert _row(calc, "gpt-5")["single"]["route"] == "single"
 
 
-def test_the_semester_line_multiplies_the_chosen_cell_by_students_assignments_and_regrades(client, db):
+def test_the_response_has_no_semester_figures_only_the_per_submission_rows(client, db):
     owner = login(client, uid="owner")
     class_id = create_class(client, owner["access"])
 
     calc = _calc(client, owner["access"], class_id, students=10, assignments=4, regrade_rate=0.5)
 
-    semester = calc["semester"]
-    assert semester["submissions"] == pytest.approx(10 * 4 * 1.5)
-    assert semester["total_krw"] == pytest.approx(semester["per_submission_krw"] * 60)
-    assert semester["per_submission_krw"] == pytest.approx(_row(calc, calc["selection"]["model_id"])["single"]["krw"])
+    assert "semester" not in calc
+    assert not {"students", "assignments", "regrade_rate"} & set(calc["assumptions"])
+    assert not {"students", "assignments", "regrade_rate"} & set(calc["defaults"])
 
 
 def test_staged_makes_a_307k_single_call_cheaper_than_off(client, db, monkeypatch):

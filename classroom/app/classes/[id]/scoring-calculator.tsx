@@ -1,6 +1,6 @@
 "use client";
 
-// 채점 비용 예상표(#1270·#1304) — 프로바이더 × 방식 × 모델의 제출 한 건 예상이 한 표에 서고, 가정(소스 크기·항목 수·학생 수…)은
+// 채점 비용 예상표(#1270·#1304) — 프로바이더 × 방식 × 모델의 제출 한 건 예상이 한 표에 서고, 가정(소스 크기·항목 수…)은
 // 라벨과 값으로 보이며 바꿔 볼 수 있다. 바꾼 값은 저장하지 않는다. 처음 표시된 칸은 지금 이 클래스의 조합이다.
 import { useState, type ReactNode } from "react";
 
@@ -19,7 +19,6 @@ import {
   parseAssumption,
   perFileLabel,
   providerLabel,
-  semesterLine,
   singleNote,
   singleTimeLabel,
   sourceLabel,
@@ -63,7 +62,6 @@ export function ScoringCalculator({ classId }: { classId: number }) {
     <div data-testid="scoring-calculator" className="flex flex-col gap-4">
       <Assumptions calc={calc} change={change} />
       <ModelTable calc={calc} pick={pick} />
-      <Semester calc={calc} />
       <CapacityLines calc={calc} />
       <EscalationLine calc={calc} />
     </div>
@@ -140,33 +138,6 @@ function Assumptions({
           value={a.requirements}
           placeholder={String(d.requirements)}
           onCommit={(value) => change("requirements", value)}
-        />
-      </Field>
-      <Field label="학생 수" tag="가정">
-        <NumberInput
-          testId="calculator-students"
-          label="학생 수"
-          value={a.students}
-          placeholder={String(d.students)}
-          onCommit={(value) => change("students", value)}
-        />
-      </Field>
-      <Field label="과제 수" tag="가정">
-        <NumberInput
-          testId="calculator-assignments"
-          label="과제 수"
-          value={a.assignments}
-          placeholder={String(d.assignments)}
-          onCommit={(value) => change("assignments", value)}
-        />
-      </Field>
-      <Field label="재채점 비율" tag="가정">
-        <NumberInput
-          testId="calculator-regrade-rate"
-          label="재채점 비율"
-          value={a.regrade_rate}
-          placeholder={String(d.regrade_rate)}
-          onCommit={(value) => change("regradeRate", value)}
         />
       </Field>
       <Field label="의심 비율" tag="가정">
@@ -332,24 +303,6 @@ function CellButton({
   );
 }
 
-function Semester({ calc }: { calc: Calculation }) {
-  const line = semesterLine(calc);
-  return (
-    <div data-testid="calculator-semester" className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px]">
-      <span className="text-[12px] text-ink/60">클래스 한 학기</span>
-      <span data-testid="calculator-semester-total" className="text-[18px] text-ink">
-        {line.total}
-      </span>
-      <span data-testid="calculator-semester-formula" className="text-ink/60">
-        {line.formula}
-      </span>
-      <span data-testid="calculator-semester-model" className="font-mono text-[12px] text-ink/50">
-        {calc.selection.model_id} · {calc.selection.method === "agent" ? "에이전트" : "한 번 호출"}
-      </span>
-    </div>
-  );
-}
-
 function CapacityLines({ calc }: { calc: Calculation }) {
   return (
     <dl data-testid="calculator-capacity" className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
@@ -414,9 +367,6 @@ function fromSelection(calc: Calculation): CalculatorChoice {
     source: s.source === "custom" ? undefined : s.source,
     sourceChars: s.source === "custom" ? s.source_chars : undefined,
     requirements: a.requirements_from === "custom" ? a.requirements : undefined,
-    students: a.students,
-    assignments: a.assignments,
-    regradeRate: a.regrade_rate,
     suspectRate: a.suspect_rate,
   };
 }
