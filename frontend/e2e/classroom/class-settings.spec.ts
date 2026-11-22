@@ -165,7 +165,7 @@ test("보관된 클래스 상세에서 설정 링크 한 번이면 복사에 닿
   expect(page.url()).not.toContain(`/classes/${classId}`);
 });
 
-test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호출」이 켜져 있고 「에이전트」는 꺼진 채 까닭이 툴팁이다", async ({
+test("채점·완성도 검사 방식 — OpenAI 키 클래스의 기본 모델(gpt-4.1-mini)로는 「에이전트」가 꺼진 채 까닭이 툴팁이다(#1311)", async ({
   page,
 }) => {
   const { classId } = await newClass(page, "method");
@@ -178,7 +178,7 @@ test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호
   for (const id of ["scoring-method", "quality-method"]) {
     await expect(page.getByTestId(`${id}-single`)).toHaveAttribute("aria-checked", "true");
     await expect(page.getByTestId(`${id}-agent`)).toBeDisabled();
-    await expect(page.getByTestId(`${id}-agent`)).toHaveAttribute("title", "OpenAI 키는 확인 전");
+    await expect(page.getByTestId(`${id}-agent`)).toHaveAttribute("title", "gpt-5-mini 이상");
     await expect(page.getByTestId(`${id}-vendor`)).toHaveText("OpenAI");
   }
 
@@ -186,7 +186,31 @@ test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호
   await expect(page.getByTestId("scoring-method-single")).toHaveAttribute("aria-checked", "true");
 });
 
-test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이 있고, 가정을 바꾸면 값이 바뀌며, 감당 크기를 넘기면 보류가 뜬다", async ({
+test("한 번 호출로 못 담는 제출물 — 고른 값과 에이전트용 모델이 새로고침 뒤에도 남는다(#1311)", async ({ page }) => {
+  const { classId } = await newClass(page, "oversize-policy");
+  await page.goto(`/classes/${classId}/settings#scoring-method`);
+  await page.getByTestId("vendor-key-openai-change").click();
+  await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
+  await page.getByTestId("openai-key-submit").click();
+  await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
+
+  await expect(page.getByTestId("oversize-policy-reject")).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("oversize-policy-partial").click();
+  await expect(page.getByTestId("oversize-policy-partial")).toHaveAttribute("aria-checked", "true");
+  await page.reload();
+  await expect(page.getByTestId("oversize-policy-partial")).toHaveAttribute("aria-checked", "true");
+
+  await page.getByTestId("oversize-policy-agent").click();
+  const model = page.getByTestId("oversize-agent-model");
+  await expect(model.locator("option[value='gpt-5-nano']")).toHaveCount(0);
+  await model.selectOption("gpt-5-mini");
+  await expect(page.getByTestId("oversize-policy-agent")).toHaveAttribute("aria-checked", "true");
+  await page.reload();
+  await expect(page.getByTestId("oversize-policy-agent")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("oversize-agent-model")).toHaveValue("gpt-5-mini");
+});
+
+test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이 있고, 가정을 바꾸면 값이 바뀌며, 감당 크기를 넘기면 반려가 뜬다", async ({
   page,
 }) => {
   const { classId } = await newClass(page, "calculator-empty");
@@ -211,7 +235,7 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
     await expect(calculator).not.toContainText(word);
   }
 
-  // 에이전트는 Claude 만 — OpenAI 에서는 고를 수 없고, Claude 로 바꾸면 에이전트 금액이 나온다.
+  // 에이전트는 모델마다 — OpenAI 의 gpt-4.1-mini 로는 고를 수 없고(#1311, gpt-5-mini 이상), Claude 로 바꾸면 에이전트 금액이 나온다.
   await expect(page.getByTestId("calculator-method").locator("option[value=agent]")).toBeDisabled();
   await page.getByTestId("calculator-vendor").selectOption("anthropic");
   await expect(page.getByTestId("calculator-vendor")).toContainText("키 없음");
@@ -227,11 +251,11 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
   await expect(page.getByTestId("calculator-source-chars")).toContainText("16만 자");
   await expect(amount).not.toHaveText(before ?? "");
 
-  // 입력한 크기가 고른 모델의 한도를 넘으면 금액 자리에 보류가 뜬다.
+  // 입력한 크기가 고른 모델의 한도를 넘으면 클래스 설정(처음 값 「반려」)대로 금액 자리에 반려가 뜬다.
   await page.getByTestId("calculator-model").selectOption("gpt-4.1-mini");
   await page.getByTestId("calculator-source-files").fill("5000");
   await page.getByTestId("calculator-source-files").press("Enter");
-  await expect(amount).toHaveText("담지 못함 — 보류");
+  await expect(amount).toHaveText("담지 못함 — 반려");
 
   // 좁은 폭에서도 가로로 넘치지 않는다.
   await page.setViewportSize({ width: 390, height: 900 });

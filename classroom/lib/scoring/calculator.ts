@@ -83,7 +83,7 @@ export function charsLabel(chars: number): string {
   return `${formatManCount(chars)} 자`;
 }
 
-export const HOLD_TEXT = "담지 못함 — 보류";
+export const REJECT_TEXT = "담지 못함 — 반려";
 
 /** 고른 칸의 행 — 처음 값은 지금 이 클래스의 조합이다. */
 export function selectedRow(calc: ScoringCalculator): CalculatorRow | undefined {
@@ -91,14 +91,17 @@ export function selectedRow(calc: ScoringCalculator): CalculatorRow | undefined 
 }
 
 /**
- * 「제출 한 건」 — 고른 칸(모델 하나)의 예상 금액. 한 번 호출이 입력 크기를 담지 못하면 보류 글자다.
+ * 「제출 한 건」 — 고른 칸(모델 하나)의 예상 금액. 한 번 호출이 입력 크기를 담지 못하면 클래스의 「한 번 호출로 못 담는
+ * 제출물」(#1311)대로 금액 옆에 낱말 하나다 — 반려·에이전트(그 모델의 에이전트 금액)·일부만(한도까지 실은 금액).
  */
 export function submissionAmount(calc: ScoringCalculator): string {
   const row = selectedRow(calc);
   if (!row) return "";
   if (calc.selection.method === "agent" && row.agent.available && row.agent.krw != null) return formatKrw(row.agent.krw);
-  if (row.single.route === "hold") return HOLD_TEXT;
-  return formatKrw(row.single.krw, row.single.open_ended);
+  if (row.single.route !== "over") return formatKrw(row.single.krw, row.single.open_ended);
+  if (calc.oversize.policy === "agent" && calc.oversize.agent_krw != null) return `${formatKrw(calc.oversize.agent_krw)} · 에이전트`;
+  if (calc.oversize.policy === "partial") return `${formatKrw(row.single.partial_krw, row.single.open_ended)} · 일부만`;
+  return REJECT_TEXT;
 }
 
 /** 「담는 크기」 — 한 번 호출에 담을 수 있는 글자 수 · 소스 파일 수. */

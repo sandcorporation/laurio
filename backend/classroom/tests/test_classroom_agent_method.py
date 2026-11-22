@@ -157,22 +157,20 @@ def test_a_compatible_server_class_cannot_pick_agent(client, db, monkeypatch):
     assert get_class(client, instructor["access"], class_id)["scoring_method"] == "single"
 
 
-def test_an_openai_key_class_cannot_pick_agent_until_codex_is_verified(client, db):
-    """#1681: Codex 에이전트는 운영에서 예산에 끊겨 판정을 내지 못했다 — OpenAI 키 클래스는 고를 수 없다(호환 서버와
-    다른 까닭 코드)."""
+def test_an_openai_key_class_picks_agent_only_with_a_model_from_gpt_5_mini(client, db):
+    """#1311: OpenAI 도 에이전트를 고를 수 있다 — 단 기본 모델이 에이전트가 받는 모델(gpt-5-mini 이상)일 때만이다.
+    예전(#1681)에는 OpenAI 키 클래스 전체가 막혀 있었다."""
 
     owner = login(client, uid="owner")
     class_id = create_class(client, owner["access"])
 
-    assert get_class(client, owner["access"], class_id)["grading_method_options"][1] == {
-        "value": "agent",
-        "selectable": False,
-        "unavailable_reason": "agent_vendor_unverified",
-    }
+    body = get_class(client, owner["access"], class_id)
+    assert body["grading_method_options"][1] == {"value": "agent", "selectable": True, "unavailable_reason": None}
+    assert body["default_model"] not in body["agent_models"]
     for field in ("scoring_method", "quality_method"):
         response = _patch_class(client, owner["access"], class_id, {field: "agent"})
         assert response.status_code == 422, response.content
-        assert "agent_vendor_unverified" in response.json()["detail"]
+        assert body["default_model"] in response.json()["detail"]
     body = get_class(client, owner["access"], class_id)
     assert (body["scoring_method"], body["quality_method"]) == ("single", "single")
 

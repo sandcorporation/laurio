@@ -10,10 +10,12 @@ import { apiRequest, bffClient } from "@/lib/bff/client";
 // 정확히 가른다.
 export type GradingMethod = "single" | "agent";
 
+export type OversizePolicy = "reject" | "agent" | "partial";
+
 export type GradingMethodOption = {
   value: GradingMethod;
   selectable: boolean;
-  unavailable_reason: "compatible_server" | "agent_vendor_unverified" | null;
+  unavailable_reason: "compatible_server" | null;
 };
 
 export type PublishedClassTemplateSummary = {
@@ -67,6 +69,11 @@ export type ClassRow = {
   quality_method: GradingMethod;
   // 방식 선택지 — 고를 수 없으면 까닭 코드가 함께 온다.
   grading_method_options: GradingMethodOption[];
+  // 이 연결에서 에이전트가 받는 모델(#1311) — OpenAI 는 gpt-5-mini 이상, Claude 는 전부, 호환 서버는 없음.
+  agent_models: string[];
+  // 한 번 호출로 못 담는 제출물(#1311) — 반려·에이전트로 채점·들어가는 파일만, 그리고 에이전트로 채점할 모델.
+  oversize_policy: OversizePolicy;
+  oversize_agent_model: string;
   // 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일 전에는 false, 지나면 백엔드가 true 로 준다.
   anthropic_key_selectable: boolean;
   // 호환 서버의 호스트 — 공동 강사도 읽는다.
@@ -154,6 +161,8 @@ export function updateClass(
     default_model_is_reasoning: boolean;
     scoring_method: GradingMethod;
     quality_method: GradingMethod;
+    oversize_policy: OversizePolicy;
+    oversize_agent_model: string;
   }>,
 ): Promise<ApiResult<ClassRow>> {
   return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);

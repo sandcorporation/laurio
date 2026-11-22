@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from classroom import agent_grading
 from classroom import scoring, scoring_calculator, scoring_cost
 from core import model_context
 from classroom.tests.test_classroom_agent_method import _claude_stream, _Runner
@@ -87,11 +88,13 @@ def test_a_reasoning_model_adds_the_effort_share_on_top_of_the_requirements():
     )
 
 
-def test_a_source_past_the_model_context_does_not_fit_and_is_held_without_a_charge():
+def test_a_source_past_the_model_context_does_not_fit_and_is_over_without_a_single_call_charge():
     assert _single(source=30_000).fits is True
     assert _single(source=30_000).route == "single"
     held = _single(source=20_000_000)
-    assert (held.fits, held.route, held.usd) == (False, "hold", 0.0)
+    assert (held.fits, held.route, held.usd) == (False, "over", 0.0)
+    # 「들어가는 파일만」(#1311)은 한도까지 실은 금액이다 — 담기는 가장 큰 소스와 같은 값.
+    assert held.partial_usd == pytest.approx(_single(source=held.capacity_chars).usd)
 
 
 def test_the_capacity_comes_from_the_same_budget_function_the_scoring_uses():
@@ -149,7 +152,7 @@ def test_the_calculator_input_in_characters_is_the_bytes_over_bytes_per_char(del
     single = _single(model, source=chars, instruction=instruction)
 
     assert single.fits is (delta < 0)
-    assert single.route == ("single" if delta < 0 else "hold")
+    assert single.route == ("single" if delta < 0 else "over")
 
 
 def test_every_priced_model_has_a_known_context_window():
@@ -187,7 +190,7 @@ def test_staged_leaves_the_machine_judged_share_out_of_the_output():
     assert on.output_tokens < off.output_tokens
 
 
-def test_staged_with_the_two_step_off_holds_what_does_not_fit():
+def test_staged_with_the_two_step_off_does_not_take_what_does_not_fit():
     held = scoring_calculator.single_call(
         "gpt-4.1-mini",
         None,
@@ -198,7 +201,7 @@ def test_staged_with_the_two_step_off_holds_what_does_not_fit():
         two_step_threshold_chars=0,
         two_step_budget_chars=60_000,
     )
-    assert held.route == "hold"
+    assert held.route == "over"
 
 
 def test_the_agent_estimate_prices_the_provider_token_shape_at_the_model_price_and_grows_with_the_source():
@@ -249,7 +252,7 @@ def test_an_empty_class_prices_every_model_by_both_methods_and_no_cell_is_missin
     for row in calc["rows"]:
         assert row["single"]["usd"] > 0 and row["single"]["capacity_chars"] > 0, row["model_id"]
         assert row["single"]["seconds"] == scoring_calculator.ASSUMED_SINGLE_SECONDS
-        if row["vendor"] == "anthropic":
+        if agent_grading.agent_model_allowed(row["vendor"], row["model_id"]):
             assert row["agent"]["available"] is True
             assert row["agent"]["usd"] > 0 and row["agent"]["seconds"] > 0, row["model_id"]
         else:
@@ -262,7 +265,9 @@ def test_an_empty_class_prices_every_model_by_both_methods_and_no_cell_is_missin
                 "measured_krw": {"sample_count": 0, "median": None, "p90": None},
                 "measured_seconds": {"sample_count": 0, "median": None, "p90": None},
             }
-    assert calc["agent_vendors"] == ["anthropic"]
+    assert calc["agent_vendors"] == ["openai", "anthropic"]
+    # OpenAI 는 gpt-5-mini 이상만 에이전트를 받는다(#1311).
+    assert (_row(calc, "gpt-5-mini")["agent"]["available"], _row(calc, "gpt-5-nano")["agent"]["available"]) == (True, False)
     assert calc["assumptions"] == {
         "source_chars": 32_000,
         "source_files": 20,
@@ -331,18 +336,41 @@ def test_changing_the_assumptions_changes_the_values_and_a_source_past_the_capac
     assert (bigger["selection"]["source"], bigger["assumptions"]["source_from"]) == ("custom", "custom")
     assert row(bigger)["single"]["usd"] > row(base)["single"]["usd"]
     assert _row(bigger, "claude-haiku-5-5")["agent"]["usd"] > _row(base, "claude-haiku-5-5")["agent"]["usd"]
-    # 100만 토큰 모델도 500만 자는 담지 못한다 — 보류, 채점하지 않는다.
-    assert (row(huge)["single"]["route"], row(huge)["single"]["fits"], row(huge)["single"]["usd"]) == ("hold", False, 0)
+    # 100만 토큰 모델도 500만 자는 담지 못한다 — 한 번 호출 금액은 없다.
+    assert (row(huge)["single"]["route"], row(huge)["single"]["fits"], row(huge)["single"]["usd"]) == ("over", False, 0)
 
 
-def test_a_source_bigger_than_the_capacity_gets_the_hold_on_a_small_context_model_only(client, db):
+def test_a_source_bigger_than_the_capacity_is_over_on_a_small_context_model_only(client, db):
     owner = login(client, uid="owner")
     class_id = create_class(client, owner["access"])
 
     calc = _calc(client, owner["access"], class_id, source_chars=600_000)
 
-    assert _row(calc, "gpt-4o-mini")["single"]["route"] == "hold"
+    assert _row(calc, "gpt-4o-mini")["single"]["route"] == "over"
     assert _row(calc, "gpt-5")["single"]["route"] == "single"
+
+
+def test_the_oversize_policy_prices_the_amount_for_what_does_not_fit(client, db):
+    """#1311 의 7 — 담지 못할 때 「제출 한 건」은 클래스 설정을 따른다: 반려(금액 없음)·에이전트(그 모델의 에이전트
+    금액)·일부만(한도까지 실은 금액)."""
+
+    owner = login(client, uid="owner")
+    class_id = create_class(client, owner["access"])
+    assert _calc(client, owner["access"], class_id)["oversize"] == {"policy": "reject", "agent_model": "", "agent_krw": None}
+
+    patch = lambda body: client.patch(  # noqa: E731
+        f"{CLASSES_URL}/{class_id}", data=body, content_type="application/json", **auth_header(owner["access"])
+    )
+    assert patch({"oversize_policy": "agent", "oversize_agent_model": "gpt-5-mini"}).status_code == 200
+    calc = _calc(client, owner["access"], class_id, source_chars=600_000)
+    assert (calc["oversize"]["policy"], calc["oversize"]["agent_model"]) == ("agent", "gpt-5-mini")
+    assert calc["oversize"]["agent_krw"] == pytest.approx(_row(calc, "gpt-5-mini")["agent"]["krw"])
+
+    assert patch({"oversize_policy": "partial"}).status_code == 200
+    calc = _calc(client, owner["access"], class_id, source_chars=600_000)
+    over = _row(calc, "gpt-4o-mini")["single"]
+    assert (calc["oversize"]["policy"], over["route"], over["usd"]) == ("partial", "over", 0)
+    assert over["partial_krw"] > 0
 
 
 def test_the_response_has_no_semester_figures_only_the_per_submission_rows(client, db):

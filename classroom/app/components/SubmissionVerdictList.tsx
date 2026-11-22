@@ -4,6 +4,7 @@
 import { Badge } from "@/app/components/ui";
 import type { ClassroomScore } from "@/lib/submissions/api";
 import { VERDICT_LABEL, verdictMarkerClass, verdictOf } from "@/lib/submissions/verdict";
+import { unseenFilesText } from "@/lib/submissions/rejection";
 
 // 판정 주체 표시(#409) — 파서 판정은 신뢰도가 높고(파이썬 표준 파서·tree-sitter), AI 판정은 파서가 없는
 // 언어이거나 크기·시간 제한에 걸렸을 때만 쓰인다.
@@ -25,6 +26,11 @@ export function SubmissionVerdictList({
       {score.reused ? (
         <li data-testid={`${testIdPrefix}-reused`}>
           <Badge tone="neutral">같은 제출 재사용</Badge>
+        </li>
+      ) : null}
+      {score.unseen_files ? (
+        <li data-testid={`${testIdPrefix}-unseen-files`} className="text-[13px] text-ink/60">
+          {unseenFilesText(score.unseen_files)}
         </li>
       ) : null}
       {score.syntax_check ? (

@@ -31,6 +31,7 @@ from .problem_authoring import (
     validate_scoring_model_choice,
 )
 from .schemas import ClassIn, ClassPatchIn, ImportClassTemplateIn
+from .scoring_connection import agent_vendor_of
 from .services import import_class_template
 
 TEMPLATE_GONE_MESSAGE = "이 템플릿은 더 이상 사용할 수 없습니다."
@@ -81,6 +82,36 @@ def touches_owner_only_fields(payload: ClassPatchIn) -> bool:
     )
 
 
+def _check_agent_models(class_obj: Class, payload: ClassPatchIn, next_model: str) -> None:
+    """에이전트가 받는 모델만 저장한다(#1311, `agent_grading.agent_model_allowed`) — 「에이전트」 방식의 기본 모델과
+    「에이전트로 채점」의 모델. 이 요청이 그 값이나 방식을 바꿀 때만 본다(그대로인 옛 값은 채점이 까닭과 함께 막는다)."""
+
+    vendor = agent_vendor_of(class_obj)
+    agent_model_allowed = agent_grading.agent_model_allowed
+    next_methods = {
+        payload.scoring_method or class_obj.scoring_method,
+        payload.quality_method or class_obj.quality_method,
+    }
+    touches_method = payload.default_model is not None or Class.GradingMethod.AGENT in (
+        payload.scoring_method,
+        payload.quality_method,
+    )
+    if touches_method and Class.GradingMethod.AGENT in next_methods and not agent_model_allowed(vendor, next_model):
+        raise HttpError(422, f"에이전트 방식은 이 모델로 고를 수 없습니다({next_model}) — gpt-5-mini 이상이나 Claude 모델을 고르세요.")
+    next_policy = payload.oversize_policy or class_obj.oversize_policy
+    next_agent_model = (
+        payload.oversize_agent_model.strip()
+        if payload.oversize_agent_model is not None
+        else class_obj.oversize_agent_model
+    )
+    touches_oversize = payload.oversize_policy is not None or payload.oversize_agent_model is not None
+    if touches_oversize and next_policy == Class.OversizePolicy.AGENT:
+        if not next_agent_model:
+            raise HttpError(422, "에이전트로 채점할 모델을 고르세요.")
+        if not agent_model_allowed(vendor, next_agent_model):
+            raise HttpError(422, f"에이전트로 채점할 수 없는 모델입니다({next_agent_model}).")
+
+
 def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
     """클래스 설정을 고친다 — 보낸 칸만. 보관 뒤에도 고칠 수 있다(`classroom.participation`
     모듈 docstring 「열어 두는 것」) — 호출부가 `class_scope(write=False)` 로 연다."""
@@ -89,11 +120,12 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
         validate_scoring_model_choice(class_obj, payload.default_model, current_value=class_obj.default_model)
     if payload.default_reasoning_effort is not None:
         validate_reasoning_effort(payload.default_reasoning_effort)
-    if Class.GradingMethod.AGENT in (payload.scoring_method, payload.quality_method):
+    if Class.GradingMethod.AGENT in (payload.scoring_method, payload.quality_method, payload.oversize_policy):
         reason = agent_grading.unavailable_reason(class_obj)
         if reason is not None:
             raise HttpError(422, f"이 채점 연결로는 에이전트 방식을 고를 수 없습니다({reason}).")
     next_model = payload.default_model if payload.default_model is not None else class_obj.default_model
+    _check_agent_models(class_obj, payload, next_model)
     next_marked = (
         payload.default_model_is_reasoning
         if payload.default_model_is_reasoning is not None
@@ -142,6 +174,12 @@ def update_class(class_obj: Class, payload: ClassPatchIn) -> Class:
     if payload.quality_method is not None:
         class_obj.quality_method = payload.quality_method
         update_fields.append("quality_method")
+    if payload.oversize_policy is not None:
+        class_obj.oversize_policy = payload.oversize_policy
+        update_fields.append("oversize_policy")
+    if payload.oversize_agent_model is not None:
+        class_obj.oversize_agent_model = payload.oversize_agent_model.strip()
+        update_fields.append("oversize_agent_model")
     if update_fields:
         class_obj.save(update_fields=update_fields)
     return class_obj

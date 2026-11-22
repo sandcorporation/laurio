@@ -25,6 +25,13 @@ SELECTION_RULE = (
 )
 
 
+#: 두 걸음 문턱·2차 상한(글자) — staged 에서만 쓴다(staged 는 2026-11-22 부터 꺼짐 고정). 운영 설정
+#: `CLASSROOM_TWO_STEP_THRESHOLD_CHARS`·`CLASSROOM_TWO_STEP_BUDGET_CHARS`(#1286)였다가 그 기본값으로 굳혔다(#1311, 대장 #5575).
+#: 문턱 0 이면 끈다.
+THRESHOLD_CHARS = 120_000
+BUDGET_CHARS = 60_000
+
+
 @dataclass(frozen=True)
 class TwoStepPlan:
     """두 걸음으로 갈 채점의 재료 — 준비(`prepare_tail`)가 짓고 벤더 호출이 쓴다."""

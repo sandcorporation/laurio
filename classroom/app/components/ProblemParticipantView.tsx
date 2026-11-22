@@ -48,6 +48,7 @@ import { checklistSummaryLine, verdictGlyph, verdictStatusText } from "@/lib/sub
 import { VERDICT_LABEL, type VerdictValue, verdictFromMet, verdictOf } from "@/lib/submissions/verdict";
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
+import { rejectionText, unseenFilesText } from "@/lib/submissions/rejection";
 
 export type ParticipantChecklistItem = {
   id: number;
@@ -691,10 +692,10 @@ function AttemptRow({
         </span>
         <span data-testid={`submission-row-${submission.id}-status`}>
           {submission.status === "pending" ? (
-            <Badge>
+            <Badge tone={submission.pending_reason === "rejected" ? "error" : undefined}>
               {withLate(
-                submission.pending_reason === "size_held"
-                  ? "채점 보류(크기 초과)"
+                submission.pending_reason === "rejected"
+                  ? "반려"
                   : submission.pending_reason
                     ? "채점 대기"
                     : "채점 중",
@@ -734,9 +735,14 @@ function AttemptRow({
               강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다
             </span>
           ) : null}
-          {submission.status === "pending" && submission.pending_reason === "size_held" ? (
-            <span data-testid={`submission-row-${submission.id}-size-held-note`} className="min-w-0 truncate">
-              강사가 확인합니다
+          {submission.status === "pending" && submission.pending_reason === "rejected" ? (
+            <span data-testid={`submission-row-${submission.id}-rejection`} className="min-w-0">
+              {rejectionText(submission.rejection)}
+            </span>
+          ) : null}
+          {scored && submission.score?.unseen_files ? (
+            <span data-testid={`submission-row-${submission.id}-unseen-files`} className="min-w-0">
+              {unseenFilesText(submission.score.unseen_files)}
             </span>
           ) : null}
           {scored ? (

@@ -42,10 +42,16 @@ class ClassPatchIn(Schema):
     #: 호출에 추론 강도가 실린다. 「OpenAI 키」 연결은 이름으로 판단해 이 값을 보지 않는다.
     default_model_is_reasoning: bool | None = None
     #: 판정 채점의 방식(#1036) — "single"(한 번 호출)|"agent"(에이전트). 생략하면 바꾸지 않는다. 호환 서버
-    #: 연결은 "agent" 를 고를 수 없다(422, 까닭 코드 `compatible_server`).
+    #: 연결은 "agent" 를 고를 수 없다(422, 까닭 코드 `compatible_server`). 「에이전트」면 기본 모델이 에이전트가 받는
+    #: 모델이어야 한다(`ClassOut.agent_models`, #1311).
     scoring_method: Literal["single", "agent"] | None = None
     #: 완성도 검사의 방식(#1036) — 위와 같은 값·규칙.
     quality_method: Literal["single", "agent"] | None = None
+    #: 한 번 호출로 못 담는 제출물(#1311) — "reject"(반려)|"agent"(에이전트로 채점)|"partial"(들어가는 파일만으로 채점).
+    #: 생략하면 바꾸지 않는다. "agent" 는 호환 서버 연결에서 고를 수 없고(422), `oversize_agent_model` 이 있어야 한다.
+    oversize_policy: Literal["reject", "agent", "partial"] | None = None
+    #: 「에이전트로 채점」의 모델(#1311) — `ClassOut.agent_models` 가운데 하나.
+    oversize_agent_model: str | None = None
 
 
 class GradingMethodOptionOut(Schema):
@@ -53,9 +59,9 @@ class GradingMethodOptionOut(Schema):
 
     value: Literal["single", "agent"]
     selectable: bool
-    #: 고를 수 없는 까닭 — "compatible_server"(호환 서버 연결), "agent_vendor_unverified"(에이전트로 확인되지 않은
-    #: 벤더 — 지금은 OpenAI 키, #1681). 고를 수 있으면 `None`.
-    unavailable_reason: Literal["compatible_server", "agent_vendor_unverified"] | None = None
+    #: 고를 수 없는 까닭 — "compatible_server"(호환 서버 연결). 고를 수 있으면 `None`. 모델은 따로 막는다
+    #: (`ClassOut.agent_models`, #1311).
+    unavailable_reason: Literal["compatible_server"] | None = None
 
 
 class PublishedTemplateSummaryOut(Schema):
@@ -132,6 +138,13 @@ class ClassOut(Schema):
     quality_method: str = "single"
     #: 두 칸이 함께 쓰는 선택지와 고를 수 없는 까닭(#1036).
     grading_method_options: list[GradingMethodOptionOut] = []
+    #: 이 클래스의 연결에서 에이전트가 받는 모델(#1311, `agent_grading.agent_models`) — 「에이전트」 방식의 모델 선택지와
+    #: 「에이전트로 채점」의 모델 선택지. 호환 서버면 빈 목록.
+    agent_models: list[str] = []
+    #: 한 번 호출로 못 담는 제출물(#1311) — "reject"|"agent"|"partial". 고른 값 그대로다.
+    oversize_policy: str = "reject"
+    #: 「에이전트로 채점」의 모델(#1311) — 고르지 않았으면 빈 문자열.
+    oversize_agent_model: str = ""
     #: 「Claude(Anthropic) 키」를 고를 수 있는가(#803) — 방침 개정 시행일(KST 0시) 전에는 거짓이고
     #: 화면이 그 선택지를 보이지 않는다(저장 API 도 거절한다). 시행일이 지나면 저절로 참이다.
     anthropic_key_selectable: bool = False
@@ -395,10 +408,13 @@ class ScoringCalculatorSingleCellOut(Schema):
     #: 감당 글자 수를 소스 파일 수로 — 글자 ÷ `SOURCE_CHARS_PER_FILE`.
     capacity_files: int
     capacity_files_hangul: int
-    #: single(한 번에 담김) | two_step(두 걸음, staged) | hold(담지 못해 「크기 초과」 보류 — 채점 안 함, 금액 0)
+    #: single(한 번에 담김) | two_step(두 걸음, staged) | over(담지 못함 — 한 번 호출 금액 0, 클래스의 「한 번 호출로
+    #: 못 담는 제출물」대로 간다: `oversize`, #1311)
     route: str
     #: 가정한 걸린 시간(초).
     seconds: float
+    #: 「들어가는 파일만」이 한도까지 실었을 때의 예상(원, #1311) — 담기면 `krw` 와 같다.
+    partial_krw: float
 
 
 class ScoringCalculatorAgentCellOut(Schema):
@@ -427,6 +443,17 @@ class ScoringCalculatorStagedOut(Schema):
     budget_chars: int
 
 
+class ScoringCalculatorOversizeOut(Schema):
+    """이 클래스가 한 번 호출로 못 담는 제출물에 지금 하는 일(#1311) — 계산기의 「제출 한 건」이 담지 못할 때 이것으로 말한다."""
+
+    #: "reject" | "agent" | "partial" — 「에이전트로 채점」인데 지금 연결이 그 모델을 못 받으면 "reject".
+    policy: str
+    #: 「에이전트로 채점」의 모델 — 아니면 빈 문자열.
+    agent_model: str
+    #: 그 모델의 에이전트 예상(원) — 「에이전트로 채점」이 아니면 `None`.
+    agent_krw: float | None = None
+
+
 class ScoringCalculatorAgentLimitsOut(Schema):
     max_zip_bytes: int
     max_extracted_bytes: int
@@ -440,7 +467,8 @@ class ScoringCalculatorOut(Schema):
     """채점 비용 예상표(#1270·#1304, CONTEXT.md 「예상 채점 비용」) — 프로바이더 × 방식 × 모델의 제출 한 건 예상과 셈에 쓴 가정."""
 
     providers: list[ScoringCalculatorProviderOut]
-    #: 에이전트를 고를 수 있는 프로바이더(`agent_grading.AGENT_VERIFIED_VENDORS`).
+    #: 에이전트를 받는 모델이 하나라도 있는 프로바이더(`agent_grading.agent_model_allowed`, #1311). 모델별 가부는 행의
+    #: `agent.available`.
     agent_vendors: list[str]
     problems: list[ScoringCalculatorProblemOut]
     #: 상세 영역에 보이는 칸 — 처음 값은 지금 이 클래스의 조합이다.
@@ -451,6 +479,7 @@ class ScoringCalculatorOut(Schema):
     rows: list[ScoringCalculatorRowOut]
     staged: ScoringCalculatorStagedOut
     agent_limits: ScoringCalculatorAgentLimitsOut
+    oversize: ScoringCalculatorOversizeOut
     min_sample_count: int
     krw_per_usd: int
 
@@ -1196,6 +1225,15 @@ class ClassroomScoreOut(Schema):
     hidden_summary: ClassroomHiddenSummaryOut | None = None
     #: 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 채운다. 원본이 누구인지는 어디에도 싣지 않는다.
     reused: bool = False
+    #: 「들어가는 파일만으로 채점」(#1311)이 보지 못한 파일 수 — 0 이면 다 봤다.
+    unseen_files: int = 0
+
+
+class SubmissionRejectionOut(Schema):
+    """반려된 시도의 사유(#1311) — 채점이 그때 잰 소스 크기와 한 번 호출 한도(글자)."""
+
+    source_chars: int
+    limit_chars: int
 
 
 class ClassroomSubmissionOut(Schema):
@@ -1224,13 +1262,16 @@ class ClassroomSubmissionOut(Schema):
     passed: bool = False
     #: 이 시도 하나가 「완벽」인가(#962) — 필수·심화 전부 충족. 심화 항목이 없는 문제는 `None`.
     perfect: bool | None = None
-    #: "no_api_key" | "model_rejected" | "size_held"(#989, 시도마다) | `None` — `classroom.pending_scoring.pending_reason`이
+    #: "rejected"(#1311, 시도마다 — 반려, 사유는 `rejection`) | "no_api_key" | "model_rejected" | `None` —
+    #: `classroom.pending_scoring.pending_reason`이
     #: 이 우선순위(키 → 모델)로 정한다(#434, #629). `status`가 "pending"일 때만 채워진다 —
     #: 강사가 채점 키를 아직 설정하지 않았으면(#346) "no_api_key", 키는 멀쩡한데 이 문제의
     #: 채점 모델을 그 키로 못 쓰면(#403) "model_rejected"다. 둘 다 참여자가 스스로 어쩔 수
     #: 없는 사유라 참여자 화면은 같은 안내로 보이고, 강사 화면만 무엇을 해야 풀리는가(키를
     #: 넣는다/모델을 바꾼다)로 갈라 말한다.
     pending_reason: str | None = None
+    #: 반려된 시도면 그 사유(#1311) — `pending_reason` 이 "rejected" 일 때만.
+    rejection: SubmissionRejectionOut | None = None
     #: 이 시도를 「공모전에도 내기」로 냈을 때만 채워진다(#549) — 끄고 낸 시도는 None.
     contest_entry: ClassroomContestEntryOut | None = None
     #: 늦음 단계(#941): null | "recommended"(권장 기한 뒤) | "deadline"(마감 기한 뒤).
@@ -1375,6 +1416,8 @@ class ClassroomInstructorSubmissionOut(Schema):
     #: (#346) — 강사도 "학생이 안 낸 것"과 "냈는데 강사 본인이 키를 안 넣어
     #: 멈춘 것"을 구별해야 한다.
     pending_reason: str | None = None
+    #: 반려된 시도면 그 사유(#1311) — `pending_reason` 이 "rejected" 일 때만.
+    rejection: SubmissionRejectionOut | None = None
     #: 「공모전에도 내기」로 낸 시도면 그 결과(#549·#550), 아니면 None. 근거·공모전 점수·수상
     #: 여부는 공모전 쪽의 것이라 실리지 않는다.
     contest_entry: ClassroomContestEntryOut | None = None

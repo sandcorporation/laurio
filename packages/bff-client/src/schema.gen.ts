@@ -6149,6 +6149,11 @@ export interface components {
         };
         /** ClassOut */
         ClassOut: {
+            /**
+             * Agent Models
+             * @default []
+             */
+            agent_models: string[];
             anthropic_key?: components["schemas"]["VendorKeyOut"] | null;
             /**
              * Anthropic Key Selectable
@@ -6213,6 +6218,16 @@ export interface components {
             openai_key_masked?: string | null;
             /** Openai Key Status */
             openai_key_status?: string | null;
+            /**
+             * Oversize Agent Model
+             * @default
+             */
+            oversize_agent_model: string;
+            /**
+             * Oversize Policy
+             * @default reject
+             */
+            oversize_policy: string;
             pending_ownership_transfer?: components["schemas"]["PendingOwnershipTransferOut"] | null;
             /**
              * Problem Count
@@ -6283,6 +6298,10 @@ export interface components {
             instructor_display_name?: string | null;
             /** Name */
             name?: string | null;
+            /** Oversize Agent Model */
+            oversize_agent_model?: string | null;
+            /** Oversize Policy */
+            oversize_policy?: ("reject" | "agent" | "partial") | null;
             /** Quality Method */
             quality_method?: ("single" | "agent") | null;
             /** Scoring Method */
@@ -6542,6 +6561,7 @@ export interface components {
             perfect?: boolean | null;
             /** Problem Id */
             problem_id: number;
+            rejection?: components["schemas"]["SubmissionRejectionOut"] | null;
             score?: components["schemas"]["ClassroomScoreOut"] | null;
             /** Status */
             status: string;
@@ -6785,6 +6805,11 @@ export interface components {
              */
             reused: boolean;
             syntax_check?: components["schemas"]["ClassroomSyntaxCheckOut"] | null;
+            /**
+             * Unseen Files
+             * @default 0
+             */
+            unseen_files: number;
         };
         /** ClassroomSubmissionIn */
         ClassroomSubmissionIn: {
@@ -6825,6 +6850,7 @@ export interface components {
             perfect?: boolean | null;
             /** Problem Id */
             problem_id: number;
+            rejection?: components["schemas"]["SubmissionRejectionOut"] | null;
             score?: components["schemas"]["ClassroomScoreOut"] | null;
             /** Status */
             status: string;
@@ -8065,7 +8091,7 @@ export interface components {
             /** Selectable */
             selectable: boolean;
             /** Unavailable Reason */
-            unavailable_reason?: ("compatible_server" | "agent_vendor_unverified") | null;
+            unavailable_reason?: "compatible_server" | null;
             /**
              * Value
              * @enum {string}
@@ -10726,6 +10752,7 @@ export interface components {
             krw_per_usd: number;
             /** Min Sample Count */
             min_sample_count: number;
+            oversize: components["schemas"]["ScoringCalculatorOversizeOut"];
             /** Problems */
             problems: components["schemas"]["ScoringCalculatorProblemOut"][];
             /** Providers */
@@ -10734,6 +10761,18 @@ export interface components {
             rows: components["schemas"]["ScoringCalculatorRowOut"][];
             selection: components["schemas"]["ScoringCalculatorSelectionOut"];
             staged: components["schemas"]["ScoringCalculatorStagedOut"];
+        };
+        /**
+         * ScoringCalculatorOversizeOut
+         * @description 이 클래스가 한 번 호출로 못 담는 제출물에 지금 하는 일(#1311) — 계산기의 「제출 한 건」이 담지 못할 때 이것으로 말한다.
+         */
+        ScoringCalculatorOversizeOut: {
+            /** Agent Krw */
+            agent_krw?: number | null;
+            /** Agent Model */
+            agent_model: string;
+            /** Policy */
+            policy: string;
         };
         /** ScoringCalculatorProblemOut */
         ScoringCalculatorProblemOut: {
@@ -10805,6 +10844,8 @@ export interface components {
             open_ended: boolean;
             /** Output Tokens */
             output_tokens: number;
+            /** Partial Krw */
+            partial_krw: number;
             /** Route */
             route: string;
             /** Seconds */
@@ -11306,6 +11347,16 @@ export interface components {
             total: number;
             /** Weighted Score */
             weighted_score: number;
+        };
+        /**
+         * SubmissionRejectionOut
+         * @description 반려된 시도의 사유(#1311) — 채점이 그때 잰 소스 크기와 한 번 호출 한도(글자).
+         */
+        SubmissionRejectionOut: {
+            /** Limit Chars */
+            limit_chars: number;
+            /** Source Chars */
+            source_chars: number;
         };
         /** TokenPairOut */
         TokenPairOut: {

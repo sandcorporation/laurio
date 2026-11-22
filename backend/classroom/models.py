@@ -168,6 +168,22 @@ class Class(models.Model):
         max_length=10, choices=GradingMethod.choices, default=GradingMethod.SINGLE, db_default=GradingMethod.SINGLE
     )
 
+    class OversizePolicy(models.TextChoices):
+        """한 번 호출로 못 담는 제출물을 어떻게 하나(#1311, CONTEXT.md 「반려」) — 크기는 비동기 채점 안에서만 잰다.
+        「반려」는 모델을 부르지 않고 점수 없이 그 시도를 돌려보낸다(학생이 다시 낸다). 「에이전트로 채점」은 그 시도만
+        `oversize_agent_model` 로 에이전트 채점한다. 「들어가는 파일만」은 예산에 든 파일만으로 한 번 호출 채점한다."""
+
+        REJECT = "reject", "반려"
+        AGENT = "agent", "에이전트로 채점"
+        PARTIAL = "partial", "들어가는 파일만으로 채점"
+
+    #: 한 번 호출로 못 담는 제출물(#1311). db_default: ADR-0053 — 기존 클래스는 모두 「반려」.
+    oversize_policy = models.CharField(
+        max_length=10, choices=OversizePolicy.choices, default=OversizePolicy.REJECT, db_default=OversizePolicy.REJECT
+    )
+    #: 「에이전트로 채점」의 모델(#1311) — 그 연결에서 에이전트가 받는 모델(`agent_grading.agent_model_allowed`)만.
+    oversize_agent_model = models.CharField(max_length=200, blank=True, default="", db_default="")
+
     #: 이 클래스의 기본 채점 모델(#285, #401). 문제가 자기 값을 갖지 않으면
     #: 이 값을 쓴다 — 그 클래스의 키로 실제로 쓸 수 있는 모델만 저장된다
     #: (`classroom.scoring_model_catalog.get_scoring_model_catalog`로 검증).
@@ -918,6 +934,8 @@ class ClassroomScore(models.Model):
     #: 지시문의 해시. 두 걸음은 `prompt` 가 고른 파일만 담아 같은 입력을 프롬프트로 가릴 수 없어 재사용이 이것으로 찾는다.
     #: 한 번 호출로 채점한 점수는 비어 있다.
     input_fingerprint = models.CharField(max_length=64, blank=True, default="", db_default="")
+    #: 「들어가는 파일만으로 채점」(#1311)이 싣지 못한 파일 수 — 통째로 빠졌거나 중간에서 잘린 것. 0 이면 다 봤다.
+    unseen_files = models.PositiveIntegerField(default=0, db_default=0)
     #: 체크리스트 항목별 판정 근거.
     #: [{"checklist_item_id": int, "is_met": bool, "reasoning": str}, ...]
     reasoning = models.JSONField()

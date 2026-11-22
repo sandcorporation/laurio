@@ -118,6 +118,7 @@ from .schemas import (
     ClassroomRecentAttemptOut,
     ClassroomRosterGridOut,
     ClassroomScoreOut,
+    SubmissionRejectionOut,
     ClassroomSubmissionIn,
     ClassroomSubmissionOut,
     ContestEntryFormOut,
@@ -300,6 +301,9 @@ def _serialize_class(
         scoring_method=class_obj.scoring_method,
         quality_method=class_obj.quality_method,
         grading_method_options=_grading_method_options(class_obj),
+        agent_models=agent_grading.agent_models(class_obj),
+        oversize_policy=class_obj.oversize_policy,
+        oversize_agent_model=class_obj.oversize_agent_model,
         anthropic_key_selectable=(
             privacy_policy.anthropic_key_connection_open() if claude_selectable is None else claude_selectable
         ),
@@ -814,6 +818,7 @@ def _serialize_score(
         syntax_check=_serialize_syntax_check(score.syntax_check_result),
         created_at=score.created_at,
         reused=hidden_items is None and score_reused(score),
+        unseen_files=score.unseen_files,
         hidden_summary=(
             None
             if hidden_items is None
@@ -843,10 +848,17 @@ def _pending_reason(score, class_obj: Class, problem: Problem, submission=None) 
     — 강사의 계정·설정 문제가 참여자에게 새어 나가지 않는다, 강사 전용
     화면(설정·시도 목록·클래스 상세 배너)만 다르게 말한다."""
 
-    # 「크기 초과」 보류(#989)는 시도마다다 — 질의가 `pending_scoring.with_size_held` 로 단 값을 읽는다.
-    return pending_scoring.pending_reason(
-        score, class_obj, problem, size_held=bool(getattr(submission, "size_held", False))
-    )
+    # 반려(#1311)는 시도마다다 — 질의가 `pending_scoring.with_rejection` 으로 단 값을 읽는다.
+    return pending_scoring.pending_reason(score, class_obj, problem, rejected=_rejection_of(submission) is not None)
+
+
+def _rejection_of(submission) -> SubmissionRejectionOut | None:
+    """반려된 시도의 사유(#1311) — `with_rejection` 이 단 `rejection_error` 를 읽는다. 채점된 시도는 늘 `None`."""
+
+    if submission is None or getattr(submission, "classroom_score", None) is not None:
+        return None
+    parsed = pending_scoring.parse_rejection(getattr(submission, "rejection_error", None))
+    return None if parsed is None else SubmissionRejectionOut(source_chars=parsed[0], limit_chars=parsed[1])
 
 
 def _serialize_classroom_submission(
@@ -881,6 +893,7 @@ def _serialize_classroom_submission(
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         perfect=_attempt_perfect(problem, score, checklist_items),
         pending_reason=pending_reason,
+        rejection=_rejection_of(submission),
         contest_entry=contest_entry_out(submission),
         late=problem.lateness(submission.created_at),
     )
@@ -938,6 +951,7 @@ def _serialize_instructor_submission(
         passed=problem.is_score_passed(score, checklist_items=checklist_items),
         perfect=_attempt_perfect(problem, score, checklist_items),
         pending_reason=_pending_reason(score, class_obj, problem, submission),
+        rejection=_rejection_of(submission),
         contest_entry=contest_entry_out(submission),
         is_current_contest_entry=marks is not None and submission.id in marks.current,
         late=problem.lateness(submission.created_at),
@@ -1341,6 +1355,9 @@ def list_class_scoring_models(request: HttpRequest, class_id: int):
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
     catalog = get_scoring_model_catalog(class_obj)
+    # 「에이전트」 방식 클래스는 에이전트가 받는 모델만 고른다(#1311) — OpenAI 의 gpt-5-mini 아래는 빠진다.
+    agent_only = agent_grading.uses_agent(class_obj, "scoring")
+    vendor = scoring_connection.agent_vendor_of(class_obj)
     return 200, ScoringModelCatalogOut(
         models=[
             ScoringModelOut(
@@ -1350,6 +1367,7 @@ def list_class_scoring_models(request: HttpRequest, class_id: int):
                 is_reasoning_model=c.is_reasoning_model,
             )
             for c in catalog.models
+            if not agent_only or agent_grading.agent_model_allowed(vendor, c.id)
         ],
         source=catalog.source,
         unavailable_reason=catalog.unavailable_reason,
@@ -1495,6 +1513,7 @@ def _single_cell_out(cell: scoring_calculator.SingleCall) -> dict[str, object]:
         "capacity_files_hangul": cell.capacity_files_hangul,
         "route": cell.route,
         "seconds": cell.seconds,
+        "partial_krw": cell.partial_usd * scoring_cost.KRW_PER_USD,
     }
 
 
@@ -1583,6 +1602,11 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "attempt_seconds": calc.agent_limits.attempt_seconds,
             "attempts": calc.agent_limits.attempts,
             "budget_usd": calc.agent_limits.budget_usd,
+        },
+        "oversize": {
+            "policy": calc.oversize_policy,
+            "agent_model": calc.oversize_agent_model,
+            "agent_krw": calc.oversize_agent_usd * krw if calc.oversize_agent_usd is not None else None,
         },
         "min_sample_count": scoring_cost.MIN_SAMPLE_COUNT,
         "krw_per_usd": krw,
@@ -2796,7 +2820,7 @@ def _serialize_own_submissions(problem, member, user, checklist_items) -> list:
     if member is None:
         return []
     submissions = (
-        pending_scoring.with_size_held(ClassroomSubmission.objects.filter(problem=problem, member=member))
+        pending_scoring.with_rejection(ClassroomSubmission.objects.filter(problem=problem, member=member))
         .select_related("classroom_score").defer(*_SCORE_PROMPT)
         .prefetch_related("assets")
         .order_by("-attempt_number")
@@ -3123,7 +3147,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
     checklist_items = list(problem.checklist_items.all())
 
     submissions = (
-        pending_scoring.with_size_held(ClassroomSubmission.objects.filter(problem=problem))
+        pending_scoring.with_rejection(ClassroomSubmission.objects.filter(problem=problem))
         .select_related("classroom_score", "member")
         .prefetch_related("assets")
         .order_by("member__display_name", "-attempt_number")

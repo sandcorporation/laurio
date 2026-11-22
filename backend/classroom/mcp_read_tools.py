@@ -213,6 +213,14 @@ def _per_submission(calc: scoring_calculator.Calculation) -> dict[str, str | int
         "agent_krw_median": round(measured.median * krw) if measured.median is not None else None,
         "agent_krw_p90": round(measured.p90 * krw) if measured.p90 is not None else None,
         "agent_sample_count": measured.sample_count,
+        "oversize_policy": calc.oversize_policy,
+        "oversize_krw": (
+            round(calc.oversize_agent_usd * krw)
+            if calc.oversize_agent_usd is not None
+            else round(row.single.partial_usd * krw)
+            if calc.oversize_policy == "partial"
+            else None
+        ),
     }
 
 
@@ -344,11 +352,20 @@ _PER_SUBMISSION_ESTIMATE = {
         "single_call_capacity_files_hangul": {"type": "integer", "description": "한글 주석 많음 감당 글자 수를 소스 파일 수로"},
         "source_files": {"type": "integer", "description": "제출 크기를 소스 파일 수로 어림한 값"},
         "source_chars_per_file": {"type": "integer", "description": "소스 파일 하나의 평균 글자 수(어림의 나누는 값)"},
-        "single_call_route": {"type": "string", "enum": ["single", "two_step", "hold"]},
+        "single_call_route": {"type": "string", "enum": ["single", "two_step", "over"]},
         "agent_krw": {"type": ["integer", "null"], "description": "에이전트 예상 — 못 받는 프로바이더면 null"},
         "agent_krw_median": {"type": ["integer", "null"], "description": "에이전트 실측 중앙 — 표본이 모자라면 null"},
         "agent_krw_p90": {"type": ["integer", "null"]},
         "agent_sample_count": {"type": "integer"},
+        "oversize_policy": {
+            "type": "string",
+            "enum": ["reject", "agent", "partial"],
+            "description": "한 번 호출로 못 담는 제출물(single_call_route 가 over)을 어떻게 하나 — 반려·에이전트로 채점·들어가는 파일만",
+        },
+        "oversize_krw": {
+            "type": ["integer", "null"],
+            "description": "담지 못할 때의 제출 한 건 — 에이전트면 그 모델의 에이전트 예상, 일부만이면 한도까지 실은 금액, 반려면 null",
+        },
     },
     "required": ["vendor", "method", "model", "single_call_krw"],
 }

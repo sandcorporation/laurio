@@ -76,6 +76,18 @@ def validate_grading_guideline(strictness: str, text: str) -> tuple[str, str]:
     return strictness, ""
 
 
+def require_agent_model(class_obj: Class, model_id: str) -> None:
+    """「에이전트」 방식 클래스의 문제 모델은 에이전트가 받는 모델이어야 한다(#1311, `agent_grading.agent_model_allowed`)."""
+
+    from . import agent_grading
+    from .scoring_connection import agent_vendor_of
+
+    if class_obj.scoring_method != Class.GradingMethod.AGENT or agent_grading.unavailable_reason(class_obj) is not None:
+        return
+    if not agent_grading.agent_model_allowed(agent_vendor_of(class_obj), model_id):
+        raise HttpError(422, f"에이전트 방식은 이 모델로 고를 수 없습니다({model_id}) — gpt-5-mini 이상이나 Claude 모델을 고르세요.")
+
+
 def validate_scoring_model_choice(class_obj: Class, model_id: str, *, current_value: str) -> None:
     """저장 시점에 이 모델이 그 클래스의 키로 실제로 쓸 수 있는지 검증한다
     (#401 AC). 클래스 기본값·문제별 값 둘 다 이 함수 하나를 쓴다 — 두
@@ -168,6 +180,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
         validate_reasoning_effort(payload.reasoning_effort)
     if payload.model:
         validate_scoring_model_choice(class_obj, payload.model, current_value="")
+        require_agent_model(class_obj, payload.model)
         probe_scoring_model_choice(
             class_obj,
             payload.model,
@@ -236,6 +249,8 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
     )
     if payload.model:
         validate_scoring_model_choice(class_obj, payload.model, current_value=problem.model)
+        if payload.model != problem.model:
+            require_agent_model(class_obj, payload.model)
     if payload.reasoning_effort:
         validate_reasoning_effort(payload.reasoning_effort)
     next_model = payload.model if payload.model is not None else problem.model

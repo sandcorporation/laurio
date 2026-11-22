@@ -481,6 +481,11 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
         checks_profanity=False,
         exempt_reason="채점 모델 식별자 — 벤더가 정한 모델 이름 중 하나.",
     ),
+    ("classroom", "ClassPatchIn", "oversize_agent_model"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason="에이전트로 채점할 모델 식별자(#1311) — 에이전트가 받는 모델 목록 중 하나만 저장된다.",
+    ),
     ("classroom", "ClassPatchIn", "default_reasoning_effort"): BannedWordRule(
         checks_impersonation=False,
         checks_profanity=False,

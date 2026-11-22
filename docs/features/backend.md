@@ -612,9 +612,11 @@ Claude 는 init 도구에 Read·Grep·Glob 이 다 있고 인증 출처가 실�
 코드 줄을 Read 로 열고, 못 찾으면 미충족, 충족마다 빈 구현·미연결 반례를 Grep). 지침은 실행 모델이 정해진 뒤 `AgentJob.build_prompt(model)` 로 만들고, Score·리뷰의
 `prompt` 와 `AgentRun.record.prompt_sha256` 에는 CLI 에 넘긴 그 지침이 남는다. 강의실의 한 번 호출 채점은
 공모전처럼 그 문제의 채점 모델 컨텍스트에서 예산을 정하고(지시문 몫에 문법 검사 덧붙임 — 파서가 못 본 파일의 전문 — 이
-든다), **다 들어가지 않거나 보낼 요청이 넘치면(벤더 거절 포함) 자르지도 미충족으로 굳히지도 않고 보류한다**(#989) —
-시도 기록이 `SourceOverBudgetHold: model=<모델> ` 으로 시작하고, **그 모델이 문제의 채점 모델인 동안만** 채점 대기에서
-빠진다(강사가 문제·클래스 모델을 바꾸면 다음 스캔이 다시 집는다). 실패 상한에 세지 않는다. 완성도 검사와 강의실 에이전트
+든다), **다 들어가지 않으면 클래스의 「한 번 호출로 못 담는 제출물」(`Class.oversize_policy`, #1311)대로 간다** —
+「반려」(처음 값)는 모델을 부르지 않고 시도 기록 `SourceOverBudgetRejected: source_chars=<N> limit_chars=<M>` 하나를 남긴다(점수
+없음, 다시 집지 않음, 실패 상한에 세지 않음 — 응답의 `pending_reason` 은 `rejected`, 사유는 `rejection`). 「에이전트로
+채점」은 그 시도만 `Class.oversize_agent_model` 로 에이전트 채점에 넘기고, 「들어가는 파일만」은 예산에 든 파일만으로 채점해
+못 본 파일 수를 `ClassroomScore.unseen_files` 에 남긴다. 예산으로 고른 뒤에도 보낼 요청이 넘치면(벤더 거절 포함) 반려한다. 완성도 검사와 강의실 에이전트
 채점은 지금처럼 `MAX_SOURCE_BYTES`(약 300KB)로 고른다.
 
 **zip 에는 Git 기록이 없다 — 그것을 묻는 필수 항목에 경고가 붙는다**(#587,
@@ -1202,8 +1204,6 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 도 시행일과 상관없이 저장되고 돈다(대표 결정 2026-11-20, `config/settings.py`). 방침 개정 시행일 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`(2026-11-27, #997)는 방침 화면 잠금 시험만 본다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
-| `CLASSROOM_TWO_STEP_THRESHOLD_CHARS` | 글자 수(#1286) | 강의실 staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이것을 넘거나 모델 예산에 다 들어가지 않으면 두 걸음 — 1차는 파일 목록으로 항목별 볼 파일을 받고, 2차는 고른 파일만 싣는다. 0 이면 끔 — staged 가 꺼짐 고정이라(#1310) 지금은 채점이 이 값을 쓰지 않는다(계산기 응답에만 실린다) | `120000` |
-| `CLASSROOM_TWO_STEP_BUDGET_CHARS` | 글자 수(#1286) | 두 걸음 2차에 싣는 소스의 상한(줄 번호를 붙인 글자) — 넘치면 항목 순으로 자른다 — staged 가 꺼짐 고정이라(#1310) 지금은 채점이 이 값을 쓰지 않는다(계산기 응답에만 실린다) | `60000` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
@@ -1242,10 +1242,12 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 - 비용은 실행별 예산($1)·`AGENT_SCORING_DAILY_LIMIT_USD`(하루) 두 겹에 CLI 자체 상한이다. `anthropic` 도 방침 시행일
   (2026-11-27) 전에 막지 않는다(대표 결정 2026-11-20 — 시행일은 방침 화면 잠금 시험만 본다).
 - **강의실**(#1036)은 클래스가 「에이전트」를 고르면(`Class.scoring_method`·`quality_method`) 판정 채점·완성도 검사가
-  같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(Claude 키 → Claude Code). **에이전트를 고를 수 있는
-  벤더는 `AGENT_VERIFIED_VENDORS` 한 곳이 정하고 지금은 Anthropic 뿐이다** — OpenAI 키(Codex)는 운영 실측(#1681)에서 예산에 끊겨
-  판정을 못 내 막았다(까닭 코드 `agent_vendor_unverified`, 호환 서버는 `compatible_server`; 클래스 응답의
-  `grading_method_options` 와 PATCH 422 가 같은 코드를 싣는다. 이미 고른 값은 두고 한 번 호출로 돈다).
+  같은 `run_agent_job` 을 탄다(`classroom.agent_grading`) — 벤더는 클래스 연결(Claude 키 → Claude Code, OpenAI 키 → Codex).
+  **에이전트가 받는 모델은 `agent_model_allowed` 한 곳이 정한다**(#1311) — Claude 는 단가표 모델 전부, OpenAI 는
+  `AGENT_OPENAI_MODELS`(gpt-5-mini·gpt-5·gpt-5.1·gpt-5.2·gpt-5.4-mini·gpt-5.4·gpt-5.5)만이다. 클래스 응답의 `agent_models` 가 그
+  목록이고, 「에이전트」 클래스의 모델 목록(`/scoring-models`)·기본 모델·문제 모델 저장(422)이 같은 판정을 쓴다. 막힌 모델이 이미
+  저장된 문제는 모델 거부(`model_rejected`)와 같은 길로 채점 대기에서 빠진다. 호환 서버는 에이전트를 못 부른다(까닭 코드
+  `compatible_server`; `grading_method_options` 와 PATCH 422 가 같은 코드를 싣는다. 이미 고른 값은 두고 한 번 호출로 돈다).
   모델은 문제의 채점 모델, 키는 그 클래스 키, 박제본은 채점 준비가 읽은 zip(아니면 보류). 기록은 `ClassroomAgentRun`
   (공모전 `AgentRun` 과 같은 꼴, 운영자 조회 `GET /api/internal/agent-runs` 에 `source=classroom` 으로 보인다). 지침은 공모전과 같은
   규칙·요구사항에 첫머리만 클래스 말(「클래스 문제의 제출물」「참여자가 제출한 저장소」, 완성도는 「문제 제목」)이다 —
