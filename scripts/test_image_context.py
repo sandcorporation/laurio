@@ -350,7 +350,7 @@ class ChangedServices(unittest.TestCase):
     FILES = (
         ".dockerignore", "backend/app.py", "frontend/page.tsx", "operator/page.tsx", "classroom/page.tsx",
         "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
-        "docker/pgbouncer/entry.sh", "backend/scoring/agent_runner.py", "backend/scoring/selfloop.py",
+        "docker/pgbouncer/entry.sh", "backend/scoring/agent_runner.py", "backend/scoring/selfloop.py", "backend/core/vendor_paths.py",
         "docker/entrypoint/wait.cjs",
         *(f"docker/{name}.Dockerfile" for name in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer", "agent-grader")),
     )
