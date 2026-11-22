@@ -62,8 +62,8 @@ class RunRow:
     #: staged 줄(#1295)만 — 기계가 정한 항목 수·모델에 간 항목 수. 다른 줄은 None.
     machine_items: int | None = None
     model_items: int | None = None
-    #: 기준 판정 칸만 — 확신 `low` 인 항목 id, 확신을 한 칸이라도 달았는가(#1297).
-    low_items: tuple[int, ...] = ()
+    #: 기준 판정 칸만 — 확신이 `high` 가 아닌(medium·low·빈) 항목 id, 확신을 한 칸이라도 달았는가(#1297·#1299).
+    soft_items: tuple[int, ...] = ()
     confidence_marked: bool = False
 
 
@@ -96,7 +96,7 @@ class RowReport:
     # staged 줄(#1295)만 — 채점된 칸 평균. 다른 줄은 None.
     machine_items: float | None = None
     model_items: float | None = None
-    # 확신 `low` 칸을 뺀 같은 셋(#1297) — 확신 표시가 없는 재료면 None.
+    # `high` 확신 칸만 센 같은 셋(#1299, medium·low 를 함께 뺀다) — 확신 표시가 없는 재료면 None.
     item_accuracy_sure: float | None = None
     unmet_recall_sure: float | None = None
     false_positive_rate_sure: float | None = None
@@ -316,9 +316,9 @@ def report_rows(
     base_scores = _per_submission(base_rows)
     truth = _verdicts(truth_runs)
     sure_truth: Verdicts | None = None
-    if any(r.confidence_marked for r in truth_runs):  # 확신 표시가 없는 재료면 「확신 낮음 뺀」 열은 「—」다
-        low = {(r.submission_id, i) for r in truth_runs for i in r.low_items}
-        sure_truth = {k: v for k, v in truth.items() if k not in low}
+    if any(r.confidence_marked for r in truth_runs):  # 확신 표시가 없는 재료면 「high 만」 열은 「—」다
+        soft = {(r.submission_id, i) for r in truth_runs for i in r.soft_items}
+        sure_truth = {k: v for k, v in truth.items() if k not in soft}
     common = {"base_verdicts": _verdicts(base_rows), "required": required_ids, "truth": truth, "truth_sure": sure_truth}
     base_report = _row_report(baseline, base_rows, base_scores, None, **common) if baseline in by_row else None
     out = [base_report] if base_report is not None else []
@@ -364,7 +364,7 @@ def _mark(value: bool | None) -> str:
 HEADERS = [
     "줄", "제출", "회차", "채점", "보류", "실패", "평균 차", "최대 차", "순위 일치", "흔들림", "근거 실재율",
     "필수 판정 일치", "선택 판정 일치", "필수 판정 흔들림", "선택 판정 흔들림", "기준 판정과의 일치", "기준 미충족 재현율", "기준 대비 오탐률",
-    "확신 낮음 뺀 기준 판정과의 일치", "확신 낮음 뺀 기준 미충족 재현율", "확신 낮음 뺀 기준 대비 오탐률",
+    "high 만 기준 판정과의 일치", "high 만 기준 미충족 재현율", "high 만 기준 대비 오탐률",
     "실측 건당 비용(USD)", "전체 예상(USD)", "p50(초)", "p90(초)",
     "평균 차 ≤5", "최대 차 ≤15", "순위 ≥0.8", "흔들림 ≤기준+2", "근거 ≥95%", "실패·보류 ≤1/16", "비용 ≤기준/3", "p90 ≤300초",
     "필수 일치 ≥95%", "필수 판정 흔들림 ≤기준+2%p",
@@ -468,6 +468,30 @@ def to_csv(reports: Sequence[RowReport], *, repeat: int, full_submissions: int) 
     for r in reports:
         writer.writerow(_cells(r, repeat=repeat, full_submissions=full_submissions))
     return buf.getvalue()
+
+
+def mismatch_lines(runs: Sequence[RunRow], *, row_names: Sequence[str]) -> str:
+    """항목 id 별 불일치 표(#1299) — 기준 판정이 있는 재료만(없으면 빈 글). 행은 불일치 칸이 많은 항목부터, 열은 기준 판정 칸 수와
+    줄마다의 불일치 칸 수(제출 × 회차). 항목 글은 넣지 않는다."""
+
+    truth = _verdicts(r for r in runs if r.row == TRUTH_ROW)
+    if not truth:
+        return ""
+    names = [n for n in row_names if n != TRUTH_ROW]
+    by_row = {n: _verdicts(r for r in runs if r.row == n) for n in names}
+    cells: dict[int, int] = {}
+    wrong: dict[int, dict[str, int]] = {}
+    for (sub, item), answers in truth.items():
+        cells[item] = cells.get(item, 0) + 1
+        for n in names:
+            miss = sum(judged != answers[0] for judged in by_row[n].get((sub, item), []))
+            wrong.setdefault(item, {}).setdefault(n, 0)
+            wrong[item][n] += miss
+    order = sorted(cells, key=lambda i: (-sum(wrong[i].values()), i))
+    head = ["항목 id", "기준 판정 칸 수", *names]
+    lines = ["", "## 항목별 불일치 칸 수(제출 × 회차)", "", "| " + " | ".join(head) + " |", "| " + " | ".join("---" for _ in head) + " |"]
+    lines += ["| " + " | ".join([str(i), str(cells[i]), *(str(wrong[i][n]) for n in names)]) + " |" for i in order]
+    return "\n".join(lines) + "\n"
 
 
 # ── 청구 대조(#1259) ──────────────────────────────────────────────────────────────────────────────────

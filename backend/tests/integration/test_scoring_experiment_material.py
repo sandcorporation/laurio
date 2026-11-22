@@ -418,22 +418,42 @@ def test_a_submission_with_every_row_blank_is_skipped_and_a_partly_blank_one_is_
 
 
 @pytest.mark.django_db
-def test_report_adds_the_same_three_without_low_confidence_cells(home, money, monkeypatch, tmp_path):
+def test_report_adds_the_same_three_for_high_confidence_cells_only(home, money, monkeypatch, tmp_path):
     _fake_single(monkeypatch)  # 항목 REQ 를 늘 미충족으로 판정한다
     items = [_item(1, met=True), _item(2, met=False)]
     path = _material(home, items)
     m1, m2 = items[0].material_id, items[1].material_id
-    # 제출1 REQ(충족, 이 줄이 틀린다)를 확신 낮음으로 달면, 그것을 뺀 일치는 제출2 REQ(미충족, 맞다) 하나뿐이다.
-    csv_path = _six_column_csv(tmp_path, [(m1, REQ, "1", "low"), (m1, OPT, "0", "high"), (m2, REQ, "0", "high"), (m2, OPT, "0", "")])
+    # 제출1 REQ(충족, 이 줄이 틀린다)를 medium 으로 달면 low 와 같이 빠진다 — high 만의 일치는 맞는 칸들뿐이다.
+    csv_path = _six_column_csv(tmp_path, [(m1, REQ, "1", "medium"), (m1, OPT, "0", "high"), (m2, REQ, "0", "high"), (m2, OPT, "0", "low")])
     _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
     _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "c", "--confirm")
 
     single = _cells_of(_call("experiment_report", "c"), SINGLE)
 
     assert single["기준 판정과의 일치"] == "50.0%" and single["기준 대비 오탐률"] == "100.0%"
-    assert single["확신 낮음 뺀 기준 판정과의 일치"] == "100.0%"
-    assert single["확신 낮음 뺀 기준 미충족 재현율"] == "100.0%"
-    assert single["확신 낮음 뺀 기준 대비 오탐률"] == "—"  # 충족 기준 칸이 low 하나뿐이라 남지 않았다
+    assert single["high 만 기준 판정과의 일치"] == "100.0%"
+    assert single["high 만 기준 미충족 재현율"] == "100.0%"
+    assert single["high 만 기준 대비 오탐률"] == "—"  # 충족 기준 칸이 medium 하나뿐이라 남지 않았다
+
+
+@pytest.mark.django_db
+def test_report_ends_with_a_per_item_mismatch_table_and_none_without_truth(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)  # 항목 REQ 를 늘 미충족으로 판정한다 — 제출1 REQ(충족)만 어긋난다
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "n", "--confirm")
+    assert "항목별 불일치" not in _call("experiment_report", "n")
+
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(_truth_csv(tmp_path, _full_truth(m1, m2))))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "w", "--confirm")
+    md = _call("experiment_report", "w")
+
+    table = md.split("## 항목별 불일치 칸 수(제출 × 회차)")[1].strip().splitlines()
+    assert table[0].startswith("| 항목 id | 기준 판정 칸 수 | single_call:gpt-4.1-mini")
+    assert table[2].startswith(f"| {REQ} | 2 | 1")  # 불일치가 몰린 항목이 첫 행
+    assert table[3].startswith(f"| {OPT} | 2 | 0")
+    assert "add_two_numbers" not in "\n".join(table)  # 항목 글은 넣지 않는다
 
 
 @pytest.mark.django_db
@@ -448,7 +468,7 @@ def test_three_column_table_still_works_and_has_no_confidence_columns_filled(hom
     single = _cells_of(_call("experiment_report", "d"), SINGLE)
 
     assert single["기준 판정과의 일치"] == "50.0%"
-    assert (single["확신 낮음 뺀 기준 판정과의 일치"], single["확신 낮음 뺀 기준 미충족 재현율"], single["확신 낮음 뺀 기준 대비 오탐률"]) == ("—", "—", "—")
+    assert (single["high 만 기준 판정과의 일치"], single["high 만 기준 미충족 재현율"], single["high 만 기준 대비 오탐률"]) == ("—", "—", "—")
 
 
 @pytest.mark.django_db
