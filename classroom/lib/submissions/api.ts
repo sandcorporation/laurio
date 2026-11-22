@@ -146,6 +146,8 @@ export type ClassroomScore = {
   hidden_summary?: { total: number; met: number } | null;
   // 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 true 가 된다.
   reused?: boolean;
+  // 정정(#1317)으로 바뀐 점수인가 — 끝난 정정의 판정이다.
+  corrected?: boolean;
   // 「들어가는 파일만으로 채점」(#1311)이 보지 못한 파일 수 — 0 이면 다 봤다.
   unseen_files?: number;
   created_at: string;

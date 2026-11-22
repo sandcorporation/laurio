@@ -55,6 +55,7 @@ from submissions.models import SubmissionAsset
 from . import pending_scoring
 from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pass_stats
 from .contest_entries import entry_marks
+from .current_score import current_score, current_score_prefetch
 from .instructor_scope import class_scope, problem_scope
 from .instructors import classes_taught_by, is_instructor
 from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA, LATE_STATUS_SCHEMA
@@ -109,7 +110,7 @@ def _clip(text: str, limit: int) -> tuple[str, bool]:
 
 
 def _latest_attempt(submission: ClassroomSubmission, class_obj, problem, checklist_items) -> dict:
-    score = getattr(submission, "classroom_score", None)
+    score = current_score(submission)
     latest: dict = {
         "submission_id": submission.id,
         "attempt_number": submission.attempt_number,
@@ -170,6 +171,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
     for submission in (
         pending_scoring.with_rejection(ClassroomSubmission.objects.filter(problem__in=problems, member__in=members))
         .select_related("classroom_score")
+        .prefetch_related(current_score_prefetch())
         .order_by("-attempt_number")
     ):
         submissions_by_key.setdefault((submission.problem_id, submission.member_id), []).append(submission)
@@ -314,7 +316,7 @@ def _source_files(raw: bytes) -> tuple[list[dict], int]:
 
 
 def _scored_content(submission: ClassroomSubmission) -> tuple[str | None, bool]:
-    score = getattr(submission, "classroom_score", None)
+    score = current_score(submission)
     if score is None or _SCORED_SOURCE_MARKER not in score.prompt:
         return None, False
     section = score.prompt.split(_SCORED_SOURCE_MARKER, 1)[1]
@@ -331,6 +333,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
             id=submission_id, problem__classroom__in=classes_taught_by(grant.instructor_id)
         )
         .select_related("problem", "member", "classroom_score")
+        .prefetch_related(current_score_prefetch())
         .first()
     )
     if submission is None:

@@ -66,6 +66,7 @@ from .models import (
     Class,
     ClassMember,
     ClassroomScore,
+    ClassroomScoreCorrection,
     ClassroomSubmission,
     ClassTemplate,
     Problem,
@@ -169,6 +170,7 @@ from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality
 from .score_reuse import score_reused
 from .events import publish_attempt_submitted
+from .current_score import CurrentClassroomScore, current_score, current_score_prefetch
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
@@ -437,7 +439,7 @@ def _problem_stats(
     if submissions is None:
         submissions = ClassroomSubmission.objects.filter(
             problem=problem, member_id__in=active_member_ids
-        ).select_related("classroom_score").defer(*_SCORE_PROMPT)
+        ).select_related("classroom_score").prefetch_related(current_score_prefetch()).defer(*_SCORE_PROMPT)
 
     passed_member_ids: set[int] = set()
     perfect_member_ids: set[int] = set()
@@ -446,7 +448,7 @@ def _problem_stats(
             not has_advanced or submission.member_id in perfect_member_ids
         ):
             continue
-        score = getattr(submission, "classroom_score", None)
+        score = current_score(submission)
         if problem.is_score_passed(score, checklist_items=checklist_items):
             passed_member_ids.add(submission.member_id)
             if has_advanced and problem.is_score_perfect(score, checklist_items=checklist_items):
@@ -516,7 +518,7 @@ def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
     for submission in (
         _participant_submissions()
         .filter(problem__classroom_id__in=class_ids, problem__status=Problem.Status.OPEN)
-        .select_related("classroom_score")
+        .select_related("classroom_score").prefetch_related(current_score_prefetch())
         # 달성률은 누가 어느 문제에서 어떤 판정을 받았나만 본다(#819) — 부모 행·프롬프트·정렬은 필요 없다.
         .only(*_PASS_JUDGMENT_FIELDS)
         .order_by()
@@ -567,9 +569,9 @@ def _joined_progress(memberships: list[ClassMember]) -> dict[int, tuple[int, int
     passed_by_member: dict[int, set[int]] = {}
     for submission in ClassroomSubmission.objects.filter(
         member_id__in=[m.id for m in memberships], problem_id__in=problems_by_id
-    ).select_related("classroom_score").defer(*_SCORE_PROMPT):
+    ).select_related("classroom_score").prefetch_related(current_score_prefetch()).defer(*_SCORE_PROMPT):
         problem = problems_by_id[submission.problem_id]
-        if problem.is_score_passed(getattr(submission, "classroom_score", None)):
+        if problem.is_score_passed(current_score(submission)):
             passed_by_member.setdefault(submission.member_id, set()).add(submission.problem_id)
 
     return {
@@ -713,7 +715,7 @@ def _perfect_ever(submissions, problem: Problem, checklist_items) -> bool | None
     if not Problem.has_advanced_items(checklist_items):
         return None
     return any(
-        problem.is_score_perfect(getattr(s, "classroom_score", None), checklist_items=checklist_items)
+        problem.is_score_perfect(current_score(s), checklist_items=checklist_items)
         for s in submissions
     )
 
@@ -794,7 +796,7 @@ def _staged_verdict_fields(entry: Mapping[str, object]) -> dict[str, object]:
 
 
 def _serialize_score(
-    score: ClassroomScore, *, hidden_items: Mapping[int, str] | None = None
+    score: CurrentClassroomScore, *, hidden_items: Mapping[int, str] | None = None
 ) -> ClassroomScoreOut:
     """`hidden_items`(숨은 항목 id → 등급)를 주면 참여자 응답이다(#906) — 그 항목의 근거를 빼고 개수·충족 수만 남긴다."""
 
@@ -817,7 +819,8 @@ def _serialize_score(
         ],
         syntax_check=_serialize_syntax_check(score.syntax_check_result),
         created_at=score.created_at,
-        reused=hidden_items is None and score_reused(score),
+        reused=hidden_items is None and not score.corrected and score_reused(score.original),
+        corrected=score.corrected,
         unseen_files=score.unseen_files,
         hidden_summary=(
             None
@@ -855,7 +858,7 @@ def _pending_reason(score, class_obj: Class, problem: Problem, submission=None) 
 def _rejection_of(submission) -> SubmissionRejectionOut | None:
     """반려된 시도의 사유(#1311) — `with_rejection` 이 단 `rejection_error` 를 읽는다. 채점된 시도는 늘 `None`."""
 
-    if submission is None or getattr(submission, "classroom_score", None) is not None:
+    if submission is None or current_score(submission) is not None:
         return None
     parsed = pending_scoring.parse_rejection(getattr(submission, "rejection_error", None))
     return None if parsed is None else SubmissionRejectionOut(source_chars=parsed[0], limit_chars=parsed[1])
@@ -873,7 +876,7 @@ def _serialize_classroom_submission(
     download_url = (
         _source_download_url(asset, user) if asset.kind == SubmissionAsset.Kind.SOURCE else None
     )
-    score = getattr(submission, "classroom_score", None)
+    score = current_score(submission)
     pending_reason = _pending_reason(score, class_obj, problem, submission)
     if checklist_items is None:
         checklist_items = list(problem.checklist_items.all())
@@ -934,7 +937,7 @@ def _serialize_instructor_submission(
         if asset.kind == SubmissionAsset.Kind.SOURCE
         else None
     )
-    score = getattr(submission, "classroom_score", None)
+    score = current_score(submission)
     return ClassroomInstructorSubmissionOut(
         id=submission.id,
         problem_id=submission.problem_id,
@@ -2212,9 +2215,9 @@ def _cell_status(
 
     if not submissions:
         return "not_submitted"
-    if any(problem.is_score_passed(getattr(s, "classroom_score", None)) for s in submissions):
+    if any(problem.is_score_passed(current_score(s)) for s in submissions):
         return "passed"
-    if any(getattr(s, "classroom_score", None) is None for s in submissions):
+    if any(current_score(s) is None for s in submissions):
         return "needs_setup" if pending_scoring.needs_setup(class_obj, problem) else "scoring"
     return "attempted_not_passed"
 
@@ -2245,7 +2248,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
 
     submissions = ClassroomSubmission.objects.filter(
         problem__in=problems, member__in=members
-    ).select_related("classroom_score").defer(*_SCORE_PROMPT)
+    ).select_related("classroom_score").prefetch_related(current_score_prefetch()).defer(*_SCORE_PROMPT)
     submissions_by_key: dict[tuple[int, int], list[ClassroomSubmission]] = {}
     for submission in submissions:
         submissions_by_key.setdefault((submission.problem_id, submission.member_id), []).append(submission)
@@ -2326,13 +2329,13 @@ def list_recent_attempts(request: HttpRequest, class_id: int):
     attempts = list(
         _participant_submissions()
         .filter(problem__classroom_id=class_obj.id)
-        .select_related("member", "problem", "classroom_score")
+        .select_related("member", "problem", "classroom_score").prefetch_related(current_score_prefetch())
         .prefetch_related("problem__checklist_items")
         .order_by("-created_at", "-id")[:RECENT_ATTEMPTS_LIMIT]
     )
     out = []
     for attempt in attempts:
-        score = getattr(attempt, "classroom_score", None)
+        score = current_score(attempt)
         if score is None:
             status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
         else:
@@ -2402,7 +2405,7 @@ def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
     submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
     for submission in ClassroomSubmission.objects.filter(
         problem__classroom_id=class_obj.id, member_id__in=active_member_ids
-    ).select_related("classroom_score").defer(*_SCORE_PROMPT):
+    ).select_related("classroom_score").prefetch_related(current_score_prefetch()).defer(*_SCORE_PROMPT):
         submissions_by_problem.setdefault(submission.problem_id, []).append(submission)
     # `_live_problem_template` 과 같은 답 — 살아 있는 템플릿은 `unique_live_problem_template_per_source`
     # 제약으로 문제당 하나뿐이라, 어느 순서로 고르든 같은 것이 나온다.
@@ -2577,7 +2580,7 @@ def list_my_problems(request: HttpRequest, class_id: int):
     all_problems = problems + hidden_problems
     submissions = ClassroomSubmission.objects.filter(
         problem__in=all_problems, member=member
-    ).select_related("classroom_score").defer(*_SCORE_PROMPT)
+    ).select_related("classroom_score").prefetch_related(current_score_prefetch()).defer(*_SCORE_PROMPT)
     submissions_by_problem: dict[int, list[ClassroomSubmission]] = {}
     for s in submissions:
         submissions_by_problem.setdefault(s.problem_id, []).append(s)
@@ -2682,9 +2685,12 @@ def remove_problem(class_obj: Class, problem: Problem) -> None:
     # 쪼개진 채 죽으면(#431이 채점 걷기를 더하며 새로 생긴 위험) 채점만 사라지고
     # 문제·시도는 남는 어중간한 상태가 생긴다.
     with transaction.atomic():
-        ClassroomScore.objects.filter(
+        own = ClassroomScore.objects.filter(
             submission__problem=problem, submission__member__user_id__in=instructor_user_ids(class_obj)
-        ).delete()
+        )
+        # 그 채점에 덧댄 정정(#1317)도 같은 범위로 먼저 걷는다 — 정정이 점수를 PROTECT 로 가리킨다.
+        ClassroomScoreCorrection.objects.filter(score__in=own).delete()
+        own.delete()
         problem.delete()
 
 
@@ -2821,7 +2827,7 @@ def _serialize_own_submissions(problem, member, user, checklist_items) -> list:
         return []
     submissions = (
         pending_scoring.with_rejection(ClassroomSubmission.objects.filter(problem=problem, member=member))
-        .select_related("classroom_score").defer(*_SCORE_PROMPT)
+        .select_related("classroom_score").prefetch_related(current_score_prefetch()).defer(*_SCORE_PROMPT)
         .prefetch_related("assets")
         .order_by("-attempt_number")
     )
@@ -3148,7 +3154,7 @@ def list_problem_submissions(request: HttpRequest, class_id: int, problem_id: in
 
     submissions = (
         pending_scoring.with_rejection(ClassroomSubmission.objects.filter(problem=problem))
-        .select_related("classroom_score", "member")
+        .select_related("classroom_score", "member").prefetch_related(current_score_prefetch())
         .prefetch_related("assets")
         .order_by("member__display_name", "-attempt_number")
     )

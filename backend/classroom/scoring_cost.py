@@ -31,9 +31,9 @@ import re
 from dataclasses import dataclass
 
 from django.db.models import Avg, Count
-from django.db.models.functions import Length
 
-from .models import Class, ClassroomScore, ClassroomSubmission, Problem
+from .current_score import scores_with_current_fields
+from .models import Class, ClassroomSubmission, Problem
 from .scoring_models import REASONING_EFFORT_CHOICES, is_claude_model_id, is_reasoning_model_id
 
 #: 원화 환산 고정 환율(2026-10 기준). 달러 단가를 원화로 보일 때만 쓴다.
@@ -286,13 +286,14 @@ class CostEstimate:
 
 
 def _llm_scores():
-    return ClassroomScore.objects.exclude(model_version__startswith=_PLATFORM_AUTO_PREFIX)
+    # 현재 점수(#1317) — 실패 상한 점수를 정정한 시도는 정정 판정의 프롬프트로 센다.
+    return scores_with_current_fields().exclude(current_model_version__startswith=_PLATFORM_AUTO_PREFIX)
 
 
 def _prompt_average(scores) -> tuple[int, int | None]:
     """(시도 수, 평균 프롬프트 길이) — 시도가 `MIN_SAMPLE_COUNT` 건 미만이면 평균은 `None`."""
 
-    agg = scores.aggregate(n=Count("id"), avg=Avg(Length("prompt")))
+    agg = scores.aggregate(n=Count("id"), avg=Avg("current_prompt_length"))
     if agg["n"] < MIN_SAMPLE_COUNT:
         return agg["n"], None
     return agg["n"], round(agg["avg"])

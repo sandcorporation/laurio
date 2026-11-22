@@ -55,7 +55,7 @@ from core.events import publish_all
 from core.llm_scoring import LLMAdapterError
 from ops_metrics import recorder as ops_recorder
 
-from . import quality, scoring
+from . import quality, score_corrections, scoring
 from .scoring import Concluded, PreparedScoring, VendorOutcome
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,8 @@ class Grader:
         self._active_ids: set[int] = set()
         #: 완성도 작업(#883)은 시도 id 가 판정과 겹칠 수 있어 따로 센다.
         self._active_quality_ids: set[int] = set()
+        #: 점수 정정(#1317) — 정정 id 로 센다.
+        self._active_correction_ids: set[int] = set()
         self._per_class: Counter[int] = Counter()
         # DB 스레드는 하나뿐이다 — 여럿이면 연결도 여럿이 된다(사용자 결정: grader 의 DB 연결은 정확히 1개).
         self._pool = ThreadPoolExecutor(
@@ -182,7 +184,64 @@ class Grader:
             task.add_done_callback(self._tasks.discard)
             started += 1
         started += await self._pick_quality(as_of)
+        started += await self._pick_corrections(as_of)
         return started
+
+    async def _pick_corrections(self, as_of) -> int:
+        """점수 정정(#1317) — 처음 채점·완성도가 자리를 잡고 남은 자리만 쓴다. 연결당 상한은 함께 센다(같은 강사
+        키다)."""
+
+        free = self.global_limit - self.active
+        if free <= 0:
+            return 0
+        full = [cid for cid, n in self._per_class.items() if n >= self.per_connection_limit]
+        candidates = await self._db(
+            score_corrections.next_corrections,
+            as_of,
+            limit=free,
+            exclude_ids=set(self._active_correction_ids),
+            exclude_class_ids=full,
+        )
+        started = 0
+        for correction_id, class_id in candidates:
+            if self.active >= self.global_limit or self._per_class[class_id] >= self.per_connection_limit:
+                continue
+            if not await self._db(score_corrections.claim_correction, correction_id, owner=self.owner, as_of=as_of):
+                continue
+            self._per_class[class_id] += 1
+            self._active_correction_ids.add(correction_id)
+            task = asyncio.create_task(self._process_correction(correction_id, class_id))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            started += 1
+        return started
+
+    async def _process_correction(self, correction_id: int, class_id: int) -> None:
+        """처음 채점(`_process`)과 같은 세 걸음 — 준비 앞(DB)·뒤(소스 풀)·벤더 — 이되 결과는 정정 행에만 쓴다.
+        재사용(#1287)은 하지 않는다(정정은 다시 판정하려고 건 것이다)."""
+
+        owner = self.owner
+        try:
+            head = await self._db(score_corrections.prepare_correction, correction_id, owner=owner)
+            if isinstance(head, dict):
+                result = head
+            else:
+                prepared = await self._source(scoring.prepare_tail, head)
+                outcome = None if isinstance(prepared, Concluded) else await self._vendor(prepared)
+                result = await self._db(score_corrections.finish_correction, correction_id, prepared, outcome, owner=owner)
+        except Exception as exc:  # noqa: BLE001 - 정정 하나의 실패가 나머지를 막으면 안 된다.
+            logger.exception("grader: 정정 %s 예외", correction_id)
+            result = await self._db(
+                score_corrections.fail_correction, correction_id, owner=owner, error=f"{type(exc).__name__}: {exc}"
+            )
+        finally:
+            self._active_correction_ids.discard(correction_id)
+            self._per_class[class_id] -= 1
+            if not self._per_class[class_id]:
+                del self._per_class[class_id]
+        if self._collect:
+            self.results.append(result)
+        logger.info("grader: correction=%s class=%s status=%s", correction_id, class_id, result.get("status"))
 
     async def _pick_quality(self, as_of) -> int:
         """완성도 작업(#883, ADR-0072) — 판정이 먼저 자리를 잡고 남은 자리만 쓴다. 연결당 상한은

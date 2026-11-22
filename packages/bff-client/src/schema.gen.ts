@@ -1538,6 +1538,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/score-corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Score Corrections */
+        get: operations["classroom_correction_api_list_score_corrections"];
+        put?: never;
+        /**
+         * Request Score Corrections
+         * @description 정정을 건다 — 소유자만. 이 클래스의 시도가 아닌 id 가 섞이면 422(어느 것도 걸지 않는다).
+         */
+        post: operations["classroom_correction_api_request_score_corrections"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/scoring-calculator": {
         parameters: {
             query?: never;
@@ -6785,6 +6806,11 @@ export interface components {
          */
         ClassroomScoreOut: {
             /**
+             * Corrected
+             * @default false
+             */
+            corrected: boolean;
+            /**
              * Created At
              * Format: date-time
              */
@@ -11138,6 +11164,13 @@ export interface components {
             /** Submission Id */
             submission_id: number;
         };
+        /** SkippedOut */
+        SkippedOut: {
+            /** Reason */
+            reason: string;
+            /** Submission Id */
+            submission_id: number;
+        };
         /** SocialLoginIn */
         SocialLoginIn: {
             /** Access Token */
@@ -14468,6 +14501,99 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_correction_api_list_score_corrections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreCorrectionListOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_correction_api_request_score_corrections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScoreCorrectionIn"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoreCorrectionRequestOut"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+            /** @description Unprocessable Content */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

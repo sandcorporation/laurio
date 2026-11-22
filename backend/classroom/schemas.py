@@ -1225,6 +1225,8 @@ class ClassroomScoreOut(Schema):
     hidden_summary: ClassroomHiddenSummaryOut | None = None
     #: 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 채운다. 원본이 누구인지는 어디에도 싣지 않는다.
     reused: bool = False
+    #: 정정(#1317)으로 바뀐 점수인가 — 끝난 정정의 판정을 보이고 있다.
+    corrected: bool = False
     #: 「들어가는 파일만으로 채점」(#1311)이 보지 못한 파일 수 — 0 이면 다 봤다.
     unseen_files: int = 0
 

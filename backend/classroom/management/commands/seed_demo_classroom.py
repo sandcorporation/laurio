@@ -50,6 +50,7 @@ from classroom.models import (
     Class,
     ClassMember,
     ClassroomScore,
+    ClassroomScoreCorrection,
     ClassroomSubmission,
     ClassTemplate,
     ClassTemplateProblem,
@@ -136,6 +137,7 @@ class Command(BaseCommand):
         # PROTECT 를 먼저 푼다 — 위 모듈 docstring 이 이 한 줄의 근거다.
         # 범위가 이 강사의 `[데모]` 클래스로 닫혀 있다는 것이 그 근거의 전부이므로,
         # 이 필터를 넓히지 마라.
+        ClassroomScoreCorrection.objects.filter(score__submission__problem__classroom__in=qs).delete()
         ClassroomScore.objects.filter(submission__problem__classroom__in=qs).delete()
 
         # 알림도 같은 class_ids 로 닫혀 있다 — 이 시드가 만든 것이 아니면 어느

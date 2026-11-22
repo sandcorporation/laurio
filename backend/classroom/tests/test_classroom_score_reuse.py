@@ -6,7 +6,12 @@ import pytest
 from django.db.models import Q
 
 from classroom import score_reuse
-from classroom.api import _serialize_score
+from classroom.api import _serialize_score as _serialize_current
+from classroom.current_score import current_of
+
+
+def _serialize_score(score, **kwargs):
+    return _serialize_current(current_of(score), **kwargs)
 from classroom.models import ChecklistItem, ClassroomScore, ClassroomSubmission, Problem
 from classroom.scoring import FakeClassroomScoringAdapter
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION

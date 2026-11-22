@@ -51,6 +51,7 @@ from core.quality_review import (
 from submissions.models import SubmissionAsset
 
 from . import agent_grading, pending_scoring, scoring, scoring_cost
+from .current_score import current_score, current_score_prefetch
 from .grading_guidelines import effective_grading_guideline_text
 from .instructors import active_participant_q
 from .models import (
@@ -136,13 +137,14 @@ def _target_submissions(problem: Problem, items: list[ChecklistItem]) -> list[Cl
         ClassroomSubmission.objects.filter(problem=problem)
         .filter(active_participant_q(member="member", classroom="problem__classroom"))
         .select_related("classroom_score", "member")
+        .prefetch_related(current_score_prefetch())
         .order_by("member_id", "-attempt_number")
     )
     latest_passed: dict[int, ClassroomSubmission] = {}
     for attempt in attempts:
         if attempt.member_id in latest_passed:
             continue
-        if problem.is_score_passed(getattr(attempt, "classroom_score", None), checklist_items=items):
+        if problem.is_score_passed(current_score(attempt), checklist_items=items):
             latest_passed[attempt.member_id] = attempt
     return list(latest_passed.values())
 
@@ -287,7 +289,7 @@ def estimate(problem: Problem) -> Estimate:
     total = 0.0
     priced = True
     for target in new:
-        score = getattr(target.submission, "classroom_score", None)
+        score = current_score(target.submission)
         chars = base_chars + (len(score.prompt) if score is not None else 0)
         cost = scoring_cost.attempt_cost(model, effort, prompt_chars=chars)
         if cost is None:
