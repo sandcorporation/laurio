@@ -64,3 +64,6 @@ node_modules/
 .playwright-mcp/
 backend/grader.log
 .postdeploy-summary
+
+# PR 본문 임시 파일 (add -A 가 집지 않게)
+.pr-body.md
