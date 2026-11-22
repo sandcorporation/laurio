@@ -291,7 +291,8 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
 그대로다. 바꾸기 전 파일은 같은 자리에 `*.bak-20261014-*` 로 남겼다. 대시보드는 「prod 백엔드 요청」과 「호스트 자원」
 사이의 「LLM 채점」 줄이고, 경보는 `alerts.yml` 의 `codemit-llm` 그룹(6개)이다. 고칠 때는 이 절과 그 파일을 같이 고친다.
 **같은 여섯 규칙을 #830 부터 codemit 이 직접 검사해 디스코드로 보낸다**(아래 「운영 경보」) — `alerts.yml` 의
-그룹을 걷는 것은 저장소 밖 일이라 대장이 맡는다. 걷기 전까지는 두 곳에서 울릴 수 있다.
+그룹을 걷는 것은 저장소 밖 일이라 대장이 맡는다. 걷기 전까지는 두 곳에서 울릴 수 있다. 일곱째 규칙
+`ClassroomGraderUnreachable`(#1318)은 codemit 검사에만 있다 — 에이전트 실행기 호출은 prometheus 지표를 내지 않는다.
 
 1. **긁기 대상**(`prometheus.yml`) — grader 는 prod 네트워크의 `grader:9102` 다(prometheus 컨테이너가 이미
    `codemit-prod_default` 에 붙어 있다). 백엔드 대상은 이미 있어 공모전 지표는 따로 할 일이 없다. grader 는
@@ -401,6 +402,7 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   | `LLMAuthRejected` | 30분 `auth` > 0 | 1회 |
   | `ClassroomScoringQueueSlow` | 10분 강의실 큐 대기 p95 > 300초(대기가 있을 때) | 10회 |
   | `GraderDown` | grader 생존 신호가 180초 넘게 없음(키가 없어도) | 1회 |
+  | `ClassroomGraderUnreachable` | 15분 `grader_unreachable` > 0 — 강의실 채점이 에이전트 실행기에 닿지 못함(#1318) | 1회 |
 
   **입력은 DB 집계 행 + 아직 옮기지 않은 Redis 분 해시다.** 「N분」 창은 지금 분(쓰는 중)과 그 앞의 N−1 개
   닫힌 분이다 — 지금 분을 넣어야 `> 0` 규칙이 첫 거부가 난 그 분에 울리고(flush 를 기다리면 1분 늦다),

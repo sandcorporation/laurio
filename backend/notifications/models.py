@@ -59,6 +59,18 @@ class NotificationType(models.TextChoices):
         "classroom_scoring_server_unreachable",
         "강의실 채점 서버 연결 불가",
     )
+    # 에이전트 실행기(플랫폼)에 닿지 않아 그 클래스 채점이 멈췄다(#1318) — 강사가 할 일은 없지만 채점이 늦어지는
+    # 까닭을 안다. 크레딧 소진과 같은 규율로 소유자에게만, **멈추는 순간**에만 한 번 간다. 풀릴 때는 가지 않는다.
+    CLASSROOM_SCORING_PLATFORM_UNAVAILABLE = (
+        "classroom_scoring_platform_unavailable",
+        "강의실 채점 플랫폼 장애",
+    )
+    # 시도가 실패 상한에 닿아 플랫폼 자동 미달로 굳었다(#1318) — 굳을 때마다 소유자에게 간다(어느 문제의 어느 제출,
+    # 실패 까닭 한 줄). 낸 사람에게는 늘 가던 채점 완료 알림이 간다.
+    CLASSROOM_SCORING_FAILURE_CAPPED = (
+        "classroom_scoring_failure_capped",
+        "강의실 채점 실패 상한",
+    )
     # 「공모전에도 내기」로 낸 시도를 공모전이 받지 않았다(#549) — 마감·허용 철회 경합 등.
     # 낸 사람에게만 간다. 클래스 시도·판정은 그대로라 알림은 「공모전에는 내지 못했다」만 말한다.
     CLASSROOM_CONTEST_ENTRY_REJECTED = (
@@ -118,6 +130,8 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
         NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
         NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
         NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE,
+        NotificationType.CLASSROOM_SCORING_PLATFORM_UNAVAILABLE,
+        NotificationType.CLASSROOM_SCORING_FAILURE_CAPPED,
         NotificationType.CLASSROOM_CONTEST_ENTRY_REJECTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED,
@@ -231,6 +245,19 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     },
     # 소유자 본인의 서버 문제(연결 불가)에 대한 경고다(#603) — 크레딧 소진과 같은 취급.
     NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 소유자에게 가는 채점 상태 알림이다(#1318) — 서버 연결 불가와 같은 취급.
+    NotificationType.CLASSROOM_SCORING_PLATFORM_UNAVAILABLE: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    NotificationType.CLASSROOM_SCORING_FAILURE_CAPPED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

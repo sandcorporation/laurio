@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('classroom', '0048_class_oversize_policy'),
+        ('classroom', '0049_class_scoring_platform_unavailable_at'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

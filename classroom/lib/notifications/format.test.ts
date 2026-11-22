@@ -156,3 +156,30 @@ describe("제보 상태 알림 (#1242)", () => {
     expect(text).toBe("보내신 제보가 '반영' 상태로 바뀌었습니다.");
   });
 });
+
+describe("describeNotification — classroom_scoring_platform_unavailable", () => {
+  it("서비스 쪽 장애로 멈췄고, 할 일이 없으며, 고쳐지면 저절로 이어진다고 말한다(#1318)", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_scoring_platform_unavailable", context: { class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toContain("알고리즘 1반");
+    expect(text).toContain("서비스 쪽 장애");
+    expect(text).toContain("하실 일은 없고");
+    expect(text).toContain("저절로 채점됩니다");
+    expect(text).toContain("미달로 처리되지 않습니다");
+  });
+});
+
+describe("describeNotification — classroom_scoring_failure_capped", () => {
+  it("어느 문제의 몇 번째 시도가 자동 미달이 됐는지와 까닭 한 줄을 말한다(#1318)", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_scoring_failure_capped",
+        context: { class_name: "알고리즘 1반", problem_title: "두 수의 합", attempt_number: 2, member_display_name: "김하늘", reason: "채점 모델이 제한 시간 안에 답하지 않았습니다" },
+      }),
+    );
+    expect(text).toContain("'알고리즘 1반' 클래스 김하늘 님의 '두 수의 합' 문제 2번째 시도");
+    expect(text).toContain("자동으로 미달");
+    expect(text).toContain("제한 시간 안에 답하지 않았습니다");
+  });
+});
