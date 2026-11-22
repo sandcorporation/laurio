@@ -9,10 +9,13 @@ import { useBackendQuery } from "@codemit/bff-client";
 import { ErrorNote, FieldLabel, INPUT_CLASS } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import {
+  agentModelIds,
   calculatorPath,
+  cheapestAgentModel,
   capacityText,
   changeChoice,
   charsLabel,
+  listedModels,
   parseAssumption,
   providerLabel,
   submissionAmount,
@@ -42,11 +45,22 @@ export function ScoringCalculator({ classId }: { classId: number }) {
   }
   const calc = state.data;
   const { selection, assumptions: a, problems } = calc;
-  const change = (field: keyof CalculatorChoice, value: string | number | undefined) =>
-    setChoice((current) => changeChoice({ ...fromSelection(calc), ...current }, field, value));
-  const provider = calc.providers.find((p) => p.vendor === selection.vendor);
   // 에이전트는 모델마다 다르다(#1311) — OpenAI 는 gpt-5-mini 이상만.
-  const agentOk = calc.rows.some((r) => r.model_id === selection.model_id && r.agent.available);
+  const agentIds = agentModelIds(calc, selection.vendor);
+  const agentOk = agentIds.has(selection.model_id);
+  // 호환 서버처럼 에이전트가 되는 모델이 하나도 없으면 「에이전트」를 끈다.
+  const agentPossible = agentIds.size > 0;
+  const change = (field: keyof CalculatorChoice, value: string | number | undefined) =>
+    setChoice((current) => {
+      const next = changeChoice({ ...fromSelection(calc), ...current }, field, value);
+      // 에이전트가 안 되는 모델에서 「에이전트」를 고르면, 되는 모델 중 입력 단가가 가장 싼 것으로 바꾼다.
+      if (field === "method" && value === "agent" && !agentOk) {
+        const model = cheapestAgentModel(calc, selection.vendor);
+        if (model) return { ...next, model };
+      }
+      return next;
+    });
+  const models = listedModels(calc);
 
   return (
     <div data-testid="scoring-calculator" className="flex flex-col gap-4">
@@ -76,7 +90,7 @@ export function ScoringCalculator({ classId }: { classId: number }) {
             onChange={(e) => change("method", e.target.value)}
           >
             <option value="single">{METHOD_LABEL.single}</option>
-            <option value="agent" disabled={!agentOk}>
+            <option value="agent" disabled={!agentPossible}>
               {METHOD_LABEL.agent}
             </option>
           </select>
@@ -89,7 +103,7 @@ export function ScoringCalculator({ classId }: { classId: number }) {
             value={selection.model_id}
             onChange={(e) => change("model", e.target.value)}
           >
-            {(provider?.models ?? []).map((m) => (
+            {models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.id}
               </option>
