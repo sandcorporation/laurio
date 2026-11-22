@@ -122,7 +122,17 @@ export function singleNote(single: CalculatorSingleCell, staged: CalculatorStage
 }
 
 function capacityNote(single: CalculatorSingleCell): string {
-  return `감당 ${capacityLabel(single.capacity_chars)} · 한글 주석 많음 ${capacityLabel(single.capacity_chars_hangul)}`;
+  return `감당 ${capacityLabel(single.capacity_chars)} · 소스 파일 약 ${fileCount(single.capacity_files)}개 · 한글 주석 많음 ${capacityLabel(single.capacity_chars_hangul)} · 약 ${fileCount(single.capacity_files_hangul)}개`;
+}
+
+/** 소스 파일 수 — 천 단위 쉼표. */
+export function fileCount(files: number): string {
+  return files.toLocaleString("ko-KR");
+}
+
+/** 파일 평균 글자 수 — 가정 줄에 값으로 보인다. */
+export function perFileLabel(charsPerFile: number): string {
+  return `파일 평균 ${charsPerFile.toLocaleString("ko-KR")}자`;
 }
 
 /** 에이전트 칸의 둘째 줄 — 실측이 있으면 중앙, 없으면 가정한 시간만. */

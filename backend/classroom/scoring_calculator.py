@@ -92,6 +92,13 @@ ESCALATION_INSTRUCTION_CHARS = 1_435
 #: 전체 합 1.006(조율자 2026-11-22). 코드 위주 제출은 바이트 ≈ 글자라 p50 을 쓴다. 감당 글자 = 감당 바이트 ÷ 이 값.
 BYTES_PER_CHAR = 1.03
 
+#: 소스 파일 하나의 평균 글자 수 — 화면이 글자 수를 개발자에게 익숙한 「파일 수」로도 보이는 데 쓴다(글자 ÷ 이 값, 반올림 어림).
+#: 출처(2026-11-22 조율자 읽기 전용 집계): 운영 강의실 채점 789건(`classroom_classroomscore.prompt` 가운데 파일 머리가 있는 것)에서
+#: 프롬프트의 소스 부분을 파일 머리(`# 경로.확장자`) 수로 나눈 파일당 글자 수 — 채점별 중앙 1,799·전체 합 2,502·평균 2,159, 파일 수 중앙 20·p90 109.
+#: 머리 셈 보정: 실험 재료 30건(가명 사본)에 같은 셈을 하면 실제 파일 1,642개 중 1,448개만 잡혀(확장자 없는 파일 등) 12% 덜 센다 —
+#: 1,799 × 0.88 ≈ 1,590 → 1,600. 표본이 큰 운영 채점의 채점별 중앙값을 쓴다(평균은 큰 제출 몇 건에 끌려간다).
+SOURCE_CHARS_PER_FILE = 1_600
+
 #: 글자당 바이트 최대 — 같은 30건의 최대 1.482(한글 주석 많음 제출). 화면의 「한글 주석 많음」 감당 글자 수만 이 값으로 셈하고,
 #: 「보류」 판정은 `BYTES_PER_CHAR` 그대로다.
 BYTES_PER_CHAR_MAX = 1.48
@@ -183,6 +190,9 @@ class SingleCall:
     capacity_chars: int
     #: 글자당 바이트를 `BYTES_PER_CHAR_MAX` 로 셈한 감당 글자 수(한글 주석 많음 소스).
     capacity_chars_hangul: int
+    #: 감당 글자 수를 파일 수로 — `files_of_chars`.
+    capacity_files: int
+    capacity_files_hangul: int
     route: Route
     #: 가정한 걸린 시간(초).
     seconds: float
@@ -426,6 +436,12 @@ def capacity_chars_hangul(model_id: str, *, instruction_chars: int) -> int:
     return int(source_budget_bytes(model_id, instruction_bytes=instruction_chars) // BYTES_PER_CHAR_MAX)
 
 
+def files_of_chars(chars: int) -> int:
+    """글자 수를 소스 파일 수로 — `SOURCE_CHARS_PER_FILE` 로 나눠 반올림한 어림."""
+
+    return round(chars / SOURCE_CHARS_PER_FILE)
+
+
 def fits_source_bytes(model_id: str, *, source_bytes: int, instruction_chars: int) -> bool:
     """소스가 `source_bytes` 바이트일 때 한 번 호출에 다 들어가는가 — 채점의 「크기 초과」 보류 판정과 같은 예산이다."""
 
@@ -455,6 +471,7 @@ def single_call(
     if effort is not None:
         output_tokens += scoring_cost.REASONING_OUTPUT_TOKENS[effort] - scoring_cost.NON_REASONING_OUTPUT_TOKENS
     capacity = capacity_chars(model_id, instruction_chars=instruction_chars)
+    hangul = capacity_chars_hangul(model_id, instruction_chars=instruction_chars)
     fits = fits_source_bytes(model_id, source_bytes=source_chars * BYTES_PER_CHAR, instruction_chars=instruction_chars)
     two_step = staged and two_step_threshold_chars > 0 and (source_chars > two_step_threshold_chars or not fits)
     route: Route = "two_step" if two_step else ("single" if fits else "hold")
@@ -464,8 +481,9 @@ def single_call(
         cost = scoring_cost.attempt_cost(model_id, reasoning_effort, prompt_chars=0, output_tokens=0)
         if cost is None:  # pragma: no cover - 모델 목록이 단가표에서 온다.
             raise ValueError(f"단가표에 없는 모델: {model_id}")
+        hangul = capacity_chars_hangul(model_id, instruction_chars=instruction_chars)
         return SingleCall(
-            0, 0, 0.0, cost.open_ended, fits, capacity, capacity_chars_hangul(model_id, instruction_chars=instruction_chars), route, 0.0
+            0, 0, 0.0, cost.open_ended, fits, capacity, hangul, files_of_chars(capacity), files_of_chars(hangul), route, 0.0
         )
     prompt_chars = instruction_chars + (min(source_chars, two_step_budget_chars) if two_step else source_chars)
     cost = scoring_cost.attempt_cost(model_id, reasoning_effort, prompt_chars=prompt_chars, output_tokens=output_tokens)
@@ -486,7 +504,9 @@ def single_call(
         open_ended=cost.open_ended,
         fits=fits,
         capacity_chars=capacity,
-        capacity_chars_hangul=capacity_chars_hangul(model_id, instruction_chars=instruction_chars),
+        capacity_chars_hangul=hangul,
+        capacity_files=files_of_chars(capacity),
+        capacity_files_hangul=files_of_chars(hangul),
         route=route,
         seconds=seconds,
     )

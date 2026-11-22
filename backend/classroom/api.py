@@ -1495,6 +1495,8 @@ def _single_cell_out(cell: scoring_calculator.SingleCall) -> dict[str, object]:
         "fits": cell.fits,
         "capacity_chars": cell.capacity_chars,
         "capacity_chars_hangul": cell.capacity_chars_hangul,
+        "capacity_files": cell.capacity_files,
+        "capacity_files_hangul": cell.capacity_files_hangul,
         "route": cell.route,
         "seconds": cell.seconds,
     }
@@ -1546,6 +1548,8 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
         },
         "assumptions": {
             "source_chars": a.source_chars,
+            "source_files": scoring_calculator.files_of_chars(a.source_chars),
+            "source_chars_per_file": scoring_calculator.SOURCE_CHARS_PER_FILE,
             "requirements": a.requirements,
             "instruction_chars": a.instruction_chars,
             "students": a.students,

@@ -265,6 +265,8 @@ def test_an_empty_class_prices_every_model_by_both_methods_and_no_cell_is_missin
     assert calc["agent_vendors"] == ["anthropic"]
     assert calc["assumptions"] == {
         "source_chars": 32_000,
+        "source_files": 20,
+        "source_chars_per_file": 1_600,
         "requirements": 6,
         "instruction_chars": scoring_calculator.assumed_instruction_chars(6),
         "students": 18,
@@ -309,6 +311,13 @@ def test_the_capacity_in_the_table_is_what_the_scoring_budget_gives(client, db):
         budget = model_context.source_budget_bytes(row["model_id"], instruction_bytes=instruction)
         assert row["single"]["capacity_chars"] == int(budget // scoring_calculator.BYTES_PER_CHAR), row["model_id"]
         assert row["single"]["capacity_chars_hangul"] == int(budget // 1.48), row["model_id"]
+        per_file = scoring_calculator.SOURCE_CHARS_PER_FILE
+        assert per_file == 1_600
+        assert row["single"]["capacity_files"] == round(row["single"]["capacity_chars"] / per_file), row["model_id"]
+        assert row["single"]["capacity_files_hangul"] == round(row["single"]["capacity_chars_hangul"] / per_file), row["model_id"]
+    assumptions = calc["assumptions"]
+    assert assumptions["source_chars_per_file"] == 1_600
+    assert assumptions["source_files"] == round(assumptions["source_chars"] / 1_600)
 
 
 def test_changing_the_assumptions_changes_the_values_and_a_source_past_the_capacity_is_held(client, db):

@@ -374,6 +374,9 @@ class ScoringCalculatorAssumptionsOut(Schema):
     """셈에 쓴 가정(#1304) — `*_from` 은 problem(그 문제의 값)·assumed(코드 기본값)·custom(강사가 바꿔 본 값)."""
 
     source_chars: int
+    #: 제출 크기를 파일 수로 어림한 값과 그 평균 글자 수.
+    source_files: int
+    source_chars_per_file: int
     requirements: int
     instruction_chars: int
     students: int
@@ -408,6 +411,9 @@ class ScoringCalculatorSingleCellOut(Schema):
     capacity_chars: int
     #: 글자당 바이트 최대(한글 주석 많음)로 셈한 감당 글자 수 — 보이기만 하고 판정은 `capacity_chars` 기준이다.
     capacity_chars_hangul: int
+    #: 감당 글자 수를 소스 파일 수로 — 글자 ÷ `SOURCE_CHARS_PER_FILE`.
+    capacity_files: int
+    capacity_files_hangul: int
     #: single(한 번에 담김) | two_step(두 걸음, staged) | hold(담지 못해 「크기 초과」 보류 — 채점 안 함, 금액 0)
     route: str
     #: 가정한 걸린 시간(초).

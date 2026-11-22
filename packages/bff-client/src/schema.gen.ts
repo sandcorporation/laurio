@@ -10703,6 +10703,10 @@ export interface components {
             requirements_from: string;
             /** Source Chars */
             source_chars: number;
+            /** Source Chars Per File */
+            source_chars_per_file: number;
+            /** Source Files */
+            source_files: number;
             /** Source From */
             source_from: string;
             /** Students */
@@ -10865,6 +10869,10 @@ export interface components {
             capacity_chars: number;
             /** Capacity Chars Hangul */
             capacity_chars_hangul: number;
+            /** Capacity Files */
+            capacity_files: number;
+            /** Capacity Files Hangul */
+            capacity_files_hangul: number;
             /** Fits */
             fits: boolean;
             /** Input Tokens */

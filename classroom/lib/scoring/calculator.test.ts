@@ -27,6 +27,8 @@ const SINGLE = {
   fits: true,
   capacity_chars: 232_000,
   capacity_chars_hangul: 166_000,
+  capacity_files: 145,
+  capacity_files_hangul: 104,
   route: "single",
   seconds: 5,
 };
@@ -90,12 +92,12 @@ describe("라벨", () => {
   });
   it("감당 크기는 글자 수 숫자다 — 「모델 한도까지」 같은 말이 아니다", () => {
     expect(capacityLabel(232_000)).toBe("23.2만 자");
-    expect(singleNote(SINGLE, STAGED)).toBe("감당 23.2만 자 · 한글 주석 많음 16.6만 자");
+    expect(singleNote(SINGLE, STAGED)).toBe("감당 23.2만 자 · 소스 파일 약 145개 · 한글 주석 많음 16.6만 자 · 약 104개");
     expect(singleNote(SINGLE, STAGED)).not.toContain("모델 한도까지");
   });
   it("감당 크기를 넘으면 보류, staged 두 걸음이면 읽는 상한", () => {
     expect(singleNote({ ...SINGLE, route: "hold", fits: false, krw: 0 }, STAGED)).toBe(
-      "담지 못함 — 보류(채점 안 함) · 감당 23.2만 자 · 한글 주석 많음 16.6만 자",
+      "담지 못함 — 보류(채점 안 함) · 감당 23.2만 자 · 소스 파일 약 145개 · 한글 주석 많음 16.6만 자 · 약 104개",
     );
     expect(singleNote({ ...SINGLE, route: "two_step" }, STAGED)).toBe("두 걸음 · 고른 파일 6만 자까지 읽음");
   });

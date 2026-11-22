@@ -166,6 +166,8 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
         assert per_submission["single_call_krw"] == round(selected["single"]["krw"])
         assert per_submission["single_call_capacity_chars"] == selected["single"]["capacity_chars"]
         assert per_submission["single_call_capacity_chars_hangul"] == selected["single"]["capacity_chars_hangul"]
+        assert per_submission["single_call_capacity_files"] == selected["single"]["capacity_files"]
+        assert per_submission["source_chars_per_file"] == 1_600
         assert (per_submission["model"], per_submission["source_chars"]) == (
             calculator["selection"]["model_id"],
             calculator["selection"]["source_chars"],
