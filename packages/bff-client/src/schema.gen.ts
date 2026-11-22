@@ -478,6 +478,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Class Attempts
+         * @description 클래스의 모든 시도(#1317 「제출」 화면) — 「최근 제출」과 같은 줄·같은 사람들·최신순이고, 쪽을 넘긴다. 줄마다
+         *     「다시 채점」을 걸 수 있나(`correctable`)를 붙인다 — 범위는 `score_corrections.correctable` 하나가 정하고, 거는
+         *     API 가 소유자만이라 공동 강사에게는 늘 거짓이다.
+         */
+        get: operations["classroom_api_list_class_attempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/co-instructor-invites": {
         parameters: {
             query?: never;
@@ -6439,6 +6461,44 @@ export interface components {
             submissions: number;
             /** Submitting Students */
             submitting_students: number;
+        };
+        /** ClassroomAttemptPageOut */
+        ClassroomAttemptPageOut: {
+            /** Has Next */
+            has_next: boolean;
+            /** Page */
+            page: number;
+            /** Rows */
+            rows: components["schemas"]["ClassroomAttemptRowOut"][];
+        };
+        /**
+         * ClassroomAttemptRowOut
+         * @description 「제출」 화면(#1317)의 한 줄 — 「최근 제출」 줄에 「다시 채점」을 걸 수 있나를 더한다.
+         */
+        ClassroomAttemptRowOut: {
+            /** Attempt Number */
+            attempt_number: number;
+            /** Correctable */
+            correctable: boolean;
+            /** Id */
+            id: number;
+            /** Late */
+            late: ("recommended" | "deadline") | null;
+            /** Member Display Name */
+            member_display_name: string;
+            /** Member Id */
+            member_id: number;
+            /** Problem Id */
+            problem_id: number;
+            /** Problem Title */
+            problem_title: string;
+            /** Status */
+            status: string;
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
         };
         /**
          * ClassroomBonusScoreIn
@@ -12445,6 +12505,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_class_attempts: {
+        parameters: {
+            query?: {
+                page?: number;
+            };
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomAttemptPageOut"];
                 };
             };
             /** @description Not Found */

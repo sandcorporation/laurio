@@ -1391,6 +1391,18 @@ class ClassroomRecentAttemptOut(Schema):
     late: LateStatus
 
 
+class ClassroomAttemptRowOut(ClassroomRecentAttemptOut):
+    """「제출」 화면(#1317)의 한 줄 — 「최근 제출」 줄에 「다시 채점」을 걸 수 있나를 더한다."""
+
+    correctable: bool
+
+
+class ClassroomAttemptPageOut(Schema):
+    rows: list[ClassroomAttemptRowOut]
+    page: int
+    has_next: bool
+
+
 class ClassroomInstructorSubmissionOut(Schema):
     """강사가 보는 시도 하나(#291) — 참여자용 `ClassroomSubmissionOut`과 같은
     모양에 `member_id`·`member_display_name`을 더한다. 강사는 자기 시도가

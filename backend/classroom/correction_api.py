@@ -20,7 +20,7 @@ from accounts.middleware import jwt_auth
 from .instructor_scope import class_scope
 from .models import ClassroomScoreCorrection, ClassroomSubmission
 from .schemas import ErrorOut
-from .score_corrections import CorrectionReasonRequired, request_corrections
+from .score_corrections import DEFAULT_REASON, CorrectionReasonRequired, request_corrections
 
 router = Router(tags=["classroom", "score-corrections"])
 
@@ -30,7 +30,8 @@ MAX_SUBMISSIONS_PER_REQUEST = 500
 
 class ScoreCorrectionIn(Schema):
     submission_ids: list[int] = Field(min_length=1, max_length=MAX_SUBMISSIONS_PER_REQUEST)
-    reason: str = Field(max_length=4000)
+    #: 강사 화면은 보내지 않는다(확인 창에 사유 칸이 없다) — 빠지면 `DEFAULT_REASON`.
+    reason: str = Field(default=DEFAULT_REASON, max_length=4000)
 
 
 class ScoreCorrectionOut(Schema):
@@ -45,7 +46,8 @@ class ScoreCorrectionOut(Schema):
 
 class SkippedOut(Schema):
     submission_id: int
-    #: `not_scored`(아직 점수 없음)·`not_latest`(최근 시도가 아님)·`in_progress`(이미 진행 중).
+    #: `not_scored`(아직 점수 없음)·`not_latest`(최근 시도가 아님)·`not_platform_failure`(「채점 실패」 점수가
+    #: 아님)·`in_progress`(이미 진행 중).
     reason: str
 
 

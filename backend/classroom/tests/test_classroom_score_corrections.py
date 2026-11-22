@@ -177,6 +177,45 @@ def test_only_the_latest_scored_attempt_of_the_pair_can_be_corrected(client, db,
     assert not ClassroomScoreCorrection.objects.exists()
 
 
+def test_a_normal_score_is_refused_and_a_finished_correction_closes_the_button(client, db, monkeypatch):
+    """범위는 「채점 실패」 점수뿐이다(#1317 대표 답) — 모델이 매긴 점수는 거절하고, 정정이 끝나 정상 점수가 되면
+    다시 걸 수 없다. 강사 화면은 사유를 보내지 않는다."""
+
+    ctx = _capped_submission(client)
+    respond_with_verdict(monkeypatch, ctx["problem"].item_id, is_met=False)
+    run_scan(client)
+
+    body = _request(client, ctx, [ctx["submission_id"]]).json()
+    assert body["skipped"] == [{"submission_id": ctx["submission_id"], "reason": "not_platform_failure"}]
+    assert not ClassroomScoreCorrection.objects.exists()
+
+    capped = _capped_submission_of(client, ctx, monkeypatch)
+    response = client.post(
+        f"{CLASSES_URL}/{ctx['class_id']}/score-corrections",
+        data={"submission_ids": [capped]},
+        content_type="application/json",
+        **auth_header(ctx["instructor"]["access"]),
+    )
+    assert response.status_code == 201, response.content
+    correction = ClassroomScoreCorrection.objects.get()
+    assert correction.reason == "채점 실패 다시 채점"
+    respond_with_verdict(monkeypatch, ctx["problem"].item_id, is_met=True)
+    assert run_correction_inline(correction.pk)["status"] == "done"
+
+    body = _request(client, ctx, [capped]).json()
+    assert body["skipped"] == [{"submission_id": capped, "reason": "not_platform_failure"}]
+
+
+def _capped_submission_of(client, ctx, monkeypatch) -> int:
+    """같은 짝의 새 시도에 실패 상한 점수를 찍는다."""
+
+    newer = submit_repository(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem"].id)["id"]
+    respond_with_permanent_failure(monkeypatch)
+    run_scan(client)
+    assert ClassroomScore.objects.get(submission_id=newer).model_version == PLATFORM_FAILURE_MODEL_VERSION
+    return newer
+
+
 def test_a_score_with_a_correction_in_progress_is_refused(client, db, monkeypatch):
     ctx = _capped_submission(client)
     _cap(client, monkeypatch, ctx)
@@ -281,3 +320,33 @@ def test_the_class_owner_lists_the_corrections_of_the_class(client, db, monkeypa
     assert response.status_code == 200, response.content
     [row] = response.json()["corrections"]
     assert (row["submission_id"], row["status"], row["reason"]) == (ctx["submission_id"], "in_progress", "실행기 망 누락")
+
+
+def test_the_class_attempts_page_marks_only_the_latest_capped_attempt_as_correctable(client, db, monkeypatch):
+    """「제출」 화면(#1317) — 「최근 제출」과 같은 줄을 최신순으로 쪽을 넘기며, 「다시 채점」은 범위 안 줄에만."""
+
+    from classroom.api import CLASS_ATTEMPTS_PAGE_SIZE
+
+    ctx = _capped_submission(client)
+    _cap(client, monkeypatch, ctx)
+    older = ctx["submission_id"]
+    newer = _capped_submission_of(client, ctx, monkeypatch)
+
+    def page(n: int, access: str | None = None):
+        return client.get(
+            f"{CLASSES_URL}/{ctx['class_id']}/attempts?page={n}", **auth_header(access or ctx["instructor"]["access"])
+        )
+
+    body = page(1).json()
+    assert [(r["id"], r["correctable"]) for r in body["rows"]] == [(newer, True), (older, False)]
+    assert (body["page"], body["has_next"]) == (1, False)
+    assert {"member_display_name", "problem_title", "status", "late"} <= set(body["rows"][0])
+    assert page(1, ctx["participant"]["access"]).status_code == 404
+
+    for _ in range(CLASS_ATTEMPTS_PAGE_SIZE):
+        submit_repository(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem"].id)
+    first, second = page(1).json(), page(2).json()
+    assert first["has_next"] is True and len(first["rows"]) == CLASS_ATTEMPTS_PAGE_SIZE
+    # 새 시도가 생겨 `newer` 는 더 이상 최근 시도가 아니다.
+    assert [(r["id"], r["correctable"]) for r in second["rows"]] == [(newer, False), (older, False)]
+    assert second["has_next"] is False

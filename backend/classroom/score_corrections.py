@@ -33,7 +33,9 @@ from core.llm_scoring import (
 )
 
 from . import agent_grading, scoring
-from .current_score import original_score
+from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
+
+from .current_score import current_of, original_score
 from .models import ClassroomScoreCorrection, ClassroomSubmission
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,10 @@ CORRECTION_RETRY_DELAY = timedelta(minutes=10)
 SKIP_NOT_SCORED = "not_scored"
 SKIP_NOT_LATEST = "not_latest"
 SKIP_IN_PROGRESS = "in_progress"
+SKIP_NOT_PLATFORM_FAILURE = "not_platform_failure"
+
+#: 강사 화면의 「다시 채점」은 사유 칸이 없다 — 범위가 「채점 실패」 점수뿐이라 사유가 하나다.
+DEFAULT_REASON = "채점 실패 다시 채점"
 
 #: 미루는(진행 중으로 두는) 벤더 오류 — 제출 탓도 설정 탓도 아니라 기다리면 풀린다.
 _DEFERRED_ERRORS = (LLMAdapterQuotaExhaustedError, LLMAdapterRateLimitedError, LLMAdapterUnreachableError)
@@ -83,16 +89,20 @@ def _latest_attempt_ids(submissions: Sequence[ClassroomSubmission]) -> set[int]:
 def correctable(submissions: Sequence[ClassroomSubmission]) -> dict[int, str | None]:
     """정정을 걸 수 있나 — 시도 id → 막는 까닭(`SKIP_*`) 또는 `None`(걸 수 있다). **범위는 이 함수 하나가 정한다.**
 
-    지금 범위(#1317 임시값): 그 (문제, 학생) 짝의 **가장 최근 시도**이고 점수가 있는 것. 진행 중 정정이 있는 점수는
-    여기서 거르지 않는다 — 동시에 거는 두 요청은 DB 제약이 가른다(`request_corrections`)."""
+    범위(#1317 대표 답): 그 (문제, 학생) 짝의 **가장 최근 시도**이고 현재 점수가 **실패 상한 점수**(「채점 실패」,
+    `PLATFORM_FAILURE_MODEL_VERSION`)인 것. 정상 점수는 거절한다 — 정정이 끝나 정상 점수가 되면 다시 걸 수 없다.
+    진행 중 정정이 있는 점수는 여기서 거르지 않는다 — 동시에 거는 두 요청은 DB 제약이 가른다(`request_corrections`)."""
 
     latest = _latest_attempt_ids(submissions)
     verdicts: dict[int, str | None] = {}
     for submission in submissions:
-        if original_score(submission) is None:
+        score = original_score(submission)
+        if score is None:
             verdicts[submission.id] = SKIP_NOT_SCORED
         elif submission.id not in latest:
             verdicts[submission.id] = SKIP_NOT_LATEST
+        elif current_of(score).model_version != PLATFORM_FAILURE_MODEL_VERSION:
+            verdicts[submission.id] = SKIP_NOT_PLATFORM_FAILURE
         else:
             verdicts[submission.id] = None
     return verdicts

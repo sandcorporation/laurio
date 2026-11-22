@@ -116,6 +116,8 @@ from .schemas import (
     ClassroomProblemMineOut,
     ClassroomProblemStatsOut,
     ClassroomProblemSubmissionsOut,
+    ClassroomAttemptPageOut,
+    ClassroomAttemptRowOut,
     ClassroomRecentAttemptOut,
     ClassroomRosterGridOut,
     ClassroomScoreOut,
@@ -167,7 +169,7 @@ from .schemas import (
 )
 from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
-from . import agent_grading, pending_scoring, quality
+from . import agent_grading, pending_scoring, quality, score_corrections
 from .score_reuse import score_reused
 from .events import publish_attempt_submitted
 from .current_score import CurrentClassroomScore, current_score, current_score_prefetch
@@ -231,6 +233,10 @@ _PASS_JUDGMENT_FIELDS = (
     "member_id",
     "classroom_score__reasoning",
     "classroom_score__syntax_check_result",
+    # 현재 점수(#1317)가 원래 점수에서 함께 읽는 셋 — 빼면 시도마다 지연 질의가 난다.
+    "classroom_score__model_version",
+    "classroom_score__unseen_files",
+    "classroom_score__created_at",
 )
 
 
@@ -2326,34 +2332,67 @@ def list_recent_attempts(request: HttpRequest, class_id: int):
     「채점 중」(`scoring`)이다."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
-    attempts = list(
+    attempts = list(_class_attempts_newest_first(class_obj)[:RECENT_ATTEMPTS_LIMIT])
+    return 200, [_recent_attempt_row(class_obj, attempt) for attempt in attempts]
+
+
+#: 「제출」 화면(#1317) 한 쪽의 줄 수.
+CLASS_ATTEMPTS_PAGE_SIZE = 20
+
+
+@router.get(
+    "/classes/{class_id}/attempts",
+    response={200: ClassroomAttemptPageOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def list_class_attempts(request: HttpRequest, class_id: int, page: int = 1):
+    """클래스의 모든 시도(#1317 「제출」 화면) — 「최근 제출」과 같은 줄·같은 사람들·최신순이고, 쪽을 넘긴다. 줄마다
+    「다시 채점」을 걸 수 있나(`correctable`)를 붙인다 — 범위는 `score_corrections.correctable` 하나가 정하고, 거는
+    API 가 소유자만이라 공동 강사에게는 늘 거짓이다."""
+
+    scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
+    class_obj = scope.class_obj
+    page = max(page, 1)
+    start = (page - 1) * CLASS_ATTEMPTS_PAGE_SIZE
+    window = list(_class_attempts_newest_first(class_obj)[start : start + CLASS_ATTEMPTS_PAGE_SIZE + 1])
+    attempts = window[:CLASS_ATTEMPTS_PAGE_SIZE]
+    verdicts = score_corrections.correctable(attempts) if scope.is_owner else {}
+    rows = [
+        ClassroomAttemptRowOut(
+            **_recent_attempt_row(class_obj, attempt).model_dump(), correctable=verdicts.get(attempt.id, "") is None
+        )
+        for attempt in attempts
+    ]
+    return 200, ClassroomAttemptPageOut(rows=rows, page=page, has_next=len(window) > CLASS_ATTEMPTS_PAGE_SIZE)
+
+
+def _class_attempts_newest_first(class_obj: Class):
+    return (
         _participant_submissions()
         .filter(problem__classroom_id=class_obj.id)
         .select_related("member", "problem", "classroom_score").prefetch_related(current_score_prefetch())
         .prefetch_related("problem__checklist_items")
-        .order_by("-created_at", "-id")[:RECENT_ATTEMPTS_LIMIT]
+        .order_by("-created_at", "-id")
     )
-    out = []
-    for attempt in attempts:
-        score = current_score(attempt)
-        if score is None:
-            status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
-        else:
-            status = "passed" if attempt.problem.is_score_passed(score) else "attempted_not_passed"
-        out.append(
-            ClassroomRecentAttemptOut(
-                id=attempt.id,
-                member_id=attempt.member_id,
-                member_display_name=attempt.member.display_name,
-                problem_id=attempt.problem_id,
-                problem_title=attempt.problem.title,
-                attempt_number=attempt.attempt_number,
-                status=status,
-                submitted_at=attempt.created_at,
-                late=attempt.problem.lateness(attempt.created_at),
-            )
-        )
-    return 200, out
+
+
+def _recent_attempt_row(class_obj: Class, attempt: ClassroomSubmission) -> ClassroomRecentAttemptOut:
+    score = current_score(attempt)
+    if score is None:
+        status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
+    else:
+        status = "passed" if attempt.problem.is_score_passed(score) else "attempted_not_passed"
+    return ClassroomRecentAttemptOut(
+        id=attempt.id,
+        member_id=attempt.member_id,
+        member_display_name=attempt.member.display_name,
+        problem_id=attempt.problem_id,
+        problem_title=attempt.problem.title,
+        attempt_number=attempt.attempt_number,
+        status=status,
+        submitted_at=attempt.created_at,
+        late=attempt.problem.lateness(attempt.created_at),
+    )
 
 
 # --- Problem -------------------------------------------------------------------
