@@ -59,11 +59,14 @@ test.describe("staged 판정 근거(#1284)", () => {
     await page.goto(`/classes/${classId}/settings#scoring-method`);
     const escalationSelect = page.getByTestId("escalation-model-select");
     await expect(escalationSelect).toBeEnabled();
+    const amount = page.getByTestId("calculator-amount");
+    const beforeText = (await amount.textContent()) ?? "";
     await escalationSelect.selectOption("gpt-5");
-    await expect(page.getByTestId("calculator-escalation-model")).toHaveText("gpt-5");
+    await expect(amount).not.toHaveText(beforeText);
+    const won = (t: string | null) => Number((t ?? "").replace(/[^0-9.]/g, ""));
+    expect(won(await amount.textContent())).toBeGreaterThan(won(beforeText));
     await page.reload();
     await expect(page.getByTestId("escalation-model-select")).toHaveValue("gpt-5");
-    await expect(page.getByTestId("calculator-escalation-rate")).toHaveText("의심 비율 2.5% 가정");
     const problemId = (
       await (
         await api.post(`/api/backend/classroom/classes/${classId}/problems`, {

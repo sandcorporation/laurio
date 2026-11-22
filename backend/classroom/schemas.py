@@ -379,9 +379,6 @@ class ScoringCalculatorAssumptionsOut(Schema):
     source_chars_per_file: int
     requirements: int
     instruction_chars: int
-    students: int
-    assignments: int
-    regrade_rate: float
     suspect_rate: float
     requirements_from: str
     source_from: str
@@ -393,9 +390,6 @@ class ScoringCalculatorDefaultsOut(Schema):
     source_chars_median: int
     source_chars_p90: int
     requirements: int
-    students: int
-    assignments: int
-    regrade_rate: float
     suspect_rate: float
 
 
@@ -436,14 +430,6 @@ class ScoringCalculatorRowOut(Schema):
     model_id: str
     single: ScoringCalculatorSingleCellOut
     agent: ScoringCalculatorAgentCellOut
-
-
-class ScoringCalculatorSemesterOut(Schema):
-    """「클래스 한 학기」 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율)."""
-
-    per_submission_krw: float
-    submissions: float
-    total_krw: float
 
 
 class ScoringCalculatorStagedOut(Schema):
@@ -490,7 +476,7 @@ class ScoringCalculatorOut(Schema):
     #: 에이전트를 고를 수 있는 프로바이더(`agent_grading.AGENT_VERIFIED_VENDORS`).
     agent_vendors: list[str]
     problems: list[ScoringCalculatorProblemOut]
-    #: 표시·학기 줄로 셈한 칸 — 처음 값은 지금 이 클래스의 조합이다.
+    #: 상세 영역에 보이는 칸 — 처음 값은 지금 이 클래스의 조합이다.
     selection: ScoringCalculatorSelectionOut
     assumptions: ScoringCalculatorAssumptionsOut
     defaults: ScoringCalculatorDefaultsOut
@@ -498,7 +484,6 @@ class ScoringCalculatorOut(Schema):
     rows: list[ScoringCalculatorRowOut]
     staged: ScoringCalculatorStagedOut
     agent_limits: ScoringCalculatorAgentLimitsOut
-    semester: ScoringCalculatorSemesterOut
     escalation: ScoringCalculatorEscalationOut
     min_sample_count: int
     krw_per_usd: int

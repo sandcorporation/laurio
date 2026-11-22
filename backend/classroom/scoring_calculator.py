@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import math
 import statistics
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
@@ -69,12 +69,6 @@ ASSUMED_SOURCE_CHARS_MEDIAN = 32_000
 ASSUMED_SOURCE_CHARS_P90 = 307_000
 #: 체크리스트 항목 수 — 운영 문제 64개의 항목 수 p50(p90 은 21).
 ASSUMED_REQUIREMENTS = 6
-#: 학생 수 — 운영 클래스 7개 구성원 수 p50(p90 31).
-ASSUMED_STUDENTS = 18
-#: 과제(문제) 수 — 운영 클래스 8개 문제 수 p50 7.5 → 8(p90 15).
-ASSUMED_ASSIGNMENTS = 8
-#: 재채점 비율 — 운영 학생·문제당 제출 평균 1.58 → 재채점 0.58.
-ASSUMED_REGRADE_RATE = 0.58
 #: 의심 비율 — dev 실험 에이전트 근거 인용 불일치 haiku 2.3%·sonnet 2.6%. staged 실측이 없어 「가정」이다.
 ASSUMED_SUSPECT_RATE = 0.025
 #: staged 에서 기계 판정(정적 검사)이 맡는 항목 몫 — 운영 실제 채점 가중 정적 몫 19%(조율자 #5332). 모델에게 묻는 항목에서 빠진다.
@@ -251,9 +245,6 @@ class Assumptions:
     source_chars: int
     requirements: int
     instruction_chars: int
-    students: int
-    assignments: int
-    regrade_rate: float
     suspect_rate: float
     requirements_from: Literal["problem", "assumed", "custom"]
     source_from: Literal["problem", "assumed", "custom"]
@@ -265,19 +256,7 @@ class Overrides:
 
     source_chars: int | None = None
     requirements: int | None = None
-    students: int | None = None
-    assignments: int | None = None
-    regrade_rate: float | None = None
     suspect_rate: float | None = None
-
-
-@dataclass(frozen=True)
-class Semester:
-    """「클래스 한 학기」 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율)."""
-
-    per_submission_usd: float
-    submissions: float
-    total_usd: float
 
 
 @dataclass(frozen=True)
@@ -302,7 +281,6 @@ class Calculation:
     two_step_threshold_chars: int
     two_step_budget_chars: int
     agent_limits: AgentLimits
-    semester: Semester
     escalation: Escalation
 
     @property
@@ -588,10 +566,6 @@ def _agent_limits() -> AgentLimits:
     )
 
 
-def _non_negative_int(value: int | None, default: int) -> int:
-    return value if value is not None and value >= 0 else default
-
-
 def calculate(
     class_obj: Class,
     *,
@@ -603,7 +577,7 @@ def calculate(
     overrides: Overrides | None = None,
 ) -> Calculation:
     """예상표를 셈한다 — 비거나 고를 수 없는 값은 지금 이 클래스의 조합(없으면 첫 선택지)으로 채운다. `vendor`·`method`·
-    `model_id` 는 표에서 표시·학기 줄로 셈할 칸이고, 표 자체는 단가표의 모든 모델 × 두 방식이다."""
+    `model_id` 는 표에서 고른 칸(상세 영역)이고, 표 자체는 단가표의 모든 모델 × 두 방식이다."""
 
     overrides = overrides or Overrides()
     providers = tuple(ProviderOption(v, _has_key(class_obj, v), tuple(models_for(v))) for v in VENDORS)
@@ -642,9 +616,6 @@ def calculate(
         source_chars=source_chars,
         requirements=requirements,
         instruction_chars=instruction,
-        students=_non_negative_int(overrides.students, ASSUMED_STUDENTS),
-        assignments=_non_negative_int(overrides.assignments, ASSUMED_ASSIGNMENTS),
-        regrade_rate=overrides.regrade_rate if overrides.regrade_rate is not None and overrides.regrade_rate >= 0 else ASSUMED_REGRADE_RATE,
         suspect_rate=overrides.suspect_rate if overrides.suspect_rate is not None and overrides.suspect_rate >= 0 else ASSUMED_SUSPECT_RATE,
         requirements_from=requirements_from,
         source_from=source_from,
@@ -694,7 +665,7 @@ def calculate(
         suspect_rate=assumptions.suspect_rate,
         requirements=requirements,
     )
-    calc = Calculation(
+    return Calculation(
         providers=providers,
         agent_vendors=tuple(v for v in VENDORS if v in AGENT_VERIFIED_VENDORS),
         problems=problems,
@@ -705,12 +676,8 @@ def calculate(
         two_step_threshold_chars=threshold,
         two_step_budget_chars=budget,
         agent_limits=_agent_limits(),
-        semester=Semester(0.0, 0.0, 0.0),
         escalation=escalated,
     )
-    submissions = assumptions.students * assumptions.assignments * (1 + assumptions.regrade_rate)
-    per_submission = calc.selected_usd
-    return replace(calc, semester=Semester(per_submission, submissions, per_submission * submissions))
 
 
 def escalation(

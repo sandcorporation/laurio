@@ -10691,12 +10691,8 @@ export interface components {
          * @description 셈에 쓴 가정(#1304) — `*_from` 은 problem(그 문제의 값)·assumed(코드 기본값)·custom(강사가 바꿔 본 값).
          */
         ScoringCalculatorAssumptionsOut: {
-            /** Assignments */
-            assignments: number;
             /** Instruction Chars */
             instruction_chars: number;
-            /** Regrade Rate */
-            regrade_rate: number;
             /** Requirements */
             requirements: number;
             /** Requirements From */
@@ -10709,8 +10705,6 @@ export interface components {
             source_files: number;
             /** Source From */
             source_from: string;
-            /** Students */
-            students: number;
             /** Suspect Rate */
             suspect_rate: number;
         };
@@ -10719,18 +10713,12 @@ export interface components {
          * @description 가정의 코드 기본값 — 입력 칸의 자리 표시와 「기본값으로」에 쓴다.
          */
         ScoringCalculatorDefaultsOut: {
-            /** Assignments */
-            assignments: number;
-            /** Regrade Rate */
-            regrade_rate: number;
             /** Requirements */
             requirements: number;
             /** Source Chars Median */
             source_chars_median: number;
             /** Source Chars P90 */
             source_chars_p90: number;
-            /** Students */
-            students: number;
             /** Suspect Rate */
             suspect_rate: number;
         };
@@ -10793,7 +10781,6 @@ export interface components {
             /** Rows */
             rows: components["schemas"]["ScoringCalculatorRowOut"][];
             selection: components["schemas"]["ScoringCalculatorSelectionOut"];
-            semester: components["schemas"]["ScoringCalculatorSemesterOut"];
             staged: components["schemas"]["ScoringCalculatorStagedOut"];
         };
         /** ScoringCalculatorProblemOut */
@@ -10850,18 +10837,6 @@ export interface components {
             source_chars: number;
             /** Vendor */
             vendor: string;
-        };
-        /**
-         * ScoringCalculatorSemesterOut
-         * @description 「클래스 한 학기」 — 고른 칸 하나의 건당 × 학생 수 × 과제 수 × (1 + 재채점 비율).
-         */
-        ScoringCalculatorSemesterOut: {
-            /** Per Submission Krw */
-            per_submission_krw: number;
-            /** Submissions */
-            submissions: number;
-            /** Total Krw */
-            total_krw: number;
         };
         /** ScoringCalculatorSingleCellOut */
         ScoringCalculatorSingleCellOut: {
@@ -14514,9 +14489,6 @@ export interface operations {
                 source?: string | null;
                 source_chars?: number | null;
                 requirements?: number | null;
-                students?: number | null;
-                assignments?: number | null;
-                regrade_rate?: number | null;
                 suspect_rate?: number | null;
             };
             header?: never;

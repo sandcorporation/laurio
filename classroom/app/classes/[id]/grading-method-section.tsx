@@ -15,7 +15,7 @@ const ROWS: { field: Field; label: string; testId: string }[] = [
   { field: "quality_method", label: "완성도 검사 방식", testId: "quality-method" },
 ];
 
-const METHOD_LABEL: Record<GradingMethod, string> = { single: "한 번 호출", agent: "에이전트" };
+export const METHOD_LABEL: Record<GradingMethod, string> = { single: "한 번 호출", agent: "에이전트" };
 
 const ESCALATION_STAGED_OFF = "근거 인용 채점이 꺼져 있음";
 
