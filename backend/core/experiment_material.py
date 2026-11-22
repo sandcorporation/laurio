@@ -334,7 +334,15 @@ class ClassroomExperimentCall(Protocol):
 
 CLASSROOM_EXPERIMENT_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 채점 한 번 호출(실험)", "classroom.apps")
 #: 강의실 staged 갈래(#1295) — 같은 모양, 기계 판정·근거 인용·의심 올림·두 걸음을 운영 설정대로 돈다(재사용은 끈다).
-CLASSROOM_EXPERIMENT_STAGED_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 staged 채점(실험)", "classroom.apps")
+class ClassroomExperimentStagedCall(Protocol):
+    """staged 갈래 — `escalation_model` 이 비어 있지 않으면 사본 클래스의 의심 재판정 모델로 쓴다(빈 문자열이면 끈다)."""
+
+    def __call__(
+        self, item: Item, *, model: str, api_key: str | None, escalation_model: str = ""
+    ) -> ClassroomCallResult: ...
+
+
+CLASSROOM_EXPERIMENT_STAGED_CALL: Slot[ClassroomExperimentStagedCall] = Slot("강의실 staged 채점(실험)", "classroom.apps")
 
 
 # ── 항목별 기준 판정(#1288) ────────────────────────────────────────────────────────────────────────────────
