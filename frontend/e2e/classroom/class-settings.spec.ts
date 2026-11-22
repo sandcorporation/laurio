@@ -235,8 +235,20 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
     await expect(calculator).not.toContainText(word);
   }
 
-  // 에이전트는 모델마다 — OpenAI 의 gpt-4.1-mini 로는 고를 수 없고(#1311, gpt-5-mini 이상), Claude 로 바꾸면 에이전트 금액이 나온다.
-  await expect(page.getByTestId("calculator-method").locator("option[value=agent]")).toBeDisabled();
+  // 에이전트는 모델마다 — gpt-4.1-mini 에서도 「에이전트」를 고를 수 있고(#1314), 고르면 되는 모델 중 가장 싼 gpt-5-mini 로 바뀌며
+  // 목록엔 되는 모델만 남는다(#1311, gpt-5-mini 이상). 「한 번 호출」로 돌리면 모델은 그대로고 목록은 전부다. Claude 로 바꾸면 에이전트 금액이 나온다.
+  const method = page.getByTestId("calculator-method");
+  const calcModel = page.getByTestId("calculator-model");
+  await calcModel.selectOption("gpt-4.1-mini");
+  await expect(method.locator("option[value=agent]")).toBeEnabled();
+  await method.selectOption("agent");
+  await expect(calcModel).toHaveValue("gpt-5-mini");
+  await expect(calcModel.locator("option[value='gpt-4.1-mini']")).toHaveCount(0);
+  await expect(calcModel.locator("option[value='gpt-5.5']")).toHaveCount(1);
+  await method.selectOption("single");
+  await expect(calcModel).toHaveValue("gpt-5-mini");
+  await expect(calcModel.locator("option[value='gpt-4.1-mini']")).toHaveCount(1);
+  await calcModel.selectOption("gpt-4.1-mini");
   await page.getByTestId("calculator-vendor").selectOption("anthropic");
   await expect(page.getByTestId("calculator-vendor")).toContainText("키 없음");
   await page.getByTestId("calculator-method").selectOption("agent");
