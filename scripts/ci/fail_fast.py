@@ -46,7 +46,23 @@ class Api(Protocol):
         ...
 
 
+def call_prefix(jobs: Iterable[Job], skip: Sequence[str]) -> str:
+    """workflow_call 로 불렸으면(after-push.yml, #1325) 잡 이름이 「<부른 잡> / <이름>」이다 — skip 이름에 붙은 그 머리.
+
+    머리가 있으면 그 머리의 잡만 본다: 부른 쪽의 잡(뒤따른 알림 등)은 이 실행이 끝나야 도므로 기다리면 끝나지 않는다.
+    """
+    for j in jobs:
+        for s in skip:
+            if j["name"].endswith(" / " + s):
+                return j["name"][: -len(s)]
+    return ""
+
+
 def watched(jobs: Iterable[Job], skip: Sequence[str]) -> list[Job]:
+    jobs = list(jobs)
+    prefix = call_prefix(jobs, skip)
+    if prefix:
+        return [j for j in jobs if j["name"].startswith(prefix) and j["name"][len(prefix):] not in skip]
     return [j for j in jobs if j["name"] not in skip]
 
 

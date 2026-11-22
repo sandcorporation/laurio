@@ -5,7 +5,8 @@
 PR → 병합 대기열(pr-check.yml, 배포 가능 판정 한 번) → main push → release.yml: image(image.yml) → promote(promote.sh) →
 production. Jenkins 는 production 머리의 이미지를 받아 배포한다(Jenkinsfile 의 `deployFrom`). 셋이 어긋나면 조용히 깨진다:
 - 이미지 목록이 다르면 Jenkins 가 오지 않을 이미지를 기다리거나(배포 실패), 굽지 않은 이미지를 compose 가 찾는다.
-- pr-check.yml 이 main push 나 release 에서도 돌면 같은 커밋을 두 번 검사한다(#1090).
+- pr-check.yml 이 main push 나 release 에서도 돌면 같은 커밋을 두 번 검사한다(#1090). 대기열 밖 main 커밋(핫픽스 길,
+  #1325)만 after-push.yml 이 workflow_call 로 뒤따라 돌리고, 대기열 커밋은 kind 잡이 가려 다시 돌지 않는다.
 - promote 가 image 를 기다리지 않으면 production 이 이미지보다 먼저 움직인다.
 - release 의 cache 잡 키가 pr-check.yml 의 복원 키와 다르면 PR 이 늘 차가운 캐시로 굽는다.
 """
@@ -70,10 +71,29 @@ class ReleaseFlowTest(unittest.TestCase):
         self.assertEqual(sorted(in_matrix), sorted(SERVICES))
         self.assertEqual(sorted(jenkins), sorted(SERVICES))
 
-    def test_pr_check_runs_on_pr_and_queue_only(self) -> None:
+    def test_pr_check_runs_on_pr_queue_and_after_push_only(self) -> None:
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "pr-check.yml"))
         assert on
-        self.assertEqual(sorted(re.findall(r"(?m)^  ([\w-]+):", on.group(1))), ["merge_group", "pull_request"])
+        self.assertEqual(sorted(re.findall(r"(?m)^  ([\w-]+):", on.group(1))), ["merge_group", "pull_request", "workflow_call"])
+        # workflow_call 을 부르는 곳은 after-push.yml 하나다(#1325) — release 등에서 다시 돌면 같은 커밋을 두 번 검사한다(#1090)
+        callers = sorted(w.name for w in WORKFLOWS.glob("*.yml") if "./.github/workflows/pr-check.yml" in read(w))
+        self.assertEqual(callers, ["after-push.yml"])
+
+    def test_after_push_skips_queue_commits(self) -> None:
+        """main push 뒤따른 검사(#1325) — 대기열 커밋에는 pr-check 를 다시 돌리지 않고, 그 밖이면 돌리고 알린다."""
+        code = read(WORKFLOWS / "after-push.yml")
+        on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", code)
+        assert on
+        self.assertEqual(re.sub(r"\s+", " ", on.group(1)).strip(), "push: branches: [main]")
+        self.assertIn("scripts/ci/push_kind.py", job_block(code, "kind"))
+        check = job_block(code, "check")
+        self.assertIn("uses: ./.github/workflows/pr-check.yml", check)
+        self.assertIn("needs.kind.outputs.kind == 'hotfix' || needs.kind.outputs.kind == 'direct'", check)
+        self.assertNotIn("queue", check)
+        self.assertIn("after-push-notify.sh direct", job_block(code, "alert"))
+        notify = job_block(code, "notify")
+        self.assertIn("after-push-notify.sh result", notify)
+        self.assertIn("always()", notify)
 
     def test_release_builds_and_promotes_without_checking(self) -> None:
         code = read(WORKFLOWS / "release.yml")

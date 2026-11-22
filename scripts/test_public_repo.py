@@ -9,7 +9,8 @@
   secrets 없음(토큰은 `github.token` 하나), 워크플로 기본 권한 `contents: read`, 액션은 40자 SHA 로 고정(같은 저장소의
   `./.github/workflows/…` 재사용은 예외). 쓰기 권한은 승격 흐름(#938)의 정해진 자리에만 — `packages: write` 는 image
   (image.yml 과 release.yml 의 image 잡), `contents: write` 는 release.yml 의 promote 잡, `issues: write` 는 같은 파일의 notify·e2e_watch·cpu_reference_watch 잡, `actions: write` 는 release.yml 의 e2e_dispatch 잡(#1154),
-  `actions: write` 는 pr-check.yml 의 fail-fast 잡(#1139, 실행 취소)과 release-cache.yml 의 cache 잡(#1137, 앞 세대 캐시 지우기).
+  `actions: write` 는 pr-check.yml 의 fail-fast 잡(#1139, 실행 취소)과 release-cache.yml 의 cache 잡(#1137, 앞 세대 캐시 지우기),
+  after-push.yml(#1325) 은 `issues: write` 가 alert·notify 잡, `actions: write` 가 pr-check.yml 을 부르는 check 잡(빨리 멈춤의 몫).
 
 CI 이미지에는 `.git`·`.github/` 가 없어(.dockerignore) pytest 가 아니라 이 스크립트를 호스트에서 부른다 —
 Actions 는 `plan` 잡, Jenkins 는 `scripts/ci/pr-check.sh`.
@@ -47,9 +48,12 @@ ALLOWED_WRITES = {
     ("release.yml", "e2e_dispatch"): {"actions"},  # main 병합 사건이 전체 e2e 를 부른다(#1154) — 이 잡에만
     ("e2e.yml", "notify"): {"issues"},  # 매시 e2e 실패 알림(#1111, 본 저장소 #1015)
     ("pr-check.yml", "fail-fast"): {"actions"},  # 잡 하나가 실패하면 실행 취소(#1139) — 시험 코드를 돌리지 않는 잡
+    ("after-push.yml", "alert"): {"issues"},  # 표식 없는 main 직접 push 알림(#1325)
+    ("after-push.yml", "notify"): {"issues"},  # 핫픽스 뒤 검사 실패 알림(#1325)
+    ("after-push.yml", "check"): {"actions"},  # pr-check.yml(workflow_call)의 fail-fast 몫 — 부르는 쪽이 줘야 한다(#1325)
 }
 # 잡마다 권한을 따로 적어도 되는 워크플로 — 승격 흐름은 잡마다 권한이 달라야 한다.
-JOB_PERMISSIONS_ALLOWED = {"release.yml", "release-cache.yml", "e2e.yml", "pr-check.yml"}
+JOB_PERMISSIONS_ALLOWED = {"release.yml", "release-cache.yml", "e2e.yml", "pr-check.yml", "after-push.yml"}
 
 
 def permission_blocks(code: str) -> list[tuple[str, dict[str, str]]]:
