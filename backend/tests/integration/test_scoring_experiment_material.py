@@ -298,7 +298,7 @@ def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home
 
     out = _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(_truth_csv(tmp_path, _full_truth(m1, m2))))
 
-    assert "정답을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
+    assert "기준 판정을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
     loaded = em.load(path, repo_root=Path("/nonexistent-repo-root"))
     by_id = {i.material_id: i for i in loaded.items}
     assert by_id[m1].truth == (em.TruthVerdict(REQ, True), em.TruthVerdict(OPT, False))
@@ -358,12 +358,12 @@ def test_report_fills_accuracy_recall_and_false_positive_rate_when_the_material_
 
     # 줄: 제출1 REQ(정답 충족)을 미충족으로 → 오답·오탐, 제출2 REQ(정답 미충족)은 미충족으로 → 정답·재현.
     single = _cells_of(md, SINGLE)
-    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("50.0%", "100.0%", "100.0%")
+    assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("50.0%", "100.0%", "100.0%")
     # 운영 판정은 정답과 네 칸 모두 같다.
     production = _cells_of(md, "운영:gpt-4.1-mini-2025-04-14")
-    assert (production["항목 판정 정확도"], production["미충족 재현율"], production["오탐률"]) == ("100.0%", "100.0%", "0.0%")
+    assert (production["기준 판정과의 일치"], production["기준 미충족 재현율"], production["기준 대비 오탐률"]) == ("100.0%", "100.0%", "0.0%")
     assert "정답:사람" not in md and "정답(알려진 미충족)이 없는 재료" not in md
-    assert "사람이 매긴 항목별 정답과 견준 값" in md
+    assert "항목별 기준 판정과 견준 값" in md
 
 
 @pytest.mark.django_db
@@ -375,5 +375,5 @@ def test_report_without_truth_keeps_the_dash_cells_and_the_note(home, money, mon
     md = _call("experiment_report", "n")
 
     single = _cells_of(md, SINGLE)
-    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("—", "—", "—")
+    assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("—", "—", "—")
     assert "정답(알려진 미충족)이 없는 재료" in md
