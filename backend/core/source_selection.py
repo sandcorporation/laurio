@@ -64,6 +64,7 @@ from typing import Callable
 
 from core.runtime_settings_port import repository_download_limit_bytes
 
+from core import vendor_paths
 from core.llm_scoring import SourceFile
 from core.source_converters import (
     SourceConversionFailed,
@@ -81,35 +82,11 @@ logger = logging.getLogger(__name__)
 # 한도에 묶인 기술값이지 사업이 정하는 값이 아니다(ADR-0027).
 MAX_SOURCE_BYTES = 300_000
 
-#: 이름 그대로 빼는 파일(소문자로 비교한다) — 사람이 쓰지 않은 잠금 파일이다. 수백 KB 가 흔하고,
-#: 선별은 경로 이름 순서로 예산을 채우므로 이것 하나가 코드의 차례를 통째로
-#: 빼앗는다.
-EXCLUDED_FILE_NAMES = frozenset({
-    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "npm-shrinkwrap.json",
-    "bun.lockb", "uv.lock", "poetry.lock", "pipfile.lock", "cargo.lock",
-    "gemfile.lock", "composer.lock", "go.sum", "gradle.lockfile",
-    # 맥 Finder 가 디렉터리마다 남기는 메타데이터 — 사람이 쓴 것이 아니다.
-    ".ds_store",
-})
-
-#: 끝이 이것이면 빼는 파일. 압축된 번들과 소스맵은 텍스트지만 읽을 수 없는
-#: 기계 산출물이고, 나머지는 바이너리다 — 바이너리는 디코딩이 어차피 거르지만
-#: 이름으로 먼저 빼면 예산만큼 읽어 보지도 않는다(우연히 UTF-8 로 읽히는
-#: 바이너리가 프롬프트에 섞이는 것도 막는다).
-EXCLUDED_SUFFIXES = (
-    ".min.js", ".min.css", ".map",
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff",
-    ".pdf", ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
-    ".jar", ".war", ".class", ".pyc", ".o", ".a", ".so", ".dll", ".exe", ".dylib",
-    ".woff", ".woff2", ".ttf", ".otf", ".eot",
-    ".mp3", ".mp4", ".mov", ".avi", ".webm", ".wav",
-    ".sqlite", ".sqlite3", ".db",
-)
-
-EXCLUDED_DIR_FRAGMENTS = (
-    "node_modules/", ".git/", "dist/", "build/", "vendor/", "__pycache__/", "__macosx/",
-    ".venv/", "venv/", "target/", ".next/", "coverage/", ".gradle/", ".idea/",
-)
+#: 벤더·빌드 판정(잠금 파일·바이너리·벤더 폴더)은 `core.vendor_paths` 한 자리다 — 에이전트 실행기 이미지도
+#: 같은 파일을 쓴다(#1300). 이름은 여기서도 그대로 보인다.
+EXCLUDED_FILE_NAMES = vendor_paths.EXCLUDED_FILE_NAMES
+EXCLUDED_SUFFIXES = vendor_paths.EXCLUDED_SUFFIXES
+EXCLUDED_DIR_FRAGMENTS = vendor_paths.EXCLUDED_DIR_FRAGMENTS
 
 #: 변환 플러그인에게 넘기는 파일 하나의 상한 — 그보다 큰 파일은 묻지 않고 버린다. 저장소 zip
 #: 다운로드 상한(운영 설정 `REPOSITORY_DOWNLOAD_LIMIT_MB`)을 그대로 따른다(#1005): 그 이상은
@@ -162,15 +139,13 @@ def excluded_kind(path: str) -> str | None:
     `generated` · `tests` · `data_json`. 루트(깊이 ≤1 — GitHub zip 은 `<저장소>-<sha>/README.md`)의
     `README.md` 는 문서지만 남긴다."""
 
-    lower = path.lower()
-    if any(fragment in lower for fragment in EXCLUDED_DIR_FRAGMENTS):
+    if vendor_paths.is_vendor_path(path):
         return "vendor"
+    lower = path.lower()
     segments = [segment for segment in lower.split("/") if segment]
     if not segments:
         return None
     name = segments[-1]
-    if name in EXCLUDED_FILE_NAMES or lower.endswith(EXCLUDED_SUFFIXES):
-        return "vendor"
     directories = set(segments[:-1])
     for kind, names in EXCLUDED_DIR_NAMES.items():
         if directories & names:

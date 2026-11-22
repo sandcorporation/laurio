@@ -32,6 +32,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 COPY backend/scoring/agent_runner.py /app/agent_runner.py
 # 우리 채점 루프(#1245) — 실행 틀이 옆 파일로 import 한다(표준 라이브러리만).
 COPY backend/scoring/selfloop.py /app/selfloop.py
+# 벤더·빌드 경로 판정(#1300) — 선별과 같은 파일, 박제본을 풀 때 `.git/`·`node_modules/` 를 뺀다.
+COPY backend/core/vendor_paths.py /app/vendor_paths.py
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
