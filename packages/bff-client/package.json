@@ -12,6 +12,7 @@
     "./login-redirect": "./src/login-redirect.ts",
     "./repository-url": "./src/repository-url.ts",
     "./feedback": "./src/feedback/index.ts",
+    "./feedback-history": "./src/feedback/markup-history.ts",
     "./feedback.css": "./feedback.css"
   },
   "scripts": {

@@ -168,7 +168,7 @@ export function FeedbackLauncher({
             aria-modal="true"
             aria-label="제보"
             data-testid="feedback-dialog"
-            className="flex max-h-[92vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto border border-rule bg-surface p-4 text-ink"
+            className="flex max-h-[96dvh] lg:h-[96dvh] w-full max-w-[96vw] flex-col gap-3 overflow-y-auto border border-rule bg-surface p-4 text-ink"
           >
             {phase === "done" ? (
               <>
@@ -179,12 +179,15 @@ export function FeedbackLauncher({
                 </div>
               </>
             ) : (
-              <>
-                {source ? (
-                  <MarkupEditor ref={markup} source={source} />
-                ) : (
-                  captureFailed && <p className="text-[13px] text-warning">화면을 뜨지 못했습니다.</p>
-                )}
+              <div className="flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-4">
+                <div className="min-w-0">
+                  {source ? (
+                    <MarkupEditor ref={markup} source={source} />
+                  ) : (
+                    captureFailed && <p className="text-[13px] text-warning">화면을 뜨지 못했습니다.</p>
+                  )}
+                </div>
+                <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap gap-2">
                   {displayCaptureSupported() && (
                     <button type="button" data-testid="feedback-share" className={buttonClass} onClick={retakeFromDisplay}>
@@ -220,15 +223,15 @@ export function FeedbackLauncher({
                     </label>
                   ))}
                 </fieldset>
-                <label className="flex flex-col gap-1 text-[13px]">
+                <label className="flex flex-col gap-1 text-[13px] lg:flex-1">
                   내용
                   <textarea
                     data-testid="feedback-body"
                     value={body}
                     maxLength={FEEDBACK_BODY_MAX}
-                    rows={5}
+                    rows={3}
                     onChange={(event) => setBody(event.target.value)}
-                    className="border border-rule bg-paper p-2 text-[14px] text-ink"
+                    className="border border-rule bg-paper p-2 text-[14px] text-ink lg:flex-1"
                   />
                   <span className="self-end text-[12px] text-ink/60">{body.length}/{FEEDBACK_BODY_MAX}</span>
                 </label>
@@ -239,7 +242,8 @@ export function FeedbackLauncher({
                     {phase === "sending" ? "보내는 중" : "보내기"}
                   </button>
                 </div>
-              </>
+                </div>
+              </div>
             )}
           </div>
         </div>
