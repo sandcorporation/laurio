@@ -10,5 +10,5 @@ export function rejectionText(rejection: SubmissionRejection | null | undefined)
 
 /** 「들어가는 파일만으로 채점」(#1311)이 보지 못한 파일 수 — 0 이면 빈 글. */
 export function unseenFilesText(unseen: number | undefined): string {
-  return unseen ? `파일 ${unseen.toLocaleString("ko-KR")}개는 보지 못했다` : "";
+  return unseen ? `파일 ${unseen.toLocaleString("ko-KR")}개는 보지 못했습니다` : "";
 }
