@@ -19,7 +19,7 @@ import contextvars
 import logging
 import tempfile
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -32,6 +32,7 @@ from django.db.models import Q, Sum
 from django.utils import timezone
 
 from contests.models import Contest, ContestSubmission, Requirement
+from core import evidence_check
 from core import experiment_material as em
 from core.adapters import is_fake_adapter_binding
 from core.agent_ports import agent_grader, price_for
@@ -62,7 +63,7 @@ from core.runtime_settings_port import ScoringVendor, agent_experiment_daily_lim
 from . import selfloop
 from .corrections import _fixed_inputs
 from .current import latest_done_correction
-from .experiment_report import BillPart
+from .experiment_report import TRUTH_ROW, BillPart
 from .models import Score, ScoringExperiment, ScoringExperimentRun
 from .selfloop_scoring import RUN_BUDGET_USD as SELFLOOP_RUN_BUDGET_USD
 from .selfloop_scoring import run_selfloop_scoring
@@ -373,6 +374,25 @@ def record_production(experiment: ScoringExperiment, subjects: Sequence[Material
         )
 
 
+def record_truth(experiment: ScoringExperiment, subjects: Sequence[MaterialSubject]) -> int:
+    """정답이 채워진 제출의 정답을 「정답:사람」 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로. 남긴 제출 수."""
+
+    count = 0
+    for s in subjects:
+        if not s.item.truth:
+            continue
+        count += 1
+        ScoringExperimentRun.objects.get_or_create(
+            experiment=experiment, submission=None, material_id=s.material_id, row=TRUTH_ROW, round=1,
+            defaults=dict(
+                status=ScoringExperimentRun.Status.SCORED,
+                verdicts=[{"requirement_id": t.checklist_item_id, "met": t.is_met} for t in s.item.truth],
+                created_at=Clock.now(),
+            ),
+        )
+    return count
+
+
 def vendor_key(vendor: ScoringVendor) -> str:
     """플랫폼(실험) 키 — 운영 설정 값(`core.llm_proxy` 와 같은 이름). 개발 환경에서는 대장이 dev 운영자 앱에서 넣는다."""
 
@@ -598,8 +618,40 @@ def _proxy_totals(record: dict[str, JSON]) -> tuple[int, int, Decimal]:
     return tokens_in, tokens_out, spent
 
 
+class _RepoLines(Mapping[str, Sequence[str]]):
+    """박제본의 파일 줄을 경로로 꺼낸다(필요한 파일만 읽는다). 루트 밖·없는 파일은 없는 키다."""
+
+    def __init__(self, tools: selfloop.RepoTools) -> None:
+        self._tools = tools
+
+    def __getitem__(self, raw: str) -> Sequence[str]:
+        try:
+            path = self._tools.resolve(raw)
+        except selfloop.ToolRefused:
+            raise KeyError(raw) from None
+        if not path.is_file():
+            raise KeyError(raw)
+        return selfloop._text_lines(path)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(())
+
+    def __len__(self) -> int:
+        return 0
+
+
+def _is_real_evidence(files: Mapping[str, Sequence[str]], item: str) -> bool:
+    match = evidence_check.EVIDENCE_RE.match(item)
+    if match is None or match.group("start") is None:
+        return False
+    start = int(match.group("start"))
+    citation = evidence_check.Citation(match.group("path"), start, int(match.group("end") or start))
+    return evidence_check.citation_problem(files, citation) is None
+
+
 def count_real_evidence(snapshot: Snapshot, items: list[dict[str, JSON]]) -> tuple[int, int]:
-    """판정들이 낸 근거 `경로:줄` 가운데 박제본에 실재하는 수 — 우리 루프와 같은 검사(`selfloop.check_evidence`)."""
+    """판정들이 낸 근거 `경로:줄` 가운데 박제본에 실재하는 수 — 대조 규칙은 강의실 staged 채점과 같다
+    (`core.evidence_check`, #1284). 우리 루프(`selfloop.check_evidence`)는 표준 라이브러리만 쓰는 사본을 든다."""
 
     evidence = [str(e) for item in items for e in (item.get("evidence") or []) if isinstance(item.get("evidence"), list)]  # type: ignore[union-attr]  # 위에서 list 로 좁혔다
     if not evidence:
@@ -609,8 +661,8 @@ def count_real_evidence(snapshot: Snapshot, items: list[dict[str, JSON]]) -> tup
         zip_path.write_bytes(snapshot.zip_bytes)
         root = Path(tmp) / "repo"
         agent_grader().extract_repo(zip_path, root, repo_kind=snapshot.kind)
-        tools = selfloop.RepoTools(root)
-        real = sum(1 for item in evidence if not selfloop.check_evidence(tools, [item]))
+        files = _RepoLines(selfloop.RepoTools(root))
+        real = sum(1 for item in evidence if _is_real_evidence(files, item))
     return len(evidence), real
 
 

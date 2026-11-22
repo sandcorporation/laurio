@@ -99,6 +99,21 @@ export type ChecklistVerdict = {
   // 세 갈래 판정(#811) — 읽을 때는 `verdictOf`(lib/submissions/verdict.ts)로.
   verdict?: VerdictValue;
   reasoning: string;
+  // 아래는 staged 갈래의 점수를 강사 응답으로 받을 때만 온다(#1283·#1284) — single_call·참여자 응답에는 키가 없다.
+  source?: "machine" | "model";
+  citations?: VerdictCitation[];
+  evidence?: string[];
+  suspect?: boolean;
+  // 의심 항목을 상위 모델로 다시 판정했다(#1285).
+  escalated?: boolean;
+};
+
+// 모델 판정의 근거 인용 하나(#1284) — 보낸 소스와 대조해 경로가 있고 줄 범위가 파일 안이면 matched.
+export type VerdictCitation = {
+  path: string;
+  start_line: number;
+  end_line: number;
+  matched: boolean;
 };
 
 // 파서가 실제로 찾은 구문 오류 하나(#408) — 어느 파일 몇 번째 줄에서 무슨
@@ -127,6 +142,8 @@ export type ClassroomScore = {
   syntax_check: SyntaxCheckVerdict | null;
   // 숨은 항목(#906) — 문구 없이 개수만. 숨은 항목이 없으면 없거나 total 0.
   hidden_summary?: { total: number; met: number } | null;
+  // 같은 입력의 이전 점수를 벤더 없이 재사용했는가(#1287) — 강사 응답에만 true 가 된다.
+  reused?: boolean;
   created_at: string;
 };
 

@@ -69,6 +69,9 @@ class SettingSpec:
 
 #: 공모전 AI 채점 스위치의 키(#991) — `contest_ai_scoring_enabled`.
 CONTEST_AI_SCORING = "CONTEST_AI_SCORING"
+
+#: 강의실 채점 재사용 스위치의 키(#1287) — `classroom_score_reuse_enabled`.
+CLASSROOM_SCORE_REUSE = "CLASSROOM_SCORE_REUSE"
 #: 공모전 완성도 리뷰 스위치의 키(#1033) — `contest_quality_review_enabled`. 채점 스위치와 따로 켜고 끈다.
 CONTEST_AI_QUALITY_REVIEW = "CONTEST_AI_QUALITY_REVIEW"
 
@@ -79,6 +82,17 @@ LLM_SCORING_VENDOR = "LLM_SCORING_VENDOR"
 CONTEST_SCORING_METHOD = "CONTEST_SCORING_METHOD"
 SCORING_METHOD_SINGLE_CALL: Literal["single_call"] = "single_call"
 SCORING_METHOD_AGENT: Literal["agent"] = "agent"
+
+#: 강의실 채점 갈래의 키(#1283, 스펙 #1282) — `classroom_scoring_pipeline`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
+CLASSROOM_SCORING_PIPELINE = "CLASSROOM_SCORING_PIPELINE"
+CLASSROOM_ESCALATION_MODEL = "CLASSROOM_ESCALATION_MODEL"
+#: 강의실 staged 두 걸음의 문턱·2차 상한(#1286, 글자 수) — `classroom_two_step_threshold_chars`·`classroom_two_step_budget_chars`.
+CLASSROOM_TWO_STEP_THRESHOLD_CHARS = "CLASSROOM_TWO_STEP_THRESHOLD_CHARS"
+DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS = 120_000
+CLASSROOM_TWO_STEP_BUDGET_CHARS = "CLASSROOM_TWO_STEP_BUDGET_CHARS"
+DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS = 60_000
+CLASSROOM_PIPELINE_SINGLE_CALL: Literal["single_call"] = "single_call"
+CLASSROOM_PIPELINE_STAGED: Literal["staged"] = "staged"
 
 _SWITCH_ON = {"on", "true", "1", "yes"}
 _SWITCH_OFF = {"off", "false", "0", "no"}
@@ -129,6 +143,37 @@ SPECS: dict[str, SettingSpec] = {
             max_length=20,
             choices=(SCORING_METHOD_SINGLE_CALL, SCORING_METHOD_AGENT),
         ),
+        # #1283: 강의실 채점(클래스 키)을 지금처럼 한 번 호출(`single_call`)로 할지, 기계 판정을 먼저 하고 판단 항목만
+        # 모델에 보내는 `staged` 로 할지. 에이전트 방식 클래스는 이 값을 보지 않는다.
+        SettingSpec(
+            CLASSROOM_SCORING_PIPELINE,
+            "강의실 채점 갈래",
+            "choice",
+            default=CLASSROOM_PIPELINE_SINGLE_CALL,
+            max_length=20,
+            choices=(CLASSROOM_PIPELINE_SINGLE_CALL, CLASSROOM_PIPELINE_STAGED),
+        ),
+        # #1285: staged 에서 「의심」 항목만 다시 판정할 상위 모델. 비면 올리지 않는다. 클래스 키로 부르므로 그 키의
+        # 프로바이더 단가표(`classroom.scoring_cost.PRICES`)에 있는 모델일 때만 쓴다.
+        SettingSpec(CLASSROOM_ESCALATION_MODEL, "강의실 의심 올림 모델", "text", max_length=100),
+        # #1286: staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이 문턱을 넘으면 두 걸음 — 파일 목록으로 고르고
+        # 고른 파일만 2차 상한 안에서 싣는다. 문턱 0 이면 끈다(그때만 크기 초과 보류 #989 가 그대로다).
+        SettingSpec(
+            CLASSROOM_TWO_STEP_THRESHOLD_CHARS,
+            "강의실 두 걸음 문턱 (자)",
+            "float",
+            default=str(DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS),
+            min_value=0.0,
+            max_value=10_000_000.0,
+        ),
+        SettingSpec(
+            CLASSROOM_TWO_STEP_BUDGET_CHARS,
+            "강의실 두 걸음 2차 상한 (자)",
+            "float",
+            default=str(DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS),
+            min_value=1000.0,
+            max_value=10_000_000.0,
+        ),
         SettingSpec("ANTHROPIC_API_KEY", "Anthropic API 키", "secret", max_length=500),
         SettingSpec("LLM_ANTHROPIC_MODEL", "Claude 모델", "text", default="claude-sonnet-5-5", max_length=100),
         SettingSpec(
@@ -151,6 +196,8 @@ SPECS: dict[str, SettingSpec] = {
         # **값이 없으면 꺼짐** — 처리기를 다시 켜는 배포가 공모전 채점까지 켜지 않게 했다. 켜려면 화면에서
         # 「on」을 저장한다(dev·시험은 환경변수로 켠다).
         SettingSpec(CONTEST_AI_SCORING, "공모전 AI 채점", "switch", default="off", max_length=3),
+        # #1287: 같은 문제·같은 모델·같은 프롬프트의 이전 강의실 점수를 벤더 없이 재사용한다. 값이 없으면 꺼짐.
+        SettingSpec(CLASSROOM_SCORE_REUSE, "강의실 채점 재사용", "switch", default="off", max_length=3),
         # #1033: 완성도 리뷰(`submission-quality-review` 스캔)만 여닫는 스위치. 값이 없으면 꺼짐.
         SettingSpec(CONTEST_AI_QUALITY_REVIEW, "공모전 완성도 리뷰", "switch", default="off", max_length=3),
         # #1221: 운영 스위치가 기본값과 다르거나 켜져 있던 것이 꺼진 채 이만큼 지나면 하루 한 번 알린다.
@@ -422,10 +469,52 @@ def contest_scoring_method() -> Literal["single_call", "agent"]:
     return SCORING_METHOD_AGENT if value == SCORING_METHOD_AGENT else SCORING_METHOD_SINGLE_CALL
 
 
+def classroom_scoring_pipeline() -> Literal["single_call", "staged"]:
+    """강의실 채점 갈래(#1283) — `staged` 일 때만 staged, 그 밖(없음·알 수 없는 값)은 `single_call`."""
+
+    value = (setting_value(CLASSROOM_SCORING_PIPELINE) or "").strip().lower()
+    return CLASSROOM_PIPELINE_STAGED if value == CLASSROOM_PIPELINE_STAGED else CLASSROOM_PIPELINE_SINGLE_CALL
+
+
+def classroom_escalation_model() -> str:
+    """staged 의심 항목을 다시 판정할 상위 모델(#1285) — 비었으면 빈 문자열(올리지 않는다)."""
+
+    return (setting_value(CLASSROOM_ESCALATION_MODEL) or "").strip()
+
+
+def _chars_setting(key: str, default: int, *, minimum: int) -> int:
+    raw = setting_value(key)
+    try:
+        value = float((raw or "").strip() or default)
+    except ValueError:
+        return default
+    if not math.isfinite(value) or value < minimum:  # NaN·무한·범위 밖(env 는 저장 검사를 지나지 않는다)
+        return default
+    return int(value)
+
+
+def classroom_two_step_threshold_chars() -> int:
+    """staged 두 걸음 문턱(#1286, 글자) — 0 이면 끔. 값이 없거나 읽을 수 없으면 기본값."""
+
+    return _chars_setting(CLASSROOM_TWO_STEP_THRESHOLD_CHARS, DEFAULT_CLASSROOM_TWO_STEP_THRESHOLD_CHARS, minimum=0)
+
+
+def classroom_two_step_budget_chars() -> int:
+    """staged 두 걸음 2차 상한(#1286, 글자) — 값이 없거나 읽을 수 없으면 기본값."""
+
+    return _chars_setting(CLASSROOM_TWO_STEP_BUDGET_CHARS, DEFAULT_CLASSROOM_TWO_STEP_BUDGET_CHARS, minimum=1)
+
+
 def contest_ai_scoring_enabled() -> bool:
     """공모전 AI 채점 스캔이 지금 도는가(#991) — 스캔의 `enabled` 콜백이라 호출마다 다시 읽는다."""
 
     return switch_on(CONTEST_AI_SCORING)
+
+
+def classroom_score_reuse_enabled() -> bool:
+    """강의실 채점이 같은 입력의 이전 점수를 재사용하는가(#1287) — 채점마다 다시 읽는다."""
+
+    return switch_on(CLASSROOM_SCORE_REUSE)
 
 
 def contest_quality_review_enabled() -> bool:

@@ -6004,6 +6004,8 @@ export interface components {
             hidden: boolean;
             /** Label */
             label: string;
+            /** Machine Rule */
+            machine_rule?: (components["schemas"]["PathExistsRuleIn"] | components["schemas"]["FileContainsRuleIn"] | components["schemas"]["ConfigValueRuleIn"]) | null;
             /** Points */
             points?: number | null;
             /**
@@ -6025,6 +6027,10 @@ export interface components {
             id: number;
             /** Label */
             label: string;
+            /** Machine Rule */
+            machine_rule?: {
+                [key: string]: unknown;
+            } | null;
             /** Order */
             order: number;
             /** Points */
@@ -6040,6 +6046,8 @@ export interface components {
             hidden?: boolean | null;
             /** Label */
             label?: string | null;
+            /** Machine Rule */
+            machine_rule?: (components["schemas"]["PathExistsRuleIn"] | components["schemas"]["FileContainsRuleIn"] | components["schemas"]["ConfigValueRuleIn"]) | null;
             /** Points */
             points?: number | null;
             /** Required */
@@ -6066,6 +6074,10 @@ export interface components {
             id: number;
             /** Label */
             label: string;
+            /** Machine Rule */
+            machine_rule?: {
+                [key: string]: unknown;
+            } | null;
             /** Order */
             order: number;
             /** Points */
@@ -6404,10 +6416,20 @@ export interface components {
         ClassroomChecklistVerdictOut: {
             /** Checklist Item Id */
             checklist_item_id: number;
+            /** Citations */
+            citations?: components["schemas"]["ClassroomVerdictCitationOut"][] | null;
+            /** Escalated */
+            escalated?: boolean | null;
+            /** Evidence */
+            evidence?: string[] | null;
             /** Is Met */
             is_met: boolean;
             /** Reasoning */
             reasoning: string;
+            /** Source */
+            source?: ("machine" | "model") | null;
+            /** Suspect */
+            suspect?: boolean | null;
             /**
              * Verdict
              * @enum {string}
@@ -6743,6 +6765,11 @@ export interface components {
             model_version: string;
             /** Reasoning */
             reasoning: components["schemas"]["ClassroomChecklistVerdictOut"][];
+            /**
+             * Reused
+             * @default false
+             */
+            reused: boolean;
             syntax_check?: components["schemas"]["ClassroomSyntaxCheckOut"] | null;
         };
         /** ClassroomSubmissionIn */
@@ -6823,6 +6850,20 @@ export interface components {
             judged_by: string;
             /** Reasoning */
             reasoning: string;
+        };
+        /**
+         * ClassroomVerdictCitationOut
+         * @description 모델 판정의 근거 인용 하나(#1284) — 보낸 소스에서 경로가 있고 줄 범위가 파일 안이면 `matched`.
+         */
+        ClassroomVerdictCitationOut: {
+            /** End Line */
+            end_line: number;
+            /** Matched */
+            matched: boolean;
+            /** Path */
+            path: string;
+            /** Start Line */
+            start_line: number;
         };
         /** CoInstructorAcceptIn */
         CoInstructorAcceptIn: {
@@ -7033,6 +7074,23 @@ export interface components {
             total_requirement_count: number;
             /** Unlinked Requirement Count */
             unlinked_requirement_count: number;
+        };
+        /**
+         * ConfigValueRuleIn
+         * @description 기계 확인 규칙(#1283) — JSON·YAML·TOML·.env 파일에서 키(점으로 이은 경로) = 값.
+         */
+        ConfigValueRuleIn: {
+            /** Key */
+            key: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "config_value";
+            /** Path */
+            path: string;
+            /** Value */
+            value: string;
         };
         /** ConfirmJudgingExtensionIn */
         ConfirmJudgingExtensionIn: {
@@ -7911,6 +7969,23 @@ export interface components {
             note: string;
             /** To Status */
             to_status: string;
+        };
+        /**
+         * FileContainsRuleIn
+         * @description 기계 확인 규칙(#1283) — 경로 glob 에 맞는 파일 안에 고정 문자열(`text`) 또는 정규식(`pattern`)이 있다. 둘 중 하나만.
+         */
+        FileContainsRuleIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "file_contains";
+            /** Path */
+            path: string;
+            /** Pattern */
+            pattern?: string | null;
+            /** Text */
+            text?: string | null;
         };
         /**
          * FreeContestCreateIn
@@ -9241,6 +9316,19 @@ export interface components {
             count: number;
             /** Items */
             items: components["schemas"]["SourceReadingOut"][];
+        };
+        /**
+         * PathExistsRuleIn
+         * @description 기계 확인 규칙(#1283) — 경로·glob 에 맞는 파일이 있다.
+         */
+        PathExistsRuleIn: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "path_exists";
+            /** Path */
+            path: string;
         };
         /** PaymentOut */
         PaymentOut: {

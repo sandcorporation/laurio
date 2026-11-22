@@ -93,6 +93,7 @@ def _item_out(item: ChecklistItem) -> dict:
         "points": item.points,
         "hidden": item.hidden,
         "order": item.order,
+        "machine_rule": item.machine_rule,
     }
 
 
@@ -201,6 +202,26 @@ _HIDDEN = {
     "type": "boolean",
     "description": "제출자에게 숨기기 — 참여자에게는 내용 없이 개수·충족 수만 보인다. AI 판정·완성도에는 보통 항목처럼 들어간다.",
 }
+#: 기계 확인 규칙(#1283) — 저장 검증은 `classroom.schemas.MachineRuleIn` 이 한 번 더 한다.
+_MACHINE_RULE = {
+    "type": ["object", "null"],
+    "description": (
+        "기계 확인 규칙. 비면(null) 「판단」 항목이다 — 채점 방식이 staged 일 때 코드가 소스에서 직접 확인한다. "
+        "kind: path_exists(path: 경로·glob) · file_contains(path + text 또는 pattern(정규식) 하나) · "
+        "config_value(path: JSON·YAML·TOML·.env 파일, key: 점으로 이은 키, value: 값). "
+        "glob 의 * 는 한 경로 조각, ** 는 여러 조각이며 앞 폴더를 건너뛰어도 맞는다."
+    ),
+    "properties": {
+        "kind": {"type": "string", "enum": ["path_exists", "file_contains", "config_value"]},
+        "path": {"type": "string"},
+        "text": {"type": "string"},
+        "pattern": {"type": "string"},
+        "key": {"type": "string"},
+        "value": {"type": "string"},
+    },
+    "required": ["kind", "path"],
+    "additionalProperties": False,
+}
 _CHECKLIST_ITEM_IN = {
     "type": "object",
     "properties": {"label": _LABEL, "required": {**_REQUIRED, "default": True}, "points": _POINTS, "hidden": _HIDDEN},
@@ -253,8 +274,9 @@ _ITEM_OUT = {
         "points": {"type": "integer"},
         "hidden": {"type": "boolean"},
         "order": {"type": "integer"},
+        "machine_rule": {"type": ["object", "null"]},
     },
-    "required": ["id", "label", "grade", "required", "points", "hidden", "order"],
+    "required": ["id", "label", "grade", "required", "points", "hidden", "order", "machine_rule"],
 }
 _STATUS_OUT = {
     "type": "string",
@@ -542,6 +564,7 @@ _ADD_ITEM_INPUT = _object(
         "required": {**_REQUIRED, "default": True},
         "points": _POINTS,
         "hidden": _HIDDEN,
+        "machine_rule": _MACHINE_RULE,
     },
     ["class_id", "problem_id", "label"],
 )
@@ -571,6 +594,7 @@ _UPDATE_ITEM_INPUT = _object(
         "required": _REQUIRED,
         "points": _POINTS,
         "hidden": _HIDDEN,
+        "machine_rule": _MACHINE_RULE,
     },
     ["class_id", "problem_id", "item_id"],
 )

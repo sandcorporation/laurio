@@ -164,6 +164,7 @@ from .schemas import (
 from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality
+from .score_reuse import score_reused
 from .events import publish_attempt_submitted
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -347,7 +348,9 @@ def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> Pending
     )
 
 
-def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
+def _serialize_checklist_item(item: ChecklistItem, *, with_rule: bool = True) -> ChecklistItemOut:
+    """`with_rule=False` 는 참여자 응답이다 — 기계 확인 규칙(#1283)을 싣지 않는다."""
+
     return ChecklistItemOut(
         id=item.id,
         label=item.label,
@@ -356,6 +359,7 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
         points=item.points,
         order=item.order,
         hidden=item.hidden,
+        machine_rule=item.machine_rule if with_rule else None,
     )
 
 
@@ -371,6 +375,7 @@ def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool =
         points=item.points,
         order=item.order,
         hidden=item.hidden,
+        machine_rule=item.machine_rule,
         gradability_warnings=gradability_warnings([item]) if text_changed else [],
     )
 
@@ -719,7 +724,7 @@ def _serialize_problem_mine(
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
         # 숨은 항목(#906)은 참여자(「참여자로 보기」의 강사 포함)에게 내용 없이 개수만.
-        checklist_items=[_serialize_checklist_item(i) for i in checklist_items if not i.hidden],
+        checklist_items=[_serialize_checklist_item(i, with_rule=False) for i in checklist_items if not i.hidden],
         hidden_checklist_item_count=sum(1 for i in checklist_items if i.hidden),
         passed=passed,
         perfect=perfect,
@@ -760,6 +765,16 @@ def _serialize_syntax_check(result: dict | None) -> ClassroomSyntaxCheckOut | No
     )
 
 
+def _staged_verdict_fields(entry: Mapping[str, object]) -> dict[str, object]:
+    """저장된 staged 판정 항목(#1283·#1284)의 출처·근거 인용·기계 근거·의심. single_call 항목에는 없어 빈 dict."""
+
+    fields: dict[str, object] = {}
+    for key in ("source", "citations", "evidence", "suspect", "escalated"):
+        if key in entry:
+            fields[key] = entry[key]
+    return fields
+
+
 def _serialize_score(
     score: ClassroomScore, *, hidden_items: Mapping[int, str] | None = None
 ) -> ClassroomScoreOut:
@@ -776,12 +791,15 @@ def _serialize_score(
                 is_met=r["is_met"],
                 verdict=verdict_of(r),
                 reasoning=r["reasoning"],
+                # staged 의 출처·근거·의심(#1284)은 강사 응답에만 — 참여자 응답은 예전 그대로다.
+                **(_staged_verdict_fields(r) if hidden_items is None else {}),
             )
             for r in score.reasoning
             if r["checklist_item_id"] not in hidden
         ],
         syntax_check=_serialize_syntax_check(score.syntax_check_result),
         created_at=score.created_at,
+        reused=hidden_items is None and score_reused(score),
         hidden_summary=(
             None
             if hidden_items is None

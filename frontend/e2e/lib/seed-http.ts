@@ -16,7 +16,7 @@
 // deliverable-types 스펙)이 그 변수를 쓰고 CLAUDE.md 의 포트 표도 그것으로 적혀 있다 —
 // 체인 전용 포트로 스택을 띄운 환경에서 여기만 58000 을 보면 **다른 체인의 스택**에
 // 시드를 심거나 globalSetup 이 통째로 연결 거부로 죽는다.
-function backendBaseUrl(): string {
+export function backendBaseUrl(): string {
   if (process.env.CODEMIT_API_BASE_URL) return process.env.CODEMIT_API_BASE_URL;
   return `http://127.0.0.1:${process.env.CODEMIT_API_PORT ?? "58000"}`;
 }

@@ -25,7 +25,7 @@ from core.banned_words import BannedWordViolation, find_banned_word_violation
 from .contest_problems import is_contest_problem, reject_if_locked
 from .models import ChecklistGrade, ChecklistItem, Class, Problem
 from .problem_transitions import NO_REQUIRED_ITEM_MESSAGE, assert_required_item_floor
-from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn
+from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn, machine_rule_to_store
 from .scoring_model_catalog import get_scoring_model_catalog
 from .scoring_connection import connection_for, mark_verified
 from .scoring_model_probe import ScoringModelProbeFailed, ensure_model_keeps_scoring_format
@@ -220,6 +220,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
                 grade=grade,
                 points=item_in.points or default_points(grade),
                 hidden=item_in.hidden,
+                machine_rule=machine_rule_to_store(item_in.machine_rule),
                 order=index,
             )
     return problem
@@ -375,6 +376,7 @@ def add_checklist_item(problem: Problem, payload: ChecklistItemIn) -> ChecklistI
         grade=payload.resolved_grade(),
         points=payload.points or default_points(payload.resolved_grade()),
         hidden=payload.hidden,
+        machine_rule=machine_rule_to_store(payload.machine_rule),
         order=problem.checklist_items.count(),
     )
 
@@ -407,6 +409,10 @@ def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItem
     if payload.hidden is not None:
         item.hidden = payload.hidden
         update_fields.append("hidden")
+    if "machine_rule" in payload.model_fields_set:
+        # null 은 지우기(「판단」 항목으로)다 — 보내지 않은 것과 가른다.
+        item.machine_rule = machine_rule_to_store(payload.machine_rule)
+        update_fields.append("machine_rule")
     if update_fields:
         item.save(update_fields=update_fields)
     return item

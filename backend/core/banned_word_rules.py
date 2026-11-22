@@ -144,6 +144,46 @@ RULES: dict[tuple[str, str, str], BannedWordRule] = {
     ("classroom", "ChecklistItemPatchIn", "label"): BannedWordRule(
         checks_impersonation=False, checks_profanity=True
     ),
+    ("classroom", "PathExistsRuleIn", "path"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason=(
+            "기계 확인 규칙(#1283)의 경로·키·값 — 강사가 소스 트리를 가리키려고 쓰는 식별자이고 "
+            "참여자에게 보이지 않는다(공개 본문이 아니다)."
+        ),
+    ),
+    ("classroom", "FileContainsRuleIn", "path"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason=(
+            "기계 확인 규칙(#1283)의 경로·키·값 — 강사가 소스 트리를 가리키려고 쓰는 식별자이고 "
+            "참여자에게 보이지 않는다(공개 본문이 아니다)."
+        ),
+    ),
+    ("classroom", "ConfigValueRuleIn", "path"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason=(
+            "기계 확인 규칙(#1283)의 경로·키·값 — 강사가 소스 트리를 가리키려고 쓰는 식별자이고 "
+            "참여자에게 보이지 않는다(공개 본문이 아니다)."
+        ),
+    ),
+    ("classroom", "ConfigValueRuleIn", "key"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason=(
+            "기계 확인 규칙(#1283)의 경로·키·값 — 강사가 소스 트리를 가리키려고 쓰는 식별자이고 "
+            "참여자에게 보이지 않는다(공개 본문이 아니다)."
+        ),
+    ),
+    ("classroom", "ConfigValueRuleIn", "value"): BannedWordRule(
+        checks_impersonation=False,
+        checks_profanity=False,
+        exempt_reason=(
+            "기계 확인 규칙(#1283)의 경로·키·값 — 강사가 소스 트리를 가리키려고 쓰는 식별자이고 "
+            "참여자에게 보이지 않는다(공개 본문이 아니다)."
+        ),
+    ),
     # --- #480 구조 검사가 찾아낸, 앞선 티켓들이 빠뜨린 실제 공개 본문 ----------
     # 아래 여섯은 예외를 적으려 훑다가 발견했다 — 이미 검사하는 필드와 같은
     # 범주(공개 이름·공개 본문)인데 어느 티켓에도 없었다. 면제로 덮지 않고

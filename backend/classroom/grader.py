@@ -277,7 +277,7 @@ class Grader:
                 # 준비가 너무 길어 임대가 다른 grader 에게 넘어갔다 — 벤더를 부르지 않는다.
                 result = {"submission_id": submission_id, "status": "lease_lost"}
             else:
-                outcome = await self._vendor(prepared)
+                outcome = await self._db(scoring.reusable_outcome, prepared) or await self._vendor(prepared)
                 result = await self._write(scoring.finish_scoring, prepared, outcome, events_out=events)
         except Exception as exc:  # noqa: BLE001 - 한 시도의 실패가 나머지를 막으면 안 된다.
             result = await self._write(

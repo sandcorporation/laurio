@@ -715,7 +715,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | `get_roster_grid`(읽기, `class_id`) | 명단 격자 — 화면의 `GET …/roster-grid` 와 같은 값(문제별 달성률 + 참여자 × 문제 칸의 통과 이력, 공모전 문제면 「공모전에도 냈다」 표시 #550) |
 | `create_problem`(쓰기) | 문제 만들기 — 설명·제출 형식·체크리스트·채점 설정을 한 번에, `open` 이면 바로 연다(#514). 결과는 문제 요약(번호·클래스·제목·상태·순서·제출 형식·채점 지침 단계·모델·추론 강도·문법 검사·체크리스트·할 수 있는 전이) — **설명·채점 지침 원문은 싣지 않는다**(#579) |
 | `update_problem`(쓰기) | 문제 고치기 — 보낸 칸만 바뀐다. 결과는 `create_problem` 과 같은 요약 |
-| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기. 결과는 바뀐 항목(지우기면 지운 번호)과 그 문제의 항목 목록(`problem_id`·`checklist_items`)뿐 — 설명·채점 설정은 없다(#579) |
+| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기. 결과는 바뀐 항목(지우기면 지운 번호)과 그 문제의 항목 목록(`problem_id`·`checklist_items`)뿐 — 설명·채점 설정은 없다(#579). 더하기·고치기는 기계 확인 규칙 `machine_rule`(#1283)도 받고, 항목 결과에 그 값을 싣는다 |
 | `open_problem` · `hide_problem` · `reopen_problem`(쓰기) | 문제 열기·숨기기·다시 열기 — 전이 표(`classroom.problem_transitions`) 그대로. 결과는 번호·제목·새 상태·할 수 있는 전이만(#579) |
 | `reorder_problems`(쓰기) | 문제 순서 바꾸기 |
 | `copy_problem`(쓰기) | 문제를 내 다른 클래스로 복사 — 복사본은 초안, 보관된 클래스에서 꺼내 갈 수는 있고 넣을 수는 없다. 결과는 복사본의 요약(`create_problem` 과 같은 모양) |
@@ -1202,12 +1202,17 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 도 시행일과 상관없이 저장되고 돈다(대표 결정 2026-11-20, `config/settings.py`). 방침 개정 시행일 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`(2026-11-27, #997)는 방침 화면 잠금 시험만 본다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
+| `CLASSROOM_SCORING_PIPELINE` | `single_call`·`staged`(#1283, ADR-0084) | 강의실 채점(클래스 키, 한 번 호출 방식) — `staged` 면 기계 확인 규칙이 있는 항목을 코드가 먼저 판정하고 남은 항목만 모델에 보낸다. 모델 판정은 근거 인용(#1284)을 받아 대조하고 맞는 인용 없는 충족에 「의심」을 단다. 에이전트 방식 클래스는 보지 않는다 | `single_call` — 알 수 없는 값도 `single_call` |
+| `CLASSROOM_ESCALATION_MODEL` | 모델 이름(#1285) | 강의실 staged 의 「의심」 항목만 이 모델로 한 번 다시 판정(클래스 키, 그 프로바이더 단가표에 있는 모델만) | (비면 올리지 않는다) |
+| `CLASSROOM_TWO_STEP_THRESHOLD_CHARS` | 글자 수(#1286) | 강의실 staged 에서 판단 항목에 실을 소스(줄 번호를 붙인 글자)가 이것을 넘거나 모델 예산에 다 들어가지 않으면 두 걸음 — 1차는 파일 목록으로 항목별 볼 파일을 받고, 2차는 고른 파일만 싣는다. 0 이면 끔 | `120000` |
+| `CLASSROOM_TWO_STEP_BUDGET_CHARS` | 글자 수(#1286) | 두 걸음 2차에 싣는 소스의 상한(줄 번호를 붙인 글자) — 넘치면 항목 순으로 자른다 | `60000` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |
 | `AGENT_EXPERIMENT_DAILY_LIMIT_USD` | USD 0~1000(#1246) | 채점 방식 비교 실험의 하루(KST) 비용 상한 — 실행 토큰 용도 `experiment` 만 세고 운영 상한과 따로다. 0 이면 실험이 돌지 않는다 | 0 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·정정 채점(`score-correction`, #1180) 스캔만 — 꺼지면 정정은 진행 중으로 기다린다 | **off** — 채점 스캔이 돌지 않는다 |
+| `CLASSROOM_SCORE_REUSE` | on/off(#1287) | 강의실 채점이 같은 문제·같은 모델·같은 프롬프트의 이전 점수(플랫폼 자동 점수 제외)를 벤더 없이 그대로 쓴다 — 토큰 0, 강사 화면에 「같은 제출 재사용」. staged 갈래(`CLASSROOM_SCORING_PIPELINE`)면 모델 판정만 가져오고 기계 판정은 이번 것을 쓴다(#1283) | **off** — 매번 벤더를 부른다 |
 | `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 
@@ -1277,8 +1282,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   실행에서 다시 돌고(그 전에 `failed` 로 남은 그런 칸도 같은 판정으로), 연속 3칸이면 멈춘다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
   (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 실측 건당 비용과 전체(제출 N × 회차 3) 예상 금액(돈이 든 칸이
   없는 줄은 「실측 없음」이고 합계에서 빠진다), p50·p90,
-  요구사항 단위 판정 일치율(기준 줄 대비, 필수·선택)·회차 사이 판정 흔들림(필수·선택), 미충족 재현율·오탐률(정답이 없는
-  운영 재료라 「—」), 문턱 열과 표본의 한계를 마크다운·CSV 로 낸다(비용 측정 전용 실험은 머리에 「점수 비교 아님」, #1261). `--bill` 은 벤더·모델·UTC 날짜·시간 창별 요청·입력·캐시 읽기/쓰기·출력·금액
+  요구사항 단위 판정 일치율(기준 줄 대비, 필수·선택)·회차 사이 판정 흔들림(필수·선택), 항목 판정 정확도·미충족 재현율·오탐률(사본에 항목별 정답이 있을 때만 — `compare_scoring_methods --material <사본> --fill-truth <CSV>` 로
+  채운다, 없으면 「—」, #1288), 문턱 열과 표본의 한계를 마크다운·CSV 로 낸다(비용 측정 전용 실험은 머리에 「점수 비교 아님」, #1261). `--bill` 은 벤더·모델·UTC 날짜·시간 창별 요청·입력·캐시 읽기/쓰기·출력·금액
   (청구 대조)을 낸다. 같은 `--name` 으로 회차·건수를 늘려 이어 갈 수 있다(먼저 2건 × 1회로 단가 실측). `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
 - **채점 방식 실험의 사본 재료(#1262)** — 운영에서 `manage.py export_experiment_material --classroom-submissions <id,…> --name
   <이름> --out <파일>`(강의실 앱, 읽기만)이 운영 채점이 끝난 강의실 제출을 가명 사본 파일 하나(tar.gz, 0600)로 꺼낸다: 소스 바이트
