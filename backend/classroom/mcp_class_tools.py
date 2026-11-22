@@ -132,6 +132,14 @@ _UPDATE_CLASS_INPUT = _object(
             "enum": [v for v, _ in REASONING_EFFORT_CHOICES],
             "description": "기본 추론 강도(low·medium·high) — 채점 모델이 추론 모델일 때만 뜻이 있다.",
         },
+        "escalation_model": {
+            "type": "string",
+            "maxLength": 200,
+            "description": (
+                "의심 재판정 모델 — staged 채점에서 「의심」 항목만 이 모델로 한 번 다시 판정한다(강사 키). 빈 문자열이면 "
+                "끈다. get_class 의 escalation_model_options 에 있는 모델만 된다."
+            ),
+        },
     },
     ["class_id"],
 )

@@ -157,7 +157,6 @@ describe("탭(#1033)", () => {
   it("강의실 채점 설정은 갈래·재사용 뒤에 이어 AI 채점 탭에 선다", () => {
     const keys = [
       "CLASSROOM_TWO_STEP_BUDGET_CHARS",
-      "CLASSROOM_ESCALATION_MODEL",
       "CLASSROOM_SCORE_REUSE",
       "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
       "CLASSROOM_SCORING_PIPELINE",
@@ -166,7 +165,6 @@ describe("탭(#1033)", () => {
     expect(settingsOfTab(rows, "ai").map((s) => s.key)).toEqual([
       "CLASSROOM_SCORING_PIPELINE",
       "CLASSROOM_SCORE_REUSE",
-      "CLASSROOM_ESCALATION_MODEL",
       "CLASSROOM_TWO_STEP_THRESHOLD_CHARS",
       "CLASSROOM_TWO_STEP_BUDGET_CHARS",
     ]);

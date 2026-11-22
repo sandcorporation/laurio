@@ -13,6 +13,7 @@ import {
   agentOnlyLabel,
   calculatorPath,
   changeChoice,
+  escalationCost,
   headline,
   NO_MEASUREMENT,
   providerLabel,
@@ -221,6 +222,33 @@ export function ScoringCalculator({ classId }: { classId: number }) {
           />
         </tbody>
       </table>
+      <EscalationLine calc={calc} />
+    </div>
+  );
+}
+
+function EscalationLine({ calc }: { calc: Calculation }) {
+  const line = escalationCost(calc.escalation);
+  return (
+    <div data-testid="calculator-escalation" className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[13px]">
+      <span className="text-[12px] text-ink/60">의심 재판정</span>
+      {line ? (
+        <>
+          <span data-testid="calculator-escalation-model" className="font-mono text-ink/70">
+            {line.model}
+          </span>
+          <span data-testid="calculator-escalation-cost" className="text-ink">
+            {line.perSuspect}
+          </span>
+          <span data-testid="calculator-escalation-rate" className="text-ink/60">
+            의심 비율 {line.rate}
+          </span>
+        </>
+      ) : (
+        <span data-testid="calculator-escalation-off" className="text-ink/60">
+          끔
+        </span>
+      )}
     </div>
   );
 }

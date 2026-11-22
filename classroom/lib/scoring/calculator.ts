@@ -7,6 +7,7 @@ import { formatKrw, formatManCount } from "./cost";
 export type ScoringCalculator = components["schemas"]["ScoringCalculatorOut"];
 export type CalculatorSpread = components["schemas"]["ScoringCalculatorSpreadOut"];
 export type CalculatorMethod = "single" | "agent";
+export type CalculatorEscalation = components["schemas"]["ScoringCalculatorEscalationOut"];
 
 export const NO_MEASUREMENT = "실측 없음";
 
@@ -93,4 +94,14 @@ function formatSeconds(seconds: number): string {
 export function headline(calc: ScoringCalculator): string {
   if (calc.selection.method === "agent") return spreadKrw(calc.agent.krw);
   return formatKrw(calc.single.krw, calc.single.open_ended);
+}
+
+/** 의심 재판정 줄(#1291) — 꺼졌으면 「끔」, 아니면 의심 한 건당 예상. 의심 비율은 실측이 생길 때까지 「실측 없음」. */
+export function escalationCost(escalation: CalculatorEscalation): { model: string; perSuspect: string; rate: string } | null {
+  if (!escalation.model_id || !escalation.per_suspect) return null;
+  return {
+    model: escalation.model_id,
+    perSuspect: `의심 한 건당 ${formatKrw(escalation.per_suspect.krw, escalation.per_suspect.open_ended)}`,
+    rate: escalation.suspect_rate == null ? NO_MEASUREMENT : `${Math.round(escalation.suspect_rate * 100)}%`,
+  };
 }
