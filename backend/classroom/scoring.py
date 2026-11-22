@@ -118,7 +118,7 @@ from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import agent_grading, machine_check, pending_scoring, score_reuse, scoring_cost
+from . import agent_grading, machine_check, pending_scoring, rule_derivation, score_reuse, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
@@ -852,6 +852,8 @@ class PreparedScoring:
     asset_kind: str = ""
     #: 두 걸음(#1286) — 있으면 `prompt`·`scoring_input` 은 1차(파일 고르기) 것이고, 벤더 호출이 2차를 짓는다.
     two_step: two_step.TwoStepPlan | None = None
+    #: staged 의 규칙 도출(#1293) — 준비가 부른 도출 호출의 결과. 결과 쓰기가 항목에 저장하고 토큰을 더한다.
+    derivation: rule_derivation.Derivation | None = None
 
 
 @dataclass
@@ -1094,11 +1096,10 @@ def _staged_split(
     checklist_items: list[ChecklistItem], raw: bytes
 ) -> tuple[list[ChecklistItem], tuple[dict, ...]]:
     """staged 의 기계 판정(#1283) — (모델에게 물을 항목, 기계가 정한 판정 항목). 규칙이 없거나 「판정 불가」인 항목은
-    모델에게 간다."""
+    모델에게 간다. 규칙은 강사 규칙이 먼저, 없으면 도출 규칙(#1293, `rule_derivation.current_rule`)."""
 
-    verdicts = machine_check.judge_items(
-        ((item.id, item.machine_rule) for item in checklist_items if item.machine_rule), raw
-    )
+    rules = ((item.id, rule_derivation.current_rule(item)) for item in checklist_items)
+    verdicts = machine_check.judge_items(((item_id, rule) for item_id, rule in rules if rule), raw)
     decided = {item_id: v for item_id, v in verdicts.items() if v.decided}
     machine_entries = tuple(_machine_entry(item.id, decided[item.id]) for item in checklist_items if item.id in decided)
     return [item for item in checklist_items if item.id not in decided], machine_entries
@@ -1292,12 +1293,16 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
 
     uses_agent = agent_grading.uses_agent(class_obj, "scoring")
     staged = head.staged and not uses_agent
+    # staged(#1293): 규칙이 없거나 글이 바뀐 항목은 여기서 한 번 도출한다 — 소스 스레드(DB 없음)의 동기 호출.
+    derivation = _derive_rules(head, model) if staged else None
     # staged(#1283): 기계 규칙이 정한 항목은 빼고, 남은 항목(판단·판정 불가)만 모델에게 묻는다.
     asked_items, machine_entries = (
         _staged_split(checklist_items, source.raw) if staged else (checklist_items, ())
     )
     if staged and not asked_items and syntax_check.synthetic_requirement() is None:
-        return _machine_only(head, syntax_check=syntax_check, model=model, machine_entries=machine_entries)
+        return _machine_only(
+            head, syntax_check=syntax_check, model=model, machine_entries=machine_entries, derivation=derivation
+        )
     source_text = source.text
     sent_files: list[SourceFile] = []
     sent_lines: dict[str, tuple[str, ...]] = {}
@@ -1327,7 +1332,11 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
                 f"소스가 모델 컨텍스트에 다 들어가지 않아 채점을 보류한다 (omitted_files={omission.omitted_files} "
                 f"omitted_bytes={omission.omitted_bytes} truncated_files={omission.truncated_files})"
             )
-            return Concluded(apply=lambda: _record_size_hold(submission, model=model, detail=detail))
+            return Concluded(
+                apply=lambda: _with_derivation(
+                    class_obj, derivation, lambda: _record_size_hold(submission, model=model, detail=detail)
+                )
+            )
 
     if plan is not None:
         prompt = plan.selection_prompt
@@ -1373,6 +1382,7 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         sent_files=tuple(sent_files) if plan is None else (),
         asset_kind=asset.kind,
         two_step=plan,
+        derivation=derivation,
         escalation_model=head.escalation_model if staged else "",
         escalation_effort=(
             problem.effective_reasoning_effort()
@@ -1383,7 +1393,12 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
 
 
 def _machine_only(
-    head: _Head, *, syntax_check: SyntaxCheckPass, model: str, machine_entries: tuple[dict, ...]
+    head: _Head,
+    *,
+    syntax_check: SyntaxCheckPass,
+    model: str,
+    machine_entries: tuple[dict, ...],
+    derivation: rule_derivation.Derivation | None = None,
 ) -> PreparedScoring:
     """staged 에서 모든 항목을 기계가 정했다(#1283) — 벤더를 부르지 않는 준비. 결과 쓰기·알림은 벤더를 부른 채점과
     같은 길(`finish_scoring`)이다."""
@@ -1408,7 +1423,63 @@ def _machine_only(
         staged=True,
         machine_entries=machine_entries,
         skip_vendor=True,
+        derivation=derivation,
     )
+
+
+def _derive_rules(head: _Head, model: str) -> rule_derivation.Derivation | None:
+    """staged 규칙 도출(#1293) — 강사 규칙이 없고 도출이 없거나 글이 바뀐 항목만 모아 이 시도의 연결로 한 번 묻는다.
+    받은 결과는 이 시도의 항목(메모리)에 바로 얹어 이번 판정에 쓰고, 저장은 결과 쓰기(`_save_derivation`)가 한다.
+    실패(벤더 오류·형식 오류)는 채점을 막지 않는다 — 그 항목들은 규칙 없이 가고 다음 채점이 다시 묻는다."""
+
+    pending = [item for item in head.checklist_items if rule_derivation.needs_derivation(item)]
+    if not pending:
+        return None
+    derive_model = rule_derivation.derivation_model(head.connection, model)
+    scoring_input = rule_derivation.build_input(
+        pending, submission_id=head.submission.id, problem_id=head.problem.id
+    )
+    try:
+        adapter = _scoring_adapter(
+            connection=head.connection,
+            model=derive_model,
+            log_context={"class_id": head.class_obj.id, "problem_id": head.problem.id},
+        )
+        output = adapter.score(scoring_input)
+    except LLMAdapterError as exc:
+        logger.warning("ClassroomSubmission(pk=%s) 규칙 도출 실패 — 규칙 없이 채점한다: %s", head.submission.id, exc)
+        return rule_derivation.Derivation(results=(), failed=True)
+    derivation = rule_derivation.parse_output(output, pending, model=derive_model)
+    by_id = {item.id: item for item in pending}
+    for derived in derivation.results:
+        item = by_id[derived.item_id]
+        item.derived_rule = derived.rule
+        item.derived_kind = derived.kind
+        item.derived_text_hash = derived.text_hash
+        item.derived_model = derived.model
+    return derivation
+
+
+def _save_derivation(class_obj: Class, derivation: rule_derivation.Derivation | None) -> None:
+    """도출 결과를 항목에 저장하고 도출 호출의 토큰을 이 클래스 사용량에 더한다(#1293). 결과 쓰기 트랜잭션 안에서 부른다."""
+
+    if derivation is None:
+        return
+    for derived in derivation.results:
+        ChecklistItem.objects.filter(pk=derived.item_id).update(
+            derived_rule=derived.rule,
+            derived_kind=derived.kind,
+            derived_text_hash=derived.text_hash,
+            derived_model=derived.model,
+        )
+    _record_token_usage(class_obj, derivation.total_tokens)
+
+
+def _with_derivation(
+    class_obj: Class, derivation: rule_derivation.Derivation | None, apply: Callable[[], dict]
+) -> dict:
+    _save_derivation(class_obj, derivation)
+    return apply()
 
 
 def _machine_only_outcome() -> VendorOutcome:
@@ -1522,6 +1593,8 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     """벤더가 돌려준 것을 DB 에 쓴다(#584) — 임대를 확인한 짧은 트랜잭션 안에서만 부른다.
     예전에 `score_classroom_submission_once` 의 `except` 사슬과 그 뒤가 하던 일 그대로다."""
 
+    # 규칙 도출(#1293)은 벤더 결과와 상관없이 저장한다 — 이미 돈 호출이다.
+    _save_derivation(prepared.class_obj, prepared.derivation)
     if outcome.second_step is not None:
         # 두 걸음(#1286) — 인용 대조·저장 프롬프트는 2차(실제로 판정한 소스) 것이다.
         prepared = outcome.second_step

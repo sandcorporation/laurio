@@ -141,11 +141,14 @@ def test_malformed_citations_are_dropped_not_failed():
 
 
 def _sequence(monkeypatch, bodies: list[list[dict]], sent: list[dict]) -> None:
-    from tests.classroom_scenarios import FakeVendorResponse, openai_verdicts_body
+    from tests.classroom_scenarios import FakeVendorResponse, derivation_body, is_derivation_request, openai_verdicts_body
 
     queue = list(bodies)
 
     def _handler(*args, **kwargs):
+        if is_derivation_request(kwargs["json"]):
+            # staged 의 규칙 도출(#1293) — 모두 「판단」으로 답하고 판정 호출로 세지 않는다.
+            return FakeVendorResponse(200, derivation_body(kwargs["json"]))
         sent.append(kwargs["json"])
         return FakeVendorResponse(200, openai_verdicts_body(queue.pop(0), total_tokens=10))
 

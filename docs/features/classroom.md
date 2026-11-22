@@ -141,6 +141,16 @@ data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippe
 지움)·MCP(`add_checklist_item`·`update_checklist_item`)로 읽고 쓰고, 참여자 응답에는 늘 null 이다. 같은 클래스 문제 복사는
 규칙을 옮기고 템플릿은 옮기지 않는다.
 
+**규칙 자동 도출**(#1293, `classroom.rule_derivation`) — 강사 규칙이 없는 항목은 staged 채점이 그 항목을 처음 만날 때
+항목 글에서 규칙을 도출해 둔다(`ChecklistItem.derived_rule`·`derived_kind`·`derived_text_hash`·`derived_model`). 도출할
+항목(도출이 없거나 글 해시가 바뀐 것)을 모아 그 시도의 연결로 **한 번** 묻는다 — 모델은 OpenAI 키면 `gpt-4.1-mini`,
+Claude 키면 `claude-haiku-5-5`, 연결이 받지 않거나 호환 서버면 문제의 채점 모델. 종류는 `static`(정적 꼴 규칙)·`judge`
+(판단)·`run`(실행 필요 — 저장만 하고 판정은 판단과 같다, **아무것도 실행하지 않는다**)이고, 꼴이 틀린 규칙은 `judge` 가
+된다. 강사 규칙이 있으면 도출하지 않고 강사 규칙이 먼저다. 도출 실패(벤더 오류·형식 오류)는 채점을 막지 않는다 — 그 항목은
+규칙 없이 가고 다음 채점이 다시 묻는다. 도출 토큰은 클래스 사용량에 더한다. 별도 큐·작업은 없다(준비의 뒤 절반에서 돈다).
+강사 응답의 항목에 `derived_kind`·`derived_rule` 을 읽기 전용으로 싣고(지금 글의 도출이 없으면 null) 참여자 응답에는 싣지
+않는다. 같은 클래스 문제 복사는 도출도 옮긴다. `single_call` 이면 도출하지 않는다.
+
 staged 의 모델 판정은 **근거 인용**(#1284, CONTEXT.md 「근거 인용」)을 함께 받는다 — 프롬프트의 소스에 줄 번호를 붙이고,
 판정 스키마에 항목마다 `citations`(`path`·`start_line`·`end_line`, 미충족은 비어도 됨)를 더한다(Anthropic 도 배열 모양 그대로).
 받은 인용은 프롬프트에 실은 파일과 대조해 인용마다 `matched` 를, 충족인데 맞는 인용이 하나도 없으면 `suspect` 를 남긴다 —

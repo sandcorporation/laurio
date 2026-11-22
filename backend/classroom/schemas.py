@@ -500,6 +500,10 @@ class ChecklistItemOut(Schema):
     hidden: bool = False
     #: 기계 확인 규칙(#1283) — 강사 응답에만 싣는다(참여자 응답은 늘 null).
     machine_rule: dict | None = None
+    #: 도출(#1293, 읽기 전용) — 지금 글에서 도출한 종류(`static`·`judge`·`run`)와 규칙(`static` 일 때만). 강사 응답에만
+    #: 싣고, 아직 도출하지 않았거나 그 뒤 글이 바뀌었으면 null.
+    derived_kind: str | None = None
+    derived_rule: dict | None = None
 
 
 class GradabilityWarningOut(Schema):
