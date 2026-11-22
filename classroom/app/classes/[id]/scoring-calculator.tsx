@@ -129,7 +129,7 @@ function Assumptions({
           value={a.source_files}
           onCommit={(value) => change("sourceChars", value === undefined ? undefined : value * a.source_chars_per_file)}
         />
-        <span data-testid="calculator-chars-per-file" className="text-xs text-muted-foreground">
+        <span data-testid="calculator-chars-per-file" className="text-xs text-ink/60">
           {perFileLabel(a.source_chars_per_file)}
         </span>
       </Field>
