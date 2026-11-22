@@ -163,7 +163,7 @@ class AgentPlatformUnavailable(LLMAdapterError):
 
 
 def platform_failure_kind(exc: BaseException) -> PlatformFailureKind:
-    """`AgentGraderError` 하나를 갈래로 — `scoring.agent_runner.request_run` 이 싣는 글(예외 이름 또는
+    """`AgentGraderError` 하나를 갈래로 — 실행기 호출(`request_run`)이 싣는 글(예외 이름 또는
     「HTTP <코드> …」)과 원인 예외로 가른다."""
 
     import urllib.error

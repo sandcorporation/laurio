@@ -50,7 +50,7 @@ from core.quality_review import (
 )
 from submissions.models import SubmissionAsset
 
-from . import agent_grading, pending_scoring, scoring, scoring_cost
+from . import agent_grading, pending_scoring, platform_failures, scoring, scoring_cost
 from .grading_guidelines import effective_grading_guideline_text
 from .instructors import active_participant_q
 from .models import (
@@ -626,6 +626,10 @@ def _apply_outcome(prepared: PreparedQuality, outcome: QualityOutcome) -> dict:
             scoring._mark_scoring_paused(class_obj, scoring.QUOTA_EXHAUSTED_AT)
         elif isinstance(exc, LLMAdapterUnreachableError):
             scoring._mark_scoring_paused(class_obj, scoring.SERVER_UNREACHABLE_AT)
+        elif isinstance(exc, agent_grading.AgentPlatformUnavailable):
+            # 실행기 장애(#1318) — 운영 신호(로그·오류 수집·경보 집계)만 판정 채점과 같이 남긴다. 완성도에는 점수·
+            # 실패 상한이 없어 클래스를 멈추거나 강사에게 알리지 않는다.
+            platform_failures.report(exc, product="classroom", model=prepared.model, job="quality")
         return _fail(sid, str(exc))()
 
     if isinstance(outcome.agent, agent_grading.AgentHeld):

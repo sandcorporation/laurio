@@ -850,6 +850,8 @@ def _notify_owner_of_failure_cap(submission: ClassroomSubmission) -> None:
             "problem_title": problem.title,
             "submission_id": submission.id,
             "attempt_number": submission.attempt_number,
+            # 「최근 제출」 카드와 같은 이름(`member.display_name`) — 소유자에게만 가는 알림이라 싣는다. 오류 수집·로그에는 없다.
+            "member_display_name": submission.member.display_name,
             "reason": failure_cap_reason(last),
         },
     )

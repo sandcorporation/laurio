@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
@@ -23,7 +24,9 @@ from django.utils import timezone
 from classroom import pending_scoring
 from classroom import scoring as classroom_scoring
 from classroom.models import Class, ClassroomScore, ClassroomScoringAttempt
-from classroom.tests.test_classroom_agent_method import _claude_key_class, _claude_stream, _Runner
+from classroom.tests.test_classroom_agent_method import _claude_key_class, _claude_stream, _patch_class, _Runner
+from classroom.tests.test_classroom_anthropic_key import _anthropic_vendor
+from classroom.tests.test_classroom_quality import REQUIRED, _board, _run, _submit, _world
 from core import agent_scoring
 from core.models import ClockOverride
 from notifications.models import NotificationType
@@ -41,6 +44,7 @@ from tests.classroom_scenarios import (
     mine,
     raise_vendor_network_error,
     run_scan,
+    set_anthropic_key,
     submit_repository,
 )
 
@@ -270,7 +274,7 @@ def test_every_failure_capped_score_tells_the_owner_which_attempt_and_why(client
     participant = login(client, uid="participant")
     class_id = create_class(client, owner["access"])
     problem = create_open_problem(client, owner["access"], class_id, required_labels=["README 가 있다"])
-    join_class(client, participant["access"], class_id, instructor_access=owner["access"])
+    join_class(client, participant["access"], class_id, instructor_access=owner["access"], display_name="김하늘")
     first = submit_repository(client, participant["access"], class_id, problem.id)["id"]
     raise_vendor_network_error(monkeypatch, requests.ReadTimeout("read timed out (180)"))
 
@@ -291,6 +295,8 @@ def test_every_failure_capped_score_tells_the_owner_which_attempt_and_why(client
         assert context["problem_id"] == problem.id
         assert context["problem_title"]
         assert context["attempt_number"] in (1, 2)
+        # 「최근 제출」 카드와 같은 이름 — 강사가 누구의 시도인지 안다.
+        assert context["member_display_name"] == "김하늘"
         assert context["reason"] == "채점 모델이 제한 시간 안에 답하지 않았습니다"
         assert "read timed out" not in context["reason"]
     # 낸 사람에게는 늘 가던 채점 완료 알림만 간다.
@@ -324,3 +330,37 @@ def test_the_metric_window_reads_the_recorded_failures(db):
     report(AgentPlatformUnavailable("x", kind="unreachable"), product="classroom", model="m")
     assert alerts.gather(timezone.now().timestamp()).results(15)["grader_unreachable"] == 1
     assert alerts.gather(moment.timestamp()).results(15)["grader_unreachable"] == 0
+
+
+# --- 완성도 검사 ------------------------------------------------------------------------------
+
+
+def test_the_quality_check_reports_an_unreachable_grader_but_does_not_pause_or_notify(
+    client, start, monkeypatch, captured, caplog
+):
+    """완성도 검사도 같은 실행기 장애를 운영에 남긴다(로그·오류 수집·경보 집계) — 점수·실패 상한이 없으니
+    클래스를 멈추거나 강사에게 알리지 않고, 그 검사만 실패로 남는다."""
+
+    _anthropic_vendor(monkeypatch)
+    world = _world(client, with_key=False)
+    instructor = world["instructor"]["access"]
+    assert set_anthropic_key(client, instructor, world["class_id"]).status_code == 200
+    assert _patch_class(client, instructor, world["class_id"], {"quality_method": "agent"}).status_code == 200
+    _submit(client, world, "p-a", f"# {REQUIRED}\n")
+
+    def down(spec, repo_zip: bytes, **kwargs):
+        raise AgentGraderError("URLError")
+
+    monkeypatch.setattr(agent_scoring, "request_run", down)
+    with caplog.at_level(logging.WARNING, logger="classroom.platform_failures"):
+        assert _run(client, world) == {"queued_count": 1}
+
+    assert _board(client, world)["failed_count"] == 1
+    assert Class.objects.get(pk=world["class_id"]).scoring_platform_unavailable_at is None
+    assert PAUSED not in _types(client, instructor)
+    [event] = captured
+    assert event["fingerprint"] == ["agent-grader-unavailable", "unreachable"]
+    assert "submission_id" not in event["tags"]
+    assert "classroom_quality" not in event["contexts"]
+    assert _metric_count(start) == 1
+    assert any(r.levelname == "WARNING" and "완성도 검사" in r.getMessage() for r in caplog.records)

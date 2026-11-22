@@ -45,8 +45,12 @@ export function describeNotification(notification: NotificationRow): string {
       const attemptNumber =
         typeof context.attempt_number === "number" ? context.attempt_number : null;
       const attemptLabel = attemptNumber !== null ? `${attemptNumber}번째 시도` : "시도";
+      const memberLabel =
+        typeof context.member_display_name === "string" && context.member_display_name
+          ? ` ${context.member_display_name} 님의`
+          : "";
       const reason = typeof context.reason === "string" && context.reason ? ` — ${context.reason}` : "";
-      return `'${className}' 클래스 '${problemTitle}' 문제 ${attemptLabel}가 채점에 거듭 실패해 자동으로 미달 처리됐습니다${reason}.`;
+      return `'${className}' 클래스${memberLabel} '${problemTitle}' 문제 ${attemptLabel}가 채점에 거듭 실패해 자동으로 미달 처리됐습니다${reason}.`;
     }
     case "classroom_contest_entry_rejected": {
       const problemTitle =
