@@ -210,7 +210,9 @@ def experiment_call(item: Item, *, model: str, api_key: str | None) -> Classroom
     )
 
 
-def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> ClassroomCallResult:
+def experiment_staged_call(
+    item: Item, *, model: str, api_key: str | None, escalation_model: str = ""
+) -> ClassroomCallResult:
     """강의실 운영 채점의 staged 갈래(#1283~#1286)를 사본 위에서 그대로 — 기계 판정(강사 규칙)·줄 번호 인용·의심 올림·큰
     제출 두 걸음을 운영 설정 기본값대로 돈다. 같은 입력 재사용(#1287)은 끈다(사본에는 이전 점수가 없다). 도출(#1293)은
     사본에 도출 칸이 없어 칸마다 새로 한다(`_derive_rules`, 저장하지 않고 그 호출의 비용을 칸에 더한다)."""
@@ -231,7 +233,13 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
     asset = SubmissionAsset(id=1, kind=item.asset_kind, label="")
     anthropic = model.startswith("claude-")
     connection = (anthropic_key_connection if anthropic else openai_key_connection)(api_key or "")
-    class_obj = Class(id=0)
+    # 의심 재판정은 클래스 칸(#1291) — 사본 클래스는 비어 있어 줄의 `+<올림 모델>` 을 거기 넣고, 운영과 같은
+    # `usable_escalation_model`(연결 종류의 단가표에 있는 모델만)을 그대로 탄다.
+    class_obj = Class(
+        id=0,
+        escalation_model=escalation_model,
+        scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY if anthropic else Class.ScoringConnectionKind.OPENAI_KEY,
+    )
     head = _Head(
         submission=submission,
         owner="experiment",
@@ -242,7 +250,6 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
         asset=asset,
         pause_recheck=False,
         staged=True,
-        # 의심 재판정은 클래스 칸(#1291) — 사본 클래스는 비어 있어 끈다.
         escalation_model=scoring_cost.usable_escalation_model(class_obj),
         two_step_threshold=classroom_two_step_threshold_chars(),
         two_step_budget=classroom_two_step_budget_chars(),
