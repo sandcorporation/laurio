@@ -62,16 +62,19 @@ orca-ide automations create --name "CI 빨강 전달" --trigger "* * * * *" \
 python3 scripts/ci/ci_red_relay.py mark     # 처음 켤 때 — 지금 열린 이슈를 보내지 않고 기록만
 ```
 
-## 대표 몫 — main ruleset 우회
+## 대표 몫 — 열림(2026-11-23, 대표·대장) — 지금 규칙 두 묶음
 
-핫픽스 길은 main ruleset 「main: PR 검사 통과 필수」가 직접 push 를 막는 동안 열리지 않는다(`hotfix.py` 가 「대표 몫」으로 거절한다).
-우회는 ruleset 하나에 통째로 걸리므로(강제 push 금지도 같이 풀린다) 규칙을 나눠서 연다(#1325 PR 본문 「대표 몫」과 같다).
+main 보호 규칙을 둘로 나눠 핫픽스 길을 열었다(대장 #5811). 우회가 ruleset 하나에 통째로 걸려(강제 push 금지도 같이 풀린다)
+나눴다(#1325 PR 본문 「대표 몫」).
 
-1. 새 ruleset 「main: 강제 push·삭제 금지」 — 대상 기본 브랜치(`~DEFAULT_BRANCH`), 규칙 `deletion`·`non_fast_forward`, 우회 없음.
-2. ruleset 26845555 「main: PR 검사 통과 필수」 — `deletion`·`non_fast_forward` 를 1로 옮겨 빼고(`required_status_checks` 「결과」·
-   `merge_queue` 는 그대로), 우회 목록에 Repository role **Admin**(actor_type `RepositoryRole`, actor_id 5), 방식 **always**
-   (`pull_request` 방식은 PR 병합만 풀어 직접 push 가 여전히 막힌다). 세션들이 쓰는 계정이 저장소 admin 이다 —
-   `spec branches` ruleset(27792646)의 우회와 같은 꼴.
+1. ruleset 27845997 「main: 강제 push·삭제 금지」 — 대상 기본 브랜치, 규칙 `deletion`·`non_fast_forward`, **우회 없음**.
+2. ruleset 26845555 「main: PR 검사 통과 필수」 — `required_status_checks`(「결과」)·`merge_queue`, 우회 Repository role
+   **Admin** 방식 **always** — 세션들이 쓰는 계정이 저장소 admin 이라 main 직접 push 가 막히지 않는다. `spec branches`
+   ruleset(27792646)의 우회와 같은 꼴.
+
+막히지 않는다고 길이 열린 것은 아니다 — 핫픽스 길은 대장 지시서로만 쓴다. 그 밖의 main 직접 push 는 [티켓을 닫는 기준](ticket-done.md)대로
+하지 않는다. 직접 push 도 pre-push 훅(「로컬 고르기 기록」, [커밋 훅](commit-hooks.md))을 지난다. `hotfix.py` 가 ruleset 거절을 「대표 몫」으로
+알리는 길은 규칙이 다시 막혔을 때를 위해 남아 있다.
 
 ## 시험
 
