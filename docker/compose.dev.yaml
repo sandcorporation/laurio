@@ -416,7 +416,7 @@ services:
       # celery-broker.sh` 가 보는 바로 그 경로가 끊긴다).
       CELERY_TASK_ALWAYS_EAGER: "false"
     # beat 도 이 안에서 돈다(`-B`, #859) — 배포 compose 와 같은 모양이다(prefork 자식 수 고정까지).
-    command: celery -A config worker -B --schedule /tmp/celerybeat-schedule --concurrency 2 --loglevel info
+    command: celery -A config worker -B --concurrency 2 --loglevel info
 
 
   frontend:
