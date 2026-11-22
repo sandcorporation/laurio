@@ -170,6 +170,7 @@ test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호
 }) => {
   const { classId } = await newClass(page, "method");
   await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("vendor-key-openai-change").click();
   await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
   await page.getByTestId("openai-key-submit").click();
   await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
