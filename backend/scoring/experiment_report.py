@@ -42,6 +42,8 @@ MIN_REQUIRED_AGREEMENT = 0.95
 #: 14개에서 판정 0.28개 ≈ 2%p.
 FLIP_SLACK = 0.02
 FULL_REPEAT = 3  # 「전체」 예상 금액의 회차
+#: 사람이 매긴 항목별 정답을 칸으로 남기는 줄(#1288) — 보고표가 이 줄을 줄로 세지 않고 정확도·재현율·오탐률의 기준으로만 쓴다.
+TRUTH_ROW = "정답:사람"
 CRITERIA = ("diff", "max_diff", "spearman", "stability", "evidence", "trouble", "cost", "p90", "agreement", "flip")
 
 
@@ -81,6 +83,10 @@ class RowReport:
     agreement_optional: float | None = None
     flip_required: float | None = None  # 회차 사이 필수 판정 흔들림
     flip_optional: float | None = None
+    # 사람이 매긴 항목별 정답(#1288)과 견준 것 — 정답이 있는 재료만. 미충족이 찾아야 할 쪽이다.
+    item_accuracy: float | None = None  # 정답과 판정이 같은 칸의 몫
+    unmet_recall: float | None = None  # 정답이 미충족인 칸 가운데 미충족으로 판정한 몫
+    false_positive_rate: float | None = None  # 정답이 충족인 칸 가운데 미충족으로 판정한 몫(오탐)
 
 
 Verdicts = dict[tuple[int, int], list[bool]]  # (제출, 요구사항) → 회차마다의 충족
@@ -102,6 +108,27 @@ def agreement(mine: Verdicts, base: Verdicts, *, required: frozenset[int], want_
     if not keys:
         return None
     return mean(sum(a == b for a in mine[k] for b in base[k]) / (len(mine[k]) * len(base[k])) for k in keys)
+
+
+def truth_scores(mine: Verdicts, truth: Verdicts) -> tuple[float | None, float | None, float | None]:
+    """정답(칸마다 판정 하나)과 이 줄의 판정(회차마다)을 칸·회차 단위로 견준다 → (정확도, 미충족 재현율, 오탐률).
+    견줄 칸이 없으면 셋 다 None, 정답에 미충족(충족)이 없으면 재현율(오탐률)만 None."""
+
+    hits = total = unmet = unmet_found = met = met_flagged = 0
+    for key, answers in truth.items():
+        for judged in mine.get(key, []):
+            expected = answers[0]
+            total += 1
+            hits += judged == expected
+            if expected:
+                met += 1
+                met_flagged += not judged
+            else:
+                unmet += 1
+                unmet_found += not judged
+    if not total:
+        return None, None, None
+    return hits / total, unmet_found / unmet if unmet else None, met_flagged / met if met else None
 
 
 def flip_rate(mine: Verdicts, *, required: frozenset[int], want_required: bool) -> float | None:
@@ -182,6 +209,7 @@ def _row_report(
     *,
     base_verdicts: Verdicts,
     required: frozenset[int],
+    truth: Verdicts | None = None,
 ) -> RowReport:
     per = _per_submission(rows)
     mine = _verdicts(rows)
@@ -196,6 +224,7 @@ def _row_report(
     # 돈이 든 칸이 하나도 없으면 실측이 없다(#1257) — 0 으로 세면 전체 예상 합계를 낮춰 보인다.
     measured = any(r.cost_usd > 0 for r in rows)
     cost = sum((r.cost_usd for r in rows), Decimal(0)) / len(rows) if measured else None
+    accuracy, recall, false_positive = truth_scores(mine, truth) if truth else (None, None, None)
     report = RowReport(
         row=name,
         submissions=len(per),
@@ -217,6 +246,9 @@ def _row_report(
         agreement_optional=agreement(mine, base_verdicts, required=required, want_required=False) if compared else None,
         flip_required=flip_rate(mine, required=required, want_required=True),
         flip_optional=flip_rate(mine, required=required, want_required=False),
+        item_accuracy=accuracy,
+        unmet_recall=recall,
+        false_positive_rate=false_positive,
     )
     passes: dict[str, bool | None] = dict.fromkeys(CRITERIA)
     if report.runs:
@@ -254,12 +286,14 @@ def report_rows(
     `row_names`(실험의 줄)에 있는데 남은 칸이 없는 줄도 빈 줄로 보인다 — 빠지면 그 줄이 안 돈 것을 놓친다.
     `required_ids` 는 공모전의 필수 요구사항 — 판정 일치율·흔들림을 필수와 그 밖으로 나눈다."""
 
-    by_row: dict[str, list[RunRow]] = {name: [] for name in row_names}
+    by_row: dict[str, list[RunRow]] = {name: [] for name in row_names if name != TRUTH_ROW}
+    truth_runs = [r for r in runs if r.row == TRUTH_ROW]
     for r in runs:
-        by_row.setdefault(r.row, []).append(r)
+        if r.row != TRUTH_ROW:
+            by_row.setdefault(r.row, []).append(r)
     base_rows = by_row.get(baseline, [])
     base_scores = _per_submission(base_rows)
-    common = {"base_verdicts": _verdicts(base_rows), "required": required_ids}
+    common = {"base_verdicts": _verdicts(base_rows), "required": required_ids, "truth": _verdicts(truth_runs)}
     base_report = _row_report(baseline, base_rows, base_scores, None, **common) if baseline in by_row else None
     out = [base_report] if base_report is not None else []
     out += [
@@ -303,12 +337,16 @@ def _mark(value: bool | None) -> str:
 
 HEADERS = [
     "줄", "제출", "회차", "채점", "보류", "실패", "평균 차", "최대 차", "순위 일치", "흔들림", "근거 실재율",
-    "필수 판정 일치", "선택 판정 일치", "필수 판정 흔들림", "선택 판정 흔들림", "미충족 재현율", "오탐률",
+    "필수 판정 일치", "선택 판정 일치", "필수 판정 흔들림", "선택 판정 흔들림", "항목 판정 정확도", "미충족 재현율", "오탐률",
     "실측 건당 비용(USD)", "전체 예상(USD)", "p50(초)", "p90(초)",
     "평균 차 ≤5", "최대 차 ≤15", "순위 ≥0.8", "흔들림 ≤기준+2", "근거 ≥95%", "실패·보류 ≤1/16", "비용 ≤기준/3", "p90 ≤300초",
     "필수 일치 ≥95%", "필수 판정 흔들림 ≤기준+2%p",
 ]
 NO_TRUTH_NOTE = "정답(알려진 미충족)이 없는 재료 — 미충족 재현율·오탐률은 「—」."
+TRUTH_NOTE = (
+    "항목 판정 정확도·미충족 재현율·오탐률은 사람이 매긴 항목별 정답과 견준 값 — 미충족이 찾는 쪽이다"
+    "(재현율 = 정답 미충족 중 미충족으로 판정, 오탐률 = 정답 충족 중 미충족으로 판정). 정답 없는 제출은 뺐다."
+)
 COST_ONLY_NOTE = "비용 측정 전용 — 점수 비교 아님(뽑힌 재료의 기준 점수가 모두 같았다)."
 
 
@@ -332,7 +370,8 @@ def _cells(r: RowReport, *, repeat: int, full_submissions: int) -> list[str]:
         _fmt(r.mean_diff, ".2f"), _fmt(r.max_diff, ".2f"), _fmt(r.spearman, ".3f"), stability,
         _pct(r.evidence_rate),
         _pct(r.agreement_required), _pct(r.agreement_optional),
-        _pct(r.flip_required), _pct(r.flip_optional), "—", "—",
+        _pct(r.flip_required), _pct(r.flip_optional),
+        _pct(r.item_accuracy), _pct(r.unmet_recall), _pct(r.false_positive_rate),
         _fmt(r.cost_per_run, "f"),
         NOT_MEASURED if (e := full_estimate_usd(r, full_submissions)) is None else format(e, "f"),
         _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),

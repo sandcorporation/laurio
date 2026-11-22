@@ -209,3 +209,32 @@ def test_all_scores_and_verdicts_met_like_contest3_four_s4():
     md = to_markdown("contest3-four-s4", reports, [COST_ONLY_NOTE, NO_TRUTH_NOTE], repeat=2, full_submissions=16)
     assert "| single_call:gpt-4.1-mini | 4 | 8 | 8 | 0 | 0 | 0.00 | 0.00 | — | 0.00 | 100.0% | 100.0% | 100.0% | 0.0% | 0.0% | — | — |" in md
     assert f"- {COST_ONLY_NOTE}" in md and f"- {NO_TRUTH_NOTE}" in md
+
+
+def test_truth_scores_count_cells_by_expected_class():
+    from scoring.experiment_report import TRUTH_ROW
+
+    truth = [_run(1, TRUTH_ROW, 1, None, verdicts=((10, True), (11, False), (12, False)))]
+    mine = [
+        _run(1, CHEAP, 1, 50.0, verdicts=((10, False), (11, False), (12, True))),
+        _run(1, CHEAP, 2, 50.0, verdicts=((10, True), (11, False), (12, False))),
+    ]
+
+    [row] = report_rows([*truth, *mine], baseline=CHEAP, row_names=[CHEAP, TRUTH_ROW])
+
+    # 여섯 칸 중 맞은 것: 10(회차2)·11(둘)·12(회차2) = 4/6. 미충족 정답 4칸 중 미충족 판정 3, 충족 정답 2칸 중 미충족 판정 1.
+    assert row.row == CHEAP
+    assert row.item_accuracy == pytest.approx(4 / 6)
+    assert row.unmet_recall == pytest.approx(3 / 4)
+    assert row.false_positive_rate == pytest.approx(1 / 2)
+
+
+def test_truth_scores_are_none_without_truth_or_without_a_class():
+    from scoring.experiment_report import TRUTH_ROW
+
+    [plain] = report_rows([_run(1, CHEAP, 1, 50.0, verdicts=((10, True),))], baseline=CHEAP)
+    assert (plain.item_accuracy, plain.unmet_recall, plain.false_positive_rate) == (None, None, None)
+
+    all_met = [_run(1, TRUTH_ROW, 1, None, verdicts=((10, True),)), _run(1, CHEAP, 1, 50.0, verdicts=((10, True),))]
+    [row] = report_rows(all_met, baseline=CHEAP)
+    assert (row.item_accuracy, row.unmet_recall, row.false_positive_rate) == (1.0, None, 0.0)

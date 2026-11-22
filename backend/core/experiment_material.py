@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import csv
+import dataclasses
 import hashlib
 import io
 import json
@@ -59,6 +61,14 @@ class ProductionVerdict:
 
 
 @dataclass(frozen=True)
+class TruthVerdict:
+    """사람이 매긴 정답 — 항목 하나가 충족인가(#1288). 근거 글은 받지 않는다."""
+
+    checklist_item_id: int
+    is_met: bool
+
+
+@dataclass(frozen=True)
 class ProblemText:
     title: str
     description: str
@@ -80,6 +90,8 @@ class Item:
     checklist: tuple[ChecklistEntry, ...]
     verdicts: tuple[ProductionVerdict, ...]
     model_version: str
+    #: 항목별 정답(#1288) — 비었으면 정답이 없는 재료다. 명령 `compare_scoring_methods --fill-truth` 가 채운다.
+    truth: tuple[TruthVerdict, ...] = ()
 
     @property
     def key(self) -> int:
@@ -140,6 +152,7 @@ def _item_json(item: Item) -> bytes:
         "checklist": [c.__dict__ for c in item.checklist],
         "verdicts": [v.__dict__ for v in item.verdicts],
         "model_version": item.model_version,
+        **({"truth": [t.__dict__ for t in item.truth]} if item.truth else {}),
     }
     return json.dumps(body, ensure_ascii=False, sort_keys=True).encode()
 
@@ -223,7 +236,13 @@ def _parse_item(raw: dict[str, object], source: bytes) -> Item:
     problem = raw.get("problem")
     checklist = raw.get("checklist")
     verdicts = raw.get("verdicts")
-    if not isinstance(problem, dict) or not isinstance(checklist, list) or not isinstance(verdicts, list):
+    truth = raw.get("truth", [])
+    if (
+        not isinstance(problem, dict)
+        or not isinstance(checklist, list)
+        or not isinstance(verdicts, list)
+        or not isinstance(truth, list)
+    ):
         raise MaterialError("사본 항목의 꼴이 다르다")
     try:
         return Item(
@@ -234,6 +253,7 @@ def _parse_item(raw: dict[str, object], source: bytes) -> Item:
             checklist=tuple(ChecklistEntry(**c) for c in checklist),
             verdicts=tuple(ProductionVerdict(**v) for v in verdicts),
             model_version=_str(raw.get("model_version"), "model_version"),
+            truth=tuple(TruthVerdict(**t) for t in truth),
         )
     except TypeError as exc:
         raise MaterialError(f"사본 항목의 꼴이 다르다: {exc}") from exc
@@ -304,3 +324,58 @@ class ClassroomExperimentCall(Protocol):
 
 
 CLASSROOM_EXPERIMENT_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 채점 한 번 호출(실험)", "classroom.apps")
+
+
+# ── 항목별 정답(#1288) ────────────────────────────────────────────────────────────────────────────────
+
+_MET_WORDS = {"충족": True, "met": True, "true": True, "1": True, "미충족": False, "unmet": False, "false": False, "0": False}
+TRUTH_COLUMNS = ("material_id", "item_id", "is_met")
+
+
+def parse_truth_csv(text: str, items: Sequence[Item]) -> dict[str, tuple[TruthVerdict, ...]]:
+    """정답 CSV(`material_id,item_id,is_met`) → 가명 id 별 정답. **원문·학생 정보는 받지 않는다** — 열이 셋뿐이다.
+
+    거절: 열이 다르다 · 모르는 가명 id · 그 제출의 체크리스트에 없는 항목 id · 같은 칸이 둘 · 충족 값을 못 읽는다 ·
+    CSV 에 나온 제출의 항목이 빠졌다(정답은 제출마다 체크리스트 전부여야 한다 — 일부만 있으면 정확도가 기울어진다)."""
+
+    reader = csv.DictReader(io.StringIO(text))
+    if tuple(reader.fieldnames or ()) != TRUTH_COLUMNS:
+        raise MaterialError(f"정답 CSV 의 열은 {','.join(TRUTH_COLUMNS)} 이어야 한다")
+    by_id = {i.material_id: i for i in items}
+    seen: dict[str, dict[int, bool]] = {}
+    for line_no, row in enumerate(reader, start=2):
+        material_id = (row["material_id"] or "").strip()
+        item = by_id.get(material_id)
+        if item is None:
+            raise MaterialError(f"{line_no}행: 재료에 없는 제출 id")
+        try:
+            item_id = int((row["item_id"] or "").strip())
+        except ValueError as exc:
+            raise MaterialError(f"{line_no}행: 항목 id 가 숫자가 아니다") from exc
+        if item_id not in {c.id for c in item.checklist}:
+            raise MaterialError(f"{line_no}행: 그 제출의 체크리스트에 없는 항목 id {item_id}")
+        met = _MET_WORDS.get((row["is_met"] or "").strip().lower())
+        if met is None:
+            raise MaterialError(f"{line_no}행: 충족 값을 읽을 수 없다(충족·미충족·true·false)")
+        if item_id in seen.setdefault(material_id, {}):
+            raise MaterialError(f"{line_no}행: 같은 칸이 두 번 있다(항목 id {item_id})")
+        seen[material_id][item_id] = met
+    out: dict[str, tuple[TruthVerdict, ...]] = {}
+    for material_id, judged in seen.items():
+        missing = sorted({c.id for c in by_id[material_id].checklist} - set(judged))
+        if missing:
+            raise MaterialError(f"제출 {material_id} 의 항목 {missing} 정답이 빠졌다")
+        out[material_id] = tuple(TruthVerdict(i, judged[i]) for i in sorted(judged))
+    return out
+
+
+def fill_truth(path: Path, truth: dict[str, tuple[TruthVerdict, ...]], *, repo_root: Path) -> int:
+    """사본 파일의 항목에 정답을 채워 같은 자리에 다시 쓴다(0600, 체크섬 새로). 채운 제출 수를 돌려준다."""
+
+    material = load(path, repo_root=repo_root)
+    items = [dataclasses.replace(i, truth=truth.get(i.material_id, i.truth)) for i in material.items]
+    staging = path.with_name(path.name + ".filling")
+    staging.unlink(missing_ok=True)
+    write(staging, name=material.manifest.name, exported_at=material.manifest.exported_at, items=items)
+    os.replace(staging, path)
+    return sum(1 for i in items if i.truth)
