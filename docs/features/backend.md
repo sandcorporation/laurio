@@ -1230,7 +1230,8 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 
 **에이전트 채점**(#999·#1000·#1001, ADR-0082) — 채점(`submission-scoring`)의 받아들이는 조건·보류·시도 기록은 위 「제출」
 절의 에이전트 채점 단락이 말한다. 여기는 실행 구조다. `agent-grader` 서비스(`scoring.agent_runner.request_run`)가 마감 커밋의
-박제본 zip 을 실행마다 읽기 전용 디렉터리에 풀고(경로 검사·0444), 빈 HOME 으로 CLI(Claude Code 또는 Codex)를 띄워 필요한
+박제본 zip 을 실행마다 읽기 전용 디렉터리에 풀고(경로 검사·0444 — 벤더·빌드 경로 `.git/`·`node_modules/`·`dist/`·잠금 파일·바이너리는
+선별의 `vendor` 묶음과 같은 판정 `core.vendor_paths` 로 풀지 않고 빠진 수·바이트를 서비스 로그에 한 줄 남긴다, 크기·항목 수 상한은 푸는 것만 센다, #1300), 빈 HOME 으로 CLI(Claude Code 또는 Codex)를 띄워 필요한
 파일만 읽게 한다 — 참가자 코드는 실행하지 않고, 진짜 키는 없고(실행 토큰만), 네트워크는 `llm-proxy` 뿐이다. 동시 실행 2,
 실행당 10분. 채점·완성도 리뷰는 같은 `run_agent_job` 을 쓰고(`AgentJob.purpose` 가 `scoring`·`quality`) 한 실행으로 묶지
 않는다. 결과는 같은 `Score`·`SubmissionQualityReview` 이고 화면·알림·순위·박제는 그대로다.

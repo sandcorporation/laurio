@@ -214,7 +214,26 @@ def test_runner_uses_only_the_standard_library() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             roots.add(node.module.split(".")[0])
     # 옆 파일 하나(우리 루프 `selfloop.py`, #1245)는 이미지에 같이 복사된다 — backend 에서는 `scoring.selfloop` 이다.
-    assert roots - {"__future__", "scoring", "selfloop"} <= set(sys.stdlib_module_names)
+    assert roots - {"__future__", "scoring", "selfloop", "core", "vendor_paths"} <= set(sys.stdlib_module_names)
+
+
+def test_vendor_rules_ship_to_the_image_as_one_stdlib_file() -> None:
+    """#1300: 실행기와 선별이 같은 판정 파일 하나를 쓴다 — 이미지에 옆 파일로 복사된다."""
+
+    from core import vendor_paths
+
+    tree = ast.parse(Path(vendor_paths.__file__).read_text(encoding="utf-8"))
+    roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            roots.add(node.module.split(".")[0])
+    assert roots - {"__future__"} <= set(sys.stdlib_module_names)
+    dockerfile = (REPO_ROOT / "docker" / "agent-grader.Dockerfile").read_text(encoding="utf-8")
+    assert "COPY backend/core/vendor_paths.py /app/vendor_paths.py" in dockerfile
+    ignore = (REPO_ROOT / "docker" / "agent-grader.Dockerfile.dockerignore").read_text(encoding="utf-8")
+    assert "!backend/core/vendor_paths.py" in ignore.splitlines()
 
 
 # ── 박제본 풀기 ──────────────────────────────────────────────────────────────────────────────────────────
@@ -274,6 +293,72 @@ def test_extract_refuses_archives_over_the_size_cap(tmp_path: Path, monkeypatch:
     with pytest.raises(ar.RunRejected) as caught:
         ar.extract_repo(_write_zip(tmp_path, _zip({"big.txt": "x" * 100})), tmp_path / "repo", repo_kind="upload")
     assert caught.value.reason == "repo_zip_too_large"
+
+
+_UPLOAD_WITH_HISTORY = {
+    "app.py": "print(1)\n",
+    "src/index.js": "export {}\n",
+    "tests/test_app.py": "def test(): pass\n",
+    "docs/guide.md": "# guide\n",
+    "package.json": "{}\n",
+    "package-lock.json": "{}\n",
+    ".git/HEAD": "ref: refs/heads/main\n",
+    ".git/objects/ab/cdef": "blob",
+    "node_modules/left-pad/index.js": "module.exports = 1\n",
+    "web/dist/bundle.js": "x\n",
+    "logo.png": b"\x89PNG",
+}
+
+
+def test_extract_skips_history_and_vendor_paths_but_keeps_source_tests_and_docs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#1300: 올린 zip 의 `.git/`·`node_modules/`·잠금 파일은 풀지 않는다 — 시험·문서는 푼다."""
+
+    dest = tmp_path / "repo"
+    assert ar.extract_repo(_write_zip(tmp_path, _zip(_UPLOAD_WITH_HISTORY)), dest, repo_kind="upload") == ""
+    kept = sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file())
+    assert kept == ["app.py", "docs/guide.md", "package.json", "src/index.js", "tests/test_app.py"]
+    assert not (dest / ".git").exists() and not (dest / "node_modules").exists()
+    assert "skipped vendor paths=6" in capsys.readouterr().err
+
+
+def test_extract_judges_vendor_paths_after_stripping_the_zipball_root(tmp_path: Path) -> None:
+    data = _zip({"owner-repo-abc/app.py": "1", "owner-repo-abc/.git/HEAD": "x", "owner-repo-abc/yarn.lock": "x"})
+    dest = tmp_path / "repo"
+    assert ar.extract_repo(_write_zip(tmp_path, data), dest, repo_kind="repository") == "owner-repo-abc"
+    assert sorted(p.name for p in dest.iterdir()) == ["app.py"]
+
+
+def test_extract_keeps_a_zip_without_history_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    dest = tmp_path / "repo"
+    ar.extract_repo(_write_zip(tmp_path, _zip({"app.py": "1", "tests/t.py": "2", "README.md": "3"})), dest, repo_kind="upload")
+    assert sorted(p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()) == ["README.md", "app.py", "tests/t.py"]
+    assert "skipped" not in capsys.readouterr().err
+
+
+def test_extract_caps_count_only_what_is_extracted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`.git` 이 커도 그것을 빼면 상한 안에 드는 zip 은 거절하지 않는다."""
+
+    monkeypatch.setattr(ar, "MAX_EXTRACTED_BYTES", 50)
+    monkeypatch.setattr(ar, "MAX_ZIP_ENTRIES", 3)
+    files = {"app.py": "x" * 10, **{f".git/objects/{i:02d}": "y" * 100 for i in range(10)}}
+    dest = tmp_path / "repo"
+    ar.extract_repo(_write_zip(tmp_path, _zip(files)), dest, repo_kind="upload")
+    assert [p.name for p in dest.iterdir()] == ["app.py"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [".git/HEAD", "a/node_modules/x.js", "dist/a.js", "pnpm-lock.yaml", "img/a.PNG", ".venv/lib/x.py",
+     "app.py", "tests/t.py", "docs/a.md", "package.json", "README.md", "scratch/n.txt"],
+)
+def test_runner_vendor_judgment_is_the_selection_judgment(path: str) -> None:
+    """판정은 강의실·공모전 선별(`core.source_selection.excluded_kind`)과 한 자리다."""
+
+    from core.source_selection import excluded_kind
+
+    assert ar.vendor_paths.is_vendor_path(path) == (excluded_kind(path) == "vendor")
 
 
 def test_extract_refuses_what_is_not_a_zip(tmp_path: Path) -> None:

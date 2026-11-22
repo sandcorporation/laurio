@@ -2,3 +2,4 @@
 *
 !backend/scoring/agent_runner.py
 !backend/scoring/selfloop.py
+!backend/core/vendor_paths.py
