@@ -3,6 +3,15 @@
 // 캡처 미리보기 위의 가리기·표시 편집기 (#1241). 가리기는 불투명 칠(되돌릴 수 없게 그림에 구워진다),
 // 표시는 펜. 획은 원본 그림 좌표로 쌓아 두고 매번 다시 그린다 — 되돌리기·지우기가 그 목록만 고친다.
 
+import {
+  clearHistory,
+  emptyHistory,
+  pushStroke,
+  redoStroke,
+  undoShortcut,
+  undoStroke,
+  type StrokeHistory,
+} from "./markup-history";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 export type MarkupTool = "redact" | "pen";
@@ -43,7 +52,8 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<MarkupTool>("redact");
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [history, setHistory] = useState<StrokeHistory<Stroke>>(emptyHistory);
+  const strokes = history.done;
   const [draft, setDraft] = useState<Stroke | null>(null);
 
   const render = useCallback(() => {
@@ -56,6 +66,17 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
   }, [source, strokes, draft]);
 
   useEffect(render, [render]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const action = undoShortcut(event, event.target instanceof HTMLElement ? event.target : null);
+      if (!action) return;
+      event.preventDefault();
+      setHistory((h) => (action === "undo" ? undoStroke(h) : redoStroke(h)));
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   useImperativeHandle(ref, () => ({
     compose() {
@@ -99,7 +120,7 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
   }
 
   function onUp() {
-    if (draft && (draft.tool === "pen" || (draft.w > 2 && draft.h > 2))) setStrokes((list) => [...list, draft]);
+    if (draft && (draft.tool === "pen" || (draft.w > 2 && draft.h > 2))) setHistory((h) => pushStroke(h, draft));
     setDraft(null);
   }
 
@@ -116,10 +137,10 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
         <button type="button" data-testid="feedback-tool-pen" aria-pressed={tool === "pen"} className={toolClass(tool === "pen")} onClick={() => setTool("pen")}>
           표시
         </button>
-        <button type="button" data-testid="feedback-undo" className={plainClass} disabled={strokes.length === 0} onClick={() => setStrokes((list) => list.slice(0, -1))}>
+        <button type="button" data-testid="feedback-undo" className={plainClass} disabled={strokes.length === 0} onClick={() => setHistory(undoStroke)}>
           되돌리기
         </button>
-        <button type="button" data-testid="feedback-clear" className={plainClass} disabled={strokes.length === 0} onClick={() => setStrokes([])}>
+        <button type="button" data-testid="feedback-clear" className={plainClass} disabled={strokes.length === 0} onClick={() => setHistory(clearHistory)}>
           지우기
         </button>
       </div>
@@ -135,7 +156,7 @@ export const MarkupEditor = forwardRef<MarkupHandle, { source: HTMLCanvasElement
         className="cursor-crosshair touch-none border border-rule bg-paper"
         style={{
           aspectRatio: `${source.width} / ${source.height}`,
-          width: `min(100%, calc(40vh * ${source.width / source.height}))`,
+          width: `min(100%, calc((100dvh - 23rem) * ${source.width / source.height}))`,
         }}
       />
     </div>

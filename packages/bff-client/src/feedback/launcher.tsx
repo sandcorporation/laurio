@@ -168,7 +168,7 @@ export function FeedbackLauncher({
             aria-modal="true"
             aria-label="제보"
             data-testid="feedback-dialog"
-            className="flex max-h-[92vh] w-full max-w-2xl flex-col gap-3 overflow-y-auto border border-rule bg-surface p-4 text-ink"
+            className="flex max-h-[96dvh] w-full max-w-[96vw] flex-col gap-3 overflow-y-auto border border-rule bg-surface p-4 text-ink"
           >
             {phase === "done" ? (
               <>
@@ -226,7 +226,7 @@ export function FeedbackLauncher({
                     data-testid="feedback-body"
                     value={body}
                     maxLength={FEEDBACK_BODY_MAX}
-                    rows={5}
+                    rows={3}
                     onChange={(event) => setBody(event.target.value)}
                     className="border border-rule bg-paper p-2 text-[14px] text-ink"
                   />
