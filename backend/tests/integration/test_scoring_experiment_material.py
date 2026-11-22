@@ -509,3 +509,19 @@ def test_report_without_truth_keeps_the_dash_cells_and_the_note(home, money, mon
     single = _cells_of(md, SINGLE)
     assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("—", "—", "—")
     assert "기준 판정(알려진 미충족)이 없는 재료" in md
+
+
+def test_classroom_staged_confirms_only_met_and_sends_the_machine_note_like_production():
+    """#1294 — 규칙이 미충족으로 본 항목은 확정하지 않고 「기계 확인: …」 메모를 달아 모델에게 넘긴다(운영과 같은 프롬프트)."""
+
+    base = _item(1, met=True)
+    missing = em.ChecklistEntry(
+        REQ, "nope.py 가 있다", "required", False, 1, machine_rule={"kind": "path_exists", "path": "nope.py"}
+    )
+    item = em.Item(**{**base.__dict__, "checklist": (missing, base.checklist[1])})
+
+    result = classroom_material.experiment_staged_call(item, model="gpt-4.1-mini", api_key=None)
+
+    assert REQ not in result.machine_ids  # 미충족은 기계가 확정하지 않는다
+    assert "기계 확인:" in result.prompt
+    assert REQ in [v.checklist_item_id for v in result.verdicts]

@@ -40,7 +40,8 @@ from .scoring import (
     _scoring_request,
     _scoring_source_files,
     _scoring_source_text,
-    _staged_split,
+    _confirmed_labels,
+    _staged_plan,
     _two_step_plan,
     call_vendor_sync,
     outcome_reasoning,
@@ -247,14 +248,17 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
     syntax_check = run_syntax_check(item.source, enabled=problem.syntax_check_enabled)
     mode = "fake" if api_key is None else (ANTHROPIC_SCORING_ADAPTER if anthropic else OPENAI_SCORING_ADAPTER)
     # 도출(#1293)은 사본에 도출 칸이 없어 칸마다 새로 한다 — 운영 채점이 prepare_tail 안에서 하는 것과 같다. 결과는 항목에 얹혀
-    # `_staged_split` 이 읽고, 저장은 하지 않는다. 그 호출의 토큰·비용도 이 칸에 더한다.
+    # `_staged_plan` 이 읽고, 저장은 하지 않는다. 그 호출의 토큰·비용도 이 칸에 더한다.
     derivation = _derive_rules(head, model, mode=mode)
     derive_usage: tuple[tuple[str, int, int], ...] = (
         ((derivation.model or model, derivation.input_tokens, derivation.output_tokens),)
         if derivation is not None and derivation.total_tokens
         else ()
     )
-    asked_items, machine_entries = _staged_split(checklist, item.source)
+    # 운영과 같은 확정 규칙(#1294) — 충족만 기계가 정하고, 미충족·판정 불가는 「기계 확인: …」 메모를 달아 모델에게 넘긴다.
+    split = _staged_plan(checklist, item.source)
+    asked_items, machine_entries, machine_notes = split.asked_items, split.machine_entries, split.machine_notes
+    confirmed = _confirmed_labels(checklist, machine_entries)
     machine_ids = tuple(e["checklist_item_id"] for e in machine_entries)
     if not asked_items and syntax_check.synthetic_requirement() is None:
         prepared = _machine_only(head, syntax_check=syntax_check, model=model, machine_entries=machine_entries)
@@ -269,7 +273,16 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
             extra_usage=derive_usage,
         )
     instruction_bytes = len(
-        _build_prompt(submission, asked_items, "", asset_kind=asset.kind, syntax_check=syntax_check, cite=True).encode("utf-8")
+        _build_prompt(
+            submission,
+            asked_items,
+            "",
+            asset_kind=asset.kind,
+            syntax_check=syntax_check,
+            cite=True,
+            machine_notes=machine_notes,
+            machine_confirmed=confirmed,
+        ).encode("utf-8")
     )
     sent_files, omission = _scoring_source_files(item.source, asset, model=model, instruction_bytes=instruction_bytes)
     plan = _two_step_plan(head, asked_items, item.source, sent_files, omission) if asked_items and head.two_step_threshold > 0 else None
@@ -301,6 +314,8 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
             asset_kind=asset.kind,
             syntax_check=syntax_check,
             staged=True,
+            machine_notes=machine_notes,
+            machine_confirmed=confirmed,
         )
     escalation_model = head.escalation_model
     prepared = PreparedScoring(
@@ -318,6 +333,7 @@ def experiment_staged_call(item: Item, *, model: str, api_key: str | None) -> Cl
         pause_recheck=False,
         staged=True,
         machine_entries=machine_entries,
+        machine_notes=machine_notes,
         sent_lines={} if plan is not None else {evidence_check.normalize_path(f.path): tuple(f.content.splitlines()) for f in sent_files},
         sent_files=() if plan is not None else tuple(sent_files),
         asset_kind=asset.kind,
