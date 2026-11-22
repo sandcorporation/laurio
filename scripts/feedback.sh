@@ -28,9 +28,22 @@ RELAY_TASK="${CODEMIT_FEEDBACK_RELAY_TASK:-codemit-feedback}"
 SWITCHBOARD="${CODEMIT_SWITCHBOARD:-$HOME/.local/bin/switchboard}"
 
 # remote 인자… — 운영 backend 에서 `manage.py feedback_report 인자…`. 인자는 숫자·상태 이름·`-` 만 온다(아래에서 거른다).
+# 실패하면 진짜 종료 코드와 한 줄 까닭(`원격 실패 rc=…`)을 표준오류에 남기고 그 코드를 돌려준다(#1280). 다시 시도하지 않는다.
 remote() {
+  local rc=0
   "$SSH" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST" \
-    "c=\$(docker ps --filter label=com.docker.compose.project=$COMPOSE_PROJECT --filter label=com.docker.compose.service=backend --format '{{.Names}}' | head -n1); [ -n \"\$c\" ] || { echo 'backend 컨테이너를 찾지 못했다' >&2; exit 3; }; docker exec -i \"\$c\" python manage.py feedback_report $*"
+    "c=\$(docker ps --filter label=com.docker.compose.project=$COMPOSE_PROJECT --filter label=com.docker.compose.service=backend --format '{{.Names}}' | head -n1); [ -n \"\$c\" ] || { echo 'backend 컨테이너를 찾지 못했다' >&2; exit 3; }; docker exec -i \"\$c\" python manage.py feedback_report $*" || rc=$?
+  [ "$rc" -eq 0 ] || echo "원격 실패 rc=$rc: $(remote_reason "$rc")" >&2
+  return "$rc"
+}
+
+remote_reason() {
+  case "$1" in
+    255) echo "ssh 가 운영에 닿지 못했다" ;;
+    3) echo "backend 컨테이너가 없다(배포 중 컨테이너 교체로 보인다)" ;;
+    129|130|131|137|143) echo "시그널($(($1 - 128)))로 종료됐다(배포 중 컨테이너 교체로 보인다)" ;;
+    *) echo "운영 명령이 실패했다" ;;
+  esac
 }
 
 need_ids() {
