@@ -67,6 +67,26 @@ export function parseAssumption(text: string): number | undefined {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+/** 그 프로바이더에서 에이전트가 되는 모델 id — 행마다 실린 `agent.available` 로 가른다. */
+export function agentModelIds(calc: ScoringCalculator, vendor: string): Set<string> {
+  return new Set(calc.rows.filter((r) => r.vendor === vendor && r.agent.available).map((r) => r.model_id));
+}
+
+/** 에이전트가 되는 모델 가운데 입력 단가가 가장 싼 것(같으면 출력 단가) — 없으면 `undefined`(호환 서버). 소스 크기와 무관하다. */
+export function cheapestAgentModel(calc: ScoringCalculator, vendor: string): string | undefined {
+  const ok = agentModelIds(calc, vendor);
+  const models = (calc.providers.find((p) => p.vendor === vendor)?.models ?? []).filter((m) => ok.has(m.id));
+  models.sort((a, b) => a.input_usd_per_million - b.input_usd_per_million || a.output_usd_per_million - b.output_usd_per_million);
+  return models[0]?.id;
+}
+
+/** 모델 목록 — 방식이 「에이전트」인 동안은 에이전트가 되는 모델만, 「한 번 호출」이면 전부. */
+export function listedModels(calc: ScoringCalculator) {
+  const { vendor, method } = calc.selection;
+  const ok = agentModelIds(calc, vendor);
+  return (calc.providers.find((p) => p.vendor === vendor)?.models ?? []).filter((m) => method !== "agent" || ok.has(m.id));
+}
+
 const VENDOR_LABEL: Record<string, string> = { openai: "OpenAI", anthropic: "Claude" };
 
 export function providerLabel(vendor: string): string {

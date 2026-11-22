@@ -166,12 +166,15 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
           <span data-testid="grading-method-error">{error}</span>
         </ErrorNote>
       ) : null}
-      <div className="border-t border-rule pt-4">
-        <ScoringCalculator
-          key={calculatorKey(classroom)}
-          classId={classId}
-        />
-      </div>
+    </div>
+  );
+}
+
+/** 예상 비용 — 실제 설정이 아니라 바꿔 보는 계산기. */
+export function CostEstimateSection({ classId, classroom }: { classId: number; classroom: ClassRow }) {
+  return (
+    <div className="p-4">
+      <ScoringCalculator key={calculatorKey(classroom)} classId={classId} />
     </div>
   );
 }

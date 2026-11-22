@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { calculatorPath, capacityText, changeChoice, charsLabel, parseAssumption, submissionAmount, type ScoringCalculator } from "./calculator";
+import { agentModelIds, calculatorPath, cheapestAgentModel, listedModels, capacityText, changeChoice, charsLabel, parseAssumption, submissionAmount, type ScoringCalculator } from "./calculator";
 import { formatKrw } from "./cost";
 
 const SINGLE = {
@@ -133,5 +133,46 @@ describe("계산기 글자(#1308)", () => {
       const source = readFileSync(join(root, file), "utf8");
       expect(source, file).not.toMatch(/표|학기|실측|토큰|가정한 시간|semester|regrade|근거 인용/);
     }
+  });
+});
+
+function catalog(): ScoringCalculator {
+  const m = (id: string, i: number, o: number) => ({ id, input_usd_per_million: i, output_usd_per_million: o, context_tokens: 1 });
+  const row = (vendor: string, id: string, available: boolean) => ({ vendor, model_id: id, agent: { available } });
+  return {
+    providers: [
+      { vendor: "openai", has_key: true, models: [m("gpt-5", 1.25, 10), m("gpt-4.1-mini", 0.4, 1.6), m("gpt-5-mini", 0.25, 2), m("gpt-5.1", 1.25, 8)] },
+      { vendor: "anthropic", has_key: true, models: [m("claude-sonnet-5-5", 3, 15), m("claude-haiku-5-5", 0.1, 0.5)] },
+      { vendor: "compat", has_key: true, models: [m("x", 1, 1)] },
+    ],
+    rows: [
+      row("openai", "gpt-5", true),
+      row("openai", "gpt-4.1-mini", false),
+      row("openai", "gpt-5-mini", true),
+      row("openai", "gpt-5.1", true),
+      row("anthropic", "claude-sonnet-5-5", true),
+      row("anthropic", "claude-haiku-5-5", true),
+      row("compat", "x", false),
+    ],
+  } as unknown as ScoringCalculator;
+}
+
+describe("에이전트 가능 모델", () => {
+  it("입력 단가가 가장 싼 모델을 고르고, 같으면 출력 단가로 가른다", () => {
+    expect(cheapestAgentModel(catalog(), "openai")).toBe("gpt-5-mini");
+    expect(cheapestAgentModel(catalog(), "anthropic")).toBe("claude-haiku-5-5");
+  });
+  it("불가 모델은 가능 목록에 없고, 가능 모델이 없으면 고르지 않는다", () => {
+    expect([...agentModelIds(catalog(), "openai")].sort()).toEqual(["gpt-5", "gpt-5-mini", "gpt-5.1"]);
+    expect(cheapestAgentModel(catalog(), "compat")).toBeUndefined();
+  });
+});
+
+describe("모델 목록", () => {
+  const withMethod = (vendor: string, method: string) => ({ ...catalog(), selection: { vendor, method } }) as unknown as ScoringCalculator;
+  it("에이전트인 동안은 불가 모델이 없고, 한 번 호출이면 전부다", () => {
+    expect(listedModels(withMethod("openai", "agent")).map((m) => m.id)).toEqual(["gpt-5", "gpt-5-mini", "gpt-5.1"]);
+    expect(listedModels(withMethod("openai", "single")).map((m) => m.id)).toHaveLength(4);
+    expect(listedModels(withMethod("anthropic", "agent")).map((m) => m.id)).toHaveLength(2);
   });
 });

@@ -49,7 +49,7 @@ import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
 import { liveTemplateFrom, type LiveTemplate } from "@/lib/problem-templates/live-state";
 
-import { GradingMethodSection } from "../grading-method-section";
+import { CostEstimateSection, GradingMethodSection } from "../grading-method-section";
 import { DefaultModelTable } from "./model-table";
 import { SettingsToc, type SettingsSection } from "./settings-toc";
 
@@ -613,6 +613,10 @@ export default function ClassSettingsPage() {
 
           <SettingsCard id="scoring-method" title="채점 방식">
             <GradingMethodSection classId={classId} classroom={classroom} onSaved={reload} />
+          </SettingsCard>
+
+          <SettingsCard id="scoring-estimate" title="예상 비용">
+            <CostEstimateSection classId={classId} classroom={classroom} />
           </SettingsCard>
 
           <SettingsCard id="scoring-model" title="기본 모델">
