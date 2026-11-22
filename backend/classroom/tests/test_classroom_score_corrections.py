@@ -342,6 +342,9 @@ def test_the_class_attempts_page_marks_only_the_latest_capped_attempt_as_correct
     assert (body["page"], body["has_next"]) == (1, False)
     assert {"member_display_name", "problem_title", "status", "late"} <= set(body["rows"][0])
     assert page(1, ctx["participant"]["access"]).status_code == 404
+    # 걸어 두면 진행 중인 동안 버튼이 내려간다.
+    _request(client, ctx, [newer])
+    assert [r["correctable"] for r in page(1).json()["rows"]] == [False, False]
 
     for _ in range(CLASS_ATTEMPTS_PAGE_SIZE):
         submit_repository(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem"].id)

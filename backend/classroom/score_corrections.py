@@ -36,6 +36,7 @@ from . import agent_grading, scoring
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
 from .current_score import current_of, original_score
+from .events import publish_attempt_scored
 from .models import ClassroomScoreCorrection, ClassroomSubmission
 
 logger = logging.getLogger(__name__)
@@ -91,9 +92,15 @@ def correctable(submissions: Sequence[ClassroomSubmission]) -> dict[int, str | N
 
     범위(#1317 대표 답): 그 (문제, 학생) 짝의 **가장 최근 시도**이고 현재 점수가 **실패 상한 점수**(「채점 실패」,
     `PLATFORM_FAILURE_MODEL_VERSION`)인 것. 정상 점수는 거절한다 — 정정이 끝나 정상 점수가 되면 다시 걸 수 없다.
-    진행 중 정정이 있는 점수는 여기서 거르지 않는다 — 동시에 거는 두 요청은 DB 제약이 가른다(`request_corrections`)."""
+    진행 중 정정이 있으면 `in_progress` 다(화면이 버튼을 내린다) — 그래도 동시에 거는 두 요청은 DB 제약이 가른다
+    (`request_corrections`)."""
 
     latest = _latest_attempt_ids(submissions)
+    busy = set(
+        ClassroomScoreCorrection.objects.filter(
+            score__submission__in=[s.id for s in submissions], status=Status.IN_PROGRESS
+        ).values_list("score__submission_id", flat=True)
+    )
     verdicts: dict[int, str | None] = {}
     for submission in submissions:
         score = original_score(submission)
@@ -103,6 +110,8 @@ def correctable(submissions: Sequence[ClassroomSubmission]) -> dict[int, str | N
             verdicts[submission.id] = SKIP_NOT_LATEST
         elif current_of(score).model_version != PLATFORM_FAILURE_MODEL_VERSION:
             verdicts[submission.id] = SKIP_NOT_PLATFORM_FAILURE
+        elif submission.id in busy:
+            verdicts[submission.id] = SKIP_IN_PROGRESS
         else:
             verdicts[submission.id] = None
     return verdicts
@@ -265,6 +274,8 @@ def finish_correction(
         correction.lease_owner = ""
         correction.lease_until = None
         correction.save()
+        # 처음 채점과 같은 신호 — 강사 「최근 제출」·「제출」 화면과 학생 결과가 새로고침 없이 다시 읽는다(커밋 뒤 발행).
+        publish_attempt_scored(correction.score.submission)
     return {"correction_id": correction_id, "status": "done"}
 
 
