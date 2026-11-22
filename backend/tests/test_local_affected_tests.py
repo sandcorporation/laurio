@@ -10,6 +10,7 @@ CI 의 pytest 잡은 얕게 체크아웃하므로 커밋 범위 대신 그 PR �
 - #1328: `tests/integration/test_agent_ports.py`(계약 시험).
 
 `staged-citations.spec.ts` 는 #1312 가 지웠다 — 그 PR 들이 그 스펙도 고쳤으므로 그때의 트리처럼 겹쳐 놓고 본다.
+프런트 쪽은 시험 안의 작은 트리(`FRONT`)로 잰다 — CI 의 pytest 이미지에는 `.git`·e2e·단위 시험 파일이 없다.
 """
 
 from __future__ import annotations
@@ -36,8 +37,6 @@ def _load() -> ModuleType:
 
 
 at = _load()
-TREE = at.WorkTree(REPO)
-
 STAGED = "frontend/e2e/classroom/staged-citations.spec.ts"
 
 PR_1305 = [
@@ -102,22 +101,69 @@ PR_1328 = [
 ]
 
 
-class Overlay:
-    """지금 트리 위에 파일을 더하거나 바꾼 트리."""
+FRONT_ROOTS = ("frontend/", "operator/", "classroom/", "packages/")
 
-    def __init__(self, base: object, extra: dict[str, str]) -> None:
+
+class Fixture:
+    """백엔드·스크립트는 지금 트리 그대로, 프런트는 아래 작은 트리로.
+
+    CI 의 pytest 이미지는 `.git`·`**/e2e/`·`**/*.test.ts`·`*.md` 를 싣지 않는다(.dockerignore) — 진짜 화면·스펙을
+    읽으면 로컬과 CI 가 갈린다. 프런트 고르기는 여기 적은 관계(import·testid·goto)로 잰다.
+    """
+
+    def __init__(self, base: object, front: dict[str, str]) -> None:
         self.base = base
-        self.extra = extra
+        self.front = front
 
     def files(self) -> list[str]:
-        return sorted({*self.base.files(), *self.extra})
+        return sorted({*(f for f in self.base.files() if not f.startswith(FRONT_ROOTS)), *self.front})
 
     def read(self, path: str) -> str:
-        return self.extra[path] if path in self.extra else self.base.read(path)
+        return self.front[path] if path in self.front else "" if path.startswith(FRONT_ROOTS) else self.base.read(path)
+
+    def adding(self, extra: dict[str, str]) -> Fixture:
+        return Fixture(self.base, {**self.front, **extra})
 
 
-#: #1312 이 지우기 전의 staged-citations 스펙 머리 — 고르기가 읽는 import 와 testid 만 남긴다
-THEN = Overlay(TREE, {STAGED: 'import { test } from "@playwright/test";\ntest("@exclusive 판정 근거", async () => {});\n'})
+#: 강의실 앱의 설정 화면 둘레 — #1305·#1309·#1315 가 바꾼 파일과 그때 빨갛던 스펙의 관계만 남긴다
+FRONT = {
+    "classroom/app/layout.tsx": "export default function L({ children }) { return children; }\n",
+    "classroom/app/classes/[id]/page.tsx": 'export default function P() { return <h1 data-testid="class-title" />; }\n',
+    "classroom/app/classes/[id]/settings/page.tsx": (
+        'import { ScoringCalculator } from "../scoring-calculator";\n'
+        'import { GradingMethodSection } from "../grading-method-section";\n'
+        'export default function P() { return <div data-testid="class-archive-status" />; }\n'
+    ),
+    "classroom/app/classes/[id]/scoring-calculator.tsx": (
+        'import { estimate } from "@/lib/scoring/calculator";\n'
+        'export function ScoringCalculator() { return <output data-testid="calculator-amount" />; }\n'
+    ),
+    "classroom/app/classes/[id]/grading-method-section.tsx": (
+        'export function GradingMethodSection() { return <p data-testid="oversize-agent-model" />; }\n'
+    ),
+    "classroom/lib/scoring/calculator.ts": "export function estimate() { return 0; }\n",
+    "classroom/lib/scoring/calculator.test.ts": 'import { estimate } from "./calculator";\n',
+    "classroom/lib/classes/grading-cost.ts": "export const cost = 1;\n",
+    "packages/bff-client/src/schema.gen.ts": "export interface paths {}\n",
+    "packages/bff-client/src/index.ts": 'export * from "./schema.gen";\n',
+    "classroom/lib/api.ts": 'import type { paths } from "@codemit/bff-client";\n',
+    "classroom/lib/api.test.ts": 'import "./api";\n',
+    "frontend/e2e/classroom/lib/cross-app-session.ts": "export async function signIn() {}\n",
+    "frontend/e2e/classroom/class-settings.spec.ts": (
+        'import { signIn } from "./lib/cross-app-session";\n'
+        "await page.goto(`/classes/${id}/settings`);\n"
+        'await page.getByTestId("calculator-amount");\n'
+    ),
+    "frontend/e2e/classroom/class-detail.spec.ts": (
+        'import { signIn } from "./lib/cross-app-session";\n'
+        "await page.goto(`/classes/${id}`);\n"
+        'await page.getByTestId("class-title");\n'
+    ),
+    "frontend/e2e/classroom/auth.spec.ts": 'await page.goto("/login");\n',
+}
+TREE = Fixture(at.WorkTree(REPO), FRONT)
+#: #1312 이 지우기 전의 staged-citations 스펙 — 고르기가 읽는 import 와 testid 만
+THEN = TREE.adding({STAGED: 'import { test } from "@playwright/test";\ntest("@exclusive 판정 근거", async () => {});\n'})
 
 
 def backend(plan: object, tier: int = 1) -> set[str]:
@@ -172,7 +218,7 @@ def test_an_http_surface_change_picks_that_apps_e2e_folder() -> None:
 
 def test_a_screen_with_no_matching_spec_widens_to_the_whole_app_and_says_so() -> None:
     lonely = "classroom/app/nowhere/page.tsx"
-    tree = Overlay(TREE, {lonely: 'export default function P() { return <div data-testid="nowhere-only" />; }\n'})
+    tree = TREE.adding({lonely: 'export default function P() { return <div data-testid="nowhere-only" />; }\n'})
     plan = at.choose([lonely], tree)
     classroom_specs = {f.removeprefix("frontend/") for f in tree.files() if f.startswith("frontend/e2e/classroom/") and f.endswith(".spec.ts")}
     assert e2e(plan) == classroom_specs

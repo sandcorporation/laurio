@@ -47,6 +47,10 @@ class Tree(Protocol):
     def read(self, path: str) -> str: ...
 
 
+#: git 이 없을 때 걷지 않는 폴더 — .gitignore 의 큰 것들
+UNTRACKED_DIRS = {".git", "node_modules", ".venv", "venv", ".next", "__pycache__", ".pytest_cache", "test-results", ".pnpm-store"}
+
+
 class WorkTree:
     """git 이 아는 파일(추적 + 무시되지 않은 새 파일) 중 지금 있는 것."""
 
@@ -57,9 +61,20 @@ class WorkTree:
 
     def files(self) -> list[str]:
         if self._files is None:
-            out = git("ls-files", "-co", "--exclude-standard", cwd=self.root)
-            self._files = sorted(f for f in set(out.split("\n")) if f and (self.root / f).is_file())
+            try:
+                out = git("ls-files", "-co", "--exclude-standard", cwd=self.root).split("\n")
+            except subprocess.CalledProcessError:
+                out = self._walk()  # git 저장소가 아닌 트리 — CI 시험 이미지는 .git 을 싣지 않는다(.dockerignore)
+            self._files = sorted(f for f in set(out) if f and (self.root / f).is_file())
         return self._files
+
+    def _walk(self) -> list[str]:
+        out = []
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = [d for d in dirnames if d not in UNTRACKED_DIRS]
+            rel = Path(dirpath).relative_to(self.root)
+            out += [(rel / f).as_posix() for f in filenames]
+        return out
 
     def read(self, path: str) -> str:
         if path not in self._text:
