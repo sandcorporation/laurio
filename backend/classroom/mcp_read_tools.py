@@ -29,7 +29,7 @@ import json
 from ninja.errors import HttpError
 from ninja.responses import NinjaJSONEncoder
 
-from . import scoring_cost
+from . import scoring_calculator, scoring_cost
 from .api import (
     _build_roster_grid,
     _serialize_class,
@@ -181,6 +181,28 @@ def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
         "scoring_cost_estimate": _cost_summary(
             estimate, problem.effective_model(), problem.effective_reasoning_effort()
         ),
+        "per_submission_estimate": _per_submission(
+            scoring_calculator.calculate(scope.class_obj, problem_id=problem.id)
+        ),
+    }
+
+
+def _per_submission(calc: scoring_calculator.Calculation) -> dict[str, str | int | None]:
+    """화면 계산기의 처음 값(지금 이 클래스의 조합)과 같은 셈 — 제출 한 건, 원(#1270). 에이전트 값이 `None` 이면
+    「실측 없음」이다."""
+
+    krw = scoring_cost.KRW_PER_USD
+    usd = calc.agent.usd
+    return {
+        "vendor": calc.selection.vendor,
+        "method": calc.selection.method,
+        "model": calc.selection.model_id,
+        "source": calc.selection.source,
+        "source_chars": calc.selection.source_chars,
+        "single_call_krw": round(calc.single.usd * krw),
+        "agent_krw_median": round(usd.median * krw) if usd.median is not None else None,
+        "agent_krw_p90": round(usd.p90 * krw) if usd.p90 is not None else None,
+        "agent_sample_count": usd.sample_count,
     }
 
 
@@ -285,6 +307,31 @@ _SCORING_COST_ESTIMATE = {
     "required": ["basis", "model", "priced"],
 }
 
+
+
+_PER_SUBMISSION_ESTIMATE = {
+    "type": "object",
+    "description": (
+        "제출 한 건 예상(원) — 클래스 설정 「채점 방식」 계산기의 처음 값과 같은 셈. 한 번 호출은 단가표 어림, "
+        "에이전트는 이 클래스·모델의 지난 실행 실측 중앙·p90 이고 null 이면 실측 없음"
+    ),
+    "properties": {
+        "vendor": {"type": "string", "enum": ["openai", "anthropic"]},
+        "method": {"type": "string", "enum": ["single", "agent"]},
+        "model": {"type": "string"},
+        "source": {"type": "string", "description": "median·p90(이 문제의 실측) 또는 small·medium·large(크기 단계)"},
+        "source_chars": {"type": "integer"},
+        "single_call_krw": {"type": "integer"},
+        "agent_krw_median": {"type": ["integer", "null"]},
+        "agent_krw_p90": {"type": ["integer", "null"]},
+        "agent_sample_count": {"type": "integer"},
+    },
+    "required": ["vendor", "method", "model", "single_call_krw"],
+}
+
+
+def _with_per_submission_estimate(schema: dict) -> dict:
+    return {**schema, "properties": {**schema["properties"], "per_submission_estimate": _PER_SUBMISSION_ESTIMATE}}
 
 
 def _with_cost_estimate(schema: dict) -> dict:
@@ -505,7 +552,7 @@ READ_TOOL_SPECS: list[dict] = [
             "required": ["class_id", "problem_id"],
             "additionalProperties": False,
         },
-        "output_schema": _with_cost_estimate(_PROBLEM_OBJECT),
+        "output_schema": _with_per_submission_estimate(_with_cost_estimate(_PROBLEM_OBJECT)),
         "handler": _get_problem,
     },
     {

@@ -153,6 +153,14 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     for problem in (opened, draft):
         tool_problem = _structured(client, token, "get_problem", class_id=class_id, problem_id=problem.id)
         problem_estimate = tool_problem.pop("scoring_cost_estimate")
+        # 제출 한 건 예상은 화면 계산기의 처음 값과 같은 셈이다(#1270).
+        per_submission = tool_problem.pop("per_submission_estimate")
+        calculator = _screen(client, access, f"{class_id}/scoring-calculator?problem_id={problem.id}")
+        assert per_submission["single_call_krw"] == round(calculator["single"]["krw"])
+        assert (per_submission["model"], per_submission["source_chars"]) == (
+            calculator["selection"]["model_id"],
+            calculator["selection"]["source_chars"],
+        )
         assert tool_problem == _screen(client, access, f"{class_id}/problems/{problem.id}")
         assert problem_estimate["model"] == tool_problem["effective_model"]
     stack = _structured(client, token, "get_problem", class_id=class_id, problem_id=opened.id)

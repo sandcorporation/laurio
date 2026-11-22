@@ -1538,6 +1538,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/scoring-calculator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Class Scoring Calculator
+         * @description 「클래스 설정 › 채점 방식」의 채점 비용 계산기(#1270). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합으로
+         *     채운다. 남의 클래스는 404다.
+         */
+        get: operations["classroom_api_get_class_scoring_calculator"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/scoring-cost": {
         parameters: {
             query?: never;
@@ -10518,6 +10539,122 @@ export interface components {
          * @enum {string}
          */
         ScoringBasis: "ai_judged" | "no_scoring_input" | "platform_failure" | "source_too_large";
+        /** ScoringCalculatorAgentOut */
+        ScoringCalculatorAgentOut: {
+            /** Available */
+            available: boolean;
+            krw: components["schemas"]["ScoringCalculatorSpreadOut"];
+            seconds: components["schemas"]["ScoringCalculatorSpreadOut"];
+            usd: components["schemas"]["ScoringCalculatorSpreadOut"];
+        };
+        /** ScoringCalculatorModelOut */
+        ScoringCalculatorModelOut: {
+            /** Id */
+            id: string;
+            /** Input Usd Per Million */
+            input_usd_per_million: number;
+            /** Output Usd Per Million */
+            output_usd_per_million: number;
+        };
+        /**
+         * ScoringCalculatorOut
+         * @description 채점 비용 계산기(#1270, CONTEXT.md 「예상 채점 비용」) — 고른 조합의 제출 한 건 예상과 고를 수 있는 값.
+         */
+        ScoringCalculatorOut: {
+            agent: components["schemas"]["ScoringCalculatorAgentOut"];
+            /** Agent Vendors */
+            agent_vendors: string[];
+            /** Krw Per Usd */
+            krw_per_usd: number;
+            /** Min Sample Count */
+            min_sample_count: number;
+            /** Problems */
+            problems: components["schemas"]["ScoringCalculatorProblemOut"][];
+            /** Providers */
+            providers: components["schemas"]["ScoringCalculatorProviderOut"][];
+            selection: components["schemas"]["ScoringCalculatorSelectionOut"];
+            single: components["schemas"]["ScoringCalculatorSingleOut"];
+        };
+        /** ScoringCalculatorProblemOut */
+        ScoringCalculatorProblemOut: {
+            /** Id */
+            id: number;
+            /** Instruction Chars */
+            instruction_chars: number;
+            /** Requirement Count */
+            requirement_count: number;
+            /** Sample Count */
+            sample_count: number;
+            /** Sources */
+            sources: components["schemas"]["ScoringCalculatorSourceOut"][];
+            /** Title */
+            title: string;
+        };
+        /** ScoringCalculatorProviderOut */
+        ScoringCalculatorProviderOut: {
+            /** Has Key */
+            has_key: boolean;
+            /** Models */
+            models: components["schemas"]["ScoringCalculatorModelOut"][];
+            /** Vendor */
+            vendor: string;
+        };
+        /** ScoringCalculatorSelectionOut */
+        ScoringCalculatorSelectionOut: {
+            /** Method */
+            method: string;
+            /** Model Id */
+            model_id: string;
+            /** Problem Id */
+            problem_id?: number | null;
+            /** Reasoning Effort */
+            reasoning_effort?: string | null;
+            /** Source */
+            source: string;
+            /** Source Chars */
+            source_chars: number;
+            /** Vendor */
+            vendor: string;
+        };
+        /** ScoringCalculatorSingleOut */
+        ScoringCalculatorSingleOut: {
+            /** Fits */
+            fits: boolean;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Krw */
+            krw: number;
+            /** Open Ended */
+            open_ended: boolean;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Requirement Limit */
+            requirement_limit?: number | null;
+            seconds: components["schemas"]["ScoringCalculatorSpreadOut"];
+            /** Usd */
+            usd: number;
+        };
+        /** ScoringCalculatorSourceOut */
+        ScoringCalculatorSourceOut: {
+            /** Chars */
+            chars: number;
+            /** Key */
+            key: string;
+            /** Measured */
+            measured: boolean;
+        };
+        /**
+         * ScoringCalculatorSpreadOut
+         * @description 실측의 중앙·p90(#1270) — 표본이 `min_sample_count` 건 미만이면 둘 다 `None`(「실측 없음」).
+         */
+        ScoringCalculatorSpreadOut: {
+            /** Median */
+            median?: number | null;
+            /** P90 */
+            p90?: number | null;
+            /** Sample Count */
+            sample_count: number;
+        };
         /**
          * ScoringCostAttemptOut
          * @description 시도 1건의 어림(#591) — 원화와 그 시도가 사용량에 더할 토큰. 호환 서버는 원화가 `None`(#604).
@@ -14086,6 +14223,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassroomRosterGridOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_class_scoring_calculator: {
+        parameters: {
+            query?: {
+                vendor?: string | null;
+                method?: string | null;
+                model?: string | null;
+                problem_id?: number | null;
+                source?: string | null;
+            };
+            header?: never;
+            path: {
+                class_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScoringCalculatorOut"];
                 };
             };
             /** @description Not Found */
