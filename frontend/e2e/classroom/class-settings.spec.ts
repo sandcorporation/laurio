@@ -196,57 +196,52 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
   await page.getByTestId("openai-key-submit").click();
   await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
 
-  const table = page.getByTestId("calculator-table");
-  await expect(table).toBeVisible();
-  // 문제·체크리스트·제출이 0 인 새 클래스 — 「실측 없음」 글자가 없고 모든 모델 행에 금액·감당 글자 수가 있다.
-  await expect(page.getByTestId("scoring-calculator")).not.toContainText("실측 없음");
-  await expect(page.getByTestId("scoring-calculator")).not.toContainText("모델 한도까지");
-  const rows = table.locator("tbody tr[data-testid^=calculator-row-]");
-  const count = await rows.count();
-  expect(count).toBeGreaterThan(10);
-  for (let i = 0; i < count; i++) {
-    const row = rows.nth(i);
-    await expect(row.locator("[data-testid^=calculator-cost-][data-testid$=-single]")).toContainText("원");
-    await expect(row.locator("[data-testid^=calculator-note-][data-testid$=-single]")).toContainText("감당");
+  // 문제·체크리스트·제출이 0 인 새 클래스 — 드롭다운 셋과 입력 둘로 금액이 나온다.
+  const calculator = page.getByTestId("scoring-calculator");
+  await expect(calculator).toBeVisible();
+  await expect(page.getByTestId("calculator-table")).toHaveCount(0);
+  await expect(page.getByTestId("calculator-source-files")).toHaveValue("20");
+  await expect(page.getByTestId("calculator-source-chars")).toContainText("3.2만 자");
+  await expect(page.getByTestId("calculator-requirements")).toHaveValue("6");
+  const amount = page.getByTestId("calculator-amount");
+  await expect(amount).toContainText("원");
+  await expect(page.getByTestId("calculator-capacity")).toContainText("소스 파일 약");
+  await expect(page.getByTestId("calculator-method")).toHaveValue("single");
+  for (const word of ["한 학기", "실측", "토큰", "학생 수", "과제 수", "재채점"]) {
+    await expect(calculator).not.toContainText(word);
   }
-  // 에이전트는 Claude 만 — OpenAI 모델은 「지원 안 함」, Claude 모델은 금액이 있다.
-  await expect(page.getByTestId("calculator-agent-unsupported-gpt-4.1-mini")).toHaveText("지원 안 함");
-  await expect(page.getByTestId("calculator-cost-claude-haiku-5-5-agent")).toContainText("원");
-  await expect(page.getByTestId("calculator-no-key-anthropic")).toHaveText("키 없음");
-  await expect(page.getByTestId("calculator-no-key-openai")).toHaveCount(0);
-  // 지금 클래스의 조합(OpenAI·한 번 호출)이 표시돼 있고, 학기 셈·학생 수·과제 수·재채점 칸은 없다.
-  await expect(page.locator("[data-testid^=calculator-cell-][aria-pressed=true]")).toHaveCount(1);
-  await expect(page.getByTestId("scoring-calculator")).not.toContainText("학기");
-  await expect(page.getByTestId("calculator-students")).toHaveCount(0);
-  await expect(page.getByTestId("calculator-assignments")).toHaveCount(0);
-  await expect(page.getByTestId("calculator-regrade-rate")).toHaveCount(0);
 
-  // 제출 크기를 감당 크기보다 크게 넣으면 한 번 호출 칸에 「보류」가 뜬다.
-  const cost = page.getByTestId("calculator-cost-gpt-4.1-mini-single");
-  await page.getByTestId("calculator-source-chars").fill("5000000");
-  await page.getByTestId("calculator-source-chars").press("Enter");
-  await expect(page.getByTestId("calculator-note-gpt-4.1-mini-single")).toContainText("담지 못함 — 보류");
-  await expect(cost).toContainText("0원");
+  // 에이전트는 Claude 만 — OpenAI 에서는 고를 수 없고, Claude 로 바꾸면 에이전트 금액이 나온다.
+  await expect(page.getByTestId("calculator-method").locator("option[value=agent]")).toBeDisabled();
+  await page.getByTestId("calculator-vendor").selectOption("anthropic");
+  await expect(page.getByTestId("calculator-vendor")).toContainText("키 없음");
+  await page.getByTestId("calculator-method").selectOption("agent");
+  await expect(amount).toContainText("원");
+  await page.getByTestId("calculator-vendor").selectOption("openai");
+  await expect(page.getByTestId("calculator-method")).toHaveValue("single");
 
-  // 다른 칸을 눌러 고르면 그 칸이 눌린 상태가 된다.
-  await page.getByTestId("calculator-cell-claude-haiku-5-5-agent").click();
-  await expect(page.getByTestId("calculator-cell-claude-haiku-5-5-agent")).toHaveAttribute("aria-pressed", "true");
+  // 소스 파일 수를 바꾸면 글자 수와 금액이 바뀐다.
+  const before = await amount.textContent();
+  await page.getByTestId("calculator-source-files").fill("100");
+  await page.getByTestId("calculator-source-files").press("Enter");
+  await expect(page.getByTestId("calculator-source-chars")).toContainText("16만 자");
+  await expect(amount).not.toHaveText(before ?? "");
 
-  // 방식별 감당 크기는 코드의 숫자다.
-  await expect(page.getByTestId("calculator-capacity-agent")).toContainText("zip 100MB · 풀린 크기 256MB · 파일 5만 개 · 시간 300초 × 2회 · 한 건 $1");
+  // 입력한 크기가 고른 모델의 한도를 넘으면 금액 자리에 보류가 뜬다.
+  await page.getByTestId("calculator-model").selectOption("gpt-4.1-mini");
+  await page.getByTestId("calculator-source-files").fill("5000");
+  await page.getByTestId("calculator-source-files").press("Enter");
+  await expect(amount).toHaveText("담지 못함 — 보류");
 
-  // 좁은 폭에서도 예상표가 가로로 넘치지 않는다.
+  // 좁은 폭에서도 가로로 넘치지 않는다.
   await page.setViewportSize({ width: 390, height: 900 });
-  await expect(page.getByTestId("calculator-table")).toBeVisible();
+  await expect(calculator).toBeVisible();
   const overflow = await page.evaluate(() => {
     const root = document.documentElement;
-    const boxes = ["scoring-calculator", "calculator-table"].map((id) => {
-      const el = document.querySelector<HTMLElement>(`[data-testid=${id}]`)!;
-      return el.scrollWidth - el.clientWidth;
-    });
-    return [root.scrollWidth - root.clientWidth, ...boxes];
+    const el = document.querySelector<HTMLElement>("[data-testid=scoring-calculator]")!;
+    return [root.scrollWidth - root.clientWidth, el.scrollWidth - el.clientWidth];
   });
-  expect(overflow).toEqual([0, 0, 0]);
+  expect(overflow).toEqual([0, 0]);
 });
 
 test("채점 비용 예상표 — 문제가 있으면 그 문제의 항목 수가 기본값을 대신하고 고르면 바뀐다", async ({ page }) => {
@@ -272,13 +267,11 @@ test("채점 비용 예상표 — 문제가 있으면 그 문제의 항목 수�
   await page.getByTestId("openai-key-submit").click();
   await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
 
-  const cost = page.getByTestId("calculator-cost-gpt-4.1-single");
+  const cost = page.getByTestId("calculator-amount");
   await expect(cost).toContainText("원");
   await expect(page.getByTestId("calculator-requirements")).toHaveValue("2");
   const before = await cost.textContent();
   await page.getByTestId("calculator-problem").selectOption({ label: "요구사항 열둘 · 항목 12개" });
   await expect(page.getByTestId("calculator-requirements")).toHaveValue("12");
   await expect(cost).not.toHaveText(before ?? "");
-  await page.getByTestId("calculator-source").selectOption("p90");
-  await expect(page.getByTestId("calculator-source-chars")).toHaveValue("307000");
 });

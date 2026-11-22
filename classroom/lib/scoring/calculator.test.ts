@@ -3,21 +3,9 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  agentLimitsLine,
-  agentNote,
-  calculatorPath,
-  capacityLabel,
-  changeChoice,
-  escalationCost,
-  fromLabel,
-  parseAssumption,
-  singleNote,
-  sourceLabel,
-  twoStepLine,
-} from "./calculator";
+import { calculatorPath, capacityText, changeChoice, charsLabel, parseAssumption, submissionAmount, type ScoringCalculator } from "./calculator";
+import { formatKrw } from "./cost";
 
-const STAGED = { enabled: true, threshold_chars: 120_000, budget_chars: 60_000 };
 const SINGLE = {
   input_tokens: 1,
   output_tokens: 1,
@@ -25,13 +13,34 @@ const SINGLE = {
   krw: 138,
   open_ended: false,
   fits: true,
-  capacity_chars: 232_000,
-  capacity_chars_hangul: 166_000,
-  capacity_files: 145,
-  capacity_files_hangul: 104,
+  capacity_chars: 3_000_000,
+  capacity_chars_hangul: 2_000_000,
+  capacity_files: 1_875,
+  capacity_files_hangul: 1_250,
   route: "single",
   seconds: 5,
 };
+const NONE = { sample_count: 0, median: null, p90: null };
+
+function calcOf(
+  overrides: { method?: string; route?: string; staged?: boolean; escalationKrw?: number | null; agentKrw?: number | null } = {},
+): ScoringCalculator {
+  const { method = "single", route = "single", staged = false, escalationKrw = null, agentKrw = 400 } = overrides;
+  // 금액·크기 글자에 쓰는 칸만 채운 흉내
+  return {
+    selection: { model_id: "m", method },
+    staged: { enabled: staged },
+    escalation: { model_id: escalationKrw === null ? null : "big", per_submission_krw: escalationKrw ?? 0 },
+    rows: [
+      {
+        vendor: "openai",
+        model_id: "m",
+        single: { ...SINGLE, route },
+        agent: { available: agentKrw !== null, krw: agentKrw, usd: 1, seconds: 1, measured_krw: NONE, measured_seconds: NONE },
+      },
+    ],
+  } as unknown as ScoringCalculator;
+}
 
 describe("calculatorPath", () => {
   it("빈 칸은 싣지 않는다", () => {
@@ -39,9 +48,9 @@ describe("calculatorPath", () => {
   });
   it("고른 칸과 바꿔 본 가정을 쿼리로 싣는다", () => {
     expect(
-      calculatorPath(7, { vendor: "anthropic", method: "agent", model: "claude-haiku-5-5", problemId: 3, source: "p90", requirements: 10, suspectRate: 0 }),
+      calculatorPath(7, { vendor: "anthropic", method: "agent", model: "claude-haiku-5-5", problemId: 3, requirements: 10, sourceChars: 32000 }),
     ).toBe(
-      "/api/backend/classroom/classes/7/scoring-calculator?vendor=anthropic&method=agent&model=claude-haiku-5-5&problem_id=3&source=p90&requirements=10&suspect_rate=0",
+      "/api/backend/classroom/classes/7/scoring-calculator?vendor=anthropic&method=agent&model=claude-haiku-5-5&problem_id=3&source_chars=32000&requirements=10",
     );
   });
 });
@@ -82,95 +91,31 @@ describe("parseAssumption", () => {
   });
 });
 
-describe("라벨", () => {
-  it("가정의 출처", () => {
-    expect([fromLabel("assumed"), fromLabel("problem"), fromLabel("custom")]).toEqual(["가정", "문제", "입력"]);
+describe("계산기 글자(#1308)", () => {
+  it("한 번 호출 금액에 담는 크기가 같은 칸에서 나온다", () => {
+    expect(submissionAmount(calcOf())).toMatch(/^약 [\d,]+원$/);
+    expect(capacityText(calcOf())).toBe("300만 자 · 소스 파일 약 1,875개");
   });
-  it("소스 크기는 출처와 글자 수", () => {
-    expect(sourceLabel({ key: "median", chars: 32_000, measured: false })).toBe("가정 중앙 · 3.2만 자");
-    expect(sourceLabel({ key: "p90", chars: 6_120, measured: true })).toBe("제출 큰 쪽(p90) · 6,120 자");
+  it("담지 못하면 금액 자리에 보류", () => {
+    expect(submissionAmount(calcOf({ route: "hold" }))).toBe("담지 못함 — 보류");
   });
-  it("감당 크기는 글자 수 숫자다 — 「모델 한도까지」 같은 말이 아니다", () => {
-    expect(capacityLabel(232_000)).toBe("23.2만 자");
-    expect(singleNote(SINGLE, STAGED)).toBe("감당 23.2만 자 · 소스 파일 약 145개 · 한글 주석 많음 16.6만 자 · 약 104개");
-    expect(singleNote(SINGLE, STAGED)).not.toContain("모델 한도까지");
+  it("에이전트는 에이전트 금액이다", () => {
+    expect(submissionAmount(calcOf({ method: "agent" }))).toBe(formatKrw(400));
   });
-  it("감당 크기를 넘으면 보류, staged 두 걸음이면 읽는 상한", () => {
-    expect(singleNote({ ...SINGLE, route: "hold", fits: false, krw: 0 }, STAGED)).toBe(
-      "담지 못함 — 보류(채점 안 함) · 감당 23.2만 자 · 소스 파일 약 145개 · 한글 주석 많음 16.6만 자 · 약 104개",
-    );
-    expect(singleNote({ ...SINGLE, route: "two_step" }, STAGED)).toBe("두 걸음 · 고른 파일 6만 자까지 읽음");
+  it("새 채점기와 재판정 모델이 함께 있을 때만 금액에 재판정 몫이 합쳐진다", () => {
+    const plain = submissionAmount(calcOf({ staged: true }));
+    expect(submissionAmount(calcOf({ staged: false, escalationKrw: 5000 }))).toBe(plain);
+    expect(submissionAmount(calcOf({ staged: true, escalationKrw: 5000 }))).toBe(formatKrw(138 + 5000));
+    expect(submissionAmount(calcOf({ staged: true, escalationKrw: 5000 }))).not.toBe(plain);
   });
-  it("두 걸음·에이전트 상한은 코드의 숫자 그대로", () => {
-    expect(twoStepLine(STAGED)).toBe("12만 자 넘으면 두 걸음 — 고른 파일 6만 자까지 읽음");
-    expect(
-      agentLimitsLine({
-        max_zip_bytes: 100 * 1024 * 1024,
-        max_extracted_bytes: 256 * 1024 * 1024,
-        max_zip_entries: 50_000,
-        attempt_seconds: 300,
-        attempts: 2,
-        budget_usd: 1,
-      }),
-    ).toBe("zip 100MB · 풀린 크기 256MB · 파일 5만 개 · 시간 300초 × 2회 · 한 건 $1");
+  it("글자 수는 만 단위로", () => {
+    expect(charsLabel(32_000)).toBe("3.2만 자");
   });
-  it("에이전트는 가정한 시간을 쓰고, 실측이 있으면 중앙을 옆에 붙인다", () => {
-    const none = { sample_count: 2, median: null, p90: null };
-    expect(agentNote({ available: true, usd: 0.1, krw: 138, seconds: 12.5, measured_krw: none, measured_seconds: none })).toBe("12.5초 가정");
-    expect(
-      agentNote({
-        available: true,
-        usd: 0.1,
-        krw: 138,
-        seconds: 12.5,
-        measured_krw: { sample_count: 4, median: 45, p90: 120 },
-        measured_seconds: { sample_count: 4, median: 40, p90: 150 },
-      }),
-    ).toBe("실측 중앙 약 45원 · 40초 (4건)");
-  });
-  it("가정·실측 없음 글자가 라벨에 없다", () => {
-    expect(agentNote({ available: true, usd: 0.1, krw: 1, seconds: 1, measured_krw: { sample_count: 0, median: null, p90: null }, measured_seconds: { sample_count: 0, median: null, p90: null } })).not.toContain("실측 없음");
-  });
-});
-
-describe("escalationCost", () => {
-  it("꺼졌으면 줄이 없다", () => {
-    expect(escalationCost({ model_id: null, per_suspect: null, suspect_rate: 0.025, per_submission_krw: 0 })).toBeNull();
-  });
-  it("고른 모델의 의심 한 건당 값과 가정한 비율, 제출 한 건에 더해지는 값", () => {
-    expect(
-      escalationCost({
-        model_id: "gpt-4.1",
-        per_suspect: { input_tokens: 1, output_tokens: 1, usd: 0.1, krw: 140, open_ended: false },
-        suspect_rate: 0.025,
-        per_submission_krw: 21,
-      }),
-    ).toEqual({
-      model: "gpt-4.1",
-      perSuspect: expect.stringMatching(/^의심 한 건당 /),
-      rate: "2.5%",
-      perSubmission: expect.stringMatching(/^제출 한 건에 /),
-    });
-  });
-});
-
-describe("두루뭉술한 말", () => {
-  it("화면 코드 어디에도 「모델 한도까지」·「실측 없음」이 없다", () => {
+  it("화면 코드에 표·한 학기·실측·토큰·시간 문구가 없다", () => {
     const root = join(__dirname, "..", "..");
     for (const file of ["lib/scoring/calculator.ts", "app/classes/[id]/scoring-calculator.tsx"]) {
       const source = readFileSync(join(root, file), "utf8");
-      expect(source, file).not.toContain("모델 한도까지");
-      expect(source, file).not.toContain("실측 없음");
-    }
-  });
-});
-
-describe("학기 셈 없음(#1308)", () => {
-  it("화면 코드에 학기 셈·학생 수·과제 수·재채점이 없다", () => {
-    const root = join(__dirname, "..", "..");
-    for (const file of ["lib/scoring/calculator.ts", "app/classes/[id]/scoring-calculator.tsx"]) {
-      const source = readFileSync(join(root, file), "utf8");
-      expect(source, file).not.toMatch(/학기|semester|학생 수|과제 수|재채점|regrade/i);
+      expect(source, file).not.toMatch(/표|학기|실측|토큰|가정한 시간|semester|regrade|근거 인용/);
     }
   });
 });
