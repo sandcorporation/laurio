@@ -80,6 +80,11 @@ CONTEST_SCORING_METHOD = "CONTEST_SCORING_METHOD"
 SCORING_METHOD_SINGLE_CALL: Literal["single_call"] = "single_call"
 SCORING_METHOD_AGENT: Literal["agent"] = "agent"
 
+#: 강의실 채점 갈래의 키(#1283, 스펙 #1282) — `classroom_scoring_pipeline`. 값이 없거나 알 수 없으면 `single_call`(그 전과 같다).
+CLASSROOM_SCORING_PIPELINE = "CLASSROOM_SCORING_PIPELINE"
+CLASSROOM_PIPELINE_SINGLE_CALL: Literal["single_call"] = "single_call"
+CLASSROOM_PIPELINE_STAGED: Literal["staged"] = "staged"
+
 _SWITCH_ON = {"on", "true", "1", "yes"}
 _SWITCH_OFF = {"off", "false", "0", "no"}
 
@@ -128,6 +133,16 @@ SPECS: dict[str, SettingSpec] = {
             default=SCORING_METHOD_SINGLE_CALL,
             max_length=20,
             choices=(SCORING_METHOD_SINGLE_CALL, SCORING_METHOD_AGENT),
+        ),
+        # #1283: 강의실 채점(클래스 키)을 지금처럼 한 번 호출(`single_call`)로 할지, 기계 판정을 먼저 하고 판단 항목만
+        # 모델에 보내는 `staged` 로 할지. 에이전트 방식 클래스는 이 값을 보지 않는다.
+        SettingSpec(
+            CLASSROOM_SCORING_PIPELINE,
+            "강의실 채점 갈래",
+            "choice",
+            default=CLASSROOM_PIPELINE_SINGLE_CALL,
+            max_length=20,
+            choices=(CLASSROOM_PIPELINE_SINGLE_CALL, CLASSROOM_PIPELINE_STAGED),
         ),
         SettingSpec("ANTHROPIC_API_KEY", "Anthropic API 키", "secret", max_length=500),
         SettingSpec("LLM_ANTHROPIC_MODEL", "Claude 모델", "text", default="claude-sonnet-5-5", max_length=100),
@@ -420,6 +435,13 @@ def contest_scoring_method() -> Literal["single_call", "agent"]:
 
     value = (setting_value(CONTEST_SCORING_METHOD) or "").strip().lower()
     return SCORING_METHOD_AGENT if value == SCORING_METHOD_AGENT else SCORING_METHOD_SINGLE_CALL
+
+
+def classroom_scoring_pipeline() -> Literal["single_call", "staged"]:
+    """강의실 채점 갈래(#1283) — `staged` 일 때만 staged, 그 밖(없음·알 수 없는 값)은 `single_call`."""
+
+    value = (setting_value(CLASSROOM_SCORING_PIPELINE) or "").strip().lower()
+    return CLASSROOM_PIPELINE_STAGED if value == CLASSROOM_PIPELINE_STAGED else CLASSROOM_PIPELINE_SINGLE_CALL
 
 
 def contest_ai_scoring_enabled() -> bool:

@@ -100,13 +100,14 @@ from core.scans import ScanSpec
 from core.model_context import source_budget_bytes
 from core.source_selection import select_source_files, select_source_files_with_omission
 from notifications.models import NotificationType
+from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 from notifications.services import create_notification, notify_safely
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 from submissions.repository_pins import clone_repository_asset
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
-from . import agent_grading, pending_scoring, scoring_cost
+from . import agent_grading, machine_check, pending_scoring, scoring_cost
 from .events import publish_attempt_scored
 from .grading_guidelines import effective_grading_guideline_text
 from .gradability_hint import UNVERIFIABLE_VERDICT_RULE
@@ -127,7 +128,7 @@ from .scoring_connection import (
     openai_key_connection,
 )
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, SyntaxCheckPass, run_syntax_check
-from .verdicts import VERDICT_UNMET, entry_from_model, reasoning_entry
+from .verdicts import VERDICT_MET, VERDICT_UNMET, entry_from_model, reasoning_entry
 
 logger = logging.getLogger(__name__)
 
@@ -788,6 +789,12 @@ class PreparedScoring:
     agent: bool = False
     #: 에이전트에게 줄 박제본 — 준비가 읽은 소스 바이트(zip 일 때만, 에이전트 방식일 때만).
     snapshot: agent_grading.Snapshot | None = None
+    #: staged 갈래인가(#1283, 운영 설정 `CLASSROOM_SCORING_PIPELINE`) — 판정 항목에 출처(`source`)를 남긴다.
+    staged: bool = False
+    #: staged 의 기계 판정 항목(`ClassroomScore.reasoning` 모양, 출처 `machine`) — 모델 판정과 합친다.
+    machine_entries: tuple[dict, ...] = ()
+    #: 모델에게 물을 것이 없다(staged, 판단 항목 0개) — 벤더를 부르지 않는다(토큰 0).
+    skip_vendor: bool = False
 
 
 @dataclass
@@ -822,6 +829,8 @@ class _Head:
     connection: ScoringConnection
     asset: SubmissionAsset
     pause_recheck: bool
+    #: staged 갈래(#1283) — 운영 설정은 DB 를 읽을 수 있어 앞 절반에서 읽는다(뒤 절반은 DB 를 쓰지 않는다).
+    staged: bool = False
 
 
 def _prepare_head(
@@ -885,7 +894,36 @@ def _prepare_head(
         connection=connection,
         asset=asset,
         pause_recheck=pause_recheck,
+        staged=classroom_scoring_pipeline() == CLASSROOM_PIPELINE_STAGED,
     )
+
+
+#: staged 에서 벤더를 부르지 않고 기계 판정만으로 매긴 점수의 `model_version`(#1283).
+MACHINE_ONLY_MODEL_VERSION = "machine-check-v1"
+#: 판정 항목의 출처(#1283) — staged 갈래만 남긴다(single_call 의 기록은 그대로).
+SOURCE_MACHINE = "machine"
+SOURCE_MODEL = "model"
+
+
+def _machine_entry(item_id: int, verdict: machine_check.MachineVerdict) -> dict:
+    entry = reasoning_entry(
+        item_id, verdict=VERDICT_MET if verdict.verdict == machine_check.MET else VERDICT_UNMET, reasoning=verdict.reasoning
+    )
+    return {**entry, "source": SOURCE_MACHINE, "evidence": list(verdict.evidence)}
+
+
+def _staged_split(
+    checklist_items: list[ChecklistItem], raw: bytes
+) -> tuple[list[ChecklistItem], tuple[dict, ...]]:
+    """staged 의 기계 판정(#1283) — (모델에게 물을 항목, 기계가 정한 판정 항목). 규칙이 없거나 「판정 불가」인 항목은
+    모델에게 간다."""
+
+    verdicts = machine_check.judge_items(
+        ((item.id, item.machine_rule) for item in checklist_items if item.machine_rule), raw
+    )
+    decided = {item_id: v for item_id, v in verdicts.items() if v.decided}
+    machine_entries = tuple(_machine_entry(item.id, decided[item.id]) for item in checklist_items if item.id in decided)
+    return [item for item in checklist_items if item.id not in decided], machine_entries
 
 
 def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
@@ -946,13 +984,20 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
     )
 
     uses_agent = agent_grading.uses_agent(class_obj, "scoring")
+    staged = head.staged and not uses_agent
+    # staged(#1283): 기계 규칙이 정한 항목은 빼고, 남은 항목(판단·판정 불가)만 모델에게 묻는다.
+    asked_items, machine_entries = (
+        _staged_split(checklist_items, source.raw) if staged else (checklist_items, ())
+    )
+    if staged and not asked_items and syntax_check.synthetic_requirement() is None:
+        return _machine_only(head, syntax_check=syntax_check, model=model, machine_entries=machine_entries)
     source_text = source.text
     if not uses_agent:
         # 한 번 호출 채점(#989): 소스를 이 모델의 예산으로 고르고, 다 들어가지 않으면 자르지 않고 벤더를 부르지
         # 않은 채 「크기 초과」 보류로 둔다. 지시문 몫에는 문법 검사 덧붙임(파서가 못 본 파일의 전문)이 든다.
         instruction_bytes = len(
             _build_prompt(
-                submission, checklist_items, "", asset_kind=asset.kind, syntax_check=syntax_check
+                submission, asked_items, "", asset_kind=asset.kind, syntax_check=syntax_check
             ).encode("utf-8")
         )
         source_text, omission = _scoring_source_text(
@@ -967,12 +1012,12 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
 
     prompt = _build_prompt(
         submission,
-        checklist_items,
+        asked_items,
         source_text,
         asset_kind=asset.kind,
         syntax_check=syntax_check,
     )
-    requirements = _requirement_inputs(checklist_items)
+    requirements = _requirement_inputs(asked_items)
     # 문법 검사 대상 파일도 소스 목록에 얹는다(#409) — OpenAIScoringAdapter는
     # prompt만 읽어 실제 벤더 요청에는 영향이 없지만(모듈 docstring),
     # FakeClassroomScoringAdapter는 `source_files`에서 haystack을 만들어
@@ -1019,7 +1064,42 @@ def prepare_tail(head: _Head) -> PreparedScoring | Concluded:
         pause_recheck=head.pause_recheck,
         agent=uses_agent,
         snapshot=agent_grading.snapshot_of(source.raw, asset) if uses_agent else None,
+        staged=staged,
+        machine_entries=machine_entries,
     )
+
+
+def _machine_only(
+    head: _Head, *, syntax_check: SyntaxCheckPass, model: str, machine_entries: tuple[dict, ...]
+) -> PreparedScoring:
+    """staged 에서 모든 항목을 기계가 정했다(#1283) — 벤더를 부르지 않는 준비. 결과 쓰기·알림은 벤더를 부른 채점과
+    같은 길(`finish_scoring`)이다."""
+
+    submission = head.submission
+    prompt = "(기계 판정만 — 모델에게 묻지 않았다)"
+    return PreparedScoring(
+        submission=submission,
+        owner=head.owner,
+        class_obj=head.class_obj,
+        problem=head.problem,
+        checklist_items=head.checklist_items,
+        connection=head.connection,
+        model=model,
+        reasoning_effort=None,
+        prompt=prompt,
+        scoring_input=ScoringInput(
+            submission_id=submission.id, contest_id=head.problem.id, prompt=prompt, source_files=[], requirements=[]
+        ),
+        syntax_check=syntax_check,
+        pause_recheck=head.pause_recheck,
+        staged=True,
+        machine_entries=machine_entries,
+        skip_vendor=True,
+    )
+
+
+def _machine_only_outcome() -> VendorOutcome:
+    return VendorOutcome(output=ScoringOutput(verdicts=[], model_version=MACHINE_ONLY_MODEL_VERSION))
 
 
 def _build_adapter(prepared: PreparedScoring, *, asynchronous: bool = False) -> LLMScoringAdapter:
@@ -1059,6 +1139,8 @@ def _call_agent(prepared: PreparedScoring) -> VendorOutcome:
 def call_vendor_sync(prepared: PreparedScoring) -> VendorOutcome:
     """벤더 호출(동기) — 시험·즉시 채점 시임이 쓴다. 어댑터가 던진 `LLMAdapterError` 를 값으로 돌려준다."""
 
+    if prepared.skip_vendor:
+        return _machine_only_outcome()
     if prepared.agent:
         return _call_agent(prepared)
     try:
@@ -1071,6 +1153,8 @@ async def call_vendor_async(prepared: PreparedScoring) -> VendorOutcome:
     """벤더 호출(비동기, #584) — grader 가 쓴다. 기다리는 동안 DB 도 스레드도 쥐지 않는다.
     어댑터를 만드는 일(키 복호화)은 코루틴 밖의 짧은 동기 일이다. 에이전트 방식은 제 스레드에서 돈다."""
 
+    if prepared.skip_vendor:
+        return _machine_only_outcome()
     if prepared.agent:
         return await agent_grading.run_in_own_thread(_call_agent, prepared)
     try:
@@ -1150,19 +1234,23 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
     assert output is not None
     if isinstance(outcome.agent, agent_grading.AgentAccepted):
         agent_grading.record_run(submission.id, "scoring", outcome.agent)
-    used_tokens, estimated = output.total_tokens, False
-    if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
-        # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 사용량이 비니 예상
-        # 비용과 같은 셈으로 어림해 더하고, 어림한 몫을 따로 남긴다. OpenAI 는 늘 usage 를 준다.
-        used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
-    _record_token_usage(class_obj, used_tokens, estimated=estimated)
-    if prepared.pause_recheck:
-        _clear_scoring_pause(class_obj)
-    mark_verified(class_obj.pk, connection)
+    if not prepared.skip_vendor:
+        # 벤더를 부르지 않은 기계 판정만의 채점(#1283)은 토큰도, 키 확인도 없다.
+        used_tokens, estimated = output.total_tokens, False
+        if used_tokens <= 0 and connection.kind == Class.ScoringConnectionKind.COMPATIBLE_SERVER:
+            # 호환 서버는 usage 를 주지 않을 수 있다(#604) — 세지 않으면 사용량이 비니 예상
+            # 비용과 같은 셈으로 어림해 더하고, 어림한 몫을 따로 남긴다. OpenAI 는 늘 usage 를 준다.
+            used_tokens, estimated = scoring_cost.estimated_usage_tokens(prepared.prompt, prepared.reasoning_effort), True
+        _record_token_usage(class_obj, used_tokens, estimated=estimated)
+        if prepared.pause_recheck:
+            _clear_scoring_pause(class_obj)
+        mark_verified(class_obj.pk, connection)
 
     reasoning = [
         entry_from_model(v) for v in output.verdicts if v.requirement_id != SYNTAX_CHECK_ITEM_ID
     ]
+    if prepared.staged:
+        reasoning = _merge_staged(prepared, reasoning)
     syntax_check_result = prepared.syntax_check.resolve(output.verdicts)
     score = ClassroomScore.objects.create(
         submission=submission,
@@ -1172,6 +1260,15 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         syntax_check_result=syntax_check_result,
     )
     return {"submission_id": submission.id, "status": "scored", "score_id": score.id}
+
+
+def _merge_staged(prepared: PreparedScoring, model_entries: list[dict]) -> list[dict]:
+    """staged(#1283): 모델 판정(출처 `model`)과 기계 판정(출처 `machine`)을 체크리스트 순서로 합친다."""
+
+    by_id = {entry["checklist_item_id"]: {**entry, "source": SOURCE_MODEL} for entry in model_entries}
+    by_id.update({entry["checklist_item_id"]: entry for entry in prepared.machine_entries})
+    ordered = [by_id.pop(item.id) for item in prepared.checklist_items if item.id in by_id]
+    return ordered + list(by_id.values())
 
 
 @contextlib.contextmanager

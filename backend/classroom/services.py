@@ -209,6 +209,7 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
             grade=item.grade,
             points=item.points,
             hidden=item.hidden,
+            machine_rule=item.machine_rule,
             order=item.order,
             # 공모전 문제의 항목은 복사본에서도 같은 Requirement 를 따라간다(#548).
             contest_requirement_id=item.contest_requirement_id,

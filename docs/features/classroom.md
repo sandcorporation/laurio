@@ -132,6 +132,15 @@ data-site="codemit">` 한 줄을 그린다(`lib/public-config.ts` `metricsSnippe
 자신의 값이든, 물려받던 클래스 기본값이 바뀌었든) 이 값이 풀려 다음 시도부터
 다시 채점 후보에 든다.
 
+**staged 갈래**(#1283, ADR-0084, CONTEXT.md 「기계 판정」) — 운영 설정 `CLASSROOM_SCORING_PIPELINE` 이 `staged` 이고
+클래스의 채점 방식이 한 번 호출이면, 기계 확인 규칙(`ChecklistItem.machine_rule`)이 있는 항목을 먼저 코드가 소스 트리에서
+판정한다(`classroom.machine_check`). 정한 항목은 빼고 남은 항목(판단·판정 불가)만 지금 프롬프트로 모델에 보낸다. 두 결과를
+체크리스트 순서로 합쳐 `ClassroomScore` 하나를 만들고, 항목마다 `source`(`machine`·`model`)를, 기계 판정에는 `evidence`
+(경로[:줄])를 함께 남긴다. 판단 항목이 없으면 벤더를 부르지 않는다(토큰 0, `model_version` `machine-check-v1`).
+`single_call`(기본)이면 규칙을 보지 않고 지금과 같다. 규칙은 강사 API(항목 만들기·고치기의 `machine_rule`, 고치기에서 null 이면
+지움)·MCP(`add_checklist_item`·`update_checklist_item`)로 읽고 쓰고, 참여자 응답에는 늘 null 이다. 같은 클래스 문제 복사는
+규칙을 옮기고 템플릿은 옮기지 않는다. 화면은 아직 없다.
+
 **채점 요청이 그 문제의 채점 모델 컨텍스트를 넘는 시도는 「크기 초과」로 보류한다**(#989) — 자르지도 미충족으로
 굳히지도 않는다. 대기 사유(`pending_reason`)는 `size_held` 이고 시도마다 다르다. 참여자 화면은 「채점 보류(크기
 초과)」 배지와 「강사가 확인합니다」, 강사 제출 현황은 「크기 초과 보류」 배지와 채점 모델을 바꾸는 길을 보인다.

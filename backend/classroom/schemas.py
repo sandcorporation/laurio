@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Annotated, Literal
 
 from ninja import Field, Schema
+from pydantic import field_validator, model_validator
 
 from .grading_guidelines import GRADING_GUIDELINE_TEXT_MAX_LENGTH
+from .machine_check import MAX_PATTERN_CHARS, MAX_RULE_FIELD_CHARS
 from .models import LateStatus
 
 
@@ -395,6 +398,60 @@ ChecklistGradeIn = Literal["required", "optional", "bonus"]
 ChecklistPointsIn = Annotated[int, Field(ge=1, le=10)]
 
 
+_RuleField = Annotated[str, Field(min_length=1, max_length=MAX_RULE_FIELD_CHARS)]
+
+
+class PathExistsRuleIn(Schema):
+    """기계 확인 규칙(#1283) — 경로·glob 에 맞는 파일이 있다."""
+
+    kind: Literal["path_exists"]
+    path: _RuleField
+
+
+class FileContainsRuleIn(Schema):
+    """기계 확인 규칙(#1283) — 경로 glob 에 맞는 파일 안에 고정 문자열(`text`) 또는 정규식(`pattern`)이 있다. 둘 중 하나만."""
+
+    kind: Literal["file_contains"]
+    path: _RuleField
+    text: Annotated[str, Field(min_length=1, max_length=MAX_RULE_FIELD_CHARS)] | None = None
+    pattern: Annotated[str, Field(min_length=1, max_length=MAX_PATTERN_CHARS)] | None = None
+
+    @field_validator("pattern")
+    @classmethod
+    def _compiles(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError(f"정규식이 올바르지 않습니다: {exc}") from exc
+        return value
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> FileContainsRuleIn:
+        if (self.text is None) == (self.pattern is None):
+            raise ValueError("text 와 pattern 중 하나만 적어야 합니다.")
+        return self
+
+
+class ConfigValueRuleIn(Schema):
+    """기계 확인 규칙(#1283) — JSON·YAML·TOML·.env 파일에서 키(점으로 이은 경로) = 값."""
+
+    kind: Literal["config_value"]
+    path: _RuleField
+    key: _RuleField
+    value: Annotated[str, Field(max_length=MAX_RULE_FIELD_CHARS)]
+
+
+#: 기계 확인 규칙(#1283, CONTEXT.md 「기계 판정」) — `kind` 로 꼴을 가른다. 비면(null) 「판단」 항목이다.
+MachineRuleIn = Annotated[PathExistsRuleIn | FileContainsRuleIn | ConfigValueRuleIn, Field(discriminator="kind")]
+
+
+def machine_rule_to_store(rule: PathExistsRuleIn | FileContainsRuleIn | ConfigValueRuleIn | None) -> dict | None:
+    """검증된 규칙 → `ChecklistItem.machine_rule` 에 저장할 dict(빈 선택 칸은 뺀다)."""
+
+    return None if rule is None else rule.model_dump(exclude_none=True)
+
+
 class ChecklistItemIn(Schema):
     """`grade` 가 진실이다. `grade` 없이 `required` 만 오면 옛 모양으로 읽는다(True → 필수, False → 선택).
     `points` 가 없으면 등급별 기본값(필수 2·선택 1)."""
@@ -405,6 +462,8 @@ class ChecklistItemIn(Schema):
     points: ChecklistPointsIn | None = None
     #: 「제출자에게 숨기기」(#906) — 참여자에게는 내용 대신 개수·충족 수만 보인다. 클래스는 숨은 필수도 허용한다.
     hidden: bool = False
+    #: 기계 확인 규칙(#1283) — 비면 「판단」 항목.
+    machine_rule: MachineRuleIn | None = None
 
     def resolved_grade(self) -> str:
         if self.grade is not None:
@@ -418,6 +477,8 @@ class ChecklistItemPatchIn(Schema):
     required: bool | None = None
     points: ChecklistPointsIn | None = None
     hidden: bool | None = None
+    #: 기계 확인 규칙(#1283) — 보내지 않으면 그대로, null 이면 지운다(「판단」 항목으로).
+    machine_rule: MachineRuleIn | None = None
 
     def resolved_grade(self) -> str | None:
         if self.grade is not None:
@@ -437,6 +498,8 @@ class ChecklistItemOut(Schema):
     order: int
     #: 「제출자에게 숨기기」(#906) — 강사 응답에서만 참일 수 있다(참여자 응답에는 숨은 항목이 아예 없다).
     hidden: bool = False
+    #: 기계 확인 규칙(#1283) — 강사 응답에만 싣는다(참여자 응답은 늘 null).
+    machine_rule: dict | None = None
 
 
 class GradabilityWarningOut(Schema):

@@ -715,7 +715,7 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 | `get_roster_grid`(읽기, `class_id`) | 명단 격자 — 화면의 `GET …/roster-grid` 와 같은 값(문제별 달성률 + 참여자 × 문제 칸의 통과 이력, 공모전 문제면 「공모전에도 냈다」 표시 #550) |
 | `create_problem`(쓰기) | 문제 만들기 — 설명·제출 형식·체크리스트·채점 설정을 한 번에, `open` 이면 바로 연다(#514). 결과는 문제 요약(번호·클래스·제목·상태·순서·제출 형식·채점 지침 단계·모델·추론 강도·문법 검사·체크리스트·할 수 있는 전이) — **설명·채점 지침 원문은 싣지 않는다**(#579) |
 | `update_problem`(쓰기) | 문제 고치기 — 보낸 칸만 바뀐다. 결과는 `create_problem` 과 같은 요약 |
-| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기. 결과는 바뀐 항목(지우기면 지운 번호)과 그 문제의 항목 목록(`problem_id`·`checklist_items`)뿐 — 설명·채점 설정은 없다(#579) |
+| `add_checklist_item` · `update_checklist_item` · `delete_checklist_item` · `reorder_checklist_items`(쓰기) | 체크리스트 항목 더하기·고치기·지우기·순서 바꾸기. 결과는 바뀐 항목(지우기면 지운 번호)과 그 문제의 항목 목록(`problem_id`·`checklist_items`)뿐 — 설명·채점 설정은 없다(#579). 더하기·고치기는 기계 확인 규칙 `machine_rule`(#1283)도 받고, 항목 결과에 그 값을 싣는다 |
 | `open_problem` · `hide_problem` · `reopen_problem`(쓰기) | 문제 열기·숨기기·다시 열기 — 전이 표(`classroom.problem_transitions`) 그대로. 결과는 번호·제목·새 상태·할 수 있는 전이만(#579) |
 | `reorder_problems`(쓰기) | 문제 순서 바꾸기 |
 | `copy_problem`(쓰기) | 문제를 내 다른 클래스로 복사 — 복사본은 초안, 보관된 클래스에서 꺼내 갈 수는 있고 넣을 수는 없다. 결과는 복사본의 요약(`create_problem` 과 같은 모양) |
@@ -1202,6 +1202,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `LLM_REQUIREMENT_CHAT_OPENAI_TEMPERATURE` | 0~2 | 요구사항 대화 | 0.7 |
 | `LLM_SCORING_VENDOR` | `openai`·`anthropic`(#994) | 공모전 채점·완성도(`core.llm_scoring.get_adapter`, 실물 모드만) | `openai` — `anthropic` 도 시행일과 상관없이 저장되고 돈다(대표 결정 2026-11-20, `config/settings.py`). 방침 개정 시행일 `PRIVACY_POLICY_PLATFORM_ANTHROPIC_DATE`(2026-11-27, #997)는 방침 화면 잠금 시험만 본다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000) | 공모전 채점(`scoring.services.score_submission_once`) — `agent` 면 CLI 에이전트(`core.agent_scoring`)가 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code), 모델은 아래 모델 설정. 채점 입력이 저장소 하나 또는 zip 소스 하나가 아니면 한 번 호출로 채점한다 | `single_call` — 알 수 없는 값도 `single_call` |
+| `CLASSROOM_SCORING_PIPELINE` | `single_call`·`staged`(#1283, ADR-0084) | 강의실 채점(클래스 키, 한 번 호출 방식) — `staged` 면 기계 확인 규칙이 있는 항목을 코드가 먼저 판정하고 남은 항목만 모델에 보낸다. 에이전트 방식 클래스는 보지 않는다 | `single_call` — 알 수 없는 값도 `single_call` |
 | `ANTHROPIC_API_KEY` | 비밀(#994) | 벤더가 `anthropic` 일 때의 공모전 채점·완성도 | (어댑터가 만들어지지 않는다) |
 | `LLM_ANTHROPIC_MODEL` | 모델 이름(#994) | 같은 둘 | `claude-sonnet-5-5` |
 | `AGENT_SCORING_DAILY_LIMIT_USD` | USD 0~1000(#998) | 에이전트 채점 키 프록시(`llm-proxy`)의 하루(KST) 비용 합계 상한 — 넘으면 그날 요청을 429 | 20 |

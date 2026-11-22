@@ -849,6 +849,9 @@ class ChecklistItem(GradedChecklistFields):
     #: 공모전 문제의 항목이면 따라가는 Requirement 의 번호(#548) — 원본이 바뀔 때 어느 항목을
     #: 고칠지 이 번호로 찾는다. 강사가 직접 만든 항목은 비어 있다.
     contest_requirement_id = models.PositiveBigIntegerField(null=True, blank=True)
+    #: 기계 확인 규칙(#1283, CONTEXT.md 「기계 판정」) — 비면 「판단」 항목이다. 모양은 `classroom.schemas.MachineRuleIn`
+    #: 이 검증한 dict(`classroom.machine_check.MachineRule`). staged 채점 갈래만 읽는다.
+    machine_rule = models.JSONField(null=True, blank=True)
 
     class Meta(GradedChecklistFields.Meta):
         ordering = ["order", "id"]

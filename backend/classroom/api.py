@@ -347,7 +347,9 @@ def _pending_ownership_transfer_out(class_obj: Class, viewer_id: int) -> Pending
     )
 
 
-def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
+def _serialize_checklist_item(item: ChecklistItem, *, with_rule: bool = True) -> ChecklistItemOut:
+    """`with_rule=False` 는 참여자 응답이다 — 기계 확인 규칙(#1283)을 싣지 않는다."""
+
     return ChecklistItemOut(
         id=item.id,
         label=item.label,
@@ -356,6 +358,7 @@ def _serialize_checklist_item(item: ChecklistItem) -> ChecklistItemOut:
         points=item.points,
         order=item.order,
         hidden=item.hidden,
+        machine_rule=item.machine_rule if with_rule else None,
     )
 
 
@@ -371,6 +374,7 @@ def _serialize_saved_checklist_item(item: ChecklistItem, *, text_changed: bool =
         points=item.points,
         order=item.order,
         hidden=item.hidden,
+        machine_rule=item.machine_rule,
         gradability_warnings=gradability_warnings([item]) if text_changed else [],
     )
 
@@ -719,7 +723,7 @@ def _serialize_problem_mine(
         grading_guideline_text=problem.grading_guideline_text,
         syntax_check_enabled=problem.syntax_check_enabled,
         # 숨은 항목(#906)은 참여자(「참여자로 보기」의 강사 포함)에게 내용 없이 개수만.
-        checklist_items=[_serialize_checklist_item(i) for i in checklist_items if not i.hidden],
+        checklist_items=[_serialize_checklist_item(i, with_rule=False) for i in checklist_items if not i.hidden],
         hidden_checklist_item_count=sum(1 for i in checklist_items if i.hidden),
         passed=passed,
         perfect=perfect,
