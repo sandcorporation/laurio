@@ -524,7 +524,9 @@ RESPONSE_FAILED`)·5xx·형식이 깨진 몸통은 지금처럼 실패 시도로
 채점되면 풀림은 위 둘과 같지만 **강사의 키·연결 문제가 아니라** 대기 사유 「키」도 클래스 응답의 멈춤 표시도
 켜지 않는다. 실패마다 WARNING 로그, GlitchTip 이벤트 하나(지문 `agent-grader-unavailable`·갈래, 제출 id 태그는
 뺀다), 1분 집계의 결과 `grader_unreachable` 한 건(운영 경보 `ClassroomGraderUnreachable` 의 입력)을 남긴다
-(`classroom.platform_failures`). 실행기 바쁨(503)은 빈도 제한, 입력 거절(400·413)과 실행기 CLI 실패(200 에 종료코드)는
+(`classroom.platform_failures`). **실행기가 모델 호출 프록시(`llm-proxy`)에 닿지 못한 것도 같은 길이다**(#1326) — 결과는 200 이지만
+실행기가 단 표식 `proxy_unreachable` 을 보고 `AgentProxyUnreachable` → 갈래 `proxy_unreachable` 로 옮긴다(시도 기록 없음·멈춤·강사 알림 한 번·
+같은 지문 앞머리·같은 경보). 실행기 바쁨(503)은 빈도 제한, 입력 거절(400·413)과 프록시에 닿은 실행기 CLI 실패(200 에 종료코드)는
 보류로 그대로 간다. 완성도 검사는 이 예외를 실패한 검사로 남기고, 같은 WARNING 로그·GlitchTip 지문·집계 한 건만
 남긴다(멈춤·강사 알림 없음 — 완성도에는 점수·실패 상한이 없다).
 **그 밖의 까닭으로 실패 상한 점수가 찍히면 찍힐 때마다 소유자에게 알린다**(#1318) — 문제·시도·참여자 이름(「최근 제출」과
@@ -1247,7 +1249,10 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 파일만 읽게 한다 — 참가자 코드는 실행하지 않고, 진짜 키는 없고(실행 토큰만), 네트워크는 `llm-proxy` 뿐이다. 실행기를
 부르는 쪽은 두 프로세스다 — 공모전 채점·완성도 스캔이 도는 `celery-worker` 와 강의실 채점·완성도 검사가 도는 `grader`(#1036·#1316).
 둘 다 실행기와 내부 망 `agent-call` 을 함께 쓰고, backend(API)는 실행기를 부르지 않는다. 동시 실행 2,
-실행당 10분. 채점·완성도 리뷰는 같은 `run_agent_job` 을 쓰고(`AgentJob.purpose` 가 `scoring`·`quality`) 한 실행으로 묶지
+실행당 10분. 실행기는 실행 전과 실패한 실행(종료코드·시간 초과, 루프는 판정이 빠지거나 멈춤) 뒤에 `llm-proxy` 에 TCP 로 붙어 보고,
+닿지 못하면 결과에 `proxy_unreachable`(`connection_refused`·`name_resolution`·`timeout`·`connect_error`)을 단다 — 실행 전이면 CLI·루프를
+띄우지 않는다(#1326). `run_agent_job`·`run_selfloop_scoring` 은 이를 재실행 없이 `AgentProxyUnreachable`(보류 `AgentRunHeld` 의 하위)로
+던진다 — 공모전·실험은 지금처럼 보류, 강의실은 플랫폼 탓으로 가른다. 채점·완성도 리뷰는 같은 `run_agent_job` 을 쓰고(`AgentJob.purpose` 가 `scoring`·`quality`) 한 실행으로 묶지
 않는다. 결과는 같은 `Score`·`SubmissionQualityReview` 이고 화면·알림·순위·박제는 그대로다.
 
 - **완성도**(#1001)는 `CONTEST_SCORING_METHOD=agent` 일 때 같은 박제본을 읽고 항목마다 0~5 와 근거 `경로:줄` 을 받는다.

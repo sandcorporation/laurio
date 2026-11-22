@@ -1,9 +1,10 @@
 """강의실 채점의 플랫폼 탓 실패를 운영에 알린다(#1318).
 
-에이전트 실행기(`agent-grader`)에 닿지 못한 실패(`agent_grading.AgentPlatformUnavailable`)마다 셋을 남긴다:
+에이전트 실행기(`agent-grader`)나 실행기가 부르는 모델 호출 프록시(#1326)에 닿지 못한 실패
+(`agent_grading.AgentPlatformUnavailable`)마다 셋을 남긴다:
 
 - **로그** — WARNING. 예전에는 INFO 한 줄이라 사고 동안 아무도 몰랐다.
-- **오류 수집**(GlitchTip) — 지문이 갈래(`unreachable`·`timeout`·`server_error`·`bad_response`)라 같은 까닭은 이슈
+- **오류 수집**(GlitchTip) — 지문이 갈래(`unreachable`·`timeout`·`server_error`·`bad_response`·`proxy_unreachable`)라 같은 까닭은 이슈
   하나로 모인다. 제출·참여자를 가리키는 값(제출 id 태그·채점 문맥)은 이 이벤트에서 뺀다 — 소스·이름도 싣지 않는다.
 - **운영 경보 입력** — 1분 집계(`ops_metrics`)의 LLM 호출 칸에 결과 `GRADER_UNREACHABLE` 로 한 번 센다. 경보 규칙
   `ClassroomGraderUnreachable`(`ops_metrics.alerts`)이 그 수를 읽는다.
@@ -33,8 +34,8 @@ _DROPPED_CONTEXTS = ("classroom_scoring", "classroom_quality")
 #: 어느 일에서 났는가 — 로그 문장만 가른다. 지문·경보 집계는 같다(같은 실행기 장애다).
 Job = Literal["scoring", "quality"]
 _LOG_MESSAGES: dict[Job, str] = {
-    "scoring": "강의실 채점: 에이전트 실행기에 닿지 못해 클래스 채점을 멈춘다 (갈래 %s): %s",
-    "quality": "강의실 완성도 검사: 에이전트 실행기에 닿지 못해 이 검사를 실패로 남긴다 (갈래 %s): %s",
+    "scoring": "강의실 채점: 에이전트 실행기(또는 그 프록시)에 닿지 못해 클래스 채점을 멈춘다 (갈래 %s): %s",
+    "quality": "강의실 완성도 검사: 에이전트 실행기(또는 그 프록시)에 닿지 못해 이 검사를 실패로 남긴다 (갈래 %s): %s",
 }
 
 

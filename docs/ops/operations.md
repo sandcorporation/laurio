@@ -402,7 +402,7 @@ prod 는 `core.json_logging.JsonFormatter`(`time`·`level`·`logger`·`message`�
   | `LLMAuthRejected` | 30분 `auth` > 0 | 1회 |
   | `ClassroomScoringQueueSlow` | 10분 강의실 큐 대기 p95 > 300초(대기가 있을 때) | 10회 |
   | `GraderDown` | grader 생존 신호가 180초 넘게 없음(키가 없어도) | 1회 |
-  | `ClassroomGraderUnreachable` | 15분 `grader_unreachable` > 0 — 강의실 채점이 에이전트 실행기에 닿지 못함(#1318) | 1회 |
+  | `ClassroomGraderUnreachable` | 15분 `grader_unreachable` > 0 — 강의실 채점이 에이전트 실행기나 그 모델 호출 프록시에 닿지 못함(#1318·#1326) | 1회 |
 
   **입력은 DB 집계 행 + 아직 옮기지 않은 Redis 분 해시다.** 「N분」 창은 지금 분(쓰는 중)과 그 앞의 N−1 개
   닫힌 분이다 — 지금 분을 넣어야 `> 0` 규칙이 첫 거부가 난 그 분에 울리고(flush 를 기다리면 1분 늦다),
