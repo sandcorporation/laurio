@@ -58,7 +58,9 @@ pub/sub 위에 산다 — Celery 브로커(DB 0)·Operator 세션(DB 1)과 같�
 58002). `.env` 의 OpenAI 키는 잔고 0원이니 벤더 주소를 `LLM_PROXY_ANTHROPIC_BASE_URL`·`LLM_PROXY_OPENAI_BASE_URL`
 로 흉내 서버에 돌린다. 호스트에서 바로 띄워도 된다: `uv run python manage.py llm_proxy --port <포트>`. 실행기만
 붙는 내부 네트워크 `agent`(`internal: true`)가 dev·prod compose 둘 다에 있다. prod 에는 실행기를 부르는 쪽 내부 네트워크
-`agent-call`(`celery-worker`·`agent-grader` 둘만, #1031)이 하나 더 있다 — 부르는 쪽은 `agent` 에 넣지 않는다.
+`agent-call`(실행기와 그것을 부르는 `celery-worker`·`grader`, #1031·#1316)이 하나 더 있다 — 부르는 쪽은 `agent` 에 넣지 않는다.
+부르는 프로세스는 `backend/scoring/tests/test_agent_call_network.py` 가 서비스 command 의 진입점에서 실행기 클라이언트까지의
+호출 그래프로 가려 이 망과 대조한다 — 새로 부르는 쪽이 생기면 그 서비스를 `agent-call` 에 붙인다.
 
 **강의실 채점은 `grader` 서비스가 한다**(#584, ADR-0059) — dev compose 의 기본 기동에 있고(`docker
 compose up -d` 에 들어간다), CI 의 e2e 스택도 띄운다. 제출·스캔은 「큐에 넣은 시각」만 찍고

@@ -11,7 +11,7 @@
 ## 어디서 돌리나 — celery-worker
 
 에이전트·우리 루프 줄은 실행기 `agent-grader:8003` 을 부른다. 운영에서 실행기와 같은 네트워크(`agent-call`)에 있는
-것은 **celery-worker 뿐**이다 — backend 는 `default` 네트워크에만 있어 닿지 못한다(운영 채점도 celery-worker 에서 돈다).
+것은 **celery-worker 와 grader**(강의실 채점, #1316)다 — backend 는 `default` 네트워크에만 있어 닿지 못한다(공모전 채점은 celery-worker 에서 돈다).
 그래서 `compare_scoring_methods` 는 celery-worker 에서 돌린다. `experiment_report` 는 DB 만 읽으니 어느 컨테이너든 된다.
 
 - 줄에 에이전트·우리 루프가 있으면 명령이 실행기의 `GET /health` 에 먼저 한 번 닿아 본다. 미리 보기는 그 결과를 한 줄

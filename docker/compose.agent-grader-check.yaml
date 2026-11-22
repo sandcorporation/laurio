@@ -56,7 +56,7 @@ services:
     read_only: true
     volumes:
       - ../scripts/ci:/checks:ro
-    # 운영의 부르는 쪽(`celery-worker`)과 같은 자리 — `agent` 가 아니라 `agent-call` 로 실행기에 닿는다(#1031).
+    # 운영의 부르는 쪽(`celery-worker`·`grader`)과 같은 자리 — `agent` 가 아니라 `agent-call` 로 실행기에 닿는다(#1031·#1316).
     # default 는 가짜 벤더의 기록(`/_requests`)을 읽으려고.
     networks:
       - default
