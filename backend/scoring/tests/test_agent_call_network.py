@@ -18,8 +18,10 @@ import shlex
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
+import pytest
 import yaml
 from django.conf import settings
 
@@ -88,6 +90,7 @@ class _Graph:
             return dotted
         return dotted
 
+    @cached_property
     def reaching(self) -> dict[str, str | None]:
         """실행기에 닿는 함수 → 다음 걸음(경로를 찍으려고). 씨앗은 None."""
 
@@ -289,11 +292,20 @@ def _members(compose: dict, network: str) -> set[str]:
     return {name for name, svc in compose["services"].items() if network in (svc.get("networks") or ["default"])}
 
 
-def runner_callers(compose: dict) -> dict[str, str]:
+@pytest.fixture(scope="module")
+def graph() -> _Graph:
+    """백엔드 소스 전체를 파싱하는 일(CI 에서 CPU 2초 남짓)은 이 파일의 시험들이 한 번만 한다 — 시험 본문의 CPU 한도
+    (`CODEMIT_TEST_CPU_LIMIT`) 밖이다."""
+
+    built = _build()
+    _ = built.reaching
+    return built
+
+
+def runner_callers(compose: dict, graph: _Graph) -> dict[str, str]:
     """실행기를 부르는 서비스 → 그 경로 하나(진입점 → … → 실행기 클라이언트)."""
 
-    graph = _build()
-    nxt = graph.reaching()
+    nxt = graph.reaching
     callers: dict[str, str] = {}
     for name, svc in compose["services"].items():
         if "codemit-backend:" not in str(svc.get("image", "")) or (command := _command(svc)) is None:
@@ -304,27 +316,26 @@ def runner_callers(compose: dict) -> dict[str, str]:
     return callers
 
 
-def test_the_call_graph_sees_the_runner_client() -> None:
+def test_the_call_graph_sees_the_runner_client(graph: _Graph) -> None:
     """씨앗이 사라지면(이름이 바뀌면) 아래 대조가 「부르는 쪽 없음」으로 조용히 초록이 된다 — 그걸 막는다."""
 
     assert HTTP_METHODS <= set(dir(AgentGrader)) and HTTP_METHODS <= set(dir(ar))
-    graph = _build()
     assert "core.agent_scoring.request_run" in graph.seeds
-    nxt = graph.reaching()
+    nxt = graph.reaching
     for known in ("classroom.grader.Grader.run_forever", "classroom.agent_grading.run_scoring"):
         assert known in nxt, known
     # pytest 전용 동기 갈래는 운영에서 돌지 않는다 — 그 길로는 API 가 실행기에 닿지 않는다.
     assert settings.CLASSROOM_GRADER_INLINE is True  # 시험 중이므로 켜져 있다(settings.py 의 `_RUNNING_TESTS`)
 
 
-def test_every_process_that_calls_the_runner_is_on_agent_call() -> None:
+def test_every_process_that_calls_the_runner_is_on_agent_call(graph: _Graph) -> None:
     """부르는 프로세스가 `agent-call` 에 없으면 `http://agent-grader:8003` 이름이 풀리지 않아 모든 실행이
     「에이전트 실행기에 닿지 못했다: URLError」다(#1316). 거꾸로, 부르지 않는 프로세스는 넣지 않는다 — 실행기에서
     보이는 것을 늘리지 않는다."""
 
     prod = _compose("compose.prod.yaml")
     assert ar.DEFAULT_SERVICE_URL == f"http://{RUNNER}:{ar.SERVICE_PORT}"
-    callers = runner_callers(prod)
+    callers = runner_callers(prod, graph)
     assert {"celery-worker", "grader"} <= callers.keys(), callers
     on_call = _members(prod, "agent-call") - {RUNNER}
     missing = {name: path for name, path in callers.items() if name not in on_call}
@@ -337,7 +348,7 @@ def test_every_process_that_calls_the_runner_is_on_agent_call() -> None:
     assert prod["networks"]["agent-call"] == {"internal": True}
 
 
-def test_ci_check_calls_the_runner_from_where_prod_callers_call_it() -> None:
+def test_ci_check_calls_the_runner_from_where_prod_callers_call_it(graph: _Graph) -> None:
     """검사 driver 는 운영의 부르는 쪽 모두와 같은 자리(`agent-call`, `agent` 아님)에 선다(#1031·#1316)."""
 
     prod = _compose("compose.prod.yaml")
@@ -345,7 +356,7 @@ def test_ci_check_calls_the_runner_from_where_prod_callers_call_it() -> None:
     driver = set(check["services"]["driver"]["networks"])
     assert "agent" not in driver
     assert driver & set(check["services"][RUNNER]["networks"]) == {"agent-call"}
-    for name in runner_callers(prod):
+    for name in runner_callers(prod, graph):
         prod_seat = set(prod["services"][name]["networks"]) & set(prod["services"][RUNNER]["networks"])
         assert prod_seat == driver & set(check["services"][RUNNER]["networks"]), name
     assert check["networks"]["agent-call"] == {"internal": True}
