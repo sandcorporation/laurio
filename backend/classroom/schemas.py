@@ -1398,6 +1398,18 @@ class ClassroomAttemptRowOut(ClassroomRecentAttemptOut):
     correctable: bool
 
 
+class ClassroomAttemptChecklistItemOut(Schema):
+    id: int
+    label: str
+
+
+class ClassroomAttemptVerdictsOut(Schema):
+    """「제출」 화면 줄을 펼쳤을 때(#1334) — 그 시도의 현재 판정(정정이 끝났으면 정정 뒤 판정)과 항목 문구. 아직 채점 전이면 `score` 는 `None`."""
+
+    score: ClassroomScoreOut | None
+    checklist_items: list[ClassroomAttemptChecklistItemOut]
+
+
 class ClassroomAttemptPageOut(Schema):
     rows: list[ClassroomAttemptRowOut]
     page: int

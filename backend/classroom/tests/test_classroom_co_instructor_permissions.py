@@ -210,6 +210,8 @@ ROUTES: list[Route] = [
     Route("get_roster_grid", "get", lambda w: f"{_c(w)}/roster-grid", None, 200),
     Route("list_recent_attempts", "get", lambda w: f"{_c(w)}/recent-attempts", None, 200),
     Route("list_class_attempts", "get", lambda w: f"{_c(w)}/attempts?page=1", None, 200),
+    # 이 세계에는 시도가 없어 문을 지난 뒤 404 다(남이면 그 전에 막힌다).
+    Route("get_class_attempt_verdicts", "get", lambda w: f"{_c(w)}/attempts/0/verdicts", None, 404),
     # 문제
     Route("create_problem", "post", lambda w: f"{_c(w)}/problems", lambda w: {"title": "새 문제", "submission_formats": ["repository"]}, 201),
     Route("list_problems", "get", lambda w: f"{_c(w)}/problems", None, 200),

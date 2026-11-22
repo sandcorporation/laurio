@@ -116,7 +116,9 @@ from .schemas import (
     ClassroomProblemMineOut,
     ClassroomProblemStatsOut,
     ClassroomProblemSubmissionsOut,
+    ClassroomAttemptChecklistItemOut,
     ClassroomAttemptPageOut,
+    ClassroomAttemptVerdictsOut,
     ClassroomAttemptRowOut,
     ClassroomRecentAttemptOut,
     ClassroomRosterGridOut,
@@ -2364,6 +2366,29 @@ def list_class_attempts(request: HttpRequest, class_id: int, page: int = 1):
         for attempt in attempts
     ]
     return 200, ClassroomAttemptPageOut(rows=rows, page=page, has_next=len(window) > CLASS_ATTEMPTS_PAGE_SIZE)
+
+
+@router.get(
+    "/classes/{class_id}/attempts/{submission_id}/verdicts",
+    response={200: ClassroomAttemptVerdictsOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_class_attempt_verdicts(request: HttpRequest, class_id: int, submission_id: int):
+    """「제출」 화면 줄을 펼칠 때(#1334) 그 시도 하나의 현재 판정 — 문제별 제출 화면의 강사 응답과 같은 `_serialize_score`
+    (정정으로 바뀐 점수는 정정 뒤 판정). 학생 소스·제출 값은 싣지 않는다. 범위는 목록과 같은 강사(소유자·공동 강사)와
+    같은 참여자 집합이고, 그 밖은 404."""
+
+    class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
+    attempt = _class_attempts_newest_first(class_obj).filter(id=submission_id).first()
+    if attempt is None:
+        raise HttpError(404, "제출을 찾을 수 없습니다.")
+    score = current_score(attempt)
+    return 200, ClassroomAttemptVerdictsOut(
+        score=_serialize_score(score) if score is not None else None,
+        checklist_items=[
+            ClassroomAttemptChecklistItemOut(id=item.id, label=item.label) for item in attempt.problem.checklist_items.all()
+        ],
+    )
 
 
 def _class_attempts_newest_first(class_obj: Class):

@@ -500,6 +500,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/{class_id}/attempts/{submission_id}/verdicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Class Attempt Verdicts
+         * @description 「제출」 화면 줄을 펼칠 때(#1334) 그 시도 하나의 현재 판정 — 문제별 제출 화면의 강사 응답과 같은 `_serialize_score`
+         *     (정정으로 바뀐 점수는 정정 뒤 판정). 학생 소스·제출 값은 싣지 않는다. 범위는 목록과 같은 강사(소유자·공동 강사)와
+         *     같은 참여자 집합이고, 그 밖은 404.
+         */
+        get: operations["classroom_api_get_class_attempt_verdicts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/{class_id}/co-instructor-invites": {
         parameters: {
             query?: never;
@@ -6462,6 +6484,13 @@ export interface components {
             /** Submitting Students */
             submitting_students: number;
         };
+        /** ClassroomAttemptChecklistItemOut */
+        ClassroomAttemptChecklistItemOut: {
+            /** Id */
+            id: number;
+            /** Label */
+            label: string;
+        };
         /** ClassroomAttemptPageOut */
         ClassroomAttemptPageOut: {
             /** Has Next */
@@ -6499,6 +6528,15 @@ export interface components {
              * Format: date-time
              */
             submitted_at: string;
+        };
+        /**
+         * ClassroomAttemptVerdictsOut
+         * @description 「제출」 화면 줄을 펼쳤을 때(#1334) — 그 시도의 현재 판정(정정이 끝났으면 정정 뒤 판정)과 항목 문구. 아직 채점 전이면 `score` 는 `None`.
+         */
+        ClassroomAttemptVerdictsOut: {
+            /** Checklist Items */
+            checklist_items: components["schemas"]["ClassroomAttemptChecklistItemOut"][];
+            score: components["schemas"]["ClassroomScoreOut"] | null;
         };
         /**
          * ClassroomBonusScoreIn
@@ -12539,6 +12577,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClassroomAttemptPageOut"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_get_class_attempt_verdicts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                class_id: number;
+                submission_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassroomAttemptVerdictsOut"];
                 };
             };
             /** @description Not Found */
