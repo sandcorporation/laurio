@@ -110,7 +110,7 @@ AGENT_TOKENS: dict[str, Usage] = {
 REFERENCE_PROMPT_TOKENS = 2_667
 
 #: 강의실 에이전트 채점의 상한 — 숫자는 실행기와 같다. 실행 시간·시도·예산은 `core.agent_scoring`, 올린 zip 크기·풀린 크기·
-#: 파일 수는 실행기 `scoring.agent_runner`(별도 서비스라 여기서 들여오지 않는다 — 시험이 같은 값인지 못 박는다).
+#: 파일 수는 실행기 실행기 모듈(별도 서비스라 여기서 들여오지 않는다 — 시험이 같은 값인지 못 박는다).
 AGENT_MAX_ZIP_BYTES = 100 * 1024 * 1024
 AGENT_MAX_EXTRACTED_BYTES = 256 * 1024 * 1024
 AGENT_MAX_ZIP_ENTRIES = 50_000
