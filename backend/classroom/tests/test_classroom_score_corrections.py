@@ -341,6 +341,10 @@ def test_the_class_attempts_page_marks_only_the_latest_capped_attempt_as_correct
     assert [(r["id"], r["correctable"]) for r in body["rows"]] == [(newer, True), (older, False)]
     assert (body["page"], body["has_next"]) == (1, False)
     assert {"member_display_name", "problem_title", "status", "late"} <= set(body["rows"][0])
+    # 실패 상한 점수 줄은 버튼이 없는 앞선 시도까지 「채점 실패」다 — 「최근 제출」도 같은 낱말.
+    assert [r["status"] for r in body["rows"]] == ["scoring_failed", "scoring_failed"]
+    recent = client.get(f"{CLASSES_URL}/{ctx['class_id']}/recent-attempts", **auth_header(ctx["instructor"]["access"]))
+    assert [r["status"] for r in recent.json()] == ["scoring_failed", "scoring_failed"]
     assert page(1, ctx["participant"]["access"]).status_code == 404
     # 걸어 두면 진행 중인 동안 버튼이 내려간다.
     _request(client, ctx, [newer])

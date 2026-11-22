@@ -60,9 +60,6 @@ Actions `PR 검사`(`pr-check.yml`)가 검사 묶음과 amd64 이미지 부팅 �
   어댑터나 로컬 흉내 서버로 한다. 풀러·Redis·OpenSearch 실물 시험(`live_infra`)은 dev 프로필을 띄워 돌려도 된다.
 - **시임은 마운트된 HTTP API** (`backend/tests/classroom_scenarios.py` 빌더 — ORM 으로 상태를 만들지 않는다)와 앱별
   e2e 다. 시험 한도는 `testing.md`(CPU 1초)·`frontend.md`(e2e 3초) — 넘으면 한도를 늘리지 말고 원인을 줄인다.
-- **화면을 바꾸면** 1440px·390px 스크린샷을 검토 Artifact 「Codemit 화면 검토」
-  (https://claude.ai/artifact/8Xc8xeV9duZJdZhzpxFEcH) 맨 위에 그 PR 절로 더한다(read 후 publish, 새 아티팩트를
-  만들지 않는다).
 - **병합 = 승격 = prod 배포다**(ADR-0068·ADR-0077). release 가 빨가면 production 이 움직이지 않는다 — 그 실행의 실패 줄을 보고 고친다. 문서만 바뀐 병합은 `codemit/deploy` 가 교체 없이 표식만 옮긴다. 배포가 돌았다면 prod
   `/api/health` 200 과 콘솔의 「디스코드 알림 실패」 0건을 확인한다(읽기만 — Jenkins 자격증명은 셸 env 의
   `JENKINS_URL`·`JENKINS_USER`·`JENKINS_API_TOKEN`, 값은 출력하지 않는다).

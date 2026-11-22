@@ -1377,7 +1377,8 @@ class ClassroomRosterGridOut(Schema):
 
 class ClassroomRecentAttemptOut(Schema):
     """클래스의 최근 시도 한 줄(#632) — 강사 전용. `status`는 격자 칸과 같은 낱말이다:
-    "passed" | "attempted_not_passed" | "scoring" | "needs_setup"."""
+    "passed" | "attempted_not_passed" | "scoring" | "needs_setup", 그리고 실패 상한 점수(`platform-auto`)면
+    "scoring_failed"(#1317)."""
 
     id: int
     member_id: int

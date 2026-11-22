@@ -13,7 +13,7 @@ import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import { ATTEMPT_SCORED, type StreamEvent } from "@/lib/events/types";
 
 // 격자 칸과 같은 낱말 — 그 시도 하나의 결과다.
-export type RecentAttemptStatus = "passed" | "attempted_not_passed" | "scoring" | "needs_setup";
+export type RecentAttemptStatus = "passed" | "attempted_not_passed" | "scoring_failed" | "scoring" | "needs_setup";
 
 export type RecentAttemptRow = {
   id: number;

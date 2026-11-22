@@ -54,7 +54,7 @@ test("제출 화면: 「채점 실패」 줄만 「다시 채점」, 확인 창�
   await expect(page.getByTestId("class-attempts-heading")).toHaveText("제출");
   const row = page.getByTestId(`class-attempt-${submissionId}`);
   await expect(row).toContainText("서지우");
-  await expect(row).toContainText("미통과");
+  await expect(row).toContainText("채점 실패");
 
   await page.getByTestId(`regrade-${submissionId}`).click();
   const dialog = page.getByTestId("regrade-dialog");
@@ -65,9 +65,9 @@ test("제출 화면: 「채점 실패」 줄만 「다시 채점」, 확인 창�
 
   // 정정이 끝나면 grader 가 attempt-scored 를 내고 화면이 다시 읽는다 — 그다음 새로고침해도 그대로다.
   await expect(page.getByTestId(`regrade-${submissionId}`)).toHaveCount(0);
-  await expect(row).not.toContainText("미통과");
+  await expect(row).not.toContainText("채점 실패");
   await page.reload();
   await expect(row).toContainText("통과");
-  await expect(row).not.toContainText("미통과");
+  await expect(row).not.toContainText("채점 실패");
   await expect(page.getByTestId(`regrade-${submissionId}`)).toHaveCount(0);
 });

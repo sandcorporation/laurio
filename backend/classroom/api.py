@@ -2382,6 +2382,9 @@ def _recent_attempt_row(class_obj: Class, attempt: ClassroomSubmission) -> Class
         status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
     else:
         status = "passed" if attempt.problem.is_score_passed(score) else "attempted_not_passed"
+        if score.model_version == PLATFORM_FAILURE_MODEL_VERSION:
+            # 실패 상한 점수(#1316·#1317)는 학생이 못 넘은 것이 아니라 채점이 못 돈 것이다.
+            status = "scoring_failed"
     return ClassroomRecentAttemptOut(
         id=attempt.id,
         member_id=attempt.member_id,

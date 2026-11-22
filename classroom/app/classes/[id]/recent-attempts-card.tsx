@@ -15,6 +15,7 @@ import { useRecentAttempts, type RecentAttemptRow, type RecentAttemptStatus } fr
 const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: string }> = {
   passed: { label: "통과", className: "text-success" },
   attempted_not_passed: { label: "미통과", className: "text-ink/60" },
+  scoring_failed: { label: "채점 실패", className: "text-ink/60" },
   scoring: { label: "채점 중", className: "text-ink/45" },
   needs_setup: { label: "설정 필요", className: "text-warning" },
 };
@@ -22,7 +23,7 @@ const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: stri
 function AttemptMark({ status }: { status: RecentAttemptStatus }) {
   const size = "h-[14px] w-[14px] shrink-0";
   if (status === "passed") return <span className={`${size} bg-success`} />;
-  if (status === "attempted_not_passed") return <span className={`${size} border border-error`} />;
+  if (status === "attempted_not_passed" || status === "scoring_failed") return <span className={`${size} border border-error`} />;
   if (status === "needs_setup") return <span className={`${size} border border-dashed border-warning`} />;
   return (
     <span
