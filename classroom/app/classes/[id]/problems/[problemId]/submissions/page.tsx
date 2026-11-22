@@ -139,7 +139,7 @@ function AttemptRow({
   const entry = latestRowEntryBadge(submission, currentEntryAttempt);
   const canOpen = submission.status === "scored" && submission.score !== null;
   return (
-    <li data-testid={testId} className="px-4 py-3">
+    <li id={`submission-${submission.id}`} data-testid={testId} className="scroll-mt-4 px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
         <span data-testid={`${testId}-member`} className="w-[90px] shrink-0 truncate text-[13.5px]">
           {submission.member_display_name}

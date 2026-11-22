@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { NotificationRow } from "./api";
+import { detailTabHref } from "../classes/detail-tab";
 import { notificationHref } from "./link";
 
 function row(overrides: Partial<NotificationRow>): NotificationRow {
@@ -106,5 +107,33 @@ describe("notificationHref — 제보 상태 (#1242)", () => {
   it("제보 상세로 가고, id 가 없으면 목록으로 간다", () => {
     expect(notificationHref(row({ notification_type: "classroom_feedback_status_changed", context: { report_id: 5 } }))).toBe("/feedback/5");
     expect(notificationHref(row({ notification_type: "classroom_feedback_status_changed", context: {} }))).toBe("/feedback");
+  });
+});
+
+describe("notificationHref — classroom_scoring_failure_capped", () => {
+  it("소유자가 받으므로 강사의 제출 현황 화면, 그 시도 줄로 간다(#1318)", () => {
+    const href = notificationHref(
+      row({
+        notification_type: "classroom_scoring_failure_capped",
+        context: { class_id: 7, problem_id: 3, submission_id: 42 },
+      }),
+    );
+    expect(href).toBe("/classes/7/problems/3/submissions#submission-42");
+  });
+
+  it("문제 id가 없으면 링크를 짓지 않는다", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_failure_capped", context: { class_id: 7 } }),
+    );
+    expect(href).toBeNull();
+  });
+});
+
+describe("notificationHref — classroom_scoring_platform_unavailable", () => {
+  it("고칠 설정이 없으므로 설정이 아니라 클래스 화면으로 간다(#1318)", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_platform_unavailable", context: { class_id: 7 } }),
+    );
+    expect(href).toBe(detailTabHref(7, "problems"));
   });
 });

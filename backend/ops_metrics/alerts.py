@@ -133,6 +133,10 @@ RULES: tuple[Rule, ...] = (
     Rule("LLMAuthRejected", 1, _count_rule("auth", 30, at_least=1)),
     Rule("ClassroomScoringQueueSlow", 10, _queue_slow),
     Rule("GraderDown", 1, _grader_down),
+    # 강의실 채점이 에이전트 실행기에 닿지 못했다(#1318, `classroom.platform_failures.GRADER_UNREACHABLE`) — 1건이면
+    # 울린다. 멈춘 클래스는 10분마다 한 건씩 다시 쳐 보므로(`QUOTA_RECHECK_INTERVAL`) 창을 그보다 넓게 잡아, 불통이
+    # 이어지는 동안 풀렸다 울렸다 하지 않게 한다.
+    Rule("ClassroomGraderUnreachable", 1, _count_rule("grader_unreachable", 15, at_least=1)),
 )
 
 

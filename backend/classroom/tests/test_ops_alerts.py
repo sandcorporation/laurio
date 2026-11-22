@@ -76,6 +76,25 @@ def test_quota_exhausted_fires_on_the_first_rejection_in_ten_minutes(db, sent):
     assert _firing(T0 + 10 * 60 + 5) == set()
 
 
+def test_grader_unreachable_fires_once_while_rechecks_keep_failing_and_resolves_after(db, sent):
+    """#1318: 강의실 채점이 에이전트 실행기에 닿지 못하면 1건에 울린다. 멈춘 클래스가 10분마다 다시 쳐 보다 또 실패하는
+    동안은 발생 한 번이고, 실패가 멈추고 15분이 지나면 풀림 한 번이다."""
+
+    assert _firing(T0) == set()
+    _calls("grader_unreachable", 1, T0 + 10)
+    assert _firing(T0 + 20) == {"ClassroomGraderUnreachable"}
+    for n in range(1, 4):  # 다시 확인(10분 남짓마다)이 또 실패한다
+        _calls("grader_unreachable", 1, T0 + n * 610)
+        for minute in range(10):
+            assert _firing(T0 + n * 610 + 5 + minute * 60) == {"ClassroomGraderUnreachable"}
+    last = T0 + 3 * 610
+    assert _firing(last + 14 * 60) == {"ClassroomGraderUnreachable"}
+    assert _firing(last + 15 * 60 + 5) == set()
+    fired = [m for m in sent if "ClassroomGraderUnreachable" in m]
+    assert len(fired) == 2, fired  # 발생 하나, 풀림 하나
+    assert AlertState.objects.get(rule="ClassroomGraderUnreachable").status == "resolved"
+
+
 def test_rate_limited_needs_five_in_ten_minutes(db, sent):
     _calls("rate_limited", 4, T0)
     assert _firing(T0 + 10) == set()
