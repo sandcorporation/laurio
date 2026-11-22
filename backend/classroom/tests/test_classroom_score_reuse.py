@@ -10,7 +10,7 @@ from classroom.api import _serialize_score
 from classroom.models import ChecklistItem, ClassroomScore, ClassroomSubmission, Problem
 from classroom.scoring import FakeClassroomScoringAdapter
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
-from tests.classroom_scenarios import create_class, create_open_problem, join_class, login, submit_repository
+from tests.classroom_scenarios import CLASSES_URL, auth_header, mine, create_class, create_open_problem, join_class, login, submit_repository
 
 
 @pytest.fixture
@@ -147,3 +147,23 @@ def test_an_attempt_never_reuses_its_own_score(client, class_with_problem, submi
         is None
     )
     assert ClassroomSubmission.objects.count() == 1
+
+
+def test_over_http_the_instructor_list_marks_reuse_and_the_students_own_view_does_not(
+    client, class_with_problem, submit, monkeypatch
+):
+    monkeypatch.setenv("CLASSROOM_SCORE_REUSE", "on")
+    ctx = class_with_problem
+    submit(ctx, "p-1")
+    second = submit(ctx, "p-2")
+    problem_id, class_id = ctx["problem"].id, ctx["class_id"]
+
+    listed = client.get(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/submissions", **auth_header(ctx["instructor"]["access"])
+    ).json()
+    assert sorted(row["score"]["reused"] for row in listed) == [False, True]
+
+    student = login(client, uid="p-2")
+    own = mine(client, student["access"], class_id, problem_id)["submissions"][0]["score"]
+    assert own["reused"] is False
+    assert score_reuse.REUSED_KEY not in str(own) and second.reasoning[0][score_reuse.REUSED_KEY] is not None
