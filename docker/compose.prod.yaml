@@ -450,8 +450,9 @@ services:
       search:
         condition: service_started
     environment: *backend-env
-    # 에이전트 채점·완성도 리뷰(#1000·#1001)가 이 프로세스에서 `agent-grader` 를 부른다 — 실행기와 `agent-call`
-    # 에 함께 붙어야 그 이름이 풀린다(#1031). `agent`(프록시만 보이는 쪽)에는 붙지 않는다.
+    # 공모전 에이전트 채점·완성도 리뷰(#1000·#1001)가 이 프로세스(워커 안 스캔)에서 `agent-grader` 를 부른다 — 실행기와
+    # `agent-call` 에 함께 붙어야 그 이름이 풀린다(#1031). `agent`(프록시만 보이는 쪽)에는 붙지 않는다. 부르는 프로세스와
+    # 이 망의 대조는 backend/scoring/tests/test_agent_call_network.py 가 호출 그래프로 한다(#1316).
     networks:
       - default
       - agent-call
@@ -510,6 +511,12 @@ services:
       # grader 의 LLM 지표(`codemit_llm_*`) 엔드포인트(#585) — 단일 프로세스라 합산이 필요 없다. 호스트에 열지
       # 않는다: oracle 의 prometheus 가 prod 네트워크 안에서 `grader:9102` 로 긁는다(docs/ops/operations.md).
       CLASSROOM_GRADER_METRICS_PORT: "9102"
+    # 강의실 에이전트 채점·완성도 검사(#1036, 2fee8b2e)가 이 프로세스에서 `agent-grader` 를 부른다 — celery-worker 와
+    # 같은 자리(`agent-call`)에 붙어야 그 이름이 풀린다(#1316 — 빠져 있어 운영의 강의실 에이전트 채점이 모두
+    # 「에이전트 실행기에 닿지 못했다: URLError」였다). `agent`(프록시만 보이는 쪽)에는 붙지 않는다.
+    networks:
+      - default
+      - agent-call
     stop_grace_period: 4m
     # 상한이 없으면 메모리를 다 쓰는 일이 같은 호스트의 DB 까지 OOM 에 끌어들일 수 있다(#584 점검).
     # 64건의 요청·응답 본문(응답은 `SAFE_OUTBOUND_RESPONSE_MAX_BYTES` 까지)·소스 읽기에 넉넉한 값이다.
@@ -832,8 +839,10 @@ services:
 networks:
   agent:
     internal: true
-  # 실행기를 부르는 쪽(#1031) — `celery-worker` 와 `agent-grader` 둘만. 이것도 `internal` 이라 실행기가 여기로 밖에
-  # 나가지 못한다. 부르는 쪽을 `agent` 에 넣지 않는 까닭: 그쪽은 「실행기에서 보이는 것은 프록시뿐」을 지키는 자리다.
+  # 실행기를 부르는 쪽(#1031·#1316) — 실행기 `agent-grader` 와 그것을 부르는 프로세스(`celery-worker`·`grader`)만. 부르는
+  # 프로세스는 손으로 적지 않고 시험(backend/scoring/tests/test_agent_call_network.py)이 서비스 command 의 진입점에서
+  # 실행기 클라이언트까지의 호출 그래프로 가린다 — 부르는 쪽이 늘면 그 시험이 빨개진다. 이것도 `internal` 이라 실행기가
+  # 여기로 밖에 나가지 못한다. 부르는 쪽을 `agent` 에 넣지 않는 까닭: 그쪽은 「실행기에서 보이는 것은 프록시뿐」을 지키는 자리다.
   agent-call:
     internal: true
 
