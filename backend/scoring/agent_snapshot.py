@@ -32,10 +32,10 @@ def contest_snapshot(submission: ContestSubmission) -> Snapshot:
             if snap is not None
             else clone_repository_asset(asset, github)
         )
-        return Snapshot(zip_bytes=cloned.zip_bytes, commit_sha=cloned.commit_sha, asset_id=asset.id)
+        return Snapshot(zip_bytes=cloned.zip_bytes, commit_sha=cloned.commit_sha, asset_id=asset.id, kind="repository")
     storage = get_storage_adapter()
     for asset in submission.assets.filter(kind=SubmissionAsset.Kind.SOURCE).order_by("order", "id"):
         raw = storage.read_object(asset.value)
         if raw is not None and zipfile.is_zipfile(io.BytesIO(raw)):
-            return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.id)
+            return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.id, kind="upload")
     raise SnapshotUnavailable("저장소 자산도 zip 소스 자료도 없다")

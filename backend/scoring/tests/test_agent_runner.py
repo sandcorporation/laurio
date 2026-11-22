@@ -223,7 +223,7 @@ def test_runner_uses_only_the_standard_library() -> None:
 def test_extract_strips_the_zipball_root_and_makes_the_tree_read_only(tmp_path: Path) -> None:
     data = _zip({"owner-repo-abc123/app.py": "print(1)\n", "owner-repo-abc123/pkg/mod.py": "x = 1\n"})
     dest = tmp_path / "repo"
-    prefix = ar.extract_repo(_write_zip(tmp_path, data), dest)
+    prefix = ar.extract_repo(_write_zip(tmp_path, data), dest, repo_kind="repository")
     assert prefix == "owner-repo-abc123"
     assert (dest / "app.py").read_text() == "print(1)\n"
     assert (dest / "pkg" / "mod.py").exists()
@@ -232,36 +232,53 @@ def test_extract_strips_the_zipball_root_and_makes_the_tree_read_only(tmp_path: 
     assert stat.S_IMODE(dest.stat().st_mode) == 0o555
 
 
+def test_extract_keeps_the_single_top_folder_of_an_uploaded_zip(tmp_path: Path) -> None:
+    """#1278: 학생이 `final/` 하나로 싼 zip 은 zipball 과 같은 꼴이지만 그 폴더가 체크리스트 경로의 일부다."""
+
+    data = _zip({"final/archive/pack.sh": "echo 1\n", "final/logs/rotate.sh": "echo 2\n"})
+    dest = tmp_path / "repo"
+    assert ar.extract_repo(_write_zip(tmp_path, data), dest, repo_kind="upload") == ""
+    assert (dest / "final" / "archive" / "pack.sh").exists()
+
+
+def test_repo_kind_defaults_to_repository_and_rejects_unknown_values() -> None:
+    assert _spec()["repo_kind"] == "repository"  # #1278 전 계약(벗긴다) — 백엔드는 늘 싣는다
+    assert _spec(repo_kind="upload")["repo_kind"] == "upload"
+    with pytest.raises(ar.RunRejected) as exc:
+        _spec(repo_kind="zip")
+    assert exc.value.reason == "spec_bad_repo_kind"
+
+
 def test_extract_keeps_paths_when_there_is_no_single_root(tmp_path: Path) -> None:
     dest = tmp_path / "repo"
-    assert ar.extract_repo(_write_zip(tmp_path, _zip({"app.py": "a", "lib/x.py": "b"})), dest) == ""
+    assert ar.extract_repo(_write_zip(tmp_path, _zip({"app.py": "a", "lib/x.py": "b"})), dest, repo_kind="repository") == ""
     assert (dest / "app.py").exists() and (dest / "lib" / "x.py").exists()
 
 
 @pytest.mark.parametrize("name", ["../evil.py", "/etc/passwd", "a/../../evil.py", "C:/evil.py", "a\\..\\evil.py"])
 def test_extract_rejects_paths_that_leave_the_repo(tmp_path: Path, name: str) -> None:
     with pytest.raises(ar.RunRejected) as caught:
-        ar.extract_repo(_write_zip(tmp_path, _zip({"ok.py": "1", name: "x"})), tmp_path / "repo")
+        ar.extract_repo(_write_zip(tmp_path, _zip({"ok.py": "1", name: "x"})), tmp_path / "repo", repo_kind="upload")
     assert caught.value.reason == "repo_zip_bad_path"
     assert not (tmp_path / "evil.py").exists()
 
 
 def test_extract_does_not_create_symlinks(tmp_path: Path) -> None:
     dest = tmp_path / "repo"
-    ar.extract_repo(_write_zip(tmp_path, _zip({"app.py": "1"}, links={"secret": "/etc/passwd"})), dest)
+    ar.extract_repo(_write_zip(tmp_path, _zip({"app.py": "1"}, links={"secret": "/etc/passwd"})), dest, repo_kind="upload")
     assert not (dest / "secret").exists() and not (dest / "secret").is_symlink()
 
 
 def test_extract_refuses_archives_over_the_size_cap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ar, "MAX_EXTRACTED_BYTES", 10)
     with pytest.raises(ar.RunRejected) as caught:
-        ar.extract_repo(_write_zip(tmp_path, _zip({"big.txt": "x" * 100})), tmp_path / "repo")
+        ar.extract_repo(_write_zip(tmp_path, _zip({"big.txt": "x" * 100})), tmp_path / "repo", repo_kind="upload")
     assert caught.value.reason == "repo_zip_too_large"
 
 
 def test_extract_refuses_what_is_not_a_zip(tmp_path: Path) -> None:
     with pytest.raises(ar.RunRejected) as caught:
-        ar.extract_repo(_write_zip(tmp_path, b"not a zip"), tmp_path / "repo")
+        ar.extract_repo(_write_zip(tmp_path, b"not a zip"), tmp_path / "repo", repo_kind="upload")
     assert caught.value.reason == "repo_zip_invalid"
 
 

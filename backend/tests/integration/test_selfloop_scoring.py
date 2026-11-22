@@ -37,7 +37,7 @@ def _snapshot() -> Snapshot:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("app.py", APP)
-    return Snapshot(zip_bytes=buf.getvalue(), commit_sha="abc123", asset_id=1)
+    return Snapshot(zip_bytes=buf.getvalue(), commit_sha="abc123", asset_id=1, kind="repository")
 
 
 @pytest.fixture

@@ -608,7 +608,7 @@ def count_real_evidence(snapshot: Snapshot, items: list[dict[str, JSON]]) -> tup
         zip_path = Path(tmp) / "repo.zip"
         zip_path.write_bytes(snapshot.zip_bytes)
         root = Path(tmp) / "repo"
-        agent_grader().extract_repo(zip_path, root)
+        agent_grader().extract_repo(zip_path, root, repo_kind=snapshot.kind)
         tools = selfloop.RepoTools(root)
         real = sum(1 for item in evidence if not selfloop.check_evidence(tools, [item]))
     return len(evidence), real

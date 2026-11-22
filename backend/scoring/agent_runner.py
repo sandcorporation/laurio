@@ -5,8 +5,10 @@
 조건(#1000)은 부르는 쪽 몫이다. 부르는 쪽이 없으면 이 서비스는 요청을 기다리기만 하고 아무 데도 나가지 않는다.
 
 실행 하나(`execute_run`):
-  1. 박제본 zip 을 `/work/<run>/repo` 에 경로 검사 뒤 푼다(절대 경로·`..`·링크는 들이지 않는다). 최상위 폴더가
-     하나뿐이면(GitHub zipball 의 `<owner>-<repo>-<sha>/`) 벗기고, 벗긴 접두사를 결과에 돌려준다. 다 풀면 읽기 전용.
+  1. 박제본 zip 을 `/work/<run>/repo` 에 경로 검사 뒤 푼다(절대 경로·`..`·링크는 들이지 않는다). 저장소 박제본
+     (`repo_kind="repository"`)이고 최상위 폴더가 하나뿐이면(GitHub zipball 의 `<owner>-<repo>-<sha>/`) 벗기고, 벗긴
+     접두사를 결과에 돌려준다. 학생이 올린 zip(`repo_kind="upload"`)은 벗기지 않는다 — `final/` 처럼 최상위 폴더
+     하나로 싼 zip 의 그 폴더는 체크리스트와 한 번 호출이 보는 경로의 일부다(#1278). 다 풀면 읽기 전용.
   2. 빈 `HOME=/work/<run>/home`, 키 자리에 실행 토큰, base_url 은 `llm-proxy`. env 는 처음부터 새로 짓는다 —
      이 프로세스의 env 를 물려주지 않는다.
   3. 고정 인자(`claude_argv`·`codex_argv`)로 CLI 를 띄운다. 프롬프트는 stdin 으로 준다(argv 길이 한도·`ps` 노출).
@@ -106,6 +108,10 @@ VENDORS: tuple[Vendor, ...] = ("anthropic", "openai")
 #: 실행 갈래 — `cli` 는 Claude Code·Codex, `selfloop` 은 우리 루프(#1245, `selfloop.py`).
 Mode = Literal["cli", "selfloop"]
 MODES: tuple[Mode, ...] = ("cli", "selfloop")
+#: 박제본이 어디서 왔나(#1278) — `repository` 는 GitHub zipball(최상위 `<owner>-<repo>-<sha>/` 를 벗긴다), `upload` 는
+#: 학생이 올린 zip(그대로 푼다). zip 모양으로 추측하지 않고 부르는 쪽이 아는 자산 종류로 정한다.
+RepoKind = Literal["repository", "upload"]
+REPO_KINDS: tuple[RepoKind, ...] = ("repository", "upload")
 MAX_SELFLOOP_REQUIREMENTS = 100
 
 
@@ -123,6 +129,8 @@ class RunSpec(TypedDict):
     #: `output_schema` 는 받지만 쓰지 않는다(판정 꼴은 루프의 제출 도구가 정한다).
     mode: NotRequired[Mode]
     requirements: NotRequired[list[selfloop.Requirement]]
+    #: 없으면 `repository`(#1278 전 계약 — 벗긴다). 백엔드는 늘 싣는다.
+    repo_kind: NotRequired[RepoKind]
 
 
 class RunResult(TypedDict):
@@ -287,8 +295,9 @@ def _common_root(paths: list[PurePosixPath], dirs: set[PurePosixPath]) -> str:
     return top
 
 
-def extract_repo(zip_path: Path, dest: Path) -> str:
+def extract_repo(zip_path: Path, dest: Path, *, repo_kind: RepoKind) -> str:
     """박제본을 `dest` 에 풀고 읽기 전용으로 돌린다. 벗긴 최상위 접두사(없으면 "")를 돌려준다.
+    최상위 폴더는 `repo_kind="repository"`(zipball)일 때만 벗긴다 — 올린 zip 은 항목 이름 그대로다(#1278).
 
     링크 항목은 만들지 않는다(밖을 가리킬 수 있다). 크기·항목 수는 압축 해제 전에 선언값으로, 풀면서 실제
     바이트로 한 번 더 센다(선언값을 속인 zip 폭탄)."""
@@ -315,7 +324,7 @@ def extract_repo(zip_path: Path, dest: Path) -> str:
                 dirs.add(rel)
                 continue
             members.append((info, rel))
-        prefix = _common_root([rel for _, rel in members] + sorted(dirs), dirs)
+        prefix = _common_root([rel for _, rel in members] + sorted(dirs), dirs) if repo_kind == "repository" else ""
         dest.mkdir(parents=True)
         written = 0
         for info, rel in members:
@@ -393,6 +402,10 @@ def validate_spec(raw: object) -> RunSpec:
     if mode == "selfloop":
         spec["mode"] = "selfloop"
         spec["requirements"] = _selfloop_requirements(raw.get("requirements"))
+    repo_kind = raw.get("repo_kind", "repository")
+    if repo_kind not in REPO_KINDS:
+        raise RunRejected("spec_bad_repo_kind")
+    spec["repo_kind"] = repo_kind
     return spec
 
 
@@ -434,7 +447,7 @@ def execute_run(spec: RunSpec, repo_zip: Path, config: RunnerConfig) -> RunResul
     repo, home, tmp = run_dir / "repo", run_dir / "home", run_dir / "tmp"
     try:
         run_dir.mkdir(parents=True)
-        prefix = extract_repo(repo_zip, repo)
+        prefix = extract_repo(repo_zip, repo, repo_kind=spec.get("repo_kind", "repository"))
         if spec.get("mode") == "selfloop":
             return _execute_selfloop(spec, repo, prefix, run_id, config)
         home.mkdir()

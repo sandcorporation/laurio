@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict
 
 # 실행기(`agent-grader`)의 계약은 `scoring.agent_runner` 가 `core.agent_ports` 에 등록한다(#1085) — 그 파일은 이미지가 홀로
 # COPY 하는 표준 라이브러리 모듈이다(agent-grader.Dockerfile·deploy.sh 가 경로를 안다).
-from core.agent_ports import RunResult, RunSpec, Vendor, agent_grader
+from core.agent_ports import RepoKind, RunResult, RunSpec, Vendor, agent_grader
 from core.agent_refusal_alert import report_account_refusal
 from core.agent_run_tokens import issue_run_token, run_usage
 from core.runtime_settings_port import VENDOR_ANTHROPIC, scoring_vendor, setting_value
@@ -188,6 +188,9 @@ class Snapshot:
     zip_bytes: bytes
     commit_sha: str | None
     asset_id: int
+    #: 저장소 자산의 GitHub zipball 이면 `repository`, 올린 zip 소스면 `upload` — 실행기가 최상위 폴더를 벗길지를
+    #: 이것으로 정한다(#1278). zip 모양으로 추측하지 않는다: `final/` 하나로 싼 학생 zip 도 zipball 과 같은 꼴이다.
+    kind: RepoKind
 
 
 _provided: ContextVar[tuple[int, Snapshot] | None] = ContextVar("agent_scoring_snapshot", default=None)
@@ -533,6 +536,7 @@ def _attempt(
         run_token=issued.token,
         max_budget_usd=float(budget_usd),
         timeout_seconds=ATTEMPT_TIMEOUT_SECONDS,
+        repo_kind=snapshot.kind,
     )
     result = request_run(spec, snapshot.zip_bytes, timeout=ATTEMPT_HTTP_TIMEOUT_SECONDS)
     parsed = parse_claude_stream(result["stdout"]) if vendor == VENDOR_ANTHROPIC else parse_codex_stream(result["stdout"])

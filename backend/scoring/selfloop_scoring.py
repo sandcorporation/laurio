@@ -152,6 +152,7 @@ def run_selfloop_scoring(
         timeout_seconds=LOOP_TIMEOUT_SECONDS,
         mode="selfloop",
         requirements=[{"id": r.requirement_id, "text": neutralize_untrusted(r.text)} for r in requirements],
+        repo_kind=snapshot.kind,
     )
     attempts: list[JSON] = []
     record["attempts"] = attempts

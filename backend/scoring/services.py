@@ -741,11 +741,11 @@ def _agent_snapshot(
 
     if len(cloned_repositories) == 1 and not readable_sources:
         asset, cloned = cloned_repositories[0]
-        return Snapshot(zip_bytes=cloned.zip_bytes, commit_sha=cloned.commit_sha, asset_id=asset.id)
+        return Snapshot(zip_bytes=cloned.zip_bytes, commit_sha=cloned.commit_sha, asset_id=asset.id, kind="repository")
     if not cloned_repositories and len(readable_sources) == 1:
         asset, raw = readable_sources[0]
         if zipfile.is_zipfile(io.BytesIO(raw)):
-            return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.id)
+            return Snapshot(zip_bytes=raw, commit_sha=None, asset_id=asset.id, kind="upload")
     logger.warning(
         "에이전트 채점은 채점 입력이 하나일 때만 한다 — 한 번 호출로 채점한다 (sources=%s repositories=%s)",
         len(readable_sources),
