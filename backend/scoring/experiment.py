@@ -390,7 +390,10 @@ def record_truth(experiment: ScoringExperiment, subjects: Sequence[MaterialSubje
             experiment=experiment, submission=None, material_id=s.material_id, row=TRUTH_ROW, round=1,
             defaults=dict(
                 status=ScoringExperimentRun.Status.SCORED,
-                verdicts=[{"requirement_id": t.checklist_item_id, "met": t.is_met} for t in s.item.truth],
+                verdicts=[
+                    {"requirement_id": t.checklist_item_id, "met": t.is_met, **({"confidence": t.confidence} if t.confidence else {})}
+                    for t in s.item.truth
+                ],
                 created_at=Clock.now(),
             ),
         )

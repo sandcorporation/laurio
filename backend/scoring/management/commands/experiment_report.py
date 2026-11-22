@@ -66,6 +66,8 @@ class Command(BaseCommand):
                 duration_seconds=r.duration_seconds,
                 verdicts=_verdicts(r.verdicts),
                 **_staged_counts(r.verdicts),
+                low_items=_low_items(r.verdicts),
+                confidence_marked=_confidence_marked(r.verdicts),
             )
             for r in experiment.runs.all()
             if not is_infra_failure(r.status, r.problem)  # 결과가 아니다(#1257) — 다음 실행에서 다시 돈다
@@ -117,6 +119,18 @@ def _staged_counts(raw: object) -> dict[str, int]:
         return {}
     machine = sum(1 for i in items if i["source"] == "machine")
     return {"machine_items": machine, "model_items": len(items) - machine}
+
+
+def _low_items(raw: object) -> tuple[int, ...]:
+    """기준 판정 칸에서 확신 `low` 인 항목 id(#1297)."""
+
+    return tuple(
+        i["requirement_id"] for i in raw if isinstance(i, dict) and i.get("confidence") == "low" and isinstance(i.get("requirement_id"), int)
+    ) if isinstance(raw, list) else ()
+
+
+def _confidence_marked(raw: object) -> bool:
+    return isinstance(raw, list) and any(isinstance(i, dict) and i.get("confidence") for i in raw)
 
 
 def _verdicts(raw: object) -> tuple[tuple[int, bool], ...]:

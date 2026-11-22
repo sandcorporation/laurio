@@ -329,14 +329,102 @@ def test_a_bad_truth_csv_is_refused_and_leaves_the_material_alone(home, tmp_path
     assert path.read_bytes() == before
 
 
+def _six_column_csv(tmp_path: Path, rows: list[tuple[str, int, str, str]]) -> Path:
+    path = tmp_path / "six.csv"
+    lines = ["material_id,item_id,is_met,evidence,confidence,note"]
+    lines += [f"{m},{i},{v},main.py:1 학생 원문,{c},메모 글" for m, i, v, c in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 @pytest.mark.django_db
-def test_truth_csv_with_student_columns_is_refused(home, tmp_path):
+def test_truth_csv_with_other_leading_columns_is_refused(home, tmp_path):
+    path = _material(home, [_item(1, met=True)])
+    csv_path = _truth_csv(tmp_path, [], header="student_name,material_id,item_id,is_met")
+
+    with pytest.raises(CommandError, match="앞 열은 material_id,item_id,is_met"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+
+@pytest.mark.django_db
+def test_six_column_table_is_accepted_and_only_confidence_reaches_the_material(home, tmp_path):
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+    csv_path = _six_column_csv(tmp_path, [(m1, REQ, "1", "high"), (m1, OPT, "0", "low"), (m2, REQ, "0", ""), (m2, OPT, "0", "Medium")])
+
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+    by_id = {i.material_id: i for i in em.load(path, repo_root=Path("/nonexistent-repo-root")).items}
+    assert by_id[m1].truth == (em.TruthVerdict(REQ, True, "high"), em.TruthVerdict(OPT, False, "low"))
+    assert by_id[m2].truth == (em.TruthVerdict(REQ, False, ""), em.TruthVerdict(OPT, False, "medium"))
+    raw = b"".join(p.read_bytes() for p in [path])
+    import tarfile
+
+    with tarfile.open(path) as tar:
+        text = b"".join(tar.extractfile(m).read() for m in tar.getmembers() if m.isfile() and m.name.endswith(".json"))
+    assert "학생 원문".encode() not in text and "메모 글".encode() not in text and raw
+
+
+@pytest.mark.django_db
+def test_unknown_confidence_is_refused(home, tmp_path):
     items = [_item(1, met=True)]
     path = _material(home, items)
-    csv_path = _truth_csv(tmp_path, [], header="material_id,item_id,is_met,student_name")
+    m1 = items[0].material_id
+    with pytest.raises(CommandError, match="확신 값을 읽을 수 없다"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+              str(_six_column_csv(tmp_path, [(m1, REQ, "1", "sure"), (m1, OPT, "0", "high")])))
 
-    with pytest.raises(CommandError, match="열은 material_id,item_id,is_met"):
-        _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+@pytest.mark.django_db
+def test_a_submission_with_every_row_blank_is_skipped_and_a_partly_blank_one_is_refused(home, tmp_path):
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+
+    out = _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+                str(_six_column_csv(tmp_path, [(m1, REQ, "1", "high"), (m1, OPT, "0", "high"), (m2, REQ, "", ""), (m2, OPT, "", "")])))
+    assert "제출 1건" in out
+    by_id = {i.material_id: i for i in em.load(path, repo_root=Path("/nonexistent-repo-root")).items}
+    assert by_id[m2].truth == ()
+
+    with pytest.raises(CommandError, match=f"제출 {m2} 의 항목 \\[{OPT}\\] 충족 값이 비었다"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+              str(_six_column_csv(tmp_path, [(m1, REQ, "1", "high"), (m1, OPT, "0", "high"), (m2, REQ, "0", ""), (m2, OPT, "", "")])))
+
+
+@pytest.mark.django_db
+def test_report_adds_the_same_three_without_low_confidence_cells(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)  # 항목 REQ 를 늘 미충족으로 판정한다
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+    # 제출1 REQ(충족, 이 줄이 틀린다)를 확신 낮음으로 달면, 그것을 뺀 일치는 제출2 REQ(미충족, 맞다) 하나뿐이다.
+    csv_path = _six_column_csv(tmp_path, [(m1, REQ, "1", "low"), (m1, OPT, "0", "high"), (m2, REQ, "0", "high"), (m2, OPT, "0", "")])
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "c", "--confirm")
+
+    single = _cells_of(_call("experiment_report", "c"), SINGLE)
+
+    assert single["기준 판정과의 일치"] == "50.0%" and single["기준 대비 오탐률"] == "100.0%"
+    assert single["확신 낮음 뺀 기준 판정과의 일치"] == "100.0%"
+    assert single["확신 낮음 뺀 기준 미충족 재현율"] == "100.0%"
+    assert single["확신 낮음 뺀 기준 대비 오탐률"] == "—"  # 충족 기준 칸이 low 하나뿐이라 남지 않았다
+
+
+@pytest.mark.django_db
+def test_three_column_table_still_works_and_has_no_confidence_columns_filled(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+          str(_truth_csv(tmp_path, _full_truth(items[0].material_id, items[1].material_id))))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "d", "--confirm")
+
+    single = _cells_of(_call("experiment_report", "d"), SINGLE)
+
+    assert single["기준 판정과의 일치"] == "50.0%"
+    assert (single["확신 낮음 뺀 기준 판정과의 일치"], single["확신 낮음 뺀 기준 미충족 재현율"], single["확신 낮음 뺀 기준 대비 오탐률"]) == ("—", "—", "—")
 
 
 @pytest.mark.django_db

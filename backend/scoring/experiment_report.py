@@ -62,6 +62,9 @@ class RunRow:
     #: staged 줄(#1295)만 — 기계가 정한 항목 수·모델에 간 항목 수. 다른 줄은 None.
     machine_items: int | None = None
     model_items: int | None = None
+    #: 기준 판정 칸만 — 확신 `low` 인 항목 id, 확신을 한 칸이라도 달았는가(#1297).
+    low_items: tuple[int, ...] = ()
+    confidence_marked: bool = False
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,10 @@ class RowReport:
     # staged 줄(#1295)만 — 채점된 칸 평균. 다른 줄은 None.
     machine_items: float | None = None
     model_items: float | None = None
+    # 확신 `low` 칸을 뺀 같은 셋(#1297) — 확신 표시가 없는 재료면 None.
+    item_accuracy_sure: float | None = None
+    unmet_recall_sure: float | None = None
+    false_positive_rate_sure: float | None = None
 
 
 Verdicts = dict[tuple[int, int], list[bool]]  # (제출, 요구사항) → 회차마다의 충족
@@ -216,6 +223,7 @@ def _row_report(
     base_verdicts: Verdicts,
     required: frozenset[int],
     truth: Verdicts | None = None,
+    truth_sure: Verdicts | None = None,
 ) -> RowReport:
     per = _per_submission(rows)
     mine = _verdicts(rows)
@@ -231,6 +239,7 @@ def _row_report(
     measured = any(r.cost_usd > 0 for r in rows)
     cost = sum((r.cost_usd for r in rows), Decimal(0)) / len(rows) if measured else None
     accuracy, recall, false_positive = truth_scores(mine, truth) if truth else (None, None, None)
+    sure = truth_scores(mine, truth_sure) if truth_sure else (None, None, None)
     staged = [r for r in rows if r.status == "scored" and r.machine_items is not None and r.model_items is not None]
     report = RowReport(
         row=name,
@@ -257,6 +266,9 @@ def _row_report(
         unmet_recall=recall,
         false_positive_rate=false_positive,
         machine_items=mean(r.machine_items for r in staged) if staged else None,  # type: ignore[misc]  # staged 는 None 을 걸렀다
+        item_accuracy_sure=sure[0],
+        unmet_recall_sure=sure[1],
+        false_positive_rate_sure=sure[2],
         model_items=mean(r.model_items for r in staged) if staged else None,  # type: ignore[misc]
     )
     passes: dict[str, bool | None] = dict.fromkeys(CRITERIA)
@@ -302,7 +314,12 @@ def report_rows(
             by_row.setdefault(r.row, []).append(r)
     base_rows = by_row.get(baseline, [])
     base_scores = _per_submission(base_rows)
-    common = {"base_verdicts": _verdicts(base_rows), "required": required_ids, "truth": _verdicts(truth_runs)}
+    truth = _verdicts(truth_runs)
+    sure_truth: Verdicts | None = None
+    if any(r.confidence_marked for r in truth_runs):  # 확신 표시가 없는 재료면 「확신 낮음 뺀」 열은 「—」다
+        low = {(r.submission_id, i) for r in truth_runs for i in r.low_items}
+        sure_truth = {k: v for k, v in truth.items() if k not in low}
+    common = {"base_verdicts": _verdicts(base_rows), "required": required_ids, "truth": truth, "truth_sure": sure_truth}
     base_report = _row_report(baseline, base_rows, base_scores, None, **common) if baseline in by_row else None
     out = [base_report] if base_report is not None else []
     out += [
@@ -347,6 +364,7 @@ def _mark(value: bool | None) -> str:
 HEADERS = [
     "줄", "제출", "회차", "채점", "보류", "실패", "평균 차", "최대 차", "순위 일치", "흔들림", "근거 실재율",
     "필수 판정 일치", "선택 판정 일치", "필수 판정 흔들림", "선택 판정 흔들림", "기준 판정과의 일치", "기준 미충족 재현율", "기준 대비 오탐률",
+    "확신 낮음 뺀 기준 판정과의 일치", "확신 낮음 뺀 기준 미충족 재현율", "확신 낮음 뺀 기준 대비 오탐률",
     "실측 건당 비용(USD)", "전체 예상(USD)", "p50(초)", "p90(초)",
     "평균 차 ≤5", "최대 차 ≤15", "순위 ≥0.8", "흔들림 ≤기준+2", "근거 ≥95%", "실패·보류 ≤1/16", "비용 ≤기준/3", "p90 ≤300초",
     "필수 일치 ≥95%", "필수 판정 흔들림 ≤기준+2%p",
@@ -382,6 +400,7 @@ def _cells(r: RowReport, *, repeat: int, full_submissions: int) -> list[str]:
         _pct(r.agreement_required), _pct(r.agreement_optional),
         _pct(r.flip_required), _pct(r.flip_optional),
         _pct(r.item_accuracy), _pct(r.unmet_recall), _pct(r.false_positive_rate),
+        _pct(r.item_accuracy_sure), _pct(r.unmet_recall_sure), _pct(r.false_positive_rate_sure),
         _fmt(r.cost_per_run, "f"),
         NOT_MEASURED if (e := full_estimate_usd(r, full_submissions)) is None else format(e, "f"),
         _fmt(r.p50_seconds, ".1f"), _fmt(r.p90_seconds, ".1f"),
