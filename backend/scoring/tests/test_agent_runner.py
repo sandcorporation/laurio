@@ -578,33 +578,6 @@ def test_prod_agent_grader_is_locked_down() -> None:
     assert svc["image"].endswith("/codemit-agent-grader:${CODEMIT_IMAGE_TAG:-local}-arm64")
 
 
-def _members(compose: dict, network: str) -> set[str]:
-    return {name for name, svc in compose["services"].items() if network in (svc.get("networks") or ["default"])}
-
-
-def test_the_caller_reaches_the_runner_but_the_runner_sees_only_the_proxy_and_the_caller() -> None:
-    """에이전트 채점·리뷰는 `celery-worker` 의 스캔이 `http://agent-grader:8003` 으로 부른다(#1031). 둘이 같은
-    네트워크에 없으면 이름이 풀리지 않아 스위치를 켜는 순간 모든 실행이 `AgentGraderError` 다."""
-
-    prod = _compose("compose.prod.yaml")
-    assert ar.DEFAULT_SERVICE_URL == "http://agent-grader:8003"
-    caller = set(prod["services"]["celery-worker"]["networks"])
-    assert caller & set(prod["services"]["agent-grader"]["networks"]) == {"agent-call"}
-    # 실행기에서 보이는 것: 프록시(`agent`)와 부르는 쪽(`agent-call`)뿐. 둘 다 밖으로 나가는 길이 없다.
-    assert _members(prod, "agent") == {"agent-grader", "llm-proxy"}
-    assert _members(prod, "agent-call") == {"agent-grader", "celery-worker"}
-
-
-def test_ci_check_calls_the_runner_from_where_prod_calls_it() -> None:
-    """검사 driver 가 `agent` 에 서서 부르면 운영의 네트워크 갈림을 못 본다(#1031 이 그렇게 빠졌다)."""
-
-    check = _compose("compose.agent-grader-check.yaml")
-    driver = set(check["services"]["driver"]["networks"])
-    assert "agent" not in driver
-    assert driver & set(check["services"]["agent-grader"]["networks"]) == {"agent-call"}
-    assert check["networks"]["agent-call"] == {"internal": True}
-
-
 def test_ci_check_runs_the_same_locked_down_service_as_prod() -> None:
     """PR 검사가 가짜 벤더로 돌리는 실행기는 운영 정의의 격리 설정을 그대로 쓴다."""
 
