@@ -379,7 +379,7 @@ def record_production(experiment: ScoringExperiment, subjects: Sequence[Material
 
 
 def record_truth(experiment: ScoringExperiment, subjects: Sequence[MaterialSubject]) -> int:
-    """정답이 채워진 제출의 정답을 「정답:사람」 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로. 남긴 제출 수."""
+    """기준 판정이 채워진 제출의 기준 판정을 `TRUTH_ROW`(저장된 칸 이름 「정답:사람」은 그대로) 줄 칸으로 남긴다 — 돈 0, 회차 1. 이미 있으면 그대로. 남긴 제출 수."""
 
     count = 0
     for s in subjects:

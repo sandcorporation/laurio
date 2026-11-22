@@ -310,7 +310,7 @@ def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home
 @pytest.mark.parametrize(
     "rows_of, reason",
     [
-        (lambda m1, m2: [(m1, REQ, "충족")], "정답이 빠졌다"),
+        (lambda m1, m2: [(m1, REQ, "충족")], "기준 판정이 빠졌다"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "충족"), ("0" * 12, REQ, "충족")], "재료에 없는 제출 id"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, 999, "충족")], "체크리스트에 없는 항목 id"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "글쎄")], "충족 값을 읽을 수 없다"),

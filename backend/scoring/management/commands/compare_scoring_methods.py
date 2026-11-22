@@ -160,7 +160,7 @@ class Command(BaseCommand):
         self.stdout.write(f"재료 {name} 을 지웠다." if gone else f"재료 {name} 이 없다({em.DEFAULT_ROOT}).")
 
     def _fill_truth(self, path: Path, csv_path: Path) -> None:
-        """사본에 항목별 정답을 채운다(#1288) — 읽고 검사한 뒤에만 쓴다(거절이면 사본은 그대로)."""
+        """사본에 항목별 기준 판정을 채운다(#1288) — 읽고 검사한 뒤에만 쓴다(거절이면 사본은 그대로)."""
 
         repo_root = Path(settings.BASE_DIR).parent
         try:

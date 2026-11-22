@@ -11,7 +11,7 @@
   - 판정 일치율: (제출, 요구사항)마다 이 줄의 회차 판정과 기준 줄의 회차 판정을 모든 짝으로 견준 일치 몫, 그 평균.
     필수와 선택(선택·가산)을 나눈다. 기준 줄 자신은 없음.
   - 판정 흔들림: 채점된 회차가 둘 이상인 (제출, 요구사항) 가운데 회차마다 판정이 바뀐 몫. 필수·선택을 나눈다.
-  - 미충족 재현율·오탐률은 정답(알려진 미충족)이 있어야 잰다 — 운영 재료에는 없어 「—」다.
+  - 미충족 재현율·오탐률은 기준 판정(알려진 미충족)이 있어야 잰다 — 운영 재료에는 없어 「—」다.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ MIN_REQUIRED_AGREEMENT = 0.95
 #: 14개에서 판정 0.28개 ≈ 2%p.
 FLIP_SLACK = 0.02
 FULL_REPEAT = 3  # 「전체」 예상 금액의 회차
-#: 사람이 매긴 항목별 정답을 칸으로 남기는 줄(#1288) — 보고표가 이 줄을 줄로 세지 않고 정확도·재현율·오탐률의 기준으로만 쓴다.
+#: 대장이 매긴 항목별 기준 판정을 칸으로 남기는 줄(#1288) — 보고표가 이 줄을 줄로 세지 않고 일치·재현율·오탐률의 기준으로만 쓴다. 값은 이미 저장된 칸 이름이라 그대로 둔다(보이는 라벨이 아니다).
 TRUTH_ROW = "정답:사람"
 CRITERIA = ("diff", "max_diff", "spearman", "stability", "evidence", "trouble", "cost", "p90", "agreement", "flip")
 
@@ -86,10 +86,10 @@ class RowReport:
     agreement_optional: float | None = None
     flip_required: float | None = None  # 회차 사이 필수 판정 흔들림
     flip_optional: float | None = None
-    # 사람이 매긴 항목별 정답(#1288)과 견준 것 — 정답이 있는 재료만. 미충족이 찾아야 할 쪽이다.
-    item_accuracy: float | None = None  # 정답과 판정이 같은 칸의 몫
-    unmet_recall: float | None = None  # 정답이 미충족인 칸 가운데 미충족으로 판정한 몫
-    false_positive_rate: float | None = None  # 정답이 충족인 칸 가운데 미충족으로 판정한 몫(오탐)
+    # 대장이 매긴 항목별 기준 판정(#1288)과 견준 것 — 기준 판정이 있는 재료만. 미충족이 찾아야 할 쪽이다.
+    item_accuracy: float | None = None  # 기준 판정과 판정이 같은 칸의 몫
+    unmet_recall: float | None = None  # 기준이 미충족인 칸 가운데 미충족으로 판정한 몫
+    false_positive_rate: float | None = None  # 기준이 충족인 칸 가운데 미충족으로 판정한 몫(오탐)
     # staged 줄(#1295)만 — 채점된 칸 평균. 다른 줄은 None.
     machine_items: float | None = None
     model_items: float | None = None
@@ -117,8 +117,8 @@ def agreement(mine: Verdicts, base: Verdicts, *, required: frozenset[int], want_
 
 
 def truth_scores(mine: Verdicts, truth: Verdicts) -> tuple[float | None, float | None, float | None]:
-    """정답(칸마다 판정 하나)과 이 줄의 판정(회차마다)을 칸·회차 단위로 견준다 → (정확도, 미충족 재현율, 오탐률).
-    견줄 칸이 없으면 셋 다 None, 정답에 미충족(충족)이 없으면 재현율(오탐률)만 None."""
+    """기준 판정(칸마다 판정 하나)과 이 줄의 판정(회차마다)을 칸·회차 단위로 견준다 → (정확도, 미충족 재현율, 오탐률).
+    견줄 칸이 없으면 셋 다 None, 기준에 미충족(충족)이 없으면 재현율(오탐률)만 None."""
 
     hits = total = unmet = unmet_found = met = met_flagged = 0
     for key, answers in truth.items():
