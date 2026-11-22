@@ -179,6 +179,80 @@ def test_classroom_call_uses_the_classroom_prompt_and_goes_real_only_on_confirm(
     assert scores == {em.pseudonym("t1262", 1): Decimal("100.00"), em.pseudonym("t1262", 2): Decimal("0.00")}
 
 
+def _staged_item(n: int, *, rule: bool) -> em.Item:
+    base = _item(n, met=rule)
+    first = em.ChecklistEntry(
+        REQ, "main.py 가 있다", "required", False, 1, machine_rule={"kind": "path_exists", "path": "main.py"} if rule else None
+    )
+    return em.Item(**{**base.__dict__, "checklist": (first, base.checklist[1])})
+
+
+STAGED = "classroom_staged:gpt-4.1-mini"
+
+
+@pytest.mark.django_db
+def test_classroom_staged_runs_beside_classroom_call_and_splits_machine_from_model(home, money, monkeypatch):
+    from classroom import scoring as classroom_scoring
+
+    modes = []
+
+    def adapter(**kwargs):
+        modes.append(kwargs["mode"])
+        return FakeClassroomScoringAdapter()
+
+    monkeypatch.setattr(classroom_scoring, "_scoring_adapter", adapter)
+    monkeypatch.setattr(classroom_material, "_scoring_adapter", adapter)
+    path = _material(home, [_staged_item(1, rule=True), _staged_item(2, rule=False)])
+
+    out = _call("compare_scoring_methods", "--material", str(path), "--rows", f"{CLASSROOM},{STAGED}", "--repeat", "1")
+    assert STAGED in out and CLASSROOM in out and "--confirm 이 없어 모델을 부르지 않았다." in out and not modes
+
+    _call("compare_scoring_methods", "--material", str(path), "--rows", f"{CLASSROOM},{STAGED}", "--repeat", "1", "--name", "s", "--confirm")
+
+    staged = {r.material_id: r for r in ScoringExperimentRun.objects.filter(row=STAGED)}
+    assert len(ScoringExperimentRun.objects.filter(row=CLASSROOM)) == 2 and len(staged) == 2
+    for run in staged.values():
+        assert len(run.verdicts) == 2  # 기계 확정 + 모델 = 항목 수
+    sources = lambda n: [v["source"] for v in staged[em.pseudonym("t1262", n)].verdicts]  # noqa: E731
+    assert sources(1) == ["machine", "model"] and sources(2) == ["model", "model"]
+    assert staged[em.pseudonym("t1262", 1)].verdicts[0]["met"] is True
+
+    md = _call("experiment_report", "s")
+    assert "| 기계 확정 항목 수 | 모델에 간 항목 수 |" in md.replace("---", "").replace("  ", " ") or "기계 확정 항목 수" in md
+    row = next(line for line in md.splitlines() if line.startswith(f"| {STAGED} |"))
+    assert row.endswith("| 0.5 | 1.5 |")
+    assert next(line for line in md.splitlines() if line.startswith(f"| {CLASSROOM} |")).endswith("| — | — |")
+
+
+@pytest.mark.django_db
+def test_classroom_staged_derives_per_cell_and_adds_the_derivation_cost(monkeypatch):
+    from classroom import rule_derivation
+
+    asked = []
+
+    def derive(head, model, *, mode=None):
+        asked.append((model, mode, [c.id for c in head.checklist_items]))
+        for c in head.checklist_items:  # 사본에 도출이 없어 칸마다 이 항목들에 얹는다
+            if c.id == OPT:
+                c.derived_rule = {"kind": "path_exists", "path": "main.py"}
+                c.derived_kind = rule_derivation.KIND_STATIC
+                c.derived_text_hash = rule_derivation.label_hash(c.label)
+        return rule_derivation.Derivation(results=(), total_tokens=300, input_tokens=200, output_tokens=100, model="gpt-4.1-nano")
+
+    monkeypatch.setattr(classroom_material, "_derive_rules", derive)
+    result = classroom_material.experiment_staged_call(_staged_item(1, rule=True), model="gpt-4.1-mini", api_key=None)
+
+    assert asked == [("gpt-4.1-mini", "fake", [REQ, OPT])]
+    assert ("gpt-4.1-nano", 200, 100) in result.extra_usage
+    assert set(result.machine_ids) == {REQ, OPT}  # 도출 규칙이 선택 항목도 기계가 정하게 했다
+    assert [v.checklist_item_id for v in result.verdicts] == [REQ, OPT]
+
+
+def test_classroom_staged_needs_material():
+    with pytest.raises(ex.ExperimentError, match="사본 재료"):
+        ex.parse_rows(STAGED)
+
+
 def test_classroom_call_needs_material():
     with pytest.raises(ex.ExperimentError, match="사본 재료"):
         ex.parse_rows(CLASSROOM)
@@ -248,7 +322,7 @@ def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home
 
     out = _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(_truth_csv(tmp_path, _full_truth(m1, m2))))
 
-    assert "정답을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
+    assert "기준 판정을 채웠다 — 제출 2건" in out and "모델은 부르지 않았다" in out
     loaded = em.load(path, repo_root=Path("/nonexistent-repo-root"))
     by_id = {i.material_id: i for i in loaded.items}
     assert by_id[m1].truth == (em.TruthVerdict(REQ, True), em.TruthVerdict(OPT, False))
@@ -260,7 +334,7 @@ def test_fill_truth_writes_the_answers_into_the_material_and_calls_no_model(home
 @pytest.mark.parametrize(
     "rows_of, reason",
     [
-        (lambda m1, m2: [(m1, REQ, "충족")], "정답이 빠졌다"),
+        (lambda m1, m2: [(m1, REQ, "충족")], "기준 판정이 빠졌다"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "충족"), ("0" * 12, REQ, "충족")], "재료에 없는 제출 id"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, 999, "충족")], "체크리스트에 없는 항목 id"),
         (lambda m1, m2: [(m1, REQ, "충족"), (m1, OPT, "글쎄")], "충족 값을 읽을 수 없다"),
@@ -279,14 +353,122 @@ def test_a_bad_truth_csv_is_refused_and_leaves_the_material_alone(home, tmp_path
     assert path.read_bytes() == before
 
 
+def _six_column_csv(tmp_path: Path, rows: list[tuple[str, int, str, str]]) -> Path:
+    path = tmp_path / "six.csv"
+    lines = ["material_id,item_id,is_met,evidence,confidence,note"]
+    lines += [f"{m},{i},{v},main.py:1 학생 원문,{c},메모 글" for m, i, v, c in rows]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 @pytest.mark.django_db
-def test_truth_csv_with_student_columns_is_refused(home, tmp_path):
+def test_truth_csv_with_other_leading_columns_is_refused(home, tmp_path):
+    path = _material(home, [_item(1, met=True)])
+    csv_path = _truth_csv(tmp_path, [], header="student_name,material_id,item_id,is_met")
+
+    with pytest.raises(CommandError, match="앞 열은 material_id,item_id,is_met"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+
+@pytest.mark.django_db
+def test_six_column_table_is_accepted_and_only_confidence_reaches_the_material(home, tmp_path):
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+    csv_path = _six_column_csv(tmp_path, [(m1, REQ, "1", "high"), (m1, OPT, "0", "low"), (m2, REQ, "0", ""), (m2, OPT, "0", "Medium")])
+
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+    by_id = {i.material_id: i for i in em.load(path, repo_root=Path("/nonexistent-repo-root")).items}
+    assert by_id[m1].truth == (em.TruthVerdict(REQ, True, "high"), em.TruthVerdict(OPT, False, "low"))
+    assert by_id[m2].truth == (em.TruthVerdict(REQ, False, ""), em.TruthVerdict(OPT, False, "medium"))
+    raw = b"".join(p.read_bytes() for p in [path])
+    import tarfile
+
+    with tarfile.open(path) as tar:
+        text = b"".join(tar.extractfile(m).read() for m in tar.getmembers() if m.isfile() and m.name.endswith(".json"))
+    assert "학생 원문".encode() not in text and "메모 글".encode() not in text and raw
+
+
+@pytest.mark.django_db
+def test_unknown_confidence_is_refused(home, tmp_path):
     items = [_item(1, met=True)]
     path = _material(home, items)
-    csv_path = _truth_csv(tmp_path, [], header="material_id,item_id,is_met,student_name")
+    m1 = items[0].material_id
+    with pytest.raises(CommandError, match="확신 값을 읽을 수 없다"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+              str(_six_column_csv(tmp_path, [(m1, REQ, "1", "sure"), (m1, OPT, "0", "high")])))
 
-    with pytest.raises(CommandError, match="열은 material_id,item_id,is_met"):
-        _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+
+@pytest.mark.django_db
+def test_a_submission_with_every_row_blank_is_skipped_and_a_partly_blank_one_is_refused(home, tmp_path):
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+
+    out = _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+                str(_six_column_csv(tmp_path, [(m1, REQ, "1", "high"), (m1, OPT, "0", "high"), (m2, REQ, "", ""), (m2, OPT, "", "")])))
+    assert "제출 1건" in out
+    by_id = {i.material_id: i for i in em.load(path, repo_root=Path("/nonexistent-repo-root")).items}
+    assert by_id[m2].truth == ()
+
+    with pytest.raises(CommandError, match=f"제출 {m2} 의 항목 \\[{OPT}\\] 충족 값이 비었다"):
+        _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+              str(_six_column_csv(tmp_path, [(m1, REQ, "1", "high"), (m1, OPT, "0", "high"), (m2, REQ, "0", ""), (m2, OPT, "", "")])))
+
+
+@pytest.mark.django_db
+def test_report_adds_the_same_three_for_high_confidence_cells_only(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)  # 항목 REQ 를 늘 미충족으로 판정한다
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+    # 제출1 REQ(충족, 이 줄이 틀린다)를 medium 으로 달면 low 와 같이 빠진다 — high 만의 일치는 맞는 칸들뿐이다.
+    csv_path = _six_column_csv(tmp_path, [(m1, REQ, "1", "medium"), (m1, OPT, "0", "high"), (m2, REQ, "0", "high"), (m2, OPT, "0", "low")])
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(csv_path))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "c", "--confirm")
+
+    single = _cells_of(_call("experiment_report", "c"), SINGLE)
+
+    assert single["기준 판정과의 일치"] == "50.0%" and single["기준 대비 오탐률"] == "100.0%"
+    assert single["high 만 기준 판정과의 일치"] == "100.0%"
+    assert single["high 만 기준 미충족 재현율"] == "100.0%"
+    assert single["high 만 기준 대비 오탐률"] == "—"  # 충족 기준 칸이 medium 하나뿐이라 남지 않았다
+
+
+@pytest.mark.django_db
+def test_report_ends_with_a_per_item_mismatch_table_and_none_without_truth(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)  # 항목 REQ 를 늘 미충족으로 판정한다 — 제출1 REQ(충족)만 어긋난다
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    m1, m2 = items[0].material_id, items[1].material_id
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "n", "--confirm")
+    assert "항목별 불일치" not in _call("experiment_report", "n")
+
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth", str(_truth_csv(tmp_path, _full_truth(m1, m2))))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "w", "--confirm")
+    md = _call("experiment_report", "w")
+
+    table = md.split("## 항목별 불일치 칸 수(제출 × 회차)")[1].strip().splitlines()
+    assert table[0].startswith("| 항목 id | 기준 판정 칸 수 | single_call:gpt-4.1-mini")
+    assert table[2].startswith(f"| {REQ} | 2 | 1")  # 불일치가 몰린 항목이 첫 행
+    assert table[3].startswith(f"| {OPT} | 2 | 0")
+    assert "add_two_numbers" not in "\n".join(table)  # 항목 글은 넣지 않는다
+
+
+@pytest.mark.django_db
+def test_three_column_table_still_works_and_has_no_confidence_columns_filled(home, money, monkeypatch, tmp_path):
+    _fake_single(monkeypatch)
+    items = [_item(1, met=True), _item(2, met=False)]
+    path = _material(home, items)
+    _call("compare_scoring_methods", "--material", str(path), "--fill-truth",
+          str(_truth_csv(tmp_path, _full_truth(items[0].material_id, items[1].material_id))))
+    _call("compare_scoring_methods", "--material", str(path), "--rows", SINGLE, "--repeat", "1", "--name", "d", "--confirm")
+
+    single = _cells_of(_call("experiment_report", "d"), SINGLE)
+
+    assert single["기준 판정과의 일치"] == "50.0%"
+    assert (single["high 만 기준 판정과의 일치"], single["high 만 기준 미충족 재현율"], single["high 만 기준 대비 오탐률"]) == ("—", "—", "—")
 
 
 @pytest.mark.django_db
@@ -308,12 +490,12 @@ def test_report_fills_accuracy_recall_and_false_positive_rate_when_the_material_
 
     # 줄: 제출1 REQ(정답 충족)을 미충족으로 → 오답·오탐, 제출2 REQ(정답 미충족)은 미충족으로 → 정답·재현.
     single = _cells_of(md, SINGLE)
-    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("50.0%", "100.0%", "100.0%")
+    assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("50.0%", "100.0%", "100.0%")
     # 운영 판정은 정답과 네 칸 모두 같다.
     production = _cells_of(md, "운영:gpt-4.1-mini-2025-04-14")
-    assert (production["항목 판정 정확도"], production["미충족 재현율"], production["오탐률"]) == ("100.0%", "100.0%", "0.0%")
-    assert "정답:사람" not in md and "정답(알려진 미충족)이 없는 재료" not in md
-    assert "사람이 매긴 항목별 정답과 견준 값" in md
+    assert (production["기준 판정과의 일치"], production["기준 미충족 재현율"], production["기준 대비 오탐률"]) == ("100.0%", "100.0%", "0.0%")
+    assert "정답:사람" not in md and "기준 판정(알려진 미충족)이 없는 재료" not in md
+    assert "항목별 기준 판정과 견준 값" in md
 
 
 @pytest.mark.django_db
@@ -325,5 +507,88 @@ def test_report_without_truth_keeps_the_dash_cells_and_the_note(home, money, mon
     md = _call("experiment_report", "n")
 
     single = _cells_of(md, SINGLE)
-    assert (single["항목 판정 정확도"], single["미충족 재현율"], single["오탐률"]) == ("—", "—", "—")
-    assert "정답(알려진 미충족)이 없는 재료" in md
+    assert (single["기준 판정과의 일치"], single["기준 미충족 재현율"], single["기준 대비 오탐률"]) == ("—", "—", "—")
+    assert "기준 판정(알려진 미충족)이 없는 재료" in md
+
+
+def test_classroom_staged_confirms_only_met_and_sends_the_machine_note_like_production():
+    """#1294 — 규칙이 미충족으로 본 항목은 확정하지 않고 「기계 확인: …」 메모를 달아 모델에게 넘긴다(운영과 같은 프롬프트)."""
+
+    base = _item(1, met=True)
+    missing = em.ChecklistEntry(
+        REQ, "nope.py 가 있다", "required", False, 1, machine_rule={"kind": "path_exists", "path": "nope.py"}
+    )
+    item = em.Item(**{**base.__dict__, "checklist": (missing, base.checklist[1])})
+
+    result = classroom_material.experiment_staged_call(item, model="gpt-4.1-mini", api_key=None)
+
+    assert REQ not in result.machine_ids  # 미충족은 기계가 확정하지 않는다
+    assert "기계 확인:" in result.prompt
+    assert REQ in [v.checklist_item_id for v in result.verdicts]
+
+
+def test_staged_row_grammar_takes_an_escalation_model_after_a_plus():
+    rows = ex.parse_rows("classroom_staged:gpt-4.1-mini+gpt-5,classroom_staged:gpt-4.1-mini", material=True)
+    assert [(r.name, r.escalation) for r in rows] == [
+        ("classroom_staged:gpt-4.1-mini+gpt-5", "gpt-5"),
+        ("classroom_staged:gpt-4.1-mini", ""),
+    ]
+    for bad in (
+        "classroom_staged:gpt-4.1-mini+claude-sonnet-4-5",  # 다른 프로바이더 단가표
+        "classroom_staged:gpt-4.1-mini+no-such-model",
+        "classroom_staged:gpt-4.1-mini+",
+        "classroom_call:gpt-4.1-mini+gpt-5",
+    ):
+        with pytest.raises(ex.ExperimentError):
+            ex.parse_rows(bad, material=True)
+
+
+def test_escalation_share_raises_only_the_high_side_of_the_preview():
+    plain, with_esc = ex.parse_rows("classroom_staged:gpt-4.1-mini,classroom_staged:gpt-4.1-mini+gpt-5", material=True)
+    (low_a, high_a), (low_b, high_b) = ex.cost_range(plain), ex.cost_range(with_esc)
+    assert low_a == low_b and high_b > high_a
+
+
+def test_staged_call_sends_only_the_doubtful_items_to_the_escalation_model(monkeypatch):
+    seen = []
+    real = classroom_material.call_vendor_sync
+
+    def spy(prepared, **kwargs):
+        seen.append(prepared.escalation_model)
+        return real(prepared, **kwargs)
+
+    monkeypatch.setattr(classroom_material, "call_vendor_sync", spy)
+    on = classroom_material.experiment_staged_call(_staged_item(2, rule=False), model="gpt-4.1-mini", api_key=None, escalation_model="gpt-5")
+    off = classroom_material.experiment_staged_call(_staged_item(2, rule=False), model="gpt-4.1-mini", api_key=None)
+    other_provider = classroom_material.experiment_staged_call(
+        _staged_item(2, rule=False), model="gpt-4.1-mini", api_key=None, escalation_model="claude-sonnet-4-5"
+    )
+    assert seen == ["gpt-5", "", ""]  # 사본 Class 가 usable_escalation_model 로 걸러 준다
+    assert on.status == off.status == other_provider.status == "scored"
+
+
+def test_escalation_row_calls_the_escalation_model_for_suspect_items_and_bills_it(monkeypatch):
+    from dataclasses import replace
+
+    from classroom import scoring as classroom_scoring
+
+    class Uncited(FakeClassroomScoringAdapter):
+        """1차 호출은 충족이라면서 근거를 못 대 — 그 항목이 의심이 된다."""
+
+        def score(self, scoring_input):
+            out = super().score(scoring_input)
+            return replace(out, verdicts=[replace(v, citations=()) for v in out.verdicts])
+
+    seen = []
+
+    def adapter(**kwargs):
+        seen.append(kwargs["model"])
+        return FakeClassroomScoringAdapter() if kwargs["model"] == "gpt-5" else Uncited()
+
+    monkeypatch.setattr(classroom_scoring, "_scoring_adapter", adapter)
+    monkeypatch.setattr(classroom_material, "_scoring_adapter", adapter)
+    result = classroom_material.experiment_staged_call(
+        _item(1, met=True), model="gpt-4.1-mini", api_key=None, escalation_model="gpt-5"
+    )
+    assert seen.count("gpt-5") == 1  # 의심 항목이 있어도 올림은 한 번
+    assert [m for m, _, _ in result.extra_usage if m == "gpt-5"] == ["gpt-5"]

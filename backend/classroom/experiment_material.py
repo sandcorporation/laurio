@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from core import evidence_check
 from core.experiment_material import (
     ChecklistEntry,
     ClassroomCallResult,
@@ -24,15 +25,30 @@ from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 
-from .models import ChecklistGrade, ChecklistItem, ClassroomScore, ClassroomSubmission, Problem
+from .models import Class, ChecklistGrade, ChecklistItem, ClassroomScore, ClassroomSubmission, Problem
 from .scoring import (
     ANTHROPIC_SCORING_ADAPTER,
+    PreparedScoring,
     _build_prompt,
+    _derive_rules,
+    _Head,
+    _machine_only,
+    _numbered_source_text,
     _requirement_inputs,
     _scoring_adapter,
+    _scoring_request,
+    _scoring_source_files,
     _scoring_source_text,
+    _confirmed_labels,
+    _staged_plan,
+    _two_step_plan,
+    call_vendor_sync,
+    outcome_reasoning,
 )
+from . import scoring_cost
 from .scoring_connection import anthropic_key_connection, openai_key_connection
+from policies.runtime_settings import classroom_two_step_budget_chars, classroom_two_step_threshold_chars
+
 from .syntax_check import SYNTAX_CHECK_ITEM_ID, run_syntax_check
 
 #: 실제 벤더로 나갈 때의 OpenAI 어댑터 — 개발 환경의 강의실 어댑터 모드(fake)와 상관없이 이 실험 명령만 나간다.
@@ -120,7 +136,9 @@ def collect(submission_ids: Sequence[int], *, name: str) -> tuple[list[Item], di
                     marked_reasoning=problem.effective_model_marked_reasoning(),
                 ),
                 checklist=tuple(
-                    ChecklistEntry(id=c.id, label=c.label, grade=c.grade, hidden=c.hidden, points=c.points)
+                    ChecklistEntry(
+                        id=c.id, label=c.label, grade=c.grade, hidden=c.hidden, points=c.points, machine_rule=c.machine_rule
+                    )
                     for c in checklist
                 ),
                 verdicts=_verdicts(score.reasoning),
@@ -189,4 +207,179 @@ def experiment_call(item: Item, *, model: str, api_key: str | None) -> Classroom
         output_tokens=output.output_tokens,
         model_version=output.model_version,
         prompt=prompt,
+    )
+
+
+def experiment_staged_call(
+    item: Item, *, model: str, api_key: str | None, escalation_model: str = ""
+) -> ClassroomCallResult:
+    """강의실 운영 채점의 staged 갈래(#1283~#1286)를 사본 위에서 그대로 — 기계 판정(강사 규칙)·줄 번호 인용·의심 올림·큰
+    제출 두 걸음을 운영 설정 기본값대로 돈다. 같은 입력 재사용(#1287)은 끈다(사본에는 이전 점수가 없다). 도출(#1293)은
+    사본에 도출 칸이 없어 칸마다 새로 한다(`_derive_rules`, 저장하지 않고 그 호출의 비용을 칸에 더한다)."""
+
+    problem = Problem(
+        id=0,
+        title=item.problem.title,
+        description=item.problem.description,
+        grading_strictness=item.problem.grading_strictness,
+        grading_guideline_text=item.problem.grading_guideline_text,
+        syntax_check_enabled=item.problem.syntax_check_enabled,
+    )
+    submission = ClassroomSubmission(id=item.key, problem=problem)
+    checklist = [
+        ChecklistItem(id=c.id, label=c.label, grade=c.grade, hidden=c.hidden, points=c.points, machine_rule=c.machine_rule)
+        for c in item.checklist
+    ]
+    asset = SubmissionAsset(id=1, kind=item.asset_kind, label="")
+    anthropic = model.startswith("claude-")
+    connection = (anthropic_key_connection if anthropic else openai_key_connection)(api_key or "")
+    # 의심 재판정은 클래스 칸(#1291) — 사본 클래스는 비어 있어 줄의 `+<올림 모델>` 을 거기 넣고, 운영과 같은
+    # `usable_escalation_model`(연결 종류의 단가표에 있는 모델만)을 그대로 탄다.
+    class_obj = Class(
+        id=0,
+        escalation_model=escalation_model,
+        scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY if anthropic else Class.ScoringConnectionKind.OPENAI_KEY,
+    )
+    head = _Head(
+        submission=submission,
+        owner="experiment",
+        class_obj=class_obj,
+        problem=problem,
+        checklist_items=checklist,
+        connection=connection,
+        asset=asset,
+        pause_recheck=False,
+        staged=True,
+        escalation_model=scoring_cost.usable_escalation_model(class_obj),
+        two_step_threshold=classroom_two_step_threshold_chars(),
+        two_step_budget=classroom_two_step_budget_chars(),
+    )
+    syntax_check = run_syntax_check(item.source, enabled=problem.syntax_check_enabled)
+    mode = "fake" if api_key is None else (ANTHROPIC_SCORING_ADAPTER if anthropic else OPENAI_SCORING_ADAPTER)
+    # 도출(#1293)은 사본에 도출 칸이 없어 칸마다 새로 한다 — 운영 채점이 prepare_tail 안에서 하는 것과 같다. 결과는 항목에 얹혀
+    # `_staged_plan` 이 읽고, 저장은 하지 않는다. 그 호출의 토큰·비용도 이 칸에 더한다.
+    derivation = _derive_rules(head, model, mode=mode)
+    derive_usage: tuple[tuple[str, int, int], ...] = (
+        ((derivation.model or model, derivation.input_tokens, derivation.output_tokens),)
+        if derivation is not None and derivation.total_tokens
+        else ()
+    )
+    # 운영과 같은 확정 규칙(#1294) — 충족만 기계가 정하고, 미충족·판정 불가는 「기계 확인: …」 메모를 달아 모델에게 넘긴다.
+    split = _staged_plan(checklist, item.source)
+    asked_items, machine_entries, machine_notes = split.asked_items, split.machine_entries, split.machine_notes
+    confirmed = _confirmed_labels(checklist, machine_entries)
+    machine_ids = tuple(e["checklist_item_id"] for e in machine_entries)
+    if not asked_items and syntax_check.synthetic_requirement() is None:
+        prepared = _machine_only(head, syntax_check=syntax_check, model=model, machine_entries=machine_entries)
+        outcome = call_vendor_sync(prepared, reuse=False)
+        assert outcome.output is not None
+        return ClassroomCallResult(
+            "scored",
+            verdicts=_final_verdicts(outcome_reasoning(prepared, outcome.output, None), item),
+            model_version=outcome.output.model_version,
+            prompt=prepared.prompt,
+            machine_ids=machine_ids,
+            extra_usage=derive_usage,
+        )
+    instruction_bytes = len(
+        _build_prompt(
+            submission,
+            asked_items,
+            "",
+            asset_kind=asset.kind,
+            syntax_check=syntax_check,
+            cite=True,
+            machine_notes=machine_notes,
+            machine_confirmed=confirmed,
+        ).encode("utf-8")
+    )
+    sent_files, omission = _scoring_source_files(item.source, asset, model=model, instruction_bytes=instruction_bytes)
+    plan = _two_step_plan(head, asked_items, item.source, sent_files, omission) if asked_items and head.two_step_threshold > 0 else None
+    if omission.any and plan is None:
+        return ClassroomCallResult("held", problem="소스가 모델 컨텍스트에 다 들어가지 않는다(운영이면 크기 초과 보류)")
+    reasoning_effort = (
+        item.problem.reasoning_effort
+        if connection.sends_reasoning_effort(model, marked_reasoning=item.problem.marked_reasoning)
+        else None
+    )
+    if plan is not None:
+        prompt = plan.selection_prompt
+        scoring_input = ScoringInput(
+            submission_id=item.key,
+            contest_id=0,
+            prompt=prompt,
+            source_files=list(plan.files),
+            requirements=_requirement_inputs(asked_items),
+            ask_citations=True,
+        )
+    else:
+        prompt, scoring_input = _scoring_request(
+            submission,
+            asked_items,
+            _numbered_source_text(sent_files),
+            sent_files,
+            asset_id=asset.id,
+            asset_label=asset.label,
+            asset_kind=asset.kind,
+            syntax_check=syntax_check,
+            staged=True,
+            machine_notes=machine_notes,
+            machine_confirmed=confirmed,
+        )
+    escalation_model = head.escalation_model
+    prepared = PreparedScoring(
+        submission=submission,
+        owner="experiment",
+        class_obj=head.class_obj,
+        problem=problem,
+        checklist_items=checklist,
+        connection=connection,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        prompt=prompt,
+        scoring_input=scoring_input,
+        syntax_check=syntax_check,
+        pause_recheck=False,
+        staged=True,
+        machine_entries=machine_entries,
+        machine_notes=machine_notes,
+        sent_lines={} if plan is not None else {evidence_check.normalize_path(f.path): tuple(f.content.splitlines()) for f in sent_files},
+        sent_files=() if plan is not None else tuple(sent_files),
+        asset_kind=asset.kind,
+        two_step=plan,
+        escalation_model=escalation_model,
+        escalation_effort=(
+            item.problem.reasoning_effort
+            if escalation_model and connection.sends_reasoning_effort(escalation_model, marked_reasoning=False)
+            else None
+        ),
+    )
+    outcome = call_vendor_sync(prepared, reuse=False, mode=mode)
+    if outcome.error is not None or outcome.output is None:
+        return ClassroomCallResult("held", problem=str(outcome.error or "응답 없음"))
+    scored = outcome.second_step or prepared
+    output = outcome.output
+    extra: list[tuple[str, int, int]] = list(derive_usage)
+    if outcome.escalation is not None:
+        extra.append((escalation_model, outcome.escalation.input_tokens, outcome.escalation.output_tokens))
+    input_tokens = output.input_tokens + (outcome.selection.input_tokens if outcome.selection else 0)
+    output_tokens = output.output_tokens + (outcome.selection.output_tokens if outcome.selection else 0)
+    return ClassroomCallResult(
+        "scored",
+        verdicts=_final_verdicts(outcome_reasoning(scored, output, outcome.escalation), item),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model_version=output.model_version,
+        prompt=scored.prompt,
+        machine_ids=machine_ids,
+        extra_usage=tuple(extra),
+    )
+
+
+def _final_verdicts(reasoning: list[dict], item: Item) -> tuple[ProductionVerdict, ...]:
+    ids = {c.id for c in item.checklist}
+    return tuple(
+        ProductionVerdict(e["checklist_item_id"], bool(e["is_met"]), str(e.get("reasoning", "")))
+        for e in reasoning
+        if e["checklist_item_id"] in ids
     )

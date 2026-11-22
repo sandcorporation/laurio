@@ -33,7 +33,15 @@ export type ChecklistItemRow = {
   /** 제출자(참여자)에게 숨김(#906) — 개최자·강사 응답에만 true 가 온다. */
   hidden: boolean;
   order: number;
+  /** 강사 규칙(#1283)·도출(#1293) — 강사 응답에만 온다. 하나라도 있으면 「기계 확인」 배지. */
+  machine_rule?: Record<string, unknown> | null;
+  derived_kind?: string | null;
 };
+
+/** 체크리스트 항목에 기계 확인 규칙이 있는가 — 강사 규칙이거나 정적 꼴 도출(#1294). */
+export function isMachineChecked(item: Pick<ChecklistItemRow, "machine_rule" | "derived_kind">): boolean {
+  return Boolean(item.machine_rule) || item.derived_kind === "static";
+}
 
 // 항목 만들기·고치기 응답(#810) — 방금 저장한 항목이 채점이 확인할 수 없을 수 있어 보이면 채워진다.
 export type SavedChecklistItemRow = ChecklistItemRow & { gradability_warnings?: GradabilityWarning[] };

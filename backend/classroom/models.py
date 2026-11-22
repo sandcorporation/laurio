@@ -833,7 +833,27 @@ class GradedChecklistFields(models.Model):
         super().save(*args, **kwargs)
 
 
-class ChecklistItem(GradedChecklistFields):
+class MachineRuleFields(models.Model):
+    """세 체크리스트 모델이 함께 갖는 기계 규칙 칸(#1296) — 템플릿 사본도 같은 칸을 들어, 템플릿을 거쳐 옮긴 문제가
+    강사 규칙과 도출 칸을 잃지 않는다. 옮기는 길은 `classroom.services.machine_rule_fields`."""
+
+    #: 기계 확인 규칙(#1283, CONTEXT.md 「기계 판정」) — 비면 「판단」 항목이다. 모양은 `classroom.schemas.MachineRuleIn`
+    #: 이 검증한 dict(`classroom.machine_check.MachineRule`). staged 채점 갈래만 읽는다.
+    machine_rule = models.JSONField(null=True, blank=True)
+    #: 도출 규칙(#1293, CONTEXT.md 「기계 확인 완료」) — staged 채점이 항목 글에서 스스로 도출해 둔 것. 강사 규칙
+    #: (`machine_rule`)이 있으면 도출하지 않는다. 종류가 `static` 일 때만 규칙이 차 있다(`run` 은 판단과 같다).
+    #: `derived_text_hash` 가 지금 글의 해시(`classroom.rule_derivation.label_hash`)와 다르면 다음 채점이 다시 도출한다.
+    derived_rule = models.JSONField(null=True, blank=True)
+    #: db_default: 겹쳐 바꾸는 배포 동안 옛 코드의 INSERT 가 이 칸들을 빼먹어도 된다(ADR-0053).
+    derived_kind = models.CharField(max_length=10, blank=True, default="", db_default="")
+    derived_text_hash = models.CharField(max_length=64, blank=True, default="", db_default="")
+    derived_model = models.CharField(max_length=100, blank=True, default="", db_default="")
+
+    class Meta:
+        abstract = True
+
+
+class ChecklistItem(GradedChecklistFields, MachineRuleFields):
     """채점이 보는 항목 하나(#283). `required=True`를 전부 충족하면 **통과**다
     — 문제마다 합격선을 따로 두지 않는다(CONTEXT.md 「통과」). 필수 항목이
     하나도 없으면 통과가 정의되지 않으므로, 그런 문제는 열 수 없다(API에서
@@ -853,9 +873,6 @@ class ChecklistItem(GradedChecklistFields):
     #: 공모전 문제의 항목이면 따라가는 Requirement 의 번호(#548) — 원본이 바뀔 때 어느 항목을
     #: 고칠지 이 번호로 찾는다. 강사가 직접 만든 항목은 비어 있다.
     contest_requirement_id = models.PositiveBigIntegerField(null=True, blank=True)
-    #: 기계 확인 규칙(#1283, CONTEXT.md 「기계 판정」) — 비면 「판단」 항목이다. 모양은 `classroom.schemas.MachineRuleIn`
-    #: 이 검증한 dict(`classroom.machine_check.MachineRule`). staged 채점 갈래만 읽는다.
-    machine_rule = models.JSONField(null=True, blank=True)
 
     class Meta(GradedChecklistFields.Meta):
         ordering = ["order", "id"]
@@ -901,6 +918,10 @@ class ClassroomScore(models.Model):
     model_version = models.CharField(max_length=200)
     #: LLM에 실제로 보낸 프롬프트 전문 — 체크리스트와 소스를 포함한다.
     prompt = models.TextField()
+    #: 두 걸음 채점의 입력 지문(#1296, `classroom.scoring.two_step_fingerprint`) — 고를 수 있는 소스 전체·판단 항목·
+    #: 지시문의 해시. 두 걸음은 `prompt` 가 고른 파일만 담아 같은 입력을 프롬프트로 가릴 수 없어 재사용이 이것으로 찾는다.
+    #: 한 번 호출로 채점한 점수는 비어 있다.
+    input_fingerprint = models.CharField(max_length=64, blank=True, default="", db_default="")
     #: 체크리스트 항목별 판정 근거.
     #: [{"checklist_item_id": int, "is_met": bool, "reasoning": str}, ...]
     reasoning = models.JSONField()
@@ -1013,7 +1034,7 @@ class ProblemTemplate(models.Model):
         return f"ProblemTemplate(id={self.pk}, title={self.title!r})"
 
 
-class ProblemTemplateChecklistItem(GradedChecklistFields):
+class ProblemTemplateChecklistItem(GradedChecklistFields, MachineRuleFields):
     """공개 시점 체크리스트 사본 한 줄 — `ChecklistItem`과 같은 모양이지만
     독립 테이블이다(`ProblemTemplate`이 `Problem`을 가리키지 않는 것과 같은
     이유)."""
@@ -1177,7 +1198,7 @@ class ClassTemplateProblem(models.Model):
         return f"ClassTemplateProblem(id={self.pk}, title={self.title!r})"
 
 
-class ClassTemplateProblemChecklistItem(GradedChecklistFields):
+class ClassTemplateProblemChecklistItem(GradedChecklistFields, MachineRuleFields):
     """`ClassTemplateProblem` 하나의 체크리스트 사본 한 줄 —
     `ProblemTemplateChecklistItem`과 같은 모양이지만 독립 테이블이다."""
 

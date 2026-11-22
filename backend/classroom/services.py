@@ -39,6 +39,7 @@ from .models import (
     ClassTemplate,
     ClassTemplateProblem,
     ClassTemplateProblemChecklistItem,
+    MachineRuleFields,
     Problem,
     ProblemTemplate,
     ProblemTemplateChecklistItem,
@@ -189,6 +190,20 @@ def pending_reported_templates() -> list[ProblemTemplate]:
     return pending
 
 
+def machine_rule_fields(item: MachineRuleFields) -> dict[str, object]:
+    """체크리스트 항목 하나의 기계 규칙 칸(#1283·#1293) — 복사·템플릿 내보내기·가져오기가 함께 옮긴다(#1296).
+    도출 규칙은 글 해시에 묶여 있어 같은 글이면 그대로 맞다 — 옮긴 쪽이 다시 묻지 않는다. 글이 다르면(템플릿 항목은
+    200자로 잘린다) 해시가 달라 다음 채점이 다시 도출한다."""
+
+    return {
+        "machine_rule": item.machine_rule,
+        "derived_rule": item.derived_rule,
+        "derived_kind": item.derived_kind,
+        "derived_text_hash": item.derived_text_hash,
+        "derived_model": item.derived_model,
+    }
+
+
 def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
     """`problem`을 `target_class` 안에 새 행으로 복사한다. 원본 상태(초안/열림)와
     무관하게 복사본은 언제나 초안으로 들어온다(#292 AC) — 대상 클래스에서는
@@ -209,7 +224,7 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
             grade=item.grade,
             points=item.points,
             hidden=item.hidden,
-            machine_rule=item.machine_rule,
+            **machine_rule_fields(item),
             order=item.order,
             # 공모전 문제의 항목은 복사본에서도 같은 Requirement 를 따라간다(#548).
             contest_requirement_id=item.contest_requirement_id,
@@ -293,7 +308,13 @@ def publish_problem_as_template(
             )
             ProblemTemplateChecklistItem.objects.bulk_create(
                 ProblemTemplateChecklistItem(
-                    template=template, label=item.label, grade=item.grade, points=item.points, hidden=item.hidden, order=item.order
+                    template=template,
+                    label=item.label,
+                    grade=item.grade,
+                    points=item.points,
+                    hidden=item.hidden,
+                    order=item.order,
+                    **machine_rule_fields(item),
                 )
                 for item in problem.checklist_items.all()
             )
@@ -319,7 +340,13 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
     )
     ChecklistItem.objects.bulk_create(
         ChecklistItem(
-            problem=problem, label=item.label, grade=item.grade, points=item.points, hidden=item.hidden, order=item.order
+            problem=problem,
+            label=item.label,
+            grade=item.grade,
+            points=item.points,
+            hidden=item.hidden,
+            order=item.order,
+            **machine_rule_fields(item),
         )
         for item in template.checklist_items.all()
     )
@@ -368,6 +395,7 @@ def publish_class_as_template(
                         points=item.points,
                         hidden=item.hidden,
                         order=item.order,
+                        **machine_rule_fields(item),
                     )
                     for item in problem.checklist_items.all()
                 )
@@ -397,8 +425,14 @@ def import_class_template(template: ClassTemplate, *, instructor_id: int, name: 
         )
         ChecklistItem.objects.bulk_create(
             ChecklistItem(
-            problem=problem, label=item.label, grade=item.grade, points=item.points, hidden=item.hidden, order=item.order
-        )
+                problem=problem,
+                label=item.label,
+                grade=item.grade,
+                points=item.points,
+                hidden=item.hidden,
+                order=item.order,
+                **machine_rule_fields(item),
+            )
             for item in template_problem.checklist_items.all()
         )
     return new_class

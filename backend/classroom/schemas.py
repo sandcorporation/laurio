@@ -530,6 +530,10 @@ class ChecklistItemOut(Schema):
     hidden: bool = False
     #: 기계 확인 규칙(#1283) — 강사 응답에만 싣는다(참여자 응답은 늘 null).
     machine_rule: dict | None = None
+    #: 도출(#1293, 읽기 전용) — 지금 글에서 도출한 종류(`static`·`judge`·`run`)와 규칙(`static` 일 때만). 강사 응답에만
+    #: 싣고, 아직 도출하지 않았거나 그 뒤 글이 바뀌었으면 null.
+    derived_kind: str | None = None
+    derived_rule: dict | None = None
 
 
 class GradabilityWarningOut(Schema):
@@ -1073,7 +1077,7 @@ class ClassroomVerdictCitationOut(Schema):
     matched: bool
 
 
-_STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect", "escalated")
+STAGED_VERDICT_KEYS = ("source", "citations", "evidence", "suspect", "escalated", "machine_note")
 
 
 class ClassroomChecklistVerdictOut(Schema):
@@ -1095,12 +1099,14 @@ class ClassroomChecklistVerdictOut(Schema):
     suspect: bool | None = None
     #: 의심 항목을 상위 모델로 다시 판정한 결과다(#1285).
     escalated: bool | None = None
+    #: 기계 미충족이라 모델에게 넘긴 「AI 판정 필요」 항목의 기계 메모(#1294, 「기계 확인: …」) — 판정은 모델 것이다.
+    machine_note: str | None = None
 
     # 반환 형을 적지 않는다 — 적으면 pydantic 이 그 형으로 직렬화 스키마를 지어 OpenAPI 가 이 모델의 칸을 잃는다.
     @model_serializer(mode="wrap")
     def _drop_unset_staged(self, handler: SerializerFunctionWrapHandler):
         data: dict[str, object] = handler(self)
-        for key in _STAGED_VERDICT_KEYS:
+        for key in STAGED_VERDICT_KEYS:
             if data.get(key) is None:
                 data.pop(key, None)
         return data

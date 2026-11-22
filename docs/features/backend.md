@@ -1211,7 +1211,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 | `AGENT_EXPERIMENT_DAILY_LIMIT_USD` | USD 0~1000(#1246) | 채점 방식 비교 실험의 하루(KST) 비용 상한 — 실행 토큰 용도 `experiment` 만 세고 운영 상한과 따로다. 0 이면 실험이 돌지 않는다 | 0 |
 | `REPOSITORY_DOWNLOAD_LIMIT_MB` | MB 1~200(#1005) | 저장소 zip 다운로드 상한과 변환 입력 상한 — 다운로드할 때마다 읽어 다음 채점부터 먹고, 넘으면 0점이 아니라 보류. 최대 200 은 grader `mem_limit: 2g` × 소스 스레드 8 에서 나온 안전치 | 100 |
 | `CONTEST_AI_SCORING` | on/off(#991) | 공모전 채점(`submission-scoring`)·정정 채점(`score-correction`, #1180) 스캔만 — 꺼지면 정정은 진행 중으로 기다린다 | **off** — 채점 스캔이 돌지 않는다 |
-| `CLASSROOM_SCORE_REUSE` | on/off(#1287) | 강의실 채점이 같은 문제·같은 모델·같은 프롬프트의 이전 점수(플랫폼 자동 점수 제외)를 벤더 없이 그대로 쓴다 — 토큰 0, 강사 화면에 「같은 제출 재사용」. staged 갈래(`CLASSROOM_SCORING_PIPELINE`)면 모델 판정만 가져오고 기계 판정은 이번 것을 쓴다(#1283) | **off** — 매번 벤더를 부른다 |
+| `CLASSROOM_SCORE_REUSE` | on/off(#1287) | 강의실 채점이 같은 문제·같은 모델·같은 프롬프트의 이전 점수(플랫폼 자동 점수 제외)를 벤더 없이 그대로 쓴다 — 토큰 0, 강사 화면에 「같은 제출 재사용」. staged 갈래(`CLASSROOM_SCORING_PIPELINE`)면 모델 판정만 가져오고 기계 판정은 이번 것을 쓴다(#1283). 두 걸음 채점은 입력 지문(`ClassroomScore.input_fingerprint`)으로 찾는다(#1296) | **off** — 매번 벤더를 부른다 |
 | `CONTEST_AI_QUALITY_REVIEW` | on/off(#1033) | 완성도 리뷰(`submission-quality-review`) 스캔만 — 채점 스위치와 따로 | **off** — 리뷰 스캔이 돌지 않는다 |
 | `CONTEST_SCORING_METHOD` | `single_call`·`agent`(#1000, ADR-0082) | 공모전 채점·완성도 리뷰의 방식 — `agent` 면 CLI 에이전트가 마감 커밋의 박제본을 읽고 판정한다. 벤더는 `LLM_SCORING_VENDOR`(openai → Codex, anthropic → Claude Code)를 따른다 | **single_call** — 지금처럼 한 번 호출 |
 
@@ -1281,7 +1281,7 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   실행에서 다시 돌고(그 전에 `failed` 로 남은 그런 칸도 같은 판정으로), 연속 3칸이면 멈춘다. `manage.py experiment_report <실험>` 이 줄마다 기준 줄
   (첫째 줄) 대비 평균·최대 점수 차, 스피어만, 흔들림, 근거 실재율, 실측 건당 비용과 전체(제출 N × 회차 3) 예상 금액(돈이 든 칸이
   없는 줄은 「실측 없음」이고 합계에서 빠진다), p50·p90,
-  요구사항 단위 판정 일치율(기준 줄 대비, 필수·선택)·회차 사이 판정 흔들림(필수·선택), 항목 판정 정확도·미충족 재현율·오탐률(사본에 항목별 정답이 있을 때만 — `compare_scoring_methods --material <사본> --fill-truth <CSV>` 로
+  요구사항 단위 판정 일치율(기준 줄 대비, 필수·선택)·회차 사이 판정 흔들림(필수·선택), 기준 판정과의 일치·기준 미충족 재현율·기준 대비 오탐률(사본에 항목별 기준 판정이 있을 때만 — `compare_scoring_methods --material <사본> --fill-truth <CSV>` 로
   채운다, 없으면 「—」, #1288), 문턱 열과 표본의 한계를 마크다운·CSV 로 낸다(비용 측정 전용 실험은 머리에 「점수 비교 아님」, #1261). `--bill` 은 벤더·모델·UTC 날짜·시간 창별 요청·입력·캐시 읽기/쓰기·출력·금액
   (청구 대조)을 낸다. 같은 `--name` 으로 회차·건수를 늘려 이어 갈 수 있다(먼저 2건 × 1회로 단가 실측). `Score`·`ScoreCorrection`·`AgentRun`·순위·지급은 쓰지 않는다. 절차: `docs/ops/scoring-experiment.md`.
 - **채점 방식 실험의 사본 재료(#1262)** — 운영에서 `manage.py export_experiment_material --classroom-submissions <id,…> --name
@@ -1292,11 +1292,17 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   까닭별 번호를 한 줄로 찍는다(꺼낸 건수가 0 이면 파일 없이 실패). 개발 환경에서
   `compare_scoring_methods --material <파일>` 이 그 사본에서 입력을 지어(운영 DB·저장소·GitHub 를 부르지 않는다) 같은 줄을 돌리고,
   줄 방식 `classroom_call:<모델>` 이 강의실 운영 채점과 같은 프롬프트(`classroom.scoring._build_prompt`)·한 번 호출로 돈다(사본에서만).
+  기준 판정 표(`--fill-truth`)의 꼴은 `material_id,item_id,is_met,evidence,confidence,note`(앞 세 열만 있어도 받는다, #1297) — `confidence`(`high`·`medium`·`low`)만
+  사본에 담고 `evidence`·`note` 글은 담지 않으며, 보고표는 기준 판정 세 열 옆에 `high` 확신 칸만 센 같은 셋(medium·low 를 함께 뺀다, #1299)을 내고(확신 표시가 없으면 「—」), 끝에 항목 id 별 불일치 칸 수 표를 더한다(기준 판정이 있는 재료만). 한 제출의 충족 칸이 모두
+  비면 매기지 않은 제출로 건너뛰고, 일부만 비면 거절한다.
+  줄 방식 `classroom_staged:<모델>`(#1295)은 같은 사본에서 staged 갈래(강사 기계 규칙 판정·줄 번호 인용·의심 올림·큰 제출 두 걸음)를 운영 설정
+  기본값대로 돌고 같은 입력 재사용은 끈다 — 올림 호출의 토큰도 그 모델 단가로 칸 비용에 더한다. 칸마다 규칙 도출(#1293)을 새로 하고(저장하지 않는다) 그 호출 비용도 칸에 더한다. 보고표는 이 줄에만 「기계 확정 항목 수」·「모델에 간
+  항목 수」 열을 채우고(둘의 합 = 항목 수), 비용 미리 보기가 이 줄의 예상도 낸다. 사본 항목은 기계 규칙(`machine_rule`)을 함께 담는다.
   기대 점수는 사본의 운영 점수(필수 충족 비율)이고 #1261 의 거절 장치가 그대로 돈다. 칸은 운영 제출 FK 없이 가명 id 로
   남고(`ScoringExperimentRun.material_id`), 사본의 운영 판정이 돈 0 인 「운영:<model_version>」 줄로 들어가 보고표가 운영 점수
   구간(0~20 … 80~100%)별 평균 차를 더 낸다. 사본이 저장소 안·`/tmp` 아래면 거절하고(기본 자리 `~/.cache/codemit-work/
   experiment-material/<이름>/`, 읽을 때 파일 0600·폴더 0700 으로 좁힌다), 가져온 지 7일이 넘으면 미리 보기·보고표가 경고하며,
-  `--purge-material <이름>` 이 지운다. `--confirm` + 사본일 때만 직접 호출(`single_call`·`classroom_call`)이 개발 환경 어댑터 모드(fake)와
+  `--purge-material <이름>` 이 지운다. `--confirm` + 사본일 때만 직접 호출(`single_call`·`classroom_call`·`classroom_staged`)이 개발 환경 어댑터 모드(fake)와
   상관없이 운영 설정의 벤더 키로 실제 벤더에 나가고, 키가 빈 줄은 미리 보기에 「키 없음」이며 `--confirm` 이 거절한다. 키 인증
   실패(만료)는 인프라 실패라 결과로 굳지 않는다.
 

@@ -9,8 +9,9 @@
 판정을 읽는 쪽은 이 키를 모르고도 읽는다. 원본이 누구인지는 어떤 응답에도 싣지 않는다(강사 화면은 「재사용」
 여부만 본다).
 
-입력 지문이 다른 갈래(단계 채점 등)도 같은 자리를 쓰도록 `find_reusable_score` 는 프롬프트 대신 일치 조건을
-받는 `input_filter` 로 일반화해 둔다.
+두 걸음 채점(#1286)은 프롬프트가 고른 파일만 담아 같은 입력을 가릴 수 없다 — 점수의 `input_fingerprint`(고를 수 있는
+소스 전체·판단 항목·지시문의 해시, #1296)로 찾는다(`find_by_fingerprint`). 두 갈래 모두 `find_reusable_score` 의
+`input_filter` 하나만 다르다.
 
 질의 비용: 문제 하나의 점수 수(N)만큼 `prompt` 문자열을 비교한다 — `submission_id` 가 인덱스라 문제의 시도
 행에서 시작해 N 행의 `model_version`(짧은 값)을 먼저 걸러 프롬프트가 같은지 본다. 한 문제의 점수는 수십~수백
@@ -59,6 +60,18 @@ def find_reusable_score(
 def find_by_prompt(problem: Problem, *, model: str, prompt: str, exclude_submission_id: int) -> ClassroomScore | None:
     return find_reusable_score(
         problem, model=model, input_filter=Q(prompt=prompt), exclude_submission_id=exclude_submission_id
+    )
+
+
+def find_by_fingerprint(
+    problem: Problem, *, model: str, fingerprint: str, exclude_submission_id: int
+) -> ClassroomScore | None:
+    """두 걸음 채점(#1296) — 프롬프트 대신 입력 지문(`classroom.scoring.two_step_fingerprint`)이 같은 점수."""
+
+    if not fingerprint:
+        return None
+    return find_reusable_score(
+        problem, model=model, input_filter=Q(input_fingerprint=fingerprint), exclude_submission_id=exclude_submission_id
     )
 
 
