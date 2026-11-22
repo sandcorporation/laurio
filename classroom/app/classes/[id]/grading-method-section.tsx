@@ -4,7 +4,9 @@ import { useState } from "react";
 
 import { ErrorNote, FieldLabel } from "@/app/components/ui";
 import { updateClass, type ClassRow, type GradingMethod } from "@/lib/classes/api";
-import { perSubmissionCost, UNAVAILABLE_TOOLTIP, vendorLabel } from "@/lib/classes/grading-cost";
+import { UNAVAILABLE_TOOLTIP, vendorLabel } from "@/lib/classes/grading-cost";
+
+import { ScoringCalculator } from "./scoring-calculator";
 
 type Field = "scoring_method" | "quality_method";
 
@@ -64,9 +66,6 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
                 {vendor}
               </span>
             ) : null}
-            <span data-testid={`${testId}-cost`} className="text-[13px] text-ink/60">
-              건당 {perSubmissionCost(classroom[field], classroom.default_model)}
-            </span>
           </div>
         </div>
       ))}
@@ -75,6 +74,23 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
           <span data-testid="grading-method-error">{error}</span>
         </ErrorNote>
       ) : null}
+      <div className="border-t border-rule pt-4">
+        <ScoringCalculator
+          key={calculatorKey(classroom)}
+          classId={classId}
+        />
+      </div>
     </div>
   );
+}
+
+// 키 저장·연결·방식·기본 모델이 바뀌면 계산기를 처음 값(지금 이 클래스의 조합)부터 다시 받는다.
+function calculatorKey(classroom: ClassRow): string {
+  return [
+    classroom.scoring_connection_kind,
+    classroom.openai_key ? "openai" : "",
+    classroom.anthropic_key ? "anthropic" : "",
+    classroom.scoring_method,
+    classroom.default_model,
+  ].join(":");
 }

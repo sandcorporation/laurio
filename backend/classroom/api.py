@@ -151,6 +151,7 @@ from .schemas import (
     template_checklist_item_out,
     ProblemTransitionOut,
     PublishedTemplateSummaryOut,
+    ScoringCalculatorOut,
     ScoringCostAttemptOut,
     ScoringCostEstimateOut,
     ScoringCostRowOut,
@@ -179,7 +180,7 @@ from .participation import (
 from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
-from . import scoring_cost
+from . import scoring_calculator, scoring_cost
 from .scoring_model_catalog import cached_scoring_model_catalog, get_scoring_model_catalog, remember_model_ids
 from . import scoring_connection
 from .scoring_models import (
@@ -1438,6 +1439,99 @@ def get_class_scoring_cost(request: HttpRequest, class_id: int, problem_id: int 
         scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
         problem = scope.problem
     return 200, _serialize_scoring_cost(scoring_cost_estimate(scope.class_obj, problem))
+
+
+def _spread_out(spread: scoring_calculator.Spread, scale: float = 1.0) -> dict[str, float | int | None]:
+    return {
+        "sample_count": spread.sample_count,
+        "median": spread.median * scale if spread.median is not None else None,
+        "p90": spread.p90 * scale if spread.p90 is not None else None,
+    }
+
+
+def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[str, object]:
+    """화면 API 와 연결된 앱(`get_problem`)이 같은 꼴로 읽는다."""
+
+    krw = scoring_cost.KRW_PER_USD
+    return {
+        "providers": [
+            {
+                "vendor": p.vendor,
+                "has_key": p.has_key,
+                "models": [
+                    {
+                        "id": m,
+                        "input_usd_per_million": scoring_cost.PRICES[m].input_usd_per_million,
+                        "output_usd_per_million": scoring_cost.PRICES[m].output_usd_per_million,
+                    }
+                    for m in p.models
+                ],
+            }
+            for p in calc.providers
+        ],
+        "agent_vendors": list(calc.agent_vendors),
+        "problems": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "requirement_count": p.requirement_count,
+                "instruction_chars": p.instruction_chars,
+                "sample_count": p.sample_count,
+                "sources": [{"key": s.key, "chars": s.chars, "measured": s.measured} for s in p.sources],
+            }
+            for p in calc.problems
+        ],
+        "selection": {
+            "vendor": calc.selection.vendor,
+            "method": calc.selection.method,
+            "model_id": calc.selection.model_id,
+            "reasoning_effort": calc.selection.reasoning_effort,
+            "problem_id": calc.selection.problem_id,
+            "source": calc.selection.source,
+            "source_chars": calc.selection.source_chars,
+        },
+        "single": {
+            "input_tokens": calc.single.input_tokens,
+            "output_tokens": calc.single.output_tokens,
+            "usd": calc.single.usd,
+            "krw": calc.single.usd * krw,
+            "open_ended": calc.single.open_ended,
+            "fits": calc.single.fits,
+            "seconds": _spread_out(calc.single.seconds),
+        },
+        "agent": {
+            "available": calc.agent.available,
+            "usd": _spread_out(calc.agent.usd),
+            "krw": _spread_out(calc.agent.usd, krw),
+            "seconds": _spread_out(calc.agent.seconds),
+        },
+        "min_sample_count": scoring_cost.MIN_SAMPLE_COUNT,
+        "krw_per_usd": krw,
+    }
+
+
+@router.get(
+    "/classes/{class_id}/scoring-calculator",
+    response={200: ScoringCalculatorOut, 404: ErrorOut},
+    auth=jwt_auth,
+)
+def get_class_scoring_calculator(
+    request: HttpRequest,
+    class_id: int,
+    vendor: str | None = None,
+    method: str | None = None,
+    model: str | None = None,
+    problem_id: int | None = None,
+    source: str | None = None,
+):
+    """「클래스 설정 › 채점 방식」의 채점 비용 계산기(#1270). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합으로
+    채운다. 남의 클래스는 404다."""
+
+    scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
+    calc = scoring_calculator.calculate(
+        scope.class_obj, vendor=vendor, method=method, model_id=model, problem_id=problem_id, source=source
+    )
+    return 200, serialize_scoring_calculator(calc)
 
 
 @router.post(

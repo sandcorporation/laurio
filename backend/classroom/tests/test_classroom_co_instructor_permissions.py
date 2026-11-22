@@ -150,6 +150,7 @@ ROUTES: list[Route] = [
     Route("copy_class_view", "post", lambda w: f"{_c(w)}/copy", None, 201),
     Route("list_class_scoring_models", "get", lambda w: f"{_c(w)}/scoring-models", None, 200),
     Route("get_class_scoring_cost", "get", lambda w: f"{_c(w)}/scoring-cost", None, 200),
+    Route("get_class_scoring_calculator", "get", lambda w: f"{_c(w)}/scoring-calculator", None, 200),
     Route("regenerate_join_link", "post", lambda w: f"{_c(w)}/join-link/regenerate", None, 200),
     Route("archive_class", "post", lambda w: f"{_c(w)}/archive", None, 200),
     Route("unarchive_class", "post", lambda w: f"{_c(w)}/unarchive", None, 200),

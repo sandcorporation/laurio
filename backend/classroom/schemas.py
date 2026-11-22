@@ -303,6 +303,88 @@ class ScoringCostEstimateOut(Schema):
     rows: list[ScoringCostRowOut]
 
 
+class ScoringCalculatorSpreadOut(Schema):
+    """실측의 중앙·p90(#1270) — 표본이 `min_sample_count` 건 미만이면 둘 다 `None`(「실측 없음」)."""
+
+    sample_count: int
+    median: float | None = None
+    p90: float | None = None
+
+
+class ScoringCalculatorModelOut(Schema):
+    id: str
+    input_usd_per_million: float
+    output_usd_per_million: float
+
+
+class ScoringCalculatorProviderOut(Schema):
+    #: openai | anthropic
+    vendor: str
+    #: 이 클래스에 그 프로바이더 키가 저장돼 있는가 — 없어도 고를 수 있고 화면은 「키 없음」을 단다.
+    has_key: bool
+    #: 단가표(`scoring_cost.PRICES`)의 그 프로바이더 모델과 단가(USD / 100만 토큰).
+    models: list[ScoringCalculatorModelOut]
+
+
+class ScoringCalculatorSourceOut(Schema):
+    #: median | p90(그 문제의 실측) | small | medium | large(크기 단계)
+    key: str
+    chars: int
+    measured: bool
+
+
+class ScoringCalculatorProblemOut(Schema):
+    id: int
+    title: str
+    requirement_count: int
+    instruction_chars: int
+    sample_count: int
+    sources: list[ScoringCalculatorSourceOut]
+
+
+class ScoringCalculatorSelectionOut(Schema):
+    vendor: str
+    #: single | agent
+    method: str
+    model_id: str
+    reasoning_effort: str | None = None
+    problem_id: int | None = None
+    source: str
+    source_chars: int
+
+
+class ScoringCalculatorSingleOut(Schema):
+    input_tokens: int
+    output_tokens: int
+    usd: float
+    krw: float
+    open_ended: bool
+    #: 소스가 모델 컨텍스트에 다 들어가는가 — 거짓이면 채점은 「크기 초과」 보류다.
+    fits: bool
+    seconds: ScoringCalculatorSpreadOut
+
+
+class ScoringCalculatorAgentOut(Schema):
+    available: bool
+    usd: ScoringCalculatorSpreadOut
+    krw: ScoringCalculatorSpreadOut
+    seconds: ScoringCalculatorSpreadOut
+
+
+class ScoringCalculatorOut(Schema):
+    """채점 비용 계산기(#1270, CONTEXT.md 「예상 채점 비용」) — 고른 조합의 제출 한 건 예상과 고를 수 있는 값."""
+
+    providers: list[ScoringCalculatorProviderOut]
+    #: 에이전트를 고를 수 있는 프로바이더(`agent_grading.AGENT_VERIFIED_VENDORS`).
+    agent_vendors: list[str]
+    problems: list[ScoringCalculatorProblemOut]
+    selection: ScoringCalculatorSelectionOut
+    single: ScoringCalculatorSingleOut
+    agent: ScoringCalculatorAgentOut
+    min_sample_count: int
+    krw_per_usd: int
+
+
 class JoinLinkOut(Schema):
     join_code: str
 

@@ -165,7 +165,7 @@ test("보관된 클래스 상세에서 설정 링크 한 번이면 복사에 닿
   expect(page.url()).not.toContain(`/classes/${classId}`);
 });
 
-test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호출」이 켜져 있고 「에이전트」는 꺼진 채 까닭이 툴팁이며, 건당 비용이 곁에 선다", async ({
+test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호출」이 켜져 있고 「에이전트」는 꺼진 채 까닭이 툴팁이다", async ({
   page,
 }) => {
   const { classId } = await newClass(page, "method");
@@ -180,9 +180,83 @@ test("채점·완성도 검사 방식 — OpenAI 키 클래스는 「한 번 호
     await expect(page.getByTestId(`${id}-agent`)).toBeDisabled();
     await expect(page.getByTestId(`${id}-agent`)).toHaveAttribute("title", "OpenAI 키는 확인 전");
     await expect(page.getByTestId(`${id}-vendor`)).toHaveText("OpenAI");
-    await expect(page.getByTestId(`${id}-cost`)).toContainText("건당 ");
   }
 
   await page.reload();
   await expect(page.getByTestId("scoring-method-single")).toHaveAttribute("aria-checked", "true");
+});
+
+test("채점 비용 계산기 — 프로바이더·방식·모델·체크리스트·소스 크기를 바꾸면 제출 한 건 예상이 바뀌고, 두 방식이 나란히 선다", async ({
+  page,
+}) => {
+  const { api, classId } = await newClass(page, "calculator");
+  for (const [title, count] of [
+    ["요구사항 둘", 2],
+    ["요구사항 열둘", 12],
+  ] as const) {
+    const created = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+      data: { title, submission_formats: ["repository"] },
+    });
+    const problemId = (await created.json()).id as number;
+    for (let i = 0; i < count; i++) {
+      const item = await api.post(`/api/backend/classroom/classes/${classId}/problems/${problemId}/checklist-items`, {
+        data: { label: `항목 ${i + 1}`, required: true },
+      });
+      expect(item.ok()).toBeTruthy();
+    }
+  }
+  await page.goto(`/classes/${classId}/settings#scoring-method`);
+  await page.getByTestId("vendor-key-openai-change").click();
+  await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
+  await page.getByTestId("openai-key-submit").click();
+  await expect(page.getByTestId("openai-key-status")).toContainText("연결됨");
+
+  const headline = page.getByTestId("calculator-headline");
+  await expect(headline).toContainText("원");
+  // 방금 저장한 키가 계산기에도 선다.
+  await expect(page.getByTestId("calculator-no-key")).toHaveCount(0);
+  await expect(page.getByTestId("calculator-vendor")).toHaveValue("openai");
+  await expect(page.getByTestId("calculator-method-single")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("calculator-method-agent")).toBeDisabled();
+  await expect(page.getByTestId("calculator-agent-unavailable")).toHaveText("에이전트 Claude 키만");
+  await expect(page.getByTestId("calculator-source")).toHaveValue("medium");
+
+  // 칸마다 바꾸면 값이 바뀐다.
+  async function changes(act: () => Promise<unknown>) {
+    const before = await headline.textContent();
+    await act();
+    await expect(headline).not.toHaveText(before ?? "");
+  }
+  await changes(() => page.getByTestId("calculator-source").selectOption("large"));
+  await changes(() => page.getByTestId("calculator-problem").selectOption({ label: "요구사항 열둘 · 요구사항 12개" }));
+  await changes(() => page.getByTestId("calculator-model").selectOption("gpt-4.1"));
+
+  // 키가 없는 Claude 도 고를 수 있다 — 값이 나오고 「키 없음」이 붙는다. 에이전트가 열린다.
+  await changes(() => page.getByTestId("calculator-vendor").selectOption("anthropic"));
+  await expect(page.getByTestId("calculator-no-key")).toHaveText("키 없음");
+  await expect(page.getByTestId("calculator-unit-price")).toContainText("/ 100만 토큰");
+  await page.getByTestId("calculator-method-agent").click();
+  await expect(page.getByTestId("calculator-method-agent")).toHaveAttribute("aria-checked", "true");
+  await expect(headline).toHaveText("실측 없음");
+
+  await expect(page.getByTestId("compare-cost-single")).toContainText("원");
+  await expect(page.getByTestId("compare-cost-agent")).toHaveText("실측 없음");
+  await expect(page.getByTestId("compare-time-single")).toHaveText("실측 없음");
+  await expect(page.getByTestId("compare-size-single")).toHaveText("모델 한도까지");
+  await expect(page.getByTestId("compare-size-agent")).toHaveText("파일을 골라 읽음");
+  await expect(page.getByTestId("compare-connections-single")).toHaveText("전부");
+  await expect(page.getByTestId("compare-connections-agent")).toHaveText("Claude 키");
+
+  // 좁은 폭에서도 계산기·비교 표가 가로로 넘치지 않는다.
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expect(page.getByTestId("calculator-compare")).toBeVisible();
+  const overflow = await page.evaluate(() => {
+    const root = document.documentElement;
+    const boxes = ["scoring-calculator", "calculator-compare"].map((id) => {
+      const el = document.querySelector<HTMLElement>(`[data-testid=${id}]`)!;
+      return el.scrollWidth - el.clientWidth;
+    });
+    return [root.scrollWidth - root.clientWidth, ...boxes];
+  });
+  expect(overflow).toEqual([0, 0, 0]);
 });

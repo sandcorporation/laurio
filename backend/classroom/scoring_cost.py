@@ -1,10 +1,12 @@
 """예상 채점 비용 — 강사가 모델·추론 강도를 고를 때 미리 보는 값 (#591, CONTEXT.md
 「예상 채점 비용」).
 
-**채점은 시도 하나에 LLM 호출 한 번이다**(체크리스트 전부를 한 프롬프트로,
+**한 번 호출 채점은 시도 하나에 LLM 호출 한 번이다**(체크리스트 전부를 한 프롬프트로,
 `classroom.scoring`). 그래서 비용은 프롬프트 길이(거의 제출 소스 길이)와 모델·추론
-강도로 정해진다 — 이 모듈이 그 셈을 혼자 든다. 화면(클래스 설정·문제 설정)과 연결된
-앱(`get_class`·`get_problem`)이 같은 값을 읽는다.
+강도로 정해진다 — 이 모듈이 그 셈과 단가표(`PRICES`, 공모전 쪽 `core.agent_run_tokens` 도 포트로 이 표를 읽는다)를
+혼자 든다. 화면(클래스 설정·문제 설정)과 연결된 앱(`get_class`·`get_problem`)이 같은 값을 읽는다. 에이전트 방식은
+한 숫자로 어림하지 않는다 — 프로바이더·방식·모델·체크리스트·소스 크기를 골라 보는 계산기(#1270)가 이 단가표와
+`attempt_cost` 위에서 한 번 호출을, 그 클래스의 지난 에이전트 실행 실측으로 에이전트를 보인다(`classroom.scoring_calculator`).
 
 **어림이다, 청구서가 아니다.** 실제 청구액은 OpenAI 사용량 화면이 기준이다 — 토큰은
 글자 수로 어림하고(`CHARS_PER_TOKEN`), 출력 토큰은 상수로 둔다(`*_OUTPUT_TOKENS`). #585 가
@@ -196,7 +198,7 @@ def estimated_usage_tokens(prompt: str, reasoning_effort: str | None) -> int:
     return attempt_tokens(reasoning_effort, prompt_chars=len(prompt)).total_tokens
 
 
-def _effort_for(model_id: str, reasoning_effort: str | None) -> str | None:
+def effort_for(model_id: str, reasoning_effort: str | None) -> str | None:
     return (reasoning_effort or "low") if _takes_effort(model_id) else None
 
 
@@ -206,15 +208,19 @@ def _takes_effort(model_id: str) -> bool:
     return is_reasoning_model_id(model_id) or is_claude_model_id(model_id)
 
 
-def attempt_cost(model_id: str, reasoning_effort: str | None, *, prompt_chars: int) -> AttemptCost | None:
-    """시도 하나를 이 모델·강도로 채점하는 어림 비용 — 단가표에 없는 모델은 `None`."""
+def attempt_cost(
+    model_id: str, reasoning_effort: str | None, *, prompt_chars: int, output_tokens: int | None = None
+) -> AttemptCost | None:
+    """시도 하나를 이 모델·강도로 채점하는 어림 비용 — 단가표에 없는 모델은 `None`. `output_tokens` 를 주면
+    강도별 상수 대신 그 값으로 센다(계산기가 요구사항 수로 셈한 출력, `classroom.scoring_calculator`)."""
 
     price = price_for(model_id)
     if price is None:
         return None
-    effort = _effort_for(model_id, reasoning_effort)
+    effort = effort_for(model_id, reasoning_effort)
     input_tokens = tokens_for_chars(prompt_chars)
-    output_tokens = NON_REASONING_OUTPUT_TOKENS if effort is None else REASONING_OUTPUT_TOKENS[effort]
+    if output_tokens is None:
+        output_tokens = NON_REASONING_OUTPUT_TOKENS if effort is None else REASONING_OUTPUT_TOKENS[effort]
     input_rate, output_rate = price.input_usd_per_million, price.output_usd_per_million
     if price.long_context_input_tokens is not None and input_tokens > price.long_context_input_tokens:
         input_rate *= price.long_context_input_multiplier
@@ -274,7 +280,7 @@ class CostEstimate:
         if self.unit == "tokens":
             # 토큰 줄의 강도는 이미 「채점 요청에 실을 값」으로 풀려 있다 — 모델로만 찾는다.
             return next((r for r in self.rows if r.model_id == model_id), None)
-        effort = _effort_for(model_id, reasoning_effort)
+        effort = effort_for(model_id, reasoning_effort)
         return next((r for r in self.rows if r.model_id == model_id and r.reasoning_effort == effort), None)
 
 
