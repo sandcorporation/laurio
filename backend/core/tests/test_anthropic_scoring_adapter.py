@@ -21,6 +21,7 @@ from core import llm_scoring_anthropic as anthropic
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMAdapterError,
+    LLMAdapterMissingVerdictError,
     LLMAdapterModelRejectedError,
     LLMAdapterPermanentError,
     LLMAdapterQuotaExhaustedError,
@@ -111,8 +112,8 @@ def test_the_request_asks_for_the_verdict_schema_with_the_native_messages_api(mo
     assert body["output_config"]["effort"] == "low"
     fmt = body["output_config"]["format"]
     assert fmt["type"] == "json_schema"
-    item = next(iter(fmt["schema"]["properties"]["verdicts"]["properties"].values()))
-    assert item["required"] == ["is_met", "reasoning"]
+    item = fmt["schema"]["properties"]["verdicts"]["items"]
+    assert item["required"] == ["requirement_id", "is_met", "reasoning"]
     assert item["additionalProperties"] is False and fmt["schema"]["additionalProperties"] is False
     # 구조화 출력은 GA 라 베타 헤더도, 폐기 예정 필드도 싣지 않는다. temperature 는 사고와 함께 쓰지 않는다.
     assert "anthropic-beta" not in call["headers"]
@@ -154,6 +155,60 @@ def test_a_missing_verdict_fails_the_attempt_without_leaking_the_source(monkeypa
         _adapter().score(INPUT)
     assert SECRET not in str(exc.value)
     assert "Anthropic" in str(exc.value)
+
+
+def _many(count: int) -> ScoringInput:
+    return ScoringInput(
+        submission_id=7,
+        contest_id=1,
+        prompt="채점 프롬프트",
+        source_files=[],
+        requirements=[
+            RequirementInput(requirement_id=100 + i, text=f"요구사항 {i}", grade="optional", self_reported_met=False)
+            for i in range(count)
+        ],
+    )
+
+
+@pytest.mark.parametrize("allow_unverifiable", [False, True])
+def test_the_verdict_schema_has_the_same_shape_however_many_requirements_are_sent(allow_unverifiable):
+    # requirement_id 를 키로 한 객체(#986)는 키가 24개를 넘으면 Anthropic 이 문법을 컴파일하지 못해
+    # 400(compiled grammar is too large)을 낸다(#1273). 스키마는 요구사항 수와 무관해야 한다.
+    adapter = _adapter(allow_unverifiable=allow_unverifiable)
+    schemas = [adapter._payload(_many(count))["output_config"]["format"]["schema"] for count in (1, 23, 24, 40)]
+
+    assert all(schema == schemas[0] for schema in schemas)
+    verdicts = schemas[0]["properties"]["verdicts"]
+    assert verdicts["type"] == "array"
+    assert verdicts["items"]["properties"]["requirement_id"] == {"type": "integer"}
+    assert "100" not in json.dumps(schemas[0])
+
+
+def test_forty_requirements_are_scored_from_an_array_answer(monkeypatch):
+    many = _many(40)
+    answer = [
+        {"requirement_id": r.requirement_id, "is_met": r.requirement_id % 2 == 0, "reasoning": "근거"}
+        for r in reversed(many.requirements)
+    ]
+    _post(monkeypatch, 200, messages_body(verdicts=answer))
+
+    output = _adapter().score(many)
+
+    assert [v.requirement_id for v in output.verdicts] == [r.requirement_id for r in many.requirements]
+    assert [v.is_met for v in output.verdicts] == [r.requirement_id % 2 == 0 for r in many.requirements]
+
+
+def test_one_requirement_left_out_of_twenty_four_fails_the_scoring(monkeypatch):
+    # 배열 스키마는 빠뜨림을 막지 못한다 — 공모전 3의 809 처럼 조용히 지나가지 않고 실패로 남아야 한다.
+    many = _many(24)
+    answer = [
+        {"requirement_id": r.requirement_id, "is_met": True, "reasoning": "근거"} for r in many.requirements[:-1]
+    ]
+    _post(monkeypatch, 200, messages_body(verdicts=answer))
+
+    with pytest.raises(LLMAdapterMissingVerdictError) as exc:
+        _adapter().score(many)
+    assert "123" in str(exc.value)
 
 
 def test_an_answer_without_a_text_block_is_a_failed_attempt(monkeypatch):
@@ -303,8 +358,8 @@ def test_with_unverifiable_the_schema_asks_for_three_verdicts_and_reads_them(mon
 
     output = _adapter(allow_unverifiable=True).score(INPUT)
 
-    item = next(iter(calls[0]["json"]["output_config"]["format"]["schema"]["properties"]["verdicts"]["properties"].values()))
-    assert item["required"] == ["verdict", "reasoning"]
+    item = calls[0]["json"]["output_config"]["format"]["schema"]["properties"]["verdicts"]["items"]
+    assert item["required"] == ["requirement_id", "verdict", "reasoning"]
     assert item["properties"]["verdict"]["enum"] == ["met", "unmet", "unverifiable"]
     assert [(v.is_met, v.verdict) for v in output.verdicts] == [(True, "met"), (False, "unverifiable")]
 
