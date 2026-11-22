@@ -619,6 +619,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         return 0
     failed = run(plan, only)
+    # push 전 확인(.githooks/pre-push → local_tests_gate.py)이 이 기록과 push 할 커밋을 맞춘다(#1331)
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import local_tests_gate
+
+    local_tests_gate.write(ROOT, base=base, picked={k: len(plan.targets(k)) for k in KINDS}, ran=only, passed=not failed)
     print("\n" + ("통과" if not failed else f"실패: {', '.join(failed)}"))
     return 1 if failed else 0
 

@@ -44,3 +44,16 @@
 `screen-language` CI 잡은 그대로 진짜 문이고, 이 훅이 그것들을 대체하지
 않는다 — 셋 다 지우지 않았다. 훅 프레임워크(husky·lefthook 등)는 쓰지
 않는다, 셸 스크립트 하나면 되는 일에 의존성을 더할 값이 없다.
+
+## pre-push — 로컬 고르기 기록(#1331)
+
+`.githooks/pre-push` → `scripts/local_tests_gate.py`. `scripts/test.sh affected`(돌리기)가 끝나면 시험한 작업 트리의 tree 해시·
+고른 수·돈 종류·통과를 `<git-dir>/codemit-local-tests.json` 에 남긴다(워크트리마다). push 할 때 원격에 없는 merge 아닌 커밋(내
+작업)이 바꾼 파일이 그 트리와 같고 기록이 통과면 보낸다. 기록이 없음·실패·고른 종류를 `--only` 로 뺌·시험 뒤 고침이면 까닭
+한 줄로 거절한다. merge·rebase 로 들어온 남의 변경은 비교에서 빠진다(`spec.py push`·`hotfix.py` 는 다시 돌릴 것이 없다).
+내 커밋이 없거나(sync·지우기) 문서(`*.md`·`docs/`)만이면 묻지 않는다.
+
+**우회는 꼬리말이다** — 내 커밋 하나에 `Local-Tests-Skipped: <까닭>`. 커밋에 남으므로 PR(스펙이면 마감 PR 의 커밋 목록)에
+보인다. 왜 pre-push 인가: 같은 확인을 `spec.py push`·`hotfix.py`·PR 여는 길에 따로 두면 셋이 갈라지고, `git push` 를 손으로
+치는 길이 빠진다 — 훅은 모두가 지나는 한 곳이다. 구조·정적 검사로는 「돌렸는가」를 볼 수 없다. 시험은
+`backend/tests/test_local_tests_gate.py`(임시 저장소 + 맨 원격에 진짜 훅으로 push). `git push --no-verify` 도 막지 못한다 — 그래서 우회를 꼬리말로 열어 두었다.

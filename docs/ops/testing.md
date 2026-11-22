@@ -58,6 +58,11 @@ macOS 기본 환경(bash 3.2, `nproc`·`taskset`·`flock` 없음)에서도 같�
 | e2e | 바뀐 스펙 · 바뀐 e2e 도우미를 import 하는 스펙 · 바뀐 화면 파일에서 가장 가까운 `.tsx` 의 `data-testid` 를 쓰거나 가장 가까운 page·layout 의 라우트로 `goto` 하는 스펙 · HTTP 겉면(`api`·`schemas`·`urls`)이 바뀐 백엔드 앱의 e2e 폴더. 스펙을 못 찾거나 루트 레이아웃·middleware 에 닿으면 그 앱의 e2e 전부 |
 | 고르지 않음 | 문서 · 공통 경로(`scripts/`·`docker/`·루트 — 가드는 고른다) · 백엔드 안쪽 모듈만 바뀐 때의 e2e — 모두 PR 검사가 넓게 돈다 |
 
+**TDD 순서**: 고칠 자리의 시험을 먼저 쓰고 그 파일만 돈다(`scripts/test.sh backend <파일>`, `pnpm --filter <앱> exec vitest run <파일>`,
+`scripts/test.sh e2e <스펙>`) → 초록이 되면 `scripts/test.sh affected` 로 바뀐 파일이 고른 셋을 한 번에 → push. 빠른 되풀이는
+`--only backend` 처럼 좁혀도 되지만, push 전 마지막 한 번은 고른 종류를 다 돈다 — pre-push 훅이 그 기록을 본다
+([커밋 훅](commit-hooks.md) 「로컬 고르기 기록」).
+
 가드 시험을 새로 만들면 `GUARDS` 에 더한다 — 표의 시험·함수가 사라지면 `tests/test_local_affected_tests.py` 가 빨갛다.
 그 시험이 #1305·#1309·#1315·#1328 에서 PR 검사에서야 빨갛던 시험·스펙이 골라지는 것을 붙들고 있다.
 
