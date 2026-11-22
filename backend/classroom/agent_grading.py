@@ -148,12 +148,14 @@ AgentResult = AgentAccepted | AgentHeld
 
 
 #: 실행기에 닿지 못한 까닭의 갈래(#1318) — 오류 수집의 지문과 로그가 쓴다. 학생 소스·이름·id 는 들지 않는다.
-PlatformFailureKind = Literal["unreachable", "timeout", "server_error", "bad_response"]
+#: `proxy_unreachable` 은 실행기는 닿았는데 실행기가 모델 호출 프록시에 닿지 못한 것(#1326)이다.
+PlatformFailureKind = Literal["unreachable", "timeout", "server_error", "bad_response", "proxy_unreachable"]
 
 
 class AgentPlatformUnavailable(LLMAdapterError):
     """에이전트 실행기(`agent-grader`)에 닿지 못했다(#1318) — 이름 풀이·연결 실패, 응답 시간 초과, 503 이 아닌 HTTP
-    오류, 깨진 응답. 실행기 CLI 가 실패해도 결과는 200 으로 오므로 이 예외는 제출 탓이 아니라 플랫폼 탓이다.
+    오류, 깨진 응답 — 그리고 실행기가 모델 호출 프록시에 닿지 못한 것(#1326, 실행기가 결과에 단 표식
+    `proxy_unreachable`). 실행기 CLI 가 실패해도 결과는 200 으로 오므로 이 예외는 제출 탓이 아니라 플랫폼 탓이다.
     판정 채점은 시도 기록 없이 그 클래스를 멈추고(`classroom.scoring`), 완성도 검사는 다른 어댑터 오류와 같이
     실패로 남긴다(`LLMAdapterError` 의 하위라 그대로다)."""
 
@@ -225,6 +227,12 @@ def _run(job: agent_scoring.AgentJob) -> AgentResult:
     grader = agent_grader()  # 실행기 오류 클래스는 scoring 이 등록한 실행 틀의 것이다(#1085)
     try:
         outcome = agent_scoring.run_agent_job(job)
+    except agent_scoring.AgentProxyUnreachable as exc:
+        # 실행기가 모델 호출 프록시에 닿지 못했다(#1326) — 결과는 200 으로 오지만 제출 탓이 아니다. 실행기에 닿지
+        # 못한 것(#1318)과 같은 자리로 보낸다(`AgentRunHeld` 의 하위라 그보다 먼저 받는다).
+        raise AgentPlatformUnavailable(
+            f"에이전트 실행기가 모델 호출 프록시에 닿지 못했다: {exc.failure}", kind="proxy_unreachable"
+        ) from exc
     except agent_scoring.AgentRunHeld as held:
         return AgentHeld(reasons=list(held.reasons), record=held.record)
     except AgentVendorRefused as exc:

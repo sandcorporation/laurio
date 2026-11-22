@@ -34,7 +34,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from classroom import scoring_cost
-from classroom.models import ClassroomScore
+from classroom.current_score import scores_with_current_fields
 
 logger = logging.getLogger(__name__)
 
@@ -174,9 +174,10 @@ def used_model_ids(now=None) -> list[str]:
 
     since = (now or timezone.now()) - USED_WITHIN
     names = (
-        ClassroomScore.objects.filter(created_at__gte=since)
-        .exclude(model_version__startswith=scoring_cost._PLATFORM_AUTO_PREFIX)
-        .values_list("model_version", flat=True)
+        scores_with_current_fields()
+        .filter(current_created_at__gte=since)
+        .exclude(current_model_version__startswith=scoring_cost._PLATFORM_AUTO_PREFIX)
+        .values_list("current_model_version", flat=True)
         .distinct()
     )
     return sorted({name for name in names if name})

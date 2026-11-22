@@ -192,8 +192,14 @@ def run_selfloop_scoring(
             "loop": loop,
             "structured_output": {ITEMS_KEY: verdicts} if isinstance(verdicts, list) else None,
             "problems": list(problems),
+            "proxy_unreachable": result.get("proxy_unreachable"),
         }
     )
+    unreachable = result.get("proxy_unreachable")
+    if isinstance(unreachable, str):
+        # 실행기가 프록시에 닿지 못했다(#1326) — 판정이 빠진 까닭이 제출이 아니다.
+        record["accepted"] = False
+        raise agent_scoring.AgentProxyUnreachable(unreachable, record)
     if problems or not isinstance(verdicts, list):
         record["accepted"] = False
         raise AgentRunHeld(problems or ["루프 출력에 판정이 없다"], record)

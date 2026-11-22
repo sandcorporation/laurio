@@ -25,7 +25,8 @@ from core.repository_adapters import GitHubAdapterError, get_github_adapter
 from storage.adapters import get_storage_adapter
 from submissions.models import SubmissionAsset
 
-from .models import Class, ChecklistGrade, ChecklistItem, ClassroomScore, ClassroomSubmission, Problem
+from .current_score import current_score, with_current_score
+from .models import Class, ChecklistGrade, ChecklistItem, ClassroomSubmission, Problem
 from .scoring import (
     ANTHROPIC_SCORING_ADAPTER,
     PreparedScoring,
@@ -94,12 +95,16 @@ def collect(submission_ids: Sequence[int], *, name: str) -> tuple[list[Item], di
     """
 
     submissions = {
-        s.pk: s for s in ClassroomSubmission.objects.filter(pk__in=submission_ids).select_related("problem__classroom")
+        s.pk: s for s in with_current_score(ClassroomSubmission.objects.filter(pk__in=submission_ids).select_related("problem__classroom"))
     }
     missing = [sid for sid in submission_ids if sid not in submissions]
     if missing:
         raise MaterialError(f"강의실 제출이 없다: {', '.join(map(str, missing))}")
-    scores = {s.submission_id: s for s in ClassroomScore.objects.filter(submission_id__in=submission_ids)}
+    scores = {
+        sid: score
+        for sid, submission in submissions.items()
+        if (score := current_score(submission)) is not None
+    }
     unscored = [sid for sid in submission_ids if sid not in scores]
     if unscored:
         raise MaterialError(f"운영 채점이 없는 제출: {', '.join(map(str, unscored))}")

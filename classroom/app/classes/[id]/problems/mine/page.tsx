@@ -12,6 +12,7 @@
 // — 이름이 클래스마다 따로라는 사실은 어느 클래스인지가 옆에 있어야 뜻이 통한다.
 // 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다 — 강사가 문제를
 // 열지 못하게 하는 것과 같은 신호(`memberExpelled`·`archived`)를 그대로 쓴다.
+import { knownOr } from "@/lib/util/known-or";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -37,6 +38,8 @@ import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
 
+const UNKNOWN_BADGE = { label: "확인 중", tone: "neutral" } as const;
+
 const STATUS_BADGE: Record<
   ProblemListItem["status"],
   { label: string; tone: "neutral" | "error" | "warning" | "verified" }
@@ -57,7 +60,7 @@ function ProblemListRow({
   classId: number;
   problem: ProblemListItem;
 }) {
-  const badge = STATUS_BADGE[problem.status];
+  const badge = knownOr(STATUS_BADGE, problem.status, UNKNOWN_BADGE);
   return (
     <li data-testid={`my-problem-row-${problem.id}`}>
       <Link

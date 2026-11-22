@@ -173,7 +173,7 @@ def test_cli_agent_sees_the_checklist_path_and_its_evidence_is_accepted(
         zip_path.write_bytes(repo_zip)
         work = tmp_path / "work"
         work.mkdir(exist_ok=True)
-        config = ar.RunnerConfig(work_root=work, proxy_base_url="http://proxy.test:8002", cli_path=f"{bin_dir}:/usr/bin:/bin")
+        config = ar.RunnerConfig(work_root=work, proxy_base_url="http://proxy.test:8002", cli_path=f"{bin_dir}:/usr/bin:/bin", probe=lambda _url: None)
         results.append(ar.execute_run(ar.validate_spec(dict(spec)), zip_path, config))
         return results[-1]
 

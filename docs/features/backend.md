@@ -340,7 +340,9 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | `GET /api/classroom/classes/{id}/members` | 참여자 명단 — 강사 전용(#281) |
 | `POST .../members/{id}/expel` | 참여자를 내보낸다 — 행은 지우지 않는다(#281). 강사(소유자·공동 강사)의 자기 참여자 행은 403 「강사는 내보낼 수 없습니다.」(#669) |
 | `GET .../roster-grid` | 참여자 × 문제 격자 — 셀마다 통과 이력과 「완벽」 여부(`perfect`, 심화 항목이 없는 문제는 `null`, #962), 문제 열에는 `perfect_count`, 달성률 행은 `problems` 목록과 같은 계산을 재사용한다(#290) |
-| `GET .../recent-attempts` | 참여자의 최근 시도 열 건(고정) — 이름·문제 제목·상태(`passed`·`attempted_not_passed`·`scoring`·`needs_setup`)·시각, 강사 전용(#632) |
+| `GET .../recent-attempts` | 참여자의 최근 시도 열 건(고정) — 이름·문제 제목·상태(`passed`·`attempted_not_passed`·`scoring_failed`(실패 상한 점수, #1317)·`scoring`·`needs_setup`)·시각, 강사 전용(#632) |
+| `POST`·`GET /api/classroom/classes/{id}/score-corrections` | 점수 정정(#1317) — 클래스 소유자만. `POST` 는 시도 id 목록과 사유(빠지면 「채점 실패 다시 채점」, 빈 사유는 422)로 시도마다 「진행 중」 정정을 걸고, 못 거는 시도는 까닭(`not_scored`·`not_latest`·`not_platform_failure`·`in_progress`)과 함께 `skipped` 로 돌려준다. 걸 수 있는 것은 그 (문제, 참여자) 짝의 가장 최근 시도이고 현재 점수가 「채점 실패」(실패 상한 점수)인 것뿐이다(`classroom.score_corrections.correctable`). 다른 클래스의 시도가 섞이면 422. `GET` 은 그 클래스의 정정을 최근 것부터 준다 |
+| `GET /api/classroom/classes/{id}/attempts?page=` | 강사 「제출」 화면(#1317) — 「최근 제출」과 같은 줄(강사 본인·내보낸 참여자 빼고)을 최신순 한 쪽 20줄로, `has_next` 와 줄마다 `correctable`(「다시 채점」을 걸 수 있나 — 소유자에게만 참)을 붙인다 |
 | `POST`·`GET /api/classroom/classes/{id}/problems[/{id}]` | 문제를 만들고 고친다 — 채점 지침(#386)과 권장 기한·마감(`recommended_due_at`·`due_at`, 둘 다 nullable, 권장 > 마감이면 422, #769)도 받는다. PATCH 에서 두 날짜는 생략하면 그대로·null 이면 비운다. 마감이 지나도 참여자가 제출한다(#941, ADR-0078). 보관 → 내보냄 → 숨김에 의한 차단은 유지한다. 시도 응답·참여자 목록 줄·격자 칸의 늦음은 권장 기한 뒤와 마감 기한 뒤를 구분하고 마감이 우선이다(목록·격자는 마지막 시도 기준). MCP 명단 격자와 참여자 리포트도 같은 단계를 싣는다. 저장하지 않고 응답마다 셈하므로 날짜를 옮기면 바뀐다. 복사·템플릿은 두 날짜를 옮기지 않는다(`PROBLEM_FIELD_TRANSFER_TABLE`). MCP `create_problem`·`update_problem` 도 같은 칸을 받는다. 응답에 참여자(강사 본인·내보낸 사람 제외)의 마지막 제출 시각과 시도 수(`participant_attempt_count`, #674 — 제출 현황의 「시도」와 같은 집합, 목록에서도 질의 하나)를 싣는다 |
 | `PATCH .../problems/{id}` | 제목·설명·제출 형식·채점 모델·추론 강도(#402)·「추론 모델」 스위치(`model_is_reasoning`, #602)·채점 지침(#386)·완성도 공개(`quality_public`, #883)를 고친다 — 호환 서버면 자기 모델을 고르거나 스위치를 바꿀 때 클래스 기본과 같은 시험 호출을 거친다(만들 때도) |
 | `POST .../problems/reorder` | 클래스 상세의 문제 순서를 바꾼다 |
@@ -524,7 +526,9 @@ RESPONSE_FAILED`)·5xx·형식이 깨진 몸통은 지금처럼 실패 시도로
 채점되면 풀림은 위 둘과 같지만 **강사의 키·연결 문제가 아니라** 대기 사유 「키」도 클래스 응답의 멈춤 표시도
 켜지 않는다. 실패마다 WARNING 로그, GlitchTip 이벤트 하나(지문 `agent-grader-unavailable`·갈래, 제출 id 태그는
 뺀다), 1분 집계의 결과 `grader_unreachable` 한 건(운영 경보 `ClassroomGraderUnreachable` 의 입력)을 남긴다
-(`classroom.platform_failures`). 실행기 바쁨(503)은 빈도 제한, 입력 거절(400·413)과 실행기 CLI 실패(200 에 종료코드)는
+(`classroom.platform_failures`). **실행기가 모델 호출 프록시(`llm-proxy`)에 닿지 못한 것도 같은 길이다**(#1326) — 결과는 200 이지만
+실행기가 단 표식 `proxy_unreachable` 을 보고 `AgentProxyUnreachable` → 갈래 `proxy_unreachable` 로 옮긴다(시도 기록 없음·멈춤·강사 알림 한 번·
+같은 지문 앞머리·같은 경보). 실행기 바쁨(503)은 빈도 제한, 입력 거절(400·413)과 프록시에 닿은 실행기 CLI 실패(200 에 종료코드)는
 보류로 그대로 간다. 완성도 검사는 이 예외를 실패한 검사로 남기고, 같은 WARNING 로그·GlitchTip 지문·집계 한 건만
 남긴다(멈춤·강사 알림 없음 — 완성도에는 점수·실패 상한이 없다).
 **그 밖의 까닭으로 실패 상한 점수가 찍히면 찍힐 때마다 소유자에게 알린다**(#1318) — 문제·시도·참여자 이름(「최근 제출」과
@@ -1247,7 +1251,10 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
 파일만 읽게 한다 — 참가자 코드는 실행하지 않고, 진짜 키는 없고(실행 토큰만), 네트워크는 `llm-proxy` 뿐이다. 실행기를
 부르는 쪽은 두 프로세스다 — 공모전 채점·완성도 스캔이 도는 `celery-worker` 와 강의실 채점·완성도 검사가 도는 `grader`(#1036·#1316).
 둘 다 실행기와 내부 망 `agent-call` 을 함께 쓰고, backend(API)는 실행기를 부르지 않는다. 동시 실행 2,
-실행당 10분. 채점·완성도 리뷰는 같은 `run_agent_job` 을 쓰고(`AgentJob.purpose` 가 `scoring`·`quality`) 한 실행으로 묶지
+실행당 10분. 실행기는 실행 전과 실패한 실행(종료코드·시간 초과, 루프는 판정이 빠지거나 멈춤) 뒤에 `llm-proxy` 에 TCP 로 붙어 보고,
+닿지 못하면 결과에 `proxy_unreachable`(`connection_refused`·`name_resolution`·`timeout`·`connect_error`)을 단다 — 실행 전이면 CLI·루프를
+띄우지 않는다(#1326). `run_agent_job`·`run_selfloop_scoring` 은 이를 재실행 없이 `AgentProxyUnreachable`(보류 `AgentRunHeld` 의 하위)로
+던진다 — 공모전·실험은 지금처럼 보류, 강의실은 플랫폼 탓으로 가른다. 채점·완성도 리뷰는 같은 `run_agent_job` 을 쓰고(`AgentJob.purpose` 가 `scoring`·`quality`) 한 실행으로 묶지
 않는다. 결과는 같은 `Score`·`SubmissionQualityReview` 이고 화면·알림·순위·박제는 그대로다.
 
 - **완성도**(#1001)는 `CONTEST_SCORING_METHOD=agent` 일 때 같은 박제본을 읽고 항목마다 0~5 와 근거 `경로:줄` 을 받는다.

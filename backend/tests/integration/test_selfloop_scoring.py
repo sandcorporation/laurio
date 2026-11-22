@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import io
+import socket
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -46,7 +47,7 @@ def anthropic_open():
         yield
 
 
-def _score(monkeypatch, tmp_path: Path, submission_id: int, vendor: str, script: dict):
+def _score(monkeypatch, tmp_path: Path, submission_id: int, vendor: str, script: dict, *, proxy_url: str | None = None):
     submission = services.ContestSubmission.objects.get(pk=submission_id)
     rid = submission.contest.requirements.get().id
     requirements = [RequirementInput(requirement_id=rid, text="로그인 기능이 있다", grade="required", self_reported_met=True)]
@@ -69,7 +70,7 @@ def _score(monkeypatch, tmp_path: Path, submission_id: int, vendor: str, script:
         work.mkdir(exist_ok=True)
         # 가짜 프록시는 이 시험이 발급한 토큰만 받는다 — 진짜 프록시처럼.
         monkeypatch.setattr(selfloop_fake, "TOKEN", spec["run_token"])
-        return ar.execute_run(ar.validate_spec(dict(spec)), zip_path, ar.RunnerConfig(work_root=work, proxy_base_url=proxy.url))
+        return ar.execute_run(ar.validate_spec(dict(spec)), zip_path, ar.RunnerConfig(work_root=work, proxy_base_url=proxy_url or proxy.url))
 
     monkeypatch.setattr(selfloop_scoring, "issue_run_token", issue)
     monkeypatch.setattr(agent_scoring, "request_run", run_in_process)
@@ -132,3 +133,23 @@ def test_unresolved_requirement_is_held_with_the_record(client, category, landin
     assert held.record["accepted"] is False
     assert held.record["attempts"][0]["loop"]["requirements"][0]["status"] == "unresolved"
     assert not AgentRun.objects.filter(submission_id=submission_id).exists()
+
+
+@pytest.mark.django_db
+def test_a_proxy_the_runner_cannot_reach_is_not_a_held_submission(client, category, landing_type, monkeypatch, tmp_path):  # noqa: F811
+    """#1326: 실행기가 프록시에 닿지 못하면 루프를 띄우지 않고 결과에 까닭을 단다 — 보류의 하위인
+    `AgentProxyUnreachable` 로 올라온다(받는 쪽이 가르지 않으면 지금처럼 보류다)."""
+
+    submission_id, _ = _closed_submission(client, category, landing_type)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        closed = f"http://127.0.0.1:{s.getsockname()[1]}"
+    _rid, _proxy, outcome, held = _score(monkeypatch, tmp_path, submission_id, "anthropic", {}, proxy_url=closed)
+
+    assert outcome is None
+    assert isinstance(held, agent_scoring.AgentProxyUnreachable)
+    assert held.failure == "connection_refused"
+    assert held.reasons == ["프록시에 닿지 못함: connection_refused"]
+    [attempt] = held.record["attempts"]
+    assert attempt["proxy_unreachable"] == "connection_refused" and attempt["exit_code"] is None
+    assert held.record["accepted"] is False

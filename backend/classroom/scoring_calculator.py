@@ -40,7 +40,8 @@ from core.model_context import BYTES_PER_TOKEN, context_window_tokens, source_bu
 from policies.runtime_settings import CLASSROOM_PIPELINE_STAGED, classroom_scoring_pipeline
 
 from . import agent_grading, scoring_cost, two_step
-from .models import ANTHROPIC_KEY_FIELDS, OPENAI_KEY_FIELDS, Class, ClassroomAgentRun, ClassroomScore, ClassroomSubmission, Problem
+from .current_score import scores_with_current_fields
+from .models import ANTHROPIC_KEY_FIELDS, OPENAI_KEY_FIELDS, Class, ClassroomAgentRun, ClassroomSubmission, Problem
 from .scoring_models import is_claude_model_id
 
 Vendor = Literal["openai", "anthropic"]
@@ -315,13 +316,14 @@ def _assumed_sources() -> tuple[SourceOption, ...]:
 
 def _problem_option(problem: Problem) -> ProblemOption:
     instruction = _instruction_chars(problem)
-    prompts = (
-        ClassroomScore.objects.filter(submission__problem=problem)
-        .exclude(model_version__startswith="platform-auto")
-        .exclude(model_version__startswith="agent:")
-        .values_list("prompt", flat=True)
+    lengths = (
+        scores_with_current_fields()
+        .filter(submission__problem=problem)
+        .exclude(current_model_version__startswith="platform-auto")
+        .exclude(current_model_version__startswith="agent:")
+        .values_list("current_prompt_length", flat=True)
     )
-    sizes = [max(len(p) - instruction, 0) for p in prompts]
+    sizes = [max((n or 0) - instruction, 0) for n in lengths]
     spread = percentile_spread([float(s) for s in sizes])
     if spread.median is not None and spread.p90 is not None:
         sources: tuple[SourceOption, ...] = (

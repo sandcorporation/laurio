@@ -59,6 +59,7 @@ API_ROUTERS: tuple[Mount, ...] = (
     Mount("/classroom", "classroom.api.router"),
     Mount("/classroom", "classroom.template_api.router"),
     Mount("/classroom", "classroom.connected_app_api.router"),
+    Mount("/classroom", "classroom.correction_api.router"),
     Mount("/internal", "core.api.router"),
     Mount("/internal/notifications", "notifications.api.router"),
     Mount("/internal/scoring", "scoring.api.router"),
