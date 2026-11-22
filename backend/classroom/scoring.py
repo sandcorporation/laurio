@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import hashlib
 import sys
 import logging
 from collections.abc import Callable, Mapping, Sequence
@@ -905,16 +906,24 @@ def reusable_outcome(prepared: PreparedScoring) -> VendorOutcome | None:
     """운영 설정 `CLASSROOM_SCORE_REUSE` 가 켜져 있고 같은 입력의 이전 점수가 있으면 벤더 대신 그것을 돌려준다(#1287).
     **DB 를 읽는다** — grader 는 DB 스레드에서 부른다. 에이전트 방식은 프롬프트가 입력 전부가 아니라 재사용하지 않는다."""
 
-    if prepared.agent or prepared.skip_vendor or prepared.two_step is not None or not classroom_score_reuse_enabled():
-        # 기계 판정만인 채점(#1283)은 벤더를 부르지 않으니 재사용할 것이 없다. 두 걸음(#1286)은 1차 프롬프트가 소스
-        # 내용을 담지 않아 「같은 입력」을 프롬프트로 가릴 수 없다.
+    if prepared.agent or prepared.skip_vendor or not classroom_score_reuse_enabled():
+        # 기계 판정만인 채점(#1283)은 벤더를 부르지 않으니 재사용할 것이 없다.
         return None
-    source = score_reuse.find_by_prompt(
-        prepared.problem,
-        model=prepared.model,
-        prompt=prepared.prompt,
-        exclude_submission_id=prepared.submission.id,
-    )
+    if prepared.two_step is not None:
+        # 두 걸음(#1286)은 1차 프롬프트가 소스 내용을 담지 않아 「같은 입력」을 프롬프트로 가릴 수 없다 — 입력 지문으로(#1296).
+        source = score_reuse.find_by_fingerprint(
+            prepared.problem,
+            model=prepared.model,
+            fingerprint=two_step_fingerprint(prepared),
+            exclude_submission_id=prepared.submission.id,
+        )
+    else:
+        source = score_reuse.find_by_prompt(
+            prepared.problem,
+            model=prepared.model,
+            prompt=prepared.prompt,
+            exclude_submission_id=prepared.submission.id,
+        )
     return None if source is None else VendorOutcome(reused=source)
 
 
@@ -1187,18 +1196,17 @@ def _selection_prompt(
     return "\n".join(lines)
 
 
-def _second_step(prepared: PreparedScoring, selection: ScoringOutput) -> PreparedScoring:
-    """1차 응답으로 2차 준비를 짓는다(#1286) — 고른 파일만 상한 안에서, 없으면 지금의 소스 고르기로. DB 를 쓰지 않는다."""
+def _second_step_request(
+    prepared: PreparedScoring, plan: two_step.TwoStepPlan, files: Sequence[SourceFile]
+) -> tuple[str, ScoringInput]:
+    """두 걸음의 2차 판정 요청(#1286) — `files` 를 실은 것. DB 를 쓰지 않는다."""
 
-    plan = prepared.two_step
-    assert plan is not None
-    files = two_step.second_step_files(selection, plan)
     asked = [item for item in prepared.checklist_items if item.id in set(plan.item_ids)]
-    prompt, scoring_input = _scoring_request(
+    return _scoring_request(
         prepared.submission,
         asked,
-        _numbered_source_text(files),
-        files,
+        _numbered_source_text(list(files)),
+        list(files),
         asset_id=plan.asset_id,
         asset_label=plan.asset_label,
         asset_kind=prepared.asset_kind,
@@ -1207,6 +1215,28 @@ def _second_step(prepared: PreparedScoring, selection: ScoringOutput) -> Prepare
         machine_notes=prepared.machine_notes,
         machine_confirmed=_confirmed_labels(prepared.checklist_items, prepared.machine_entries),
     )
+
+
+def two_step_fingerprint(prepared: PreparedScoring) -> str:
+    """두 걸음 채점의 입력 지문(#1296) — 두 걸음이 아니면 빈 문자열. 1차 프롬프트(판단 항목·파일 목록·고르기 지시문)와
+    **고를 수 있는 파일 전부를 실은** 2차 프롬프트(소스 전체·기계 메모·판정 지시문), 2차 예산의 해시다. 같은 입력이면
+    1차가 같은 파일을 고르리라 보고 이전 두 걸음 점수를 재사용한다(모델은 `model_version` 으로 따로 맞춘다)."""
+
+    plan = prepared.two_step
+    if plan is None:
+        return ""
+    full_prompt, _ = _second_step_request(prepared, plan, plan.files)
+    material = "\0".join([plan.selection_prompt, full_prompt, str(plan.budget_chars)])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _second_step(prepared: PreparedScoring, selection: ScoringOutput) -> PreparedScoring:
+    """1차 응답으로 2차 준비를 짓는다(#1286) — 고른 파일만 상한 안에서, 없으면 지금의 소스 고르기로. DB 를 쓰지 않는다."""
+
+    plan = prepared.two_step
+    assert plan is not None
+    files = two_step.second_step_files(selection, plan)
+    prompt, scoring_input = _second_step_request(prepared, plan, files)
     return dataclasses.replace(
         prepared,
         prompt=prompt,
@@ -1736,7 +1766,9 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         score = ClassroomScore.objects.create(
             submission=submission,
             model_version=source.model_version,
-            prompt=prepared.prompt,
+            # 두 걸음이면 원본이 2차로 실은 프롬프트(판정이 인용한 소스) — 이번 준비의 것은 1차다(#1296).
+            prompt=source.prompt if prepared.two_step is not None else prepared.prompt,
+            input_fingerprint=two_step_fingerprint(prepared),
             reasoning=reused_reasoning,
             syntax_check_result=source.syntax_check_result,
         )
@@ -1774,6 +1806,8 @@ def _apply_vendor_outcome(prepared: PreparedScoring, outcome: VendorOutcome) -> 
         submission=submission,
         model_version=output.model_version,
         prompt=prepared.prompt,
+        # 두 걸음이면 재사용(#1296)이 찾는 입력 지문 — 2차 준비도 계획·항목을 그대로 들고 있어 같은 값이다.
+        input_fingerprint=two_step_fingerprint(prepared),
         reasoning=reasoning,
         syntax_check_result=syntax_check_result,
     )

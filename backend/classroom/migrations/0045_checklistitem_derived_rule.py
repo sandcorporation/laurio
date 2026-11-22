@@ -17,16 +17,16 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="checklistitem",
             name="derived_kind",
-            field=models.CharField(blank=True, default="", max_length=10),
+            field=models.CharField(blank=True, db_default="", default="", max_length=10),
         ),
         migrations.AddField(
             model_name="checklistitem",
             name="derived_text_hash",
-            field=models.CharField(blank=True, default="", max_length=64),
+            field=models.CharField(blank=True, db_default="", default="", max_length=64),
         ),
         migrations.AddField(
             model_name="checklistitem",
             name="derived_model",
-            field=models.CharField(blank=True, default="", max_length=100),
+            field=models.CharField(blank=True, db_default="", default="", max_length=100),
         ),
     ]

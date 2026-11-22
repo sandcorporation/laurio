@@ -17,6 +17,7 @@ from tests.classroom_scenarios import (
     DERIVATION_PROMPT_HEAD,
     FakeVendorResponse,
     auth_header,
+    create_class,
     derivation_body,
     derivation_item_ids,
     force_real_scoring_adapter,
@@ -210,3 +211,64 @@ def test_the_derivation_is_shown_to_the_instructor_only(client, db, monkeypatch,
     assert participant_item.get("derived_kind") is None
     assert participant_item.get("derived_rule") is None
     assert json.dumps(participant_item).find("app.py") == -1
+
+
+def _rule_fields(problem_id: int) -> dict[str, tuple]:
+    return {
+        i.label: (i.machine_rule, i.derived_rule, i.derived_kind, i.derived_text_hash, i.derived_model)
+        for i in ChecklistItem.objects.filter(problem_id=problem_id)
+    }
+
+
+def _post(client, url: str, access: str, data: dict) -> dict:
+    response = client.post(url, data=data, content_type="application/json", **auth_header(access))
+    assert response.status_code == 201, response.content
+    return response.json()
+
+
+def test_templates_carry_the_rule_fields_and_skip_derivation_for_the_same_text(client, db, monkeypatch, staged):
+    """받아들임(#1296) — 규칙·도출 칸이 있는 문제를 템플릿으로 내보내고 다시 가져오면 칸이 남고, 같은 글이면 도출 호출이 없다."""
+
+    with force_real_scoring_adapter():
+        vendor = Vendor(monkeypatch, {"앱 진입 파일이 있다": APP_EXISTS})
+        ctx = _world_with(
+            client,
+            vendor,
+            [
+                ("앱 진입 파일이 있다", None),
+                ("코드가 읽기 쉽다", None),
+                ("시험 폴더가 있다", {"kind": "path_exists", "path": "tests/*.py"}),
+            ],
+        )
+        run_scan(client)
+        assert len(vendor.derivations) == 1
+        source = _rule_fields(ctx["problem_id"])
+        assert source["시험 폴더가 있다"][0] and source["앱 진입 파일이 있다"][2] == "static"
+        access, class_id = ctx["access"], ctx["class_id"]
+
+        # 문제 템플릿: 내보내기 → 다른 클래스로 가져오기.
+        share = _post(
+            client,
+            f"{CLASSES_URL}/{class_id}/problems/{ctx['problem_id']}/publish-template",
+            access,
+            {"publisher_display_name": "김강사"},
+        )["share_code"]
+        target = create_class(client, access)
+        problem_id = _post(client, f"/api/classroom/problem-templates/{share}/import", access, {"target_class_id": target})["id"]
+        assert _rule_fields(problem_id) == source
+
+        # 클래스 템플릿: 내보내기 → 새 클래스로 가져오기.
+        class_share = _post(client, f"{CLASSES_URL}/{class_id}/publish-template", access, {"publisher_display_name": "김강사"})[
+            "share_code"
+        ]
+        new_class = _post(client, f"/api/classroom/class-templates/{class_share}/import", access, {"name": "가져온 클래스"})["id"]
+        (imported,) = set(ChecklistItem.objects.filter(problem__classroom_id=new_class).values_list("problem_id", flat=True))
+        assert _rule_fields(imported) == source
+
+        # 가져온 문제를 채점해도 같은 글이라 도출을 다시 부르지 않는다.
+        opened = client.post(f"{CLASSES_URL}/{target}/problems/{problem_id}/open", content_type="application/json", **auth_header(access))
+        assert opened.status_code == 200, opened.content
+        _submit_as(client, {**ctx, "class_id": target, "problem_id": problem_id}, "participant-2")
+        run_scan(client)
+        assert len(vendor.derivations) == 1
+        assert len(vendor.scorings) == 2

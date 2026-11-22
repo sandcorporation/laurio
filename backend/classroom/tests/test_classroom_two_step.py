@@ -11,7 +11,8 @@ import pytest
 from classroom import two_step
 from classroom.models import ClassroomScore, ClassroomScoringAttempt
 from classroom.pending_scoring import SIZE_HOLD_ERROR_PREFIX
-from classroom.tests.test_classroom_machine_check import _world, staged  # noqa: F401 - fixture
+from classroom import score_reuse
+from classroom.tests.test_classroom_machine_check import TREE, _world, staged  # noqa: F401 - fixture
 from core.llm_scoring import Citation, RequirementVerdict, ScoringOutput, SourceFile
 from tests.classroom_scenarios import (
     FakeVendorResponse,
@@ -19,8 +20,12 @@ from tests.classroom_scenarios import (
     force_real_scoring_adapter,
     get_class,
     is_derivation_request,
+    join_class,
+    login,
     openai_verdicts_body,
     run_scan,
+    submit_source,
+    user_id,
 )
 
 pytestmark = pytest.mark.usefixtures("reset_rate_limits")
@@ -34,8 +39,8 @@ def _whole(path: str) -> dict:
     return {"path": path, "start_line": 1, "end_line": 1}
 
 
-def _scan(client, monkeypatch, bodies, sent: list[dict]) -> dict:
-    """`bodies` 는 (진입점 항목 id, 시험 항목 id) → 그 호출의 판정 목록. 호출마다 토큰 10."""
+def _scan(client, monkeypatch, bodies, sent: list[dict], derived: list[dict] | None = None) -> dict:
+    """`bodies` 는 (진입점 항목 id, 시험 항목 id) → 그 호출의 판정 목록. 호출마다 토큰 10. 도출 호출은 `derived` 에 모은다."""
 
     with force_real_scoring_adapter():
         ctx = _world(client, [("진입점이 있다", None), ("시험이 있다", None)])
@@ -44,13 +49,28 @@ def _scan(client, monkeypatch, bodies, sent: list[dict]) -> dict:
         def _handler(*args, **kwargs):
             if is_derivation_request(kwargs["json"]):
                 # staged 의 규칙 도출(#1293) — 모두 「판단」으로 답하고 판정 호출로 세지 않는다.
+                if derived is not None:
+                    derived.append(kwargs["json"])
                 return FakeVendorResponse(200, derivation_body(kwargs["json"]))
             sent.append(kwargs["json"])
-            return FakeVendorResponse(200, openai_verdicts_body(queue.pop(0), total_tokens=10))
+            # 벤더는 요청한 모델 이름을 돌려준다 — 재사용(#1287)이 모델로 맞춘다.
+            body = openai_verdicts_body(queue.pop(0), model=kwargs["json"]["model"], total_tokens=10)
+            return FakeVendorResponse(200, body)
 
         monkeypatch.setattr("core.llm_scoring.requests.post", _handler)
         run_scan(client)
+        ctx["queue"] = queue
     return ctx
+
+
+def _submit_again(client, ctx, uid: str, files: dict[str, str]) -> None:
+    """다른 참여자가 `files` 를 내고 채점까지 — `_scan` 의 가짜 벤더(남은 판정 목록)를 그대로 쓴다."""
+
+    participant = login(client, uid=uid)
+    join_class(client, participant["access"], ctx["class_id"], instructor_access=ctx["access"])
+    submit_source(client, participant["access"], ctx["class_id"], ctx["problem_id"], participant_user_id=user_id(uid), files=files)
+    with force_real_scoring_adapter():
+        run_scan(client)
 
 
 def _user_prompt(request: dict) -> str:
@@ -74,6 +94,60 @@ def _judge(app, test):
 @pytest.fixture
 def low_threshold(monkeypatch):
     monkeypatch.setenv("CLASSROOM_TWO_STEP_THRESHOLD_CHARS", "100")
+
+
+def test_the_same_source_twice_reuses_both_steps(client, db, monkeypatch, staged, low_threshold):  # noqa: F811
+    """받아들임(#1296) — 같은 소스의 큰 제출을 두 번 채점하면 두 번째는 벤더 호출 0(1·2차, 도출 모두)."""
+
+    monkeypatch.setenv("CLASSROOM_SCORE_REUSE", "on")
+    sent: list[dict] = []
+    derived: list[dict] = []
+    ctx = _scan(client, monkeypatch, [_pick([APP], [TOML]), _judge], sent, derived)
+    assert len(sent) == 2 and derived
+    calls_before = len(derived)
+
+    _submit_again(client, ctx, "participant-2", TREE)
+
+    assert len(sent) == 2 and len(derived) == calls_before
+    first, second = ClassroomScore.objects.order_by("id")
+    assert first.input_fingerprint and second.input_fingerprint == first.input_fingerprint
+    assert score_reuse.score_reused(second) and second.prompt == first.prompt
+    # 판정은 원본 그대로(재사용 표식만 더한다), 토큰은 첫 채점의 두 호출뿐.
+    assert [(r["checklist_item_id"], r["verdict"]) for r in second.reasoning] == [
+        (r["checklist_item_id"], r["verdict"]) for r in first.reasoning
+    ]
+    assert get_class(client, ctx["access"], ctx["class_id"])["token_usage_total"] == 20
+
+
+def test_a_changed_file_outside_the_picked_ones_still_calls_both_steps(client, db, monkeypatch, staged, low_threshold):  # noqa: F811
+    """지문은 고를 수 있는 소스 **전체**다 — 1차가 고르지 않은 파일이 달라도 같은 입력이 아니다."""
+
+    monkeypatch.setenv("CLASSROOM_SCORE_REUSE", "on")
+    sent: list[dict] = []
+    ctx = _scan(client, monkeypatch, [_pick([APP], [TOML]), _judge, _pick([APP], [TOML]), _judge], sent)
+
+    _submit_again(client, ctx, "participant-2", {**TREE, CONFIG: "server:\n  port: 9090\n"})
+
+    assert len(sent) == 4
+    first, second = ClassroomScore.objects.order_by("id")
+    assert second.input_fingerprint != first.input_fingerprint
+    assert not score_reuse.score_reused(second)
+
+
+def test_reuse_off_two_step_calls_the_vendor_again(client, db, monkeypatch, staged, low_threshold):  # noqa: F811
+    sent: list[dict] = []
+    ctx = _scan(client, monkeypatch, [_pick([APP], [TOML]), _judge, _pick([APP], [TOML]), _judge], sent)
+
+    _submit_again(client, ctx, "participant-2", TREE)
+
+    assert len(sent) == 4
+
+
+def test_a_one_call_score_has_no_fingerprint(client, db, monkeypatch, staged):  # noqa: F811
+    sent: list[dict] = []
+    _scan(client, monkeypatch, [_judge], sent)
+
+    assert ClassroomScore.objects.get().input_fingerprint == ""
 
 
 def test_below_the_threshold_is_one_call(client, db, monkeypatch, staged):  # noqa: F811
