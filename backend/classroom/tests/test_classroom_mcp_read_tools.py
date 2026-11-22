@@ -129,6 +129,12 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
     tool_class = _structured(client, token, "get_class", class_id=class_id)
     # 화면에 없는 칸은 예상 채점 비용 하나다(#591) — 화면은 따로 `scoring-cost` 로 읽는다.
     class_estimate = tool_class.pop("scoring_cost_estimate")
+    # 제출 한 건 예상은 화면 예상표의 처음 값과 같은 셈이다(#1304) — 빈 클래스에서도 값이 있다.
+    class_per_submission = tool_class.pop("per_submission_estimate")
+    class_table = _screen(client, access, f"{class_id}/scoring-calculator")
+    assert class_per_submission["single_call_krw"] == round(
+        next(r for r in class_table["rows"] if r["model_id"] == class_table["selection"]["model_id"])["single"]["krw"]
+    )
     # 채점 연결의 값 조각(키 끝 네 자리, 호환 서버 주소·인증 가림, #605)은 화면에만 있다.
     # 넣어 둔 두 벤더 키의 마스킹(#1269)도 그렇다.
     withheld = {"openai_key_masked", "scoring_server_url", "scoring_auth_masked", "openai_key", "anthropic_key"}
@@ -156,7 +162,9 @@ def test_each_read_tool_returns_what_the_screen_returns(client, db):
         # 제출 한 건 예상은 화면 계산기의 처음 값과 같은 셈이다(#1270).
         per_submission = tool_problem.pop("per_submission_estimate")
         calculator = _screen(client, access, f"{class_id}/scoring-calculator?problem_id={problem.id}")
-        assert per_submission["single_call_krw"] == round(calculator["single"]["krw"])
+        selected = next(r for r in calculator["rows"] if r["model_id"] == calculator["selection"]["model_id"])
+        assert per_submission["single_call_krw"] == round(selected["single"]["krw"])
+        assert per_submission["single_call_capacity_chars"] == selected["single"]["capacity_chars"]
         assert (per_submission["model"], per_submission["source_chars"]) == (
             calculator["selection"]["model_id"],
             calculator["selection"]["source_chars"],

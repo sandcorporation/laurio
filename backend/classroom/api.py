@@ -43,6 +43,7 @@ from core.events import Event, EventBusDisconnected, get_event_bus
 from core import privacy_policy
 from core.keyset import decode_cursor, encode_cursor
 from core.llm_scoring import LLMKeyCheckStatus
+from core.model_context import context_window_tokens
 from core.observability import tag_error_scope
 from core.quality_review import mask_hidden_quality_items
 from policies.services import get_current_policy
@@ -1484,10 +1485,25 @@ def _spread_out(spread: scoring_calculator.Spread, scale: float = 1.0) -> dict[s
     }
 
 
+def _single_cell_out(cell: scoring_calculator.SingleCall) -> dict[str, object]:
+    return {
+        "input_tokens": cell.input_tokens,
+        "output_tokens": cell.output_tokens,
+        "usd": cell.usd,
+        "krw": cell.usd * scoring_cost.KRW_PER_USD,
+        "open_ended": cell.open_ended,
+        "fits": cell.fits,
+        "capacity_chars": cell.capacity_chars,
+        "route": cell.route,
+        "seconds": cell.seconds,
+    }
+
+
 def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[str, object]:
     """화면 API 와 연결된 앱(`get_problem`)이 같은 꼴로 읽는다."""
 
     krw = scoring_cost.KRW_PER_USD
+    a = calc.assumptions
     return {
         "providers": [
             {
@@ -1498,6 +1514,7 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
                         "id": m,
                         "input_usd_per_million": scoring_cost.PRICES[m].input_usd_per_million,
                         "output_usd_per_million": scoring_cost.PRICES[m].output_usd_per_million,
+                        "context_tokens": context_window_tokens(m),
                     }
                     for m in p.models
                 ],
@@ -1526,20 +1543,59 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
             "source": calc.selection.source,
             "source_chars": calc.selection.source_chars,
         },
-        "single": {
-            "input_tokens": calc.single.input_tokens,
-            "output_tokens": calc.single.output_tokens,
-            "usd": calc.single.usd,
-            "krw": calc.single.usd * krw,
-            "open_ended": calc.single.open_ended,
-            "fits": calc.single.fits,
-            "seconds": _spread_out(calc.single.seconds),
+        "assumptions": {
+            "source_chars": a.source_chars,
+            "requirements": a.requirements,
+            "instruction_chars": a.instruction_chars,
+            "students": a.students,
+            "assignments": a.assignments,
+            "regrade_rate": a.regrade_rate,
+            "suspect_rate": a.suspect_rate,
+            "requirements_from": a.requirements_from,
+            "source_from": a.source_from,
         },
-        "agent": {
-            "available": calc.agent.available,
-            "usd": _spread_out(calc.agent.usd),
-            "krw": _spread_out(calc.agent.usd, krw),
-            "seconds": _spread_out(calc.agent.seconds),
+        "defaults": {
+            "source_chars_median": scoring_calculator.ASSUMED_SOURCE_CHARS_MEDIAN,
+            "source_chars_p90": scoring_calculator.ASSUMED_SOURCE_CHARS_P90,
+            "requirements": scoring_calculator.ASSUMED_REQUIREMENTS,
+            "students": scoring_calculator.ASSUMED_STUDENTS,
+            "assignments": scoring_calculator.ASSUMED_ASSIGNMENTS,
+            "regrade_rate": scoring_calculator.ASSUMED_REGRADE_RATE,
+            "suspect_rate": scoring_calculator.ASSUMED_SUSPECT_RATE,
+        },
+        "rows": [
+            {
+                "vendor": r.vendor,
+                "model_id": r.model_id,
+                "single": _single_cell_out(r.single),
+                "agent": {
+                    "available": r.agent.available,
+                    "usd": r.agent.usd,
+                    "krw": r.agent.usd * krw if r.agent.usd is not None else None,
+                    "seconds": r.agent.seconds,
+                    "measured_krw": _spread_out(r.agent.measured_usd, krw),
+                    "measured_seconds": _spread_out(r.agent.measured_seconds),
+                },
+            }
+            for r in calc.rows
+        ],
+        "staged": {
+            "enabled": calc.staged,
+            "threshold_chars": calc.two_step_threshold_chars,
+            "budget_chars": calc.two_step_budget_chars,
+        },
+        "agent_limits": {
+            "max_zip_bytes": calc.agent_limits.max_zip_bytes,
+            "max_extracted_bytes": calc.agent_limits.max_extracted_bytes,
+            "max_zip_entries": calc.agent_limits.max_zip_entries,
+            "attempt_seconds": calc.agent_limits.attempt_seconds,
+            "attempts": calc.agent_limits.attempts,
+            "budget_usd": calc.agent_limits.budget_usd,
+        },
+        "semester": {
+            "per_submission_krw": calc.semester.per_submission_usd * krw,
+            "submissions": calc.semester.submissions,
+            "total_krw": calc.semester.total_usd * krw,
         },
         "escalation": {
             "model_id": calc.escalation.model_id,
@@ -1555,6 +1611,7 @@ def serialize_scoring_calculator(calc: scoring_calculator.Calculation) -> dict[s
                 else None
             ),
             "suspect_rate": calc.escalation.suspect_rate,
+            "per_submission_krw": calc.escalation.per_submission_usd * krw,
         },
         "min_sample_count": scoring_cost.MIN_SAMPLE_COUNT,
         "krw_per_usd": krw,
@@ -1574,13 +1631,32 @@ def get_class_scoring_calculator(
     model: str | None = None,
     problem_id: int | None = None,
     source: str | None = None,
+    source_chars: int | None = None,
+    requirements: int | None = None,
+    students: int | None = None,
+    assignments: int | None = None,
+    regrade_rate: float | None = None,
+    suspect_rate: float | None = None,
 ):
-    """「클래스 설정 › 채점 방식」의 채점 비용 계산기(#1270). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합으로
-    채운다. 남의 클래스는 404다."""
+    """「클래스 설정 › 채점 방식」의 채점 비용 예상표(#1270·#1304). 빈 값·고를 수 없는 값은 지금 이 클래스의 조합·
+    기본 가정으로 채운다(가정을 바꿔 본 값은 저장하지 않는다). 남의 클래스는 404다."""
 
     scope = class_scope(class_id, request.auth_user.id, write=False, owner=False)
     calc = scoring_calculator.calculate(
-        scope.class_obj, vendor=vendor, method=method, model_id=model, problem_id=problem_id, source=source
+        scope.class_obj,
+        vendor=vendor,
+        method=method,
+        model_id=model,
+        problem_id=problem_id,
+        source=source,
+        overrides=scoring_calculator.Overrides(
+            source_chars=source_chars,
+            requirements=requirements,
+            students=students,
+            assignments=assignments,
+            regrade_rate=regrade_rate,
+            suspect_rate=suspect_rate,
+        ),
     )
     return 200, serialize_scoring_calculator(calc)
 

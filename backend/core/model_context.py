@@ -35,6 +35,7 @@ KNOWN_CLAUDE_CONTEXT_WINDOWS: dict[str, int] = {
     "claude-haiku-5-5": 1_000_000,
     "claude-sonnet-5-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
+    "claude-sonnet-4-6": 1_000_000,  # 같은 문서(2026-11-22 확인) — 「All models」 표에 1M, 베타·조건 표시 없음.
 }
 
 #: 표에 없는 모델을 볼 때의 컨텍스트 — 지금 공모전 기본 모델(`gpt-4o-mini`)과 같다.

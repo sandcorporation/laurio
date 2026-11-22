@@ -139,6 +139,7 @@ def _get_class(grant: ConnectedApp, arguments: dict) -> dict:
         "scoring_cost_estimate": _cost_summary(
             estimate, class_obj.default_model, class_obj.default_reasoning_effort
         ),
+        "per_submission_estimate": _per_submission(scoring_calculator.calculate(class_obj)),
     }
 
 
@@ -188,21 +189,25 @@ def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
 
 
 def _per_submission(calc: scoring_calculator.Calculation) -> dict[str, str | int | None]:
-    """화면 계산기의 처음 값(지금 이 클래스의 조합)과 같은 셈 — 제출 한 건, 원(#1270). 에이전트 값이 `None` 이면
-    「실측 없음」이다."""
+    """화면 예상표의 처음 값(지금 이 클래스의 조합)과 같은 셈 — 제출 한 건, 원(#1270·#1304). 예상은 늘 있다(에이전트를
+    못 받는 프로바이더만 null). 실측은 그 클래스·모델의 지난 에이전트 실행이 `min` 건 이상일 때만 값이 있다."""
 
     krw = scoring_cost.KRW_PER_USD
-    usd = calc.agent.usd
+    row = calc.selected
+    measured = row.agent.measured_usd
     return {
         "vendor": calc.selection.vendor,
         "method": calc.selection.method,
         "model": calc.selection.model_id,
         "source": calc.selection.source,
         "source_chars": calc.selection.source_chars,
-        "single_call_krw": round(calc.single.usd * krw),
-        "agent_krw_median": round(usd.median * krw) if usd.median is not None else None,
-        "agent_krw_p90": round(usd.p90 * krw) if usd.p90 is not None else None,
-        "agent_sample_count": usd.sample_count,
+        "single_call_krw": round(row.single.usd * krw),
+        "single_call_capacity_chars": row.single.capacity_chars,
+        "single_call_route": row.single.route,
+        "agent_krw": round(row.agent.usd * krw) if row.agent.usd is not None else None,
+        "agent_krw_median": round(measured.median * krw) if measured.median is not None else None,
+        "agent_krw_p90": round(measured.p90 * krw) if measured.p90 is not None else None,
+        "agent_sample_count": measured.sample_count,
     }
 
 
@@ -312,17 +317,23 @@ _SCORING_COST_ESTIMATE = {
 _PER_SUBMISSION_ESTIMATE = {
     "type": "object",
     "description": (
-        "제출 한 건 예상(원) — 클래스 설정 「채점 방식」 계산기의 처음 값과 같은 셈. 한 번 호출은 단가표 어림, "
-        "에이전트는 이 클래스·모델의 지난 실행 실측 중앙·p90 이고 null 이면 실측 없음"
+        "제출 한 건 예상(원) — 클래스 설정 「채점 방식」 예상표의 처음 값과 같은 셈. 예상은 단가표 × 가정(제출 크기·항목 수)이라 "
+        "빈 클래스에서도 값이 있고, 실측(agent_krw_median·p90)은 이 클래스·모델의 지난 에이전트 실행이 충분할 때만 옆에 붙는다"
     ),
     "properties": {
         "vendor": {"type": "string", "enum": ["openai", "anthropic"]},
         "method": {"type": "string", "enum": ["single", "agent"]},
         "model": {"type": "string"},
-        "source": {"type": "string", "description": "median·p90(이 문제의 실측) 또는 small·medium·large(크기 단계)"},
+        "source": {"type": "string", "description": "median·p90(이 문제의 실측 또는 가정) 또는 custom"},
         "source_chars": {"type": "integer"},
-        "single_call_krw": {"type": "integer"},
-        "agent_krw_median": {"type": ["integer", "null"]},
+        "single_call_krw": {"type": "integer", "description": "한 번 호출 예상 — 「크기 초과」 보류면 0"},
+        "single_call_capacity_chars": {
+            "type": "integer",
+            "description": "이 모델이 한 번 호출에 담는 소스 글자 수 — 넘으면 채점하지 않고 보류한다",
+        },
+        "single_call_route": {"type": "string", "enum": ["single", "two_step", "hold"]},
+        "agent_krw": {"type": ["integer", "null"], "description": "에이전트 예상 — 못 받는 프로바이더면 null"},
+        "agent_krw_median": {"type": ["integer", "null"], "description": "에이전트 실측 중앙 — 표본이 모자라면 null"},
         "agent_krw_p90": {"type": ["integer", "null"]},
         "agent_sample_count": {"type": "integer"},
     },
@@ -529,7 +540,7 @@ READ_TOOL_SPECS: list[dict] = [
             "하나, 원). 내가 강사가 아닌 클래스는 찾을 수 없다고 답한다."
         ),
         "input_schema": _CLASS_ONLY_INPUT,
-        "output_schema": _with_cost_estimate(CLASS_OUTPUT_SCHEMA),
+        "output_schema": _with_per_submission_estimate(_with_cost_estimate(CLASS_OUTPUT_SCHEMA)),
         "handler": _get_class,
     },
     {
