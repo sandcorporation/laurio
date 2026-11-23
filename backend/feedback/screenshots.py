@@ -75,5 +75,11 @@ def request_download_url(object_key: str) -> PresignedDownload:
     )
 
 
+def read(object_key: str) -> bytes | None:
+    """운영 명령(`feedback_report screenshot`)이 그림 바이트를 직접 읽는다 — 서명 주소를 만들지 않는다(#1347)."""
+
+    return get_storage_adapter().read_object(object_key, bucket=Bucket.PRIVATE)
+
+
 def delete(object_key: str) -> None:
     get_storage_adapter().delete_object(object_key, bucket=Bucket.PRIVATE)

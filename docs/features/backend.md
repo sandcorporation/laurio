@@ -923,7 +923,8 @@ CALLS_PER_MINUTE`)을 넘으면 429 와 JSON-RPC 오류로 몇 초 뒤에 다시
 409). 배포됨·반려로 들어가면 종결 시각을 찍는다. 운영자 화면과 관리 명령(`manage.py feedback_report status`, 누가 =
 「대장(명령)」)이 같은 서비스 함수를 부른다. 관리 명령은 그 밖에 `show`(읽기, 스크린샷은 있는지만)·`summary`·`list`·`take`(아직
 전달 안 된 것을 집어 번호·갈래·앱·받은 시각만 JSON 으로, 집은 뒤 15분 안에 전달 표시가 없으면 다시 나온다)·
-`untake`·`mark-forwarded` 를 둔다 — 대장 전달 길(`scripts/feedback.sh`, `docs/ops/feedback-relay.md`, #1240)이 쓴다.
+`untake`·`mark-forwarded`, 그리고 `screenshot`(그림 바이트를 표준출력으로 — 서명 주소를 만들지 않는다, 제보 없음 4 ·
+스크린샷 없음 5 · 저장소에 그림 없음 6, #1347)을 둔다 — 대장 전달 길(`scripts/feedback.sh`, `docs/ops/feedback-relay.md`, #1240)이 쓴다.
 
 ## 스스로 도는 일 — 스캔 32개
 

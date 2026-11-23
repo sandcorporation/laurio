@@ -1,12 +1,15 @@
 """`manage.py feedback_report` — 대장 전달(`scripts/feedback.sh`, #1240)이 운영 backend 에서 부른다 (#1239).
 
-읽기: `show <번호>` · `summary <번호>` · `list [--limit N]`
+읽기: `show <번호>` · `summary <번호>` · `list [--limit N]` · `screenshot <번호>`
 전달: `take [--limit N]` · `untake <번호>` · `mark-forwarded <번호>`
 쓰기: `status <번호> <상태> --note "<처리 글>"` — 운영자 화면과 같은 서비스 함수, 같은 알림.
       `--note -` 면 처리 글을 표준 입력에서 읽는다(ssh 를 거치며 따옴표·한글이 깨지지 않게).
 
 `list`·`take`·`summary` 는 번호·갈래·앱·받은 시각만 JSON 한 줄씩 낸다 — 내용·그림은 전달 메일에 싣지 않는다.
 `show` 는 사람이 읽는 글이다(내용·상태·이력, 스크린샷은 있는지만).
+`screenshot` 은 그림 바이트를 표준출력에 그대로 낸다(#1347) — `feedback.sh screenshot` 이 ssh 로 받아 work 의 임시
+파일로 쓴다. 서명 주소를 만들지 않으므로 주소·키가 어디에도 찍히지 않는다. 실패는 종료 코드로 가른다:
+제보 없음 4 · 스크린샷 없음 5 · 버킷에 그림 없음(보존 기간이 지나 지워짐 등) 6.
 """
 
 from __future__ import annotations
@@ -17,8 +20,12 @@ from argparse import ArgumentParser
 
 from django.core.management.base import BaseCommand, CommandError
 
-from feedback import services
+from feedback import screenshots, services
 from feedback.models import FeedbackReport
+
+NO_REPORT = 4
+NO_SCREENSHOT = 5
+SCREENSHOT_GONE = 6
 
 
 def _summary(report: FeedbackReport) -> str:
@@ -43,7 +50,7 @@ class Command(BaseCommand):
         for name in ("list", "take"):
             p = sub.add_parser(name)
             p.add_argument("--limit", type=int, default=20)
-        for name in ("summary", "untake", "mark-forwarded"):
+        for name in ("summary", "untake", "mark-forwarded", "screenshot"):
             p = sub.add_parser(name)
             p.add_argument("report_id", type=int)
         status = sub.add_parser("status")
@@ -66,6 +73,8 @@ class Command(BaseCommand):
             if report is None:
                 raise CommandError(f"제보 #{options['report_id']} 이(가) 없습니다.")
             self.stdout.write(_summary(report))
+        elif action == "screenshot":
+            self._screenshot(int(options["report_id"]))
         elif action == "untake":
             if not services.untake_report(int(options["report_id"])):
                 raise CommandError("되돌릴 제보가 없습니다(없거나 이미 전달됨).")
@@ -105,6 +114,22 @@ class Command(BaseCommand):
                 for c in changes
             ]
         self.stdout.write("\n".join(lines))
+
+    def _screenshot(self, report_id: int) -> None:
+        report = FeedbackReport.objects.filter(pk=report_id).first()
+        if report is None:
+            raise CommandError(f"제보 #{report_id} 이(가) 없습니다.", returncode=NO_REPORT)
+        if not report.screenshot_key:
+            raise CommandError(f"제보 #{report_id} 에는 스크린샷이 없습니다.", returncode=NO_SCREENSHOT)
+        content = screenshots.read(report.screenshot_key)
+        if content is None:
+            raise CommandError(
+                f"제보 #{report_id} 의 스크린샷이 저장소에 없습니다(보존 기간이 지났을 수 있다).",
+                returncode=SCREENSHOT_GONE,
+            )
+        # 바이트는 글 출력(self.stdout)이 아니라 표준출력 그 자체로 낸다 — ssh 가 그대로 실어 나른다.
+        sys.stdout.buffer.write(content)
+        sys.stdout.buffer.flush()
 
     def _status(self, report_id: int, to_status: str, note: str) -> None:
         try:

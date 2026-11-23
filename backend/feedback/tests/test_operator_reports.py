@@ -247,3 +247,34 @@ def test_command_summary_and_note_from_stdin(monkeypatch):
     _command("status", str(report_id), "deployed", "--note", "-")
     detail = reporter.get(f"/api/feedback/reports/{report_id}").json()
     assert detail["resolution_note"] == '반영했습니다 — "따옴표" 포함'
+
+
+def test_command_screenshot_writes_raw_bytes_and_never_the_key(capsysbinary):
+    reporter = granted_reporter("fbr-shot", operator_client("fbr-op-shot"))
+    picture = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) + b"\x00\n\r\x00"
+    key = reporter.upload_screenshot(content=picture)
+    report_id = reporter.report(screenshot_key=key).json()["id"]
+    capsysbinary.readouterr()
+
+    _command("screenshot", str(report_id))
+
+    captured = capsysbinary.readouterr()
+    assert captured.out == picture
+    assert key.encode() not in captured.out + captured.err
+
+
+def test_command_screenshot_failures_have_distinct_exit_codes():
+    reporter = granted_reporter("fbr-shot-x", operator_client("fbr-op-shot-x"))
+    plain_id = reporter.report().json()["id"]
+    key = reporter.upload_screenshot()
+    gone_id = reporter.report(screenshot_key=key).json()["id"]
+    FakeStorageAdapter().delete_object(key, bucket=Bucket.PRIVATE)
+
+    codes = {}
+    for name, report_id in (("missing", plain_id + 10_000), ("none", plain_id), ("gone", gone_id)):
+        with pytest.raises(CommandError) as exc:
+            _command("screenshot", str(report_id))
+        assert key not in str(exc.value)
+        codes[name] = exc.value.returncode
+
+    assert codes == {"missing": 4, "none": 5, "gone": 6}

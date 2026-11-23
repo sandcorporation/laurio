@@ -12,6 +12,10 @@
 #   feedback.sh untake ID…       집은 기록을 지운다(다음 check 에서 다시 잡힌다)
 #   feedback.sh mark ID…         보내지 않고 전달 표시만 한다(처음 켤 때 지난 제보를 거르는 용도)
 #   feedback.sh show ID          제보 하나를 읽는다(내용·상태·이력, 스크린샷은 있는지만)
+#   feedback.sh screenshot ID    스크린샷을 이 컴퓨터의 임시 폴더(저장소 밖, 700)에 파일(600)로 받고 경로만 찍는다(#1347).
+#                                제보 없음 4 · 스크린샷 없음 5 · 저장소에 그림 없음 6 · 운영에 못 닿음 2.
+#                                받은 지 24시간 지난 파일은 다음 screenshot 때 지워진다.
+#   feedback.sh screenshot-rm [ID…]  받은 그림을 지운다(번호를 주지 않으면 전부). 일이 끝나면 부른다.
 #   feedback.sh status ID received|in_progress|deployed|declined "처리 글"
 #                                상태를 바꾼다 — 운영자 화면과 같은 길이라 제보자에게 앱 안 알림이 간다.
 #
@@ -26,6 +30,10 @@ RELAY_TO="${CODEMIT_FEEDBACK_RELAY_TO:-sandcorp/boss}"
 RELAY_PROFILE="${CODEMIT_FEEDBACK_RELAY_PROFILE:-codemit-coordinator}"
 RELAY_TASK="${CODEMIT_FEEDBACK_RELAY_TASK:-codemit-feedback}"
 SWITCHBOARD="${CODEMIT_SWITCHBOARD:-$HOME/.local/bin/switchboard}"
+# 스크린샷을 받는 곳 — 저장소 밖, 이 사용자만(#1347). 그림에는 학생 정보가 찍힐 수 있다.
+_tmp="${TMPDIR:-/tmp}"
+SHOT_DIR="${CODEMIT_FEEDBACK_SHOT_DIR:-${_tmp%/}/codemit-feedback-shots-$(id -u)}"
+SHOT_TTL_MIN="${CODEMIT_FEEDBACK_SHOT_TTL_MIN:-1440}"
 
 # remote 인자… — 운영 backend 에서 `manage.py feedback_report 인자…`. 인자는 숫자·상태 이름·`-` 만 온다(아래에서 거른다).
 # 실패하면 진짜 종료 코드와 한 줄 까닭(`원격 실패 rc=…`)을 표준오류에 남기고 그 코드를 돌려준다(#1280). 다시 시도하지 않는다.
@@ -41,6 +49,9 @@ remote_reason() {
   case "$1" in
     255) echo "ssh 가 운영에 닿지 못했다" ;;
     3) echo "backend 컨테이너가 없다(배포 중 컨테이너 교체로 보인다)" ;;
+    4) echo "그런 제보가 없다" ;;
+    5) echo "그 제보에는 스크린샷이 없다" ;;
+    6) echo "스크린샷이 저장소에 없다(보존 기간이 지났을 수 있다)" ;;
     129|130|131|137|143) echo "시그널($(($1 - 128)))로 종료됐다(배포 중 컨테이너 교체로 보인다)" ;;
     *) echo "운영 명령이 실패했다" ;;
   esac
@@ -49,6 +60,24 @@ remote_reason() {
 need_ids() {
   [ "$#" -gt 0 ] || { echo "제보 번호가 필요하다" >&2; exit 2; }
   for id in "$@"; do [[ "$id" =~ ^[0-9]+$ ]] || { echo "제보 번호는 숫자다: $id" >&2; exit 2; }; done
+}
+
+# 받는 폴더를 이 사용자 것(700)으로 세우고 묵은 그림을 지운다. 남의 것이거나 링크면 쓰지 않는다.
+shot_dir() {
+  if [ -L "$SHOT_DIR" ]; then echo "스크린샷 폴더가 링크다 — 쓰지 않는다: $SHOT_DIR" >&2; exit 2; fi
+  mkdir -p -m 700 "$SHOT_DIR"
+  [ -O "$SHOT_DIR" ] || { echo "스크린샷 폴더가 내 것이 아니다: $SHOT_DIR" >&2; exit 2; }
+  chmod 700 "$SHOT_DIR"
+  find "$SHOT_DIR" -maxdepth 1 -type f -name 'report-*' -mmin "+$SHOT_TTL_MIN" -delete
+}
+
+# 그림의 앞 바이트로 확장자를 고른다(서버가 올릴 때 png·jpeg·webp 만 받는다).
+shot_ext() {
+  python3 -c '
+import sys
+h = open(sys.argv[1], "rb").read(12)
+print("png" if h.startswith(b"\x89PNG") else "jpg" if h.startswith(b"\xff\xd8\xff")
+      else "webp" if h[:4] == b"RIFF" and h[8:12] == b"WEBP" else "bin")' "$1"
 }
 
 kind_label() { case "$1" in suggestion) echo 건의 ;; bug) echo 버그 ;; *) echo "$1" ;; esac; }
@@ -104,6 +133,35 @@ scripts/feedback.sh show $id"
     need_ids "${2:-}"
     remote show "$2"
     ;;
+  screenshot)
+    id="${2:-}"
+    need_ids "$id"
+    umask 077
+    shot_dir
+    part="$SHOT_DIR/.report-$id.part"
+    rc=0
+    # 바이트를 셸 변수로 받지 않는다(NUL 이 잘린다) — 곧장 파일로.
+    remote screenshot "$id" > "$part" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      rm -f "$part"
+      case "$rc" in 4|5|6) exit "$rc" ;; *) exit 2 ;; esac
+    fi
+    dest="$SHOT_DIR/report-$id.$(shot_ext "$part")"
+    rm -f "$SHOT_DIR/report-$id".*
+    mv "$part" "$dest"
+    chmod 600 "$dest"
+    printf '%s\n' "$dest"
+    ;;
+  screenshot-rm)
+    shift
+    [ "$#" -eq 0 ] || need_ids "$@"
+    [ -d "$SHOT_DIR" ] || exit 0
+    if [ "$#" -eq 0 ]; then
+      find "$SHOT_DIR" -maxdepth 1 -type f \( -name 'report-*' -o -name '.report-*' \) -delete
+    else
+      for id in "$@"; do rm -f "$SHOT_DIR/report-$id".* "$SHOT_DIR/.report-$id.part"; done
+    fi
+    ;;
   status)
     id="${2:-}"; to="${3:-}"; note="${4:-}"
     need_ids "$id"
@@ -113,7 +171,7 @@ scripts/feedback.sh show $id"
     printf '%s' "$note" | remote status "$id" "$to" --note -
     ;;
   *)
-    sed -n '2,17p' "$0" >&2
+    sed -n '2,21p' "$0" >&2
     exit 2
     ;;
 esac
