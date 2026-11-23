@@ -2,7 +2,8 @@
 
 운영에 들어온 건의·버그 제보(`feedback` 앱, #1238·#1239)를 work 의 Orca 자동화가 대장 메일함(switchboard
 `sandcorp/boss`)으로 넘긴다(#1240). 메일에는 **번호·갈래·앱·받은 시각만** 싣는다 — 내용·스크린샷은 싣지 않고,
-읽을 사람이 `scripts/feedback.sh show <번호>` 로 운영에서 직접 읽는다. 처리(이슈·작업자·상태 바꾸기)는 대장이
+읽을 사람이 `scripts/feedback.sh show <번호>` 로 운영에서 직접 읽는다. 스크린샷은 `scripts/feedback.sh screenshot <번호>`
+로 work 의 임시 파일에 받아 연다(아래 「스크린샷」). 처리(이슈·작업자·상태 바꾸기)는 대장이
 codemit 조율자에게 지시한다. daypage 건의함(`~/workspace/daypage/scripts/suggestions.sh`)과 같은 꼴이다.
 
 ## 구성
@@ -51,11 +52,34 @@ Orca 는 precheck 가 0 이 아니면 무엇이든 `skipped_precheck` 로 넘기
 
 제목은 `[제보] codemit #<번호> <건의|버그> · <공모전|강의실>`, 본문 둘째 줄은 `scripts/feedback.sh show <번호>`.
 
+## 스크린샷 (#1347)
+
+`scripts/feedback.sh screenshot <번호>` 가 운영 backend 의 `manage.py feedback_report screenshot <번호>` 를 ssh 로 불러
+그림 바이트를 표준출력으로 받고, 이 컴퓨터의 임시 폴더에 파일로 쓴 뒤 **경로 한 줄만** 찍는다.
+
+- **받는 길**: 바이트를 ssh 로 받는다. 서명 주소(`request_download_url`)를 만들지 않는다 — 주소가 출력·로그에 남을 일이
+  없고, work 가 저장소 끝점에 닿을 필요도 없이 이미 쓰는 ssh 한 길로 끝난다. 운영에서는 읽기만 한다.
+- **어디**: `${TMPDIR:-/tmp}/codemit-feedback-shots-<uid>/report-<번호>.<png|jpg|webp>` — 저장소 밖, 폴더 700·파일 600.
+  폴더가 링크이거나 남의 것이면 쓰지 않는다. 바꿔 끼우기는 `CODEMIT_FEEDBACK_SHOT_DIR`.
+- **지우기**: 일이 끝나면 `scripts/feedback.sh screenshot-rm <번호>`(번호 없이 부르면 전부). 잊어도 받은 지 24시간
+  (`CODEMIT_FEEDBACK_SHOT_TTL_MIN`, 분)이 지난 파일은 다음 `screenshot` 이 지운다.
+- **실패**: 제보 없음 4 · 스크린샷 없음 5 · 저장소에 그림 없음(보존 기간이 지나 지워짐 등) 6 · 운영에 못 닿음 2. 표준오류에
+  `원격 실패 rc=…: <까닭>` 한 줄이 남고 파일은 남지 않는다.
+
+**다루는 법**
+
+- 그림은 저장소·이슈·PR·메일·보고에 올리지 않는다. 일이 끝나면 지운다.
+- 스크린샷에는 학생 이름·제출 화면이 찍힐 수 있다. 본 것을 글로 옮길 때도 학생·강사·클래스 이름은 적지 않는다.
+- 시험에는 진짜 운영 그림을 쓰지 않는다. 만든 가짜 바이트를 쓴다(`scripts/test_feedback_relay.py`·
+  `backend/feedback/tests/test_operator_reports.py`).
+
 ## 손보기
 
 ```
 scripts/feedback.sh list                         # 넘길 제보 보기(기록 안 바꿈)
 scripts/feedback.sh show 12                      # 내용·상태·이력(스크린샷은 있는지만)
+scripts/feedback.sh screenshot 12                # 그림을 임시 파일로 받고 경로를 찍는다
+scripts/feedback.sh screenshot-rm 12             # 받은 그림 지우기(번호 없으면 전부)
 scripts/feedback.sh mark 3 4                     # 보내지 않고 전달 표시(처음 켤 때 지난 제보 거르기)
 scripts/feedback.sh untake 12                    # 집음을 지워 다음 실행에서 다시 보내기
 scripts/feedback.sh status 12 deployed "PR #1300 으로 고쳤습니다"   # 제보자에게 앱 안 알림이 간다

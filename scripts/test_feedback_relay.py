@@ -12,6 +12,7 @@ import os
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -62,6 +63,16 @@ elif action == "mark-forwarded":
     r["forwarded"] = True
 elif action == "show":
     print(f"제보 #{sub[1]}")
+elif action == "screenshot":
+    assert "docker exec -i " in command, command
+    r = rows.get(int(sub[1]))
+    if r is None:
+        print("CommandError: 제보가 없습니다", file=sys.stderr)
+        sys.exit(4)
+    if not r.get("shot"):
+        print("CommandError: 스크린샷이 없습니다", file=sys.stderr)
+        sys.exit(5)
+    sys.stdout.buffer.write(bytes.fromhex(r["shot"]))
 elif action == "status":
     rows[int(sub[1])]["status"] = sub[2]
     rows[int(sub[1])]["note"] = sys.stdin.read() if sub[3:] == ["--note", "-"] else ""
@@ -90,6 +101,10 @@ def _write_exec(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+# 진짜 운영 그림을 쓰지 않는다 — 만든 바이트(NUL·줄바꿈이 섞여 바이트가 그대로 오는지 본다).
+FAKE_PNG = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) + b"\x00\n"
+
+
 class FeedbackRelay(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -97,9 +112,10 @@ class FeedbackRelay(unittest.TestCase):
         self.fake = Path(tmp.name)
         _write_exec(self.fake / "ssh", FAKE_SSH)
         _write_exec(self.fake / "switchboard", FAKE_SWITCHBOARD)
+        self.shots = self.fake / "shots"
         self.reports(
             {"id": 5, "kind": "bug", "app": "contest", "received_at": "2026-11-21T10:00:00+09:00",
-             "body": "다른 학생 이름이 보이는 화면"},
+             "body": "다른 학생 이름이 보이는 화면", "shot": FAKE_PNG.hex()},
             {"id": 6, "kind": "suggestion", "app": "classroom", "received_at": "2026-11-21T10:05:00+09:00",
              "body": "건의 내용"},
         )
@@ -117,6 +133,7 @@ class FeedbackRelay(unittest.TestCase):
             "FAKE": str(self.fake),
             "CODEMIT_FEEDBACK_SSH": str(self.fake / "ssh"),
             "CODEMIT_SWITCHBOARD": str(self.fake / "switchboard"),
+            "CODEMIT_FEEDBACK_SHOT_DIR": str(self.shots),
         }
         env.pop("SWITCHBOARD_PROFILE", None)
         return subprocess.run(
@@ -217,8 +234,66 @@ class FeedbackRelay(unittest.TestCase):
         self.assertEqual(self.db()[5]["note"], note)
         self.assertNotIn("rm -rf", self.ssh_calls()[0]["command"])
 
+    # --- 스크린샷(#1347) ---------------------------------------------------------
+
+    def test_screenshot_lands_in_private_temp_file_and_prints_only_the_path(self) -> None:
+        result = self.run_script("screenshot", "5")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        path = Path(result.stdout.strip())
+        self.assertEqual(result.stdout, f"{path}\n")
+        self.assertEqual(path, self.shots / "report-5.png")
+        self.assertEqual(path.read_bytes(), FAKE_PNG)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.shots.stat().st_mode), 0o700)
+        self.assertEqual(sorted(p.name for p in self.shots.iterdir()), ["report-5.png"])
+        self.assertIn("feedback_report screenshot 5", self.ssh_calls()[0]["command"])
+        self.assertEqual(self.ssh_calls()[0]["host"], "oracle")
+
+    def test_screenshot_failures_exit_nonzero_with_one_reason_and_leave_no_file(self) -> None:
+        for report_id, code, reason in (("6", 5, "스크린샷이 없다"), ("99", 4, "그런 제보가 없다")):
+            with self.subTest(report_id=report_id):
+                result = self.run_script("screenshot", report_id)
+                self.assertEqual(result.returncode, code)
+                self.assertIn(reason, result.stderr)
+                self.assertEqual(result.stdout, "")
+        (self.fake / "ssh-down").touch()
+        result = self.run_script("screenshot", "5")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("운영에 닿지 못했다", result.stderr)
+        self.assertEqual(list(self.shots.iterdir()), [])
+
+    def test_screenshot_rm_and_old_files_expire(self) -> None:
+        self.reports(
+            {"id": 5, "kind": "bug", "app": "contest", "received_at": "t", "shot": FAKE_PNG.hex()},
+            {"id": 7, "kind": "bug", "app": "contest", "received_at": "t", "shot": FAKE_PNG.hex()},
+        )
+        first = Path(self.run_script("screenshot", "5").stdout.strip())
+        old = time.time() - 25 * 3600
+        os.utime(first, (old, old))
+        second = Path(self.run_script("screenshot", "7").stdout.strip())
+        self.assertFalse(first.exists())  # 24시간 지난 그림은 다음 screenshot 이 지운다
+        self.assertTrue(second.exists())
+
+        self.assertEqual(self.run_script("screenshot-rm", "7").returncode, 0)
+        self.assertFalse(second.exists())
+        self.run_script("screenshot", "5")
+        self.run_script("screenshot", "7")
+        self.assertEqual(self.run_script("screenshot-rm").returncode, 0)
+        self.assertEqual(list(self.shots.iterdir()), [])
+
+    def test_screenshot_refuses_a_linked_folder(self) -> None:
+        target = self.fake / "elsewhere"
+        target.mkdir()
+        self.shots.symlink_to(target)
+        result = self.run_script("screenshot", "5")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(self.ssh_calls(), [])
+
     def test_bad_input_never_reaches_production(self) -> None:
-        for args in (("forward", "5; reboot"), ("status", "5", "done"), ("show",), ("untake", "x"), ("take", "1;x")):
+        for args in (("forward", "5; reboot"), ("status", "5", "done"), ("show",), ("untake", "x"), ("take", "1;x"),
+                     ("screenshot",), ("screenshot", "5 ../x"), ("screenshot-rm", "*")):
             with self.subTest(args=args):
                 self.assertEqual(self.run_script(*args).returncode, 2)
         self.assertEqual(self.ssh_calls(), [])
