@@ -102,7 +102,7 @@ def test_an_unreachable_proxy_pauses_the_class_like_an_unreachable_grader(
     [event] = captured
     assert event["fingerprint"] == ["agent-grader-unavailable", "proxy_unreachable"]
     assert "submission_id" not in event["tags"]
-    assert _metric_count(start) == 1
+    assert _metric_count() == 1
     assert any(r.levelname == "WARNING" and "proxy_unreachable" in r.getMessage() for r in caplog.records)
 
 
@@ -138,4 +138,4 @@ def test_the_quality_check_reports_an_unreachable_proxy_but_does_not_pause(clien
     assert PAUSED not in _types(client, instructor)
     [event] = captured
     assert event["fingerprint"] == ["agent-grader-unavailable", "proxy_unreachable"]
-    assert _metric_count(start) == 1
+    assert _metric_count() == 1
