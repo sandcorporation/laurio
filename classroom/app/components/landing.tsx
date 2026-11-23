@@ -10,7 +10,7 @@
 // Decisions — 강사가 직접 내는 비용이라 랜딩에서 미리 겁줄 이유가 없다).
 import Link from "next/link";
 
-import { Badge, Card, PageShell, buttonClass } from "@/app/components/ui";
+import { Card, PageShell, buttonClass } from "@/app/components/ui";
 
 import { LANDING_DESCRIPTION, LANDING_TITLE } from "@/lib/landing-copy";
 
@@ -44,7 +44,6 @@ export function Landing() {
     <PageShell>
       <div className="flex flex-col gap-12 py-6">
         <section className="flex flex-col gap-5">
-          <Badge>클래스</Badge>
           <h1
             data-testid="classroom-landing-heading"
             className="max-w-[640px] text-[28px] font-semibold leading-tight tracking-[-0.01em] sm:text-[34px]"
