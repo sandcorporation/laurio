@@ -327,9 +327,19 @@ class ClassroomCallResult:
 
 
 class ClassroomExperimentCall(Protocol):
-    """`item` 을 `model` 로 한 번 채점한다. `api_key` 가 None 이면 흉내 어댑터, 아니면 그 키로 실제 벤더에 나간다."""
+    """`item` 을 `model` 로 한 번 채점한다. `api_key` 가 None 이면 흉내 어댑터, 아니면 그 키로 실제 벤더에 나간다.
+    `reasoning_effort` 는 줄에 붙인 강도(#1350) — None 이면 사본에 실린 그 문제의 강도(운영 채점과 같다).
+    `timeout` 은 벤더 요청 한도(초) — None 이면 강의실 운영 한도."""
 
-    def __call__(self, item: Item, *, model: str, api_key: str | None) -> ClassroomCallResult: ...
+    def __call__(
+        self,
+        item: Item,
+        *,
+        model: str,
+        api_key: str | None,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
+    ) -> ClassroomCallResult: ...
 
 
 CLASSROOM_EXPERIMENT_CALL: Slot[ClassroomExperimentCall] = Slot("강의실 채점 한 번 호출(실험)", "classroom.apps")

@@ -152,7 +152,14 @@ def collect(submission_ids: Sequence[int], *, name: str) -> tuple[list[Item], di
     return items, skipped
 
 
-def experiment_call(item: Item, *, model: str, api_key: str | None) -> ClassroomCallResult:
+def experiment_call(
+    item: Item,
+    *,
+    model: str,
+    api_key: str | None,
+    reasoning_effort: str | None = None,
+    timeout: float | None = None,
+) -> ClassroomCallResult:
     """강의실 운영 채점(`prepare_tail` → `call_vendor_sync`)의 한 번 호출 갈래를 사본 위에서 그대로 — 프롬프트·소스 예산·
     문법 검사 항목·어댑터가 같다. 키만 강사 키가 아니라 실험 키다(`api_key`, None 이면 흉내 어댑터)."""
 
@@ -182,13 +189,20 @@ def experiment_call(item: Item, *, model: str, api_key: str | None) -> Classroom
         requirements = [*requirements, synthetic]
     anthropic = model.startswith("claude-")
     connection = (anthropic_key_connection if anthropic else openai_key_connection)(api_key or "")
-    reasoning_effort = (
-        item.problem.reasoning_effort
+    # 줄에 붙인 강도(#1350)가 사본의 문제 강도를 이긴다 — 실험이 같은 사본을 강도만 바꿔 다시 잰다.
+    effort = (
+        (reasoning_effort or item.problem.reasoning_effort)
         if connection.sends_reasoning_effort(model, marked_reasoning=item.problem.marked_reasoning)
         else None
     )
     mode = "fake" if api_key is None else (ANTHROPIC_SCORING_ADAPTER if anthropic else OPENAI_SCORING_ADAPTER)
-    adapter = _scoring_adapter(connection=connection, model=model, reasoning_effort=reasoning_effort, mode=mode)
+    adapter = _scoring_adapter(
+        connection=connection,
+        model=model,
+        reasoning_effort=effort,
+        mode=mode,
+        **({} if timeout is None else {"timeout": timeout}),
+    )
     output = adapter.score(
         ScoringInput(
             submission_id=item.key,
