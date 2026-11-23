@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
@@ -136,9 +137,9 @@ def _attempts(client, ctx) -> list[dict]:
     return mine(client, ctx["participant"]["access"], ctx["class_id"], ctx["problem"].id)["submissions"]
 
 
-def _metric_count(moment) -> int:
-    now = moment.timestamp()
-    return alerts.gather(now).results(15)["grader_unreachable"]
+def _metric_count() -> int:
+    # 기록기는 벽시계 분에 센다(`at=None`) — 시작 시각으로 읽으면 시험 중 분이 넘어갈 때 0 이 된다(#1354 PR 2 CI).
+    return alerts.gather(time.time()).results(15)["grader_unreachable"]
 
 
 # --- 멈춘다 ----------------------------------------------------------------------------------
@@ -182,7 +183,7 @@ def test_an_unreachable_grader_pauses_the_class_without_a_failed_attempt(client,
     }[str(error)]
     assert "submission_id" not in event["tags"]
     assert "classroom_scoring" not in event["contexts"]
-    assert _metric_count(start) == 1
+    assert _metric_count() == 1
 
 
 def test_failures_never_turn_into_an_automatic_fail_and_the_owner_is_told_once(client, start, monkeypatch, captured):
@@ -362,5 +363,5 @@ def test_the_quality_check_reports_an_unreachable_grader_but_does_not_pause_or_n
     assert event["fingerprint"] == ["agent-grader-unavailable", "unreachable"]
     assert "submission_id" not in event["tags"]
     assert "classroom_quality" not in event["contexts"]
-    assert _metric_count(start) == 1
+    assert _metric_count() == 1
     assert any(r.levelname == "WARNING" and "완성도 검사" in r.getMessage() for r in caplog.records)
