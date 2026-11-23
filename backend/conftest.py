@@ -415,8 +415,10 @@ def _reset_default_cache():
     결과가 연결 단위로 캐시돼(#601, #602) 같은 서버 주소를 쓰는 시험끼리 결과가 샜다(#603)."""
 
     caches["default"].clear()
+    caches["scoring_models"].clear()
     yield
     caches["default"].clear()
+    caches["scoring_models"].clear()
 
 
 @pytest.fixture(autouse=True)

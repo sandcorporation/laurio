@@ -405,6 +405,20 @@ CACHES = {
             "KEY_PREFIX": "rate",
         }
     ),
+    # 강의실 채점 모델 목록(#1051, #1357) — 웹 워커와 celery 가 한 목록을 나눠야 첫 요청의 벤더
+    # 왕복이 워커·배포마다 되풀이되지 않고 뒤 재조회가 웹에 닿는다. default 는 바꾸지 않는다.
+    "scoring_models": (
+        {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": f"codemit-scoring-models-{_CHECKOUT_TOKEN}",
+        }
+        if _RUNNING_TESTS
+        else {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": SESSION_REDIS_URL,
+            "KEY_PREFIX": "scoring-models",
+        }
+    ),
 }
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
