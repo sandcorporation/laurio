@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import TypedDict
 
 from django.conf import settings
-from django.core.cache import cache
+from django.core.cache import caches
 
 from core.adapters import is_fake_adapter_binding
 from core.llm_scoring import list_openai_models
@@ -110,6 +110,43 @@ def _unfiltered_choices(model_ids: list[str]) -> tuple[ScoringModelChoice, ...]:
     )
 
 
+def _cache():
+    """모델 목록 전용 캐시 별칭 — 배포에서는 웹 워커·celery 가 나누는 Redis 다(#1357).
+    default(LocMem)는 프로세스마다 따로라 워커마다 벤더 왕복을 치르고, celery 의 재조회가 웹에 닿지 않았다."""
+
+    return caches["scoring_models"]
+
+
+def _cache_set(key: str, value: _CachedModelIds) -> None:
+    try:
+        _cache().set(key, value, timeout=_STALE_SECONDS)
+    except Exception:  # noqa: BLE001 — Redis 가 죽어도 요청은 벤더 조회로 간다
+        logger.warning("scoring model cache write failed", exc_info=True)
+
+
+def _cache_get(key: str) -> object:
+    try:
+        return _cache().get(key)
+    except Exception:  # noqa: BLE001 — 읽지 못하면 없는 것으로 본다
+        logger.warning("scoring model cache read failed", exc_info=True)
+        return None
+
+
+def _lock_acquire(key: str) -> bool:
+    try:
+        return bool(_cache().add(key, 1, timeout=_REFRESH_LOCK_SECONDS))
+    except Exception:  # noqa: BLE001 — 잠금을 못 잡으면 재조회를 넣지 않는다(묵은 목록으로 계속 간다)
+        logger.warning("scoring model refresh lock failed", exc_info=True)
+        return False
+
+
+def _lock_release(key: str) -> None:
+    try:
+        _cache().delete(key)
+    except Exception:  # noqa: BLE001 — 잠금은 시간이 지나 풀린다
+        logger.warning("scoring model refresh unlock failed", exc_info=True)
+
+
 def remember_model_ids(connection: ScoringConnection, model_ids: list[str] | None) -> None:
     """저장할 때 이미 받은 목록을 캐시에 둔다 — 화면이 곧바로 같은 서버에 다시 묻지 않게."""
 
@@ -119,11 +156,11 @@ def remember_model_ids(connection: ScoringConnection, model_ids: list[str] | Non
 
 def _store(connection: ScoringConnection, model_ids: list[str]) -> None:
     entry: _CachedModelIds = {"ids": list(model_ids), "fetched_at": _now()}
-    cache.set(_CACHE_KEY_PREFIX + connection.cache_identity, entry, timeout=_STALE_SECONDS)
+    _cache_set(_CACHE_KEY_PREFIX + connection.cache_identity, entry)
 
 
 def _cached(connection: ScoringConnection) -> _CachedModelIds | None:
-    entry = cache.get(_CACHE_KEY_PREFIX + connection.cache_identity)
+    entry = _cache_get(_CACHE_KEY_PREFIX + connection.cache_identity)
     # 예전 모양(목록만)은 조회 시각을 몰라 없는 것으로 본다.
     if not isinstance(entry, dict) or not isinstance(entry.get("ids"), list):
         return None
@@ -188,7 +225,7 @@ def _enqueue_refresh(class_obj: Class, connection: ScoringConnection) -> None:
 
     from .tasks import refresh_scoring_models
 
-    if not cache.add(_REFRESH_LOCK_PREFIX + connection.cache_identity, 1, timeout=_REFRESH_LOCK_SECONDS):
+    if not _lock_acquire(_REFRESH_LOCK_PREFIX + connection.cache_identity):
         return
     try:
         refresh_scoring_models.delay(class_obj.pk)
@@ -213,7 +250,7 @@ def refresh_cached_models(class_id: int) -> None:
         logger.warning("scoring model refresh failed", exc_info=True)
     finally:
         if connection is not None:
-            cache.delete(_REFRESH_LOCK_PREFIX + connection.cache_identity)
+            _lock_release(_REFRESH_LOCK_PREFIX + connection.cache_identity)
 
 
 def cached_scoring_model_catalog(class_obj: Class) -> ScoringModelCatalog:
