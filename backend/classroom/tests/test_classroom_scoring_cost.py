@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 import requests
-from django.core.cache import cache
+from django.core.cache import caches
 
 from classroom import scoring_cost, scoring_model_catalog
 from classroom.tasks import refresh_scoring_models
@@ -382,7 +382,7 @@ def _vendor_that_would_hang(monkeypatch) -> list:
 def test_a_cold_cache_estimate_answers_from_the_fallback_list_without_asking_the_vendor(client, db, monkeypatch):
     with force_real_scoring_adapter():
         instructor, class_id = _real_key_class(client, monkeypatch)
-        cache.clear()
+        caches["scoring_models"].clear()
         calls = _vendor_that_would_hang(monkeypatch)
 
         estimate = _estimate(client, instructor["access"], class_id)
@@ -437,3 +437,63 @@ def test_a_list_the_picker_saw_hours_ago_still_shapes_the_estimate_and_the_picke
 
     assert [m["id"] for m in again["models"]] == ["gpt-4o-mini"]
     assert queued == [class_id, class_id]
+
+
+# --- 프로세스끼리 나누는 캐시(#1357) -------------------------------------------------
+#
+# default 캐시는 프로세스마다 따로(LocMem)라 워커마다 벤더 왕복을 치르고, celery 의 재조회가 웹
+# 응답이 읽는 캐시에 닿지 않았다. 목록은 `scoring_models` 별칭(운영은 Redis)에 둔다.
+
+
+def test_the_model_list_lives_in_the_shared_alias_and_survives_a_process_local_default_cache(
+    client, db, monkeypatch
+):
+    with force_real_scoring_adapter():
+        instructor, class_id = _real_key_class(client, monkeypatch)
+        client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"]))
+        # 다른 프로세스는 이 프로세스의 default 를 볼 수 없다 — default 를 비워도 목록은 남는다.
+        caches["default"].clear()
+        calls = _vendor_that_would_hang(monkeypatch)
+
+        picker = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"]))
+
+    assert picker.status_code == 200
+    assert calls == []
+    assert "gpt-5.5" in [m["id"] for m in picker.json()["models"]]
+
+
+def test_a_refresh_in_the_worker_process_lands_in_the_cache_the_web_response_reads(client, db, monkeypatch):
+    with force_real_scoring_adapter():
+        instructor, class_id = _real_key_class(client, monkeypatch)
+        caches["scoring_models"].clear()
+        track_models_endpoint_calls(monkeypatch, model_ids=["gpt-4o-mini"])
+
+        refresh_scoring_models(class_id)  # celery 프로세스
+        # 웹 프로세스는 default 를 따로 가진다 — 거기에 아무것도 없어도 새 목록이 보인다.
+        caches["default"].clear()
+        calls = _vendor_that_would_hang(monkeypatch)
+        picker = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"]))
+
+    assert calls == []
+    assert [m["id"] for m in picker.json()["models"]] == ["gpt-4o-mini"]
+
+
+def test_a_dead_cache_falls_back_to_the_vendor_instead_of_a_500(client, db, monkeypatch):
+    class _DeadCache:
+        def __getattr__(self, name):
+            def _boom(*args, **kwargs):
+                raise ConnectionError("redis is down")
+
+            return _boom
+
+    with force_real_scoring_adapter():
+        instructor, class_id = _real_key_class(client, monkeypatch)
+        monkeypatch.setattr(scoring_model_catalog, "_cache", lambda: _DeadCache())
+        track_models_endpoint_calls(monkeypatch, model_ids=["gpt-4o-mini", "gpt-5"])
+
+        picker = client.get(f"{CLASSES_URL}/{class_id}/scoring-models", **auth_header(instructor["access"]))
+        estimate = _estimate(client, instructor["access"], class_id)
+
+    assert picker.status_code == 200
+    assert {m["id"] for m in picker.json()["models"]} == {"gpt-4o-mini", "gpt-5"}
+    assert estimate["rows"]
