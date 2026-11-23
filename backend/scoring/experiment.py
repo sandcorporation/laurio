@@ -50,6 +50,7 @@ from core.agent_scoring import (
 )
 from core.clock import Clock
 from core.models import AgentRunToken
+from core.llm_scoring_anthropic import SCORING_MAX_TOKENS
 from core.llm_scoring import (
     LLMAdapterAuthError,
     LLMScoringAdapter,
@@ -113,6 +114,20 @@ _TOKEN_ESTIMATE: dict[Method, tuple[tuple[int, int], tuple[int, int]]] = {
     "agent": ((60_000, 2_000), (600_000, 15_000)),
     "self_loop": ((40_000, 2_000), (400_000, 12_000)),
 }
+#: 줄 이름 끝의 추론 강도(`방식:모델@강도`, #1350) — 한 번 호출 Anthropic 줄(`single_call`·`classroom_call`)만 받는다.
+#: 붙이지 않은 줄은 지금 그대로다: `single_call` 은 운영 상수 `PLATFORM_SCORING_EFFORT`(low), `classroom_call` 은 사본에 실린
+#: 그 문제의 강도(운영 채점과 같다). 그래서 옛 기록의 줄 이름과 겹쳐 나란히 놓인다.
+Effort = Literal["low", "medium", "high"]
+EFFORTS: tuple[Effort, ...] = ("low", "medium", "high")
+EFFORT_METHODS: tuple[Method, ...] = ("single_call", "classroom_call")
+#: 강도를 low 보다 올린 줄의 높은 쪽 출력 토큰 — 어댑터가 요청에 거는 출력 상한(사고 토큰 포함)이라 이 위로는 청구되지
+#: 않는다. 강의실 계산기의 강도별 어림(high 15,000)은 평균이라 칸 예산으로는 작다.
+_EFFORT_HIGH_OUTPUT_TOKENS = SCORING_MAX_TOKENS
+#: 강도를 low 보다 올린 줄의 벤더 요청 한도(초). 요청이 응답을 다 만들 때까지 아무 바이트도 오지 않아(스트리밍 아님)
+#: 읽기 한도가 곧 생성 시간 한도다. 운영 한도 180초(`CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS`)는 low 의 출력 어림(4천)에
+#: 맞춘 값이고, high 는 출력 상한(3만 2천)까지 사고할 수 있어 모자란다 — 실험 길에서만 늘린다.
+EFFORT_VENDOR_TIMEOUT_SECONDS = 600
+
 #: 칸 하나의 하드 상한(USD) — 실행 토큰이 끊는 값. 에이전트는 시도 둘(최초 + 재실행)을 합쳐 이 안이다(#1259).
 #: 한 번 호출은 요청 하나라 토큰이 없다(벤더를 직접 부른다).
 CELL_BUDGET_USD: dict[Method, Decimal | None] = {
@@ -190,10 +205,23 @@ class Row:
     method: Method
     model: str
     vendor: ScoringVendor
+    #: 줄 이름에 붙인 추론 강도(#1350). None 이면 붙이지 않은 줄 — 방식의 지금 동작 그대로다.
+    effort: Effort | None = None
 
     @property
     def name(self) -> str:
-        return f"{self.method}:{self.model}"
+        suffix = f"@{self.effort}" if self.effort else ""
+        return f"{self.method}:{self.model}{suffix}"
+
+    @property
+    def raised_effort(self) -> bool:
+        """low 보다 올린 강도 — 출력 어림과 요청 한도를 키운다."""
+
+        return self.effort in ("medium", "high")
+
+    @property
+    def vendor_timeout(self) -> float:
+        return EFFORT_VENDOR_TIMEOUT_SECONDS if self.raised_effort else CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS
 
 
 def vendor_for(model: str) -> ScoringVendor:
@@ -209,20 +237,28 @@ DEFAULT_MATERIAL_ROWS = (*DEFAULT_ROWS, "classroom_call:gpt-4.1-mini")
 
 
 def parse_rows(text: str | None, *, material: bool = False) -> list[Row]:
-    """`방식:모델,…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다.
-    `classroom_call` 은 사본 재료에서만 받는다(공모전 제출에는 강의실 문제·체크리스트가 없다)."""
+    """`방식:모델[@강도],…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다.
+    `classroom_call` 은 사본 재료에서만 받는다(공모전 제출에는 강의실 문제·체크리스트가 없다).
+    강도(`@low`·`@medium`·`@high`, #1350)는 `single_call`·`classroom_call` 의 Anthropic 줄에만 붙는다."""
 
     names = [p.strip() for p in (text or ",".join(DEFAULT_MATERIAL_ROWS if material else DEFAULT_ROWS)).split(",") if p.strip()]
     rows: list[Row] = []
     for name in names:
-        method, sep, model = name.partition(":")
+        method, sep, rest = name.partition(":")
+        model, at, effort = rest.partition("@")
         if not sep or method not in METHODS or not model:
             raise ExperimentError(f"줄은 `방식:모델` 이고 방식은 {', '.join(METHODS)} 중 하나다: {name}")
+        if at and effort not in EFFORTS:
+            raise ExperimentError(f"추론 강도는 {', '.join(EFFORTS)} 중 하나다: {name}")
+        if at and (method not in EFFORT_METHODS or vendor_for(model) != "anthropic"):
+            raise ExperimentError(
+                f"추론 강도는 {', '.join(EFFORT_METHODS)} 의 Anthropic(claude-) 줄에만 붙는다: {name}"
+            )
         if method in MATERIAL_ONLY_METHODS and not material:
             raise ExperimentError(f"{method} 줄은 사본 재료(--material)에서만 돈다: {name}")
         if price_for(model) is None:
             raise ExperimentError(f"단가를 모르는 모델이라 비용을 셀 수 없다: {model}")
-        row = Row(method, model, vendor_for(model))  # type: ignore[arg-type]  # method 는 위에서 METHODS 로 좁혔다
+        row = Row(method, model, vendor_for(model), effort or None)  # type: ignore[arg-type]  # method·effort 는 위에서 좁혔다
         if row in rows:
             raise ExperimentError(f"같은 줄이 두 번 있다: {name}")
         rows.append(row)
@@ -462,6 +498,8 @@ def cost_range(row: Row, observed: Sequence[Decimal] = ()) -> tuple[Decimal, Dec
     if observed:
         return min(observed), max(observed)
     (lo_in, lo_out), (hi_in, hi_out) = _TOKEN_ESTIMATE[row.method]
+    if row.raised_effort:
+        hi_out = _EFFORT_HIGH_OUTPUT_TOKENS  # 사고 토큰은 출력으로 청구된다 — 높은 쪽은 출력 상한까지(#1350)
     low = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=lo_in, output_tokens=lo_out))
     cap = CELL_BUDGET_USD[row.method]
     if cap is None:
@@ -509,7 +547,7 @@ def bill_parts(experiment: ScoringExperiment) -> list[BillPart]:
         for t in tokens
     ]
     for run in experiment.runs.filter(_direct_rows()).order_by("created_at"):
-        model = run.row.split(":", 1)[1].split("+", 1)[0]
+        model = run.row.split(":", 1)[1].split("+", 1)[0].split("@", 1)[0]
         parts.append(
             BillPart(
                 source="direct", vendor=vendor_for(model), model=model, at=run.created_at, requests=1,
@@ -590,8 +628,8 @@ def _single_call_adapter(row: Row) -> LLMScoringAdapter:
         return AnthropicScoringAdapter(
             api_key=setting_value("ANTHROPIC_API_KEY") or "",
             model=row.model,
-            reasoning_effort=PLATFORM_SCORING_EFFORT,
-            timeout=CONTEST_SCORING_VENDOR_TIMEOUT_SECONDS,
+            reasoning_effort=row.effort or PLATFORM_SCORING_EFFORT,
+            timeout=row.vendor_timeout,
             product="contest",
         )
     from core.llm_scoring import OpenAIScoringAdapter
@@ -731,7 +769,10 @@ def _run_classroom_call(submission: Subject, row: Row, inputs: _Inputs) -> CellR
     if inputs.item is None:
         return CellResult("failed", problem="classroom_call 은 사본 재료에서만 돈다")
     key = vendor_key(row.vendor) if _REAL_VENDOR.get() else None
-    out = em.CLASSROOM_EXPERIMENT_CALL.get()(inputs.item, model=row.model, api_key=key or None)
+    out = em.CLASSROOM_EXPERIMENT_CALL.get()(
+        inputs.item, model=row.model, api_key=key or None, reasoning_effort=row.effort,
+        timeout=EFFORT_VENDOR_TIMEOUT_SECONDS if row.raised_effort else None,  # 붙이지 않은 줄은 강의실 운영 한도
+    )
     if out.status != "scored":
         return CellResult("held", problem=out.problem)
     verdicts = [RequirementVerdict(requirement_id=v.checklist_item_id, is_met=v.is_met, reasoning=v.reasoning) for v in out.verdicts]

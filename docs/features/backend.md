@@ -1318,6 +1318,9 @@ Redis 를 못 읽으면 30초, 읽혀도 60초마다 DB 를 다시 본다. 비�
   까닭별 번호를 한 줄로 찍는다(꺼낸 건수가 0 이면 파일 없이 실패). 개발 환경에서
   `compare_scoring_methods --material <파일>` 이 그 사본에서 입력을 지어(운영 DB·저장소·GitHub 를 부르지 않는다) 같은 줄을 돌리고,
   줄 방식 `classroom_call:<모델>` 이 강의실 운영 채점과 같은 프롬프트(`classroom.scoring._build_prompt`)·한 번 호출로 돈다(사본에서만).
+  `single_call`·`classroom_call` 의 Anthropic 줄은 끝에 추론 강도를 붙여 고른다(`…:claude-haiku-5-5@medium`, `low`·`medium`·`high`, #1350) —
+  붙이지 않으면 전과 같고(`single_call` 은 `low`, `classroom_call` 은 사본의 문제 강도), 그 밖의 줄에 붙이면 거절한다. `medium`·`high` 줄은 비용
+  어림의 높은 쪽이 출력 상한까지, 벤더 요청 한도가 600초다(실험 길에서만).
   기준 판정 표(`--fill-truth`)의 꼴은 `material_id,item_id,is_met,evidence,confidence,note`(앞 세 열만 있어도 받는다, #1297) — `confidence`(`high`·`medium`·`low`)만
   사본에 담고 `evidence`·`note` 글은 담지 않으며, 보고표는 기준 판정 세 열 옆에 `high` 확신 칸만 센 같은 셋(medium·low 를 함께 뺀다, #1299)을 내고(확신 표시가 없으면 「—」), 끝에 항목 id 별 불일치 칸 수 표를 더한다(기준 판정이 있는 재료만). 한 제출의 충족 칸이 모두
   비면 매기지 않은 제출로 건너뛰고, 일부만 비면 거절한다.
