@@ -126,6 +126,69 @@ def test_claude_argv_is_the_fixed_read_only_set() -> None:
     assert "--bare" not in argv
 
 
+def _flag(argv: list[str], name: str) -> str:
+    return argv[argv.index(name) + 1]
+
+
+def test_a_spec_without_a_subagent_keeps_the_production_argv() -> None:
+    # 운영 채점은 `subagent_model` 을 싣지 않는다(#1352) — 위 고정 인자 그대로여야 한다.
+    plain = ar.claude_argv(model="claude-sonnet-4-5", output_schema_json='{"type":"object"}', max_budget_usd=1)
+    none = ar.claude_argv(model="claude-sonnet-4-5", output_schema_json='{"type":"object"}', max_budget_usd=1, subagent_model=None)
+    assert plain == none
+    assert "subagent_model" not in _spec()
+    assert not any(a.startswith(("--agents", "--disallowedTools")) for a in plain) and "Agent" not in _flag(plain, "--tools")
+
+
+def test_the_subagent_row_opens_only_the_call_tool_and_a_read_only_haiku_definition() -> None:
+    argv = ar.claude_argv(
+        model="claude-sonnet-5-5", output_schema_json='{"type":"object"}', max_budget_usd=1, subagent_model="claude-haiku-5-5"
+    )
+    agents = json.loads(_flag(argv, "--agents"))
+    assert list(agents) == [ar.SUBAGENT_NAME]
+    sub = agents[ar.SUBAGENT_NAME]
+    assert sub["tools"] == ["Read", "Grep", "Glob"] and sub["model"] == "claude-haiku-5-5"
+    assert "파일 찾기·읽기" in sub["description"]
+    # 메인: 읽기 셋 + 서브에이전트를 부르는 도구만, 그것도 우리 서브에이전트 하나만 허용.
+    assert _flag(argv, "--tools") == "Read,Grep,Glob,Agent"
+    assert _flag(argv, "--allowedTools") == f"Read,Grep,Glob,Agent({ar.SUBAGENT_NAME})"
+    denied = _flag(argv, "--disallowedTools").split(",")
+    assert {f"Agent({n})" for n in ("general-purpose", "Explore", "Plan", "claude", "statusline-setup")} <= set(denied)
+    # `--safe-mode` 는 사용자 정의 에이전트까지 꺼서 이 줄에서만 뺀다 — 나머지 잠금은 그대로.
+    assert "--safe-mode" not in argv
+    assert {"--restricted", "--strict-mcp-config", "--no-session-persistence"} <= set(argv)
+    assert _flag(argv, "--setting-sources") == "" and _flag(argv, "--model") == "claude-sonnet-5-5"
+    opened = ",".join([_flag(argv, "--tools"), _flag(argv, "--allowedTools"), *sub["tools"]])
+    for tool in ("Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "mcp__"):
+        assert tool not in opened
+    assert "--mcp-config" not in argv
+
+
+def test_a_subagent_spec_reaches_the_cli_argv(tmp_path: Path, config: ar.RunnerConfig) -> None:
+    zip_path = _write_zip(tmp_path, _zip({"me-repo-1/app.py": "x = 1\n"}))
+    seen = json.loads(ar.execute_run(_spec(subagent_model="claude-haiku-5-5"), zip_path, config)["stdout"])
+    assert json.loads(_flag(seen["argv"], "--agents"))[ar.SUBAGENT_NAME]["model"] == "claude-haiku-5-5"
+    plain = json.loads(ar.execute_run(_spec(), zip_path, config)["stdout"])
+    assert "--agents" not in plain["argv"] and "--safe-mode" in plain["argv"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"subagent_model": "gpt-4.1-mini"},
+        {"subagent_model": ""},
+        {"subagent_model": 3},
+        {"vendor": "openai", "model": "gpt-5.5", "subagent_model": "claude-haiku-5-5"},
+        {"mode": "selfloop", "requirements": [{"id": 1, "text": "로그인"}], "subagent_model": "claude-haiku-5-5"},
+    ],
+)
+def test_a_subagent_model_is_only_for_anthropic_cli_runs(change: dict[str, object]) -> None:
+    raw: dict[str, object] = dict(_spec())
+    raw.update(change)
+    with pytest.raises(ar.RunRejected) as caught:
+        ar.validate_spec(raw)
+    assert caught.value.reason == "spec_bad_subagent_model"
+
+
 def test_codex_argv_is_read_only_ephemeral_and_goes_through_the_proxy() -> None:
     argv = ar.codex_argv(
         model="gpt-5.5", output_schema_path="/work/r/output-schema.json", repo_dir="/work/r/repo", proxy_base_url="http://llm-proxy:8002"

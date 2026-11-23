@@ -82,6 +82,18 @@ STDERR_TAIL_BYTES = 8 * 1024
 
 CLI_PATH = "/usr/local/bin:/usr/bin:/bin"
 CLAUDE_TOOLS = ("Read", "Grep", "Glob")
+#: 방식 비교 실험의 「메인 + 서브에이전트」 줄(#1352)만 쓴다 — 운영 채점 argv 에는 없다.
+#: 서브에이전트를 부르는 도구 이름(Claude Code 2.1.328 — init 이벤트는 옛 이름 `Task` 로 보인다).
+SUBAGENT_TOOL = "Agent"
+SUBAGENT_NAME = "file-reader"
+SUBAGENT_DESCRIPTION = "파일 찾기·읽기 담당 — 저장소에서 파일을 찾고 읽어 그 내용을 경로:줄과 함께 돌려준다."
+SUBAGENT_PROMPT = (
+    "너는 채점자의 파일 찾기·읽기 담당이다. 요청받은 것을 저장소에서 Glob·Grep 으로 찾고 Read 로 읽어, 찾은 내용을 "
+    "`경로:줄` 과 함께 그대로 돌려준다. 판정하지 않는다. 찾지 못했으면 찾아본 경로와 검색어를 적는다."
+)
+#: CLI 에 딸려 오는 내장 에이전트 — `--agents` 를 쓰려면 `--safe-mode` 를 빼야 하는데(빼지 않으면 사용자 정의 에이전트도
+#: 꺼진다), 그러면 이것들도 부를 수 있어 막는다. general-purpose 는 메인 모델·메인 도구로 돌아 비교를 흐린다.
+BUILTIN_AGENTS = ("general-purpose", "claude", "statusline-setup", "Explore", "Plan")
 CODEX_PROVIDER = "codemit"
 CODEX_TOKEN_ENV = "CODEMIT_AGENT_RUN_TOKEN"
 # 채점에 쓸 일이 없고 밖으로 나가거나 HOME 밖을 읽는 기능 — 0.170.0 의 `codex features list` 이름.
@@ -145,6 +157,8 @@ class RunSpec(TypedDict):
     requirements: NotRequired[list[selfloop.Requirement]]
     #: 없으면 `repository`(#1278 전 계약 — 벗긴다). 백엔드는 늘 싣는다.
     repo_kind: NotRequired[RepoKind]
+    #: 방식 비교 실험의 서브에이전트 모델(#1352, Anthropic `cli` 만). 없으면 지금 argv 그대로다.
+    subagent_model: NotRequired[str]
 
 
 class RunResult(TypedDict):
@@ -210,16 +224,48 @@ def probe_proxy(base_url: str) -> ProxyFailure | None:
 # ── 고정 인자 ─────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def claude_argv(*, model: str, output_schema_json: str, max_budget_usd: float) -> list[str]:
-    """Claude Code 한 번. `--bare` 는 쓰지 않는다 — init 도구가 Read 하나로 줄어 디렉터리를 못 뒤진다(#992)."""
+def subagent_definition(model: str) -> dict[str, dict[str, str | list[str]]]:
+    """`--agents` 에 넘길 서브에이전트 하나 — 읽기 도구 셋만."""
 
-    tools = ",".join(CLAUDE_TOOLS)
+    return {
+        SUBAGENT_NAME: {
+            "description": SUBAGENT_DESCRIPTION,
+            "prompt": SUBAGENT_PROMPT,
+            "tools": list(CLAUDE_TOOLS),
+            "model": model,
+        }
+    }
+
+
+def claude_argv(
+    *, model: str, output_schema_json: str, max_budget_usd: float, subagent_model: str | None = None
+) -> list[str]:
+    """Claude Code 한 번. `--bare` 는 쓰지 않는다 — init 도구가 Read 하나로 줄어 디렉터리를 못 뒤진다(#992).
+
+    `subagent_model`(실험 줄만, #1352)이 있으면 그 모델의 읽기 전용 서브에이전트 하나를 `--agents` 로 넘기고 메인에게
+    그것을 부르는 도구만 더 연다. `--safe-mode` 는 사용자 정의 에이전트까지 끄므로 이 줄에서만 뺀다 — 저장소의
+    CLAUDE.md·`.claude/` 는 `--setting-sources ""` 가 막고(가짜 벤더로 확인), 내장 에이전트는 `--disallowedTools` 로 막는다."""
+
+    base = ",".join(CLAUDE_TOOLS)
+    if subagent_model is None:
+        mode = ["--safe-mode"]
+        tools, allowed, extra = base, base, []
+    else:
+        mode = []
+        tools = f"{base},{SUBAGENT_TOOL}"
+        allowed = f"{base},{SUBAGENT_TOOL}({SUBAGENT_NAME})"
+        extra = [
+            "--agents",
+            json.dumps(subagent_definition(subagent_model), ensure_ascii=False),
+            "--disallowedTools",
+            ",".join(f"{SUBAGENT_TOOL}({name})" for name in BUILTIN_AGENTS),
+        ]
     return [
         "claude",
         "-p",
         "--model",
         model,
-        "--safe-mode",
+        *mode,
         "--restricted",
         "--strict-mcp-config",
         "--setting-sources",
@@ -227,7 +273,8 @@ def claude_argv(*, model: str, output_schema_json: str, max_budget_usd: float) -
         "--tools",
         tools,
         "--allowedTools",
-        tools,
+        allowed,
+        *extra,
         "--json-schema",
         output_schema_json,
         "--output-format",
@@ -463,6 +510,11 @@ def validate_spec(raw: object) -> RunSpec:
     if repo_kind not in REPO_KINDS:
         raise RunRejected("spec_bad_repo_kind")
     spec["repo_kind"] = repo_kind
+    sub = raw.get("subagent_model")
+    if sub is not None:
+        if not isinstance(sub, str) or not sub.startswith("claude-") or vendor != "anthropic" or mode != "cli":
+            raise RunRejected("spec_bad_subagent_model")
+        spec["subagent_model"] = sub
     return spec
 
 
@@ -518,7 +570,12 @@ def execute_run(spec: RunSpec, repo_zip: Path, config: RunnerConfig) -> RunResul
             (home / ".codex").mkdir()  # CODEX_HOME 은 있어야 한다 — 없으면 Codex 가 바로 끝난다
         schema_json = json.dumps(spec["output_schema"], ensure_ascii=False)
         if spec["vendor"] == "anthropic":
-            argv = claude_argv(model=spec["model"], output_schema_json=schema_json, max_budget_usd=spec["max_budget_usd"])
+            argv = claude_argv(
+                model=spec["model"],
+                output_schema_json=schema_json,
+                max_budget_usd=spec["max_budget_usd"],
+                subagent_model=spec.get("subagent_model"),
+            )
             version = CLAUDE_CODE_VERSION
         else:
             schema_path = run_dir / "output-schema.json"

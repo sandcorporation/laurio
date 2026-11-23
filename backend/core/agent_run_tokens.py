@@ -30,8 +30,9 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, TypedDict
 
+from django.db import transaction
 from django.db.models import F, Sum
 from django.utils import timezone
 
@@ -85,6 +86,19 @@ class Usage:
     cache_write_tokens: int = 0
 
 
+class ModelTally(TypedDict):
+    """서브에이전트가 있는 실행의 모델 하나 몫(#1352). `spent_usd` 는 Decimal 의 문자열(JSON 칸에 담는다)."""
+
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_write_tokens: int
+    spent_usd: str
+    #: 프롬프트가 긴 프롬프트 문턱(Haiku 5.5 는 10만)을 넘어 할증 단가로 센 요청 수.
+    long_context_requests: int
+
+
 @dataclass(frozen=True)
 class RunUsage:
     """실행 토큰 하나에 쌓인 합 — 채점 시도 기록에 붙인다."""
@@ -95,6 +109,8 @@ class RunUsage:
     usage: Usage
     spent_usd: Decimal
     budget_usd: Decimal
+    #: 서브에이전트가 있는 실행만 모델별 몫(#1352). 운영 채점은 None.
+    model_usage: dict[str, ModelTally] | None = None
 
 
 @dataclass(frozen=True)
@@ -141,9 +157,12 @@ def issue_run_token(
     model: str,
     budget_usd: Decimal = DEFAULT_RUN_BUDGET_USD,
     key_class_id: int | None = None,
+    sub_model: str | None = None,
 ) -> IssuedRunToken:
     """실행 하나의 토큰을 발급한다. 방침이 덮지 않는 Anthropic·단가 모르는 모델·알 수 없는 용도는 거절한다.
-    `key_class_id` 를 주면 프록시가 플랫폼 키 대신 그 클래스의 채점 연결 키를 붙인다(#1036)."""
+    `key_class_id` 를 주면 프록시가 플랫폼 키 대신 그 클래스의 채점 연결 키를 붙인다(#1036).
+    `sub_model` 은 방식 비교 실험의 Anthropic 서브에이전트 모델(#1352) — 이 토큰이 그 모델의 요청도 부를 수 있다.
+    예산은 두 모델 몫을 합친 하나다."""
 
     if purpose not in _PURPOSES:
         raise RunTokenRefused(f"알 수 없는 용도: {purpose}")
@@ -153,6 +172,11 @@ def issue_run_token(
         raise RunTokenRefused(f"단가를 모르는 모델이라 비용 상한을 걸 수 없다: {model}")
     if budget_usd <= 0:
         raise RunTokenRefused("예산은 0 보다 커야 한다")
+    if sub_model is not None:
+        if purpose != AgentRunToken.PURPOSE_EXPERIMENT or vendor != "anthropic":
+            raise RunTokenRefused("서브에이전트 모델은 방식 비교 실험의 Anthropic 실행에만 붙는다")
+        if not sub_model.startswith("claude-") or price_for(sub_model) is None:
+            raise RunTokenRefused(f"단가를 모르는 서브에이전트 모델이라 비용 상한을 걸 수 없다: {sub_model}")
     now = Clock.now()
     token = _TOKEN_PREFIX + secrets.token_urlsafe(32)
     row = AgentRunToken.objects.create(
@@ -162,6 +186,7 @@ def issue_run_token(
         vendor=vendor,
         model=model,
         key_class_id=key_class_id,
+        sub_model=sub_model or "",
         budget_usd=budget_usd,
         created_at=now,
         expires_at=now + RUN_TOKEN_TTL,
@@ -212,8 +237,9 @@ def authorize(token: str | None, *, vendor: ScoringVendor, model: str | None) ->
         return Refusal("expired", 401, "실행 토큰이 만료됐다")
     if row.vendor != vendor:
         return Refusal("wrong_vendor", 403, "이 실행 토큰은 다른 벤더 것이다")
-    if model != row.model:
-        return Refusal("wrong_model", 403, f"이 실행 토큰은 모델 {row.model} 만 부를 수 있다")
+    if model != row.model and not (row.sub_model and model == row.sub_model):
+        allowed = f"{row.model}·{row.sub_model}" if row.sub_model else row.model
+        return Refusal("wrong_model", 403, f"이 실행 토큰은 모델 {allowed} 만 부를 수 있다")
     if row.spent_usd >= row.budget_usd:
         return Refusal("run_budget", 429, f"실행 예산 ${row.budget_usd} 을 다 썼다")
     if row.purpose == AgentRunToken.PURPOSE_EXPERIMENT:
@@ -226,11 +252,19 @@ def authorize(token: str | None, *, vendor: ScoringVendor, model: str | None) ->
         limit = agent_scoring_daily_limit_usd()
         if spent_today_usd(now) >= limit:
             return Refusal("daily_limit", 429, f"오늘의 에이전트 채점 비용 상한 ${limit} 에 닿았다")
-    return Grant(record_id=row.pk, vendor=_vendor(row.vendor), model=row.model, key_class_id=row.key_class_id)
+    granted = model if row.sub_model and model == row.sub_model else row.model
+    return Grant(record_id=row.pk, vendor=_vendor(row.vendor), model=granted, key_class_id=row.key_class_id)
 
 
 def _price(price: ModelPrice, attr: str, multiplier: float) -> Decimal:
     return Decimal(str(getattr(price, attr))) * Decimal(str(multiplier)) / _PER_MILLION
+
+
+def _long_context(vendor: ScoringVendor, price: ModelPrice, usage: Usage) -> bool:
+    prompt_tokens = usage.input_tokens + (
+        usage.cache_read_tokens + usage.cache_write_tokens if vendor == "anthropic" else 0
+    )
+    return price.long_context_input_tokens is not None and prompt_tokens > price.long_context_input_tokens
 
 
 def usage_cost_usd(vendor: ScoringVendor, model: str, usage: Usage, *, long_context: bool = True) -> Decimal:
@@ -243,12 +277,7 @@ def usage_cost_usd(vendor: ScoringVendor, model: str, usage: Usage, *, long_cont
     price = price_for(model)
     if price is None:
         raise RunTokenRefused(f"단가를 모르는 모델: {model}")
-    prompt_tokens = usage.input_tokens + (
-        usage.cache_read_tokens + usage.cache_write_tokens if vendor == "anthropic" else 0
-    )
-    surcharge = (
-        long_context and price.long_context_input_tokens is not None and prompt_tokens > price.long_context_input_tokens
-    )
+    surcharge = long_context and _long_context(vendor, price, usage)
     in_mult = price.long_context_input_multiplier if surcharge else 1.0
     out_mult = price.long_context_output_multiplier if surcharge else 1.0
     unit_in = _price(price, "input_usd_per_million", in_mult)
@@ -269,13 +298,21 @@ def usage_cost_usd(vendor: ScoringVendor, model: str, usage: Usage, *, long_cont
     return cost.quantize(Decimal("0.000001"))
 
 
-def record_usage(record_id: int, usage: Usage) -> Decimal:
-    """응답 하나의 usage 와 비용을 토큰 행에 더한다. 더한 비용을 돌려준다."""
+def record_usage(record_id: int, usage: Usage, model: str | None = None) -> Decimal:
+    """응답 하나의 usage 와 비용을 토큰 행에 더한다. 더한 비용을 돌려준다.
 
-    row = AgentRunToken.objects.filter(pk=record_id).values("vendor", "model").first()
+    `model` 은 그 요청의 모델(`Grant.model`) — 서브에이전트가 있는 실행(#1352)이면 그 모델의 단가로 세고 모델별
+    장부(`model_usage`)에도 더한다. 비거나 토큰 모델과 같으면 지금처럼 토큰 모델의 단가다."""
+
+    row = AgentRunToken.objects.filter(pk=record_id).values("vendor", "model", "sub_model").first()
     if row is None:
         return Decimal(0)
-    cost = usage_cost_usd(_vendor(row["vendor"]), row["model"], usage)
+    vendor = _vendor(row["vendor"])
+    priced = model if row["sub_model"] and model == row["sub_model"] else row["model"]
+    cost = usage_cost_usd(vendor, priced, usage)
+    if row["sub_model"]:
+        price = price_for(priced)
+        _add_model_usage(record_id, priced, usage, cost, long_context=price is not None and _long_context(vendor, price, usage))
     AgentRunToken.objects.filter(pk=record_id).update(
         request_count=F("request_count") + 1,
         input_tokens=F("input_tokens") + usage.input_tokens,
@@ -285,6 +322,29 @@ def record_usage(record_id: int, usage: Usage) -> Decimal:
         spent_usd=F("spent_usd") + cost,
     )
     return cost
+
+
+def _add_model_usage(record_id: int, model: str, usage: Usage, cost: Decimal, *, long_context: bool) -> None:
+    """모델별 장부에 응답 하나를 더한다 — 서브에이전트 요청이 나란히 올 수 있어 행을 잠그고 고친다."""
+
+    with transaction.atomic():
+        token = AgentRunToken.objects.select_for_update().only("model_usage").get(pk=record_id)
+        tallies: dict[str, ModelTally] = dict(token.model_usage or {})
+        t = tallies.get(model) or ModelTally(
+            requests=0, input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0,
+            spent_usd="0", long_context_requests=0,
+        )
+        tallies[model] = ModelTally(
+            requests=t["requests"] + 1,
+            input_tokens=t["input_tokens"] + usage.input_tokens,
+            output_tokens=t["output_tokens"] + usage.output_tokens,
+            cache_read_tokens=t["cache_read_tokens"] + usage.cache_read_tokens,
+            cache_write_tokens=t["cache_write_tokens"] + usage.cache_write_tokens,
+            spent_usd=str(Decimal(t["spent_usd"]) + cost),
+            long_context_requests=t["long_context_requests"] + (1 if long_context else 0),
+        )
+        token.model_usage = tallies
+        token.save(update_fields=["model_usage"])
 
 
 def run_usage(record_id: int) -> RunUsage:
@@ -303,4 +363,5 @@ def run_usage(record_id: int) -> RunUsage:
         ),
         spent_usd=row.spent_usd,
         budget_usd=row.budget_usd,
+        model_usage=dict(row.model_usage or {}) if row.sub_model else None,
     )

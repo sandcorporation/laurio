@@ -107,6 +107,8 @@ class AgentJob:
     #: 시도 전체(최초 + 재실행)에 거는 예산 하나(방식 비교 실험의 칸 예산, #1259). 둘째 시도의 토큰 예산은 이것에서 앞
     #: 시도가 쓴 돈을 뺀 값이고, 남은 것이 없으면 재실행하지 않는다. 비면 지금처럼 시도마다 `RUN_BUDGET_USD`(운영 채점).
     total_budget_usd: Decimal | None = None
+    #: 방식 비교 실험의 서브에이전트 모델(#1352, Anthropic 만) — 메인은 `pinned_model`. 비면 지금 argv·기록 그대로다.
+    sub_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -273,6 +275,10 @@ class ParsedRun:
     output_parse_error: str = ""
     usage: dict[str, JSON] = field(default_factory=dict)
     cost_usd: float | None = None
+    #: 메인이 직접 부른 도구(서브에이전트 안의 호출은 `parent_tool_use_id` 가 차 있어 뺀다, #1352). `tool_calls` 는 둘 다.
+    main_tool_calls: dict[str, int] = field(default_factory=dict)
+    #: 마지막 result 의 `modelUsage`(모델별 누적 — CLI 가 센 값, 단가는 공개 단가표).
+    model_usage: dict[str, JSON] = field(default_factory=dict)
 
 
 def _events(stdout: str) -> Iterator[dict[str, JSON]]:
@@ -305,6 +311,8 @@ def parse_claude_stream(stdout: str) -> ParsedRun:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
                     name = str(block.get("name"))
                     parsed.tool_calls[name] = parsed.tool_calls.get(name, 0) + 1
+                    if event.get("parent_tool_use_id") is None:
+                        parsed.main_tool_calls[name] = parsed.main_tool_calls.get(name, 0) + 1
         elif kind == "result":
             result = event
     if result is None:
@@ -327,6 +335,8 @@ def parse_claude_stream(stdout: str) -> ParsedRun:
     parsed.usage = usage if isinstance(usage, dict) else {}
     cost = result.get("total_cost_usd")
     parsed.cost_usd = float(cost) if isinstance(cost, int | float) else None
+    model_usage = result.get("modelUsage")
+    parsed.model_usage = model_usage if isinstance(model_usage, dict) else {}
     parsed.structured_output = result.get("structured_output")
     return parsed
 
@@ -537,6 +547,7 @@ def _attempt(
         model=model,
         budget_usd=budget_usd,
         key_class_id=job.class_key.class_id if job.class_key is not None else None,
+        sub_model=job.sub_model,
     )
     spec = RunSpec(
         vendor=vendor,
@@ -548,6 +559,8 @@ def _attempt(
         timeout_seconds=ATTEMPT_TIMEOUT_SECONDS,
         repo_kind=snapshot.kind,
     )
+    if job.sub_model is not None:
+        spec["subagent_model"] = job.sub_model
     result = request_run(spec, snapshot.zip_bytes, timeout=ATTEMPT_HTTP_TIMEOUT_SECONDS)
     parsed = parse_claude_stream(result["stdout"]) if vendor == VENDOR_ANTHROPIC else parse_codex_stream(result["stdout"])
     problems, evidence = acceptance_problems(vendor=vendor, result=result, parsed=parsed, job=job, index=index)
@@ -585,7 +598,30 @@ def _attempt(
         # 계정 쪽 거절이면 그 본문(#1052) — `run_agent_job` 이 재실행하지 않고 미룸으로 던진다.
         "account_refusal": account_refusal(parsed.error_detail) if problems and parsed.error_detail else None,
     }
+    if job.sub_model is not None:
+        record["subagent"] = subagent_record(model, job.sub_model, parsed, usage.model_usage or {})
     return problems, record, parsed.structured_output
+
+
+#: 메인이 직접 부르는 읽기 도구(서브에이전트 줄 기록, #1352).
+_MAIN_READ_TOOLS = ("Read", "Grep", "Glob")
+#: 서브에이전트를 부르는 도구 — CLI 판에 따라 `Agent`(지금)·`Task`(옛 이름)로 찍힌다.
+_SUBAGENT_TOOLS = ("Agent", "Task")
+
+
+def subagent_record(main: str, sub: str, parsed: ParsedRun, ledger: Mapping[str, JSON]) -> dict[str, JSON]:
+    """「메인 + 서브에이전트」 시도 하나의 모델별 몫(#1352). 토큰·달러는 프록시 장부(요청마다 그 모델 단가)가 원본이고,
+    CLI 의 `modelUsage` 는 대조용으로 그대로 둔다."""
+
+    return {
+        "main_model": main,
+        "sub_model": sub,
+        "main": ledger.get(main),
+        "sub": ledger.get(sub),
+        "main_read_calls": {name: parsed.main_tool_calls.get(name, 0) for name in _MAIN_READ_TOOLS},
+        "subagent_calls": sum(parsed.main_tool_calls.get(name, 0) for name in _SUBAGENT_TOOLS),
+        "cli_model_usage": dict(parsed.model_usage),
+    }
 
 
 def _attempt_spent(attempt: JSON) -> Decimal | None:

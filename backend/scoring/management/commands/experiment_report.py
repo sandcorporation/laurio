@@ -27,6 +27,8 @@ from scoring.experiment_report import (
     limits_note,
     mismatch_lines,
     report_rows,
+    subagent_lines,
+    subagent_totals,
     to_csv,
     to_markdown,
 )
@@ -110,6 +112,11 @@ class Command(BaseCommand):
         if production:
             md += band_lines(runs, production_row=production[0], row_names=[*experiment.rows, *production[1:]])
         md += mismatch_lines(runs, row_names=[*experiment.rows, *production])
+        md += subagent_lines(
+            subagent_totals(
+                (r.row, r.record) for r in experiment.runs.filter(row__contains="+") if not is_infra_failure(r.status, r.problem)
+            )
+        )
         self.stdout.write(md, ending="")
 
 

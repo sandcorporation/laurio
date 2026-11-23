@@ -128,6 +128,12 @@ _EFFORT_HIGH_OUTPUT_TOKENS = SCORING_MAX_TOKENS
 #: 맞춘 값이고, high 는 출력 상한(3만 2천)까지 사고할 수 있어 모자란다 — 실험 길에서만 늘린다.
 EFFORT_VENDOR_TIMEOUT_SECONDS = 600
 
+#: 「메인 + 서브에이전트」 줄(`agent:메인+서브`, #1352)의 서브 몫 토큰 범위(입력, 출력) — 낮은·높은. 실측 전 대략값이다.
+#: 서브는 파일을 통째로 읽어 메인보다 입력이 크다고 본다. 높은 쪽은 칸 예산이 덮는다(두 모델이 실행 토큰 하나의 예산을 같이 쓴다).
+_SUBAGENT_TOKEN_ESTIMATE: tuple[tuple[int, int], tuple[int, int]] = ((80_000, 2_000), (800_000, 20_000))
+#: 서브에이전트를 붙일 수 있는 방식 — Claude Code 의 `--agents` 만 있다.
+SUBAGENT_METHODS: tuple[Method, ...] = ("agent",)
+
 #: 칸 하나의 하드 상한(USD) — 실행 토큰이 끊는 값. 에이전트는 시도 둘(최초 + 재실행)을 합쳐 이 안이다(#1259).
 #: 한 번 호출은 요청 하나라 토큰이 없다(벤더를 직접 부른다).
 CELL_BUDGET_USD: dict[Method, Decimal | None] = {
@@ -207,11 +213,14 @@ class Row:
     vendor: ScoringVendor
     #: 줄 이름에 붙인 추론 강도(#1350). None 이면 붙이지 않은 줄 — 방식의 지금 동작 그대로다.
     effort: Effort | None = None
+    #: 서브에이전트 모델(`agent:메인+서브`, #1352). None 이면 지금 에이전트 그대로다.
+    sub_model: str | None = None
 
     @property
     def name(self) -> str:
+        sub = f"+{self.sub_model}" if self.sub_model else ""
         suffix = f"@{self.effort}" if self.effort else ""
-        return f"{self.method}:{self.model}{suffix}"
+        return f"{self.method}:{self.model}{sub}{suffix}"
 
     @property
     def raised_effort(self) -> bool:
@@ -237,15 +246,17 @@ DEFAULT_MATERIAL_ROWS = (*DEFAULT_ROWS, "classroom_call:gpt-4.1-mini")
 
 
 def parse_rows(text: str | None, *, material: bool = False) -> list[Row]:
-    """`방식:모델[@강도],…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다.
+    """`방식:모델[+서브모델][@강도],…` → 줄 목록. 비면 기본 줄. 단가를 모르는 모델은 비용 상한을 걸 수 없어 거절한다.
     `classroom_call` 은 사본 재료에서만 받는다(공모전 제출에는 강의실 문제·체크리스트가 없다).
-    강도(`@low`·`@medium`·`@high`, #1350)는 `single_call`·`classroom_call` 의 Anthropic 줄에만 붙는다."""
+    강도(`@low`·`@medium`·`@high`, #1350)는 `single_call`·`classroom_call` 의 Anthropic 줄에만 붙는다.
+    서브에이전트(`+모델`, #1352)는 메인·서브 모두 Anthropic 인 `agent` 줄에만 붙는다."""
 
     names = [p.strip() for p in (text or ",".join(DEFAULT_MATERIAL_ROWS if material else DEFAULT_ROWS)).split(",") if p.strip()]
     rows: list[Row] = []
     for name in names:
         method, sep, rest = name.partition(":")
-        model, at, effort = rest.partition("@")
+        models_part, at, effort = rest.partition("@")
+        model, plus, sub = models_part.partition("+")
         if not sep or method not in METHODS or not model:
             raise ExperimentError(f"줄은 `방식:모델` 이고 방식은 {', '.join(METHODS)} 중 하나다: {name}")
         if at and effort not in EFFORTS:
@@ -254,11 +265,21 @@ def parse_rows(text: str | None, *, material: bool = False) -> list[Row]:
             raise ExperimentError(
                 f"추론 강도는 {', '.join(EFFORT_METHODS)} 의 Anthropic(claude-) 줄에만 붙는다: {name}"
             )
+        if plus and (
+            method not in SUBAGENT_METHODS
+            or not sub
+            or "+" in sub
+            or vendor_for(model) != "anthropic"
+            or not sub.startswith("claude-")
+        ):
+            raise ExperimentError(f"서브에이전트(`+모델`)는 {', '.join(SUBAGENT_METHODS)} 의 Anthropic(claude-) 메인·서브 줄에만 붙는다: {name}")
+        if plus and price_for(sub) is None:
+            raise ExperimentError(f"단가를 모르는 모델이라 비용을 셀 수 없다: {sub}")
         if method in MATERIAL_ONLY_METHODS and not material:
             raise ExperimentError(f"{method} 줄은 사본 재료(--material)에서만 돈다: {name}")
         if price_for(model) is None:
             raise ExperimentError(f"단가를 모르는 모델이라 비용을 셀 수 없다: {model}")
-        row = Row(method, model, vendor_for(model), effort or None)  # type: ignore[arg-type]  # method·effort 는 위에서 좁혔다
+        row = Row(method, model, vendor_for(model), effort or None, sub or None)  # type: ignore[arg-type]  # method·effort 는 위에서 좁혔다
         if row in rows:
             raise ExperimentError(f"같은 줄이 두 번 있다: {name}")
         rows.append(row)
@@ -501,6 +522,10 @@ def cost_range(row: Row, observed: Sequence[Decimal] = ()) -> tuple[Decimal, Dec
     if row.raised_effort:
         hi_out = _EFFORT_HIGH_OUTPUT_TOKENS  # 사고 토큰은 출력으로 청구된다 — 높은 쪽은 출력 상한까지(#1350)
     low = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=lo_in, output_tokens=lo_out))
+    if row.sub_model is not None:
+        # 서브 몫을 더한다(#1352). 요청 하나하나의 크기를 모르므로 긴 프롬프트 할증 없이 근사한다(`usage_cost_usd` 설명).
+        (sub_in, sub_out), _ = _SUBAGENT_TOKEN_ESTIMATE
+        low += usage_cost_usd(row.vendor, row.sub_model, Usage(input_tokens=sub_in, output_tokens=sub_out), long_context=False)
     cap = CELL_BUDGET_USD[row.method]
     if cap is None:
         high = usage_cost_usd(row.vendor, row.model, Usage(input_tokens=hi_in, output_tokens=hi_out))
@@ -538,14 +563,27 @@ def bill_parts(experiment: ScoringExperiment) -> list[BillPart]:
     tokens = AgentRunToken.objects.filter(
         purpose=AgentRunToken.PURPOSE_EXPERIMENT, submission_id__in=submissions, created_at__gte=experiment.created_at
     ).order_by("created_at")
-    parts = [
-        BillPart(
-            source="proxy", vendor=t.vendor, model=t.model, at=t.created_at, requests=t.request_count,
-            input_tokens=t.input_tokens, cache_read_tokens=t.cache_read_tokens, cache_write_tokens=t.cache_write_tokens,
-            output_tokens=t.output_tokens, usd=t.spent_usd,
+    parts: list[BillPart] = []
+    for t in tokens:
+        if t.sub_model:
+            # 「메인 + 서브에이전트」 실행(#1352)은 모델별 장부로 나눈다 — 청구가 모델마다 따로 온다.
+            parts += [
+                BillPart(
+                    source="proxy", vendor=t.vendor, model=model, at=t.created_at, requests=tally["requests"],
+                    input_tokens=tally["input_tokens"], cache_read_tokens=tally["cache_read_tokens"],
+                    cache_write_tokens=tally["cache_write_tokens"], output_tokens=tally["output_tokens"],
+                    usd=Decimal(tally["spent_usd"]),
+                )
+                for model, tally in (t.model_usage or {}).items()
+            ]
+            continue
+        parts.append(
+            BillPart(
+                source="proxy", vendor=t.vendor, model=t.model, at=t.created_at, requests=t.request_count,
+                input_tokens=t.input_tokens, cache_read_tokens=t.cache_read_tokens,
+                cache_write_tokens=t.cache_write_tokens, output_tokens=t.output_tokens, usd=t.spent_usd,
+            )
         )
-        for t in tokens
-    ]
     for run in experiment.runs.filter(_direct_rows()).order_by("created_at"):
         model = run.row.split(":", 1)[1].split("+", 1)[0].split("@", 1)[0]
         parts.append(
@@ -841,6 +879,7 @@ def _run_agent(submission: Subject, row: Row, inputs: _Inputs) -> CellResult:
         evidence_required=lambda item: item.get("met") is True,
         pinned_model=(row.vendor, row.model),
         total_budget_usd=cell_budget_usd(row),
+        sub_model=row.sub_model,
     )
     try:
         with provided_snapshot(submission.pk, inputs.snapshot):

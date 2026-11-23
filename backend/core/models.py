@@ -249,6 +249,13 @@ class AgentRunToken(models.Model):
     cache_read_tokens = models.PositiveBigIntegerField(default=0)
     cache_write_tokens = models.PositiveBigIntegerField(default=0)
     spent_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    #: 방식 비교 실험의 서브에이전트 모델(#1352) — 비면 없다(운영 채점은 늘 빈다). 차 있으면 프록시가 이 모델의 요청도
+    #: 받고, 그 요청은 이 모델의 단가로 센다.
+    sub_model = models.CharField(max_length=100, blank=True, default="", db_default="")
+    #: 서브에이전트가 있는 실행만 — 모델별 장부 `{모델: {requests, input_tokens, output_tokens, cache_read_tokens,
+    #: cache_write_tokens, spent_usd, long_context_requests}}`(#1352). 위 합계 칸은 두 모델을 더한 값이다. 그 밖의 행은 NULL
+    #: (배포 중 옛 코드의 INSERT 가 이 칸을 모른다).
+    model_usage = models.JSONField(null=True, blank=True, default=None)
 
     class Meta:
         ordering = ["-created_at", "-id"]
