@@ -478,3 +478,19 @@ jobs:
             [ "$got" = "$want" ] || { echo "$name: $got (기대 $want)"; bad=1; }
           done
           exit $bad
+      # exp/ 갈래는 실험용이라 병합하지 않는다(#1361). PR 일 때만 본다 — merge_group·workflow_call(push)에서는
+      # head_ref 가 비거나 다르다. 갈래 이름은 PR 을 낸 쪽이 정하는 값이라 run 에 바로 넣지 않고 env 로 넘긴다.
+      # 조건을 if 가 아니라 셸에 둔다 — 단계 if 는 always() 하나로 둔다(위 거짓 초록 주석).
+      - name: 실험 갈래가 아닌가
+        if: always()
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          [ "$EVENT" = pull_request ] || exit 0
+          case "$HEAD_REF" in
+            exp/*)
+              echo "::error::exp/ 갈래는 실험용이라 병합하지 않는다 — 운영에 들이기로 정해졌으면 평소 갈래에서 PR 을 다시 낸다"
+              exit 1
+              ;;
+          esac

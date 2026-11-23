@@ -311,6 +311,45 @@ class ReleaseFlowTest(unittest.TestCase):
         script = (ROOT / "scripts" / "ci" / "fail_fast.py").read_text(encoding="utf-8")
         self.assertIn("/actions/runs/{env['GITHUB_RUN_ID']}", script)
 
+    def test_result_fails_pull_requests_from_exp_branches(self) -> None:
+        """exp/ 갈래에서 온 PR 은 「결과」가 실패한다(#1361) — 실험 갈래는 병합하지 않는다.
+
+        - 갈래 이름은 PR 을 낸 쪽이 정하는 값이라 run 에 `${{ }}` 로 넣지 않고 env 로 넘긴다.
+        - merge_group·workflow_call(after-push 의 push)에서는 head_ref 가 비거나 다르다 — PR 일 때만 본다.
+        """
+        result = job_block(read(WORKFLOWS / "pr-check.yml"), "result")
+        step = re.search(r"(?ms)^      - name: 실험 갈래가 아닌가\n(.*?)(?=^      - |\Z)", result)
+        assert step, "「결과」에 실험 갈래 단계가 없다"
+        body = step.group(1)
+        self.assertRegex(body, r"(?m)^        if: always\(\)$")
+        self.assertIn("HEAD_REF: ${{ github.head_ref }}", body)
+        self.assertIn("EVENT: ${{ github.event_name }}", body)
+        script = body.split("        run: |\n", 1)[1]
+        self.assertNotIn("${{", script)
+        script = "\n".join(line[10:] for line in script.splitlines())
+        cases = [
+            ("pull_request", "exp/check-1", 1),
+            ("pull_request", "exp/", 1),
+            ("pull_request", "t1361", 0),
+            ("pull_request", "spec/exp/x", 0),
+            ("pull_request", "dependabot/pip/exp/x", 0),
+            ("merge_group", "", 0),
+            ("merge_group", "exp/x", 0),
+            ("push", "", 0),
+        ]
+        for event, ref, want in cases:
+            with self.subTest(event=event, ref=ref):
+                run = subprocess.run(
+                    ["bash", "-c", script],
+                    env={"EVENT": event, "HEAD_REF": ref, "PATH": "/usr/bin:/bin"},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(run.returncode, want, run.stdout + run.stderr)
+                if want:
+                    self.assertRegex(run.stdout, r"(?m)^::error::exp/ 갈래는 실험용이라 병합하지 않는다 — .*평소 갈래에서 PR 을 다시 낸다")
+
     def test_image_is_only_built_from_main_or_by_hand(self) -> None:
         on = re.search(r"(?ms)^on:\n(.*?)(?=^\S)", read(WORKFLOWS / "image.yml"))
         assert on
