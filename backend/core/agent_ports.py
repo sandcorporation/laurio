@@ -48,6 +48,7 @@ class RunSpec(TypedDict):
     mode: NotRequired[Literal["cli", "selfloop"]]  # #1245 — 없으면 cli
     requirements: NotRequired[list[SelfLoopRequirement]]  # selfloop 일 때만
     repo_kind: NotRequired[RepoKind]  # #1278 — 없으면 repository. 백엔드는 늘 박제본의 `kind` 를 싣는다
+    subagent_model: NotRequired[str]  # #1352 — 방식 비교 실험의 서브에이전트 모델(Anthropic cli 만). 없으면 지금 argv
 
 
 #: `scoring.agent_runner.ProxyFailure` — 실행기가 프록시에 닿지 못한 까닭(#1326).

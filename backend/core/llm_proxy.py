@@ -216,9 +216,9 @@ def _authorize_sync(token: str | None, vendor: ScoringVendor, model: str | None)
     return authorize(token, vendor=vendor, model=model)
 
 
-def _record_sync(record_id: int, usage: Usage) -> Decimal:
+def _record_sync(record_id: int, usage: Usage, model: str) -> Decimal:
     _fresh_connection()
-    return record_usage(record_id, usage)
+    return record_usage(record_id, usage, model)
 
 
 async def _authorize(token: str | None, vendor: ScoringVendor, model: str | None) -> Grant | Refusal:
@@ -311,7 +311,7 @@ async def _relay(
         if usage is None:
             logger.warning("llm-proxy: no usage in response vendor=%s run=%s status=%s", vendor, verdict.record_id, status)
             return
-        cost = await sync_to_async(_record_sync)(verdict.record_id, usage)
+        cost = await sync_to_async(_record_sync)(verdict.record_id, usage, verdict.model)
         logger.info("llm-proxy: relayed vendor=%s run=%s status=%s cost_usd=%s", vendor, verdict.record_id, status, cost)
 
     status = 0
