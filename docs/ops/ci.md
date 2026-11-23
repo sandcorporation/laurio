@@ -365,3 +365,4 @@ squash 병합한다 — 이것이 배포 가능 판정 한 번이다. 대기열�
 release 는 검사하지 않고 이미지·승격만 한다. 운영에 닿는 잡(`release.yml` 의 image·promote·notify, `image.yml` 의 build, 매시
 e2e 의 실패 이슈)은 `github.repository == 'sandcorporation/laurio'` 조건을 단다 — `scripts/test_release_flow.py` 가 이 조건과
 `merge_group` 트리거를 고정한다.
+
