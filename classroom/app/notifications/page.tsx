@@ -26,9 +26,11 @@
 // 읽음」이 서버를 다시 불러오지 않고 로컬에서 `read_at`만 바꾸는 자리
 // (`applyRead`)가 그 훅에는 없다.
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
+import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import {
   fetchMyNotifications,
@@ -48,8 +50,13 @@ import {
   type NotificationGroup,
 } from "@/lib/notifications/group";
 import { notificationHref } from "@/lib/notifications/link";
+import { mergeFirstPage } from "@/lib/notifications/merge";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
 import { useUnreadCount } from "@/lib/notifications/use-unread-count";
+
+function isNotificationChanged(event: StreamEvent): boolean {
+  return event.kind === NOTIFICATION_CHANGED;
+}
 
 type LoadState =
   | { status: "loading" }
@@ -84,6 +91,26 @@ export default function NotificationsPage() {
       cancelled = true;
     };
   }, []);
+
+  // 실시간 신호(#1346) — 첫 쪽만 다시 불러와 지금 목록에 합친다(`mergeFirstPage`).
+  // 아래 줄·다음 쪽 커서·스크롤은 그대로고, 실패해도 화면을 건드리지 않는다.
+  const refreshFirstPage = useCallback(() => {
+    fetchMyNotifications().then((result) => {
+      if (!result.ok) return;
+      setLoad((current) =>
+        current.status === "ready"
+          ? { ...current, items: mergeFirstPage(current.items, result.data.items) }
+          : current,
+      );
+    });
+  }, []);
+
+  useRealtimeRefresh({
+    matches: isNotificationChanged,
+    waiting: load.status === "ready",
+    fallbackPollMs: 30_000,
+    reload: refreshFirstPage,
+  });
 
   async function loadMore() {
     if (load.status !== "ready" || load.nextCursor === null) return;
