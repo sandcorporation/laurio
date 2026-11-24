@@ -53,7 +53,11 @@ case "$*" in
     { echo "stdin: $cfg"; echo "argv: $*"; } >> "$FAKE_ALERTS"
     echo "$TOOL alert@$(echo "$h" | cut -c1-4)" >> "$FAKE_CALLS"
     # FAKE_ALERT_FAIL: 1 이면 모두 실패, 아니면 그 문자열이 주소 줄에 든 호출만 실패
-    if [ "${FAKE_ALERT_FAIL:-}" = 1 ] || { [ -n "${FAKE_ALERT_FAIL:-}" ] && [[ "$cfg" == *"$FAKE_ALERT_FAIL"* ]]; }; then printf 000; exit 7; fi
+    case "${FAKE_ALERT_FAIL:-}" in
+      "") ;;
+      1) printf 000; exit 7 ;;
+      *) case "$cfg" in *"$FAKE_ALERT_FAIL"*) printf 000; exit 7 ;; esac ;;
+    esac
     printf 204; exit 0 ;;
   *scope=ready*) step=ready ;;
   *api/health*) step=health ;;
