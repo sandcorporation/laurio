@@ -1342,5 +1342,5 @@ SENTRY_ENABLED = configure_sentry()
 INTERNAL_SERVICE_HOSTS = ("backend", "events")
 
 #: 새 제보(#1366) 접수를 알릴 목적지 웹훅 — 비면 보내지 않고 전달 표시도 찍지 않는다(바깥 자동화가 그대로 집어 간다).
-#: 값은 배포 .env 에만 있다. 웹 프로세스만 읽는다(접수 요청이 커밋된 뒤 보낸다).
+#: 값은 배포 .env 에만 있다. celery worker 가 읽는다(접수가 커밋된 뒤 `feedback.send_feedback_notice` 가 보낸다).
 FEEDBACK_NOTICE_WEBHOOK_URL = _env("FEEDBACK_NOTICE_WEBHOOK_URL", "")

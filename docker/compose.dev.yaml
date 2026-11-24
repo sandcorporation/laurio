@@ -406,6 +406,7 @@ services:
       OPS_METRICS_REDIS_URL: redis://redis:6379/3
       # 운영 경보(#830)의 디스코드 웹훅 — 비면 보내지 않고 상태만 기록한다.
       OPS_ALERT_DISCORD_WEBHOOK_URL: ${OPS_ALERT_DISCORD_WEBHOOK_URL:-}
+      FEEDBACK_NOTICE_WEBHOOK_URL: ${FEEDBACK_NOTICE_WEBHOOK_URL:-}
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # backend 서비스는 INTERNAL_API_TOKEN 을 주지 않아 DEBUG 기본값

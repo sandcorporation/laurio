@@ -11,7 +11,6 @@ import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
@@ -20,7 +19,6 @@ from django.db.models import Q, QuerySet
 from core.clock import Clock
 from notifications.models import NotificationType
 from notifications.services import create_notification
-from ops_metrics import alerts
 
 from . import screenshots
 from .models import (
@@ -152,7 +150,7 @@ def create_report(*, reporter: AbstractBaseUser, data: NewReport) -> FeedbackRep
             received_at=now,
         )
         report_id = report.pk
-        transaction.on_commit(lambda: _send_notice(report_id))
+        transaction.on_commit(lambda: _enqueue_notice(report_id))
         return report
 
 
@@ -162,22 +160,15 @@ def notice_line(report: FeedbackReport) -> str:
     return f"📮 [Codemit] 새 제보 #{report.pk} · {report.get_kind_display()} · {report.app}"
 
 
-def _send_notice(report_id: int) -> None:
-    """접수가 커밋된 뒤 알림 목적지로 한 건 보낸다 — 보내면 전달 표시를 찍는다. 실패는 삼킨다.
+def _enqueue_notice(report_id: int) -> None:
+    """접수가 커밋된 뒤 알림 작업을 큐에 넣는다. 브로커가 죽어도 접수는 이미 끝났다 — 종류만 남기고 삼킨다."""
 
-    요청 스레드에서 짧은 소켓 한도(`OPS_ALERT_DISCORD_TIMEOUT_SECONDS`)로 보낸다.
-    """
+    from .tasks import send_feedback_notice
 
-    url = settings.FEEDBACK_NOTICE_WEBHOOK_URL
-    if not url:
-        return
     try:
-        report = FeedbackReport.objects.get(pk=report_id)
-        alerts.post_webhook(url, notice_line(report))
-        mark_forwarded(report_id)
-    except Exception as exc:  # noqa: BLE001 - 접수는 이미 커밋됐다. 못 보낸 제보는 자동화가 집는다.
-        # 주소가 예외 문장에 섞일 수 있어 종류만 남긴다.
-        logger.warning("제보 #%s 알림을 보내지 못했다: %s", report_id, type(exc).__name__)
+        send_feedback_notice.delay(report_id)
+    except Exception as exc:  # noqa: BLE001 - 못 보낸 제보는 자동화가 집는다.
+        logger.warning("제보 #%s 알림 작업을 큐에 넣지 못했다: %s", report_id, type(exc).__name__)
 
 
 # --- 상태 바꾸기 (#1239) ------------------------------------------------------
