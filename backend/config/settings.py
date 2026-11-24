@@ -1185,6 +1185,9 @@ OPS_METRICS_REQUEST_FLUSH_SECONDS = 0 if _RUNNING_TESTS else 5
 OPS_ALERT_DISCORD_WEBHOOK_URL = _env("OPS_ALERT_DISCORD_WEBHOOK_URL", "")
 #: 웹훅 한 번의 소켓 한도(초) — 검사는 1분마다 돌고 규칙이 여섯이라 최악에도 1분 안에 끝난다.
 OPS_ALERT_DISCORD_TIMEOUT_SECONDS = 5
+#: 둘째 알림 목적지(디스코드 꼴 `{"content": …}` 를 받는다) — 같은 본문을 나란히 보낸다. 비면 건너뛴다(필수 아님).
+#: 소켓 한도는 디스코드와 같은 `OPS_ALERT_DISCORD_TIMEOUT_SECONDS`.
+OPS_ALERT_NOTICE_WEBHOOK_URL = _env("OPS_ALERT_NOTICE_WEBHOOK_URL", "")
 
 # --- Handover · Escrow 해제 (#14, ADR-0003/0004/0005/0014) --------------------------
 #

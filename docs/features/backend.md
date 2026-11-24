@@ -982,7 +982,7 @@ SHA 만 clone 한다(push 해도 안 바뀐다). 짧은 커밋 SHA 도 같은 �
 **운영 경보도 beat 가 돌린다(#830).** 매분 `ops_metrics.check_alerts` 가 LLM 채점 여섯 규칙(타임아웃 비율·쿼터·
 속도 제한·인증 거부·강의실 큐 대기 p95·grader 생존 신호)을 DB 집계 행 + 아직 옮기지 않은 Redis 분으로 검사해
 `AlertState` 에 기록하고, 울리기 시작할 때와 해소될 때 한 번씩 디스코드 웹훅(`OPS_ALERT_DISCORD_WEBHOOK_URL`,
-비면 보내지 않는다)으로 보낸다. 같은 응답의 `alerts` 가 지금 울리는 목록(규칙·시작·값·기준)이다
+비면 보내지 않는다)으로 보낸다. 둘째 알림 목적지(`OPS_ALERT_NOTICE_WEBHOOK_URL`, 선택)에도 같은 본문을 알림마다 한 번 나란히 보낸다(#1364). 같은 응답의 `alerts` 가 지금 울리는 목록(규칙·시작·값·기준)이다
 (`docs/ops/operations.md` 「운영 경보」).
 **발송 실패도 같은 길로 올린다(#1123).** 스캔 `notification-dispatch-alert`(5분)가 최근 60분의 `NotificationDispatch` 를 보고 실패 이력이 5건 이상이거나, 한 알림 유형이 3건 이상인데 성공 이력이 하나도 없으면(닿은 수신자 0) 울린다 — 글에는 건수·채널·알림 유형만 있다. 문턱은 `NOTIFICATION_ALERT_WINDOW_MINUTES`·`_FAILURE_THRESHOLD`·`_ZERO_REACH_MIN` 이다.
 같은 검사가 **느린 경로**(#971)도 본다 — 경로(메서드 + URL 패턴)마다 최근 30분 중앙값을 그 경로의 앞 14일 중앙값과
