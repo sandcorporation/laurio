@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`scripts/automation-run.sh`(Orca 자동화 진입, #1252)를 고정한다.
 
-`python3 scripts/test_automation_run.py` 하나로 돈다. 진짜 git(임시 origin·체크아웃)과 가짜 switchboard 를 쓴다 —
+`python3 scripts/test_automation_run.py` 하나로 돈다. 진짜 git(임시 origin·체크아웃)과 가짜 orca 를 쓴다 —
 운영·실제 메일함에 닿지 않는다. 본 명령은 종료 코드만 흉내 내는 작은 스크립트다.
 """
 
@@ -18,16 +18,19 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "automation-run.sh"
 
-FAKE_SWITCHBOARD = r'''#!/usr/bin/env python3
+FAKE_ORCA = r'''#!/usr/bin/env python3
 import json, os, sys
 fake = os.environ["FAKE"]
-with open(os.path.join(fake, "switchboard.log"), "a") as log:
-    log.write(json.dumps({"argv": sys.argv[1:], "profile": os.environ.get("SWITCHBOARD_PROFILE")}, ensure_ascii=False) + "\n")
-if os.path.exists(os.path.join(fake, "switchboard-down")):
+a = sys.argv[1:]
+with open(os.path.join(fake, "orca.log"), "a") as log:
+    log.write(json.dumps({"argv": a, "body": open(a[a.index("--body-file") + 1]).read()}, ensure_ascii=False) + "\n")
+if os.path.exists(os.path.join(fake, "orca-down")):
     print("error: mailbox unreachable", file=sys.stderr)
     sys.exit(1)
-print("#4400 " + sys.argv[sys.argv.index("--subject") + 1])
-print("codemit/coordinator → sandcorp/boss · pending")
+if os.path.exists(os.path.join(fake, "orca-noid")):
+    print("queued")
+    sys.exit(0)
+print("sent messageId=msg_4400")
 '''
 
 # 본 명령: 종료 코드는 파일 `rc`(없으면 0). 돈 자리의 HEAD 를 `ran.log` 에 남긴다.
@@ -56,7 +59,7 @@ class AutomationRun(unittest.TestCase):
         root = Path(tmp.name)
         self.fake = root / "fake"
         self.fake.mkdir()
-        _write_exec(self.fake / "switchboard", FAKE_SWITCHBOARD)
+        _write_exec(self.fake / "orca", FAKE_ORCA)
         _write_exec(self.fake / "cmd.sh", COMMAND)
         self.origin = root / "origin.git"
         self.checkout = root / "checkout"
@@ -85,10 +88,11 @@ class AutomationRun(unittest.TestCase):
             "CODEMIT_AUTOMATION_REPO": str(self.checkout),
             "CODEMIT_AUTOMATION_STATE_DIR": str(self.state),
             "CODEMIT_AUTOMATION_REPEAT_SECS": str(repeat_secs),
-            "CODEMIT_SWITCHBOARD": str(self.fake / "switchboard"),
+            "CODEMIT_ORCA": str(self.fake / "orca"),
+            "CODEMIT_OPS_NOTIFY_ON": "test-on",
+            "CODEMIT_OPS_NOTIFY_TO": "test-to",
             "CODEMIT_AUTOMATION_LOCK_WAIT": str(lock_wait),
         }
-        env.pop("SWITCHBOARD_PROFILE", None)
         return env
 
     def run_script(self, *extra: str, repeat_secs: int = 3600, lock_wait: int = 60) -> subprocess.CompletedProcess:
@@ -102,7 +106,7 @@ class AutomationRun(unittest.TestCase):
         (self.fake / "rc").write_text(str(rc))
 
     def mails(self) -> list[dict]:
-        log = self.fake / "switchboard.log"
+        log = self.fake / "orca.log"
         return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
     def subject(self, mail: dict) -> str:
@@ -134,11 +138,10 @@ class AutomationRun(unittest.TestCase):
         self.assertEqual(self.ran(), [])  # 묵은 코드로 본 명령을 돌리지 않는다
         mails = self.mails()
         self.assertEqual(len(mails), 1)
-        self.assertEqual(mails[0]["profile"], "codemit-coordinator")
         argv = mails[0]["argv"]
-        self.assertEqual(argv[argv.index("--to") + 1], "sandcorp/boss")
+        self.assertEqual(argv[argv.index("--to") + 1], "test-to")
         self.assertIn("feedback-relay", self.subject(mails[0]))
-        self.assertIn("커밋하지 않은 변경", argv[argv.index("--body") + 1])
+        self.assertIn("커밋하지 않은 변경", mails[0]["body"])
 
     def test_checkout_ahead_of_origin_is_kept_and_reported(self) -> None:
         (self.checkout / "local.txt").write_text("다른 세션의 커밋")
@@ -158,7 +161,7 @@ class AutomationRun(unittest.TestCase):
         self.push_new_commit()
         self.assertEqual(self.run_script().returncode, 70)
         self.assertEqual(len(self.mails()), 1)
-        self.assertIn("갈라졌다", self.mails()[0]["argv"][self.mails()[0]["argv"].index("--body") + 1])
+        self.assertIn("갈라졌다", self.mails()[0]["body"])
 
     def test_checkout_off_main_is_reported(self) -> None:
         _git(self.checkout, "checkout", "-q", "-b", "other")
@@ -205,9 +208,8 @@ class AutomationRun(unittest.TestCase):
         self.assertEqual(self.run_script().returncode, 2)
         mails = self.mails()
         self.assertEqual(len(mails), 1)
-        argv = mails[0]["argv"]
         self.assertIn("종료 코드 2", self.subject(mails[0]))
-        self.assertIn("표준오류 한 줄", argv[argv.index("--body") + 1])
+        self.assertIn("표준오류 한 줄", mails[0]["body"])
 
         self.set_rc(1)  # 회복 — 이제 제보 없음
         self.assertEqual(self.run_script().returncode, 1)
@@ -226,7 +228,8 @@ class AutomationRun(unittest.TestCase):
     def test_missing_command_127_is_reported(self) -> None:
         env = {**os.environ, "FAKE": str(self.fake), "CODEMIT_AUTOMATION_REPO": str(self.checkout),
                "CODEMIT_AUTOMATION_STATE_DIR": str(self.state),
-               "CODEMIT_SWITCHBOARD": str(self.fake / "switchboard")}
+               "CODEMIT_ORCA": str(self.fake / "orca"),
+               "CODEMIT_OPS_NOTIFY_ON": "test-on", "CODEMIT_OPS_NOTIFY_TO": "test-to"}
         result = subprocess.run(["bash", str(SCRIPT), "x", "--", str(self.fake / "없음.sh")],
                                 env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 127)
@@ -239,14 +242,34 @@ class AutomationRun(unittest.TestCase):
 
     def test_mail_failure_is_retried_next_run(self) -> None:
         self.set_rc(2)
-        (self.fake / "switchboard-down").touch()
+        (self.fake / "orca-down").touch()
         self.assertEqual(self.run_script().returncode, 2)
-        (self.fake / "switchboard-down").unlink()
+        (self.fake / "orca-down").unlink()
         self.run_script()
         ok_mails = [m for m in self.mails()]
         self.assertEqual(len(ok_mails), 2)  # 첫 시도(실패) + 다음 실행의 재시도
         self.run_script()
         self.assertEqual(len(self.mails()), 2)  # 보냈으니 더 안 보낸다
+
+    def test_missing_destination_config_is_not_recorded_and_retried(self) -> None:
+        self.set_rc(2)
+        env = self.env()
+        for k in ("CODEMIT_OPS_NOTIFY_ON", "CODEMIT_OPS_NOTIFY_TO"):
+            env.pop(k)
+        env.update(XDG_CONFIG_HOME=str(self.fake / "no-config"), HOME=str(self.fake))
+        r = subprocess.run(["bash", str(SCRIPT), "feedback-relay", "--", str(self.fake / "cmd.sh")],
+                           env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(self.mails(), [])
+        self.assertFalse((self.state / "feedback-relay.state").exists())
+        self.assertEqual(self.run_script().returncode, 2)
+        self.assertEqual(len(self.mails()), 1)
+
+    def test_zero_exit_without_message_id_is_not_recorded(self) -> None:
+        self.set_rc(2)
+        (self.fake / "orca-noid").touch()
+        self.run_script()
+        self.assertFalse((self.state / "feedback-relay.state").exists())
 
     def test_bad_arguments_exit_two(self) -> None:
         env = {**os.environ, "CODEMIT_AUTOMATION_REPO": str(self.checkout)}
@@ -295,7 +318,7 @@ class AutomationRun(unittest.TestCase):
         self.assertIn("잠금 대기 초과", result.stderr)
         self.assertEqual(self.ran(), [])
         self.assertEqual(len(self.mails()), 1)  # 재시도로 숨기지 않고 한 통 알린다
-        self.assertIn("잠금 대기 초과", " ".join(self.mails()[0]["argv"]))
+        self.assertIn("잠금 대기 초과", self.mails()[0]["body"])
 
     def test_fetch_helper_shares_the_lock(self) -> None:
         import fcntl

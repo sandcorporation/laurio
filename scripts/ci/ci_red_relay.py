@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""핫픽스 길의 ci-red 이슈를 대장 메일함으로 넘긴다(#1325). work 의 Orca 자동화 precheck 가 매분 부른다.
+"""핫픽스 길의 ci-red 이슈를 운영 담당 Orca 메일로 넘긴다(#1325, #1374). work 의 Orca 자동화 precheck 가 매분 부른다.
 
     python3 scripts/ci/ci_red_relay.py relay     # 보낼 것을 보내고 1 로 끝난다(에이전트를 띄울 일이 없다)
     python3 scripts/ci/ci_red_relay.py mark      # 보내지 않고 지금 상태만 기록(처음 켤 때 묵은 이슈 거르기)
@@ -12,9 +12,9 @@
 - 상태 파일이 없거나 깨졌으면 아무것도 보내지 않고 지금 상태를 기록만 한 뒤 3 으로 끝난다 — 열린 이슈를 한꺼번에 다시
   보내지 않고(중복 폭주 없음), 무엇을 건너뛰었는지는 표준오류 한 줄로 automation-run.sh 가 대장에게 한 번 드러낸다.
 
-switchboard 가 0 으로 끝나고 「#번호」 줄을 찍어야 보낸 것이다(scripts/feedback.sh 와 같다). 못 보낸 이슈는 기록하지 않아
+scripts/notify-ops.sh 가 0 으로 끝나야(orca 0 + `messageId=` 줄) 보낸 것이다(scripts/feedback.sh 와 같다). 못 보낸 이슈는 기록하지 않아
 다음 분에 다시 시도한다. 종료 코드: 1 정상(보낼 것을 다 보냈거나 없었다) · 2 gh 조회 실패 · 3 메일 실패가 있었다.
-automation-run.sh 가 1 밖의 코드를 대장 메일함에 드러낸다(docs/ops/feedback-relay.md 「실패는 드러난다」).
+automation-run.sh 가 1 밖의 코드를 운영 담당에게 드러낸다(docs/ops/feedback-relay.md 「실패는 드러난다」).
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TypedDict
@@ -53,17 +54,14 @@ def _gh(args: Sequence[str]) -> str:
 
 
 def _send(subject: str, body: str) -> bool:
-    sb = os.environ.get("CODEMIT_SWITCHBOARD", str(Path.home() / ".local/bin/switchboard"))
-    env = {**os.environ, "SWITCHBOARD_PROFILE": os.environ.get("CODEMIT_CI_RED_RELAY_PROFILE", "codemit-coordinator")}
-    r = subprocess.run(
-        [sb, "send", "--to", os.environ.get("CODEMIT_CI_RED_RELAY_TO", "sandcorp/boss"),
-         "--task", os.environ.get("CODEMIT_CI_RED_RELAY_TASK", "codemit-ci-red"),
-         "--subject", subject, "--body", body],
-        capture_output=True, text=True, check=False, env=env,
-    )
-    out = r.stdout + r.stderr
-    print(out.strip())
-    return r.returncode == 0 and re.search(r"(?m)^#\d+ ", out) is not None
+    notify = Path(__file__).resolve().parent.parent / "notify-ops.sh"
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8") as f:
+        f.write(body)
+        f.flush()
+        r = subprocess.run(["bash", str(notify), f"[codemit] ci-red {subject}", f.name],
+                           capture_output=True, text=True, check=False)
+    print((r.stdout + r.stderr).strip())
+    return r.returncode == 0
 
 
 def kind_of(title: str) -> str | None:

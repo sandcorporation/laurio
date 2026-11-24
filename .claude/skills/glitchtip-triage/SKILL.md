@@ -15,7 +15,7 @@ GitHub Issues 에 있는 것은 **티켓**이다. 「이슈 10번」처럼 쓰�
 - **자동화(대장 경유 모드, 2026-11-07).** Orca automation 이 `ops-shared` 의 precheck 로 prod 의
   미해결·미클레임 오류 하나를 집고 `~/.sandcorp/glitchtip/codemit/current.json` 에 적어 세션을 띄운다.
   **진단만 한다** — 지시서가 이 스킬의 1·2단계만 따르라고 한다. 3단계 이후(재현·수정·티켓·커밋·PR)는 하지
-  않고, 결과는 대장 메일함(switchboard)으로 보고한다. 아래 절차에서 3~9단계와 「사람이 직접 부를 때」라고
+  않고, 결과는 운영 담당 Orca 메일(`scripts/notify-ops.sh`)로 보고한다. 아래 절차에서 3~9단계와 「사람이 직접 부를 때」라고
   적힌 것은 이 모드에 해당하지 않는다.
 - **사람이 직접 부를 때.** 이 스킬의 전체 절차(1~9단계)를 따른다. 상태 파일은 공용판
   `ops-shared/glitchtip/pick.py` 가 쓰는 `~/.sandcorp/glitchtip/codemit/current.json` 이다.

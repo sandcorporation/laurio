@@ -564,7 +564,7 @@ Orca automation 「GlitchTip prod 오류 진단」이 매분 precheck 를 돌려
 | precheck | `ops-shared/glitchtip/pick.py --service codemit --project-prefix codemit- --repo <주 체크아웃>` (서비스 공용, 같은 조직의 다른 서비스 자동화 여섯도 이것을 쓴다) | 없다 — 저장소의 사본(`scripts/glitchtip_pick.py`)은 걷었다(#981) |
 | 지시서 | automation 의 프롬프트(`ops-shared/glitchtip/codemit-prompt.md` 와 같은 꼴) | `.claude/skills/glitchtip-triage/` — 지시서가 1·2단계만 따르라고 한다 |
 | 상태 자리 | `~/.sandcorp/glitchtip/codemit/` 의 `current.json`·`regressions.json`·`reported.json`(세션이 쓰는 24시간 묶기 장부)·`lock` | 옛 `~/.codemit/glitchtip-*` |
-| 보고 | 대장 메일함 `sandcorp/boss`(switchboard) — **GitHub 티켓은 열지 않는다** | 옛 모드는 티켓 |
+| 보고 | 운영 담당 Orca 메일(`scripts/notify-ops.sh`) — **GitHub 티켓은 열지 않는다** | 옛 모드는 티켓 |
 
 **대장 경유 모드**(2026-11-07 대표 결정): 자동화 세션은 **진단만** 한다 — 스킬의 1단계(이벤트 읽기)와
 2단계(영역이 무엇으로 정해졌는지 읽기)만 따르고, 코드 수정·커밋·push·PR·티켓·GlitchTip 상태 변경·운영 쓰기를

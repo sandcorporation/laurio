@@ -41,18 +41,17 @@ main push 마다 `kind` 잡이 push 를 가른다(`scripts/ci/push_kind.py`).
 검사 결과는 `notify` 잡이 「핫픽스 뒤 검사 실패 — main 붉음」 ci-red 이슈 하나로 낸다(`scripts/ci/after-push-notify.sh`) —
 실패면 열고, 이어지는 실패는 댓글, 초록이면 「복구됨」 댓글로 닫는다. 실패한 잡·sha·run 링크가 본문에 있다.
 
-## 대장 메일함으로 — work Orca 자동화 「CI 빨강 전달」
+## 운영 담당 Orca 메일로 — work Orca 자동화 「CI 빨강 전달」
 
-GitHub 에서 switchboard 로 바로 쏘는 길은 없어, work 의 Orca 자동화가 위 두 종류의 ci-red 이슈를 대장 메일함(`sandcorp/boss`)으로
-넘긴다(`scripts/ci/ci_red_relay.py`). [제보 전달](feedback-relay.md)과 같은 꼴이고 같은 `automation-run.sh` 로 감싼다.
+GitHub 에서 Orca 메일로 바로 쏘는 길은 없어, work 의 Orca 자동화가 위 두 종류의 ci-red 이슈를 운영 담당 Orca 메일로
+넘긴다(`scripts/ci/ci_red_relay.py` → `scripts/notify-ops.sh`, 제목 `[codemit] ci-red …`). [제보 전달](feedback-relay.md)과 같은 꼴이고 같은 `automation-run.sh` 로 감싼다.
 
 - 열린 이슈를 처음 보면 한 통 — 번호·종류·sha·run 링크만. 이어지는 실패(댓글)는 다시 보내지 않는다. 보낸 이슈가 닫히면 「복구·닫힘」 한 통.
 - 기록은 `~/.cache/codemit-automation/ci-red-relay.json`(처음 켤 때 `mark` 가 만든다). 처음 보는 닫힌 이슈는 보내지 않는다.
   기록이 없거나 깨졌으면 아무것도 보내지 않고 기록만 다시 만든 뒤 3 으로 끝난다 — 열린 이슈를 한꺼번에 다시 보내지 않고, 건너뛴 번호는 한 통으로 드러난다.
 - 보낼 것을 precheck 가 직접 보내고 늘 1 로 끝난다 — 에이전트를 띄우지 않는다. gh 조회 실패(2)·메일 실패(3)는 `automation-run.sh` 가
-  대장 메일함에 드러내고, 못 보낸 이슈는 다음 분에 다시 보낸다.
-- 받는 곳 `CODEMIT_CI_RED_RELAY_TO`(기본 `sandcorp/boss`), 프로필 `CODEMIT_CI_RED_RELAY_PROFILE`(기본 `codemit-coordinator`),
-  task `CODEMIT_CI_RED_RELAY_TASK`(기본 `codemit-ci-red`), 상태 파일 `CODEMIT_CI_RED_RELAY_STATE`, `CODEMIT_SWITCHBOARD`.
+  운영 담당 메일로 드러내고, 못 보낸 이슈는 다음 분에 다시 보낸다.
+- 받는 곳은 [제보 전달](feedback-relay.md)의 「받는 곳」과 같다(저장소에 적지 않는다). 상태 파일 `CODEMIT_CI_RED_RELAY_STATE`, `orca` 경로 `CODEMIT_ORCA`.
 
 ```
 orca-ide automations create --name "CI 빨강 전달" --trigger "* * * * *" \
@@ -78,5 +77,5 @@ main 보호 규칙을 둘로 나눠 핫픽스 길을 열었다(대장 #5811). �
 
 ## 시험
 
-`python3 scripts/test_hotfix_flow.py` — 분류(실제 git), 알림 → ci-red → 전달(가짜 gh·switchboard), `hotfix.py`(맨 원격 + 클론, ruleset
+`python3 scripts/test_hotfix_flow.py` — 분류(실제 git), 알림 → ci-red → 전달(가짜 gh·orca), `hotfix.py`(맨 원격 + 클론, ruleset
 거절은 pre-receive 훅으로 흉내). 워크플로 배선은 `scripts/test_release_flow.py`, 권한은 `scripts/test_public_repo.py`. PR 검사의 plan 잡이 셋을 돈다.

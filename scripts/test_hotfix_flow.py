@@ -2,7 +2,7 @@
 """핫픽스 길(#1325) — `python3 scripts/test_hotfix_flow.py` 하나로 돈다(PR 검사의 plan 잡이 부른다).
 
 - push_kind.py: 대기열 커밋 · 표식 있는 핫픽스 · 표식 없는 직접 push 를 실제 git 으로 가른다(gh 는 가짜).
-- after-push-notify.sh → ci-issue.sh → ci_red_relay.py: 가짜 gh(이슈를 파일에 둔다)와 가짜 switchboard 로
+- after-push-notify.sh → ci-issue.sh → ci_red_relay.py: 가짜 gh(이슈를 파일에 둔다)와 가짜 orca 로
   「실패 → 대장 메일 1통, 이어지는 실패는 같은 이슈 댓글, 다시 초록이면 복구 알림」과 표식 없는 push 알림을 보인다.
 - hotfix.py: 맨 원격 하나 + 클론으로 표식·따라잡기·push·dry-run·거절을 실제 git 으로 돌린다. 진짜 main 에는 닿지 않는다.
 """
@@ -139,18 +139,21 @@ if out:
     print(out)
 """
 
-FAKE_SWITCHBOARD = r"""#!/usr/bin/env python3
+FAKE_ORCA = r"""#!/usr/bin/env python3
 import json, os, sys
 d = os.path.dirname(os.path.abspath(__file__))
-if os.path.exists(os.path.join(d, "switchboard-fail")):
+if os.path.exists(os.path.join(d, "orca-fail")):
     print("connection refused", file=sys.stderr); sys.exit(1)
+if os.path.exists(os.path.join(d, "orca-noid")):
+    print("queued"); sys.exit(0)
 a = sys.argv[1:]
-mail = {"profile": os.environ.get("SWITCHBOARD_PROFILE"), "to": a[a.index("--to") + 1],
-        "task": a[a.index("--task") + 1], "subject": a[a.index("--subject") + 1], "body": a[a.index("--body") + 1]}
+assert a[:2] == ["orchestration", "send"], a
+mail = {"on": a[a.index("--on") + 1], "to": a[a.index("--to") + 1], "type": a[a.index("--type") + 1],
+        "subject": a[a.index("--subject") + 1], "body": open(a[a.index("--body-file") + 1]).read()}
 with open(os.path.join(d, "mails.jsonl"), "a") as f:
     f.write(json.dumps(mail, ensure_ascii=False) + "\n")
 n = sum(1 for _ in open(os.path.join(d, "mails.jsonl")))
-print(f"#{n} {mail['subject']}\n{mail['profile']} → {mail['to']} · pending")
+print(f"sent messageId=msg_{n}")
 """
 
 
@@ -169,12 +172,14 @@ class RelayChainTest(unittest.TestCase):
         self.d = Path(tmp.name)
         (self.d / "bin").mkdir()
         _exe(self.d / "bin" / "gh", FAKE_GH)
-        _exe(self.d / "bin" / "switchboard", FAKE_SWITCHBOARD)
+        _exe(self.d / "bin" / "orca", FAKE_ORCA)
         self.env = {
             **os.environ,
             "PATH": f"{self.d / 'bin'}:{os.environ['PATH']}",
             "FAKE_STATE": str(self.d / "issues.json"),
-            "CODEMIT_SWITCHBOARD": str(self.d / "bin" / "switchboard"),
+            "CODEMIT_ORCA": str(self.d / "bin" / "orca"),
+            "CODEMIT_OPS_NOTIFY_ON": "test-on",
+            "CODEMIT_OPS_NOTIFY_TO": "test-to",
             "CODEMIT_CI_RED_RELAY_STATE": str(self.d / "relay.json"),
             "CI_RED_ASSIGNEE": "",
             "GITHUB_STEP_SUMMARY": str(self.d / "summary"),
@@ -205,7 +210,8 @@ class RelayChainTest(unittest.TestCase):
     def test_failure_mails_once_comments_after_and_recovery_mails(self) -> None:
         self.fail(SHA_A, 11)
         [mail] = self.relay()
-        self.assertEqual((mail["to"], mail["profile"], mail["task"]), ("sandcorp/boss", "codemit-coordinator", "codemit-ci-red"))
+        self.assertEqual((mail["on"], mail["to"], mail["type"]), ("test-on", "test-to", "status"))
+        self.assertTrue(mail["subject"].startswith("[codemit] ci-red "))
         self.assertIn("핫픽스 뒤 검사 실패", mail["subject"])
         self.assertIn(SHA_A[:12], mail["body"])
         self.assertIn("https://github.com/o/r/actions/runs/11", mail["body"])
@@ -251,10 +257,25 @@ class RelayChainTest(unittest.TestCase):
 
     def test_mail_failure_is_retried_next_run(self) -> None:
         self.fail(SHA_A, 11)
-        (self.d / "bin" / "switchboard-fail").touch()
+        (self.d / "bin" / "orca-fail").touch()
         self.assertEqual(self.relay(want=3), [])
-        (self.d / "bin" / "switchboard-fail").unlink()
+        (self.d / "bin" / "orca-fail").unlink()
         self.assertEqual(len(self.relay()), 1)
+
+    def test_zero_exit_without_message_id_is_not_sent(self) -> None:
+        self.fail(SHA_A, 11)
+        (self.d / "bin" / "orca-noid").touch()
+        self.assertEqual(self.relay(want=3), [])
+        (self.d / "bin" / "orca-noid").unlink()
+        self.assertEqual(len(self.relay()), 1)
+
+    def test_missing_destination_config_fails_and_is_retried(self) -> None:
+        self.fail(SHA_A, 11)
+        env = {k: v for k, v in self.env.items() if not k.startswith("CODEMIT_OPS_NOTIFY_")}
+        r = subprocess.run([sys.executable, str(RELAY), "relay"], env=env, text=True, capture_output=True, check=False)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("받는 곳 설정 없음", r.stdout + r.stderr)
+        self.assertEqual(len(self.relay()), 1)  # 설정이 돌아오면 기록되지 않았던 이슈가 간다
 
     def test_old_closed_issues_are_not_mailed_on_first_run(self) -> None:
         self.fail(SHA_A, 11)
