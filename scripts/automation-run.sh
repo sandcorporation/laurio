@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Orca 자동화의 진입 스크립트(#1252) — main 체크아웃을 origin/main 으로 따라잡은 뒤 본 명령을 부르고,
-# 「정상 종료 코드」가 아닌 실패는 대장 메일함(switchboard)에 드러낸다.
+# 「정상 종료 코드」가 아닌 실패는 운영 담당 Orca 메일(scripts/notify-ops.sh)로 드러낸다.
 #
 #   scripts/automation-run.sh <이름> [--ok 0,1] -- <명령> [인자…]
 #
@@ -22,7 +22,7 @@
 #
 # 알림: 같은 원인(sync·rc<코드>)은 처음 한 번, 이어지면 1시간마다 한 번. 정상으로 돌아오면 한 번.
 # 상태는 `~/.cache/codemit-automation/<이름>.state` 한 파일(`원인 마지막_알림_epoch`).
-# 메일 꼴은 scripts/feedback.sh forward 와 같은 프로필·task 환경변수를 쓴다.
+# 받는 곳은 scripts/notify-ops.sh 의 설정(환경변수·설정 파일)을 따른다.
 set -uo pipefail
 
 REPO="${CODEMIT_AUTOMATION_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -31,19 +31,18 @@ REMOTE="${CODEMIT_AUTOMATION_REMOTE:-origin}"
 BRANCH="${CODEMIT_AUTOMATION_BRANCH:-main}"
 REPEAT_SECS="${CODEMIT_AUTOMATION_REPEAT_SECS:-3600}"
 LOCK_WAIT="${CODEMIT_AUTOMATION_LOCK_WAIT:-60}"
-RELAY_TO="${CODEMIT_FEEDBACK_RELAY_TO:-sandcorp/boss}"
-RELAY_PROFILE="${CODEMIT_FEEDBACK_RELAY_PROFILE:-codemit-coordinator}"
-RELAY_TASK="${CODEMIT_FEEDBACK_RELAY_TASK:-codemit-feedback}"
-SWITCHBOARD="${CODEMIT_SWITCHBOARD:-$HOME/.local/bin/switchboard}"
+NOTIFY_OPS="${CODEMIT_NOTIFY_OPS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/notify-ops.sh}"
 
 # 스크립트 자신이 따라잡기로 바뀌어도 읽던 자리가 흐트러지지 않게 전부 함수 안에서 돌고 끝에서 빠진다.
 usage() { sed -n '2,10p' "$0" >&2; exit 2; }
 
 notify() { # notify <제목> <본문> — 보냈으면 0
-  local out rc=0
-  out="$(SWITCHBOARD_PROFILE="$RELAY_PROFILE" "$SWITCHBOARD" send --to "$RELAY_TO" --task "$RELAY_TASK" \
-           --subject "$1" --body "$2" 2>&1)" || rc=$?
-  [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eq '^#[0-9]+ '
+  local bodyf rc=0
+  bodyf="$(mktemp)"
+  printf '%s\n' "$2" > "$bodyf"
+  bash "$NOTIFY_OPS" "$1" "$bodyf" >/dev/null 2>&1 || rc=$?
+  rm -f "$bodyf"
+  return "$rc"
 }
 
 # problem <원인> <한 줄 설명> <자세히> — 같은 원인이면 REPEAT_SECS 안에는 다시 보내지 않는다.
@@ -54,18 +53,18 @@ problem() {
   if [ "$prev" = "$cause" ] && [ -n "$last" ] && [ $((now - last)) -lt "$REPEAT_SECS" ]; then
     return 0
   fi
-  if notify "[자동화] $NAME 실패 — $summary" "$summary
+  if notify "[codemit] 자동화 실패 $NAME — $summary" "$summary
 $detail
 (같은 원인은 $((REPEAT_SECS / 60))분마다 한 번, 회복하면 한 번 알린다)"; then
     mkdir -p "$STATE_DIR" && printf '%s %s\n' "$cause" "$now" > "$STATE_FILE"
   else
-    echo "대장에게 알리지 못했다: $summary" >&2
+    echo "운영 담당에게 알리지 못했다: $summary" >&2
   fi
 }
 
 recovered() {
   [ -f "$STATE_FILE" ] || return 0
-  if notify "[자동화] $NAME 회복" "$NAME 이 다시 정상으로 돈다."; then
+  if notify "[codemit] 자동화 회복 $NAME" "$NAME 이 다시 정상으로 돈다."; then
     : > "$STATE_FILE" && rm -f "$STATE_FILE"
   fi
 }

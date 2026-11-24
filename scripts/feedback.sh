@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# 운영 건의·버그 제보를 대장 메일함으로 넘긴다(#1240). Orca 자동화(docs/ops/feedback-relay.md)가 쓴다.
+# 운영 건의·버그 제보를 운영 담당 Orca 메일로 넘긴다(#1240). Orca 자동화(docs/ops/feedback-relay.md)가 쓴다.
 # daypage 건의함 길(scripts/suggestions.sh)을 본떴다 — 다른 것은 배정 기록이 이 컴퓨터의 파일이 아니라
 # 운영 DB(FeedbackReport.taken_at·forwarded_at)에 있다는 것뿐이다.
 #
 #   feedback.sh check            전달할 제보가 있으면 0, 없으면 1, 운영에 못 닿으면 2  ← Orca 자동화의 precheck
 #   feedback.sh list             전달할 제보를 JSON 한 줄씩 {"id","kind","app","received_at"} (기록을 바꾸지 않는다)
 #   feedback.sh take [N]         list 와 같되 집은 것으로 기록한다(N 기본 20). 15분 안에 전달되지 않으면 다시 나온다.
-#   feedback.sh forward ID       대장 메일함(switchboard sandcorp/boss)으로 번호·갈래·앱·받은 시각만 보낸다.
-#                                switchboard 가 0 으로 끝나고 「#번호」를 찍어야 보낸 것이다 — 그때만 전달 표시를
+#   feedback.sh forward ID       운영 담당 Orca 메일(scripts/notify-ops.sh)로 번호·갈래·앱·받은 시각만 보낸다.
+#                                notify-ops.sh 가 0 으로 끝나야(orca 0 + `messageId=`) 보낸 것이다 — 그때만 전달 표시를
 #                                하고, 아니면 되돌려(untake) 0 이 아닌 코드로 끝난다.
 #   feedback.sh untake ID…       집은 기록을 지운다(다음 check 에서 다시 잡힌다)
 #   feedback.sh mark ID…         보내지 않고 전달 표시만 한다(처음 켤 때 지난 제보를 거르는 용도)
@@ -26,10 +26,7 @@ set -euo pipefail
 SSH_HOST="${CODEMIT_FEEDBACK_SSH_HOST:-oracle}"
 SSH="${CODEMIT_FEEDBACK_SSH:-ssh}"
 COMPOSE_PROJECT="${CODEMIT_FEEDBACK_COMPOSE_PROJECT:-codemit-prod}"
-RELAY_TO="${CODEMIT_FEEDBACK_RELAY_TO:-sandcorp/boss}"
-RELAY_PROFILE="${CODEMIT_FEEDBACK_RELAY_PROFILE:-codemit-coordinator}"
-RELAY_TASK="${CODEMIT_FEEDBACK_RELAY_TASK:-codemit-feedback}"
-SWITCHBOARD="${CODEMIT_SWITCHBOARD:-$HOME/.local/bin/switchboard}"
+NOTIFY_OPS="${CODEMIT_NOTIFY_OPS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/notify-ops.sh}"
 # 스크린샷을 받는 곳 — 저장소 밖, 이 사용자만(#1347). 그림에는 학생 정보가 찍힐 수 있다.
 _tmp="${TMPDIR:-/tmp}"
 SHOT_DIR="${CODEMIT_FEEDBACK_SHOT_DIR:-${_tmp%/}/codemit-feedback-shots-$(id -u)}"
@@ -104,18 +101,20 @@ case "${1:-}" in
     kind="$(kind_label "$(printf '%s' "$summary" | field kind)")"
     app="$(app_label "$(printf '%s' "$summary" | field app)")"
     at="$(printf '%s' "$summary" | field received_at)"
-    subject="[제보] codemit #$id $kind · $app"
+    subject="[codemit] 제보 #$id $kind · $app"
     body="제보 #$id · $kind · $app · 받은 시각 $at
 scripts/feedback.sh show $id"
+    bodyf="$(mktemp)"
+    printf '%s\n' "$body" > "$bodyf"
     rc=0
-    out="$(SWITCHBOARD_PROFILE="$RELAY_PROFILE" "$SWITCHBOARD" send --to "$RELAY_TO" --task "$RELAY_TASK" \
-             --subject "$subject" --body "$body" 2>&1)" || rc=$?
+    out="$(bash "$NOTIFY_OPS" "$subject" "$bodyf" 2>&1)" || rc=$?
+    rm -f "$bodyf"
     printf '%s\n' "$out"
-    if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep -Eq '^#[0-9]+ '; then
+    if [ "$rc" -eq 0 ]; then
       remote mark-forwarded "$id"
     else
       remote untake "$id" || true
-      echo "대장에게 못 보내 제보 #$id 를 되돌렸다(다음 check 에서 다시 잡힌다)" >&2
+      echo "운영 담당에게 못 보내 제보 #$id 를 되돌렸다(다음 check 에서 다시 잡힌다)" >&2
       exit 1
     fi
     ;;

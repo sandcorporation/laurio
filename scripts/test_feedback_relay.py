@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`scripts/feedback.sh`(제보 → 대장 메일함, #1240)를 고정한다.
 
-`python3 scripts/test_feedback_relay.py` 하나로 돈다. 가짜 ssh·switchboard 를 쓴다 — 운영에 닿지 않는다.
+`python3 scripts/test_feedback_relay.py` 하나로 돈다. 가짜 ssh·orca 를 쓴다 — 운영에 닿지 않는다.
 가짜 ssh 는 운영 backend 의 `manage.py feedback_report` 를 JSON 파일 하나로 흉내 낸다(집음·전달 표시).
 """
 
@@ -79,20 +79,21 @@ elif action == "status":
 json.dump(db, open(path, "w"), ensure_ascii=False)
 '''
 
-FAKE_SWITCHBOARD = r'''#!/usr/bin/env python3
+FAKE_ORCA = r'''#!/usr/bin/env python3
 import json, os, sys
 fake = os.environ["FAKE"]
-with open(os.path.join(fake, "switchboard.log"), "a") as log:
-    log.write(json.dumps({"argv": sys.argv[1:], "profile": os.environ.get("SWITCHBOARD_PROFILE")}, ensure_ascii=False) + "\n")
-mode = open(os.path.join(fake, "switchboard-mode")).read().strip() if os.path.exists(os.path.join(fake, "switchboard-mode")) else "ok"
+a = sys.argv[1:]
+body = open(a[a.index("--body-file") + 1]).read()
+with open(os.path.join(fake, "orca.log"), "a") as log:
+    log.write(json.dumps({"argv": a, "body": body}, ensure_ascii=False) + "\n")
+mode = open(os.path.join(fake, "orca-mode")).read().strip() if os.path.exists(os.path.join(fake, "orca-mode")) else "ok"
 if mode == "fail":
     print("error: mailbox unreachable", file=sys.stderr)
     sys.exit(1)
 if mode == "noid":
     print("queued")
     sys.exit(0)
-print("#4400 " + sys.argv[sys.argv.index("--subject") + 1])
-print("codemit/coordinator → sandcorp/boss · pending")
+print("sent messageId=msg_4400")
 '''
 
 
@@ -111,7 +112,7 @@ class FeedbackRelay(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.fake = Path(tmp.name)
         _write_exec(self.fake / "ssh", FAKE_SSH)
-        _write_exec(self.fake / "switchboard", FAKE_SWITCHBOARD)
+        _write_exec(self.fake / "orca", FAKE_ORCA)
         self.shots = self.fake / "shots"
         self.reports(
             {"id": 5, "kind": "bug", "app": "contest", "received_at": "2026-11-21T10:00:00+09:00",
@@ -127,21 +128,23 @@ class FeedbackRelay(unittest.TestCase):
     def db(self) -> dict[int, dict]:
         return {r["id"]: r for r in json.loads((self.fake / "db.json").read_text())}
 
-    def run_script(self, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
+    def run_script(self, *args: str, stdin: str = "", **extra_env: str) -> subprocess.CompletedProcess:
         env = {
             **os.environ,
             "FAKE": str(self.fake),
             "CODEMIT_FEEDBACK_SSH": str(self.fake / "ssh"),
-            "CODEMIT_SWITCHBOARD": str(self.fake / "switchboard"),
+            "CODEMIT_ORCA": str(self.fake / "orca"),
+            "CODEMIT_OPS_NOTIFY_ON": "test-on",
+            "CODEMIT_OPS_NOTIFY_TO": "test-to",
             "CODEMIT_FEEDBACK_SHOT_DIR": str(self.shots),
         }
-        env.pop("SWITCHBOARD_PROFILE", None)
+        env.update(extra_env)
         return subprocess.run(
             ["bash", str(SCRIPT), *args], env=env, input=stdin, capture_output=True, text=True, timeout=30
         )
 
     def mails(self) -> list[dict]:
-        log = self.fake / "switchboard.log"
+        log = self.fake / "orca.log"
         return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
     def ssh_calls(self) -> list[dict]:
@@ -187,11 +190,11 @@ class FeedbackRelay(unittest.TestCase):
         self.assertTrue(self.db()[5]["forwarded"])
         mail = self.mails()[0]
         argv = mail["argv"]
-        self.assertEqual(mail["profile"], "codemit-coordinator")
-        self.assertEqual(argv[argv.index("--to") + 1], "sandcorp/boss")
-        self.assertEqual(argv[argv.index("--task") + 1], "codemit-feedback")
-        self.assertEqual(argv[argv.index("--subject") + 1], "[제보] codemit #5 버그 · 공모전")
-        body = argv[argv.index("--body") + 1]
+        self.assertEqual(argv[:2], ["orchestration", "send"])
+        self.assertEqual(argv[argv.index("--on") + 1], "test-on")
+        self.assertEqual(argv[argv.index("--to") + 1], "test-to")
+        self.assertEqual(argv[argv.index("--subject") + 1], "[codemit] 제보 #5 버그 · 공모전")
+        body = mail["body"]
         self.assertIn("2026-11-21T10:00:00+09:00", body)
         self.assertIn("scripts/feedback.sh show 5", body)
         self.assertNotIn("다른 학생", body)
@@ -199,13 +202,34 @@ class FeedbackRelay(unittest.TestCase):
     def test_forward_failure_puts_report_back(self) -> None:
         for mode in ("fail", "noid"):
             with self.subTest(mode=mode):
-                (self.fake / "switchboard-mode").write_text(mode)
+                (self.fake / "orca-mode").write_text(mode)
                 self.run_script("take")
                 result = self.run_script("forward", "5")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(self.db()[5]["forwarded"])
                 self.assertFalse(self.db()[5]["taken"])
                 self.assertEqual(self.run_script("check").returncode, 0)
+
+    def test_forward_without_destination_config_fails_and_puts_report_back(self) -> None:
+        self.run_script("take")
+        result = self.run_script("forward", "5", CODEMIT_OPS_NOTIFY_ON="", CODEMIT_OPS_NOTIFY_TO="",
+                                XDG_CONFIG_HOME=str(self.fake / "no-config"), HOME=str(self.fake))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("받는 곳 설정 없음", result.stdout + result.stderr)
+        self.assertEqual(self.mails(), [])
+        self.assertFalse(self.db()[5]["forwarded"])
+        self.assertFalse(self.db()[5]["taken"])
+
+    def test_destination_can_come_from_config_file(self) -> None:
+        conf = self.fake / "cfg" / "codemit"
+        conf.mkdir(parents=True)
+        (conf / "ops-notify.env").write_text("CODEMIT_OPS_NOTIFY_ON=file-on\nCODEMIT_OPS_NOTIFY_TO=file-to\n")
+        self.run_script("take")
+        result = self.run_script("forward", "5", CODEMIT_OPS_NOTIFY_ON="", CODEMIT_OPS_NOTIFY_TO="",
+                                XDG_CONFIG_HOME=str(self.fake / "cfg"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = self.mails()[0]["argv"]
+        self.assertEqual((argv[argv.index("--on") + 1], argv[argv.index("--to") + 1]), ("file-on", "file-to"))
 
     def test_forwarded_report_is_not_sent_twice(self) -> None:
         self.run_script("take")
