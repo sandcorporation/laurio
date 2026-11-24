@@ -52,7 +52,7 @@ plugs = ["appeals", "contests", "core"]
 
 [feedback]
 group = "shared"
-uses = ["accounts", "core", "notifications", "storage"]
+uses = ["accounts", "core", "notifications", "ops_metrics", "storage"]
 plugs = ["core"]
 
 [handovers]

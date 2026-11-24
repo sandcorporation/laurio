@@ -7,9 +7,11 @@ API 레이어(`feedback.api`·`feedback.operator_api`)와 관리 명령에서만
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
@@ -18,6 +20,7 @@ from django.db.models import Q, QuerySet
 from core.clock import Clock
 from notifications.models import NotificationType
 from notifications.services import create_notification
+from ops_metrics import alerts
 
 from . import screenshots
 from .models import (
@@ -27,6 +30,8 @@ from .models import (
     FeedbackReport,
     FeedbackStatusChange,
 )
+
+logger = logging.getLogger(__name__)
 
 # 계정당 24시간(굴러가는 창) 안에 만들 수 있는 제보 수.
 DAILY_REPORT_LIMIT = 20
@@ -134,7 +139,7 @@ def create_report(*, reporter: AbstractBaseUser, data: NewReport) -> FeedbackRep
             raise FeedbackRateLimitError(
                 f"제보는 하루 {DAILY_REPORT_LIMIT}건까지 보낼 수 있습니다."
             )
-        return FeedbackReport.objects.create(
+        report = FeedbackReport.objects.create(
             reporter=reporter,
             kind=data.kind,
             body=body,
@@ -146,6 +151,33 @@ def create_report(*, reporter: AbstractBaseUser, data: NewReport) -> FeedbackRep
             screenshot_key=data.screenshot_key,
             received_at=now,
         )
+        report_id = report.pk
+        transaction.on_commit(lambda: _send_notice(report_id))
+        return report
+
+
+def notice_line(report: FeedbackReport) -> str:
+    """알림 한 줄 — 번호·종류·앱 갈래만. 본문·제보자·주소·스크린샷은 넣지 않는다."""
+
+    return f"📮 [Codemit] 새 제보 #{report.pk} · {report.get_kind_display()} · {report.app}"
+
+
+def _send_notice(report_id: int) -> None:
+    """접수가 커밋된 뒤 알림 목적지로 한 건 보낸다 — 보내면 전달 표시를 찍는다. 실패는 삼킨다.
+
+    요청 스레드에서 짧은 소켓 한도(`OPS_ALERT_DISCORD_TIMEOUT_SECONDS`)로 보낸다.
+    """
+
+    url = settings.FEEDBACK_NOTICE_WEBHOOK_URL
+    if not url:
+        return
+    try:
+        report = FeedbackReport.objects.get(pk=report_id)
+        alerts.post_webhook(url, notice_line(report))
+        mark_forwarded(report_id)
+    except Exception as exc:  # noqa: BLE001 - 접수는 이미 커밋됐다. 못 보낸 제보는 자동화가 집는다.
+        # 주소가 예외 문장에 섞일 수 있어 종류만 남긴다.
+        logger.warning("제보 #%s 알림을 보내지 못했다: %s", report_id, type(exc).__name__)
 
 
 # --- 상태 바꾸기 (#1239) ------------------------------------------------------

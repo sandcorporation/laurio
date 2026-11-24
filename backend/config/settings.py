@@ -1340,3 +1340,7 @@ SENTRY_ENABLED = configure_sentry()
 #: compose 네트워크 안에서만 풀리는 서비스 이름 — 이 이름으로 들어온 요청은 TLS 프록시를 거친
 #: 것으로 친다(core.internal_hosts). 공개 도메인은 여기 넣지 않는다.
 INTERNAL_SERVICE_HOSTS = ("backend", "events")
+
+#: 새 제보(#1366) 접수를 알릴 목적지 웹훅 — 비면 보내지 않고 전달 표시도 찍지 않는다(바깥 자동화가 그대로 집어 간다).
+#: 값은 배포 .env 에만 있다. 웹 프로세스만 읽는다(접수 요청이 커밋된 뒤 보낸다).
+FEEDBACK_NOTICE_WEBHOOK_URL = _env("FEEDBACK_NOTICE_WEBHOOK_URL", "")
