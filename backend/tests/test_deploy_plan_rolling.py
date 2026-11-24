@@ -95,7 +95,10 @@ CONTEXT_FILES = (
     "classroom/page.tsx", "packages/shared/index.ts", "package.json", "pnpm-workspace.yaml", "pnpm-lock.yaml",
     "docker/pgbouncer/entry.sh",
     "docker/entrypoint/wait-for-backend.cjs",
-    *(f"docker/{n}.Dockerfile" for n in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer")),
+    # 에이전트 채점 실행기(#999)의 문맥 — 없으면 해시가 매번 달라 agent-grader 가 늘 「바뀜」이 된다(#1372).
+    "backend/scoring/agent_runner.py", "backend/scoring/selfloop.py", "backend/core/vendor_paths.py",
+    *(f"docker/{n}.Dockerfile"
+      for n in ("backend", "frontend", "operator", "classroom", "search", "pgbouncer", "agent-grader")),
 )
 
 

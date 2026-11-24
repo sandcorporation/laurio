@@ -52,6 +52,8 @@ node_modules/
 /.pnpm-store/
 .jenkins-prod-deployed
 .jenkins-prod-plan
+.jenkins-prod-env-sha256
+.jenkins-prod-env-sha256.tmp
 .jenkins-prod-config-hash.err
 .jenkins-prod-dumps/
 .images-amd64.result
