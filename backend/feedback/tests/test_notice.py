@@ -68,21 +68,84 @@ def test_task_with_unset_url_sends_nothing_and_leaves_unforwarded(settings, sent
 
 def test_task_failure_keeps_report_unmarked_and_logs_no_address(settings, monkeypatch, reporter, caplog):
     settings.FEEDBACK_NOTICE_WEBHOOK_URL = SECRET_URL
+    attempts: list[str] = []
 
     def boom(url, content):
+        attempts.append(url)
         raise RuntimeError(f"connect to {url} failed")
 
     monkeypatch.setattr("ops_metrics.alerts.post_webhook", boom)
     report = _new_report(reporter)
 
     with caplog.at_level(logging.WARNING):
-        send_feedback_notice(report.pk)
+        send_feedback_notice.apply(args=[report.pk])
 
+    assert len(attempts) == 6
     report.refresh_from_db()
     assert report.forwarded_at is None
+    assert f"#{report.pk}" in caplog.text
+    assert "6번" in caplog.text
     assert "RuntimeError" in caplog.text
     assert "secret-token" not in caplog.text
     assert "hooks.invalid" not in caplog.text
+
+
+def test_task_retries_with_doubling_countdown(settings, monkeypatch, reporter):
+    settings.FEEDBACK_NOTICE_WEBHOOK_URL = SECRET_URL
+    monkeypatch.setattr("ops_metrics.alerts.post_webhook", lambda url, content: 1 / 0)
+    countdowns: list[int] = []
+    real_retry = send_feedback_notice.retry
+
+    def spy(*args, **kwargs):
+        countdowns.append(kwargs["countdown"])
+        return real_retry(*args, **kwargs)
+
+    monkeypatch.setattr(send_feedback_notice, "retry", spy)
+    report = _new_report(reporter)
+
+    send_feedback_notice.apply(args=[report.pk])
+
+    assert countdowns == [30, 60, 120, 240, 480]
+
+
+def test_task_succeeds_on_third_try_with_one_send(settings, monkeypatch, reporter):
+    settings.FEEDBACK_NOTICE_WEBHOOK_URL = SECRET_URL
+    delivered: list[str] = []
+
+    def flaky(url, content):
+        if len(delivered) + flaky.failed < 2:
+            flaky.failed += 1
+            raise ConnectionError("down")
+        delivered.append(content)
+
+    flaky.failed = 0
+    monkeypatch.setattr("ops_metrics.alerts.post_webhook", flaky)
+    report = _new_report(reporter)
+
+    send_feedback_notice.apply(args=[report.pk])
+
+    assert len(delivered) == 1
+    report.refresh_from_db()
+    assert report.forwarded_at is not None
+
+
+def test_task_skips_already_forwarded_report(settings, sent, reporter):
+    settings.FEEDBACK_NOTICE_WEBHOOK_URL = SECRET_URL
+    report = _new_report(reporter)
+    services.mark_forwarded(report.pk)
+
+    send_feedback_notice.apply(args=[report.pk])
+
+    assert sent == []
+
+
+def test_task_with_missing_report_sends_nothing_and_does_not_retry(settings, sent):
+    settings.FEEDBACK_NOTICE_WEBHOOK_URL = SECRET_URL
+
+    result = send_feedback_notice.apply(args=[999999])
+
+    assert result.successful()
+    assert sent == []
 
 
 def test_commit_enqueues_the_task_once_with_the_report_number(delayed, reporter, django_capture_on_commit_callbacks):
