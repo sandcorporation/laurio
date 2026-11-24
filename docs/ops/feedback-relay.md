@@ -1,10 +1,21 @@
-# 제보 → 대장 메일함 (work 의 Orca 자동화)
+# 제보 전달 — 앱 전송 길과 손보기
 
-운영에 들어온 건의·버그 제보(`feedback` 앱, #1238·#1239)를 work 의 Orca 자동화가 대장 메일함(switchboard
-`sandcorp/boss`)으로 넘긴다(#1240). 메일에는 **번호·갈래·앱·받은 시각만** 싣는다 — 내용·스크린샷은 싣지 않고,
-읽을 사람이 `scripts/feedback.sh show <번호>` 로 운영에서 직접 읽는다. 스크린샷은 `scripts/feedback.sh screenshot <번호>`
-로 work 의 임시 파일에 받아 연다(아래 「스크린샷」). 처리(이슈·작업자·상태 바꾸기)는 대장이
-codemit 조율자에게 지시한다. daypage 건의함(`~/workspace/daypage/scripts/suggestions.sh`)과 같은 꼴이다.
+운영에 들어온 건의·버그 제보(`feedback` 앱, #1238·#1239)는 접수되면 앱이 알림 목적지로 번호·종류·앱만 보낸다(아래 「앱 전송 길」, #1366).
+매분 work 의 Orca 자동화가 대장 메일함(switchboard `sandcorp/boss`)으로 넘기던 길(#1240)은 꺼졌고, 아래 「구성」·「흐름」·「실패는 드러난다」는
+예전 길이자 손으로 쓸 때의 설명이다. 내용·스크린샷은 알림에 싣지 않고, 읽을 사람이 `scripts/feedback.sh show <번호>` 로 운영에서 직접 읽는다.
+스크린샷은 `scripts/feedback.sh screenshot <번호>` 로 work 의 임시 파일에 받아 연다(아래 「스크린샷」). daypage 건의함
+(`~/workspace/daypage/scripts/suggestions.sh`)과 같은 꼴이다.
+
+## 상태는 처리에 맞춰 바로 바꾼다
+
+처리하는 쪽이 제보를 만지는 순간 `scripts/feedback.sh status <번호> <상태> "처리 글"` 로 상태를 바꾼다. 나중에 몰아서 바꾸지 않는다.
+
+- 집어서 처리를 시작하면 `in_progress`.
+- 고쳐서 배포까지 끝나면 `deployed`.
+- 하지 않기로 하면 `declined`.
+- 시험 제보는 수신을 확인하면 바로 `declined` 로 닫는다 — 접수·작업 중으로 남기지 않는다.
+
+`status` 는 운영자 화면과 같은 서비스 함수라 이력에 「대장(명령)」으로 남고, **제보자에게 앱 안 알림이 간다**.
 
 ## 구성
 
@@ -29,14 +40,14 @@ codemit 조율자에게 지시한다. daypage 건의함(`~/workspace/daypage/scr
 ## 앱 전송 길 (#1366)
 
 `FEEDBACK_NOTICE_WEBHOOK_URL` 이 있으면 앱이 접수가 커밋된 뒤(`transaction.on_commit`) 알림 목적지로 한 건 보낸다.
-비어 있으면 아무것도 하지 않는다 — 전달 표시도 찍지 않아 위 자동화가 그대로 집어 간다.
+비어 있으면 아무것도 하지 않는다 — 전달 표시도 찍지 않는다. 자동화는 꺼졌으니 못 넘긴 제보는 `check`·`list` 에 남고, 보면 운영 쪽에 알린다.
 
 - 본문은 `{"content": "📮 [Codemit] 새 제보 #123 · 버그 · classroom"}` 한 줄이다. 번호·종류·앱 갈래만 들어가고
   제보 본문·스크린샷·제보자·페이지 주소는 넣지 않는다.
 - 접수 커밋 뒤 celery 작업(`feedback.send_feedback_notice`)을 큐에 넣고 worker 가 운영 경보와 같은 소켓 한도(5초)로
   보낸다 — 받는 곳이 느려도 접수 응답은 늦지 않는다. 재시도는 없고, 실패(큐에 못 넣음 포함)는 삼키며 로그에는 예외 종류만 남긴다.
 - 보내기에 성공하면 그 제보에 전달 표시(`forwarded_at`)를 찍는다 — 자동화가 켜져 있어도 같은 제보가 두 번 넘어가지 않는다.
-  실패한 제보는 `check`·`take` 에 남아 손으로 넘길 수 있다.
+  실패한 제보는 `check`·`list` 에 남아 손으로 넘길 수 있다.
 - 설정을 읽는 프로세스는 celery worker 다(dev 는 작업이 eager 라 `backend` 도 읽는다). 값을 넣은 뒤 `celery-worker` 컨테이너를 다시 띄운다.
 
 ## 실패는 드러난다 (#1252)

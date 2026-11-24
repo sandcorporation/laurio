@@ -44,7 +44,7 @@ scripts/test.sh backend tests/test_x.py              # 테스트(로컬은 400�
 - [배포 길 셋](docs/ops/deploy-paths.md) — 핫픽스(대장이 정함, `scripts/hotfix.py`, 검사는 배포 뒤 따라 돈다)·스펙·낱개 이슈.
 - [배포](docs/ops/deploy.md) — PR → main → production(= prod 배포) 체인, 되돌리기(revert PR · `ROLLBACK_SHA`), deploy.sh, 겹쳐 바꾸기, 풀러, 제품 스위치.
 - [운영](docs/ops/operations.md) — admin 없음, 백업, Prometheus·Loki·GlitchTip, GlitchTip 자동 진단.
-- [제보 전달](docs/ops/feedback-relay.md) — 운영 건의·버그 제보를 work Orca 자동화가 `scripts/feedback.sh` 로 대장 메일함에 넘긴다(번호·갈래·앱·시각만, #1240).
+- [제보 전달](docs/ops/feedback-relay.md) — 새 제보는 앱이 알림 목적지로 번호·종류·앱만 보내고(#1366) 받는 쪽이 `scripts/feedback.sh` 로 읽는다. **상태는 처리에 맞춰 바로 `feedback.sh status` 로 바꾼다**(집으면 `in_progress`, 배포로 끝나면 `deployed`, 하지 않으면 `declined`, 시험 제보는 수신 확인 즉시 `declined`).
 - [커밋 훅](docs/ops/commit-hooks.md) — `.githooks/pre-commit` 이 하는 셋.
 
 ## Agent skills
