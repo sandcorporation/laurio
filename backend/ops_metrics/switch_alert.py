@@ -40,10 +40,12 @@ def check_daily(*, now: datetime) -> list[str]:
     targets = due(now)
     if not targets:
         return []
+    text = message(targets)
+    alerts.post_notice(text)
     url = settings.OPS_ALERT_DISCORD_WEBHOOK_URL
     if url:
         try:
-            alerts.post_webhook(url, message(targets))
+            alerts.post_webhook(url, text)
         except Exception as exc:  # noqa: BLE001 - 다음 날 다시 대상이다
             # 주소가 예외 문장에 섞일 수 있어 종류만 남긴다.
             logger.warning("운영 스위치 경보를 보내지 못했다: %s", type(exc).__name__)

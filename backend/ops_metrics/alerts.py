@@ -209,20 +209,52 @@ def message(state: AlertState, kind: str) -> str:
     return f"✅ [Codemit] {state.rule} 해소 — {_duration(lasted)} 지속"
 
 
-def _deliver(state: AlertState) -> None:
-    url = settings.OPS_ALERT_DISCORD_WEBHOOK_URL
+def post_notice(content: str) -> None:
+    """둘째 알림 목적지(`OPS_ALERT_NOTICE_WEBHOOK_URL`)로 한 번 보낸다 — 비면 건너뛰고, 실패는 삼킨다(다시 보내지 않는다).
+
+    디스코드 쪽과 독립이다: 여기서 느리거나 실패해도 호출자와 디스코드 전송은 그대로다. 주소가 예외 문장에 섞일 수 있어
+    예외 종류만 로그에 남긴다.
+    """
+
+    url = settings.OPS_ALERT_NOTICE_WEBHOOK_URL
+    if not url:
+        return
+    try:
+        post_webhook(url, content)
+    except Exception as exc:  # noqa: BLE001 - 둘째는 한 번만 보내고 포기한다
+        logger.warning("운영 경보를 둘째 알림 목적지로 보내지 못했다: %s", type(exc).__name__)
+
+
+def _deliver(state: AlertState, *, fresh: bool = True) -> None:
+    """대기 중인 알림을 보낸다. `fresh` 는 이 알림이 이번 검사에서 새로 생겼다는 뜻 — 둘째 목적지는 그때만 한 번 받는다.
+
+    디스코드는 못 보내면 `pending_notice` 를 남겨 다음 검사가 다시 보낸다(그때 `fresh` 는 거짓이라 둘째는 받지 않는다).
+    """
+
     if not state.pending_notice:
         return
+    text = message(state, state.pending_notice)
+    if fresh:
+        post_notice(text)
+    url = settings.OPS_ALERT_DISCORD_WEBHOOK_URL
     if not url:
         state.pending_notice = ""
         return
     try:
-        post_webhook(url, message(state, state.pending_notice))
+        post_webhook(url, text)
     except Exception as exc:  # noqa: BLE001 - 다음 검사가 다시 보낸다
         # 주소가 예외 문장에 섞일 수 있어 종류만 남긴다.
         logger.warning("운영 경보 %s 의 %s 알림을 보내지 못해 다음 검사에서 다시 보낸다: %s", state.rule, state.pending_notice, type(exc).__name__)
         return
     state.pending_notice = ""
+
+
+def advance(state: AlertState, rule: Rule, reading: Reading, at: datetime) -> None:
+    """한 규칙을 한 걸음 옮기고 알림을 보낸다 — 새로 생긴 알림만 둘째 목적지로 간다."""
+
+    before = state.pending_notice
+    _step(state, rule, reading, at)
+    _deliver(state, fresh=bool(state.pending_notice) and state.pending_notice != before)
 
 
 # --- 검사 ------------------------------------------------------------------------------------
@@ -260,8 +292,7 @@ def check_alerts(*, now: datetime) -> dict[str, str] | None:
         states = {state.rule: state for state in AlertState.objects.filter(rule__in=[r.name for r in RULES])}
         for rule in RULES:
             state = states[rule.name]
-            _step(state, rule, rule.read(inputs), now)
-            _deliver(state)
+            advance(state, rule, rule.read(inputs), now)
             state.save()
         # 느린 경로(#971)는 디스코드가 아니라 GlitchTip 으로 간다 — 같은 잠금 안에서 경로마다 따로 상태를 든다.
         slow_route_check.check_realtime(now=now)

@@ -189,3 +189,20 @@ def test_confirmation_shows_in_change_history(su, capture):
     _post(su, f"/{SCORING}/confirm")
     rows = su.get(f"{URL}/changes", HTTP_ORIGIN=ORIGIN).json()
     assert rows[0]["action"] == "ack" and rows[0]["operator_username"] == "sw_super"
+
+
+def test_second_destination_gets_the_switch_alert_and_its_failure_is_harmless(su, capture, monkeypatch, settings):
+    _set(su, capture, SCORING, "on", T0)
+    now = T0 + timedelta(days=3)
+    settings.OPS_ALERT_DISCORD_WEBHOOK_URL = HOOK
+    settings.OPS_ALERT_NOTICE_WEBHOOK_URL = "https://notice.invalid/hook/x"
+    out: dict[str, list[str]] = {}
+    monkeypatch.setattr(alerts, "post_webhook", lambda url, content: out.setdefault(url, []).append(content))
+    assert check_daily(now=now) == [SCORING]
+    assert out[HOOK] == out["https://notice.invalid/hook/x"] and len(out[HOOK]) == 1
+
+    def boom(url, content):
+        raise RuntimeError(url)
+
+    monkeypatch.setattr(alerts, "post_webhook", boom)
+    assert check_daily(now=now) == [SCORING]

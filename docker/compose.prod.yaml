@@ -277,6 +277,8 @@ x-backend-env: &backend-env
   OPS_METRICS_REDIS_URL: redis://redis:6379/3
   # 운영 경보(#830)의 디스코드 웹훅 — 비면 보내지 않고 상태만 기록한다(값은 .env 에만 둔다).
   OPS_ALERT_DISCORD_WEBHOOK_URL: ${OPS_ALERT_DISCORD_WEBHOOK_URL:-}
+  # 둘째 알림 목적지(#1364) — 같은 본문을 나란히 보낸다. 비면 건너뛴다.
+  OPS_ALERT_NOTICE_WEBHOOK_URL: ${OPS_ALERT_NOTICE_WEBHOOK_URL:-}
 
   # --- 공모전 검색 (#450/#451, 부모 #444 스펙, ADR-0007) ---
   # 값이 없어도 부팅이 막히지 않도록 컴포즈 레벨 기본값을 실물
