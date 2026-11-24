@@ -1,6 +1,6 @@
 """발송 실패 운영 경보(#1123) — 알림이 나가지 않아도 사람이 사이트를 보기 전에는 알 길이 없었다(2026-11-21,
 채점 완료 알림 16건). `NotificationDispatch`(발송 기록)를 스캔 하나(`notification-dispatch-alert`)가 보고,
-두 규칙 중 하나라도 걸리면 운영 경보 길(`OPS_ALERT_DISCORD_WEBHOOK_URL` → `ops_metrics.alerts`)로 올린다.
+두 규칙 중 하나라도 걸리면 운영 경보 길(`OPS_ALERT_DISCORD_WEBHOOK_URL`·`OPS_ALERT_NOTICE_WEBHOOK_URL` → `ops_metrics.alerts`)로 올린다.
 
 - `notification-dispatch-failures` — 최근 창(기본 60분) 안의 실패 이력이 문턱(기본 5건) 이상.
 - `notification-zero-reach` — 같은 창 안에 시도한 알림이 한 유형에서 문턱(기본 3건) 이상인데 **하나도 닿지 않았다**
@@ -95,8 +95,7 @@ def check(*, now) -> dict[str, str]:
         for name in _RULES:
             state = states[name]
             before = state.status
-            alerts._step(state, alerts.Rule(name, 1, lambda _inputs: readings[name]), readings[name], now)
-            alerts._deliver(state)
+            alerts.advance(state, alerts.Rule(name, 1, lambda _inputs: readings[name]), readings[name], now)
             state.save()
             if state.status != before:
                 changed[name] = str(state.status)

@@ -262,3 +262,80 @@ def test_the_beat_schedule_checks_alerts_every_minute():
     job = SCHEDULED_JOBS["ops-metrics:alerts"]
     assert job["task"] == "ops_metrics.check_alerts"
     assert job["schedule"].minute == set(range(60))
+
+
+# --- 둘째 알림 목적지(#1364) ---------------------------------------------------------------
+
+NOTICE = "https://notice.invalid/hook/other-token"
+
+
+@pytest.fixture
+def routed(monkeypatch, settings):
+    """주소 → 보낸 문장들. 디스코드와 둘째 목적지가 모두 설정돼 있다."""
+
+    settings.OPS_ALERT_DISCORD_WEBHOOK_URL = HOOK
+    settings.OPS_ALERT_NOTICE_WEBHOOK_URL = NOTICE
+    settings.OPERATOR_WEB_ORIGIN = "https://console.example"
+    out: dict[str, list[str]] = {HOOK: [], NOTICE: []}
+
+    def post(url, content):
+        out[url].append(content)
+
+    monkeypatch.setattr(alerts, "post_webhook", post)
+    return out
+
+
+def test_second_destination_gets_the_same_body_alongside_discord(db, routed):
+    _calls("auth", 1, T0)
+    _check(T0 + 10)
+    assert len(routed[HOOK]) == 1 and routed[NOTICE] == routed[HOOK]
+
+
+def test_without_a_second_destination_only_discord_gets_it(db, sent, settings):
+    settings.OPS_ALERT_NOTICE_WEBHOOK_URL = ""
+    _calls("auth", 1, T0)
+    _check(T0 + 10)
+    assert len(sent) == 1
+
+
+def test_second_destination_still_gets_it_when_discord_fails(db, routed, monkeypatch):
+    def post(url, content):
+        if url == HOOK:
+            raise ConnectionError("discord unreachable")
+        routed[url].append(content)
+
+    monkeypatch.setattr(alerts, "post_webhook", post)
+    _calls("auth", 1, T0)
+    _check(T0 + 10)
+    assert len(routed[NOTICE]) == 1
+
+
+def test_second_failure_breaks_neither_discord_nor_the_caller(db, routed, monkeypatch, caplog):
+    def post(url, content):
+        if url == NOTICE:
+            raise ConnectionError(NOTICE)
+        routed[url].append(content)
+
+    monkeypatch.setattr(alerts, "post_webhook", post)
+    _calls("auth", 1, T0)
+    assert _check(T0 + 10) is not None
+    assert len(routed[HOOK]) == 1
+    assert NOTICE not in caplog.text and "ConnectionError" in caplog.text
+
+
+def test_discord_retry_does_not_resend_to_the_second_destination(db, routed, monkeypatch):
+    attempts = []
+
+    def post(url, content):
+        if url == HOOK:
+            attempts.append(content)
+            if len(attempts) == 1:
+                raise ConnectionError("discord unreachable")
+        routed[url].append(content)
+
+    monkeypatch.setattr(alerts, "post_webhook", post)
+    _calls("auth", 1, T0)
+    _check(T0 + 10)
+    _check(T0 + 70)
+    _check(T0 + 130)
+    assert len(attempts) == 2 and len(routed[NOTICE]) == 1

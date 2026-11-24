@@ -364,6 +364,7 @@ pull) → 교체 → 확인 → 배포 표식 → GlitchTip 해결 표시 → �
 예시는 `docker/*.env.example`·`backend/.env.example`). 빌드 알림의 Jenkins 자격증명은 CI 의 것이라 쓰지
 않는다. **비어 있으면 보내지 않고 상태만 기록한다** — 콘솔 `/ops` 경보 패널은 그대로 채워진다. 값은 대표가
 서버의 env 파일에 넣고, 저장소·로그에는 남기지 않는다(전송 실패 로그도 예외 종류만 적는다).
+**둘째 알림 목적지**(#1364) — 같은 본문을 `OPS_ALERT_NOTICE_WEBHOOK_URL`(디스코드 꼴 `{"content": …}` 을 받는 주소, 선택·필수 설정 아님, 비면 건너뛴다)로도 나란히 보낸다. backend 경보(web·celery worker·beat)와 배포 뒤 경보(`scripts/ci/ops-alert.sh`)가 읽는다. 값을 넣은 뒤 backend·celery worker·beat 컨테이너를 다시 띄운다. 두 전송은 서로 독립이고, 둘째는 알림마다 한 번만 보낸다(다시 보내지 않는다).
 
 **배포 끝에 호스트의 도커 디스크를 비운다**(`deploy.sh <대상> prune`, 2026-09-17). 커밋마다
 ghcr 에서 새 태그를 받으니 옛 커밋 이미지가 쌓이고, oracle 에는 ghcr 이전에 굽던 빌드 캐시가

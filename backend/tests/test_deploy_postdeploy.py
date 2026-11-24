@@ -49,9 +49,11 @@ h=$(head)
 case "$*" in
   *"--config -"*)
     # 운영 경보(ops-alert.sh) — 설정(표준 입력, 주소)과 명령줄을 따로 남긴다
-    { echo "stdin: $(cat)"; echo "argv: $*"; } >> "$FAKE_ALERTS"
+    cfg="$(cat)"
+    { echo "stdin: $cfg"; echo "argv: $*"; } >> "$FAKE_ALERTS"
     echo "$TOOL alert@$(echo "$h" | cut -c1-4)" >> "$FAKE_CALLS"
-    [ -n "${FAKE_ALERT_FAIL:-}" ] && { printf 000; exit 7; }
+    # FAKE_ALERT_FAIL: 1 이면 모두 실패, 아니면 그 문자열이 주소 줄에 든 호출만 실패
+    if [ "${FAKE_ALERT_FAIL:-}" = 1 ] || { [ -n "${FAKE_ALERT_FAIL:-}" ] && [[ "$cfg" == *"$FAKE_ALERT_FAIL"* ]]; }; then printf 000; exit 7; fi
     printf 204; exit 0 ;;
   *scope=ready*) step=ready ;;
   *api/health*) step=health ;;
@@ -354,6 +356,45 @@ def test_alert_failure_does_not_change_the_rollback(prod):
     assert "경보: 보내지 못했다" in result.stdout
     assert _git(repo, "rev-parse", "HEAD") == a
     assert _marker(repo) == a
+
+
+NOTICE = "https://notice.invalid/hook/2/other-token"
+BOTH_ENV = ALERT_ENV + f"OPS_ALERT_NOTICE_WEBHOOK_URL={NOTICE}\n"
+
+
+def test_second_destination_gets_the_same_body_alongside(prod):
+    repo, a, b, run = prod
+    result, _ = run(env_file=BOTH_ENV, FAKE_BAD=b, FAKE_FAIL="health backend")
+    assert result.returncode == 2
+    rows = _alerts(repo)
+    stdins, argvs = rows[0::2], rows[1::2]
+    assert sorted(stdins) == sorted([f'stdin: url = "{HOOK}"', f'stdin: url = "{NOTICE}"'])
+    assert argvs[0] == argvs[1]
+    assert NOTICE not in result.stdout + result.stderr + "".join(argvs)
+
+
+def test_without_second_destination_only_one_alert_goes(prod):
+    repo, a, b, run = prod
+    result, _ = run(env_file=ALERT_ENV, FAKE_BAD=b, FAKE_FAIL="health backend")
+    assert result.returncode == 2
+    assert len(_alerts(repo)) == 2
+
+
+def test_discord_failure_still_sends_the_second(prod):
+    repo, a, b, run = prod
+    result, _ = run(env_file=BOTH_ENV, FAKE_BAD=b, FAKE_FAIL="health backend", FAKE_ALERT_FAIL="secret-token")
+    assert result.returncode == 2
+    assert f'stdin: url = "{NOTICE}"' in _alerts(repo)
+    assert "경보: 보내지 못했다" in result.stdout and "경보: 둘째 목적지 보냈다" in result.stdout
+
+
+def test_second_failure_changes_neither_discord_nor_the_rollback(prod):
+    repo, a, b, run = prod
+    result, _ = run(env_file=BOTH_ENV, FAKE_BAD=b, FAKE_FAIL="health backend", FAKE_ALERT_FAIL="other-token")
+    assert result.returncode == 2
+    assert "자동 되돌리기 끝" in result.stdout
+    assert "경보: 보냈다" in result.stdout and "경보: 둘째 목적지 보내지 못했다" in result.stdout
+    assert _git(repo, "rev-parse", "HEAD") == a
 
 
 def test_no_alert_address_skips_quietly(prod):
