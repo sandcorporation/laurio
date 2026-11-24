@@ -13,7 +13,8 @@
 # `GLITCHTIP_TOKEN_FOR_AUTOMATION`(없으면 표시만 건너뛴다).
 #
 # 「문서만」 병합은 `plan` 이 배포 표식(`.jenkins-prod-deployed`, = 직전 성공 배포) 기준으로 바뀐 서비스가 없다고
-# 내고(DEPLOY_ANY=false), 교체 없이 표식만 옮긴다 — 컨테이너는 그대로다.
+# 내고(DEPLOY_ANY=false), 교체 없이 표식만 옮긴다 — 컨테이너는 그대로다. env 만 고쳤으면 지금 production sha 로
+# ROLLBACK_SHA 재배포 → env 지문(`.jenkins-prod-env-sha256`)이 달라 plan 이 교체 길을 내고 앱 컨테이너를 다시 올린다(#1372).
 #
 # 종료 코드는 라이브러리 약속(README 「자동 롤백」)을 따른다: 0 성공 · 1 교체 전 실패(옛 서비스 그대로) ·
 # 2 교체 뒤 실패(되돌리지 않는다 — Jenkinsfile 의 `autoRollback: false`). `SANDCORP_ROLLBACK=1` 로 불리면 거절한다.

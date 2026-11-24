@@ -150,6 +150,14 @@ DEPLOYED=".jenkins-${TARGET}-deployed"
 # gitignore 한다.
 PLAN_FILE=".jenkins-${TARGET}-plan"
 
+# 직전 성공 배포 때 env 파일(`$ENV_FILE`)의 sha256(#1372). env 는 저장소 밖이라 경로 차이로는 안 보인다 —
+# env 만 고치고 같은 커밋을 다시 배포(ROLLBACK_SHA)하면 「배포할 것이 없다」로 끝나 컨테이너가 옛 env 를 들고
+# 있었다(배포 잡 #801). `mark` 가 남기고 `plan` 이 견준다. 값이 아니라 지문만, 권한 600. 로그에 찍지 않는다.
+ENV_FINGERPRINT=".jenkins-${TARGET}-env-sha256"
+env_fingerprint() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$ENV_FILE"; else shasum -a 256 "$ENV_FILE"; fi | cut -d' ' -f1
+}
+
 # Jenkins 워크스페이스는 체크아웃 주체와 셸 실행 주체의 uid 가 다를 수 있다.
 # 그때 git 이 "dubious ownership" 으로 멈추는데, 배포와 무관한 이유로 멈추는
 # 것이므로 이 저장소만 예외로 둔다.
@@ -631,8 +639,17 @@ cmd_plan() {
     BUILD_AGENT_GRADER=false
   fi
 
+  # **env 만 바뀐 배포**(#1372) — 직전 성공 배포의 env 지문과 다르거나 남긴 지문이 없으면 교체 길을 탄다.
+  # 이미지는 받지 않는다(BUILD_* 는 그대로) — `up` 이 backend 넷과 llm-proxy 를 지금 이미지로 다시 만든다.
+  # 세 앱은 위 `app_env_needs_restart` 가 따로 본다.
+  ENV_CHANGED=false
+  if [ "$STALE" = false ] && [ -f "$ENV_FILE" ] \
+     && [ "$(cat "$ENV_FINGERPRINT" 2>/dev/null)" != "$(env_fingerprint)" ]; then
+    ENV_CHANGED=true
+  fi
+
   ANY=false
-  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ] || [ "$BUILD_PGBOUNCER" = true ] || [ "$BUILD_AGENT_GRADER" = true ]; then
+  if [ "$BUILD_BACKEND" = true ] || [ "$BUILD_FRONTEND" = true ] || [ "$BUILD_OPERATOR" = true ] || [ "$BUILD_CLASSROOM" = true ] || [ "$BUILD_SEARCH" = true ] || [ "$BUILD_PGBOUNCER" = true ] || [ "$BUILD_AGENT_GRADER" = true ] || [ "$ENV_CHANGED" = true ]; then
     ANY=true
   fi
 
@@ -648,6 +665,7 @@ cmd_plan() {
     echo "BUILD_PGBOUNCER=$BUILD_PGBOUNCER"
     echo "BUILD_AGENT_GRADER=$BUILD_AGENT_GRADER"
     echo "AGENT_GRADER_RECREATE=$AGENT_GRADER_RECREATE"
+    echo "ENV_CHANGED=$ENV_CHANGED"
     echo "ROLLING_BACKEND=$ROLLING_BACKEND"
     echo "PLANNED_COMMIT=$($GIT rev-parse HEAD)"
   } > "$PLAN_FILE"
@@ -671,6 +689,9 @@ cmd_plan() {
     else
       echo "  backend·events 교체 방식                      : 넷을 내리고 마이그레이션을 돌린 뒤 올린다 — ${ROLLING_REASON}"
     fi
+  fi
+  if [ "$ENV_CHANGED" = true ]; then
+    log "env 가 바뀌어 다시 올린다 — backend(+celery-worker,+events,+grader,+llm-proxy), 이미지는 그대로."
   fi
   if [ "$ANY" = false ]; then
     log "바뀐 것이 없다. 배포할 것이 없다."
@@ -1173,6 +1194,23 @@ cmd_up() {
       # shellcheck disable=SC2086
       $COMPOSE up -d --no-deps $UP_FLAGS celery-worker events grader llm-proxy
     fi
+  elif [ "${ENV_CHANGED:-false}" = true ]; then
+    # **env 만 바뀌었다**(#1372) — 이미지·마이그레이션은 그대로, `x-backend-env` 를 받는 다섯을 지금 env 로 다시
+    # 만든다. compose 도 설정 해시로 알아채지만 어느 서비스가 바뀐 키를 읽는지 계획이 모르므로 강제로 다시 만든다.
+    # 겹쳐 바꾸기는 새 컨테이너를 늘 새로 만든다. 이미지 태그는 이 커밋의 것이라 같은 커밋 재배포면 이미 있다.
+    log "env 가 바뀌어 backend·celery-worker·events·grader·llm-proxy 를 다시 올린다"
+    if [ "${ROLLING_BACKEND:-false}" = true ]; then
+      rolling_replace backend 8000 30
+      # shellcheck disable=SC2086
+      $COMPOSE up -d --no-deps $UP_FLAGS --force-recreate celery-worker llm-proxy
+      rolling_replace events 8001 10
+      log "grader 를 바꾼다 — 채점 중인 것을 마저 끝내느라 최대 4분 걸린다"
+      # shellcheck disable=SC2086
+      $COMPOSE up -d --no-deps $UP_FLAGS --force-recreate grader
+    else
+      # shellcheck disable=SC2086
+      $COMPOSE up -d --no-deps $UP_FLAGS --force-recreate backend celery-worker events grader llm-proxy
+    fi
   fi
   # shellcheck disable=SC2086
   if [ "$BUILD_FRONTEND" = true ]; then $COMPOSE up -d --no-deps $UP_FLAGS frontend; fi
@@ -1324,6 +1362,11 @@ cmd_mark() {
     fi
   fi
   echo "$head_sha" > "$DEPLOYED"
+  # 이 배포가 올린 env 의 지문(#1372) — 다음 `plan` 이 견준다. 값이 아니라 지문만, 주인만 읽는다.
+  if [ -f "$ENV_FILE" ]; then
+    (umask 077 && env_fingerprint > "$ENV_FINGERPRINT.tmp") && chmod 600 "$ENV_FINGERPRINT.tmp" \
+      && mv "$ENV_FINGERPRINT.tmp" "$ENV_FINGERPRINT"
+  fi
   rm -f "$PLAN_FILE"
   log "배포 표식: $(cat "$DEPLOYED")"
 }

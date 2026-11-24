@@ -154,7 +154,9 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    - **배포**(에이전트 `oracle`) — `scripts/ci/deploy-prod.sh` 가 `deploy.sh prod <명령>` 을 Preflight → 변경 계획 → 이미지
      받기 → 교체(마이그레이션이 있으면 migrate 전에 덤프, #839; backend·events 는 겹쳐 바꾸기) → 확인 → 배포 표식 →
      **GlitchTip 해결 표시** → 정리 순으로 부른다. **「문서만」 병합**은 변경 계획이 배포 표식(`.jenkins-prod-deployed` = 마지막
-     성공 배포) 기준으로 비워 교체 없이 표식만 옮긴다. 빌드 노드 단계가 없으니 문맥 해시(`CODEMIT_CTX_*`)가 오지 않아 변경
+     성공 배포) 기준으로 비워 교체 없이 표식만 옮긴다 — 단 `docker/.env.prod` 의 지문이 표식 옆 `.jenkins-prod-env-sha256`(600,
+     성공 배포 때 `mark` 가 남긴다)과 다르거나 그 파일이 없으면 이미지는 받지 않고 backend·celery-worker·events·grader·llm-proxy
+     를 지금 env 로 다시 만든다(#1372, 로그는 「env 가 바뀌어 다시 올린다」 한 줄, 지문·값은 찍지 않는다). 빌드 노드 단계가 없으니 문맥 해시(`CODEMIT_CTX_*`)가 오지 않아 변경
      계획은 경로 비교로 고른다(oracle 에이전트에는 python3 가 없다, #849).
    - **끝**(built-in) — 커밋 상태 `sandcorp/deploy` 를 success/failure 로, 실패면 그 커밋을 만든 PR 에 「배포 실패 — …」
      댓글, 디스코드 한 줄.
@@ -252,7 +254,8 @@ codemit-prod-backend-1 …` 안에서 `127.0.0.1:8000` 으로 친다. 그때 Hos
    옮겨 배포한다(production 은 앞으로만 간다 — ruleset 이 강제 push·삭제를 막는다. production 을 옛 sha 로 옮기는
    워크플로는 두지 않는다). ② **급하면 Jenkins 「Build with Parameters」의 `ROLLBACK_SHA=<sha 40자>`** — 빌드 없이 그 커밋의
    이미지로 같은 절차를 돈다(`deploy-prod.sh` 가 그 커밋을 체크아웃한다). production 은 그대로라 다음 승격이 다시 앞으로
-   간다 — 그 전에 revert PR 을 넣는다. 같은 커밋을 다시 배포할 때도 `ROLLBACK_SHA` 에 그 sha.
+   간다 — 그 전에 revert PR 을 넣는다. 같은 커밋을 다시 배포할 때도 `ROLLBACK_SHA` 에 그 sha. **env 만 고쳤으면 지금
+   production sha 로 `ROLLBACK_SHA` 재배포** — env 지문이 달라 앱 컨테이너를 다시 올린다(#1372).
    Actions image job 이 실패하면 해당 GitHub Actions 실행을 고치거나 다시 실행한다. Jenkins 는 빌드 노드를 선택하지 않고, `ROLLBACK_SHA` 도 Actions 가 GHCR 에 올린 이미지에만 쓴다.
 
    예전 흐름: 2026-10-02 ~ 10-15 에는 GitHub Actions(`images.yaml`)가 이미지와 가드를 돌리고 `staging` 을
