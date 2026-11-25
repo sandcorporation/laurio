@@ -46,6 +46,7 @@ import {
 } from "@/lib/problems/due-dates";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
+import { openBlockedReason } from "@/lib/problems/open-blocked-reason";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type DraftChecklistItem = {
@@ -63,7 +64,10 @@ export default function NewProblemPage() {
   // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속). 불러오는 중에는
   // 비워 둔다 — 「클래스」 같은 자리표시를 잠깐 보였다 바꾸면 깜빡임만 는다.
   const { state: classState, reload: reloadClass } = useClass(classId);
-  useClassroomTabTitle({ screenName: "새 문제" });
+  useClassroomTabTitle({
+    screenName: "새 문제",
+    className: classState.status === "ready" ? classState.classroom.name : null,
+  });
   const costState = useScoringCost(classId);
   const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const router = useRouter();
@@ -316,6 +320,7 @@ export default function NewProblemPage() {
             type="button"
             data-testid="new-problem-create-and-open-submit"
             disabled={createDisabled || !hasRequiredItem}
+            title={openBlockedReason({ createDisabled, hasRequiredItem }) ?? undefined}
             onClick={handleCreateAndOpen}
             className={buttonClass("primary")}
           >
