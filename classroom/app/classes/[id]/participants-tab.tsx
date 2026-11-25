@@ -22,14 +22,15 @@ import type { GridCell, GridCellStatus, GridMemberRow } from "@/lib/roster-grid/
 import { gridEntryLabel } from "@/lib/submissions/contest-entry";
 import { openPassedSummary } from "@/lib/roster-grid/passed";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const PROBLEM_STATUS_LABEL: Record<string, string> = { draft: "초안", hidden: "숨김" };
 
 const STATUS_LABEL: Record<GridCellStatus, string> = {
   passed: "통과",
   attempted_not_passed: "시도했으나 미통과",
-  needs_setup: "설정 필요",
-  scoring: "채점 중",
+  needs_setup: WAITING_LABEL,
+  scoring: SCORING_LABEL,
   not_submitted: "미제출",
 };
 
@@ -73,7 +74,7 @@ function StatusMark({ status, perfect = false }: { status: GridCellStatus; perfe
   if (status === "attempted_not_passed")
     return <span className="mx-auto block h-[15px] w-[15px] border border-error" />;
   if (status === "needs_setup")
-    // 「설정 필요」는 강사가 키를 넣거나 모델을 바꾸기 전까지 절대 바뀌지
+    // 「채점 대기」(`needs_setup`)는 강사가 키를 넣거나 모델을 바꾸기 전까지 절대 바뀌지
     // 않는다(#346, #403, #434) — 「채점 중」의 빗금과 달리 속이 빈 주의색
     // 테두리로 "멈춰 있다"를 그린다.
     return <span className="mx-auto block h-[15px] w-[15px] border border-warning border-dashed" />;
