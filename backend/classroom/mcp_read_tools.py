@@ -485,7 +485,8 @@ _PARTICIPANT_OBJECT = {
         "id": {"type": "integer", "description": "참여자 번호"},
         "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
         "joined_at": {**_DATETIME, "description": "가입한 시각(ISO 8601)"},
-        "expelled": {"type": "boolean", "description": "내보낸 참여자인가 — 기록은 남고 새 제출만 막힌다"},
+        "expelled": {"type": "boolean", "description": "내보냈거나 스스로 나간 참여자인가 — 기록은 남고 새 제출만 막힌다"},
+        "left": {"type": "boolean", "description": "expelled 가 참인 까닭이 스스로 나간 것인가(공동 강사였다가 떠남·탈퇴)"},
         "is_instructor": {"type": "boolean", "description": "강사(소유자·공동 강사)가 참여자로도 들어온 자리인가 — 집계에서 빠진다"},
     },
     "required": ["id", "display_name", "joined_at", "expelled", "is_instructor"],
@@ -647,7 +648,8 @@ READ_TOOL_SPECS: list[dict] = [
                             "id": {"type": "integer", "description": "참여자 번호"},
                             "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
                             "is_instructor": {"type": "boolean"},
-                            "expelled": {"type": "boolean", "description": "내보낸 참여자인가"},
+                            "expelled": {"type": "boolean", "description": "내보냈거나 스스로 나간 참여자인가"},
+                            "left": {"type": "boolean", "description": "expelled 가 참인 까닭이 스스로 나간 것인가"},
                             "cells": {
                                 "type": "array",
                                 "items": {

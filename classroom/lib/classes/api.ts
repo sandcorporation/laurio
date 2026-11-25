@@ -140,6 +140,8 @@ export type JoinedClassRow = {
   // 강사가 내보냈는가(#281) — 참이면 새 제출만 막히고, 지난 시도·판정은
   // 그대로 읽힌다.
   expelled: boolean;
+  // `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5) — 공동 강사였다가 떠났거나 탈퇴했다.
+  left: boolean;
   // 열린 문제 수와 그중 내가 한 번이라도 통과한 수(#632) — 둘 다 항상 정수다.
   open_problem_count: number;
   passed_count: number;

@@ -268,12 +268,13 @@ def _my_roster_row(class_obj: Class, user_id: int) -> dict:
 # --- 떠나기 (#563) -----------------------------------------------------------------
 
 
-def depart(row: ClassCoInstructor) -> bool:
+def depart(row: ClassCoInstructor, *, by_self: bool) -> bool:
     """공동 강사 한 사람이 클래스에서 빠진다 — 세 길(떠나기·내보내기·탈퇴)이 모두 이 함수를
     탄다. 한 트랜잭션에서:
 
     1. 공동 강사 자리를 지운다 — 그 순간부터 「강사인가」가 거짓이라 강사 라우트가 404 다.
-    2. 그 사람의 참여자 행이 있으면 내보낸 참여자로 표시한다(이미 내보냈으면 그대로). 강사일
+    2. 그 사람의 참여자 행이 있으면 닫는다(이미 닫혔으면 그대로) — 떠나기·탈퇴(`by_self`)면
+       스스로 나간 것으로, 소유자의 내보내기면 내보낸 것으로 적는다(#1492-5). 강사일
        때 집계에서 빠지던 점검용 시도가 「지금 배우는 사람」으로 돌아오지 않게 하고, 그 시도는
        내보낸 참여자의 시도로 남아 문제 삭제를 막는다(ADR-0050).
     3. 그 사람이 만든 대기 중 초대를 취소한다 — 더 믿지 않는 사람이 나눠 준 링크로 누가
@@ -295,7 +296,7 @@ def depart(row: ClassCoInstructor) -> bool:
         ClassCoInstructor.objects.filter(id=row.id).delete()
         ClassMember.objects.filter(
             classroom_id=row.classroom_id, user_id=row.user_id, expelled_at__isnull=True
-        ).update(expelled_at=now)
+        ).update(expelled_at=now, left_by_self=by_self)
         CoInstructorInvite.objects.filter(
             _pending_q(now), classroom_id=row.classroom_id, created_by_id=row.user_id
         ).update(cancelled_at=now)
@@ -310,14 +311,14 @@ def leave(class_obj: Class, user_id: int) -> None:
         raise HttpError(409, OWNER_CANNOT_LEAVE_MESSAGE)
     row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, user_id=user_id).first()
     if row is not None:
-        depart(row)
+        depart(row, by_self=True)
 
 
 def remove_by_owner(class_obj: Class, co_instructor_id: int) -> None:
     """소유자가 공동 강사 한 사람을 내보낸다. 이 클래스의 공동 강사 줄이 아니면 404."""
 
     row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, id=co_instructor_id).first()
-    if row is None or not depart(row):
+    if row is None or not depart(row, by_self=False):
         raise HttpError(404, "이 클래스에 그런 공동 강사가 없습니다.")
 
 
@@ -327,4 +328,4 @@ def leave_all_on_withdrawal(sender, user, **kwargs) -> None:
     않는다(보관하지 않은 소유 클래스는 탈퇴를 막고, 보관한 것은 소유자에게 남는다)."""
 
     for row in ClassCoInstructor.objects.filter(user_id=user.id):
-        depart(row)
+        depart(row, by_self=True)

@@ -8,6 +8,8 @@ export type MemberRow = {
   display_name: string;
   joined_at: string;
   expelled: boolean;
+  // `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5).
+  left: boolean;
   is_instructor: boolean;
 };
 

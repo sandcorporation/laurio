@@ -251,6 +251,9 @@ class JoinedClassOut(Schema):
     #: 강사가 내보냈는가(#281) — 참이어도 행은 지워지지 않고 지난 시도·판정은
     #: 그대로 읽힌다(`member_expelled`와 같은 신호, #300). 새 제출만 막힌다.
     expelled: bool = False
+    #: `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5, `ClassMember.left_by_self`) — 공동
+    #: 강사로 있다가 떠나거나 탈퇴한 사람이다. 화면은 「내보내짐」 대신 「나감」으로 적는다.
+    left: bool = False
     #: 내 진행(#632) — 지금 열린 문제 수와 그중 내가 한 번이라도 통과한 수.
     open_problem_count: int = 0
     passed_count: int = 0
@@ -980,6 +983,8 @@ class MemberOut(Schema):
     display_name: str
     joined_at: datetime
     expelled: bool
+    #: `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5, `ClassMember.left_by_self`).
+    left: bool = False
     is_instructor: bool
 
 
@@ -1303,7 +1308,7 @@ class ClassroomProblemSubmissionsOut(Schema):
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
     #: 이 요청을 보낸 사람이 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면
-    #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) |
+    #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) | "left"(스스로 나감, #1492-5) |
     #: "hidden"(강사가 이 문제를 숨김) 중 하나다 — 우선순위는
     #: 보관 → 내보냄 → 숨김이고
     #: (`classroom.participation.participant_submit_blocked_reason`), 강사에게는
@@ -1378,6 +1383,8 @@ class ClassroomGridMemberOut(Schema):
     display_name: str
     is_instructor: bool
     expelled: bool
+    #: `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5) — 참여자 표가 「나감」과 「내보냄」을 가른다.
+    left: bool = False
     cells: list[ClassroomGridCellOut]
     #: 가입 시각과 이 사람의 가장 최근 제출 시각(#632). 제출이 없으면 `None`.
     joined_at: datetime | None = None

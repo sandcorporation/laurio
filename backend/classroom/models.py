@@ -597,6 +597,10 @@ class ClassMember(models.Model):
     #: 새 제출을 못 내는 것은 이 값을 보는 제출 엔드포인트(#286)의 몫이다 —
     #: 이 티켓은 그 신호를 남기는 데까지다.
     expelled_at = models.DateTimeField(null=True, blank=True)
+    #: `expelled_at` 이 찬 까닭이 스스로 나간 것인가(#1492-5). 참여자였던 공동 강사가 떠나거나
+    #: 탈퇴하면(`classroom.co_instructors.depart`) 참여자 행도 닫히는데, 그것은 누가 내보낸 것이
+    #: 아니다 — 화면이 「나감」과 「내보냄」을 가른다. 새 제출이 막히는 것은 둘이 같다.
+    left_by_self = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         ordering = ["joined_at", "id"]

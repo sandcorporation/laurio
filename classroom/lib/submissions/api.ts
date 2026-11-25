@@ -205,6 +205,8 @@ export type AttemptContestEntry = {
 export type SubmitBlockedReason =
   | "archived"
   | "expelled"
+  // 공동 강사였다가 스스로 나갔다(#1492-5) — 막는 것은 "expelled" 와 같고 문구만 다르다.
+  | "left"
   | "hidden"
   | null;
 
