@@ -132,7 +132,7 @@ export function ProblemsTable({
   problems: ProblemRow[];
   reorderError: boolean;
   onMove: (problemId: number, direction: "up" | "down") => Promise<boolean>;
-  onOpenPicker: (tab: PickerTab) => void;
+  onOpenPicker: (tab: PickerTab, opener: HTMLElement) => void;
 }) {
   // 옮긴 뒤 안내(#1478 6번, #1484 ②) — 서버가 확정한 뒤에 성공·실패를 읽는다. 낙관 배열만 보고 알리지 않는다.
   const [moveStatus, setMoveStatus] = useState("");
@@ -166,7 +166,7 @@ export function ProblemsTable({
       type="button"
       data-testid={testId}
       disabled={archived}
-      onClick={() => onOpenPicker(tab)}
+      onClick={(event) => onOpenPicker(tab, event.currentTarget)}
       className={buttonClass("secondary", "sm")}
     >
       {label}

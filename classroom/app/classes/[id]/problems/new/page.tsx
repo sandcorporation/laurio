@@ -106,6 +106,7 @@ export default function NewProblemPage() {
   // 나면 이 화면(빈 초안 폼)은 더 볼 일이 없다 — 가져온 문제의 편집
   // 화면으로 곧장 보낸다.
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerOpener = useRef<HTMLElement | null>(null);
   // 「공모전에서 들여오기」(#548) — 템플릿과 같은 자리, 들여온 뒤 그 문제의 편집 화면으로 간다.
 
   function handleImported(problem: ProblemRow) {
@@ -305,7 +306,10 @@ export default function NewProblemPage() {
           <button
             type="button"
             data-testid="open-problem-import"
-            onClick={() => setPickerOpen(true)}
+            onClick={(event) => {
+              pickerOpener.current = event.currentTarget;
+              setPickerOpen(true);
+            }}
             className={buttonClass("secondary")}
           >
             문제 가져오기
@@ -584,6 +588,7 @@ export default function NewProblemPage() {
       {pickerOpen ? (
         <ProblemImportSheet
           classId={classId}
+          opener={pickerOpener.current}
           onClose={() => setPickerOpen(false)}
           onImported={handleImported}
         />

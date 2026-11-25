@@ -108,6 +108,12 @@ for (const viewport of [
 
     const row = (await page.getByTestId(`my-problem-row-${past}-link`).boundingBox())!;
     const badge = (await status.locator("span").first().boundingBox())!;
+    // 상태 칸 경계 안에 든다 — 행은 칸보다 넓어 칸 밖으로 넘친 배지가 이웃 칸(마감)과 겹쳐도 행 경계만 보면 통과한다(#1510 이전 판).
+    const cell = (await status.boundingBox())!;
+    expect(badge.x).toBeGreaterThanOrEqual(cell.x - 1);
+    expect(badge.x + badge.width).toBeLessThanOrEqual(cell.x + cell.width + 1);
+    expect(badge.y).toBeGreaterThanOrEqual(cell.y - 1);
+    expect(badge.y + badge.height).toBeLessThanOrEqual(cell.y + cell.height + 1);
     // 한 픽셀 여유 — 테두리 반올림.
     expect(badge.x).toBeGreaterThanOrEqual(row.x - 1);
     expect(badge.x + badge.width).toBeLessThanOrEqual(row.x + row.width + 1);
