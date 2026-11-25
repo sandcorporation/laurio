@@ -151,6 +151,13 @@ function ClassDetail() {
   const [pickerTab, setPickerTab] = useState<PickerTab | null>(null);
   const pickerOpener = useRef<HTMLElement | null>(null);
 
+  // 삭제 뒤 이동처럼 초점이 갈 곳 없이 body 에 있을 때만 제목이 받는다(#1517) — 다른 곳의 초점은 빼앗지 않는다.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const classReady = classState.status === "ready";
+  useEffect(() => {
+    if (classReady && document.activeElement === document.body) titleRef.current?.focus();
+  }, [classReady]);
+
   useClassroomTabTitle({
     screenName: "클래스 상세",
     className: classState.status === "ready" ? classState.classroom.name : undefined,
@@ -207,7 +214,7 @@ function ClassDetail() {
 
   return (
     <PageShell>
-      <ClassHead classroom={classroom} />
+      <ClassHead classroom={classroom} titleRef={titleRef} />
 
       <div className="flex flex-col gap-5">
         {/* 나에게 온 소유권 이전 요청(#564) — 답을 기다리는 일이라 맨 위에 둔다. */}

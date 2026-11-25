@@ -100,3 +100,72 @@ test("제출이 있는 클래스는 삭제 버튼 대신 보관 안내가 뜬다
   await expect(page.getByTestId("delete-class-blocked")).toContainText("지울 수 없습니다");
   await expect(page.getByTestId("delete-class-open")).toHaveCount(0);
 });
+
+test("삭제 확인을 열면 이름 입력칸으로, 취소하면 「클래스 삭제」 단추로 초점이 간다 (#1517)", async ({ page }) => {
+  const seed = `class-deletion-focus-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const classResponse = await api.post("/api/backend/classroom/classes", {
+    data: { name: `초점 클래스 ${Date.now()}`, instructor_display_name: "강사" },
+  });
+  const classId = (await classResponse.json()).id as number;
+
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 700 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/classes/${classId}/settings`);
+    const open = page.getByRole("button", { name: "클래스 삭제" });
+    await open.focus();
+    await page.keyboard.press("Enter");
+
+    // 입력칸이 초점을 받고 화면 안에 있다 — 낭독기는 이름·경고 설명을 이어 읽는다.
+    const input = page.locator("#delete-class-confirm-input");
+    await expect(input).toBeFocused();
+    await expect(input).toBeInViewport();
+    await expect(input).toHaveAccessibleDescription(/되돌릴 수 없습니다.*템플릿으로 공개한 것은/s);
+    await expect(page.getByRole("textbox", { name: /계속하려면 클래스 이름/ })).toBeFocused();
+
+    await page.getByRole("button", { name: "취소" }).press("Enter");
+    await expect(page.getByRole("button", { name: "클래스 삭제" })).toBeFocused();
+  }
+});
+
+test("삭제가 끝나 목록으로 가면 초점이 body 에 남지 않는다 (#1517)", async ({ page }) => {
+  const seed = `class-deletion-after-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const name = `삭제 뒤 초점 ${Date.now()}`;
+  const classId = (await (await api.post("/api/backend/classroom/classes", { data: { name, instructor_display_name: "강사" } })).json()).id as number;
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`/classes/${classId}/settings`);
+  await page.getByTestId("delete-class-open").click();
+  await page.getByTestId("delete-class-confirm-input").fill(name);
+  await page.getByTestId("delete-class-confirm").press("Enter");
+  await expect(page).toHaveURL("/");
+  await expect(page.getByTestId("classroom-home-heading")).toBeFocused();
+});
+
+test("지우는 중에도 눌린 「정말 삭제」가 초점을 지키고 aria-disabled 로 알린다 (#1517)", async ({ page }) => {
+  const seed = `class-deletion-after-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const name = `삭제 뒤 초점 ${Date.now()}`;
+  const classId = (await (await api.post("/api/backend/classroom/classes", { data: { name, instructor_display_name: "강사" } })).json()).id as number;
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.goto(`/classes/${classId}/settings`);
+  await page.getByTestId("delete-class-open").click();
+  await page.getByTestId("delete-class-confirm-input").fill(name);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/backend/classroom/classes/*", async (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback();
+    await gate;
+    await route.fallback();
+  });
+  await page.getByTestId("delete-class-confirm").press("Enter");
+  await expect(page.getByTestId("delete-class-confirm")).toHaveAttribute("aria-disabled", "true");
+  await expect(page.getByTestId("delete-class-confirm")).toBeFocused();
+  release();
+
+  await expect(page).toHaveURL("/");
+  await expect(page.getByTestId("classroom-home-heading")).toBeFocused();
+});

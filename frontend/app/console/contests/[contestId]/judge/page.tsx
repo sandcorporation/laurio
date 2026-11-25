@@ -21,7 +21,7 @@
 // 자체에 필드가 없다 — "존재하지만 안 보임"이 아니라 애초에 없다. 이 파일은 그
 // 응답 객체를 그대로 신뢰해 렌더링만 한다 — 통째로 어딘가에 다시 직렬화해 넘기지
 // 않는 한 하이드레이션 페이로드에도 새어나갈 값 자체가 없다.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { ErrorNote, EmptyState, PageHeader, buttonClass } from "@/app/components/ui";
@@ -576,6 +576,23 @@ function SubmissionColumnHeader({
     award.status === "confirming" && award.submissionId === submission.submission_id;
   const isSaving = award.status === "saving" && award.submissionId === submission.submission_id;
 
+  // 확정 확인을 열면 안전한 「취소」가, 취소하면 「당선작으로 확정」 단추가, 확정되면 「당선 확정」 표시가 초점을 받는다 —
+  // 누른 단추가 사라지며 초점이 body 로 떨어지지 않게(#1517). 다른 곳에 있는 초점은 빼앗지 않는다.
+  const openRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const badgeRef = useRef<HTMLParagraphElement>(null);
+  const wasConfirming = useRef(false);
+  const wasAwarded = useRef(isAwarded);
+  useEffect(() => {
+    const active = document.activeElement;
+    const lost = active === null || active === document.body;
+    if (isConfirming && !wasConfirming.current) cancelRef.current?.focus();
+    else if (!isConfirming && wasConfirming.current && lost && !isAwarded) openRef.current?.focus();
+    if (isAwarded && !wasAwarded.current && lost) badgeRef.current?.focus();
+    wasConfirming.current = isConfirming;
+    wasAwarded.current = isAwarded;
+  }, [isConfirming, isAwarded]);
+
   return (
     <div className="flex flex-col gap-2">
       {/* #165 — 공개 개발자 프로필(/developers/{id})로 가는 유일한 인바운드 링크.
@@ -689,7 +706,12 @@ function SubmissionColumnHeader({
         ))}
 
       {isAwarded && (
-        <p className="text-xs font-semibold text-success" data-testid={`awarded-badge-${submission.submission_id}`}>
+        <p
+          ref={badgeRef}
+          tabIndex={-1}
+          className="text-xs font-semibold text-success outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
+          data-testid={`awarded-badge-${submission.submission_id}`}
+        >
           당선 확정
         </p>
       )}
@@ -709,6 +731,7 @@ function SubmissionColumnHeader({
           {!isConfirming ? (
             <button
               type="button"
+              ref={openRef}
               onClick={onAwardClick}
               aria-disabled={isSaving || undefined}
               data-testid={`award-button-${submission.submission_id}`}
@@ -718,7 +741,7 @@ function SubmissionColumnHeader({
             </button>
           ) : (
             <div className="flex flex-col gap-1">
-              <p className="text-xs" data-testid={`award-confirm-notice-${submission.submission_id}`}>
+              <p className="text-xs" id={`award-confirm-notice-${submission.submission_id}`} data-testid={`award-confirm-notice-${submission.submission_id}`}>
                 이 제출물을 당선작으로 확정하시겠습니까? 소스코드가 개최자에게 열리며 되돌릴 수 없습니다.
                 {!isFree && " 인수·정산이 시작됩니다."}
               </p>
@@ -727,6 +750,7 @@ function SubmissionColumnHeader({
                   type="button"
                   onClick={onConfirm}
                   aria-disabled={isSaving || undefined}
+                  aria-describedby={`award-confirm-notice-${submission.submission_id}`}
                   data-testid={`award-confirm-${submission.submission_id}`}
                   className={buttonClass("dangerFilled", "sm")}
                 >
@@ -734,8 +758,10 @@ function SubmissionColumnHeader({
                 </button>
                 <button
                   type="button"
+                  ref={cancelRef}
                   onClick={onCancel}
                   aria-disabled={isSaving || undefined}
+                  aria-describedby={`award-confirm-notice-${submission.submission_id}`}
                   data-testid={`award-cancel-${submission.submission_id}`}
                   className={buttonClass("secondary", "sm")}
                 >

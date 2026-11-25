@@ -127,7 +127,7 @@ export function EmptyState({ children }: { children: ReactNode }) {
 
 const BUTTON_BASE =
   "inline-flex items-center justify-center whitespace-nowrap text-[13.5px] " +
-  "transition-colors disabled:cursor-not-allowed disabled:opacity-45";
+  "transition-colors disabled:cursor-not-allowed disabled:opacity-45 aria-disabled:cursor-not-allowed aria-disabled:opacity-45";
 const BUTTON_TONE = {
   primary: "bg-ink text-paper hover:bg-ink/85",
   secondary: "border border-rule bg-surface text-ink hover:bg-paper",

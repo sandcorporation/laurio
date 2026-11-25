@@ -31,6 +31,7 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type ToastEditor from "@toast-ui/editor";
 
+import { nameUnlabeledEditorButtons } from "@/lib/editor/toolbar-names";
 import { resolveEffectiveTheme } from "@/lib/theme/preference";
 import { subscribeToThemeChange } from "@/lib/theme/theme-bus";
 
@@ -73,6 +74,7 @@ export function MarkdownEditor({
   useLayoutEffect(() => {
     let cancelled = false;
     let editor: ToastEditor | null = null;
+    let namesObserver: MutationObserver | null = null;
 
     Promise.all([import("@toast-ui/editor"), import("@toast-ui/editor/dist/i18n/ko-kr")]).then(
       ([{ default: Editor }]) => {
@@ -114,11 +116,19 @@ export function MarkdownEditor({
           const editable = wrapper?.querySelector<HTMLElement>(".ProseMirror") ?? wrapper;
           editable?.setAttribute("aria-label", label);
         }
+
+        // 툴바 단추·팝업 안 단추 중 이름이 빈 것(「…」 더보기 등)에 이름을 준다. 툴바는 폭에 따라
+        // 단추를 더보기 안으로 옮기며 다시 그리고 팝업은 열 때마다 만들어져, 한 번만 달면 새로 생긴 것이 빈다.
+        const root = containerRef.current;
+        nameUnlabeledEditorButtons(root);
+        namesObserver = new MutationObserver(() => nameUnlabeledEditorButtons(root));
+        namesObserver.observe(root, { childList: true, subtree: true });
       },
     );
 
     return () => {
       cancelled = true;
+      namesObserver?.disconnect();
       try {
         // ToastUI 자신의 툴바가 리사이즈를 200ms 스로틀로 재배치한다
         // (`Toolbar.prototype.addEvent`, 라이브러리 소스) — 컨테이너가 문서에서

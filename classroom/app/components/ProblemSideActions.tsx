@@ -39,6 +39,7 @@ export function ProblemSideActions({
   reload: () => void;
 }) {
   const [open, setOpen] = useState<Panel | null>(null);
+  const deleteOpenRef = useRef<HTMLButtonElement>(null);
   const followsContest = problem.contest !== null;
   const toggle = (panel: Panel) => setOpen((prev) => (prev === panel ? null : panel));
 
@@ -70,7 +71,7 @@ export function ProblemSideActions({
             시도가 있어 지울 수 없습니다
           </span>
         ) : (
-          <button type="button" data-testid="delete-problem-open" aria-expanded={open === "delete"} onClick={() => toggle("delete")} className={`${LINK_CLASS} hover:text-error`}>
+          <button type="button" ref={deleteOpenRef} data-testid="delete-problem-open" aria-expanded={open === "delete"} onClick={() => toggle("delete")} className={`${LINK_CLASS} hover:text-error`}>
             문제 삭제
           </button>
         )}
@@ -81,7 +82,16 @@ export function ProblemSideActions({
         <PublishPanel classId={classId} problemId={problemId} problem={problem} reload={reload} />
       ) : null}
       {open === "delete" && problem.deletable && !isArchived ? (
-        <DeletePanel classId={classId} problemId={problemId} problem={problem} onCancel={() => setOpen(null)} />
+        <DeletePanel
+          classId={classId}
+          problemId={problemId}
+          problem={problem} 
+          onCancel={() => {
+            setOpen(null);
+            // 취소 단추가 사라지며 초점이 BODY 로 떨어지지 않게 연 링크로 되돌린다.
+            deleteOpenRef.current?.focus();
+          }}
+        />
       ) : null}
     </div>
   );
@@ -149,7 +159,7 @@ function CopyPanel({ classId, problemId }: { classId: number; problemId: number 
           <button
             type="submit"
             data-testid="copy-problem-submit"
-            disabled={copyMutation.pending || targetClassId === ""}
+            aria-disabled={copyMutation.pending || targetClassId === ""}
             className={buttonClass("secondary")}
           >
             {copyMutation.pending ? "복사하는 중..." : "복사"}
@@ -271,7 +281,7 @@ function PublishPanel({
             <button
               type="submit"
               data-testid="publish-template-submit"
-              disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
+              aria-disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
               className={buttonClass("secondary")}
             >
               {publishMutation.pending ? "공개하는 중..." : "템플릿으로 공개"}
@@ -309,6 +319,13 @@ function DeletePanel({
   const router = useRouter();
   const [typedTitle, setTypedTitle] = useState("");
   const deleteMutation = useMutationRequest();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 열리면 제목 입력칸으로 — 경고는 입력칸의 설명으로 묶여 있어 초점이 가야 읽힌다.
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.scrollIntoView({ block: "center" });
+  }, []);
 
   function handleDelete() {
     void deleteMutation.run(() => deleteProblem(classId, problemId), {
@@ -331,6 +348,7 @@ function DeletePanel({
       </label>
       <input
         id="delete-problem-confirm-input"
+        ref={inputRef}
         data-testid="delete-problem-confirm-input"
         aria-describedby="delete-problem-warning"
         value={typedTitle}
@@ -343,7 +361,7 @@ function DeletePanel({
           type="button"
           data-testid="delete-problem-confirm"
           onClick={handleDelete}
-          disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
+          aria-disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
           className={buttonClass("dangerFilled", "sm")}
         >
           {deleteMutation.pending ? "지우는 중..." : "정말 삭제"}
@@ -356,7 +374,7 @@ function DeletePanel({
             deleteMutation.setError(null);
             onCancel();
           }}
-          disabled={deleteMutation.pending}
+          aria-disabled={deleteMutation.pending}
           className={buttonClass("secondary", "sm")}
         >
           취소

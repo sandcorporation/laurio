@@ -130,3 +130,90 @@ test("주소의 #scoring-model 로 열면 채점 모델 칸이 화면 안으로 
   await expect(card).toBeVisible();
   await expect(card).toBeInViewport();
 });
+
+test("설명 편집기 툴바의 모든 버튼과 더보기 안 메뉴에 이름이 있고 「더보기」는 정확히 그 이름이다 (#1517)", async ({ page }) => {
+  const { classId } = await seedProblem(page, `edit-toolbar-names-${test.info().workerIndex}-${Date.now()}`, []);
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/classes/${classId}/problems/new`);
+    const toolbar = page.locator(".toastui-editor-defaultUI-toolbar");
+    await expect(toolbar).toBeVisible();
+    await expect(page.getByRole("button", { name: "더보기", exact: true })).toHaveCount(1);
+
+    // 이름 없는 단추가 없다 — 보이는 것(툴바)만이 아니라 열리는 팝업 안까지.
+    const unnamed = () =>
+      page.locator(".toastui-editor-defaultUI").evaluate((root) =>
+        Array.from(root.querySelectorAll<HTMLElement>("button, [role=button]"))
+          .filter((el) => el.getClientRects().length > 0)
+          .filter((el) => !(el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || "").trim())
+          .map((el) => el.outerHTML.slice(0, 120)),
+      );
+    expect(await unnamed()).toEqual([]);
+
+    await page.getByRole("button", { name: "더보기", exact: true }).click();
+    expect(await unnamed()).toEqual([]);
+    await page.keyboard.press("Escape");
+    let opened = 0;
+    for (const name of ["제목크기", "표 삽입", "이미지 삽입", "링크 삽입"]) {
+      const trigger = toolbar.getByRole("button", { name });
+      if ((await trigger.count()) === 0) {
+        // 폭이 모자라면 더보기 안으로 들어가 위에서 이미 검사했다.
+        continue;
+      }
+      await trigger.first().click();
+      opened += 1;
+      expect(await unnamed(), `${name} 팝업`).toEqual([]);
+      await page.keyboard.press("Escape");
+    }
+    expect(opened, `${viewport.width}px 에서 연 팝업`).toBeGreaterThan(0);
+  }
+});
+
+test("숨기기 확인을 열면 「취소」가 초점을 받아 안내를 읽고, 취소하면 「숨기기」 단추로 돌아간다 (#1517)", async ({ page }) => {
+  const { classId, problemId } = await seedProblem(page, `edit-hide-focus-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"], true);
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/classes/${classId}/problems/${problemId}`);
+    await page.getByTestId("hide-problem-button").focus();
+    await page.keyboard.press("Enter");
+
+    const cancel = page.getByTestId("hide-problem-cancel");
+    await expect(cancel).toBeFocused();
+    await expect(cancel).toHaveAccessibleDescription(/숨기면 참여자 목록에서 빠지고/);
+    await expect(page.getByTestId("hide-problem-confirm")).toHaveAccessibleDescription(/숨기면 참여자 목록에서 빠지고/);
+
+    await cancel.press("Enter");
+    await expect(page.getByTestId("hide-problem-button")).toBeFocused();
+  }
+});
+
+test("열기·숨기기·다시 열기가 끝나면 초점이 body 로 빠지지 않고 새로 생긴 단추가 받는다 (#1517)", async ({ page }) => {
+  const { classId, problemId } = await seedProblem(page, `edit-transition-focus-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"]);
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/classes/${classId}/problems/${problemId}`);
+    const badge = page.getByTestId("edit-problem-status-badge");
+    if ((await badge.textContent()) === "초안") {
+      await page.getByTestId("open-problem-button").focus();
+      await page.keyboard.press("Enter");
+      await expect(badge).toHaveText("열림");
+      await expect(page.getByRole("button", { name: "숨기기", exact: true }).first()).toBeFocused();
+    }
+    if ((await badge.textContent()) === "숨김") {
+      await page.getByTestId("reopen-problem-button").focus();
+      await page.keyboard.press("Enter");
+      await expect(badge).toHaveText("열림");
+    }
+    await page.getByTestId("hide-problem-button").focus();
+    await page.keyboard.press("Enter");
+    await page.getByTestId("hide-problem-confirm").press("Enter");
+    await expect(badge).toHaveText("숨김");
+    await expect(page.getByRole("button", { name: "다시 열기" })).toBeFocused();
+
+    // 다른 곳에 초점이 있으면 뺏지 않는다.
+    await page.getByTestId("edit-problem-title-input").focus();
+    await page.getByRole("button", { name: "다시 열기" }).click();
+    await expect(badge).toHaveText("열림");
+    await expect(page.getByRole("button", { name: "숨기기", exact: true }).first()).toBeFocused();
+  }
+});

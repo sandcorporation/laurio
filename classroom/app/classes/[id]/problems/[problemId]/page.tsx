@@ -38,7 +38,7 @@ import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemSideActions } from "@/app/components/ProblemSideActions";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
@@ -153,7 +153,30 @@ export default function EditProblemPage() {
   // 바로 실행하지 않는다.
   const [confirmingHide, setConfirmingHide] = useState(false);
   const hideMutation = useMutationRequest();
+  // 숨기기 확인을 열면 안전한 「취소」가, 취소하면 「숨기기」 단추가 초점을 받는다 — 취소 단추가 사라지며
+  // 초점이 BODY 로 떨어지지 않게(#1517).
+  const hideButtonRef = useRef<HTMLButtonElement>(null);
+  const hideCancelRef = useRef<HTMLButtonElement>(null);
+  const focusAfterHideToggle = useRef<"cancel" | "hide" | null>(null);
+  useEffect(() => {
+    const target = focusAfterHideToggle.current;
+    focusAfterHideToggle.current = null;
+    if (target === "cancel") hideCancelRef.current?.focus();
+    else if (target === "hide") hideButtonRef.current?.focus();
+  }, [confirmingHide]);
   const reopenMutation = useMutationRequest();
+  // 열기·숨기기·다시 열기가 성공하면 누른 단추가 다음 전이의 단추로 바뀐다 — 초점이 body 로 떨어졌을 때만
+  // 새 단추로 옮긴다(다른 곳에 있는 초점은 뺏지 않는다, #1519). 상태 전이 단추는 한 자리에 하나다.
+  const transitionButtonRef = useRef<HTMLButtonElement>(null);
+  const transitionFrom = useRef<string | null>(null);
+  const transitionName = state.status === "ready" ? state.problem.available_transitions[0]?.name ?? null : null;
+  useEffect(() => {
+    const from = transitionFrom.current;
+    if (from === null || transitionName === null || transitionName === from) return;
+    transitionFrom.current = null;
+    const active = document.activeElement;
+    if (active === null || active === document.body) transitionButtonRef.current?.focus();
+  }, [transitionName]);
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
@@ -415,6 +438,7 @@ export default function EditProblemPage() {
   }
 
   function handleOpen() {
+    transitionFrom.current = transitionName;
     void openMutation.run(() => openProblem(classId, problemId), {
       fallbackMessage: "문제를 열지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -422,6 +446,7 @@ export default function EditProblemPage() {
   }
 
   function handleHide() {
+    transitionFrom.current = transitionName;
     void hideMutation.run(() => hideProblem(classId, problemId), {
       fallbackMessage: "문제를 숨기지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -430,6 +455,7 @@ export default function EditProblemPage() {
   }
 
   function handleReopen() {
+    transitionFrom.current = transitionName;
     void reopenMutation.run(() => reopenProblem(classId, problemId), {
       fallbackMessage: "문제를 다시 열지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -796,20 +822,27 @@ export default function EditProblemPage() {
                           {transitionBlockedReasonText(transition.blocked_reason)}
                         </span>
                       ) : transition?.name === "open" ? (
-                        <button type="button" data-testid="open-problem-button" onClick={handleOpen} className={buttonClass("primary", "sm")}>
+                        <button type="button" ref={transitionButtonRef} data-testid="open-problem-button" onClick={handleOpen} className={buttonClass("primary", "sm")}>
                           문제 열기
                         </button>
                       ) : transition?.name === "hide" ? (
                         <button
                           type="button"
+                          ref={(node) => {
+                            hideButtonRef.current = node;
+                            transitionButtonRef.current = node;
+                          }}
                           data-testid="hide-problem-button"
-                          onClick={() => setConfirmingHide(true)}
+                          onClick={() => {
+                            focusAfterHideToggle.current = "cancel";
+                            setConfirmingHide(true);
+                          }}
                           className={buttonClass("danger", "sm")}
                         >
                           숨기기
                         </button>
                       ) : transition?.name === "reopen" ? (
-                        <button type="button" data-testid="reopen-problem-button" onClick={handleReopen} className={buttonClass("primary", "sm")}>
+                        <button type="button" ref={transitionButtonRef} data-testid="reopen-problem-button" onClick={handleReopen} className={buttonClass("primary", "sm")}>
                           다시 열기
                         </button>
                       ) : null}
@@ -818,17 +851,20 @@ export default function EditProblemPage() {
                       // 숨기기 전 한 번 더 확인한다(#405 AC "결과를 알고 숨기기 위해서다").
                       <Note tone="warning">
                         <div className="flex flex-col gap-2.5">
-                          <span data-testid="hide-problem-confirm-notice">
+                          <span id="hide-problem-confirm-notice" data-testid="hide-problem-confirm-notice">
                             숨기면 참여자 목록에서 빠지고 새로 낼 수 없습니다. 이미 낸 참여자는 자기 시도와 판정을 계속 볼 수 있습니다.
                           </span>
                           <div className="flex gap-2">
-                            <button type="button" data-testid="hide-problem-confirm" onClick={handleHide} className={buttonClass("danger", "sm")}>
+                            <button type="button" data-testid="hide-problem-confirm" aria-describedby="hide-problem-confirm-notice" onClick={handleHide} className={buttonClass("danger", "sm")}>
                               숨기기
                             </button>
                             <button
                               type="button"
+                              ref={hideCancelRef}
                               data-testid="hide-problem-cancel"
+                              aria-describedby="hide-problem-confirm-notice"
                               onClick={() => {
+                                focusAfterHideToggle.current = "hide";
                                 setConfirmingHide(false);
                                 hideMutation.setError(null);
                               }}
