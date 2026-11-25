@@ -38,6 +38,7 @@ import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
 import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const UNKNOWN_BADGE = { label: "확인 중", tone: "neutral" } as const;
 
@@ -47,8 +48,8 @@ const STATUS_BADGE: Record<
 > = {
   passed: { label: "통과", tone: "verified" },
   attempted_not_passed: { label: "미통과", tone: "error" },
-  scoring: { label: "채점 중", tone: "neutral" },
-  needs_setup: { label: "채점 대기", tone: "warning" },
+  scoring: { label: SCORING_LABEL, tone: "neutral" },
+  needs_setup: { label: WAITING_LABEL, tone: "warning" },
   not_submitted: { label: "미제출", tone: "neutral" },
 };
 
@@ -154,7 +155,7 @@ function ProgressLine({ problems }: { problems: ProblemListItem[] }) {
   ).length;
   const rest = [
     scoring > 0 ? `채점 중 ${scoring}` : null,
-    waiting > 0 ? `채점 대기 ${waiting}` : null,
+    waiting > 0 ? `${WAITING_LABEL} ${waiting}` : null,
     notSubmitted > 0 ? `미제출 ${notSubmitted}` : null,
   ].filter((part): part is string => part !== null);
   return (
