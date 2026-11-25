@@ -104,7 +104,8 @@ class NotificationOut(Schema):
     # 사실이다. 강의실 목록(`/me?classroom_only=true`)만 채우고, 받는 사람 자신의 시도가 없는 문제는 `null`.
     problem_status: ProblemStatusOut | None = None
     # 소유권 이전 요청 알림이 가리키는 요청의 **지금** 상태(#1435·#1441) — `pending`·`accepted`·`declined`·
-    # `cancelled`·`expired`. 알림 문구는 받은 때의 것이다. 강의실 목록만 채우고, 다른 유형이나 요청을 못 찾으면 `null`.
+    # `cancelled`·`expired`, 요청을 찾지 못하면 `gone`(끝난 요청, #1448). 알림 문구는 받은 때의 것이다.
+    # 강의실 목록만 채우고, 다른 유형은 `null`.
     transfer_status: str | None = None
 
 
@@ -222,6 +223,19 @@ def _transfer_id(notification: Notification) -> int | None:
     return transfer_id if isinstance(transfer_id, int) else None
 
 
+#: 요청 알림인데 가리키는 요청을 찾지 못했다(#1448) — `transfer_id` 없는 옛 알림이거나 받는 사람이 떠나 요청 행이
+#: 지워졌다. 대기 중인 요청은 언제나 행이 있으므로 찾지 못함은 끝난 요청이다.
+TRANSFER_GONE = "gone"
+
+
+def _transfer_status(notification: Notification, transfer_id: int | None, states: dict[int, str]) -> str | None:
+    if notification.notification_type != NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED:
+        return None
+    if transfer_id is None:
+        return TRANSFER_GONE
+    return states.get(transfer_id, TRANSFER_GONE)
+
+
 def _serialize_page(notifications: list[Notification], *, recipient_id: int) -> list[dict]:
     """받는 사람의 목록 한 쪽 — 채점 알림에는 문제의 지금 상태를 한 번에 물어 싣는다(#1405)."""
 
@@ -238,7 +252,7 @@ def _serialize_page(notifications: list[Notification], *, recipient_id: int) -> 
             {
                 **_serialize(notification, for_recipient=True),
                 "problem_status": None if status is None else asdict(status),
-                "transfer_status": None if transfer_id is None else transfer_states.get(transfer_id),
+                "transfer_status": _transfer_status(notification, transfer_id, transfer_states),
             }
         )
     return items

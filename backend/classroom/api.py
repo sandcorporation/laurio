@@ -2175,9 +2175,13 @@ def assert_member_expellable(class_obj: Class, member: ClassMember) -> None:
 def expel_class_member(member: ClassMember) -> ClassMember:
     """내보낸다 — 행을 지우지 않고 표시만, 이미 내보낸 사람이면 그대로(`expel_member` docstring)."""
 
-    if member.expelled_at is None:
-        member.expelled_at = timezone.now()
-        member.save(update_fields=["expelled_at"])
+    if member.expelled_at is not None:
+        return member
+    # 조건부 갱신으로 최초 전이를 가린다(#1448 ④) — 두 강사가 동시에 내보내 둘 다 `expelled_at=None` 을
+    # 읽었어도 행을 바꾼 쪽은 하나다. 진 쪽은 이긴 쪽이 남긴 시각을 읽어 돌려준다.
+    first = ClassMember.objects.filter(id=member.id, expelled_at__isnull=True).update(expelled_at=timezone.now())
+    member.refresh_from_db(fields=["expelled_at"])
+    if first:
         # 처음 내보낼 때만 — 내보내진 사람에게 알린다(#1441-8). 알림이 실패해도 내보내기는 그대로다.
         notify_safely(
             recipient=member.user,
