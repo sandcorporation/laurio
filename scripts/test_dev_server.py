@@ -45,6 +45,8 @@ def run(args: list[str], root: Path, proc: Path, run_dir: Path, **env: str) -> s
         "CODEMIT_CGROUP_ROOT": str(root),
         "CODEMIT_PROC_CGROUP": str(proc),
         "CODEMIT_DEV_SERVER_DIR": str(run_dir),
+        # `start` 는 포트를 고르려고 dev-env.sh 를 부른다 — 칸 예약(#1411)이 임시 폴더에 남게 한다.
+        "XDG_STATE_HOME": str(run_dir / "xdg"),
         **env,
     }
     return subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=full, timeout=60)
