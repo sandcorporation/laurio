@@ -16,7 +16,13 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { ATTEMPT_SCORED, ATTEMPT_SUBMITTED, type StreamEvent } from "@/lib/events/types";
+import {
+  ATTEMPT_SCORED,
+  ATTEMPT_SUBMITTED,
+  PARTICIPATION_CHANGED,
+  isClassSignal,
+  type StreamEvent,
+} from "@/lib/events/types";
 
 import type { ProblemSubmissions } from "./api";
 
@@ -54,11 +60,15 @@ export function useMyProblem(classId: number, problemId: number) {
   // ADR-0046). attempt-submitted를 더한 이유는 #383 AC "다른 탭에서 낸
   // 시도가 나타난다" — 이 참여자가 다른 탭·기기에서 낸 시도도 새로고침
   // 없이 이 목록에 보여야 한다.
+  //
+  // participation-changed(#1447 10-2)는 문제 숨김·클래스 보관·내보내기 — 열어 둔 화면이 「낼 수 있음」에
+  // 머물지 않고 제출 가능 상태를 다시 읽는다. 클래스 단위 신호라 문제 번호를 보지 않는다.
   const matches = useCallback(
     (event: StreamEvent) =>
-      (event.kind === ATTEMPT_SCORED || event.kind === ATTEMPT_SUBMITTED) &&
-      event.payload.class_id === classId &&
-      event.payload.problem_id === problemId,
+      isClassSignal(event, PARTICIPATION_CHANGED, classId) ||
+      ((event.kind === ATTEMPT_SCORED || event.kind === ATTEMPT_SUBMITTED) &&
+        event.payload.class_id === classId &&
+        event.payload.problem_id === problemId),
     [classId, problemId],
   );
   useRealtimeRefresh({ matches, waiting: hasPendingAttempt, fallbackPollMs: FALLBACK_POLL_MS, reload });
