@@ -192,6 +192,8 @@ class ClassOut(Schema):
     #: 대기 중인 소유권 이전 요청(#564) — 없으면 `None`. 강사 누구나 본다: 소유자는 취소하고,
     #: 받는 공동 강사(`recipient_is_me`)는 클래스 화면에서 수락하거나 거절한다.
     pending_ownership_transfer: PendingOwnershipTransferOut | None = None
+    #: 강사 쪽 변경 번호(#1484 ④) — `instructors-changed` 신호 본문의 `rev` 와 같은 값. 이 번호 이하의 신호는 이 응답이 이미 담았다.
+    signal_rev: int = 0
     #: 클래스 행 수치(#632) — 모두 「강사 본인·내보낸 참여자 제외」의 달성률과 같은 기준이다.
     #: 참여 중인 참여자 수.
     member_count: int = 0

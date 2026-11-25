@@ -99,6 +99,8 @@ export type ClassRow = {
   role: "owner" | "co_instructor";
   // 대기 중인 소유권 이전 요청(#564) — 없으면 `null`. 강사 누구나 본다.
   pending_ownership_transfer: PendingOwnershipTransfer | null;
+  // 강사 쪽 변경 번호(#1484 ④) — `instructors-changed` 신호 본문의 `rev` 와 같은 값. 이 번호 이하의 신호는 이 응답이 이미 담았다.
+  signal_rev: number;
   // 클래스 상세 머리의 통계 바와 채점 카드가 읽는 집계(#632) — 문제 목록에서 다시 세지 않는다.
   // 강사 전원을 센다(내보낸 사람 제외).
   member_count: number;
