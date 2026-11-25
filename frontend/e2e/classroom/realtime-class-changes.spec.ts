@@ -199,6 +199,11 @@ for (const blocker of BLOCKERS) {
 
     await expect(page.getByTestId(blocker.expected)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("submit-repository")).toHaveCount(0);
+    if (blocker.expected !== "my-problem-not-found") {
+      // 보관·내보내기 안내는 낭독되고 초점을 받는다(#1459 ③) — 폼과 함께 초점이 body 로 빠지지 않는다.
+      await expect(page.getByTestId(blocker.expected)).toHaveAttribute("role", "alert");
+      await expect(page.getByTestId(blocker.expected)).toBeFocused();
+    }
   });
 }
 

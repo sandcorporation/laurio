@@ -397,6 +397,15 @@ function CompatibleServerForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 부모의 key 로 다시 만들지 않는다(저장 뒤 초점·확인이 남아야 한다, #1459 ⑤) — 다른 탭·사람이 서버를
+  // 바꿔 재조회되면 열려 있던 칸이 새 주소와 빈 인증 값으로 맞춰진다.
+  const savedUrl = classroom.scoring_server_url ?? "";
+  useEffect(() => {
+    setServerUrl(savedUrl);
+    setAuthValue("");
+    setError(null);
+  }, [savedUrl]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const checked = normalizeServerUrl(serverUrl);

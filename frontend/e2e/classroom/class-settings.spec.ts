@@ -461,3 +461,86 @@ test("호환 서버 주소 — 브라우저 풍선 없이 앱 문장으로 거�
   await expect(page.getByRole("status").filter({ hasText: "호환 서버를 저장했습니다." })).toBeVisible();
   expect(sentUrl).toBe("https://llm.example.test/v1");
 });
+
+test("호환 서버 저장 뒤 클래스 재조회로 연결 종류가 바뀌어도 초점과 저장 확인이 남는다(#1459 ⑤)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "compat-remount");
+  const current = await (await api.get(`/api/backend/classroom/classes/${classId}`)).json();
+  const saved = {
+    ...current,
+    has_openai_key: true,
+    scoring_connection_kind: "compatible_server",
+    scoring_server_url: "https://llm.example.test/v1",
+  };
+  let stored = false;
+  await page.route(`**/classes/${classId}/compatible-server`, (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    stored = true;
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(saved) });
+  });
+  // 저장 뒤 재조회는 연결 종류가 바뀐 클래스를 돌려준다 — 부모의 key 가 바뀌는 길.
+  await page.route(`**/classroom/classes/${classId}`, (route) =>
+    stored && route.request().method() === "GET"
+      ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(saved) })
+      : route.fallback(),
+  );
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("scoring-connection-kind-compatible_server").click();
+  await page.getByTestId("scoring-server-url-input").fill("https://llm.example.test/v1");
+  const reloaded = page.waitForResponse((r) => r.url().endsWith(`/classroom/classes/${classId}`) && r.request().method() === "GET");
+  await page.getByTestId("scoring-server-submit").click();
+  await reloaded;
+  await expect(page.getByTestId("scoring-connection-change")).toBeVisible();
+
+  await expect(page.getByTestId("scoring-connection-notice")).toHaveText("호환 서버를 저장했습니다.");
+  await expect(page.getByTestId("scoring-connection-focus")).toBeFocused();
+});
+
+test("열어 둔 호환 서버 폼은 재조회로 연결이 바뀌면 새 주소로 맞춰진다(#1459 ⑤)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "compat-follow");
+  const current = await (await api.get(`/api/backend/classroom/classes/${classId}`)).json();
+  let changed = false;
+  await page.route(`**/classroom/classes/${classId}`, (route) =>
+    changed && route.request().method() === "GET"
+      ? route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...current,
+            has_openai_key: true,
+            scoring_connection_kind: "compatible_server",
+            scoring_server_url: "https://other-tab.example.test/v1",
+          }),
+        })
+      : route.fallback(),
+  );
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("scoring-connection-kind-compatible_server").click();
+  await page.getByTestId("scoring-server-url-input").fill("https://draft.example.test/v1");
+  // 다른 탭이 연결을 바꾼 뒤, 이 탭의 다른 저장이 클래스를 다시 읽는다.
+  changed = true;
+  await page.getByTestId("vendor-key-openai-change").click();
+  await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
+  await page.getByTestId("openai-key-submit").click();
+  await expect(page.getByTestId("scoring-server-url-input")).toHaveValue("https://other-tab.example.test/v1");
+});
+
+test("OpenAI 키 저장 뒤 연결 종류가 바뀐 재조회에도 초점과 저장 확인이 남는다(#1459 ⑤)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "key-remount");
+  const current = await (await api.get(`/api/backend/classroom/classes/${classId}`)).json();
+  let saved = false;
+  // 저장 뒤 재조회가 연결 종류가 바뀐 클래스를 돌려준다 — 부모의 key 가 바뀌는 길.
+  await page.route(`**/classroom/classes/${classId}`, async (route) => {
+    if (!saved || route.request().method() !== "GET") return route.fallback();
+    const response = await route.fetch();
+    const body = await response.json();
+    return route.fulfill({ response, json: { ...body, scoring_connection_kind: current.scoring_connection_kind === "anthropic_key" ? "openai_key" : "anthropic_key" } });
+  });
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("vendor-key-openai-change").click();
+  await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
+  saved = true;
+  await page.getByTestId("openai-key-submit").click();
+  await expect(page.getByTestId("vendor-key-openai-masked")).toBeVisible();
+  await expect(page.getByTestId("scoring-connection-notice")).toHaveText("OpenAI 키를 저장했습니다.");
+  await expect(page.getByTestId("vendor-key-openai-change")).toBeFocused();
+});

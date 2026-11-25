@@ -633,7 +633,6 @@ export default function ClassSettingsPage() {
         <div className="flex min-w-0 flex-1 flex-col gap-5">
           <SettingsCard id="scoring-key" title="채점 연결">
             <ScoringConnectionSection
-              key={`${classroom.scoring_connection_kind}:${classroom.scoring_server_url ?? ""}`}
               classroom={classroom}
               isOwner={isOwner}
               onSaved={() => {
