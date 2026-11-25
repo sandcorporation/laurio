@@ -295,6 +295,38 @@ test("참여자의 빈 저장소 제출에도 안내가 뜨고 화면 말은 참
   expect(sent).toHaveLength(0);
 });
 
+test("잘못된 주소로 blur·제출한 뒤 다시 적기 시작하면 오류가 걷히고 다음 blur 에 돌아온다(#1448 일부-7)", async ({ browser }) => {
+  const seed = `access-retype-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, instructor } = await seedClass(browser, seed);
+  await instructor.goto(`/classes/${classId}/problems/${openId}/submit`);
+  const input = instructor.getByTestId("repository-url-input");
+  const error = instructor.getByTestId("repository-url-invalid");
+
+  await input.fill("not a url");
+  await input.blur();
+  await expect(error).toBeVisible();
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+  await expect(input).toHaveAccessibleDescription(/GitHub/);
+
+  // 다시 적기 시작 — 첫 글자부터 오류·aria-invalid·설명 연결이 없다.
+  await input.pressSequentially("h");
+  await expect(error).toHaveCount(0);
+  await expect(input).toHaveAttribute("aria-invalid", "false");
+  await expect(input).not.toHaveAttribute("aria-describedby", /.+/);
+
+  // 다음 blur 에서 다시 판정한다.
+  await input.blur();
+  await expect(error).toBeVisible();
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+
+  // 제출에서도 다시 판정한다.
+  await input.pressSequentially("x");
+  await expect(error).toHaveCount(0);
+  await instructor.getByTestId("submit-repository").click();
+  await expect(error).toBeVisible();
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+});
+
 test("제출 중에 거듭 내도 누른 시점의 주소로 한 번만 간다", async ({ browser }) => {
   const seed = `access-once-${test.info().workerIndex}-${Date.now()}`;
   const { classId, openId, instructor } = await seedClass(browser, seed);

@@ -155,3 +155,8 @@ export function dueOrderViolated(recommended: DueDraft, due: DueDraft): boolean 
 
 /** 서버가 순서 위반에 주는 문구 — 422 를 받으면 칸을 붉게 두는 데 쓴다. */
 export const DUE_ORDER_MESSAGE = "권장 기한은 마감보다 늦을 수 없습니다.";
+
+/** 권장 기한이 마감보다 늦을 때 칸 아래에 보이고 읽힐 문구 — 순서가 맞으면 null. */
+export function dueOrderNote(violated: boolean): string | null {
+  return violated ? "권장 기한이 마감보다 늦습니다. 권장 기한을 마감 이전으로 바꾸세요." : null;
+}

@@ -32,6 +32,9 @@ test("채점 연결은 「연결 없음」에서 시작해 OpenAI 키를 넣으�
   await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
   await expect(page.getByTestId("scoring-connection-verified")).toHaveText(/^\d{1,2}\/\d{1,2} 확인$/);
   await expect(page.getByTestId("openai-key-input")).toHaveCount(0);
+  // 저장하면 폼이 사라진다 — 초점은 「바꾸기」로, 결과는 상태 영역으로(#1447).
+  await expect(page.getByTestId("vendor-key-openai-change")).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "OpenAI 키를 저장했습니다." })).toBeVisible();
   await expect(page.getByTestId("vendor-key-openai-masked")).toContainText("7f2a");
   await expect(page.getByTestId("scoring-connection-kind-openai_key")).toHaveAttribute("aria-checked", "true");
 
@@ -181,7 +184,15 @@ test("채점·완성도 검사 방식 — OpenAI 키 클래스의 기본 모델(
   for (const id of ["scoring-method", "quality-method"]) {
     await expect(page.getByTestId(`${id}-single`)).toHaveAttribute("aria-checked", "true");
     await expect(page.getByTestId(`${id}-agent`)).toBeDisabled();
-    await expect(page.getByTestId(`${id}-agent`)).toHaveAttribute("title", "gpt-5-mini 이상");
+    // 까닭은 title 이 아니라 보이는 글이고 선택 그룹이 가리킨다 — 키 까닭이 아니라 모델 까닭이다(#1447).
+    const note = page.getByTestId(`${id}-blocked-note`);
+    await expect(note).toBeVisible();
+    await expect(note).toHaveAttribute("data-reason", "model");
+    await expect(note).toContainText("gpt-5-mini 이상");
+    await expect(page.getByTestId(`${id}-agent`)).not.toHaveAttribute("title", /.+/);
+    await expect(
+      page.getByRole("radiogroup", { name: id === "scoring-method" ? "채점 방식" : "완성도 검사 방식" }),
+    ).toHaveAccessibleDescription(/gpt-5-mini 이상/);
     await expect(page.getByTestId(`${id}-vendor`)).toHaveText("OpenAI");
   }
 
@@ -333,6 +344,9 @@ test("채점 키 지우기는 줄 안에서 한 번 더 묻는다 — 브라우�
   await trigger.click();
   await expect(confirm).toContainText("채점이 멈춥니다");
   await expect(confirm.getByRole("button", { name: "그대로 두기" })).toBeFocused();
+  // 초점이 들어갈 때 낭독기가 질문을 함께 읽도록 묶음이 질문 문장을 설명으로 갖는다(#1453).
+  await expect(confirm).toHaveAttribute("role", "group");
+  await expect(confirm).toHaveAccessibleDescription(/채점이 멈춥니다/);
   await page.keyboard.press("Escape");
   await expect(confirm).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -343,4 +357,107 @@ test("채점 키 지우기는 줄 안에서 한 번 더 묻는다 — 브라우�
   await expect(trigger).toHaveCount(0);
   await expect(page.getByTestId("vendor-key-openai-change")).toBeFocused();
   expect(dialogs).toBe(0);
+});
+
+test("채점 키 입력칸 — 확인 결과·저장 오류가 칸에 연결되고 확정 오류에만 aria-invalid 가 붙는다(#1447)", async ({ page }) => {
+  const { classId } = await newClass(page, "key-describe");
+  await page.route("https://api.openai.com/v1/models", (route) => route.fulfill({ status: 401, body: "{}" }));
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("vendor-key-openai-change").click();
+  const input = page.getByTestId("openai-key-input");
+  const live = page.getByRole("status").filter({ hasText: "이 키는 쓸 수 없습니다" });
+  await expect(input).not.toHaveAttribute("aria-invalid", "true");
+  await input.fill("sk-e2e-bad-key-0000");
+  await expect(live).toBeVisible();
+  await expect(input).toHaveAccessibleDescription(/이 키는 쓸 수 없습니다/);
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+});
+
+test("기한 순서 — 권장 기한이 마감보다 늦으면 문구가 보이고 날짜·시각 칸이 그것을 가리킨다(#1447)", async ({ page }) => {
+  const { classId } = await newClass(page, "due-order");
+  await page.goto(`/classes/${classId}/problems/new`);
+  await page.getByTestId("new-problem-recommended-due-date").fill("2030-05-10");
+  await page.getByTestId("new-problem-due-date").fill("2030-05-01");
+  await page.getByTestId("new-problem-title-input").fill("기한 순서 시험");
+  await page.getByTestId("new-problem-submit").click();
+  await expect(page.getByRole("alert").filter({ hasText: "권장 기한이 마감보다 늦습니다" })).toBeVisible();
+  for (const id of ["new-problem-recommended-due-date", "new-problem-recommended-due-time", "new-problem-due-date", "new-problem-due-time"]) {
+    await expect(page.getByTestId(id)).toHaveAccessibleDescription(/권장 기한이 마감보다 늦습니다/);
+    await expect(page.getByTestId(id)).toHaveAttribute("aria-invalid", "true");
+  }
+});
+
+test("호환 서버 저장 — 초점이 연결 상태로 가고 저장 결과가 상태 영역에 읽히며, 다시 열면 옛 결과가 비워진다(#1447)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "compat-save");
+  const current = await (await api.get(`/api/backend/classroom/classes/${classId}`)).json();
+  await page.route(`**/classes/${classId}/compatible-server`, (route) =>
+    route.request().method() === "PUT" ? route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(current) }) : route.fallback(),
+  );
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("scoring-connection-kind-compatible_server").click();
+  await page.getByTestId("scoring-server-url-input").fill("https://llm.example.test/v1");
+  await page.getByTestId("scoring-server-submit").click();
+
+  await expect(page.getByTestId("scoring-server-url-input")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "호환 서버를 저장했습니다." })).toBeVisible();
+  await expect(page.getByTestId("scoring-connection-focus")).toBeFocused();
+
+  // 다른 동작을 시작하면 옛 결과를 비운다 — 낭독기가 다시 읽지 않게.
+  await page.getByTestId("vendor-key-openai-change").click();
+  await expect(page.getByTestId("scoring-connection-notice")).toBeEmpty();
+});
+
+test("기한 순서를 서버가 거절해도 문구는 기한 카드의 alert 하나뿐이다 — 새 문제·문제 편집(#1447)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "due-422");
+  const refuse = (route: import("@playwright/test").Route) =>
+    route.request().method() === "POST" || route.request().method() === "PATCH" || route.request().method() === "PUT"
+      ? route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ detail: "권장 기한은 마감보다 늦을 수 없습니다." }) })
+      : route.fallback();
+  const dueAlerts = page.getByRole("alert").filter({ hasText: /권장 기한(은|이) 마감보다 늦/ });
+
+  await page.route(`**/classes/${classId}/problems`, refuse);
+  await page.goto(`/classes/${classId}/problems/new`);
+  await page.getByTestId("new-problem-title-input").fill("서버 거절");
+  await page.getByTestId("new-problem-submit").click();
+  await expect(dueAlerts).toHaveCount(1);
+  await expect(page.getByTestId("new-problem-due-order-note")).toBeVisible();
+  await expect(page.getByTestId("new-problem-error")).toHaveCount(0);
+  await page.unroute(`**/classes/${classId}/problems`, refuse);
+
+  const created = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+    data: { title: "편집 거절", submission_formats: ["source"], checklist_items: [{ label: "합을 출력한다", required: true }] },
+  });
+  const problemId = (await created.json()).id as number;
+  await page.route(`**/classes/${classId}/problems/${problemId}`, refuse);
+  await page.goto(`/classes/${classId}/problems/${problemId}`);
+  await page.getByTestId("edit-problem-title-input").fill("편집 거절 2");
+  await page.getByTestId("edit-problem-submit").click();
+  await expect(dueAlerts).toHaveCount(1);
+  await expect(page.getByTestId("edit-problem-due-order-note")).toBeVisible();
+  await expect(page.getByTestId("edit-problem-error-message")).toHaveCount(0);
+});
+
+test("호환 서버 주소 — 브라우저 풍선 없이 앱 문장으로 거절하고 칸에 연결하며, 빠진 https:// 는 채워 보낸다(#1455)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "compat-url");
+  const current = await (await api.get(`/api/backend/classroom/classes/${classId}`)).json();
+  let sentUrl = "";
+  await page.route(`**/classes/${classId}/compatible-server`, (route) => {
+    if (route.request().method() !== "PUT") return route.fallback();
+    sentUrl = route.request().postDataJSON().server_url;
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(current) });
+  });
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("scoring-connection-kind-compatible_server").click();
+  const url = page.getByTestId("scoring-server-url-input");
+  await url.fill("not a url");
+  await page.getByTestId("scoring-server-submit").click();
+  await expect(page.getByRole("alert").filter({ hasText: "https://llm.example.com/v1 꼴로" })).toBeVisible();
+  await expect(url).toHaveAttribute("aria-invalid", "true");
+  await expect(url).toHaveAccessibleDescription(/꼴로 넣어 주세요/);
+  expect(sentUrl).toBe("");
+
+  await url.fill("llm.example.test/v1");
+  await page.getByTestId("scoring-server-submit").click();
+  await expect(page.getByRole("status").filter({ hasText: "호환 서버를 저장했습니다." })).toBeVisible();
+  expect(sentUrl).toBe("https://llm.example.test/v1");
 });
