@@ -26,11 +26,16 @@ export interface LoginAutoContinueInput {
   nextOrigin: string | null | undefined;
 }
 
+/** 순환 차단기가 세션 쿠키가 있는 사람의 자동 넘김을 막았는가 — 폼이 그렇다고 알린다(#1406). */
+export function isAutoContinueStopped(input: LoginAutoContinueInput): boolean {
+  if (!input.hasSessionCookie || input.error || !input.bounced) return false;
+  return Boolean(resolveLoginDestination(input.next, input.nextOrigin).returnOrigin);
+}
+
 export function shouldCheckSessionOnLogin(input: LoginAutoContinueInput): boolean {
   if (!input.hasSessionCookie) return false;
   if (input.error) return false;
-  if (input.bounced && resolveLoginDestination(input.next, input.nextOrigin).returnOrigin) return false;
-  return true;
+  return !isAutoContinueStopped(input);
 }
 
 export function autoContinuePath(next: string | null | undefined, nextOrigin: string | null | undefined): string {
