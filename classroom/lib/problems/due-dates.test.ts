@@ -61,6 +61,26 @@ describe("describeDue", () => {
   });
 });
 
+describe("describeDue — 오늘 마감", () => {
+  const at = (h: number, mi: number) => local(2026, 10, 21, h, mi).toISOString();
+  const due = (iso: string, passed: boolean | null) =>
+    describeDue({ recommended_due_at: null, due_at: iso }, { passed, now: NOW }).due;
+
+  it("오늘 마감이 한 시간보다 멀면 날짜 대신 시각을 보인다", () => {
+    expect(due(at(23, 59), false)).toEqual({ label: "오늘 마감", text: "23:59", tone: "normal", passed: false });
+  });
+
+  it("한 시간 안이면 「곧 마감」 — 아직 통과하지 못한 참여자에게는 주의색", () => {
+    expect(due(at(12, 53), false)).toEqual({ label: "곧 마감", text: "12:53", tone: "attention", passed: false });
+    expect(due(at(12, 53), true)?.tone).toBe("faint");
+    expect(due(at(12, 53), null)?.label).toBe("곧 마감");
+  });
+
+  it("내일 마감은 그대로 날짜", () => {
+    expect(due(iso(2026, 10, 22), false)).toEqual({ label: "마감", text: "10/22", tone: "normal", passed: false });
+  });
+});
+
 describe("withLate", () => {
   it("늦음 두 단계를 배지 글자로 나눈다", () => {
     expect(withLate("통과", "recommended")).toBe("통과 · 권장 기한 뒤");
