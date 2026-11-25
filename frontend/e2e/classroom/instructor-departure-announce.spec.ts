@@ -120,7 +120,47 @@ test("묵은 안내 — 「넘겨받았습니다」 안내는 새 이전 요청�
   // 새 소유자가 나에게 다시 넘기려 한다 — 지난 「넘겨받았습니다」는 새 요청 카드와 함께 남지 않는다.
   const back = (await rosterOf(helper.api)).find((r) => r.co_instructor_id !== null)!.co_instructor_id;
   expect((await helper.api.post(`${base}/ownership-transfers`, { data: { co_instructor_id: back } })).ok()).toBeTruthy();
-  await expect(page.getByTestId("ownership-transfer-offer-arrived-note")).not.toBeEmpty({ timeout: 10_000 });
-  await expect(taken).toHaveCount(0);
+  // 지난 안내 안에 있던 초점은 걷히기 전에 새 요청 카드로 간다(#1525 ①) — 카드가 이름·설명으로 읽힌다.
+  await expect(taken).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByRole("region", { name: "소유권 이전 요청" })).toBeFocused();
   await helper.context.close();
+});
+
+test("한 명단 응답에 떠남과 초대 수락이 같이 오면 두 사실이 한 안내로 읽힌다 (#1525 ②)", async ({ page, browser }) => {
+  const seed = `depart-and-join-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, invite } = await ownerClass(page, seed);
+  const leaver = await otherSession(browser, `${seed}-leaver`);
+  expect(
+    (await leaver.api.post(`/api/backend/classroom/co-instructor-invites/${await invite()}/accept`, { data: { display_name: "박조교" } })).ok(),
+  ).toBeTruthy();
+  await openWithStream(page, `/classes/${classId}?tab=instructors`);
+  await expect(page.getByTestId("class-instructors-count")).toHaveText("2명");
+
+  // 명단 응답을 붙들어 두 변경이 모두 끝난 뒤에 한 번에 읽히게 한다.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  let reached!: () => void;
+  const held = new Promise<void>((resolve) => (reached = resolve));
+  await page.route(`**/classroom/classes/${classId}/instructors`, async (route) => {
+    if (holding) {
+      reached();
+      await gate;
+    }
+    await route.continue();
+  });
+  const joiner = await otherSession(browser, `${seed}-joiner`);
+  expect((await leaver.api.post(`/api/backend/classroom/classes/${classId}/instructors/me/leave`)).ok()).toBeTruthy();
+  expect(
+    (await joiner.api.post(`/api/backend/classroom/co-instructor-invites/${await invite()}/accept`, { data: { display_name: "최조교" } })).ok(),
+  ).toBeTruthy();
+  await held;
+  holding = false;
+  release();
+  await leaver.context.close();
+  await joiner.context.close();
+
+  const note = page.getByTestId("co-instructor-departed-note");
+  await expect(note).toContainText("박조교님이 클래스를 떠났습니다", { timeout: 10_000 });
+  await expect(note).toContainText("최조교 님이 초대를 수락했습니다");
 });

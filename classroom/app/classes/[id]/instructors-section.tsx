@@ -26,7 +26,7 @@ import { useBackendQuery } from "@codemit/bff-client";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { INSTRUCTORS_CHANGED, isClassSignal } from "@/lib/events/types";
 import { useEventStream } from "@/lib/events/stream-context";
-import { departureNotes, parseDeparture, vanishedInstructors, type Departure } from "@/lib/co-instructors/departure-note";
+import { departureNotes, parseDeparture, rosterChangeNote, vanishedInstructors, type Departure } from "@/lib/co-instructors/departure-note";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import { pendingTransferEndNote, pendingTransferRowText } from "@/lib/co-instructors/transfer-end-note";
@@ -538,10 +538,10 @@ export function InstructorsSection({
     if (known === null) return;
     // 줄이 사라졌다 — 떠났거나 내보내졌다. 읽어 주고, 초점이 그 줄과 함께 사라졌으면 늘 있는 「초대 링크 만들기」로 옮긴다.
     const vanished = vanishedInstructors(knownNames, knownInstructorIds.current);
+    let departedText = "";
     if (vanished.length > 0) {
-      const text = departureNotes(vanished, departures.current);
+      departedText = departureNotes(vanished, departures.current);
       vanished.forEach(({ id }) => departures.current.delete(id));
-      if (text) announce("departed", text);
       const active = document.activeElement;
       if (active === null || active === document.body) createButtonRef.current?.focus();
     }
@@ -549,7 +549,12 @@ export function InstructorsSection({
       (instructor) =>
         instructor.co_instructor_id !== null && !known.has(instructor.co_instructor_id) && instructor.joined_by === "invite",
     );
-    if (joined.length > 0) announce("accepted", `${joined.map((instructor) => instructor.display_name).join(", ")} 님이 초대를 수락했습니다`);
+    // 떠남과 수락이 한 응답에 같이 오면 한 문장으로 알린다 — 따로 알리면 뒤의 안내가 앞의 것을 지운다.
+    const change = rosterChangeNote(
+      departedText,
+      joined.map((instructor) => instructor.display_name),
+    );
+    if (change) announce(change.kind, change.text);
   }, [rosterState, announce]);
   useEffect(() => {
     if (invitesState.status !== "ready") return;
