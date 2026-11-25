@@ -97,6 +97,12 @@ export default function ProblemSubmitPage() {
     if (offersContestEntry) void loadEntryForm();
   }, [offersContestEntry, loadEntryForm]);
 
+  // 폼이 보이던 화면이 다시 읽은 끝에 찾을 수 없음 안내로 바뀌면 폼과 함께 초점이 사라진다 — 안내가 받는다(#1431).
+  const [hadForm, setHadForm] = useState(false);
+  useEffect(() => {
+    if (state.status === "ready") setHadForm(true);
+  }, [state.status]);
+
   useClassroomTabTitle({
     screenName: "문제 제출",
     className: state.status === "ready" ? state.data.class_name : undefined,
@@ -114,7 +120,7 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" />
+        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} />
       </PageShell>
     );
   }
