@@ -196,7 +196,11 @@ function ProblemTemplatesList({
                   <Num>{new Date(item.created_at).toLocaleDateString("ko-KR")}</Num> 공개
                 </div>
               </div>
-              <Link href={`/templates/${item.share_code}`} className={buttonClass("secondary", "sm")}>
+              <Link
+                href={`/templates/${item.share_code}`}
+                aria-label={`미리보기 ${item.title}`}
+                className={buttonClass("secondary", "sm")}
+              >
                 미리보기
               </Link>
             </li>
@@ -278,7 +282,11 @@ function ClassTemplatesList({
                   <Num>{new Date(item.created_at).toLocaleDateString("ko-KR")}</Num> 공개
                 </div>
               </div>
-              <Link href={`/class-templates/${item.share_code}`} className={buttonClass("secondary", "sm")}>
+              <Link
+                href={`/class-templates/${item.share_code}`}
+                aria-label={`미리보기 ${item.name}`}
+                className={buttonClass("secondary", "sm")}
+              >
                 미리보기
               </Link>
             </li>

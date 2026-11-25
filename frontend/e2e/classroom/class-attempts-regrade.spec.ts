@@ -130,6 +130,23 @@ test("「다시 채점」 확인 창은 예상 금액을 받은 뒤에 열린다
   await expect(dialog.getByRole("button", { name: "취소" })).toBeFocused();
 });
 
+// 서버가 거절하면(4xx) 창은 열린 채 실패가 상태 영역으로 읽히고, 시작했다는 알림은 없다.
+test("「다시 채점」을 서버가 거절하면 창 안 상태 영역이 실패를 읽고 시작 알림은 없다", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+  await page.route("**/score-corrections", async (route) => {
+    await route.fulfill({ status: 422, contentType: "application/json", body: JSON.stringify({ detail: "no" }) });
+  });
+  await page.goto(`/classes/${classId}/submissions`);
+  await page.getByTestId(`regrade-${secondSubmissionId}`).click();
+  const dialog = page.getByRole("dialog", { name: "다시 채점" });
+  const status = dialog.getByRole("status");
+  await expect(status).toHaveText("");
+  await dialog.getByRole("button", { name: "다시 채점" }).click();
+  await expect(status).toHaveText("다시 채점을 걸지 못했습니다.");
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId("regrade-started")).toHaveText("");
+});
+
 // 창을 연 동안 다른 탭이 같은 시도를 다시 채점하면 원래 단추가 사라진다 — 취소해도 초점은 body 로 빠지지 않고 제목에 간다(#1484 ①).
 test("「다시 채점」 창을 연 동안 다른 탭이 같은 시도를 다시 채점해 단추가 사라져도, 취소하면 초점이 제목으로 간다", async ({ browser }) => {
   const page = await (await browser.newContext({ storageState: ownerState })).newPage();
@@ -168,6 +185,10 @@ test("「다시 채점」은 확인 창을 거쳐 걸리고, 새로고침 뒤 �
   await expect(dialog).toBeHidden();
   const heading = page.getByTestId("class-attempts-heading");
   await expect(heading).toBeFocused();
+  // 시작했다는 결과를 낭독기가 듣는다 — 상태 영역이 누구의 어느 문제인지 말한다.
+  await expect(page.getByRole("status").filter({ hasText: "다시 채점을 시작했습니다" })).toHaveText(
+    "서지우 · 1주차 다시 채점을 시작했습니다.",
+  );
 
   // 정정이 끝나면 grader 가 attempt-scored 를 내고 화면이 다시 읽는다 — 그다음 새로고침해도 그대로다.
   await expect(page.getByTestId(`regrade-${submissionId}`)).toHaveCount(0);
