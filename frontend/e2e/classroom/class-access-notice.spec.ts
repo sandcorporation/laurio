@@ -382,6 +382,7 @@ test("폼을 연 채 문제가 숨겨지면 적던 저장소 주소를 안내 �
   await page.goto(`/classes/${classId}/problems/${openId}/submit`);
   await expect(page.getByTestId("repository-url-input")).toBeVisible();
 
+  await page.getByTestId("repository-url-input").fill("https://github.com/owner/repo");
   await page.route(
     (url) => url.pathname.endsWith(`/problems/${openId}/submissions`),
     (route) =>
@@ -393,7 +394,6 @@ test("폼을 연 채 문제가 숨겨지면 적던 저장소 주소를 안내 �
     (url) => url.pathname.endsWith(`/problems/${openId}/mine`),
     (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not Found" }) }),
   );
-  await page.getByTestId("repository-url-input").fill("https://github.com/owner/repo");
   await page.getByTestId("submit-repository").click();
 
   await expect(page.getByTestId("my-problem-not-found")).toBeVisible();
