@@ -62,6 +62,7 @@ function ConfirmDialog({
   label,
   onDismiss,
   returnTo,
+  opener,
   children,
   dismissLabel = "돌아가기",
   actions,
@@ -71,13 +72,15 @@ function ConfirmDialog({
   label: string;
   onDismiss: () => void;
   returnTo: () => HTMLElement | null;
+  /** 연 단추(클릭의 currentTarget) — 초점 없이 열려도 닫으면 여기로 돌아온다. */
+  opener: HTMLElement | null;
   children: ReactNode;
   dismissLabel?: string;
   actions: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const safeRef = useRef<HTMLButtonElement>(null);
-  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onDismiss, initialFocus: safeRef, fallbackFocus: returnTo });
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onDismiss, initialFocus: safeRef, fallbackFocus: returnTo, opener });
   return (
     <div
       ref={dialogRef}
@@ -115,6 +118,9 @@ export default function ContestCertificatesPage() {
   const [pickResult, setPickResult] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [cancelling, setCancelling] = useState<number | null>(null);
+  // 확인창을 연 단추 — 낭독기 활성화·일부 터치는 초점을 옮기지 않아 activeElement 로는 돌아갈 곳을 모른다.
+  const [confirmOpener, setConfirmOpener] = useState<HTMLElement | null>(null);
+  const [cancelOpener, setCancelOpener] = useState<HTMLElement | null>(null);
   // 묶어 받을 발급된 상장 id. 비어 있으면 받을 수 있는 것 전부를 받는다.
   const [bundlePicked, setBundlePicked] = useState<ReadonlySet<number>>(new Set());
   const [reissue, setReissue] = useState<{ id: number; text: CertificateTextIn } | null>(null);
@@ -468,6 +474,7 @@ export default function ContestCertificatesPage() {
             <ConfirmDialog
               testId="certificates-confirm"
               label="상장 발급 확인"
+              opener={confirmOpener}
               onDismiss={() => setConfirming(false)}
               returnTo={() =>
                 document.querySelector<HTMLElement>('[data-testid="certificates-issue"]') ?? focusIssuedHeading()
@@ -495,7 +502,10 @@ export default function ContestCertificatesPage() {
                 type="button"
                 className={buttonClass("primary")}
                 disabled={busy}
-                onClick={() => setConfirming(true)}
+                onClick={(event) => {
+                  setConfirmOpener(event.currentTarget);
+                  setConfirming(true);
+                }}
                 data-testid="certificates-issue"
               >
                 {picked.length}장 발급
@@ -605,7 +615,8 @@ export default function ContestCertificatesPage() {
                       <button
                         type="button"
                         className="underline"
-                        onClick={() => {
+                        onClick={(event) => {
+                          setCancelOpener(event.currentTarget);
                           setCancelling(c.id);
                           setReissue(null);
                         }}
@@ -622,6 +633,7 @@ export default function ContestCertificatesPage() {
                       label={`${c.number} 취소 확인`}
                       onDismiss={() => setCancelling(null)}
                       returnTo={focusIssuedHeading}
+                      opener={cancelOpener}
                       actions={
                         <button
                           type="button"

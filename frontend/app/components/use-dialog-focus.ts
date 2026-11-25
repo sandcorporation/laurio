@@ -18,9 +18,11 @@ export function useDialogFocus(
     initialFocus?: RefObject<HTMLElement | null>;
     /** 연 단추가 닫히며 사라졌을 때 초점을 받을 곳. */
     fallbackFocus?: () => HTMLElement | null;
+    /** 연 단추 — 클릭의 currentTarget. 낭독기 활성화·일부 터치는 초점을 옮기지 않아 activeElement 가 body 라, 알면 이것이 이긴다. */
+    opener?: HTMLElement | null;
   },
 ) {
-  const { onEscape, initialFocus, fallbackFocus } = options;
+  const { onEscape, initialFocus, fallbackFocus, opener: given } = options;
   // 창 본문(질문·결과·금액)을 가리키는 id — 창 요소의 aria-describedby 와 본문 요소의 id 에 같이 건다.
   const descriptionId = useId();
   const opener = useRef<HTMLElement | null>(null);
@@ -28,7 +30,7 @@ export function useDialogFocus(
   fallback.current = fallbackFocus;
 
   useEffect(() => {
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    opener.current = given ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     (initialFocus?.current ?? dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
     return () => {
       const back = opener.current?.isConnected && opener.current !== document.body ? opener.current : null;
