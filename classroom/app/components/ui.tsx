@@ -157,9 +157,12 @@ export function iconButtonClass(tone: ButtonTone = "secondary"): string {
 /** 상태 표시. 중립·오류·주의·충족·심화 다섯이다 — 색은 팔레트 역할 이름(ADR-0080)을 따른다. */
 export function Badge({
   tone = "neutral",
+  wrap = false,
   children,
 }: {
   tone?: "neutral" | "error" | "warning" | "verified" | "advanced";
+  /** 긴 라벨(「채점 대기 · 마감 기한 뒤」)이 칸 폭에서 줄바꿈하게 한다 — 기본은 한 줄이다. */
+  wrap?: boolean;
   children: ReactNode;
 }) {
   const cls = {
@@ -175,7 +178,7 @@ export function Badge({
     // 나왔다: `inline-block` 은 flex 자식으로서 min-content 까지 줄어들고, 그 폭이
     // 한 글자다. 라벨은 짧은 낱말이므로 줄바꿈할 이유가 애초에 없다.
     <span
-      className={`inline-block shrink-0 border px-2 py-0.5 text-[11px] leading-tight whitespace-nowrap ${cls}`}
+      className={`inline-block border px-2 py-0.5 text-[11px] leading-tight ${wrap ? "min-w-0 whitespace-normal" : "shrink-0 whitespace-nowrap"} ${cls}`}
     >
       {children}
     </span>

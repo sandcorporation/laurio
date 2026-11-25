@@ -58,9 +58,11 @@ const STATUS_BADGE: Record<
 function ProblemListRow({
   classId,
   problem,
+  archived,
 }: {
   classId: number;
   problem: ProblemListItem;
+  archived: boolean;
 }) {
   const badge = knownOr(STATUS_BADGE, problem.status, UNKNOWN_BADGE);
   return (
@@ -74,7 +76,7 @@ function ProblemListRow({
           {problem.title}
         </span>
         {/* 고정 폭 세 칸(#770) — 기한(권장 100px · 마감 150px), 시도·마지막, 상태 배지. 한 줄 높이. */}
-        <DueCells problem={problem} passed={problem.status === "passed"} testId={`my-problem-row-${problem.id}`} />
+        <DueCells problem={problem} passed={problem.status === "passed"} testId={`my-problem-row-${problem.id}`} archived={archived} />
         <span className="w-[170px] shrink-0 text-right text-[12px] whitespace-nowrap text-ink/45 max-sm:hidden">
           {problem.attempt_count > 0 ? (
             <span data-testid={`my-problem-row-${problem.id}-attempts`}>
@@ -84,14 +86,14 @@ function ProblemListRow({
         </span>
         <span
           data-testid={`my-problem-row-${problem.id}-status`}
-          className="w-[96px] shrink-0 text-right"
+          className="flex min-w-[96px] max-w-[132px] shrink-0 justify-end text-right max-sm:max-w-[45%]"
         >
           {problem.status === "passed" ? (
-            <Stamp kind={stampKind(true, problem.perfect)!} size="sm">
+            <Stamp kind={stampKind(true, problem.perfect)!} size="sm" wrap>
               {withLate(STAMP_LABEL[stampKind(true, problem.perfect)!], problem.late)}
             </Stamp>
           ) : (
-            <Badge tone={badge.tone}>{withLate(badge.label, problem.late)}</Badge>
+            <Badge tone={badge.tone} wrap>{withLate(badge.label, problem.late)}</Badge>
           )}
         </span>
       </Link>
@@ -104,9 +106,11 @@ function ProblemListRow({
 function HiddenProblemsSection({
   classId,
   hiddenProblems,
+  archived,
 }: {
   classId: number;
   hiddenProblems: ProblemListItem[];
+  archived: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -135,6 +139,7 @@ function HiddenProblemsSection({
                 key={problem.id}
                 classId={classId}
                 problem={problem}
+                archived={archived}
               />
             ))}
           </ul>
@@ -419,6 +424,11 @@ export default function MyProblemsPage() {
       />
 
       <div className="flex flex-col gap-5">
+        {archived ? (
+          <p data-testid="my-problems-archived-note" className="text-[13px] font-medium text-ink/75">
+            보관됨 · 읽기 전용
+          </p>
+        ) : null}
         {problems.length > 0 ? <ProgressLine problems={problems} /> : null}
 
         {problems.length === 0 ? (
@@ -437,6 +447,7 @@ export default function MyProblemsPage() {
                   key={problem.id}
                   classId={classId}
                   problem={problem}
+                  archived={archived}
                 />
               ))}
             </ul>
@@ -446,6 +457,7 @@ export default function MyProblemsPage() {
         <HiddenProblemsSection
           classId={classId}
           hiddenProblems={hiddenProblems}
+          archived={archived}
         />
       </div>
     </PageShell>

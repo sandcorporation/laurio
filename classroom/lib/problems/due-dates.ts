@@ -53,11 +53,12 @@ function formatClock(ms: number): string {
 }
 
 /**
+ * `archived` — 보관된 클래스(읽기 전용, #1507 B)면 마감은 재촉할 일이 아니다 — 「곧 마감」·「마감 지남」·주의색을 끄고 흐린 「마감」만 남긴다.
  * `passed` — 참여자 화면이면 그 참여자가 이 문제를 통과했는가, 강사 화면(표·격자)이면 null.
  */
 export function describeDue(
   problem: DueFields,
-  { passed, now = Date.now() }: { passed: boolean | null; now?: number },
+  { passed, now = Date.now(), archived = false }: { passed: boolean | null; now?: number; archived?: boolean },
 ): DueDescription {
   const done = passed === true;
   let recommended: DueMark | null = null;
@@ -73,15 +74,15 @@ export function describeDue(
   let due: DueMark | null = null;
   if (problem.due_at) {
     const behind = Date.parse(problem.due_at) < now;
-    const attention = behind && passed === false;
+    const attention = !archived && behind && passed === false;
     const dueMs = Date.parse(problem.due_at);
     // 아직 안 지난 오늘 마감은 날짜 대신 시각으로, 한 시간 안이면 「곧 마감」으로 알린다.
     const today = !behind && isSameLocalDay(dueMs, now);
-    const soon = !behind && dueMs - now <= SOON_MS;
+    const soon = !archived && !behind && dueMs - now <= SOON_MS;
     due = {
-      label: attention ? "마감 지남" : soon ? "곧 마감" : today ? "오늘 마감" : "마감",
+      label: attention ? "마감 지남" : soon ? "곧 마감" : today && !archived ? "오늘 마감" : "마감",
       text: today ? formatClock(dueMs) : formatDay(problem.due_at),
-      tone: attention ? "attention" : done || behind ? "faint" : soon && passed === false ? "attention" : "normal",
+      tone: attention ? "attention" : archived || done || behind ? "faint" : soon && passed === false ? "attention" : "normal",
       passed: behind,
     };
   }
