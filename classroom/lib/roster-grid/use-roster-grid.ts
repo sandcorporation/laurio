@@ -14,7 +14,14 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { ATTEMPT_SCORED, ATTEMPT_SUBMITTED, type StreamEvent } from "@/lib/events/types";
+import {
+  ATTEMPT_SCORED,
+  ATTEMPT_SUBMITTED,
+  INSTRUCTORS_CHANGED,
+  PARTICIPATION_CHANGED,
+  isClassSignal,
+  type StreamEvent,
+} from "@/lib/events/types";
 
 import { expelMember } from "@/lib/members/api";
 
@@ -55,13 +62,15 @@ export function useRosterGrid(classId: number) {
     [classId, reload],
   );
 
-  // 이 클래스의 attempt-submitted·attempt-scored만 반응한다 — 다른
-  // 클래스의 신호는 무시한다(각 화면은 자기와 관계있는 신호에만 반응한다,
-  // ADR-0046).
+  // 이 클래스의 제출·채점 신호와, 집계 대상을 바꾸는 신호에 반응한다 — 참여자가 공동 강사가 되거나
+  // 공동 강사가 떠나면(instructors-changed), 문제가 열리거나 숨겨지면(participation-changed) 행·열과
+  // 달성률이 바뀐다(#1471 ⑦). 다른 클래스의 신호는 무시한다(ADR-0046).
   const matches = useCallback(
     (event: StreamEvent) =>
-      (event.kind === ATTEMPT_SUBMITTED || event.kind === ATTEMPT_SCORED) &&
-      event.payload.class_id === classId,
+      isClassSignal(event, ATTEMPT_SUBMITTED, classId) ||
+      isClassSignal(event, ATTEMPT_SCORED, classId) ||
+      isClassSignal(event, INSTRUCTORS_CHANGED, classId) ||
+      isClassSignal(event, PARTICIPATION_CHANGED, classId),
     [classId],
   );
   useRealtimeRefresh({ matches, waiting: true, fallbackPollMs: FALLBACK_POLL_MS, reload });

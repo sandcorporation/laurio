@@ -137,7 +137,8 @@ def test_backfill_links_each_old_notification_to_its_own_request(client, db):
 
 
 def test_backfill_reads_and_writes_in_a_fixed_number_of_queries(client, db):
-    """알림 수에 비례하지 않는다 — 옛 알림 읽기 하나, 후보 요청 읽기 하나, `bulk_update` 하나(#1459 ②)."""
+    """알림 수에 비례하지 않는다 — 옛 알림 읽기 하나, 후보 요청 읽기 하나, 연결 `bulk_update` 하나(#1459 ②),
+    답한 요청의 읽음 보정 조건부 `UPDATE` 하나(#1471 ⑤). 답한 알림이 둘이어도 보정은 질의 하나다."""
 
     start = timezone.now()
     _at(start)
@@ -148,12 +149,23 @@ def test_backfill_reads_and_writes_in_a_fixed_number_of_queries(client, db):
     second = _request(client, owner, class_id)
     assert decline_ownership_transfer(client, co["access"], class_id, second["id"]).status_code == 204
     _at(start + timedelta(hours=2))
+    third = _request(client, owner, class_id)
+    assert decline_ownership_transfer(client, co["access"], class_id, third["id"]).status_code == 204
+    _at(start + timedelta(hours=3))
     _request(client, owner, class_id)
     _strip_transfer_ids()
+    Notification.objects.filter(notification_type=REQUESTED).update(read_at=None)
 
     with CaptureQueriesContext(connection) as queries:
-        assert _backfill() == 3
-    assert len(queries) == 3, [q["sql"] for q in queries]
+        assert _backfill() == 4
+    assert len(queries) == 4, [q["sql"] for q in queries]
+    read = {
+        n.context["transfer_id"]: n.read_at for n in Notification.objects.filter(notification_type=REQUESTED)
+    }
+    declined_at = dict(OwnershipTransfer.objects.values_list("id", "declined_at"))
+    assert read[second["id"]] == declined_at[second["id"]]
+    assert read[third["id"]] == declined_at[third["id"]]
+    assert read[first["id"]] is None
 
 
 def test_backfill_does_not_link_when_the_times_do_not_pick_one_request(client, db):
@@ -197,6 +209,64 @@ def test_backfill_marks_an_answered_old_request_notification_read(client, db):
     row = _requested_rows(client, co["access"])[0]
     assert row["transfer_status"] == "declined"
     assert row["read_at"] is not None
+
+
+class _UserReadsRightAfterTheBackfillReads:
+    """이행이 요청 알림을 읽은 바로 뒤·쓰기 전에 받는 사람이 그 알림을 읽음 처리한다(#1471 ⑤).
+
+    읽음 API(`notifications.api.mark_one_read`)와 같은 조건부 갱신을 끼워 넣는다 — 이행이 메모리에 든 옛
+    `read_at` 으로 그 읽음을 덮으면 안 된다."""
+
+    def __init__(self, read_at):
+        self._read_at = read_at
+        self._first = True
+        self.objects = self
+
+    def filter(self, *args, **kwargs):
+        queryset = Notification.objects.filter(*args, **kwargs)
+        if not self._first:
+            return queryset
+        self._first = False
+        rows = list(queryset)
+        Notification.objects.filter(
+            pk__in=[n.pk for n in rows], read_at__isnull=True
+        ).update(read_at=self._read_at)
+        return rows
+
+    def __getattr__(self, name):
+        return getattr(Notification.objects, name)
+
+
+def test_backfill_keeps_a_read_that_lands_between_its_read_and_its_write(client, db):
+    """대기 중인 요청의 알림 — 이행은 읽음을 옮기지 않지만, 그 사이 사용자가 읽은 것을 미읽음으로 되돌리지도 않는다."""
+
+    owner, co, _, class_id = _three_instructors(client)
+    transfer = _request(client, owner, class_id)
+    _strip_transfer_ids()
+    read_at = timezone.now()
+
+    assert link_legacy_request_notifications(_UserReadsRightAfterTheBackfillReads(read_at), OwnershipTransfer) == 1
+
+    notification = Notification.objects.get(notification_type=REQUESTED)
+    assert notification.context["transfer_id"] == transfer["id"]
+    assert notification.read_at == read_at
+
+
+def test_backfill_keeps_the_users_own_read_time_on_an_answered_request(client, db):
+    """답한 요청의 알림 — 이행이 읽기 전에는 안 읽음이었어도, 그 사이 사용자가 읽은 시각을 답한 시각으로 덮지 않는다."""
+
+    owner, co, _, class_id = _three_instructors(client)
+    transfer = _request(client, owner, class_id)
+    _strip_transfer_ids()
+    assert decline_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 204
+    Notification.objects.filter(notification_type=REQUESTED).update(read_at=None)
+    read_at = timezone.now() + timedelta(minutes=5)
+
+    assert link_legacy_request_notifications(_UserReadsRightAfterTheBackfillReads(read_at), OwnershipTransfer) == 1
+
+    notification = Notification.objects.get(notification_type=REQUESTED)
+    assert notification.context["transfer_id"] == transfer["id"]
+    assert notification.read_at == read_at
 
 
 def test_answering_after_the_backfill_marks_the_old_notification_read(client, db):
