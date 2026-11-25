@@ -212,14 +212,39 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
   const { state, expel, expelError } = useRosterGrid(classId);
   const [expelling, setExpelling] = useState<GridMemberRow | null>(null);
   const [busy, setBusy] = useState(false);
+  // 확인창이 닫히면(성공·실패·취소) 연 메뉴 단추로, 행이 내보내져 메뉴가 없어졌으면 인접 행의 메뉴나 표 머리로 초점을 돌린다(#1447 1-4).
+  const [restore, setRestore] = useState<{ id: number; expelled: boolean } | null>(null);
+  const gridState = state.status === "ready" ? state.grid : null;
+
+  useEffect(() => {
+    if (!restore || !gridState) return;
+    const list = gridState.members;
+    const at = list.findIndex((m) => m.id === restore.id);
+    // 내보냄이 격자에 반영되기 전에는 옛 행의 메뉴가 아직 있다 — 기다린다.
+    if (restore.expelled && at >= 0 && !list[at].expelled) return;
+    setRestore(null);
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const menuOf = (id: number) => document.querySelector<HTMLElement>(`[data-testid="participant-row-${id}-menu"]`);
+    let target = at >= 0 ? menuOf(restore.id) : null;
+    for (let i = 1; !target && at >= 0 && i < list.length; i++) {
+      target = (list[at + i] ? menuOf(list[at + i].id) : null) ?? (list[at - i] ? menuOf(list[at - i].id) : null);
+    }
+    (target ?? document.querySelector<HTMLElement>('[data-testid="participants-header-name"]'))?.focus();
+  }, [restore, gridState]);
 
   async function confirmExpel() {
     if (!expelling) return;
     setBusy(true);
     const ok = await expel(expelling.id);
     setBusy(false);
+    setRestore({ id: expelling.id, expelled: ok });
     setExpelling(null);
     if (ok) onChanged?.();
+  }
+
+  function cancelExpel() {
+    if (expelling) setRestore({ id: expelling.id, expelled: false });
+    setExpelling(null);
   }
 
   if (state.status === "loading") {
@@ -274,7 +299,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
       {expelError ? (
         <div className="border-b border-rule p-3">
           <ErrorNote>
-            <span data-testid="participants-expel-error">내보내지 못했습니다. 다시 시도해주세요.</span>
+            <span data-testid="participants-expel-error">{expelError}</span>
           </ErrorNote>
         </div>
       ) : null}
@@ -338,7 +363,11 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
         <table data-testid="participants-table" className="w-full border-collapse text-[13px]">
           <thead>
             <tr>
-              <th className={`${STICKY} ${HEAD} tracking-[0.06em]`} data-testid="participants-header-name">
+              <th
+                tabIndex={-1}
+                className={`${STICKY} ${HEAD} tracking-[0.06em] outline-none focus-visible:ring-2 focus-visible:ring-ink/40`}
+                data-testid="participants-header-name"
+              >
                 참여자
               </th>
               {problems.map((problem) => (
@@ -465,7 +494,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
         <ExpelDialog
           member={expelling}
           busy={busy}
-          onCancel={() => setExpelling(null)}
+          onCancel={cancelExpel}
           onConfirm={confirmExpel}
         />
       ) : null}
