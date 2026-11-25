@@ -177,6 +177,65 @@ test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeEnabled();
 });
 
+// 확인창의 초점 규약(#1471 ⑥) — 열면 안전한 쪽(돌아가기), Tab 은 창 안에 갇히고, Escape·돌아가기는 닫고
+// 연 자리로 돌아온다. 읽기만 한다(발급·취소를 보내지 않는다).
+test("발급 확인창은 돌아가기에 초점을 두고 Tab 을 가두며 Escape 로 닫으면 발급 단추로 돌아온다", async ({ page }) => {
+  const { id, submissionId } = await openBoardWithoutLoading(page, 0);
+  await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+    const response = await route.fetch();
+    const board = await response.json();
+    board.certificates = board.certificates.filter((c: { submission_id: number }) => c.submission_id !== submissionId);
+    board.recipients = board.recipients.map((r: { submission_id: number }) =>
+      r.submission_id === submissionId ? { ...r, certificate_id: null } : r,
+    );
+    await route.fulfill({ response, json: board });
+  });
+  await page.goto(`/console/contests/${id}/certificates`);
+  await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
+  await page.getByTestId(`certificates-pick-${submissionId}`).check();
+  await page.getByTestId("certificates-issue").focus();
+  await page.keyboard.press("Enter");
+
+  const dialog = page.getByRole("alertdialog");
+  const back = dialog.getByRole("button", { name: "돌아가기" });
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "발급", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "발급", exact: true })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByTestId("certificates-issue")).toBeFocused();
+
+  await page.keyboard.press("Enter");
+  await page.getByRole("alertdialog").getByRole("button", { name: "돌아가기" }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page.getByTestId("certificates-issue")).toBeFocused();
+});
+
+test("취소 확인창은 돌아가기에 초점을 두고 Tab 을 가두며 Escape 로 닫으면 취소 단추로 돌아온다", async ({ page }) => {
+  await openBoard(page, 1);
+  const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+  const opener = row.getByRole("button", { name: "취소", exact: true });
+  await opener.focus();
+  await page.keyboard.press("Enter");
+
+  const dialog = page.getByRole("alertdialog");
+  const back = dialog.getByRole("button", { name: "돌아가기" });
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "취소하기" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(back).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
 test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기·다시 발급이 꺼진다", async ({ page }) => {
   await establishDeveloperSession(page, seeded.judging.sponsor_login_seed, null);
   const { id } = seeded.judging;

@@ -8,7 +8,7 @@
 // 서버가 거절하고, 이 화면은 그 문구를 그대로 보여 준다.
 //
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -26,6 +26,7 @@ import {
   type CertificateOut,
   type CertificateTextIn,
 } from "@/lib/certificates/types";
+import { useDialogFocus } from "@/app/components/use-dialog-focus";
 import { buttonClass } from "@/lib/ui/classnames";
 
 import { CertificateFields } from "./certificate-fields";
@@ -46,6 +47,51 @@ const STATUS_LABEL = { valid: "유효", replaced: "다시 발급됨", cancelled:
 
 function api(contestId: string, suffix = ""): string {
   return `/api/backend/contests/${contestId}/certificates${suffix}`;
+}
+
+// 머리글로 초점을 돌려야 할 때 — 머리글은 기본이 초점 대상이 아니라 tabindex=-1 을 단 뒤 준다.
+function focusIssuedHeading(): HTMLElement | null {
+  const heading = document.querySelector<HTMLElement>('[data-testid="certificates-issued"] h2');
+  if (heading) heading.tabIndex = -1;
+  return heading;
+}
+
+// 되돌릴 수 없는 확인창(role=alertdialog) — 열면 안전한 쪽(돌아가기), Tab 은 창 안에, Escape 는 닫기.
+function ConfirmDialog({
+  testId,
+  onDismiss,
+  returnTo,
+  children,
+  dismissLabel = "돌아가기",
+  actions,
+}: {
+  testId: string;
+  onDismiss: () => void;
+  returnTo: () => HTMLElement | null;
+  children: ReactNode;
+  dismissLabel?: string;
+  actions: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const safeRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(dialogRef, { onEscape: onDismiss, initialFocus: safeRef, fallbackFocus: returnTo });
+  return (
+    <div
+      ref={dialogRef}
+      className="flex flex-col gap-3 border border-error p-4 text-sm"
+      role="alertdialog"
+      aria-modal="true"
+      data-testid={testId}
+    >
+      {children}
+      <div className="flex gap-2">
+        {actions}
+        <button ref={safeRef} type="button" className={buttonClass("secondary", "sm")} onClick={onDismiss}>
+          {dismissLabel}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function ContestCertificatesPage() {
@@ -399,16 +445,13 @@ export default function ContestCertificatesPage() {
           ) : null}
 
           {confirming ? (
-            <div
-              className="flex flex-col gap-3 border border-error p-4 text-sm"
-              role="alertdialog"
-              data-testid="certificates-confirm"
-            >
-              <p>
-                {picked.length}장을 발급합니다. 발급한 상장은 고칠 수 없고, 받는 사람에게 알림이 갑니다.
-                고치려면 취소한 뒤 다시 발급해야 합니다.
-              </p>
-              <div className="flex gap-2">
+            <ConfirmDialog
+              testId="certificates-confirm"
+              onDismiss={() => setConfirming(false)}
+              returnTo={() =>
+                document.querySelector<HTMLElement>('[data-testid="certificates-issue"]') ?? focusIssuedHeading()
+              }
+              actions={
                 <button
                   type="button"
                   className={buttonClass("dangerFilled", "sm")}
@@ -418,15 +461,13 @@ export default function ContestCertificatesPage() {
                 >
                   발급
                 </button>
-                <button
-                  type="button"
-                  className={buttonClass("secondary", "sm")}
-                  onClick={() => setConfirming(false)}
-                >
-                  돌아가기
-                </button>
-              </div>
-            </div>
+              }
+            >
+              <p>
+                {picked.length}장을 발급합니다. 발급한 상장은 고칠 수 없고, 받는 사람에게 알림이 갑니다.
+                고치려면 취소한 뒤 다시 발급해야 합니다.
+              </p>
+            </ConfirmDialog>
           ) : (
             <div>
               <button
@@ -555,16 +596,11 @@ export default function ContestCertificatesPage() {
                   ) : null}
 
                   {cancelling === c.id ? (
-                    <div
-                      className="flex flex-col gap-3 border border-error p-3 text-sm"
-                      role="alertdialog"
-                      data-testid={`certificates-cancel-confirm-${c.id}`}
-                    >
-                      <p>
-                        {c.number} 을(를) 취소합니다. 확인 페이지에 「취소됨」으로 보이고 되돌릴 수 없습니다.
-                        다시 받는 사람에게 발급하려면 새 번호로 발급해야 합니다.
-                      </p>
-                      <div className="flex gap-2">
+                    <ConfirmDialog
+                      testId={`certificates-cancel-confirm-${c.id}`}
+                      onDismiss={() => setCancelling(null)}
+                      returnTo={focusIssuedHeading}
+                      actions={
                         <button
                           type="button"
                           className={buttonClass("dangerFilled", "sm")}
@@ -574,15 +610,13 @@ export default function ContestCertificatesPage() {
                         >
                           취소하기
                         </button>
-                        <button
-                          type="button"
-                          className={buttonClass("secondary", "sm")}
-                          onClick={() => setCancelling(null)}
-                        >
-                          돌아가기
-                        </button>
-                      </div>
-                    </div>
+                      }
+                    >
+                      <p>
+                        {c.number} 을(를) 취소합니다. 확인 페이지에 「취소됨」으로 보이고 되돌릴 수 없습니다.
+                        다시 받는 사람에게 발급하려면 새 번호로 발급해야 합니다.
+                      </p>
+                    </ConfirmDialog>
                   ) : null}
 
                   {reissue?.id === c.id ? (
