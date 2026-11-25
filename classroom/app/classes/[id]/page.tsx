@@ -16,6 +16,7 @@ import { ErrorNote, PageShell } from "@/app/components/ui";
 import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
+import { decideKeyNote, type KeyNoteSnapshot } from "@/lib/classes/takeover-key-note";
 import { offerArrivedNote, offerEndNote } from "@/lib/co-instructors/transfer-end-note";
 import { useClass } from "@/lib/classes/use-class";
 import { useClassSignalReload } from "@/lib/classes/use-class-signal-reload";
@@ -97,28 +98,42 @@ function ClassDetail() {
     setJustDeclined(false);
     setOwnershipTaken(null);
   }, [pendingTransferId]);
-  // 채점 연결이 「연결됨」인가 — 카드가 보이는 같은 값(scoringStatus)이다. 넘겨받은 안내가 처음 보인 때의 값을 기억해 두고,
-  // 키 없이 시작했다가 다시 불러온 결과에서 연결이 확인되면 안내를 걷고 완료 문구를 한 번 알린다(#1532 ②).
+  // 채점 연결이 「연결됨」인가 — 카드가 보이는 같은 값(scoringStatus)이다. 넘겨받은 안내가 떠 있는데 연결이 확인되면 안내를 걷고
+  // 완료 문구를 알린다(#1532 ②). 오류·불러오는 중(null)에는 아무것도 바꾸지 않아 회복 뒤에도 같게 걷힌다(#1535 ①).
+  // 완료 문구는 새 이전 요청·연결 해제·다시 넘겨받음에서 비우고, 다음 완료에서 비운 다음 프레임에 다시 쓴다(#1535 ③).
+  // 판단은 `decideKeyNote` 가 한다.
   const connectedNow = ready ? scoringStatus(ready).kind === "connected" : null;
-  const [takeoverBaseline, setTakeoverBaseline] = useState<boolean | null>(null);
   const [keyAddedNote, setKeyAddedNote] = useState("");
+  const keyAddedNoteRef = useRef("");
+  const keyNoteFrame = useRef<number | null>(null);
+  const keyNoteSnapshot = useRef<KeyNoteSnapshot>({ noteShown: false, connected: null, pendingTransferId: null });
   const takeoverNoteShown = justTookOver && ready?.role === "owner";
+  function writeKeyAddedNote(text: string) {
+    keyAddedNoteRef.current = text;
+    setKeyAddedNote(text);
+  }
+  function cancelKeyNoteFrame() {
+    if (keyNoteFrame.current !== null) window.cancelAnimationFrame(keyNoteFrame.current);
+    keyNoteFrame.current = null;
+  }
+  useEffect(() => cancelKeyNoteFrame, []);
   useEffect(() => {
-    if (!takeoverNoteShown) {
-      setTakeoverBaseline(null);
-      return;
+    const now: KeyNoteSnapshot = { noteShown: takeoverNoteShown, connected: connectedNow, pendingTransferId };
+    const action = decideKeyNote(keyNoteSnapshot.current, now, keyAddedNoteRef.current !== "");
+    if (connectedNow !== null) keyNoteSnapshot.current = now;
+    if (action.clearDone || action.complete) {
+      cancelKeyNoteFrame();
+      writeKeyAddedNote("");
     }
-    if (connectedNow === null) return;
-    if (takeoverBaseline === null) {
-      setTakeoverBaseline(connectedNow);
-      return;
-    }
-    if (takeoverBaseline === false && connectedNow) {
+    if (action.complete) {
       keepFocusBeforeDroppingNotes();
       setJustTookOver(false);
-      setKeyAddedNote("채점 키를 넣었습니다");
+      keyNoteFrame.current = window.requestAnimationFrame(() => {
+        keyNoteFrame.current = null;
+        writeKeyAddedNote("채점 키를 넣었습니다");
+      });
     }
-  }, [takeoverNoteShown, connectedNow, takeoverBaseline]);
+  }, [takeoverNoteShown, connectedNow, pendingTransferId]);
   useEffect(() => {
     if (!hasTimedTransferNote) return;
     const timer = window.setTimeout(() => {
