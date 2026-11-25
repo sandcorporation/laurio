@@ -57,9 +57,13 @@ test("켠 계정은 강의실에서 제보 버튼 → 가리기 → 보내기 �
   await page.mouse.up();
   await expect(page.getByTestId("feedback-undo")).toBeEnabled();
 
+  // 빈 채로 보내면 오류가 뜨고, 창은 그 오류를 설명으로 가리킨다(낭독기가 창에 들어가며 듣는다).
+  await page.getByTestId("feedback-submit").click();
+  await expect(page.getByRole("dialog", { name: "제보" })).toHaveAccessibleDescription("내용을 적어 주세요.");
   await page.getByTestId("feedback-body").fill(`강의실 e2e ${e2eRunId()}`);
   await page.getByTestId("feedback-submit").click();
   await expect(page.getByTestId("feedback-done")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "제보" })).toHaveAccessibleDescription("접수했습니다.");
   await context.close();
 });
 

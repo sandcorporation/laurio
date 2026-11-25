@@ -121,7 +121,7 @@ test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 
   // 되돌릴 수 없다는 경고가 먼저 뜬다 — 확인 전에는 보내지 않는다.
   await expect(page.getByTestId("certificates-confirm")).toContainText("고칠 수 없고");
   // 낭독기는 확인창에 들어가며 무엇을 하는지(장수·되돌릴 수 없음)를 듣는다(#1477).
-  await expect(page.getByRole("alertdialog")).toHaveAccessibleDescription(/1장을 발급합니다.*고칠 수 없고/);
+  await expect(page.getByRole("alertdialog", { name: "상장 발급 확인" })).toHaveAccessibleDescription(/1장을 발급합니다.*고칠 수 없고/);
   expect(sent).toBeNull();
   await page.getByTestId("certificates-confirm-issue").click();
 
@@ -172,9 +172,13 @@ test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
   await row.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.locator('[data-testid^="certificates-cancel-confirm-"]')).toContainText("되돌릴 수 없습니다");
-  await expect(page.getByRole("alertdialog")).toHaveAccessibleDescription(/을\(를\) 취소합니다.*되돌릴 수 없습니다/);
+  await expect(page.getByRole("alertdialog", { name: /^\S+ 취소 확인$/ })).toHaveAccessibleDescription(
+    /을\(를\) 취소합니다.*되돌릴 수 없습니다/,
+  );
   await page.locator('[data-testid^="certificates-cancel-go-"]').click();
   await expect(row).toHaveAttribute("data-status", "cancelled");
+  // 취소된 장에서 「취소」 단추가 사라진다 — 초점은 body 가 아니라 「발급한 상장」 머리글로 간다.
+  await expect(page.getByRole("heading", { name: "발급한 상장" })).toBeFocused();
   // 취소된 상장은 묶음에 고를 수 없다.
   await expect(row.getByRole("checkbox")).toBeDisabled();
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeEnabled();
@@ -277,4 +281,27 @@ test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기�
   await expect(page.getByTestId("certificates-select-9001")).toBeEnabled();
   // 묶음에는 파일 있는 한 장만 센다.
   await expect(page.getByTestId("certificates-bundle")).toHaveText("묶음 받기 (전체 1)");
+});
+
+// 「전체 선택」 — 고른 수와 결과를 낭독기가 듣는다(status). 읽기만 한다.
+test("전체 선택은 고른 수를 status 로 알리고 다시 누르면 풀었다고 알린다", async ({ page }) => {
+  const { id } = await openBoardWithoutLoading(page, 0);
+  await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+    const response = await route.fetch();
+    const board = await response.json();
+    board.certificates = [];
+    board.recipients = board.recipients.map((r: object) => ({ ...r, certificate_id: null }));
+    await route.fulfill({ response, json: board });
+  });
+  await page.goto(`/console/contests/${id}/certificates`);
+  await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
+  const total = await page.locator('[data-testid^="certificates-recipient-"]').count();
+  expect(total).toBeGreaterThan(0);
+  await expect(page.getByTestId("certificates-picked-count")).toHaveAttribute("role", "status");
+  await page.getByTestId("certificates-pick-all").check();
+  await expect(page.getByTestId("certificates-pick-result")).toHaveText(`${total}명을 모두 선택했습니다.`);
+  await expect(page.getByRole("status").filter({ hasText: `${total}/${total} 선택` })).toHaveCount(1);
+  await page.getByTestId("certificates-pick-all").uncheck();
+  await expect(page.getByTestId("certificates-pick-result")).toHaveText("선택을 모두 풀었습니다.");
+  await expect(page.getByRole("status").filter({ hasText: `0/${total} 선택` })).toHaveCount(1);
 });

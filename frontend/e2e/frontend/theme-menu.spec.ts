@@ -1,4 +1,4 @@
-// 헤더 테마 메뉴의 키보드 규약(#1471 ⑥) — 열면 첫 항목, ↑↓·Home/End, Escape 로 닫고 여는 단추로 복귀.
+// 헤더 테마 메뉴의 키보드 규약(#1471 ⑥) — 열면 첫 항목, ↑↓·Home/End, Escape 로 닫고 여는 단추로 복귀, Tab 은 닫는다(#1484 ⑤).
 import { expect, test } from "@playwright/test";
 
 async function openMenu(page: import("@playwright/test").Page) {
@@ -43,5 +43,13 @@ test.describe("@exclusive 테마 메뉴 — 키보드", () => {
     await expect(page.getByRole("menu")).toHaveCount(0);
     await expect(trigger).toBeFocused();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  });
+
+  test("Tab 은 메뉴를 닫고 초점이 body 로 빠지지 않는다", async ({ page }) => {
+    await openMenu(page);
+    await expect(page.getByRole("menuitemradio").nth(0)).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(page.locator("body")).not.toBeFocused();
   });
 });
