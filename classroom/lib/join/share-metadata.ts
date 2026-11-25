@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { LANDING_DESCRIPTION } from "../landing-copy";
+import { buildClassroomTabTitle } from "../rendering/tab-title";
 import type { JoinPreview } from "./api";
 
 // 가입 링크(`/join/<코드>`)를 메신저·SNS 에 붙였을 때 뜨는 공유 카드(#788).
@@ -29,10 +30,11 @@ export const SHARE_IMAGE = {
   type: "image/png",
 };
 
-// 가입 링크의 문서 제목은 받는 사람이 보는 클래스 이름이다 — 화면 이름을 앞에 붙이는 앱 안 탭 제목(`buildClassroomTabTitle`)과 갈라 둔다(#1431). 메신저 카드 제목은 그대로다(#1400).
+// 가입 링크의 문서 제목은 다른 화면처럼 「화면 · 클래스 · Codemit」 꼴이다(#1441 9번, #1431 의 결정을 뒤집음).
+// 메신저 카드 제목(openGraph·twitter)은 따로이고 그대로다(#1400).
 function card(title: string, description: string, className?: string): Metadata {
   return {
-    title: `${className?.trim() ? className : "클래스 가입"} · Codemit`,
+    title: buildClassroomTabTitle({ screenName: "클래스 가입", className }),
     description,
     openGraph: { title, description, type: "website", images: [SHARE_IMAGE] },
     twitter: { card: "summary_large_image", title, description, images: [SHARE_IMAGE] },

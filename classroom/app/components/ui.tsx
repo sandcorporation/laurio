@@ -8,7 +8,7 @@
 // 리터럴 hex 는 여기에도 없다 — 전부 `app/tokens.css` 의 `@theme` 가 만든
 // 유틸리티다(`bg-paper`·`text-ink`·`border-rule`·`text-error`·`text-success`).
 import { createElement } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 /** 화면 한 장의 바깥 틀 — 폭과 여백을 여기서만 정한다. */
 export function PageShell({ children }: { children: ReactNode }) {
@@ -23,7 +23,10 @@ export function PageHeader({
   description,
   actions,
   headingLevel = "h1",
+  titleRef,
 }: {
+  /** 화면이 열릴 때 제목이 초점을 받아야 하는 자리(가입 뒤 이동 등)에 쓴다 — 주면 `tabIndex=-1` 이 붙는다. */
+  titleRef?: Ref<HTMLHeadingElement>;
   eyebrow?: string;
   title: string;
   /** 화면의 제목은 `h1` 하나여야 한다 — 테스트가 잡을 자리를 여기로 준다.
@@ -46,7 +49,11 @@ export function PageHeader({
         ) : null}
         {createElement(
           headingLevel,
-          { className: "text-[22px] font-semibold tracking-[-0.01em]", "data-testid": titleTestId },
+          {
+            className: `text-[22px] font-semibold tracking-[-0.01em]${titleRef ? " outline-none" : ""}`,
+            "data-testid": titleTestId,
+            ...(titleRef ? { ref: titleRef, tabIndex: -1 } : {}),
+          },
           title,
         )}
         {description ? (
