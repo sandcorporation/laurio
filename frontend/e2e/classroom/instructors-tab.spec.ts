@@ -56,6 +56,8 @@ test("강사 탭 — 소유자가 초대 링크를 만들고 소유권을 넘기
   await expect(transferConfirm.getByRole("button", { name: "그만두기" })).toBeFocused();
   await expect(transferConfirm).toHaveAttribute("role", "group");
   await expect(transferConfirm).toHaveAccessibleDescription(/소유권을 넘길까요/);
+  // 되돌리기 어려운 결과(채점 키가 비워져 채점이 멈춘다)도 같은 묶음 설명으로 읽힌다(#1489).
+  await expect(transferConfirm).toHaveAccessibleDescription(/새 소유자가 자기 키를 넣을 때까지 참여자의 제출은 채점되지 않고 기다립니다/);
   await page.getByTestId("ownership-transfer-confirm-button").click();
   await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
   // 보낸 뒤 초점이 BODY 로 떨어지지 않고 보낸 요청의 상태로 옮겨 가며, 읽힌다(#1435).
@@ -113,6 +115,8 @@ test("강사 탭 — 공동 강사 초대는 「정말 취소」를 눌러야 �
   // 한 번 눌러서는 취소되지 않는다(#1378).
   await page.getByTestId("co-instructor-invite-cancel").click();
   await expect(confirm).toHaveText("정말 취소");
+  // 되돌릴 수 없다는 결과가 확인 묶음의 설명으로 읽힌다(#1489 같은 꼴).
+  await expect(page.getByRole("group").filter({ has: confirm })).toHaveAccessibleDescription(/다시 쓸 수 없습니다/);
   expect(await (await api.get(invitesPath)).json()).toHaveLength(1);
 
   // 확인이 열리면 초점은 「그대로 두기」에 있고, 닫히면 「취소」로 돌아온다(#1400) — `body` 로 빠지지 않는다.
@@ -262,4 +266,31 @@ test("소유권 이전 — 넘어간 뒤 소유자가 「요청 취소」를 누
   await expect(note).toContainText("이미 박조교님이 넘겨받았습니다");
   await expect(note).toBeFocused();
   await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0);
+});
+
+test("강사 탭 — 서버 신호와 클래스 재조회가 요청 응답보다 먼저 와도 요청을 보낸 뒤 초점이 대기 줄에 있다 (#1496 ⑥)", async ({
+  page,
+}) => {
+  const seed = `instructors-tab-order-${test.info().workerIndex}-${Date.now()}`;
+  const classId = await openClassWithCoInstructor(page, seed);
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+
+  const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
+  await page.goto(`/classes/${classId}?tab=instructors`);
+  await stream;
+  await expect(page.getByTestId("class-instructors-count")).toHaveText("2명");
+
+  // 요청 응답을 붙들어 둔다 — 서버가 처리한 뒤 신호→클래스 재조회로 대기 줄이 먼저 그려진 다음에야 응답이 닿는다.
+  await page.route("**/classroom/classes/*/ownership-transfers", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const response = await route.fetch();
+    await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible({ timeout: 10_000 });
+    await route.fulfill({ response });
+  });
+
+  await page.getByTestId("ownership-transfer-start").click();
+  await page.getByTestId("ownership-transfer-confirm-button").click();
+  await expect(page.getByTestId("ownership-transfer-pending")).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("ownership-transfer-pending");
 });
