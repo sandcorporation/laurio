@@ -103,6 +103,9 @@ test("기본 모델은 라디오 표에서 골라 저장하고, 새로고침해�
   expect(secondModel).toBeTruthy();
   await second.check();
   await page.getByTestId("class-default-model-submit").click();
+  // 저장 뒤 확인 문구가 낭독되고(role=status) 초점이 BODY 로 가지 않는다(#1441-2).
+  await expect(page.getByRole("status").filter({ hasText: "기본 모델을 저장했습니다." })).toBeVisible();
+  await expect(page.getByTestId("class-default-model-submit")).toBeFocused();
 
   await expect
     .poll(async () => (await (await api.get(`/api/backend/classroom/classes/${classId}`)).json()).default_model)

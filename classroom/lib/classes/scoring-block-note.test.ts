@@ -182,14 +182,26 @@ describe("modelRejectedNote — 키 사유는 소유자 몫, 모델 사유는 �
     });
   });
 
-  it("공동 강사 — 문제 모델이 있든 없든 문제 편집의 채점 모델 칸", () => {
-    for (const m of ["", "gpt-5-retired"]) {
-      expect(modelRejectedNote("co_instructor", 7, 3, m)).toEqual({
-        message,
-        actionLabel: action,
-        href: "/classes/7/problems/3#scoring-model",
-      });
-    }
+  it("공동 강사 + 문제 모델 있음 — 문제 편집의 채점 모델 칸, 원인은 그 문제 하나", () => {
+    expect(modelRejectedNote("co_instructor", 7, 3, "gpt-5-retired")).toEqual({
+      message,
+      actionLabel: action,
+      href: "/classes/7/problems/3#scoring-model",
+    });
+  });
+
+  it("공동 강사 + 문제 모델 없음 — 문제 편집으로 가되 클래스 기본 모델이 원인이라 소유자에게 부탁한다(#1441-3)", () => {
+    const note = modelRejectedNote("co_instructor", 7, 3, "");
+    expect(note.actionLabel).toBe(action);
+    expect(note.href).toBe("/classes/7/problems/3#scoring-model");
+    expect(note.message).toBe(
+      `${message} 클래스 기본 모델이 원인입니다 — 같은 기본 모델을 쓰는 다른 문제도 멈춰 있으니 소유자에게 클래스 설정의 기본 모델을 바꿔 달라고 하세요.`,
+    );
+  });
+
+  it("소유자에게는 부탁 문장이 없다 — 클래스 설정으로 직접 간다", () => {
+    expect(modelRejectedNote("owner", 7, 3, "").message).toBe(message);
+    expect(modelRejectedNote("owner", 7, 3, "gpt-5-retired").message).toBe(message);
   });
 
   it("역할을 모르면 문구만 — 갈 곳이 열릴지 모른다", () => {
@@ -245,9 +257,9 @@ describe("attemptWaitingNote — 펼친 채점 대기 시도 (#1436 7번)", () =
     expect(attemptWaitingNote({ ...row, problem_model: "gpt-5-mini" }, connected, 3)?.href).toBe(
       "/classes/3/problems/9#scoring-model",
     );
-    // 공동 강사 — 같은 문장, 문제 편집으로
+    // 공동 강사 — 문제 편집으로, 기본 모델이 원인이면 소유자에게 부탁하는 문장이 붙는다(#1441-3)
     expect(attemptWaitingNote(row, { ...connected, role: "co_instructor" }, 3)).toMatchObject({
-      message: owner?.message,
+      message: modelRejectedNote("co_instructor", 3, 9, "").message,
       actionLabel: "채점 모델 바꾸기",
       href: "/classes/3/problems/9#scoring-model",
     });

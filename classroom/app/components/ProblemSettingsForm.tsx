@@ -26,7 +26,7 @@ import {
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ProblemCostLine } from "@/app/components/ScoringCost";
 import type { SubmissionFormat } from "@/lib/problems/api";
-import { modelRejectionNoteId, modelSelectDescribedBy } from "@/lib/problems/model-rejection-description";
+import { modelRejectionBadgeId, modelSelectDescribedBy } from "@/lib/problems/model-rejection-description";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 import type { ScoringModelsState } from "@/lib/scoring/use-scoring-models";
@@ -130,9 +130,11 @@ export function ProblemSettingsForm({
         <div id="scoring-model" className="flex flex-col gap-2.5 p-4">
           {modelRejection ? (
             <Note tone="error">
-              <div id={modelRejectionNoteId(testIdPrefix)} data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
+              <div data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
-                  <Badge tone="error">모델 거부</Badge>
+                  <span id={modelRejectionBadgeId(testIdPrefix)}>
+                    <Badge tone="error">모델 거부</Badge>
+                  </span>
                 </div>
                 <button
                   type="button"

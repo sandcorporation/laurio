@@ -9,3 +9,6 @@ export function openBlockedReason({
 }): string | null {
   return !createDisabled && !hasRequiredItem ? "필수 항목이 없어 아직 열 수 없습니다." : null;
 }
+
+// 꺼진 단추의 이유를 보이는 글로 두고 `aria-describedby` 가 가리키는 id(#1441-1).
+export const OPEN_BLOCKED_REASON_ID = "new-problem-open-blocked-reason";

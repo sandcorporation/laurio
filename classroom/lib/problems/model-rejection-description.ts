@@ -4,5 +4,17 @@ export function modelRejectionNoteId(testIdPrefix: string): string {
 }
 
 export function modelSelectDescribedBy(testIdPrefix: string, rejected: boolean): string | undefined {
-  return rejected ? modelRejectionNoteId(testIdPrefix) : undefined;
+  return rejected ? modelRejectionBadgeId(testIdPrefix) : undefined;
+}
+
+// 거부된 현재 값 줄(클래스 설정 「기본 모델」, #1441-2)을 라디오 묶음의 설명으로 묶는다.
+export const DEFAULT_MODEL_UNAVAILABLE_ID = "class-default-model-unavailable";
+
+export function defaultModelGroupDescribedBy(unavailable: boolean): string | undefined {
+  return unavailable ? DEFAULT_MODEL_UNAVAILABLE_ID : undefined;
+}
+
+// 거부 배지만 가리키는 id(#1441-11) — 「이 모델로 다시 시도」 단추 글자는 설명에 넣지 않는다.
+export function modelRejectionBadgeId(testIdPrefix: string): string {
+  return `${testIdPrefix}-model-rejected-badge`;
 }
