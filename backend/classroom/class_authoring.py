@@ -23,6 +23,7 @@ from ninja.errors import HttpError
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
 from . import agent_grading
+from .events import publish_participation_changed
 from .models import Class, ClassTemplate, ProblemTemplate, _generate_join_code
 from .problem_authoring import (
     reject_banned_public_text,
@@ -199,6 +200,7 @@ def archive_class(class_obj: Class) -> Class:
     if class_obj.archived_at is None:
         class_obj.archived_at = timezone.now()
         class_obj.save(update_fields=["archived_at"])
+        publish_participation_changed(class_obj.id)
     return class_obj
 
 
@@ -208,6 +210,7 @@ def unarchive_class(class_obj: Class) -> Class:
     if class_obj.archived_at is not None:
         class_obj.archived_at = None
         class_obj.save(update_fields=["archived_at"])
+        publish_participation_changed(class_obj.id)
     return class_obj
 
 

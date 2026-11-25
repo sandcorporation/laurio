@@ -36,6 +36,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 
 from .class_authoring import reject_banned_name
+from .events import publish_instructors_changed
 from .instructors import is_instructor, is_owner
 from .models import (
     CO_INSTRUCTOR_INVITE_TTL_DAYS,
@@ -68,12 +69,14 @@ def create_invite(class_obj: Class, created_by_id: int) -> CoInstructorInvite:
     """강사(소유자 또는 공동 강사)가 초대를 하나 만든다 — 여러 개가 동시에 열려 있어도 된다."""
 
     now = Clock.now()
-    return CoInstructorInvite.objects.create(
+    invite = CoInstructorInvite.objects.create(
         classroom=class_obj,
         created_by_id=created_by_id,
         created_at=now,
         expires_at=now + timedelta(days=CO_INSTRUCTOR_INVITE_TTL_DAYS),
     )
+    publish_instructors_changed(class_obj)
+    return invite
 
 
 def invite_or_404(token: str) -> CoInstructorInvite:
@@ -168,6 +171,7 @@ def cancel_invite(class_obj: Class, invite_id: int) -> None:
             raise HttpError(409, message)
         invite.cancelled_at = Clock.now()
         invite.save(update_fields=["cancelled_at"])
+        publish_instructors_changed(class_obj)
 
 
 def accept_invite(token: str, user_id: int, display_name: str) -> Class:
@@ -208,6 +212,8 @@ def accept_invite(token: str, user_id: int, display_name: str) -> Class:
         invite.accepted_by_id = user_id
         invite.accepted_at = now
         invite.save(update_fields=["accepted_by", "accepted_at"])
+        # 열어 둔 강사 탭의 명단·대기 초대를 맞춘다(#1447 10-1).
+        publish_instructors_changed(class_obj)
     return class_obj
 
 
@@ -239,6 +245,7 @@ def rename_myself(class_obj: Class, user_id: int, display_name: str) -> dict:
             if is_owner(locked, user_id):
                 locked.instructor_display_name = display_name
                 locked.save(update_fields=["instructor_display_name"])
+                publish_instructors_changed(locked)
                 return _my_roster_row(locked, user_id)
             # 겹친 이전 수락이 방금 이 사람을 공동 강사로 옮겼을 수 있다 — 클래스 잠금 뒤 다시 본다.
             row = (
@@ -250,6 +257,7 @@ def rename_myself(class_obj: Class, user_id: int, display_name: str) -> dict:
                 raise HttpError(404, NOT_INSTRUCTOR_MESSAGE)
         row.display_name = display_name
         row.save(update_fields=["display_name"])
+    publish_instructors_changed(class_obj)
     return _my_roster_row(class_obj, user_id)
 
 
@@ -291,6 +299,7 @@ def depart(row: ClassCoInstructor) -> bool:
         CoInstructorInvite.objects.filter(
             _pending_q(now), classroom_id=row.classroom_id, created_by_id=row.user_id
         ).update(cancelled_at=now)
+        publish_instructors_changed(row.classroom, also={row.user_id})
     return True
 
 

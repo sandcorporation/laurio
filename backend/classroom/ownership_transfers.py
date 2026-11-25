@@ -40,6 +40,7 @@ from core.clock import Clock
 from notifications.models import NotificationType
 from notifications.services import mark_read_safely, notify_safely
 
+from .events import publish_instructors_changed
 from .instructor_scope import OWNER_ONLY_MESSAGE
 from .instructors import is_owner
 from .models import (
@@ -113,6 +114,7 @@ def request(class_obj: Class, owner_id: int, co_instructor_id: int) -> Ownership
             requested_at=now,
             expires_at=now + timedelta(days=OWNERSHIP_TRANSFER_TTL_DAYS),
         )
+        publish_instructors_changed(locked)
     notify_safely(
         recipient=row.user,
         notification_type=NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
@@ -147,6 +149,7 @@ def cancel(class_obj: Class, owner_id: int, transfer_id: int) -> None:
             raise HttpError(403, OWNER_ONLY_MESSAGE)
         transfer.cancelled_at = Clock.now()
         transfer.save(update_fields=["cancelled_at"])
+        publish_instructors_changed(class_obj)
 
 
 def decline(class_obj: Class, user_id: int, transfer_id: int) -> None:
@@ -161,6 +164,8 @@ def decline(class_obj: Class, user_id: int, transfer_id: int) -> None:
         transfer.save(update_fields=["declined_at"])
         locked = Class.objects.get(id=class_obj.id)
         row = ClassCoInstructor.objects.filter(classroom_id=locked.id, user_id=user_id).first()
+        # 요청한 소유자의 열린 강사 탭이 「이전 대기」를 거둔다(#1447 10-1).
+        publish_instructors_changed(locked)
     _mark_request_read(transfer)
     _notify_requester(
         transfer,
@@ -233,6 +238,8 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         # 키를 비웠으니 열린 「연결 없음」 기록은 옛 소유자 몫으로 닫는다(#1389) — 남은 참여자 대기 시도는 다음 제출이나
         # 60초 스캔이 새 소유자에게 새로 알린다. `Class` 를 이미 잠갔다(`classroom.scoring_key_missing` 잠금 규칙 ③).
         close_open_alert(locked.id, ClassScoringKeyMissingAlert.ClosedReason.TRANSFER)
+        # 넘긴 사람은 공동 강사로 남아 함께 받는다 — 열린 탭의 역할·대기가 바뀐다(#1447 10-1).
+        publish_instructors_changed(locked)
     _mark_request_read(transfer)
     _notify_requester(
         transfer,

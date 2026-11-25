@@ -4,7 +4,8 @@
 신호 종류의 이름과 "누구에게 보낼지"는 발행하는 자리(이 앱)가 정한다(#269,
 앱 경계 테스트가 강의실을 몰라야 하는 방향과 같은 이유).
 
-`ATTEMPT_SUBMITTED`·`ATTEMPT_SCORED` 둘이 여기 산다(#379·#383). 알림 벨의
+`ATTEMPT_SUBMITTED`·`ATTEMPT_SCORED`(#379·#383)와 재조회 신호 `INSTRUCTORS_CHANGED`·
+`PARTICIPATION_CHANGED`(#1447)가 여기 산다. 알림 벨의
 `notification-changed`(#381)는 알림 앱(공유층)이 정의한다 — 알림을 만들고 읽음을
 바꾸는 자리가 거기라, 여기 두면 공유층이 기능 앱을 부르는 경계 예외가 생긴다. 새 신호 종류를 추가하고 발행 자리 하나를 더하는 것으로 끝나야,
 버스·SSE 엔드포인트·BFF·프론트 훅을 매번 다시 설계하지 않는다(디스패치 노트
@@ -16,6 +17,7 @@ from __future__ import annotations
 from core.events import Event, publish_after_commit
 
 from .instructors import instructor_user_ids
+from .models import ClassMember
 
 #: 강의실 시도가 새로 생겼다(#383 AC). 그 시도를 낸 참여자와 그 클래스
 #: 강사에게 간다 — 다른 클래스 강사·다른 참여자에게는 가지 않는다.
@@ -95,3 +97,35 @@ def publish_attempt_scored(submission) -> None:
     for recipient_id in recipient_ids:
         event = Event(kind=ATTEMPT_SCORED, recipient_id=recipient_id, payload=payload)
         publish_after_commit(event)
+
+
+#: 클래스의 강사 쪽 상태가 바뀌었다 — 강사 명단·대기 초대·소유권 이전(#1447 10-1). 그 클래스
+#: 강사(소유자·공동 강사)에게만 간다. 열어 둔 강사 탭이 클래스와 두 목록을 다시 읽는 재조회
+#: 신호라 본문은 `class_id` 하나뿐이다 — 누가 들어왔고 누가 답했는지는 싣지 않는다.
+INSTRUCTORS_CHANGED = "instructors-changed"
+
+#: 참여자가 그 클래스에 낼 수 있는지가 바뀌었다 — 문제 열기·숨김·다시 열기, 클래스 보관·되돌리기,
+#: 내보내기(#1447 10-2). 그 클래스의 (내보내지지 않은) 참여자에게만, 내보내기는 내보내진 그 사람
+#: 에게만 간다. 열어 둔 제출 화면이 제출 가능 상태를 다시 읽는 신호라 본문은 `class_id` 하나뿐이다.
+PARTICIPATION_CHANGED = "participation-changed"
+
+
+def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = frozenset()) -> None:
+    """바뀐 뒤의 강사 전원에게 보낸다(바꾸는 트랜잭션 안에서 부르면 바뀐 명단을 읽는다). 방금
+    빠진 사람(떠나기·내보내기)은 `also` 로 더한다 — 그 사람의 열린 탭도 접근 안내로 바뀌어야 한다."""
+
+    payload = {"class_id": class_obj.id}
+    for recipient_id in {*instructor_user_ids(class_obj), *also}:
+        publish_after_commit(Event(kind=INSTRUCTORS_CHANGED, recipient_id=recipient_id, payload=payload))
+
+
+def publish_participation_changed(class_id: int, *, member_user_ids=None) -> None:
+    """`member_user_ids` 를 주지 않으면 그 클래스의 내보내지지 않은 참여자 전원에게 보낸다."""
+
+    if member_user_ids is None:
+        member_user_ids = ClassMember.objects.filter(
+            classroom_id=class_id, expelled_at__isnull=True
+        ).values_list("user_id", flat=True)
+    payload = {"class_id": class_id}
+    for recipient_id in set(member_user_ids):
+        publish_after_commit(Event(kind=PARTICIPATION_CHANGED, recipient_id=recipient_id, payload=payload))

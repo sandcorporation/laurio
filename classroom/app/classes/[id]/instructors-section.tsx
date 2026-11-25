@@ -19,13 +19,16 @@
 // 공동 강사에게만 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 역할 전용
 // 행동은 다른 역할에게 그 버튼이 없는 것으로 말한다.
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
+import { pendingTransferEndNote } from "@/lib/co-instructors/transfer-end-note";
+import { INSTRUCTORS_CHANGED, isClassSignal, type StreamEvent } from "@/lib/events/types";
+import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import { formatDay } from "@/lib/classes/format-day";
 import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 import { cancelTransferButtonLabel, removeButtonLabel, transferButtonLabel } from "@/lib/co-instructors/instructor-labels";
@@ -367,13 +370,19 @@ function LeaveSection({ classId }: { classId: number }) {
   );
 }
 
+// 강사 영역은 늘 보고 있는 화면이 아니라 스트림이 끊겨도 폴링하지 않는다(`waiting: false`) — 이 값은 쓰이지 않는다.
+const ROSTER_FALLBACK_POLL_MS = 30_000;
+
 export function InstructorsSection({
   classId,
+  role,
   pendingTransfer,
   onTransferChanged,
   focusPendingTransfer,
 }: {
   classId: number;
+  // 부른 사람의 이 클래스 역할 — 클래스 응답에서 온다. 바뀌면(넘겨받기·넘겨주기) 목록을 다시 읽는다.
+  role: "owner" | "co_instructor";
   // 클래스의 대기 중 소유권 이전 요청 — 클래스 응답(`ClassRow`)에서 온다.
   pendingTransfer: PendingOwnershipTransfer | null;
   // 요청·취소 뒤 클래스를 다시 읽는다. 취소가 거절당하면(그 사이 끝났을 수 있다) `cancel-failed`.
@@ -397,6 +406,52 @@ export function InstructorsSection({
   const [confirming, setConfirming] = useState<{ id: number; what: Exclude<RowConfirm, null> } | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
+  const reloadBoth = useCallback(() => {
+    reloadRoster();
+    reloadInvites();
+  }, [reloadRoster, reloadInvites]);
+  // 상대가 초대를 수락하거나 이전에 답하면 명단·대기 초대를 다시 읽는다(#1447 10-1). 탭으로 돌아와 스트림이
+  // 다시 열릴 때도 한 번 다시 읽는다 — 숨긴 동안 놓친 신호를 메운다.
+  const matchesInstructorsChange = useCallback(
+    (event: StreamEvent) => isClassSignal(event, INSTRUCTORS_CHANGED, classId),
+    [classId],
+  );
+  useRealtimeRefresh({
+    matches: matchesInstructorsChange,
+    waiting: false,
+    fallbackPollMs: ROSTER_FALLBACK_POLL_MS,
+    reload: reloadBoth,
+  });
+
+  // 대기 요청이 끝났는데(거절·만료·취소) 소유자로 남았으면 결과를 알린다 — 그 줄의 「요청 취소」가 사라지므로
+  // 초점이 그 안에 있었으면 강사 표 제목으로 옮긴다(#1448 ③). 역할이 바뀐 끝(넘겨줌)은 클래스 화면의 안내가 맡는다.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const focusWithin = useRef(false);
+  const cancelledByMe = useRef(false);
+  const [transferNote, setTransferNote] = useState("");
+  const previous = useRef({ role, pendingTransfer });
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = { role, pendingTransfer };
+    if (before.role === role && before.pendingTransfer?.id === pendingTransfer?.id) return;
+    // 역할·대기 요청이 바뀌면 명단의 줄 모양(넘기기·내보내기·이전 대기)이 바뀐다.
+    reloadBoth();
+    setConfirming(null);
+    const note = pendingTransferEndNote({
+      ended: before.pendingTransfer,
+      now: pendingTransfer,
+      stillOwner: before.role === "owner" && role === "owner",
+      cancelledByMe: cancelledByMe.current,
+    });
+    cancelledByMe.current = false;
+    if (note === null) return;
+    setTransferNote(note);
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || !rootRef.current?.contains(active);
+    if (focusWithin.current && lost) headingRef.current?.focus();
+  }, [role, pendingTransfer, reloadBoth]);
+
   const roster = rosterState.status === "ready" ? rosterState.data : [];
   const me = roster.find((instructor) => instructor.is_me);
   const iAmOwner = me?.role === "owner";
@@ -419,6 +474,8 @@ export function InstructorsSection({
     const result = await cancelOwnershipTransfer(classId, transferId);
     if (!result.ok) {
       setError(result.detail);
+    } else {
+      cancelledByMe.current = true;
     }
     setBusyId(null);
     onTransferChanged(result.ok ? undefined : "cancel-failed");
@@ -480,10 +537,29 @@ export function InstructorsSection({
   const invites = invitesState.status === "ready" ? invitesState.data : [];
 
   return (
-    <div className="flex flex-col gap-5 pt-5 lg:flex-row lg:items-start">
+    <div
+      ref={rootRef}
+      onFocus={() => {
+        focusWithin.current = true;
+      }}
+      onBlur={(event) => {
+        // 줄이 사라져 초점이 빠질 때는 relatedTarget 이 없다 — 그때는 「안에 있었다」를 지우지 않는다.
+        const next = event.relatedTarget;
+        if (next !== null && !rootRef.current?.contains(next)) focusWithin.current = false;
+      }}
+      className="flex flex-col gap-5 pt-5 lg:flex-row lg:items-start"
+    >
       <div className="flex min-w-0 flex-1 flex-col gap-5">
+        <p role="status" data-testid="ownership-transfer-ended-note" className={transferNote ? "text-[13px] text-ink/70" : "sr-only"}>
+          {transferNote}
+        </p>
         <Card>
-          <h2 className="flex items-baseline gap-2.5 px-4 py-3 text-[15px] font-semibold tracking-[-0.005em]">
+          <h2
+            ref={headingRef}
+            tabIndex={-1}
+            data-testid="class-instructors-heading"
+            className="flex items-baseline gap-2.5 px-4 py-3 text-[15px] font-semibold tracking-[-0.005em] outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
+          >
             이 클래스의 강사
             {rosterState.status === "ready" ? (
               <span data-testid="class-instructors-count" className="text-[12.5px] font-normal text-ink/45">

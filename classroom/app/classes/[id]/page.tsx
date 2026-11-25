@@ -17,7 +17,7 @@ import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
 import { useClass } from "@/lib/classes/use-class";
-import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
+import { INSTRUCTORS_CHANGED, NOTIFICATION_CHANGED, isClassSignal, type StreamEvent } from "@/lib/events/types";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 import { useProblems } from "@/lib/problems/use-problems";
@@ -44,11 +44,6 @@ function joinLinkUrl(joinCode: string): string {
   return `${window.location.origin}/join/${joinCode}`;
 }
 
-// 소유권 이전의 답(수락)은 요청한 사람에게 알림으로 온다 — 그 신호가 강사 탭의 「이전 대기」를 맞춘다(#1441).
-function isNotificationChanged(event: StreamEvent): boolean {
-  return event.kind === NOTIFICATION_CHANGED;
-}
-
 const TRANSFER_FALLBACK_POLL_MS = 30_000;
 
 function ClassDetail() {
@@ -67,14 +62,19 @@ function ClassDetail() {
   const previousRole = useRef<string | null>(null);
   const ready = classState.status === "ready" ? classState.classroom : null;
   const waitingForAnswer = ready?.role === "owner" && ready.pending_ownership_transfer !== null;
-  const reloadWhileWaiting = useCallback(() => {
-    if (waitingForAnswer) reloadClass();
-  }, [waitingForAnswer, reloadClass]);
+  // 강사 쪽 상태가 바뀌면(초대 수락·이전 요청·답, #1447 10-1) 클래스를 다시 읽는다 — 역할과 대기 요청이 여기 있다.
+  // 소유권 이전의 답은 요청한 사람에게 알림으로도 온다(#1441) — 답을 기다리는 동안만 그 신호도 본다. 탭으로
+  // 돌아오면 스트림이 다시 열리며 한 번 다시 읽는다(`decideStreamRefresh`).
+  const matchesClassChange = useCallback(
+    (event: StreamEvent) =>
+      isClassSignal(event, INSTRUCTORS_CHANGED, classId) || (waitingForAnswer && event.kind === NOTIFICATION_CHANGED),
+    [classId, waitingForAnswer],
+  );
   useRealtimeRefresh({
-    matches: isNotificationChanged,
+    matches: matchesClassChange,
     waiting: waitingForAnswer,
     fallbackPollMs: TRANSFER_FALLBACK_POLL_MS,
-    reload: reloadWhileWaiting,
+    reload: reloadClass,
   });
   const currentRole = ready?.role ?? null;
   useEffect(() => {
@@ -208,10 +208,10 @@ function ClassDetail() {
           ) : tab === "participants" ? (
             <ParticipantsTab classId={classId} onChanged={reloadClass} />
           ) : (
-            // 역할과 대기 요청이 바뀌면(넘겨받기·요청·취소) 강사 목록을 처음부터 다시 읽는다.
+            // 역할과 대기 요청이 바뀌어도 영역을 새로 만들지 않는다 — 초점이 BODY 로 떨어진다(#1448 ③). 목록은 영역이 다시 읽는다.
             <InstructorsSection
-              key={`${classroom.role}-${classroom.pending_ownership_transfer?.id ?? "none"}`}
               classId={classId}
+              role={classroom.role}
               pendingTransfer={classroom.pending_ownership_transfer}
               onTransferChanged={(change) => {
                 if (change === "requested") focusPendingTransfer.current = true;

@@ -176,7 +176,7 @@ from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality, score_corrections
 from .score_reuse import score_reused
-from .events import publish_attempt_submitted
+from .events import publish_attempt_submitted, publish_participation_changed
 from .current_score import CurrentClassroomScore, current_score, current_score_prefetch
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -2178,6 +2178,8 @@ def expel_class_member(member: ClassMember) -> ClassMember:
     if member.expelled_at is None:
         member.expelled_at = timezone.now()
         member.save(update_fields=["expelled_at"])
+        # 내보내진 그 사람의 열린 제출 화면만 — 다른 참여자에게는 보내지 않는다(#1447 10-2).
+        publish_participation_changed(member.classroom_id, member_user_ids=[member.user_id])
         # 처음 내보낼 때만 — 내보내진 사람에게 알린다(#1441-8). 알림이 실패해도 내보내기는 그대로다.
         notify_safely(
             recipient=member.user,
