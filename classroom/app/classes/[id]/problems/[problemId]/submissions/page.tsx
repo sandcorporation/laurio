@@ -49,6 +49,7 @@ import { PERFECT_TEXT_CLASS, STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { withLate } from "@/lib/problems/due-dates";
 import { currentEntryAttemptByMember, latestRowEntryBadge } from "@/lib/submissions/contest-entry";
 import { rejectionText } from "@/lib/submissions/rejection";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
 
@@ -65,7 +66,7 @@ function StatBar({ stats, perfect }: { stats: ReturnType<typeof submissionStats>
       : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: countTone(perfect, PERFECT_TEXT_CLASS) }]),
     { key: "attempts", label: "시도", value: String(stats.attempts) },
     { key: "scoring", label: "채점 중", value: String(stats.scoring) },
-    { key: "waiting", label: "채점 대기", value: String(stats.waiting) },
+    { key: "waiting", label: WAITING_LABEL, value: String(stats.waiting) },
   ];
   return (
     <div data-testid="submissions-stat-bar" className="grid grid-cols-4 border border-rule bg-surface sm:flex sm:w-fit">
@@ -92,8 +93,8 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
             submission.pending_reason === "rejected"
               ? "반려"
               : submission.pending_reason
-                ? "채점 대기"
-                : "채점 중",
+                ? WAITING_LABEL
+                : SCORING_LABEL,
             submission.late,
           )}
         </Badge>
