@@ -159,7 +159,7 @@ function CopyPanel({ classId, problemId }: { classId: number; problemId: number 
           <button
             type="submit"
             data-testid="copy-problem-submit"
-            disabled={copyMutation.pending || targetClassId === ""}
+            aria-disabled={copyMutation.pending || targetClassId === ""}
             className={buttonClass("secondary")}
           >
             {copyMutation.pending ? "복사하는 중..." : "복사"}
@@ -281,7 +281,7 @@ function PublishPanel({
             <button
               type="submit"
               data-testid="publish-template-submit"
-              disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
+              aria-disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
               className={buttonClass("secondary")}
             >
               {publishMutation.pending ? "공개하는 중..." : "템플릿으로 공개"}
@@ -361,7 +361,7 @@ function DeletePanel({
           type="button"
           data-testid="delete-problem-confirm"
           onClick={handleDelete}
-          disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
+          aria-disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
           className={buttonClass("dangerFilled", "sm")}
         >
           {deleteMutation.pending ? "지우는 중..." : "정말 삭제"}
@@ -374,7 +374,7 @@ function DeletePanel({
             deleteMutation.setError(null);
             onCancel();
           }}
-          disabled={deleteMutation.pending}
+          aria-disabled={deleteMutation.pending}
           className={buttonClass("secondary", "sm")}
         >
           취소

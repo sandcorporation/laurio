@@ -185,7 +185,7 @@ function ClassTemplatePublishCard({
             <button
               type="submit"
               data-testid="publish-class-template-submit"
-              disabled={publishing || publisherDisplayName.trim() === ""}
+              aria-disabled={publishing || publisherDisplayName.trim() === ""}
               className={buttonClass("secondary")}
             >
               {publishing ? "공개하는 중..." : "클래스를 템플릿으로 공개"}
@@ -244,7 +244,7 @@ function ClassLifecycleCard({
           type="button"
           data-testid="copy-class-button"
           onClick={handleCopy}
-          disabled={copying}
+          aria-disabled={copying}
           className={buttonClass(classroom.archived ? "primary" : "secondary", "sm")}
         >
           {copying ? "복사하는 중..." : "복사해서 새로 열기"}
@@ -371,7 +371,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
             ref={openButtonRef}
             data-testid="delete-class-open"
             onClick={openConfirm}
-            disabled={!previewReady}
+            aria-disabled={!previewReady}
             className={buttonClass("danger", "sm")}
           >
             {previewReady ? "클래스 삭제" : "불러오는 중..."}
@@ -415,7 +415,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
                 data-testid="delete-class-confirm"
                 aria-describedby="delete-class-warning delete-class-template-note"
                 onClick={handleDelete}
-                disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
+                aria-disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
                 className={buttonClass("dangerFilled", "sm")}
               >
                 {deleting ? "지우는 중..." : "정말 삭제"}
@@ -424,7 +424,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
                 type="button"
                 data-testid="delete-class-cancel"
                 onClick={cancel}
-                disabled={deleting}
+                aria-disabled={deleting}
                 className={buttonClass("secondary", "sm")}
               >
                 취소
@@ -753,7 +753,7 @@ export default function ClassSettingsPage() {
                       ref={modelSubmitRef}
                       type="submit"
                       data-testid="class-default-model-submit"
-                      disabled={modelSaving || defaultModel.trim() === ""}
+                      aria-disabled={modelSaving || defaultModel.trim() === ""}
                       className={buttonClass("primary")}
                     >
                       {modelSaving ? "저장하는 중..." : "저장"}
@@ -868,7 +868,7 @@ export default function ClassSettingsPage() {
                 <button
                   type="submit"
                   data-testid="class-instructor-display-name-submit"
-                  disabled={nameSaving || namesPatch === null}
+                  aria-disabled={nameSaving || namesPatch === null}
                   className={buttonClass("primary")}
                 >
                   {nameSaving ? "저장하는 중..." : "저장"}

@@ -12,9 +12,6 @@ const BUSY = /\b(saving|submitting|pending|busy|sending|loading|loadingMore|uplo
 // 다른 작업자(1517a/b·1518b)가 맡은 파일 — 거기 남은 것은 PR 본문 목록에 있다.
 const OTHER_TICKETS = [
   "instructors-section",
-  "settings/page",
-  "ProblemSideActions",
-  "MarkdownEditor",
   "certificates/page",
   "ownership-transfer-offer",
 ];
