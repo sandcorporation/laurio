@@ -124,6 +124,12 @@ export function submissionAmount(calc: ScoringCalculator): string {
   return REJECT_TEXT;
 }
 
+/** 「제출 한 건」 옆 줄 — 그 금액이 기대는 소스 크기·항목 수. 모델 카드의 「소스 약 N 자 기준」과 같은 말이다(#1492). */
+export function submissionBasis(calc: ScoringCalculator): string {
+  const a = calc.assumptions;
+  return `소스 ${fileCount(a.source_files)}개 · ${charsLabel(a.source_chars)} · 항목 ${a.requirements}개 기준`;
+}
+
 /** 「담는 크기」 — 한 번 호출에 담을 수 있는 글자 수 · 소스 파일 수. */
 export function capacityText(calc: ScoringCalculator): string {
   const row = selectedRow(calc);

@@ -9,6 +9,7 @@ import {
   formatManCount,
   formatRatio,
   formatTokens,
+  modelCostBasis,
   problemCostLine,
   usageCostText,
   usageKrw,
@@ -205,5 +206,15 @@ describe("문제 편집의 비용 한 줄 (#637)", () => {
         row({ priced: false, per_attempt: { krw: null, tokens: 17_650 }, per_problem_tokens: 70_000 }),
       ),
     ).toBe("시도 1건 약 1.8만 토큰 · 참여자 2명 × 평균 2회 ≈ 약 7만 토큰");
+  });
+});
+
+describe("모델 카드 비용의 소스 크기 기준(#1492)", () => {
+  it("실측 평균이 있으면 그 크기, 소스 크기별이면 가운데 크기", () => {
+    expect(modelCostBasis(estimate({ basis: "class", avg_prompt_chars: 55_000 }))).toBe("소스 약 5.5만 자 기준");
+    expect(modelCostBasis(estimate({ basis: "source_sizes", avg_prompt_chars: null }))).toBe("소스 약 5만 자 기준");
+  });
+  it("크기를 모르면 없다", () => {
+    expect(modelCostBasis(estimate({ basis: "class", avg_prompt_chars: null }))).toBeNull();
   });
 });

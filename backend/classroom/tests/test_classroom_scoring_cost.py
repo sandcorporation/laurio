@@ -11,6 +11,7 @@ import pytest
 import requests
 from django.core.cache import caches
 
+from classroom.models import Problem
 from classroom import scoring_cost, scoring_model_catalog
 from classroom.tasks import refresh_scoring_models
 from classroom.scoring_models import FALLBACK_SCORING_MODEL_CHOICES
@@ -215,7 +216,14 @@ def test_a_class_without_attempts_prices_attempts_by_source_size(client, db):
     mini = _row(estimate, "gpt-4.1-mini")
     assert mini["per_attempt"] is None
     assert [band["krw"] for band in mini["by_source_size"]] == [
-        pytest.approx(scoring_cost.attempt_cost("gpt-4.1-mini", None, prompt_chars=chars).krw)
+        pytest.approx(
+            scoring_cost.attempt_cost(
+                "gpt-4.1-mini",
+                None,
+                prompt_chars=chars,
+                output_tokens=scoring_cost.output_tokens_for(None, scoring_cost.ASSUMED_REQUIREMENTS),
+            ).krw
+        )
         for chars in (10_000, 50_000, 200_000)
     ]
 
@@ -276,7 +284,12 @@ def test_a_problem_with_attempts_is_priced_from_its_own_average_prompt(client, d
     assert estimate["attempts_per_participant"] == pytest.approx(1.5)
     assert estimate["attempts_per_participant_measured"] is True
     mini = _row(estimate, "gpt-4.1-mini")
-    per_attempt = scoring_cost.attempt_cost("gpt-4.1-mini", None, prompt_chars=estimate["avg_prompt_chars"])
+    per_attempt = scoring_cost.attempt_cost(
+        "gpt-4.1-mini",
+        None,
+        prompt_chars=estimate["avg_prompt_chars"],
+        output_tokens=scoring_cost.output_tokens_for(None, Problem.objects.get(pk=problem.id).checklist_items.count()),
+    )
     assert mini["per_attempt"]["krw"] == pytest.approx(per_attempt.krw)
     assert mini["per_attempt"]["tokens"] == per_attempt.total_tokens
     assert mini["per_problem_krw"] == pytest.approx(per_attempt.krw * 3 * 1.5)

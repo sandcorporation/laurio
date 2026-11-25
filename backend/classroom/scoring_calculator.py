@@ -53,9 +53,8 @@ Route = Literal["single", "two_step", "over"]
 
 VENDORS: tuple[Vendor, ...] = ("openai", "anthropic")
 
-#: 판정 JSON 의 요구사항 하나 몫(id·판정·근거 한두 문장) — `NON_REASONING_OUTPUT_TOKENS`(2,500)를 「체크리스트
-#: 수십 항목」 25개로 나눈 값이다. 추론 모델은 여기에 강도별 추론 몫(`REASONING_OUTPUT_TOKENS` − 2,500)을 더한다.
-OUTPUT_TOKENS_PER_REQUIREMENT = scoring_cost.NON_REASONING_OUTPUT_TOKENS // 25
+#: 판정 JSON 의 요구사항 하나 몫 — 예상 비용표와 같은 값이다(`scoring_cost.OUTPUT_TOKENS_PER_REQUIREMENT`, #1492).
+OUTPUT_TOKENS_PER_REQUIREMENT = scoring_cost.OUTPUT_TOKENS_PER_REQUIREMENT
 
 # --- 가정(코드 기본값) — 화면이 라벨·값으로 보이고 강사가 바꿔 볼 수 있다. 출처는 조율자가 운영 읽기 전용·work dev 실험에서
 # 집계한 값이다(2026-11-22, #1304 본문 2·3절). 지어낸 값이 없다 --------------------------------------------------------
@@ -64,7 +63,7 @@ OUTPUT_TOKENS_PER_REQUIREMENT = scoring_cost.NON_REASONING_OUTPUT_TOKENS // 25
 ASSUMED_SOURCE_CHARS_MEDIAN = 32_000
 ASSUMED_SOURCE_CHARS_P90 = 307_000
 #: 체크리스트 항목 수 — 운영 문제 64개의 항목 수 p50(p90 은 21).
-ASSUMED_REQUIREMENTS = 6
+ASSUMED_REQUIREMENTS = scoring_cost.ASSUMED_REQUIREMENTS
 #: staged 에서 기계 판정(정적 검사)이 맡는 항목 몫 — 운영 실제 채점 가중 정적 몫 19%(조율자 #5332). 모델에게 묻는 항목에서 빠진다.
 MACHINE_JUDGED_SHARE = 0.19
 
@@ -410,9 +409,7 @@ def single_call(
     asked = requirement_count
     if staged:
         asked = max(1, round(requirement_count * (1 - MACHINE_JUDGED_SHARE))) if requirement_count else 0
-    output_tokens = asked * OUTPUT_TOKENS_PER_REQUIREMENT
-    if effort is not None:
-        output_tokens += scoring_cost.REASONING_OUTPUT_TOKENS[effort] - scoring_cost.NON_REASONING_OUTPUT_TOKENS
+    output_tokens = scoring_cost.output_tokens_for(effort, asked)
     capacity = capacity_chars(model_id, instruction_chars=instruction_chars)
     hangul = capacity_chars_hangul(model_id, instruction_chars=instruction_chars)
     fits = fits_source_bytes(model_id, source_bytes=source_chars * BYTES_PER_CHAR, instruction_chars=instruction_chars)

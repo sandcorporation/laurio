@@ -192,6 +192,18 @@ export function problemCostLine(estimate: ScoringCostEstimate, row: ScoringCostR
 }
 
 /**
+ * 모델 카드 비용이 기대는 소스 크기 한 줄(#1492) — 「소스 약 5만 자 기준」. 계산기의 「제출 한 건」 옆 줄과 같은 말이라 두
+ * 금액을 같은 단위로 견줄 수 있다. 기준이 소스 크기별이면 가운데(「보통」) 크기다. 크기를 모르면 null.
+ */
+export function modelCostBasis(estimate: ScoringCostEstimate): string | null {
+  const chars =
+    estimate.basis === "source_sizes"
+      ? estimate.source_size_bands[Math.floor(estimate.source_size_bands.length / 2)]
+      : estimate.avg_prompt_chars;
+  return chars === undefined || chars === null ? null : `${sourceBandLabel(chars)} 기준`;
+}
+
+/**
  * 기본 모델 표의 한 칸(#636) — 그 모델의 시도 1건 비용. 호환 서버(토큰 단위)는 토큰을, OpenAI 키는
  * 원화를 적고, 단가를 모르면 「단가 모름」이다. 기준이 소스 크기별이면 가운데(「보통」) 크기로 본다.
  */

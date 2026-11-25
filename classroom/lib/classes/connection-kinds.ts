@@ -20,3 +20,14 @@ export function connectionKindOptions(selectable: boolean): { kind: ConnectionKi
 export function initialConnectionKind(current: ConnectionKind, selectable: boolean): ConnectionKind {
   return connectionKindOptions(selectable).some((option) => option.kind === current) ? current : "openai_key";
 }
+
+/** 꺼진 벤더 선택지의 이유 — 그 벤더의 키가 없거나 거부되어 스위치가 넘어갈 수 없을 때. 고를 수 있으면 null. */
+export function vendorUnavailableReason(vendorKey: { switchable: boolean } | null): string | null {
+  if (vendorKey === null) return "키 없음";
+  return vendorKey.switchable ? null : "키 거부됨";
+}
+
+/** 키 줄 단추의 접근성 이름 — 보이는 글자(넣기·바꾸기·닫기·지우기)를 그대로 포함하고 어느 키인지 앞에 붙인다. */
+export function vendorKeyButtonName(keyLabel: string, action: string): string {
+  return `${keyLabel} ${action}`;
+}

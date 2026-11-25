@@ -19,6 +19,7 @@ import {
   parseAssumption,
   providerLabel,
   submissionAmount,
+  submissionBasis,
   type CalculatorChoice,
   type ScoringCalculator as Calculation,
 } from "@/lib/scoring/calculator";
@@ -162,6 +163,9 @@ export function ScoringCalculator({ classId }: { classId: number }) {
         <dt className="text-[12px] text-ink/60">제출 한 건</dt>
         <dd data-testid="calculator-amount" className="text-ink">
           {submissionAmount(calc)}
+        </dd>
+        <dd data-testid="calculator-amount-basis" className="col-start-2 -mt-0.5 text-[11.5px] text-ink/45">
+          {submissionBasis(calc)}
         </dd>
         <dt className="text-[12px] text-ink/60">담는 크기</dt>
         <dd data-testid="calculator-capacity" className="text-ink/80">

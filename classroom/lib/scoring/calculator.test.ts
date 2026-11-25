@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { agentModelIds, calculatorPath, cheapestAgentModel, listedModels, capacityText, changeChoice, charsLabel, parseAssumption, submissionAmount, type ScoringCalculator } from "./calculator";
+import { agentModelIds, calculatorPath, cheapestAgentModel, listedModels, capacityText, changeChoice, charsLabel, parseAssumption, submissionAmount, submissionBasis, type ScoringCalculator } from "./calculator";
 import { formatKrw } from "./cost";
 
 const SINGLE = {
@@ -123,6 +123,10 @@ describe("계산기 글자(#1308)", () => {
   });
   it("제출 한 건은 고른 모델 하나의 값이다", () => {
     expect(submissionAmount(calcOf({ staged: true }))).toBe(formatKrw(138));
+  });
+  it("금액 옆 줄은 그 금액이 기대는 소스 크기·항목 수다(#1492)", () => {
+    const calc = { assumptions: { source_files: 20, source_chars: 32_000, requirements: 6 } } as unknown as ScoringCalculator;
+    expect(submissionBasis(calc)).toBe("소스 20개 · 3.2만 자 · 항목 6개 기준");
   });
   it("글자 수는 만 단위로", () => {
     expect(charsLabel(32_000)).toBe("3.2만 자");

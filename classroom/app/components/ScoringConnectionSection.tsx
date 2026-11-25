@@ -17,7 +17,13 @@ import {
   type ClassRow,
   type VendorKey,
 } from "@/lib/classes/api";
-import { CLAUDE_KEY_LABEL, connectionKindOptions, type ConnectionKind } from "@/lib/classes/connection-kinds";
+import {
+  CLAUDE_KEY_LABEL,
+  connectionKindOptions,
+  vendorKeyButtonName,
+  vendorUnavailableReason,
+  type ConnectionKind,
+} from "@/lib/classes/connection-kinds";
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 import { normalizeServerUrl } from "@/lib/classes/server-url";
@@ -116,23 +122,34 @@ function VendorSwitch({
                 ? classroom.anthropic_key
                 : null;
           const checked = option.kind === current || (option.kind === "compatible_server" && compatibleOpen);
-          const disabled = busy || (option.kind !== "compatible_server" && !vendorKey?.switchable);
+          // 꺼진 이유가 있으면(키 없음·거부됨) disabled 가 아니라 aria-disabled 다 — Tab 이 닿아 이유가 설명으로 읽힌다.
+          const reason = option.kind === "compatible_server" ? null : vendorUnavailableReason(vendorKey);
+          const reasonId = `scoring-connection-kind-${option.kind}-reason`;
           return (
-            <button
-              key={option.kind}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              disabled={disabled}
-              data-testid={`scoring-connection-kind-${option.kind}`}
-              onClick={() => {
-                if (option.kind === "compatible_server") onCompatible();
-                else if (option.kind !== current) onSwitch(option.kind);
-              }}
-              className={buttonClass(checked ? "primary" : "secondary", "sm")}
-            >
-              {VENDOR_LABELS[option.kind]}
-            </button>
+            <span key={option.kind} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                disabled={busy}
+                aria-disabled={reason !== null || undefined}
+                aria-describedby={reason ? reasonId : undefined}
+                data-testid={`scoring-connection-kind-${option.kind}`}
+                onClick={() => {
+                  if (reason) return;
+                  if (option.kind === "compatible_server") onCompatible();
+                  else if (option.kind !== current) onSwitch(option.kind);
+                }}
+                className={`${buttonClass(checked ? "primary" : "secondary", "sm")} ${reason ? "cursor-not-allowed opacity-45" : ""}`}
+              >
+                {VENDOR_LABELS[option.kind]}
+              </button>
+              {reason ? (
+                <span id={reasonId} data-testid={reasonId} className="text-[12px] text-ink/60">
+                  {reason}
+                </span>
+              ) : null}
+            </span>
           );
         })}
       </div>
@@ -207,6 +224,7 @@ function VendorKeyRow({
             ref={changeButtonRef}
             type="button"
             data-testid={`vendor-key-${provider}-change`}
+            aria-label={vendorKeyButtonName(label, open ? "닫기" : vendorKey ? "바꾸기" : "넣기")}
             aria-expanded={open}
             onClick={() => {
               announce("");
@@ -221,6 +239,7 @@ function VendorKeyRow({
               ref={deleteConfirm.triggerRef}
               type="button"
               data-testid={`vendor-key-${provider}-delete`}
+              aria-label={vendorKeyButtonName(label, "지우기")}
               onClick={() => setConfirming(true)}
               className={buttonClass("secondary", "sm")}
             >

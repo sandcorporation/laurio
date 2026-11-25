@@ -526,3 +526,50 @@ def test_three_agent_runs_put_the_measured_median_beside_the_unchanged_estimate(
     assert agent["measured_seconds"] == {"sample_count": 3, "median": 1.0, "p90": 1.0}
     # 다른 모델의 실측은 섞지 않는다.
     assert _row(calc, "claude-sonnet-5-5")["agent"]["measured_krw"]["median"] is None
+
+
+def test_the_cost_table_and_the_calculator_give_the_same_amount_for_the_same_input(client, db):
+    """#1492 — 같은 모델·같은 소스 크기·같은 항목 수면 모델 카드(예상 비용표)와 계산기의 「제출 한 건」이 한 금액이다."""
+
+    calc = scoring_calculator
+
+    chars = calc.ASSUMED_SOURCE_CHARS_MEDIAN
+    instruction = calc.assumed_instruction_chars(calc.ASSUMED_REQUIREMENTS)
+    for model_id, effort in (("gpt-4.1-mini", None), ("gpt-5.5", "medium")):
+        single = calc.single_call(
+            model_id, effort, source_chars=chars, instruction_chars=instruction, requirement_count=calc.ASSUMED_REQUIREMENTS
+        )
+        card = scoring_cost.attempt_cost(
+            model_id,
+            effort,
+            prompt_chars=chars + instruction,
+            output_tokens=scoring_cost.output_tokens_for(
+                scoring_cost.effort_for(model_id, effort), scoring_cost.ASSUMED_REQUIREMENTS
+            ),
+        )
+        assert single.usd * scoring_cost.KRW_PER_USD == pytest.approx(card.krw)
+        assert single.output_tokens == card.output_tokens
+
+
+def test_the_class_cost_rows_count_the_output_by_requirements(client, db):
+    instructor = login(client, uid="instructor-1")
+    class_id = create_class(client, instructor["access"])
+    response = client.get(f"{CLASSES_URL}/{class_id}/scoring-cost", **auth_header(instructor["access"]))
+    row = next(r for r in response.json()["rows"] if r["model_id"] == "gpt-4.1-mini")
+    mid = row["by_source_size"][1]
+    expected = scoring_cost.attempt_cost(
+        "gpt-4.1-mini", None, prompt_chars=50_000, output_tokens=scoring_cost.ASSUMED_REQUIREMENTS * scoring_cost.OUTPUT_TOKENS_PER_REQUIREMENT
+    )
+    assert mid["krw"] == pytest.approx(expected.krw)
+    assert mid["tokens"] == expected.total_tokens
+
+
+def test_the_shared_output_rule_is_pinned_to_the_one_amount_both_screens_show():
+    """#1492 — 항목 6개 ·소스 3.2만 자의 gpt-4.1-mini 는 두 화면 모두 약 7원이다. 상수를 바꾸면 이 줄이 먼저 빨개진다."""
+
+    assert scoring_cost.OUTPUT_TOKENS_PER_REQUIREMENT == 100
+    assert scoring_cost.output_tokens_for(None, 6) == 600
+    assert scoring_cost.output_tokens_for("medium", 6) == 600 + 7_500 - 2_500
+    chars = scoring_calculator.ASSUMED_SOURCE_CHARS_MEDIAN + scoring_calculator.assumed_instruction_chars(6)
+    card = scoring_cost.attempt_cost("gpt-4.1-mini", None, prompt_chars=chars, output_tokens=scoring_cost.output_tokens_for(None, 6))
+    assert round(card.krw) == 7

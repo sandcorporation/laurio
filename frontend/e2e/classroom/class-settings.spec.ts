@@ -24,7 +24,15 @@ test("채점 연결은 「연결 없음」에서 시작해 OpenAI 키를 넣으�
 
   await expect(page.getByTestId("openai-key-status")).toContainText("연결 없음");
   await expect(page.getByTestId("scoring-connection-kind-openai_key")).toBeDisabled();
+  // 꺼진 선택지는 이유가 설명으로 읽히고(#1492) Tab 이 닿는다. 「넣기」 단추 이름에는 어느 키인지가 있다.
+  const openaiRadio = page.getByRole("radio", { name: "OpenAI" });
+  await expect(openaiRadio).toHaveAccessibleDescription("키 없음");
+  await expect(page.getByTestId("scoring-connection-kind-openai_key-reason")).toHaveText("키 없음");
+  await openaiRadio.focus();
+  await expect(openaiRadio).toBeFocused();
+  await expect(page.getByRole("button", { name: "OpenAI 키 넣기" })).toBeVisible();
   await page.getByTestId("vendor-key-openai-change").click();
+  await expect(page.getByRole("button", { name: "OpenAI 키 닫기" })).toBeVisible();
   await page.getByTestId("openai-key-input").fill("sk-e2e-test-key-7f2a");
   await page.getByTestId("openai-key-submit").click();
 
@@ -37,6 +45,9 @@ test("채점 연결은 「연결 없음」에서 시작해 OpenAI 키를 넣으�
   await expect(page.getByRole("status").filter({ hasText: "OpenAI 키를 저장했습니다." })).toBeVisible();
   await expect(page.getByTestId("vendor-key-openai-masked")).toContainText("7f2a");
   await expect(page.getByTestId("scoring-connection-kind-openai_key")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("scoring-connection-kind-openai_key-reason")).toHaveCount(0);
+  await expect(page.getByRole("radio", { name: "OpenAI" })).not.toHaveAccessibleDescription("키 없음");
+  await expect(page.getByRole("button", { name: "OpenAI 키 바꾸기" })).toBeVisible();
 
   await page.reload();
   await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
@@ -62,6 +73,8 @@ test("OpenAI·Claude 키를 둘 다 넣어 두고 스위치로 채점 벤더를 
     return;
   }
   await expect(page.getByTestId("scoring-connection-kind-anthropic_key")).toBeDisabled();
+  await expect(page.getByRole("radio", { name: "Claude" })).toHaveAccessibleDescription("키 없음");
+  await expect(page.getByRole("button", { name: "Claude(Anthropic) 키 넣기" })).toBeVisible();
   await page.getByTestId("vendor-key-anthropic-change").click();
   await page.getByTestId("anthropic-key-input").fill("sk-ant-e2e-test-key-9c1d");
   await page.getByTestId("anthropic-key-submit").click();
@@ -76,6 +89,8 @@ test("OpenAI·Claude 키를 둘 다 넣어 두고 스위치로 채점 벤더를 
   await expect(page.getByTestId("vendor-key-openai-masked")).toContainText("7f2a");
   // 새로고침 없이도 단가표에 있는 Claude 모델은 원화로 보인다(#801) — 비용은 연결이 바뀐 뒤에 다시 받는다.
   await expect(page.getByTestId("scoring-model-cost-claude-haiku-5-5")).toContainText("원");
+  // 금액이 기대는 소스 크기가 같은 칸에 적힌다(#1492) — 계산기의 「제출 한 건」 옆 줄과 같은 말.
+  await expect(page.getByTestId("scoring-model-basis-claude-haiku-5-5")).toHaveText(/^소스 약 [\d.]+만? ?자 기준$/);
   await expect(page.getByTestId("scoring-model-cost-claude-sonnet-5-5")).not.toContainText("단가 모름");
 
   await page.reload();
@@ -242,6 +257,7 @@ test("채점 비용 예상표 — 빈 클래스에서도 모든 칸에 금액이
   await expect(page.getByTestId("calculator-source-chars")).toContainText("3.2만 자");
   await expect(page.getByTestId("calculator-requirements")).toHaveValue("6");
   const amount = page.getByTestId("calculator-amount");
+  await expect(page.getByTestId("calculator-amount-basis")).toHaveText(/^소스 [\d,]+개 · [\d.]+만? ?자 · 항목 \d+개 기준$/);
   await expect(amount).toContainText("원");
   await expect(page.getByTestId("calculator-capacity")).toContainText("소스 파일 약");
   await expect(page.getByTestId("calculator-method")).toHaveValue("single");
