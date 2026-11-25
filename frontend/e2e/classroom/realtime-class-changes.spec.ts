@@ -408,3 +408,66 @@ test("이전 요청에 답이 오면 클래스·강사·초대 재조회가 세 
   expect(reads.all - before).toBeGreaterThan(0);
   expect(reads.all - before).toBeLessThanOrEqual(3);
 });
+
+// #1464 — 거절 뒤의 「소유자는 그대로입니다」는 다음 요청이 걸리거나 역할이 바뀌면 지워진다.
+for (const next of ["다시 요청", "수락"] as const) {
+  test(`이전 요청 거절 문구는 ${next} 뒤에 강사 탭에서 사라진다`, async ({ page, browser }) => {
+    const seed = `rt-note-${next === "수락" ? "a" : "r"}-${test.info().workerIndex}-${Date.now()}`;
+    await establishClassroomSession(page, seed);
+    const classId = await createClass(page, seed);
+    const token = await createInvite(page, classId);
+    const helper = await otherSession(browser, `${seed}-helper`);
+    expect(
+      (
+        await helper.api.post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, {
+          data: { display_name: "박조교" },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    const api = classroomApi(page);
+    const base = `/api/backend/classroom/classes/${classId}`;
+    const roster = (await (await api.get(`${base}/instructors`)).json()) as { co_instructor_id: number | null }[];
+    const coInstructorId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+    async function request() {
+      const requested = await api.post(`${base}/ownership-transfers`, { data: { co_instructor_id: coInstructorId } });
+      expect(requested.ok()).toBeTruthy();
+      return (await requested.json()).id as number;
+    }
+    const first = await request();
+
+    await openWithStream(page, `/classes/${classId}?tab=instructors`);
+    await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
+    expect((await helper.api.post(`${base}/ownership-transfers/${first}/decline`)).ok()).toBeTruthy();
+    const ended = page.getByTestId("ownership-transfer-ended-note");
+    await expect(ended).toHaveText("박조교님에게 보낸 소유권 이전 요청이 끝났습니다. 소유자는 그대로입니다.", {
+      timeout: 10_000,
+    });
+
+    const second = await request();
+    await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible({ timeout: 10_000 });
+    if (next === "수락") {
+      expect((await helper.api.post(`${base}/ownership-transfers/${second}/accept`)).ok()).toBeTruthy();
+      await expect(page.getByTestId("class-leave")).toBeVisible({ timeout: 10_000 });
+    }
+    await expect(ended).toHaveText("");
+    await helper.context.close();
+  });
+}
+
+// #1465 3 — 「초대 링크 만들기」 결과가 읽히고 초점이 새 링크의 「복사」로 간다.
+for (const width of [1280, 390]) {
+  test(`${width}px — 「초대 링크 만들기」를 누르면 만들었다는 안내가 읽히고 초점이 새 링크의 「복사」로 간다`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    const seed = `rt-create-${test.info().workerIndex}-${Date.now()}`;
+    await establishClassroomSession(page, seed);
+    const classId = await createClass(page, seed);
+    await page.goto(`/classes/${classId}?tab=instructors`);
+    const note = page.getByTestId("co-instructor-created-note");
+    await expect(note).toHaveAttribute("role", "status");
+    await expect(note).toHaveText("");
+    await page.getByRole("button", { name: "초대 링크 만들기" }).press("Enter");
+    await expect(note).toHaveText("초대 링크를 만들었습니다");
+    await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(1);
+    await expect(page.getByTestId("co-instructor-invite-copy")).toBeFocused();
+  });
+}
