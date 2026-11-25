@@ -37,10 +37,6 @@ export type RosterGridState =
 //: 과 같은 30초로 잡는다 — 격자 전체는 늘 기다리는 셈이다.
 const FALLBACK_POLL_MS = 30_000;
 
-//: 한 변경이 신호 둘로 올 수 있다 — 강사이면서 참여자인 사람은 문제 전이에 participation-changed 와
-//: instructors-changed 를 함께 받는다(#1471 ⑦). 클래스 화면의 신호 재조회(250ms)와 같은 간격으로 묶는다.
-const SIGNAL_COALESCE_MS = 250;
-
 const NOT_FOUND = Symbol("roster-grid-not-found");
 
 export function useRosterGrid(classId: number) {
@@ -82,7 +78,6 @@ export function useRosterGrid(classId: number) {
     waiting: true,
     fallbackPollMs: FALLBACK_POLL_MS,
     reload,
-    coalesceSignalsMs: SIGNAL_COALESCE_MS,
   });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는

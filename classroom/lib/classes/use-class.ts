@@ -81,5 +81,7 @@ export function useClass(classId: number) {
     [classId, reload],
   );
 
-  return { state, reload, regenerateJoinCode, setArchived };
+  // 요청 하나가 끝날 때마다(성공·실패) 새 값이 된다 — 신호 재조회가 「읽는 중」을 풀 자리(#1496 ④). `state` 는 이름 바꾸기·보관
+  // 오류 표시로도 바뀌어 요청의 끝으로 쓸 수 없다.
+  return { state, settled: queryState, reload, regenerateJoinCode, setArchived };
 }

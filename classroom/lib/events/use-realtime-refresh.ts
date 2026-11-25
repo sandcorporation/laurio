@@ -6,9 +6,10 @@
 // 네 곳이 각자 구독·재연결 재조회·폴링을 3개의 `useEffect`로 다시 배선했다
 // (합쳐 12벌) — 이 훅 하나가 그 자리를 대신한다. `decideStreamRefresh`
 // (`./policy.ts`)가 유일한 판단이고, 이 훅은 그 결정을 그대로 실행할 뿐이다.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { decideStreamRefresh } from "./policy";
+import { createSameChangeFilter } from "./same-change";
 import { useEventStream } from "./stream-context";
 import type { StreamConnectionState, StreamEvent } from "./types";
 
@@ -25,10 +26,6 @@ export interface RealtimeRefreshOptions {
   fallbackPollMs: number;
   /** 신호를 받거나, 재연결됐거나, 폴링 차례가 됐을 때 부를 재조회. */
   reload: () => void;
-  /** 주면 이 시간 안에 잇따라 온 신호를 재조회 한 번으로 묶는다 — 한 변경이 신호 둘로 오는 화면(강사이면서
-   *  참여자인 사람이 문제 전이에 `participation-changed`·`instructors-changed` 를 함께 받는다, #1471 ⑦)이 쓴다.
-   *  재연결·폴링 재조회는 묶지 않는다. */
-  coalesceSignalsMs?: number;
 }
 
 export function useRealtimeRefresh({
@@ -36,30 +33,22 @@ export function useRealtimeRefresh({
   waiting,
   fallbackPollMs,
   reload,
-  coalesceSignalsMs,
 }: RealtimeRefreshOptions): void {
   const { connectionState, subscribe } = useEventStream();
   const previousConnectionState = useRef<StreamConnectionState>(connectionState);
+  // 한 변경이 신호 둘로 오는 사람(참여자 행이 있는 강사가 보관·문제 쓰기에 `participation-changed`·`instructors-changed` 를
+  // 함께 받는다, #1471 ⑦)의 재조회를 하나로 — 두 신호의 같은 변경 번호로 알아본다(#1496 ⑤). 예전의 250ms 창은 두 신호가
+  // 그보다 벌어지면 두 번 읽었다. 재연결·폴링 재조회는 거르지 않는다. 다시 구독해도 기억은 이어진다.
+  const [alreadyRead] = useState(createSameChangeFilter);
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = subscribe((event) => {
-      if (!matches(event)) return;
-      if (coalesceSignalsMs === undefined) {
+  useEffect(
+    () =>
+      subscribe((event) => {
+        if (!matches(event) || alreadyRead(event)) return;
         reload();
-        return;
-      }
-      if (timer !== null) return;
-      timer = setTimeout(() => {
-        timer = null;
-        reload();
-      }, coalesceSignalsMs);
-    });
-    return () => {
-      unsubscribe();
-      if (timer !== null) clearTimeout(timer);
-    };
-  }, [subscribe, reload, matches, coalesceSignalsMs]);
+      }),
+    [subscribe, reload, matches, alreadyRead],
+  );
 
   useEffect(() => {
     const decision = decideStreamRefresh(

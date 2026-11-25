@@ -48,7 +48,7 @@ function ClassDetail() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const tab = parseDetailTab(useSearchParams().get("tab"));
-  const { state: classState, reload: reloadClass, regenerateJoinCode } = useClass(classId);
+  const { state: classState, settled: classSettled, reload: reloadClass, regenerateJoinCode } = useClass(classId);
   // 방금 소유권을 넘겨받았는가(#564) — 키 넣기로 가는 안내를 한 번 보인다.
   const [justTookOver, setJustTookOver] = useState(false);
   const [justDeclined, setJustDeclined] = useState(false);
@@ -61,12 +61,14 @@ function ClassDetail() {
   const ready = classState.status === "ready" ? classState.classroom : null;
   const waitingForAnswer = ready?.role === "owner" && ready.pending_ownership_transfer !== null;
   // 강사 쪽 상태가 바뀌면(초대 수락·이전 요청·답, #1447 10-1) 클래스를 다시 읽는다 — 역할과 대기 요청이 여기 있다.
-  // 같은 변경의 재조회는 시간 창이 아니라 변경 번호로 하나가 된다(#1484 ④): 이미 읽은 번호의 신호는 건너뛴다.
+  // 같은 변경의 재조회는 시간 창이 아니라 변경 번호로 하나가 된다(#1484 ④): 이미 읽은 번호의 신호는 건너뛴다. 재조회가
+  // 실패해도 다음 신호가 다시 읽는다(#1496 ④).
   // 강사 영역은 이 응답에 맞춰 명단·대기 초대를 읽는다(`signalPending`). 탭으로 돌아오면 스트림이 다시 열리며 한 번 읽는다.
   const { signalPending, beginCommand, reloadAfterCommand } = useClassSignalReload({
     classId,
-    loaded: ready,
-    classroomSignalRev: ready?.signal_rev ?? 0,
+    settled: classSettled,
+    // 옛 서버(겹쳐 배포 중)의 응답에는 번호가 없다 — 0 으로 채우면 읽은 번호가 신호보다 늘 작아 끝없이 다시 읽는다(#1496 ③).
+    classroomSignalRev: typeof ready?.signal_rev === "number" ? ready.signal_rev : null,
     waitingForAnswer,
     reloadClass,
   });

@@ -8,11 +8,13 @@
   `instructors-changed` 로 간다(#1471 ⑦ 후속). 다른 탭·다른 강사가 열어 둔 클래스 머리·참여자 격자·문제 목록의
   참여자 수·n/N·달성률이 그것으로 다시 읽는다.
 
-두 신호 모두 본문은 `class_id` 하나다 — 이름·소스 같은 것을 싣지 않는다. 준비는 마운트된 HTTP API
+두 신호 모두 본문은 `class_id` 와 변경 번호 `rev` 다 — 이름·소스 같은 것을 싣지 않는다. 준비는 마운트된 HTTP API
 (`tests.classroom_scenarios`), 신호는 fake 이벤트 버스의 수신자별 큐로 본다.
 """
 
 from __future__ import annotations
+
+import pytest
 
 from core.events import FakeEventBus
 from tests.classroom_scenarios import (
@@ -73,11 +75,10 @@ def _scene(client):
 
 
 def _body_is(kind: str, payload: dict, class_id: int) -> bool:
-    """강사 쪽 신호는 `class_id` 에 변경 번호 `rev` 하나만, 참여 신호는 `class_id` 하나만 싣는다(#1484 ④)."""
+    """두 신호 모두 `class_id` 에 변경 번호 `rev` 하나만 싣는다(#1484 ④). 참여 신호의 번호는 같은 변경의 강사 신호와
+    같은 값이다(#1496 ⑤ — 둘을 함께 받는 사람의 화면이 번호로 같은 변경을 알아본다)."""
 
-    if kind == INSTRUCTORS_CHANGED:
-        return set(payload) == {"class_id", "rev"} and payload["class_id"] == class_id and isinstance(payload["rev"], int)
-    return payload == {"class_id": class_id}
+    return set(payload) == {"class_id", "rev"} and payload["class_id"] == class_id and isinstance(payload["rev"], int)
 
 
 def _assert_only(kind: str, class_id: int, receivers: set[str]) -> None:
@@ -316,3 +317,44 @@ def test_a_stale_class_instance_saving_does_not_rewind_the_rev(client, db, djang
     stale.save()
 
     assert _class_rev(client, owner, class_id) == bumped
+
+
+# --- #1496 ⑤ 같은 변경의 두 신호는 같은 번호 ----------------------------------------
+
+
+def _same_change_actions(client, s):
+    owner = s["owner"]["access"]
+    problem_id = s["problem"].id
+    return {
+        "archive": lambda: archive_class(client, owner, s["class_id"]),
+        "unarchive": lambda: _post(client, owner, f"{s['class_id']}/unarchive"),
+        "hide": lambda: _post(client, owner, f"{s['class_id']}/problems/{problem_id}/hide"),
+        "edit-open-problem": lambda: client.patch(
+            f"{CLASSES_URL}/{s['class_id']}/problems/{problem_id}",
+            data={"title": "고친 제목"},
+            content_type="application/json",
+            **auth_header(owner),
+        ),
+    }
+
+
+@pytest.mark.parametrize("action", ["archive", "unarchive", "hide", "edit-open-problem"])
+def test_participation_signal_carries_the_rev_of_the_same_change(client, db, django_capture_on_commit_callbacks, action):
+    """참여자 행이 있는 강사는 한 변경에 두 신호를 받는다 — 둘의 번호가 같아야 열어 둔 제출 화면이 시간 창 없이 하나로
+    읽는다(#1496 ⑤). 참여자만인 사람의 번호도 같은 변경의 번호다."""
+
+    s = _scene(client)
+    join_class(client, s["owner"]["access"], s["class_id"], instructor_access=s["owner"]["access"], display_name="김소유")
+    if action == "unarchive":
+        archive_class(client, s["owner"]["access"], s["class_id"])
+    run = _same_change_actions(client, s)[action]
+    _clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        run()
+
+    instructor_revs = [p["rev"] for p in _signals("owner", INSTRUCTORS_CHANGED)]
+    participation_revs = [p["rev"] for p in _signals("owner", PARTICIPATION_CHANGED)]
+    assert len(instructor_revs) == 1, instructor_revs
+    assert participation_revs == instructor_revs
+    assert [p["rev"] for p in _signals("alice", PARTICIPATION_CHANGED)] == instructor_revs
