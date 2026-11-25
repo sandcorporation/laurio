@@ -1,14 +1,9 @@
 "use client";
 
-// 판정 도장(#963) — 살짝 기운 테두리. 통과는 success, 완벽은 advanced 색.
+// 판정 도장(#963) — 살짝 기운 테두리. 통과·완벽 모두 success 색이고 글자가 둘을 가른다(#1381).
 // `scope` 를 주면 그 도장을 처음 렌더할 때 한 번 찍히는 움직임이 붙는다(없으면 정지).
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { consumeFirstView, STAMP_LABEL, type StampKind } from "@/lib/design/stamp";
-
-const COLOR: Record<StampKind, string> = {
-  passed: "border-success text-success",
-  perfect: "border-advanced text-advanced",
-};
+import { consumeFirstView, STAMP_COLOR_CLASS, STAMP_LABEL, type StampKind } from "@/lib/design/stamp";
 
 export function Stamp({
   kind,
@@ -31,7 +26,7 @@ export function Stamp({
     <span
       data-stamp={kind}
       style={{ "--stamp-tilt": size === "sm" ? "-3deg" : "-4deg", transform: "rotate(var(--stamp-tilt))" } as CSSProperties}
-      className={`inline-block shrink-0 border-2 font-semibold tracking-[0.04em] whitespace-nowrap ${dims} ${COLOR[kind]} ${press ? "stamp-press" : ""}`}
+      className={`inline-block shrink-0 border-2 font-semibold tracking-[0.04em] whitespace-nowrap ${dims} ${STAMP_COLOR_CLASS[kind]} ${press ? "stamp-press" : ""}`}
     >
       {children ?? STAMP_LABEL[kind]}
     </span>

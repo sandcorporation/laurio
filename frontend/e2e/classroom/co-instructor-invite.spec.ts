@@ -54,4 +54,9 @@ test("로그아웃 상태로 초대 링크를 열고 로그인하면 같은 초�
 
   await expect(page).toHaveURL(`/classes/${classId}`);
   await expect(page.getByTestId("classroom-detail-co-instructor-badge")).toBeVisible();
+
+  // 같은 링크를 다시 열면 「새 링크」가 아니라 클래스로 가는 길이다(#1381).
+  await page.goto(`/invite/${token}`);
+  await expect(page.getByTestId("invite-go-to-class")).toHaveAttribute("href", `/classes/${classId}`);
+  await expect(page.getByTestId("invite-unusable")).toHaveCount(0);
 });

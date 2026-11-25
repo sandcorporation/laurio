@@ -29,7 +29,7 @@
 // 않고(로그인 여부가 아직 갈리지 않았다), 실패(401 등)면 로그인 링크로 대체한다.
 import Link from "next/link";
 import { UserRound } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useMe } from "@/lib/auth/use-me";
 
@@ -44,6 +44,18 @@ export function AccountMenuClient({
 }) {
   const me = useMe();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [open]);
 
   if (me.status === "loading") {
     return <span data-testid="account-menu-loading" aria-hidden="true" />;
@@ -70,6 +82,7 @@ export function AccountMenuClient({
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         data-testid="account-menu-trigger"

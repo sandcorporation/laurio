@@ -39,6 +39,7 @@ import { DueRows } from "@/app/components/DueLabel";
 import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
+import { unpassedBadge } from "@/lib/submissions/unpassed-badge";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import type { ChecklistVerdict, ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
@@ -369,7 +370,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 {stampKind(passed, perfect) ? (
                   <Stamp kind={stampKind(passed, perfect)!} />
                 ) : (
-                  <Badge tone="error">아직 미통과</Badge>
+                  <Badge tone={unpassedBadge(submissions.length).tone}>{unpassedBadge(submissions.length).label}</Badge>
                 )}
               </span>
             )}

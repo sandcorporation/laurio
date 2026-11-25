@@ -42,7 +42,7 @@ test("강사 탭 — 소유자가 초대 링크를 만들고 소유권을 넘기
 
   await page.goto(`/classes/${classId}?tab=instructors`);
   await expect(page.getByTestId("class-instructors-count")).toHaveText("2명");
-  await expect(page.getByTestId("class-leave")).toBeDisabled();
+  await expect(page.getByTestId("class-leave")).toHaveCount(0);
 
   await page.getByTestId("co-instructor-invite-create").click();
   await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(1);

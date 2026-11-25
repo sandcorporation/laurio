@@ -42,7 +42,7 @@ import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
 import { Stamp } from "@/app/components/Stamp";
-import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
+import { PERFECT_TEXT_CLASS, STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { withLate } from "@/lib/problems/due-dates";
 import { currentEntryAttemptByMember, latestRowEntryBadge } from "@/lib/submissions/contest-entry";
 import { rejectionText } from "@/lib/submissions/rejection";
@@ -59,7 +59,7 @@ function StatBar({ stats, perfect }: { stats: ReturnType<typeof submissionStats>
     },
     ...(perfect === null
       ? []
-      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: "text-advanced" }]),
+      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: PERFECT_TEXT_CLASS }]),
     { key: "attempts", label: "시도", value: String(stats.attempts) },
     { key: "scoring", label: "채점 중", value: String(stats.scoring) },
     { key: "waiting", label: "채점 대기", value: String(stats.waiting) },

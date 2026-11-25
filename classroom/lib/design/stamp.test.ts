@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { consumeFirstView, stampKind, stampStorageKey } from "./stamp";
+import { consumeFirstView, stampKind, stampStorageKey, PERFECT_TEXT_CLASS, STAMP_COLOR_CLASS } from "./stamp";
+
+describe("완벽의 색 (#1381)", () => {
+  it("도장과 숫자가 통과 계열(success) 색이다", () => {
+    expect(STAMP_COLOR_CLASS.perfect).toBe("border-success text-success");
+    expect(PERFECT_TEXT_CLASS).toBe("text-success");
+  });
+});
 
 function memory(): Pick<Storage, "getItem" | "setItem"> & { data: Map<string, string> } {
   const data = new Map<string, string>();

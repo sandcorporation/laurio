@@ -30,6 +30,10 @@ test("공개 앱 계정 메뉴의 「클래스로 가기」로 강의실로 건�
   await page.goto(publicOrigin());
   await page.getByTestId("account-menu-trigger").click();
   await page.getByTestId("account-menu-panel").waitFor({ state: "visible" });
+  // Esc 로 닫히고 다시 열린다(#1381).
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("account-menu-panel")).toHaveCount(0);
+  await page.getByTestId("account-menu-trigger").click();
 
   const classroomLink = page.getByTestId("account-menu-classroom-link");
   await expect(classroomLink).toHaveText("클래스로 가기");
@@ -47,6 +51,10 @@ test("강의실 계정 메뉴의 「공모전으로 가기」로 공개 앱으�
   await page.goto("/");
   await page.getByTestId("account-menu-trigger").click();
   await page.getByTestId("account-menu-panel").waitFor({ state: "visible" });
+  // Esc 로 닫히고 다시 열린다(#1381).
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("account-menu-panel")).toHaveCount(0);
+  await page.getByTestId("account-menu-trigger").click();
 
   const contestsLink = page.getByTestId("account-menu-contests-link");
   await expect(contestsLink).toHaveText("공모전으로 가기");
