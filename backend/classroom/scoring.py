@@ -781,6 +781,8 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
             "submission_id": submission.id,
             "attempt_number": submission.attempt_number,
             "passed": passed,
+            # 늦음은 낸 시각으로 정한다 — 화면의 상태 글자와 같은 단계다(#1400).
+            "late": problem.lateness(submission.created_at),
         },
     )
     publish_attempt_scored(submission)
