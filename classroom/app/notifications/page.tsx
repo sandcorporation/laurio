@@ -29,6 +29,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import { useSessionRecheck } from "@/lib/auth/use-session-recheck";
 import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import {
@@ -76,6 +77,7 @@ export default function NotificationsPage() {
   // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로만 보이면, 1페이지를
   // 전부 읽어도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다.
   const unreadCountState = useUnreadCount();
+  useSessionRecheck();
 
   useEffect(() => {
     let cancelled = false;
