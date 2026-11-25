@@ -124,7 +124,9 @@ class ShardsByRecordedTime(unittest.TestCase):
     def test_real_plan_spread_on_the_seed(self) -> None:
         shards = e2e_plan.plan(None, e2e_durations.read_record())["include"]
         seconds = [float(s["seconds"]) for s in shards]
-        self.assertLess(max(seconds) - min(seconds), 15, shards)
+        # 차의 문턱은 가장 긴 조각의 절반이다(#1542). 예전의 「15초 미만」은 합 ~130초일 때의 값이라, 실측 417초에서는
+        # 조각을 몇 개로 늘려도 못 넘는다 — 운영자 앱이 한 조각(~30초)인데 공개 앱 조각은 시험 파일 단위라 더 잘게 못 나눈다.
+        self.assertLess(max(seconds) - min(seconds), max(seconds) / 2, shards)
 
 
 class SeedSlack(unittest.TestCase):
