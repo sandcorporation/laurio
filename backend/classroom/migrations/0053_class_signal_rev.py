@@ -11,6 +11,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='class',
             name='signal_rev',
-            field=models.PositiveBigIntegerField(default=0),
+            field=models.PositiveBigIntegerField(db_default=0, default=0),
         ),
     ]
