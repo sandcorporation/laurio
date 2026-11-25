@@ -113,7 +113,7 @@ describe("제출 현황 계산", () => {
     expect(requiredSummary(autoFail, items, true)).toEqual({
       met: 0,
       total: 2,
-      unmet: ["오류 화면", "소스에 문법 오류가 없다"],
+      unmet: ["소스에 문법 오류가 없다", "오류 화면"],
       syntaxMet: false,
     });
   });

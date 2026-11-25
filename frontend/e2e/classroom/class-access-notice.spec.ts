@@ -284,6 +284,11 @@ test("참여자의 빈 저장소 제출에도 안내가 뜨고 화면 말은 참
   await page.getByTestId("submit-repository").click();
 
   await expect(page.getByTestId("repository-url-invalid")).toHaveText(EMPTY_REPOSITORY);
+  // 빈 칸 오류도 칸에 무효로 알리고 문구와 이어진다(#1422).
+  const urlInput = page.getByTestId("repository-url-input");
+  await expect(urlInput).toHaveAttribute("aria-invalid", "true");
+  await expect(urlInput).toHaveAttribute("aria-describedby", "repository-url-error");
+  await expect(page.locator("#repository-url-error")).toHaveText(EMPTY_REPOSITORY);
   await expect(page.getByTestId("my-problem-back-link")).toHaveText("문제 목록으로");
   await expect(page.getByRole("heading", { name: "내 시도" })).toBeVisible();
   await expect(page.getByTestId("instructor-viewing-banner")).toHaveCount(0);
@@ -335,4 +340,34 @@ test("보관한 클래스의 학생 화면에는 띠에 보관 한 줄이 있고
   await expect(banner.getByRole("link", { name: "문제 편집" })).toBeVisible();
   await expect(banner.getByRole("link", { name: "제출 현황" })).toBeVisible();
   await expect(instructor.getByTestId("submit-form-area")).toHaveCount(0);
+});
+
+test("제출 중 내보내짐(403)을 받으면 새로 고친 뒤처럼 폼이 사라진다", async ({ page, browser }) => {
+  const seed = `access-403-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, joinCode } = await seedClass(browser, seed);
+  await joinAs(page, seed, joinCode);
+  await page.goto(`/classes/${classId}/problems/${openId}/submit`);
+  await expect(page.getByTestId("repository-url-input")).toBeVisible();
+
+  // 폼을 연 채 내보내진 상황 — 제출은 403, 다시 읽은 문제는 내보냄 사유를 준다.
+  await page.route(
+    (url) => url.pathname.endsWith(`/problems/${openId}/submissions`),
+    (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ detail: "더 이상 이 클래스의 참여자가 아닙니다." }) })
+        : route.continue(),
+  );
+  await page.route(
+    (url) => url.pathname.endsWith(`/problems/${openId}/mine`),
+    async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: { ...body, submit_blocked_reason: "expelled" } });
+    },
+  );
+  await page.getByTestId("repository-url-input").fill("https://github.com/owner/repo");
+  await page.getByTestId("submit-repository").click();
+
+  await expect(page.getByTestId("member-expelled-note")).toHaveText("이 클래스에서 내보내져 새로 제출할 수 없습니다.");
+  await expect(page.getByTestId("submit-repository")).toHaveCount(0);
 });

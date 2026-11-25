@@ -61,6 +61,10 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
   // 스크린리더에도 빈 칸이 아니다.
   const cell = page.getByTestId(`participant-cell-${memberId}-${problemId}`);
   await expect(page.getByTestId("participants-legend-not_submitted")).toHaveText("미제출");
+  // 범례는 긴 표 아래가 아니라 위에 있다(#1422).
+  const legendTop = (await page.getByTestId("participants-legend").boundingBox())!.y;
+  const tableTop = (await page.getByTestId("participants-table").boundingBox())!.y;
+  expect(legendTop).toBeLessThan(tableTop);
   await expect(page.getByTestId("participants-legend-attempted_not_passed")).toHaveText("시도했으나 미통과");
   await expect(cell).toHaveAttribute("title", "미제출");
   await expect(cell.getByRole("img", { name: "미제출", exact: true })).toBeVisible();

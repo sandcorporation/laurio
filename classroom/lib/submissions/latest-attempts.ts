@@ -100,7 +100,8 @@ export function requiredSummary(
   if (syntaxCheckEnabled) {
     const syntax = row.score.syntax_check;
     syntaxMet = syntax ? syntax.is_met : false;
-    if (!syntaxMet) unmet.push(SYNTAX_CHECK_LABEL);
+    // 제출 화면 체크리스트는 문법 줄이 맨 위다 — 미충족 목록도 같은 순서로 문법 항목을 앞에 둔다(#1422).
+    if (!syntaxMet) unmet.unshift(SYNTAX_CHECK_LABEL);
   }
   return { met: total - unmet.length, total, unmet, syntaxMet };
 }

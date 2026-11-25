@@ -9,6 +9,7 @@
 // 실제로 그리는 일은 `ProblemParticipantView`(#325)가 한다 — 문제 만들기/
 // 편집의 「미리보기」 탭이 **같은 조각**을 쓴다. 이 파일은 데이터를 불러오고
 // 제출 요청을 보내는 배선만 맡는다.
+import { submitRejectedAsBlocked } from "@/lib/submissions/submit-blocked";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -177,6 +178,10 @@ export default function ProblemSubmitPage() {
       reload();
       // 공모전에 냈으면 「이미 낸 제출」이 생겼다 — 칸을 새로 읽어 다음 시도의 확인을 받는다.
       if (contestEntry !== null) void loadEntryForm();
+    } else if (submitRejectedAsBlocked(result)) {
+      // 내보내짐·숨김·보관 — 새로 고친 뒤와 같은 상태로: 폼이 사라지고 이유 한 줄이 남는다(#1422).
+      setSubmitError(null);
+      reload();
     } else {
       setSubmitError(result.detail);
     }
