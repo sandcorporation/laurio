@@ -130,6 +130,33 @@ test("「다시 채점」 확인 창은 예상 금액을 받은 뒤에 열린다
   await expect(dialog.getByRole("button", { name: "취소" })).toBeFocused();
 });
 
+// 금액을 기다리는 동안 그만둘 수 있다(#1496 ⑦) — 낭독되는 상태가 있고, Escape·「취소」(터치)로 그만두면 응답이 와도 창은 열리지 않으며 초점은 단추에 있다.
+for (const how of ["Escape", "취소 단추"] as const) {
+  test(`금액 조회 중 ${how}로 그만두면 응답이 와도 확인 창이 열리지 않고 초점은 단추에 있다`, async ({ browser }) => {
+    const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/scoring-calculator**", async (route) => {
+      await gate;
+      await route.continue();
+    });
+    await page.goto(`/classes/${classId}/submissions`);
+    const opener = page.getByTestId(`regrade-${secondSubmissionId}`);
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const loading = page.getByRole("status").filter({ hasText: "예상 금액을 불러오는 중" });
+    await expect(loading).toBeVisible();
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await loading.getByRole("button", { name: "취소" }).click();
+    await expect(loading).toHaveCount(0);
+    const answered = page.waitForResponse("**/scoring-calculator**");
+    release();
+    await answered;
+    await expect(page.getByRole("dialog", { name: "다시 채점" })).toHaveCount(0);
+    if (how === "Escape") await expect(opener).toBeFocused();
+  });
+}
+
 // 서버가 거절하면(4xx) 창은 열린 채 실패가 상태 영역으로 읽히고, 시작했다는 알림은 없다.
 test("「다시 채점」을 서버가 거절하면 창 안 상태 영역이 실패를 읽고 시작 알림은 없다", async ({ browser }) => {
   const page = await (await browser.newContext({ storageState: ownerState })).newPage();
