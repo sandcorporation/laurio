@@ -884,6 +884,54 @@ test("입력하던 것이 없이 문제가 숨겨졌다 다시 열리면 초점�
   await expect(page.locator("#elsewhere")).toBeFocused();
 });
 
+// #1532 ① — 다시 엶 안내는 현재 차단 사유와 함께 다룬다: 다시 막히면 비우고 사유 하나만, 제출한 뒤엔 걷는다.
+for (const view of [
+  { name: "데스크톱", size: { width: 1280, height: 800 } },
+  { name: "390px 터치", size: { width: 390, height: 844 } },
+]) {
+  test(`${view.name} — 다시 연 뒤 소유자가 보관하면 「제출할 수 있습니다」가 사라지고 보관 사유 하나만 남는다`, async ({ page, browser }) => {
+    test.setTimeout(40_000);
+    await page.setViewportSize(view.size);
+    const seed = `rt-reopen-archive-${view.size.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { instructor, base, problemId } = await openSubmitWithBothFormats(page, browser, seed);
+    expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+    await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeFocused({ timeout: 10_000 });
+    expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+    const reopened = page.getByRole("status").filter({ hasText: "제출할 수 있습니다" });
+    await expect(reopened).toBeVisible({ timeout: 10_000 });
+
+    expect((await instructor.api.post(`${base}/archive`)).ok()).toBeTruthy();
+    await instructor.context.close();
+    await expect(page.getByTestId("class-archived-note")).toBeVisible({ timeout: 10_000 });
+    await expect(reopened).toHaveCount(0);
+    await expect(page.getByTestId("submit-reopened-note")).toBeEmpty();
+    await expect(page.getByRole("status").filter({ hasText: "제출할 수" })).toHaveCount(0);
+  });
+}
+
+test("다시 연 뒤 제출하면 다시 엶 안내가 걷히고, 다시 숨겨도 낡은 안내가 되살지 않는다", async ({ page, browser }) => {
+  test.setTimeout(50_000);
+  const seed = `rt-reopen-submit-${test.info().workerIndex}-${Date.now()}`;
+  const { instructor, base, problemId } = await openSubmitWithBothFormats(page, browser, seed);
+  expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+  await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeVisible({ timeout: 10_000 });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+  const reopened = page.getByRole("status").filter({ hasText: "문제가 다시 열려 제출할 수 있습니다" });
+  await expect(reopened).toBeVisible({ timeout: 10_000 });
+
+  await page.getByTestId("submission-format-option-repository").click();
+  await page.getByTestId("repository-url-input").fill("https://github.com/codemit/sample");
+  await page.getByTestId("submit-repository").click();
+  await expect(page.getByTestId("submissions-list")).toBeVisible({ timeout: 10_000 });
+  await expect(reopened).toHaveCount(0);
+
+  expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+  await expect(page.getByText("강사가 숨긴 문제라 새로 낼 수 없습니다.")).toBeVisible({ timeout: 10_000 });
+  await expect(reopened).toHaveCount(0);
+  await expect(page.getByTestId("submit-reopened-note")).toBeEmpty();
+  await instructor.context.close();
+});
+
 test("보관이 풀릴 때 초점이 안내 밖에 있으면 초점을 빼앗지 않는다", async ({ page, browser }) => {
   const seed = `rt-unarchived-keep-${test.info().workerIndex}-${Date.now()}`;
   const instructor = await otherSession(browser, seed);
