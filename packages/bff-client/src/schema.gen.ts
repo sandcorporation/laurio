@@ -8955,6 +8955,8 @@ export interface components {
             status: string;
             /** Title */
             title?: string | null;
+            /** Transfer Pending */
+            transfer_pending?: boolean | null;
         };
         /** NotificationPageOut */
         NotificationPageOut: {

@@ -19,7 +19,7 @@
 // 공동 강사에게만 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 역할 전용
 // 행동은 다른 역할에게 그 버튼이 없는 것으로 말한다.
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
@@ -61,6 +61,7 @@ function InstructorRow({
   onTransfer,
   onCancelTransfer,
   onKeep,
+  focusPending,
 }: {
   instructor: ClassInstructor;
   // 부른 사람이 소유자이고 이 줄이 공동 강사일 때만 참이다.
@@ -76,7 +77,16 @@ function InstructorRow({
   onTransfer: () => void;
   onCancelTransfer: () => void;
   onKeep: () => void;
+  // 방금 보낸 이전 요청이면 「답을 기다립니다」 줄이 그려질 때 초점을 받는다.
+  focusPending: RefObject<boolean>;
 }) {
+  const pendingRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (transferPending && focusPending.current) {
+      focusPending.current = false;
+      pendingRef.current?.focus();
+    }
+  }, [transferPending, focusPending]);
   const transferConfirm = useInlineConfirm(confirming === "transfer", onKeep);
   const removeConfirm = useInlineConfirm(confirming === "remove", onKeep);
   const owner = instructor.role === "owner";
@@ -99,7 +109,13 @@ function InstructorRow({
           </span>
         ) : null}
         {transferPending ? (
-          <span data-testid="ownership-transfer-pending" className="text-[12px] text-ink/45">
+          <span
+            ref={pendingRef}
+            role="status"
+            tabIndex={-1}
+            data-testid="ownership-transfer-pending"
+            className="text-[12px] text-ink/45 outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
+          >
             {formatDay(transferPending.expires_at)} 까지 답을 기다립니다
           </span>
         ) : null}
@@ -109,6 +125,7 @@ function InstructorRow({
               type="button"
               data-testid="ownership-transfer-start"
               ref={transferConfirm.triggerRef}
+              aria-label={`${name} 소유권 넘기기`}
               onClick={() => onAsk("transfer")}
               className={LINK_ACTION}
             >
@@ -121,6 +138,7 @@ function InstructorRow({
               type="button"
               data-testid="co-instructor-remove"
               ref={removeConfirm.triggerRef}
+              aria-label={`${name} 내보내기`}
               onClick={() => onAsk("remove")}
               className={LINK_ACTION}
             >
@@ -131,6 +149,7 @@ function InstructorRow({
             <button
               type="button"
               data-testid="ownership-transfer-cancel"
+              aria-label={`${name} 소유권 이전 요청 취소`}
               onClick={onCancelTransfer}
               disabled={busy}
               className={LINK_ACTION}
@@ -351,12 +370,15 @@ export function InstructorsSection({
   classId,
   pendingTransfer,
   onTransferChanged,
+  focusPendingTransfer,
 }: {
   classId: number;
   // 클래스의 대기 중 소유권 이전 요청 — 클래스 응답(`ClassRow`)에서 온다.
   pendingTransfer: PendingOwnershipTransfer | null;
   // 요청·취소 뒤 클래스를 다시 읽는다.
-  onTransferChanged: () => void;
+  onTransferChanged: (requested?: boolean) => void;
+  // 요청을 보낸 뒤 강사 목록이 다시 그려지므로(key) 초점 표시는 그 바깥에 둔다.
+  focusPendingTransfer: RefObject<boolean>;
 }) {
   const { state: rosterState, reload: reloadRoster } = useBackendQuery<ClassInstructor[]>(bffClient, classInstructorsPath(classId));
   const { state: invitesState, reload: reloadInvites } = useBackendQuery<PendingCoInstructorInvite[]>(
@@ -387,7 +409,7 @@ export function InstructorsSection({
     }
     setConfirming(null);
     setBusyId(null);
-    onTransferChanged();
+    onTransferChanged(result.ok);
   }
 
   async function cancelTransfer(coInstructorId: number, transferId: number) {
@@ -490,6 +512,7 @@ export function InstructorsSection({
                     onTransfer={() => id !== null && void transfer(id)}
                     onCancelTransfer={() => id !== null && pendingHere && void cancelTransfer(id, pendingHere.id)}
                     onKeep={() => setConfirming(null)}
+                    focusPending={focusPendingTransfer}
                   />
                 );
               })}
