@@ -253,7 +253,10 @@ ADR-0017 의 세 위험(공개 페이지 SSR·인증 구역 가드·프록시 �
 오리진 목록**(`CODEMIT_CLASSROOM_ORIGIN`)과 대조해 통과한 것만 OAuth 왕복 쿠키에
 싣고, 콜백이 거기로 돌려보낸다. 사용자 입력이 고르는 것은 「이 목록 중 어느
 것인가」뿐이다. 실패 경로(`oauth_unconfigured` 등)도 같은 값을 실어 보낸다 —
-안 그러면 한 번 실패한 사람이 다시 성공해도 공개 앱에 남는다.
+안 그러면 한 번 실패한 사람이 다시 성공해도 공개 앱에 남는다. 판정은
+`frontend/lib/auth/login-destination.ts` 한 곳이고, OAuth 왕복이 없는 dev 시드 로그인도
+`/api/auth/continue` 로 와서 같은 판정을 받는다(#1388 — 그 전에는 화면이 `next_origin`
+을 검증 없이 썼다).
 
 **`CODEMIT_CLASSROOM_ORIGIN` 은 공개 앱과 강의실이 같은 `.env` 줄을 나눠 읽는
 값이다**(`CODEMIT_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히 안 되고

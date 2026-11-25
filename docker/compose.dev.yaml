@@ -444,7 +444,13 @@ services:
       # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
       # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
-      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-}
+      #
+      # dev 기본값은 이 스택의 강의실 주소다(#1388) — 시드 로그인도 서버
+      # (`/api/auth/continue`)가 이 목록으로 목적지를 정하므로, 비우면 강의실로 못
+      # 돌아간다. 호스트 이름은 강의실의 CODEMIT_WEB_ORIGIN 과 같은 `localhost` 다
+      # (두 앱을 localhost 로 열어야 세션 쿠키가 같이 실린다). 강의실 컨테이너 자신의
+      # CODEMIT_CLASSROOM_ORIGIN(Origin 검증용)은 계속 비워 둔다.
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-http://localhost:${CODEMIT_CLASSROOM_WEB_PORT:-53002}}
       # 컨테이너 안에서는 compose 네트워크 이름으로 백엔드에 붙는다. 호스트에서
       # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
       CODEMIT_API_BASE_URL: http://backend:8000
