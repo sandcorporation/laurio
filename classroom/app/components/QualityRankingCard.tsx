@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Badge, Card, CardHeader, EmptyState, ErrorNote, Num, buttonClass } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import type { ClassRow } from "@/lib/classes/api";
-import { scoringBlockNote } from "@/lib/classes/scoring-block-note";
+import { modelRejectedNote, scoringBlockNote } from "@/lib/classes/scoring-block-note";
 import { updateProblem } from "@/lib/problems/api";
 import { BonusScoreEditor } from "@/app/components/BonusScoreEditor";
 import { GRADE_LABEL } from "@/lib/problems/grade";
@@ -126,6 +126,7 @@ export function QualityRankingCard({
 }) {
   const { state, reload } = useProblemQuality(classId, problemId);
   const keyNote = scoringBlockNote(classroom, "quality");
+  const modelNote = modelRejectedNote(classroom?.role, classId, problemId);
   const [confirm, setConfirm] = useState<Confirm>({ step: "idle" });
   const [openIds, setOpenIds] = useState<ReadonlySet<number>>(new Set());
   const [publicSaving, setPublicSaving] = useState(false);
@@ -256,14 +257,9 @@ export function QualityRankingCard({
           ) : confirm.estimate.blocked_reason === "model_rejected" ? (
             <MissingScoringKeyNote
               classId={classId}
-              message={
-                classroom?.role === "owner"
-                  ? "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
-                  : "이 키로 쓸 수 없는 채점 모델입니다 — 소유자에게 채점 모델을 바꿔 달라고 하세요."
-              }
+              {...modelNote}
               noteTestId="quality-model-rejected-note"
               settingsLinkTestId="quality-model-rejected-settings-link"
-              actionLabel={classroom?.role === "owner" ? "채점 모델 바꾸기" : null}
               settingsAnchor="scoring-model"
             />
           ) : (

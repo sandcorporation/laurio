@@ -27,7 +27,7 @@ import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { QualityRankingCard } from "@/app/components/QualityRankingCard";
 import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
 import { detailTabHref } from "@/lib/classes/detail-tab";
-import { scoringBlockNote } from "@/lib/classes/scoring-block-note";
+import { modelRejectedNote, scoringBlockNote } from "@/lib/classes/scoring-block-note";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { useClass } from "@/lib/classes/use-class";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
@@ -358,16 +358,9 @@ export default function ProblemSubmissionsPage() {
         {blockedByRejectedModel ? (
           <MissingScoringKeyNote
             classId={classId}
-            message={
-              classState.status === "ready" && classState.classroom.role === "co_instructor"
-                ? "이 키로 쓸 수 없는 채점 모델입니다 — 소유자에게 채점 모델을 바꿔 달라고 하세요."
-                : "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
-            }
+            {...modelRejectedNote(classState.status === "ready" ? classState.classroom.role : null, classId, problemId)}
             noteTestId="submissions-model-rejected-note"
             settingsLinkTestId="submissions-model-rejected-settings-link"
-            actionLabel={
-              classState.status === "ready" && classState.classroom.role === "co_instructor" ? null : "채점 모델 바꾸기"
-            }
             settingsAnchor="scoring-model"
           />
         ) : null}
