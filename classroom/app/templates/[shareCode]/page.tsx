@@ -4,7 +4,7 @@
 // 이미 보장한다 — `/join/[code]`와 달리 needsLogin 분기가 없다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
@@ -59,6 +59,20 @@ export default function ProblemTemplatePreviewPage() {
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportDone, setReportDone] = useState(false);
+  // 신고 폼이 접수 안내로 바뀌면 누른 단추가 사라진다 — 초점을 안내로 옮겨 낭독기가 결과를 읽게 한다(#1447 2-1).
+  const reportDoneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (reportDone) reportDoneRef.current?.focus();
+  }, [reportDone]);
+  // 신고 칸을 열면 사유 칸으로, 닫으면 신고 단추로 초점을 돌려준다(#1454).
+  const reportReasonRef = useRef<HTMLTextAreaElement>(null);
+  const reportOpenRef = useRef<HTMLButtonElement>(null);
+  const [reportFocus, setReportFocus] = useState<"reason" | "button" | null>(null);
+  useEffect(() => {
+    if (reportFocus === "reason") reportReasonRef.current?.focus();
+    if (reportFocus === "button") reportOpenRef.current?.focus();
+    if (reportFocus) setReportFocus(null);
+  }, [reportFocus, reportOpen]);
   const [reportError, setReportError] = useState<string | null>(null);
 
   const [takingDown, setTakingDown] = useState(false);
@@ -352,9 +366,16 @@ export default function ProblemTemplatePreviewPage() {
               <CardHeader title="신고" />
               <div className="flex flex-col gap-2.5 p-4">
                 {reportDone ? (
-                  <Note>
-                    <span data-testid="template-report-done">신고가 접수되었습니다. 운영자가 확인합니다.</span>
-                  </Note>
+                  <div
+                    ref={reportDoneRef}
+                    role="status"
+                    tabIndex={-1}
+                    className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
+                  >
+                    <Note>
+                      <span data-testid="template-report-done">신고가 접수되었습니다. 운영자가 확인합니다.</span>
+                    </Note>
+                  </div>
                 ) : reportOpen ? (
                   <form onSubmit={handleReport} className="flex flex-col gap-2.5">
                     <label htmlFor="template-report-reason">
@@ -362,6 +383,7 @@ export default function ProblemTemplatePreviewPage() {
                     </label>
                     <textarea
                       id="template-report-reason"
+                      ref={reportReasonRef}
                       data-testid="template-report-reason-input"
                       value={reportReason}
                       onChange={(event) => setReportReason(event.target.value)}
@@ -377,12 +399,29 @@ export default function ProblemTemplatePreviewPage() {
                     >
                       {reportSubmitting ? "접수하는 중..." : "신고하기"}
                     </button>
+                    <button
+                      type="button"
+                      data-testid="template-report-cancel"
+                      onClick={() => {
+                        setReportOpen(false);
+                        setReportError(null);
+                        setReportFocus("button");
+                      }}
+                      disabled={reportSubmitting}
+                      className={buttonClass("secondary")}
+                    >
+                      취소
+                    </button>
                   </form>
                 ) : (
                   <button
                     type="button"
                     data-testid="template-report-open"
-                    onClick={() => setReportOpen(true)}
+                    ref={reportOpenRef}
+                    onClick={() => {
+                      setReportOpen(true);
+                      setReportFocus("reason");
+                    }}
                     className={buttonClass("secondary")}
                   >
                     부적절한 템플릿 신고

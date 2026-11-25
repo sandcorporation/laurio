@@ -65,6 +65,8 @@ export type PublishedProblemTemplateSummary = {
   share_code: string;
   publisher_display_name: string;
   created_at: string;
+  // 부른 사람이 내릴 수 있는가 — 공개한 사람만 내린다(#1446).
+  can_take_down: boolean;
 };
 
 // zip 으로 낸 사람이 언제나 놓칠 필수 항목들(#587) — zip 에는 Git 기록(.git)이 없다. 판정은
