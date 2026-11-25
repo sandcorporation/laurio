@@ -86,14 +86,16 @@ function NoticeBody({
   }, [focusOnShow]);
   // 어느 주소에서 막혔든 탭 제목은 안내 제목이다(#1406) — 화면이 단 제목보다 앞선다.
   useClassroomTabTitle({ screenName: content.title }, { override: true });
+  // 「속성.link」 꼴은 공개 저장소 검사(scripts/test_public_repo.py)가 .link 도메인으로 읽는다 — 풀어 쓴다.
+  const { link } = content;
   return (
     <>
       <h1 ref={headingRef} tabIndex={-1} data-testid={testId} className="text-[22px] font-semibold outline-none">
         {content.title}
       </h1>
       <p className="mt-4">
-        <Link href={content.link.href} data-testid="access-notice-link" className={buttonClass("secondary", "sm")}>
-          {content.link.label}
+        <Link href={link.href} data-testid="access-notice-link" className={buttonClass("secondary", "sm")}>
+          {link.label}
         </Link>
       </p>
     </>
