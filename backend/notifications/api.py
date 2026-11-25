@@ -28,7 +28,7 @@ from .models import (
     NotificationDispatch,
     NotificationType,
 )
-from .ports import CLASSROOM_PROBLEM_STATUSES
+from .ports import CLASSROOM_PROBLEM_STATUSES, CLASSROOM_TRANSFER_PENDING
 from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
@@ -103,6 +103,9 @@ class NotificationOut(Schema):
     # 채점 완료 알림이 가리키는 문제의 **지금** 상태(#1405) — `context.passed` 는 그 시도의 채점 때
     # 사실이다. 강의실 목록(`/me?classroom_only=true`)만 채우고, 받는 사람 자신의 시도가 없는 문제는 `null`.
     problem_status: ProblemStatusOut | None = None
+    # 소유권 이전 요청 알림이 가리키는 요청이 **지금도** 답을 기다리는지(#1435) — 알림 문구는 받은 때의
+    # 것이다. 강의실 목록만 채우고, 다른 유형은 `null`.
+    transfer_pending: bool | None = None
 
 
 class UnreadCountOut(Schema):
@@ -212,19 +215,32 @@ def _scored_problem_id(notification: Notification) -> int | None:
     return problem_id if isinstance(problem_id, int) else None
 
 
+def _transfer_class_id(notification: Notification) -> int | None:
+    if notification.notification_type != NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED:
+        return None
+    class_id = (notification.context or {}).get("class_id")
+    return class_id if isinstance(class_id, int) else None
+
+
 def _serialize_page(notifications: list[Notification], *, recipient_id: int) -> list[dict]:
     """받는 사람의 목록 한 쪽 — 채점 알림에는 문제의 지금 상태를 한 번에 물어 싣는다(#1405)."""
 
     problem_ids = {pid for n in notifications if (pid := _scored_problem_id(n)) is not None}
     statuses = CLASSROOM_PROBLEM_STATUSES.get()(recipient_id, problem_ids) if problem_ids else {}
+    transfer_class_ids = {cid for n in notifications if (cid := _transfer_class_id(n)) is not None}
+    pending_class_ids = (
+        CLASSROOM_TRANSFER_PENDING.get()(recipient_id, transfer_class_ids) if transfer_class_ids else set()
+    )
     items = []
     for notification in notifications:
         problem_id = _scored_problem_id(notification)
+        transfer_class_id = _transfer_class_id(notification)
         status = None if problem_id is None else statuses.get(problem_id)
         items.append(
             {
                 **_serialize(notification, for_recipient=True),
                 "problem_status": None if status is None else asdict(status),
+                "transfer_pending": None if transfer_class_id is None else transfer_class_id in pending_class_ids,
             }
         )
     return items

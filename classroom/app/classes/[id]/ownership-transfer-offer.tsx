@@ -4,7 +4,7 @@
 // 무엇을 떠안는지 — 채점 키가 비워지고, 키를 넣을 때까지 채점이 멈추고, 사용량은 남고, 지금
 // 소유자는 공동 강사로 남는다 — 를 말한 뒤 넘겨받거나 거절하게 한다. 받는 사람에게만 그린다.
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Card, CardHeader, ErrorNote, Note, buttonClass } from "@/app/components/ui";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
@@ -47,6 +47,7 @@ export function OwnershipTransferOffer({
   }
 
   return (
+    <section aria-label="소유권 이전 요청">
     <Card>
       <CardHeader title="소유권 이전 요청" hint={`${formatWhen(transfer.expires_at)}까지 답할 수 있습니다`} />
       <div data-testid="ownership-transfer-offer" className="flex flex-col gap-3 px-4 py-4">
@@ -89,12 +90,24 @@ export function OwnershipTransferOffer({
         ) : null}
       </div>
     </Card>
+    </section>
   );
+}
+
+/** 답한 뒤 누른 단추가 사라진다 — 결과 문구가 읽히고 초점도 받는다(#1435). */
+function useFocusOnMount<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return ref;
 }
 
 /** 방금 넘겨받은 사람에게 한 번 보이는 안내 — 다음에 할 일(채점 키 넣기)로 가는 길을 준다. */
 export function OwnershipTransferAcceptedNote({ classId }: { classId: number }) {
+  const ref = useFocusOnMount<HTMLDivElement>();
   return (
+    <div ref={ref} role="status" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40">
     <Note>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span data-testid="ownership-transfer-accepted-note" className="flex-1">
@@ -109,5 +122,18 @@ export function OwnershipTransferAcceptedNote({ classId }: { classId: number }) 
         </Link>
       </div>
     </Note>
+    </div>
+  );
+}
+
+/** 거절한 사람에게 한 번 보이는 한 줄 — 카드가 사라진 자리에서 결과를 읽는다. */
+export function OwnershipTransferDeclinedNote() {
+  const ref = useFocusOnMount<HTMLDivElement>();
+  return (
+    <div ref={ref} role="status" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40">
+      <Note>
+        <span data-testid="ownership-transfer-declined-note">소유권 이전 요청을 거절했습니다. 소유권은 그대로입니다.</span>
+      </Note>
+    </div>
   );
 }

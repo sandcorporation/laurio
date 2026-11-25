@@ -12,7 +12,10 @@ from collections.abc import Collection
 from notifications.ports import ProblemStatus
 
 from .current_score import current_score, with_current_score, without_score_prompt
-from .models import ClassroomSubmission
+from core.clock import Clock
+
+from .models import ClassroomSubmission, OwnershipTransfer
+from .ownership_transfers import pending_q
 
 
 def problem_statuses_for(user_id: int, problem_ids: Collection[int]) -> dict[int, ProblemStatus]:
@@ -34,3 +37,14 @@ def problem_statuses_for(user_id: int, problem_ids: Collection[int]) -> dict[int
         )
         for problem_id, own in by_problem.items()
     }
+
+
+def transfer_pending_class_ids(user_id: int, class_ids: Collection[int]) -> set[int]:
+    """이 사람 앞으로 지금도 답을 기다리는 소유권 이전 요청이 있는 클래스들 — 질의 한 번(#1435)."""
+
+    if not class_ids:
+        return set()
+    return set(
+        OwnershipTransfer.objects.filter(pending_q(Clock.now()), recipient_id=user_id, classroom_id__in=class_ids)
+        .values_list("classroom_id", flat=True)
+    )

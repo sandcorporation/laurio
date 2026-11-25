@@ -167,3 +167,40 @@ def test_a_failing_notification_does_not_stop_a_decline(client, db, broken_notif
 
     assert decline_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 204
     assert pending_ownership_transfer(client, owner["access"], class_id) is None
+
+
+def _requested_row(client, access: str) -> dict:
+    return next(row for row in _notifications(client, access) if row["notification_type"] == REQUESTED)
+
+
+def test_the_request_notification_says_whether_the_request_is_still_pending(client, db):
+    """받은 알림의 문구는 받은 때의 것이다 — 목록은 그 요청이 지금도 답을 기다리는지 함께 싣는다(#1435)."""
+
+    owner, co, other, class_id = _three_instructors(client)
+    _request(client, owner, class_id)
+
+    assert _requested_row(client, co["access"])["transfer_pending"] is True
+
+
+@pytest.mark.parametrize("ending", ["accept", "decline", "cancel"])
+def test_the_request_notification_stops_being_pending_once_the_request_ends(client, db, ending):
+    owner, co, other, class_id = _three_instructors(client)
+    transfer = _request(client, owner, class_id)
+    if ending == "accept":
+        assert accept_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 200
+    elif ending == "decline":
+        assert decline_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 204
+    else:
+        assert cancel_ownership_transfer(client, owner["access"], class_id, transfer["id"]).status_code == 204
+
+    assert _requested_row(client, co["access"])["transfer_pending"] is False
+
+
+def test_other_notifications_carry_no_transfer_state(client, db):
+    owner, co, other, class_id = _three_instructors(client)
+    transfer = _request(client, owner, class_id)
+    assert accept_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 200
+
+    rows = _notifications(client, owner["access"])
+    assert [row["notification_type"] for row in rows] == [ACCEPTED]
+    assert rows[0]["transfer_pending"] is None
