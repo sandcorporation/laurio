@@ -23,7 +23,7 @@ from ninja.errors import HttpError
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
 from . import agent_grading
-from .events import publish_participation_changed
+from .events import publish_instructors_changed, publish_participation_changed
 from .models import Class, ClassTemplate, ProblemTemplate, _generate_join_code
 from .problem_authoring import (
     reject_banned_public_text,
@@ -201,6 +201,8 @@ def archive_class(class_obj: Class) -> Class:
         class_obj.archived_at = timezone.now()
         class_obj.save(update_fields=["archived_at"])
         publish_participation_changed(class_obj.id)
+        # 참여자 행이 없는 강사(소유자·공동 강사)의 학생 화면·다른 탭도 보관 여부를 다시 읽는다(#1471).
+        publish_instructors_changed(class_obj)
     return class_obj
 
 
@@ -211,6 +213,8 @@ def unarchive_class(class_obj: Class) -> Class:
         class_obj.archived_at = None
         class_obj.save(update_fields=["archived_at"])
         publish_participation_changed(class_obj.id)
+        # 참여자 행이 없는 강사(소유자·공동 강사)의 학생 화면·다른 탭도 보관 여부를 다시 읽는다(#1471).
+        publish_instructors_changed(class_obj)
     return class_obj
 
 
