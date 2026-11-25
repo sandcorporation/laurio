@@ -47,13 +47,11 @@ def assert_class_mutable(class_obj: Class) -> None:
 
 
 #: 참여자가 지금 이 클래스·문제에 새로 낼 수 없는 이유(#439) — 우선순위는
-#: 보관 → 내보냄 → 숨김이다(#941). 강사가 학생 화면으로 보는 경우("강사
-#: 보기")는 이 셋과 겹치지 않는다 — 진짜 참여자가 아니므로 호출부(`classroom.api.
-#: get_my_problem`)가 이 값들과 무관하게 직접 채운다.
+#: 보관 → 내보냄 → 숨김이다(#941). 강사가 학생 화면으로 보는 경우는 호출부
+#: (`classroom.api.get_my_problem`)가 보관 하나만 본다(`instructor_can_submit`).
 SUBMIT_BLOCKED_ARCHIVED = "archived"
 SUBMIT_BLOCKED_EXPELLED = "expelled"
 SUBMIT_BLOCKED_HIDDEN = "hidden"
-SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR = "viewing_as_instructor"
 
 
 def participant_membership_blocked_reason(class_obj: Class, member: ClassMember) -> str | None:

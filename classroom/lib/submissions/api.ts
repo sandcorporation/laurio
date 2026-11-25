@@ -199,15 +199,13 @@ export type AttemptContestEntry = {
 };
 
 // 참여자가 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면 `null`(#439). 우선순위는
-// 보관 → 내보냄 → 숨김이고, "viewing_as_instructor"(강사가 학생 화면으로 보는
-// 중)는 그 셋과 겹치지 않는 별도 판정이다. 백엔드가 이미 우선순위를 정해
+// 보관 → 내보냄 → 숨김이고 강사에게는 "archived" 만 온다. 백엔드가 이미 우선순위를 정해
 // 하나만 내려주므로 화면은 이 값을 다시 계산하지 않는다
 // (`classroom.participation.participant_submit_blocked_reason`).
 export type SubmitBlockedReason =
   | "archived"
   | "expelled"
   | "hidden"
-  | "viewing_as_instructor"
   | null;
 
 export type ProblemSubmissions = {

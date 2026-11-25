@@ -1293,18 +1293,17 @@ class ClassroomProblemSubmissionsOut(Schema):
     submissions: list[ClassroomSubmissionOut]
     #: 이 요청을 보낸 사람이 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면
     #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) |
-    #: "hidden"(강사가 이 문제를 숨김) |
-    #: "viewing_as_instructor"(강사가 학생 화면으로 보는 중) 중 하나다 — 우선순위는
+    #: "hidden"(강사가 이 문제를 숨김) 중 하나다 — 우선순위는
     #: 보관 → 내보냄 → 숨김이고
-    #: (`classroom.participation.participant_submit_blocked_reason`), 강사
-    #: 보기는 그 셋과 겹치지 않는 별도 판정이다. 예전의 네 불리언
+    #: (`classroom.participation.participant_submit_blocked_reason`), 강사에게는
+    #: "archived" 만 나온다. 예전의 네 불리언
     #: (`member_expelled`·`archived`·`problem_hidden`·`viewing_as_instructor`)을
     #: 이 값 하나로 합쳤다 — 화면이 우선순위를 다시 계산하지 않는다. 지난
     #: 시도는 이 값과 무관하게 `submissions`에 그대로 남는다 — 막히는 것은
     #: 새 제출뿐이다.
     submit_blocked_reason: str | None = None
-    #: `submit_blocked_reason`이 "viewing_as_instructor"일 때만 채워지는 문제
-    #: 상태("draft"|"open"|"hidden") — 띠가 몇 줄을 더 말할지 이 값으로
+    #: `viewing_as_instructor`일 때만 채워지는 문제
+    #: 상태("draft"|"open"|"hidden") — 띠가 상태 배지를 이 값으로
     #: 정한다. 참여자 시점에는 언제나 `None`이다(참여자에게는 상태 구분이
     #: 필요 없다는 것이 이미 `ClassroomProblemMineOut`의 설계다).
     instructor_problem_status: str | None = None
