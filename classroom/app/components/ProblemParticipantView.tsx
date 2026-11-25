@@ -939,9 +939,12 @@ function InteractiveSubmissionForm(
   const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
   // 빈 칸으로 낸 뒤에만 안내한다 — 다시 치기 시작하면 걷는다.
   const [submittedEmpty, setSubmittedEmpty] = useState(false);
+  // 잘못된 모양의 문구는 칸을 떠나거나 낼 때 띄운다 — 적는 동안 빨간 글이 계속 보이지 않게.
+  const [urlTouched, setUrlTouched] = useState(false);
   // 잘못된 주소와 빈 칸 제출 둘 다 오류 문구가 보인다 — 칸이 같이 무효로 알리고 문구와 이어진다(#1422).
+  const showShapeError = urlTouched && repositoryCheck !== null && !repositoryCheck.ok;
   const repositoryInvalid =
-    (repositoryCheck !== null && !repositoryCheck.ok) || (submittedEmpty && repositoryCheck === null);
+    showShapeError || (submittedEmpty && repositoryCheck === null);
   const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
 
   // 형식을 고르면 눌린 단추가 사라진다 — 초점을 새로 나온 칸(저장소 주소·파일 고르기)으로 옮긴다(#1431).
@@ -987,33 +990,52 @@ function InteractiveSubmissionForm(
 
   // 낼 수 없는 이유는 제출 카드 자리에 한 줄이다 — 지난 시도와 판정은 옆 열에 그대로 남는다.
   // 백엔드가 보관 → 내보냄 → 숨김 순서로 이유를 하나만 정해 주므로(#439, #941) 그대로 분기한다.
+  // 적던 저장소 주소는 막힌 안내 곁에 남긴다 — 제출 순간 막혀도 다시 적지 않게(#1441-8, #1436-10).
+  const keptDraft = repositoryUrl.trim();
+  const draftLine =
+    keptDraft !== "" ? (
+      <p data-testid="blocked-kept-repository-url" className="text-[12px] text-ink/60">
+        적던 저장소 주소: <span className="break-all font-mono">{keptDraft}</span>
+      </p>
+    ) : null;
   if (submitBlockedReason === "archived") {
-    return <ArchivedNote />;
+    return (
+      <>
+        <ArchivedNote />
+        {draftLine}
+      </>
+    );
   }
   if (submitBlockedReason === "expelled") {
     return (
-      <p
-        ref={blockedNoteRef}
-        tabIndex={-1}
-        role="alert"
-        data-testid="member-expelled-note"
-        className="text-[13px] text-warning outline-none"
-      >
-        이 클래스에서 내보내져 새로 제출할 수 없습니다.
-      </p>
+      <div className="flex flex-col gap-2">
+        <p
+          ref={blockedNoteRef}
+          tabIndex={-1}
+          role="alert"
+          data-testid="member-expelled-note"
+          className="text-[13px] text-warning outline-none"
+        >
+          이 클래스에서 내보내져 새로 제출할 수 없습니다.
+        </p>
+        {draftLine}
+      </div>
     );
   }
   if (submitBlockedReason === "hidden") {
     return (
-      <p
-        ref={blockedNoteRef}
-        tabIndex={-1}
-        role="alert"
-        data-testid="problem-hidden-note"
-        className="text-[13px] text-warning outline-none"
-      >
-        강사가 숨긴 문제라 새로 낼 수 없습니다.
-      </p>
+      <div className="flex flex-col gap-2">
+        <p
+          ref={blockedNoteRef}
+          tabIndex={-1}
+          role="alert"
+          data-testid="problem-hidden-note"
+          className="text-[13px] text-warning outline-none"
+        >
+          강사가 숨긴 문제라 새로 낼 수 없습니다.
+        </p>
+        {draftLine}
+      </div>
     );
   }
 
@@ -1065,6 +1087,7 @@ function InteractiveSubmissionForm(
         <form
           onSubmit={(event) => {
             setSubmittedEmpty(repositoryCheck === null);
+            setUrlTouched(true);
             onRepositorySubmit(event);
           }}
           className="flex flex-col gap-3"
@@ -1084,6 +1107,7 @@ function InteractiveSubmissionForm(
               spellCheck={false}
               placeholder="https://github.com/owner/repo"
               value={repositoryUrl}
+              onBlur={() => setUrlTouched(true)}
               onChange={(event) => {
                 setSubmittedEmpty(false);
                 onRepositoryUrlChange(event.target.value);
@@ -1093,7 +1117,7 @@ function InteractiveSubmissionForm(
               aria-describedby={repositoryInvalid ? "repository-url-error" : undefined}
               className={`${INPUT_CLASS} font-mono`}
             />
-            {repositoryCheck !== null && !repositoryCheck.ok ? (
+            {showShapeError && repositoryCheck !== null && !repositoryCheck.ok ? (
               <p id="repository-url-error" data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
                 {repositoryCheck.message}
                 {repositoryCheck.suggestion ? (

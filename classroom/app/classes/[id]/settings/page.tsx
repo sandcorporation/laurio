@@ -8,7 +8,7 @@
 import { useScrollToHash } from "@/lib/util/use-scroll-to-hash";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ScoringConnectionSection } from "@/app/components/ScoringConnectionSection";
@@ -425,6 +425,16 @@ export default function ClassSettingsPage() {
   const [defaultModelIsReasoning, setDefaultModelIsReasoning] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  // 저장 뒤 확인 문구와 초점(#1441-2) — 저장 중 꺼진 단추가 초점을 잃어 BODY 로 간다. 다시 켜진 뒤 되돌린다.
+  const [modelSavedNote, setModelSavedNote] = useState(false);
+  const [refocusModelSubmit, setRefocusModelSubmit] = useState(false);
+  const modelSubmitRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (refocusModelSubmit && !modelSaving) {
+      modelSubmitRef.current?.focus();
+      setRefocusModelSubmit(false);
+    }
+  }, [refocusModelSubmit, modelSaving]);
 
   const [classNameDraft, setClassNameDraft] = useState("");
   const [instructorDisplayName, setInstructorDisplayName] = useState("");
@@ -548,6 +558,7 @@ export default function ClassSettingsPage() {
     event.preventDefault();
     setModelSaving(true);
     setModelError(null);
+    setModelSavedNote(false);
     const result = await updateClass(classId, {
       default_model: defaultModel,
       default_reasoning_effort: defaultReasoningEffort,
@@ -555,10 +566,12 @@ export default function ClassSettingsPage() {
     });
     if (result.ok) {
       reload();
+      setModelSavedNote(true);
     } else {
       setModelError(result.detail);
     }
     setModelSaving(false);
+    setRefocusModelSubmit(true);
   }
 
   const costReady = costState.status === "ready" ? costState.estimate : null;
@@ -654,7 +667,10 @@ export default function ClassSettingsPage() {
                       models={modelsState.models}
                       savedModel={classroom.default_model}
                       selected={defaultModel}
-                      onSelect={setDefaultModel}
+                      onSelect={(id) => {
+                        setModelSavedNote(false);
+                        setDefaultModel(id);
+                      }}
                       costState={costState}
                       reasoningEffort={defaultReasoningEffort}
                     />
@@ -689,6 +705,7 @@ export default function ClassSettingsPage() {
                   ) : null}
                   <div>
                     <button
+                      ref={modelSubmitRef}
                       type="submit"
                       data-testid="class-default-model-submit"
                       disabled={modelSaving || defaultModel.trim() === ""}
@@ -699,6 +716,13 @@ export default function ClassSettingsPage() {
                   </div>
                 </form>
               )}
+              <p
+                role="status"
+                data-testid="class-default-model-saved"
+                className={modelSavedNote ? "text-[12.5px] text-ink/60" : "sr-only"}
+              >
+                {modelSavedNote ? "기본 모델을 저장했습니다." : ""}
+              </p>
               {modelError ? (
                 <ErrorNote>
                   <span data-testid="class-default-model-error">{modelError}</span>

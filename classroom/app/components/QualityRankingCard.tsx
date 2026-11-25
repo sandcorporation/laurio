@@ -280,7 +280,7 @@ export function QualityRankingCard({
               settingsAnchor="scoring-model"
             />
           ) : (
-            <span data-testid="quality-confirm-line" className="text-[13.5px]">
+            <span id="quality-confirm-line" data-testid="quality-confirm-line" role="status" className="text-[13.5px]">
               {confirm.estimate.new_count === 0 ? "새로 채점할 사람이 없습니다" : estimateLine(confirm.estimate)}
             </span>
           )}
@@ -298,6 +298,11 @@ export function QualityRankingCard({
             <button
               type="button"
               data-testid="quality-confirm-cancel"
+              aria-describedby={
+                confirm.estimate.blocked_reason === null && confirm.estimate.new_count === 0
+                  ? "quality-confirm-line"
+                  : undefined
+              }
               onClick={() => {
                 moveFocus.current = true;
                 setConfirm({ step: "idle" });

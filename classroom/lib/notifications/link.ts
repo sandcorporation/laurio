@@ -69,6 +69,12 @@ export function notificationHref(notification: NotificationRow): string | null {
       if (typeof classId !== "number") return null;
       return detailTabHref(classId, "instructors");
     }
+    // 내보내진 참여자 — 지난 시도를 읽는 참여자 화면으로(강사 전용 상세는 참여자에게 404).
+    case "classroom_member_expelled": {
+      const classId = context.class_id;
+      if (typeof classId !== "number") return null;
+      return `/classes/${classId}/problems/mine`;
+    }
     case "classroom_feedback_status_changed": {
       const reportId = context.report_id;
       return typeof reportId === "number" ? `/feedback/${reportId}` : "/feedback";

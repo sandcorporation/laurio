@@ -97,6 +97,9 @@ class NotificationType(models.TextChoices):
         "classroom_ownership_transfer_declined",
         "강의실 소유권 이전 거절",
     )
+    # 강사가 참여자를 내보냈다(#1441-8) — 내보내진 사람에게 닿는다. 행은 지우지 않아 지난 시도는 그대로
+    # 읽히지만 새 제출은 막힌다는 사실 통지다. 다시 내보내도(멱등) 두 번 보내지 않는다.
+    CLASSROOM_MEMBER_EXPELLED = "classroom_member_expelled", "강의실 내보내짐"
     # Operator 가 한 사용자에게 직접 보내는 알림이다(#418, CONTEXT.md 「운영자
     # 알림」) — 무료 공모전 수상자에게 개최자 보상(기프티콘 등)을 전하는 것이
     # 첫 쓰임이다. 제목·본문·(선택) 이미지는 이 앱의 `OperatorNotice`가 담고,
@@ -141,6 +144,7 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_ACCEPTED,
         NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_DECLINED,
+        NotificationType.CLASSROOM_MEMBER_EXPELLED,
         NotificationType.CLASSROOM_FEEDBACK_STATUS_CHANGED,
     }
 )
@@ -299,6 +303,13 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
         "is_internal_only": True,
     },
     NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_DECLINED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 내보내진 사람 자신의 클래스 참여에 관한 사실 통지(#1441-8) — 다른 강의실 알림과 같은 취급.
+    NotificationType.CLASSROOM_MEMBER_EXPELLED: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

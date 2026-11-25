@@ -74,3 +74,68 @@ test("참여자 문제 목록이 진행 한 줄과 한 줄 행으로 보인다",
   await page.getByTestId(`my-problem-row-${untouched}-link`).click();
   await expect(page).toHaveURL(new RegExp(`/problems/${untouched}/submit$`));
 });
+
+// 390px 에서도 기한·「곧 마감」·「마감 지남」이 제목 아래 줄에 보이고, 시도 수 칸만 숨는다(#1440).
+test("390px 문제 목록은 제목 아래 줄에 기한·곧 마감·마감 지남을 보인다", async ({ page, browser }) => {
+  const seed = `participant-due-${test.info().workerIndex}-${Date.now()}`;
+  const instructorContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const instructorPage = await instructorContext.newPage();
+  await establishClassroomSession(instructorPage, seed);
+  const api = classroomApi(instructorPage);
+  const classId = (
+    await (
+      await api.post("/api/backend/classroom/classes", {
+        data: { name: `기한 테스트 ${Date.now()}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+
+  async function openProblem(title: string, due: Date | null): Promise<number> {
+    const created = await api.post(`${base}/problems`, {
+      data: { title, submission_formats: ["repository"], due_at: due ? due.toISOString() : null },
+    });
+    expect(created.ok()).toBeTruthy();
+    const id = (await created.json()).id as number;
+    expect(
+      (await api.post(`${base}/problems/${id}/checklist-items`, { data: { label: "통과 조건", required: true } })).ok(),
+    ).toBeTruthy();
+    expect((await api.post(`${base}/problems/${id}/open`)).ok()).toBeTruthy();
+    return id;
+  }
+  const soon = await openProblem("곧 마감 문제", new Date(Date.now() + 40 * 60_000));
+  const past = await openProblem("마감 지난 문제", new Date(Date.now() - 36 * 3600_000));
+  const none = await openProblem("기한 없는 문제", null);
+
+  const joinCode = (await (await api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "서지우" } })).ok(),
+  ).toBeTruthy();
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto(`/classes/${classId}/problems/mine`);
+
+  const soonDue = page.getByTestId(`my-problem-row-${soon}-due`);
+  const pastDue = page.getByTestId(`my-problem-row-${past}-due`);
+  await expect(soonDue).toBeVisible();
+  await expect(soonDue).toContainText("곧 마감");
+  await expect(pastDue).toBeVisible();
+  await expect(pastDue).toContainText("마감 지남");
+  // 기한 줄은 제목 아래에 선다 — 같은 행 안, 제목보다 아래.
+  const title = await page.getByTestId(`my-problem-row-${soon}-link`).locator("span").first().boundingBox();
+  const dueBox = await soonDue.boundingBox();
+  expect(dueBox!.y).toBeGreaterThan(title!.y + title!.height - 1);
+  // 기한 없는 행엔 빈 줄이 없다 — 높이가 기한 있는 행보다 낮다.
+  const noneRow = await page.getByTestId(`my-problem-row-${none}`).boundingBox();
+  const soonRow = await page.getByTestId(`my-problem-row-${soon}`).boundingBox();
+  expect(noneRow!.height).toBeLessThan(soonRow!.height);
+  // 가로로 넘치지 않는다.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  // 넓은 폭에서는 한 줄 그대로 — 기한이 제목과 같은 높이에 선다.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const wideTitle = await page.getByTestId(`my-problem-row-${soon}-link`).locator("span").first().boundingBox();
+  const wideDue = await soonDue.boundingBox();
+  expect(Math.abs(wideDue!.y - wideTitle!.y)).toBeLessThan(wideTitle!.height);
+});

@@ -15,7 +15,7 @@
 import { knownOr } from "@/lib/util/known-or";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
@@ -68,7 +68,7 @@ function ProblemListRow({
       <Link
         href={`/classes/${classId}/problems/${problem.id}/submit`}
         data-testid={`my-problem-row-${problem.id}-link`}
-        className="flex items-center gap-3.5 px-4 py-2.5 hover:bg-ink/[0.03]"
+        className="flex flex-wrap items-center gap-x-3.5 gap-y-1 px-4 py-2.5 hover:bg-ink/[0.03]"
       >
         <span className="min-w-0 flex-1 truncate text-[14px]">
           {problem.title}
@@ -320,6 +320,13 @@ export default function MyProblemsPage() {
   const classId = Number(params.id);
   const { state, reload } = useMyProblems(classId);
 
+  // 가입 뒤 이동처럼 초점이 갈 곳 없이 body 에 있을 때만 제목이 받는다(#1441 9번) — 이미 다른 곳에 있던 초점은 빼앗지 않는다.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const ready = state.status === "ready";
+  useEffect(() => {
+    if (ready && document.activeElement === document.body) titleRef.current?.focus();
+  }, [ready]);
+
   useClassroomTabTitle({
     screenName: "문제 목록",
     className: state.status === "ready" ? state.className : undefined,
@@ -377,6 +384,7 @@ export default function MyProblemsPage() {
             : className
         }
         title="문제"
+        titleRef={titleRef}
         actions={
           // 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다(#372 AC) —
           // 어차피 서버가 403으로 거절할 요청을 화면에서 미리 막는다.

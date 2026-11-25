@@ -28,6 +28,16 @@ describe("checkGithubRepositoryUrl", () => {
     }
   });
 
+  it("https:// 가 빠진 주소는 앞에 붙여 받는다 (#1441)", () => {
+    for (const raw of ["github.com/kim/todo-app", "www.github.com/kim/todo-app.git", " github.com/kim/todo-app/ "]) {
+      expect(checkGithubRepositoryUrl(raw)).toEqual({ ok: true, url: "https://github.com/kim/todo-app" });
+    }
+    expect(checkGithubRepositoryUrl("github.com/kim/todo-app/tree/release/2024")).toEqual({
+      ok: true,
+      url: "https://github.com/kim/todo-app/tree/release/2024",
+    });
+  });
+
   it("SSH 주소는 거부하고 https 주소를 제안한다", () => {
     for (const raw of ["git@github.com:kim/todo-app.git", "ssh://git@github.com/kim/todo-app.git"]) {
       const result = checkGithubRepositoryUrl(raw);

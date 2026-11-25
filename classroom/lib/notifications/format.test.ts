@@ -203,6 +203,15 @@ describe("소유권 이전 알림 (#575)", () => {
   });
 });
 
+describe("내보내짐 알림 (#1441)", () => {
+  it("어느 클래스에서 내보내졌고 지난 시도는 읽힌다는 것을 말한다", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_member_expelled", context: { class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toBe("'알고리즘 1반' 클래스에서 내보내졌습니다 — 새로 제출할 수 없고, 지난 시도와 채점 결과는 그대로 볼 수 있습니다.");
+  });
+});
+
 describe("제보 상태 알림 (#1242)", () => {
   it("바뀐 상태를 말한다", () => {
     const text = describeNotification(
