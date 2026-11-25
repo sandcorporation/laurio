@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NotificationRow } from "../notifications/api";
 import { describeNotification } from "../notifications/format";
 
-import { scoringBlockNote } from "./scoring-block-note";
+import { modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
 
 const connected = {
   archived: false,
@@ -17,7 +17,12 @@ const connected = {
   role: "owner" as const,
 };
 
-const missing = { ...connected, has_openai_key: false, openai_key_status: null, openai_key_masked: null };
+const missing = {
+  ...connected,
+  has_openai_key: false,
+  openai_key_status: null,
+  openai_key_masked: null,
+};
 
 describe("scoringBlockNote — 제출 현황", () => {
   it("연결 없음 — 「연결 없음」 알림과 같은 원인·동사, 단추도 「넣기」", () => {
@@ -128,8 +133,14 @@ describe("scoringBlockNote — 공동 강사(#1421)", () => {
       "지금은 채점할 수 없습니다 — 소유자에게 채점 연결을 확인해 달라고 하세요.",
     ],
   ])("%s — 소유자에게 부탁하는 문장, 설정으로 가는 단추 없음", (_, classroom, submissions, quality) => {
-    expect(scoringBlockNote(classroom, "submissions")).toEqual({ message: submissions, actionLabel: null });
-    expect(scoringBlockNote(classroom, "quality")).toEqual({ message: quality, actionLabel: null });
+    expect(scoringBlockNote(classroom, "submissions")).toEqual({
+      message: submissions,
+      actionLabel: null,
+    });
+    expect(scoringBlockNote(classroom, "quality")).toEqual({
+      message: quality,
+      actionLabel: null,
+    });
   });
 
   it("서버 연결 불가 — 문장은 소유자와 같고 단추만 없다", () => {
@@ -150,5 +161,39 @@ describe("scoringBlockNote — 공동 강사(#1421)", () => {
 
   it("클래스 정보를 못 읽으면 단추를 내지 않는다", () => {
     expect(scoringBlockNote(null, "quality").actionLabel).toBeNull();
+  });
+});
+
+describe("modelRejectedNote — 키 사유는 소유자 몫, 모델 사유는 공동 강사도 바꾼다(#1425)", () => {
+  const message = "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요.";
+
+  it("소유자 — 클래스 설정의 모델 카드로", () => {
+    expect(modelRejectedNote("owner", 7, 3)).toEqual({
+      message,
+      actionLabel: "채점 모델 바꾸기",
+      href: "/classes/7/settings#scoring-model",
+    });
+  });
+
+  it("공동 강사 — 같은 문구, 단추는 문제 편집으로(소유자에게 부탁하지 않는다)", () => {
+    expect(modelRejectedNote("co_instructor", 7, 3)).toEqual({
+      message,
+      actionLabel: "채점 모델 바꾸기",
+      href: "/classes/7/problems/3",
+    });
+  });
+
+  it("역할을 모르면 문구만 — 갈 곳이 열릴지 모른다", () => {
+    expect(modelRejectedNote(undefined, 7, 3)).toEqual({
+      message,
+      actionLabel: null,
+      href: null,
+    });
+  });
+
+  it("채점 키 사유는 공동 강사에게 여전히 소유자에게 부탁한다", () => {
+    const co = scoringBlockNote({ ...missing, role: "co_instructor" as const }, "submissions");
+    expect(co.actionLabel).toBeNull();
+    expect(co.message).toContain("소유자에게");
   });
 });

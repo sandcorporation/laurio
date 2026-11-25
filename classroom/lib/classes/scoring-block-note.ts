@@ -1,8 +1,9 @@
 // 채점이 연결 때문에 멈췄을 때 제출 현황 배너와 「완성도 순위」 확인 단계가 하는 말(#1397). 서버의 사유
 // "no_api_key" 하나에 원인 넷(연결 없음·거부됨·크레딧 소진·서버 연결 불가)이 실리므로, 원인은 「채점」 카드와
 // 같은 `scoringStatus` 로 가른다. 원인의 낱말과 동사는 알림 문구(`lib/notifications/format.ts`)를 따르고,
-// 단추는 문장의 동사를 쓴다. 채점 연결은 소유자만 바꾸므로(#561) 공동 강사에게는 소유자에게 부탁하는 문장을 주고
-// 단추는 내지 않는다(#1421).
+// 단추는 문장의 동사를 쓴다. 채점 키는 소유자만 바꾸므로(#561) 공동 강사에게는 소유자에게 부탁하는 문장을 주고
+// 단추는 내지 않는다(#1421). 채점 모델은 공동 강사도 문제 편집에서 바꾸므로(`update_problem` owner=False)
+// `modelRejectedNote` 는 역할과 상관없이 같은 문장이고 단추만 갈 곳이 다르다(#1425).
 import { knownOr } from "../util/known-or";
 import { scoringStatus, type ScoringStatus } from "./scoring-status";
 
@@ -64,14 +65,48 @@ const CO_INSTRUCTOR: Record<ScoringStatus["kind"], Record<ScoringBlockSurface, s
 };
 
 export function scoringBlockNote(
-  classroom: (Parameters<typeof scoringStatus>[0] & { role?: "owner" | "co_instructor" }) | null,
+  classroom:
+    | (Parameters<typeof scoringStatus>[0] & {
+        role?: "owner" | "co_instructor";
+      })
+    | null,
   surface: ScoringBlockSurface,
 ): Note {
   const kind = classroom ? scoringStatus(classroom).kind : "connected";
   const owner = knownOr(OWNER, kind, OWNER.connected);
   // 역할을 모르면(클래스 정보를 못 읽음) 소유자 문구를 주되 단추는 내지 않는다 — 갈 곳이 열릴지 모른다.
   if (classroom?.role === "co_instructor") {
-    return { message: knownOr(CO_INSTRUCTOR, kind, CO_INSTRUCTOR.connected)[surface], actionLabel: null };
+    return {
+      message: knownOr(CO_INSTRUCTOR, kind, CO_INSTRUCTOR.connected)[surface],
+      actionLabel: null,
+    };
   }
-  return { message: owner[surface], actionLabel: classroom?.role === "owner" ? owner.actionLabel : null };
+  return {
+    message: owner[surface],
+    actionLabel: classroom?.role === "owner" ? owner.actionLabel : null,
+  };
+}
+
+// 채점 모델이 키에 거부된 사유(#403) — 모델을 바꾸면 풀리고, 공동 강사도 바꿀 수 있다(#1425).
+export function modelRejectedNote(
+  role: "owner" | "co_instructor" | null | undefined,
+  classId: number,
+  problemId: number,
+): { message: string; actionLabel: string | null; href: string | null } {
+  const message = "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요.";
+  if (role === "owner") {
+    return {
+      message,
+      actionLabel: "채점 모델 바꾸기",
+      href: `/classes/${classId}/settings#scoring-model`,
+    };
+  }
+  if (role === "co_instructor") {
+    return {
+      message,
+      actionLabel: "채점 모델 바꾸기",
+      href: `/classes/${classId}/problems/${problemId}`,
+    };
+  }
+  return { message, actionLabel: null, href: null };
 }
