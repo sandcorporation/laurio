@@ -105,7 +105,7 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
                     role="radio"
                     aria-checked={checked}
                     data-testid={`${testId}-${option.value}`}
-                    disabled={!selectable || saving !== null}
+                    aria-disabled={(!selectable || saving !== null) || undefined}
                     onClick={() => void choose(field, option.value)}
                     className={radioClass(checked)}
                   >
@@ -147,7 +147,7 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
                     role="radio"
                     aria-checked={shownOversize === value}
                     data-testid={`oversize-policy-${value}`}
-                    disabled={Boolean(blocked) || saving !== null}
+                    aria-disabled={(Boolean(blocked) || saving !== null) || undefined}
                     onClick={() => void chooseOversize(value)}
                     className={radioClass(shownOversize === value)}
                   >

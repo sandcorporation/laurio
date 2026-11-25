@@ -356,7 +356,7 @@ export function BriefEditPanel({
             <button
               type="button"
               onClick={cancelEditing}
-              disabled={saving}
+              aria-disabled={saving || undefined}
               data-testid="draft-edit-cancel"
               className={buttonClass("secondary", "sm")}
             >

@@ -121,7 +121,7 @@ function RegradeDialogBody({
           <button
             type="button"
             data-testid="regrade-confirm"
-            disabled={busy}
+            aria-disabled={busy || undefined}
             onClick={onConfirm}
             className={buttonClass("primary", "sm")}
           >

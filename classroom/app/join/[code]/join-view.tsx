@@ -214,7 +214,7 @@ export function JoinView() {
             <button
               type="submit"
               data-testid="join-submit"
-              disabled={submit.status === "submitting" || displayName.trim() === ""}
+              aria-disabled={(submit.status === "submitting" || displayName.trim() === "") || undefined}
               className={`${buttonClass("primary")} w-full sm:w-auto sm:self-start`}
             >
               {submit.status === "submitting" ? "가입하는 중..." : "가입하고 문제 보기"}

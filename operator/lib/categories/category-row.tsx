@@ -149,7 +149,7 @@ export function CategoryRow({
             type="button"
             data-testid={`${rowTestId}-edit-save`}
             onClick={handleSaveEdit}
-            disabled={pending}
+            aria-disabled={pending || undefined}
             className="border border-ink bg-ink px-2.5 py-1 text-[12px] text-paper disabled:opacity-50"
           >
             {pending ? "저장 중..." : "저장"}
@@ -157,7 +157,7 @@ export function CategoryRow({
           <button
             type="button"
             onClick={resetAndClose}
-            disabled={pending}
+            aria-disabled={pending || undefined}
             className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
           >
             취소
@@ -180,7 +180,7 @@ export function CategoryRow({
             type="button"
             data-testid={`${rowTestId}-deactivate-confirm`}
             onClick={handleConfirmDeactivate}
-            disabled={pending}
+            aria-disabled={pending || undefined}
             className="border border-attention bg-attention px-2.5 py-1 text-[12px] text-paper disabled:opacity-50"
           >
             {pending ? "처리 중..." : "감추기 확정"}
@@ -188,7 +188,7 @@ export function CategoryRow({
           <button
             type="button"
             onClick={resetAndClose}
-            disabled={pending}
+            aria-disabled={pending || undefined}
             className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
           >
             취소

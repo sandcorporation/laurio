@@ -1232,7 +1232,7 @@ function InteractiveSubmissionFormBody(
             type="submit"
             data-testid="submit-repository"
             aria-describedby={joinDescribedBy(deadlineNoteId)}
-            disabled={submitting}
+            aria-disabled={submitting || undefined}
             className={`${buttonClass("primary")} w-full`}
           >
             {submitting ? "제출하는 중..." : "제출하기"}

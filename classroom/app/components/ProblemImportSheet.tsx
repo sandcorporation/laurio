@@ -453,7 +453,7 @@ export function ProblemImportSheet({
                       <button
                         type="button"
                         data-testid="problem-import-contest-more"
-                        disabled={contestState.loadingMore}
+                        aria-disabled={contestState.loadingMore || undefined}
                         onClick={() => void loadMoreContests()}
                         className={`${buttonClass("secondary", "sm")} w-full`}
                       >

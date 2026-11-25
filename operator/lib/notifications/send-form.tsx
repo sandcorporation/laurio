@@ -344,7 +344,7 @@ export function SendOperatorNoticeForm({
                 type="button"
                 data-testid="operator-notice-send"
                 onClick={handleSend}
-                disabled={sending}
+                aria-disabled={sending || undefined}
                 className={PRIMARY_BUTTON}
               >
                 {sending ? "보내는 중..." : "보내기"}

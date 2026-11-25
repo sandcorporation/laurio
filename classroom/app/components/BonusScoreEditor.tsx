@@ -70,7 +70,7 @@ export function BonusScoreEditor({
         <button
           type="button"
           data-testid={`${testId}-save`}
-          disabled={disabled || saving}
+          aria-disabled={(disabled || saving) || undefined}
           onClick={() => void save()}
           className={buttonClass("primary", "sm")}
         >

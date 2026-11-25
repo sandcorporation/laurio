@@ -710,7 +710,7 @@ function SubmissionColumnHeader({
             <button
               type="button"
               onClick={onAwardClick}
-              disabled={isSaving}
+              aria-disabled={isSaving || undefined}
               data-testid={`award-button-${submission.submission_id}`}
               className={`w-fit ${buttonClass("danger", "sm")}`}
             >
@@ -726,7 +726,7 @@ function SubmissionColumnHeader({
                 <button
                   type="button"
                   onClick={onConfirm}
-                  disabled={isSaving}
+                  aria-disabled={isSaving || undefined}
                   data-testid={`award-confirm-${submission.submission_id}`}
                   className={buttonClass("dangerFilled", "sm")}
                 >
@@ -735,7 +735,7 @@ function SubmissionColumnHeader({
                 <button
                   type="button"
                   onClick={onCancel}
-                  disabled={isSaving}
+                  aria-disabled={isSaving || undefined}
                   data-testid={`award-cancel-${submission.submission_id}`}
                   className={buttonClass("secondary", "sm")}
                 >

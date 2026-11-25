@@ -13,6 +13,7 @@
     "./repository-url": "./src/repository-url.ts",
     "./feedback": "./src/feedback/index.ts",
     "./feedback-history": "./src/feedback/markup-history.ts",
+    "./busy-guard": "./src/busy-guard.tsx",
     "./feedback.css": "./feedback.css"
   },
   "scripts": {

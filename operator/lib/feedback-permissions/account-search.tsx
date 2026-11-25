@@ -85,7 +85,7 @@ export function FeedbackPermissionAccountSearch({
             type="button"
             data-testid="feedback-permission-search-button"
             onClick={handleSearch}
-            disabled={state.status === "loading"}
+            aria-disabled={(state.status === "loading") || undefined}
             className="bg-ink px-4 py-2 text-[13px] font-medium text-paper disabled:opacity-50"
           >
             검색

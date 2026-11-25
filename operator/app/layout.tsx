@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BusyGuard } from "@codemit/bff-client/busy-guard";
 import { cookies } from "next/headers";
 import localFont from "next/font/local";
 import type { ReactNode } from "react";
@@ -67,6 +68,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       </head>
       <body>
         <AppShell themePreference={themePreference}>{children}</AppShell>
+        <BusyGuard />
       </body>
     </html>
   );

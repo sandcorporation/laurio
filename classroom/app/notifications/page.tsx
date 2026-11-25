@@ -252,7 +252,7 @@ export default function NotificationsPage() {
         <button
           type="button"
           onClick={loadMore}
-          disabled={loadingMore}
+          aria-disabled={loadingMore || undefined}
           data-testid="notifications-load-more"
           className={`mt-4 self-start ${buttonClass("secondary")}`}
         >

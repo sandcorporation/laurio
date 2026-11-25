@@ -200,7 +200,7 @@ function ExpelDialog({
           <button
             type="button"
             data-testid="expel-confirm"
-            disabled={busy}
+            aria-disabled={busy || undefined}
             onClick={onConfirm}
             className={buttonClass("dangerFilled", "sm")}
           >

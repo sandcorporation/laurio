@@ -113,7 +113,7 @@ export default function NewClassPage() {
             <button
               type="submit"
               data-testid="new-class-submit"
-              disabled={submitting || name.trim() === "" || instructorDisplayName.trim() === ""}
+              aria-disabled={(submitting || name.trim() === "" || instructorDisplayName.trim() === "") || undefined}
               className={buttonClass("primary")}
             >
               {submitting ? "만드는 중..." : "만들기"}

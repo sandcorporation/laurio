@@ -95,7 +95,7 @@ export function OperatorRow({
               type="button"
               data-testid={`${rowTestId}-deactivate`}
               onClick={handleDeactivate}
-              disabled={pending}
+              aria-disabled={pending || undefined}
               className="w-fit border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
             >
               {pending ? "처리 중..." : "비활성화"}
@@ -105,7 +105,7 @@ export function OperatorRow({
               type="button"
               data-testid={`${rowTestId}-reactivate`}
               onClick={handleReactivate}
-              disabled={pending}
+              aria-disabled={pending || undefined}
               className="w-fit border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
             >
               {pending ? "처리 중..." : "재활성화"}
