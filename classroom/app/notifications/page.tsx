@@ -56,6 +56,7 @@ import { notificationHref } from "@/lib/notifications/link";
 import { loadNextPage, mergePage, type UpdateList } from "@/lib/notifications/merge";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
 import { useUnreadCount } from "@/lib/notifications/use-unread-count";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 function isNotificationChanged(event: StreamEvent): boolean {
   return event.kind === NOTIFICATION_CHANGED;
@@ -76,6 +77,7 @@ export default function NotificationsPage() {
   // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로만 보이면, 1페이지를
   // 전부 읽어도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다.
   const unreadCountState = useUnreadCount();
+  useClassroomTabTitle({ screenName: "알림" });
 
   useEffect(() => {
     let cancelled = false;

@@ -25,12 +25,17 @@ import { importClassTemplate, takedownClassTemplate, type ClassTemplateRow } fro
 import { useClassTemplatePreview } from "@/lib/class-templates/use-class-template-preview";
 import { formatSubmissionFormats } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function ClassTemplatePreviewPage() {
   const params = useParams<{ shareCode: string }>();
   const shareCode = params.shareCode;
   const router = useRouter();
   const { state, reload } = useClassTemplatePreview(shareCode);
+  useClassroomTabTitle({
+    screenName: "클래스 템플릿",
+    className: state.status === "ready" ? state.template.name : undefined,
+  });
 
   const [name, setName] = useState("");
   const [importing, setImporting] = useState(false);

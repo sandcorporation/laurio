@@ -8,10 +8,12 @@ import { FeedbackReportDetail } from "@codemit/bff-client/feedback";
 
 import { PageHeader, PageShell } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function MyFeedbackDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
+  useClassroomTabTitle({ screenName: "제보" });
   return (
     <PageShell>
       <PageHeader title="제보" titleTestId="feedback-title" actions={<Link href="/feedback" className="text-[13px] underline">내 제보</Link>} />

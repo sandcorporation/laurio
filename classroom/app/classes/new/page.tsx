@@ -18,8 +18,10 @@ import {
 import { createClass } from "@/lib/classes/api";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function NewClassPage() {
+  useClassroomTabTitle({ screenName: "새 클래스" });
   const router = useRouter();
   const [name, setName] = useState("");
   const [instructorDisplayName, setInstructorDisplayName] = useState("");
