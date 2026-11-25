@@ -72,12 +72,20 @@ def _scene(client):
     return {"owner": owner, "co": co, "alice": alice, "bob": bob, "class_id": class_id, "problem": problem}
 
 
+def _body_is(kind: str, payload: dict, class_id: int) -> bool:
+    """강사 쪽 신호는 `class_id` 에 변경 번호 `rev` 하나만, 참여 신호는 `class_id` 하나만 싣는다(#1484 ④)."""
+
+    if kind == INSTRUCTORS_CHANGED:
+        return set(payload) == {"class_id", "rev"} and payload["class_id"] == class_id and isinstance(payload["rev"], int)
+    return payload == {"class_id": class_id}
+
+
 def _assert_only(kind: str, class_id: int, receivers: set[str]) -> None:
     everyone = {"owner", "co", "alice", "bob", "outsider-owner", "outsider"}
     for uid in everyone:
         got = _signals(uid, kind)
         if uid in receivers:
-            assert got and all(p == {"class_id": class_id} for p in got), (uid, got)
+            assert got and all(_body_is(kind, p, class_id) for p in got), (uid, got)
         else:
             assert got == [], (uid, got)
 
@@ -96,7 +104,7 @@ def test_accepting_an_invite_signals_the_class_instructors_only(client, db, djan
     assert response.status_code == 200, response.content
 
     _assert_only(INSTRUCTORS_CHANGED, s["class_id"], {"owner", "co"})
-    assert _signals("newcomer", INSTRUCTORS_CHANGED) == [{"class_id": s["class_id"]}]
+    assert [p["class_id"] for p in _signals("newcomer", INSTRUCTORS_CHANGED)] == [s["class_id"]]
     _assert_only(PARTICIPATION_CHANGED, s["class_id"], set())
 
 
@@ -259,3 +267,52 @@ def test_expelling_twice_signals_only_once(client, db, django_capture_on_commit_
         _post(client, s["owner"]["access"], f"{s['class_id']}/members/{alice_id}/expel")
 
     _assert_only(INSTRUCTORS_CHANGED, s["class_id"], set())
+
+
+# --- #1484 ④ 변경 번호 ----------------------------------------------------------------
+
+
+def _class_rev(client, access: str, class_id: int) -> int:
+    response = client.get(f"{CLASSES_URL}/{class_id}", **auth_header(access))
+    assert response.status_code == 200, response.content
+    return response.json()["signal_rev"]
+
+
+def test_each_instructor_change_carries_a_higher_rev_that_the_class_response_reports(
+    client, db, django_capture_on_commit_callbacks
+):
+    s = _scene(client)
+    owner, class_id = s["owner"]["access"], s["class_id"]
+    _clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        create_co_instructor_invite(client, owner, class_id)
+    first = _signals("owner", INSTRUCTORS_CHANGED)
+    assert len(first) == 1
+    # 신호의 번호와 그 뒤 클래스 응답의 번호가 같다 — 화면이 이 응답으로 그 신호를 이미 반영했음을 안다.
+    assert _class_rev(client, owner, class_id) == first[0]["rev"]
+
+    with django_capture_on_commit_callbacks(execute=True):
+        create_co_instructor_invite(client, owner, class_id)
+    second = _signals("owner", INSTRUCTORS_CHANGED)
+    assert [p["rev"] for p in second] == [first[0]["rev"], first[0]["rev"] + 1]
+    # 같은 변경의 두 수신자는 같은 번호를 받는다.
+    assert _signals("co", INSTRUCTORS_CHANGED)[-1]["rev"] == second[-1]["rev"]
+    assert _class_rev(client, owner, class_id) == second[-1]["rev"]
+
+
+def test_a_stale_class_instance_saving_does_not_rewind_the_rev(client, db, django_capture_on_commit_callbacks):
+    from classroom.models import Class
+
+    s = _scene(client)
+    owner, class_id = s["owner"]["access"], s["class_id"]
+    stale = Class.objects.get(pk=class_id)
+    with django_capture_on_commit_callbacks(execute=True):
+        create_co_instructor_invite(client, owner, class_id)
+    bumped = _class_rev(client, owner, class_id)
+    assert bumped > stale.signal_rev
+
+    stale.name = "바뀐 이름"
+    stale.save()
+
+    assert _class_rev(client, owner, class_id) == bumped

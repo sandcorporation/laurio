@@ -14,10 +14,12 @@
 
 from __future__ import annotations
 
+from django.db.models import F
+
 from core.events import Event, publish_after_commit
 
 from .instructors import instructor_user_ids
-from .models import ClassMember
+from .models import Class, ClassMember
 
 #: 강의실 시도가 새로 생겼다(#383 AC). 그 시도를 낸 참여자와 그 클래스
 #: 강사에게 간다 — 다른 클래스 강사·다른 참여자에게는 가지 않는다.
@@ -112,10 +114,13 @@ PARTICIPATION_CHANGED = "participation-changed"
 
 
 def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = frozenset()) -> None:
-    """바뀐 뒤의 강사 전원에게 보낸다(바꾸는 트랜잭션 안에서 부르면 바뀐 명단을 읽는다). 방금
+    """바뀐 뒤의 강사 전원에게 보낸다(본문은 `class_id` 와 변경 번호 `rev`. 바꾸는 트랜잭션 안에서 부르면 바뀐 명단을 읽는다). 방금
     빠진 사람(떠나기·내보내기)은 `also` 로 더한다 — 그 사람의 열린 탭도 접근 안내로 바뀌어야 한다."""
 
-    payload = {"class_id": class_obj.id}
+    # 변경 번호를 하나 올려 본문에 싣는다 — 클래스 응답이 같은 번호를 싣는다(`Class.signal_rev`, #1484 ④).
+    Class.objects.filter(pk=class_obj.pk).update(signal_rev=F("signal_rev") + 1)
+    class_obj.signal_rev = Class.objects.filter(pk=class_obj.pk).values_list("signal_rev", flat=True).first() or 0
+    payload = {"class_id": class_obj.id, "rev": class_obj.signal_rev}
     for recipient_id in {*instructor_user_ids(class_obj), *also}:
         publish_after_commit(Event(kind=INSTRUCTORS_CHANGED, recipient_id=recipient_id, payload=payload))
 

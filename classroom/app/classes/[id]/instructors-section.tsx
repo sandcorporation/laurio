@@ -384,6 +384,7 @@ export function InstructorsSection({
   classId,
   role,
   pendingTransfer,
+  onCommandStart,
   onTransferChanged,
   focusPendingTransfer,
   classVersion,
@@ -395,7 +396,9 @@ export function InstructorsSection({
   // 클래스의 대기 중 소유권 이전 요청 — 클래스 응답(`ClassRow`)에서 온다.
   pendingTransfer: PendingOwnershipTransfer | null;
   // 요청·취소 뒤 클래스를 다시 읽는다. 취소가 거절당하면(그 사이 끝났을 수 있다) `cancel-failed`.
-  onTransferChanged: (change?: "requested" | "cancel-failed") => void;
+  // 명령을 보내기 직전 — 그때까지 본 신호 번호를 받아 끝날 때 `onTransferChanged` 에 돌려준다(#1484 ④).
+  onCommandStart: () => number;
+  onTransferChanged: (change: "requested" | "cancel-failed" | undefined, seenRevAtStart: number) => void;
   // 요청을 보낸 뒤 강사 목록이 다시 그려지므로(key) 초점 표시는 그 바깥에 둔다.
   focusPendingTransfer: RefObject<boolean>;
   // 클래스 응답 — 새로 도착할 때마다 바뀐다. 신호로 시작된 재조회의 응답이 오면 명단·대기 초대를 한 번 다시 읽는다(#1459 ⑥).
@@ -497,6 +500,7 @@ export function InstructorsSection({
   const iAmOwner = me?.role === "owner";
 
   async function transfer(coInstructorId: number) {
+    const seenRevAtStart = onCommandStart();
     setBusyId(coInstructorId);
     setError(null);
     const result = await requestOwnershipTransfer(classId, coInstructorId);
@@ -505,10 +509,11 @@ export function InstructorsSection({
     }
     setConfirming(null);
     setBusyId(null);
-    onTransferChanged(result.ok ? "requested" : undefined);
+    onTransferChanged(result.ok ? "requested" : undefined, seenRevAtStart);
   }
 
   async function cancelTransfer(coInstructorId: number, transferId: number) {
+    const seenRevAtStart = onCommandStart();
     setBusyId(coInstructorId);
     setError(null);
     const result = await cancelOwnershipTransfer(classId, transferId);
@@ -518,10 +523,11 @@ export function InstructorsSection({
       cancelledByMe.current = true;
     }
     setBusyId(null);
-    onTransferChanged(result.ok ? undefined : "cancel-failed");
+    onTransferChanged(result.ok ? undefined : "cancel-failed", seenRevAtStart);
   }
 
   async function remove(coInstructorId: number) {
+    const seenRevAtStart = onCommandStart();
     setBusyId(coInstructorId);
     setError(null);
     const result = await removeCoInstructor(classId, coInstructorId);
@@ -533,10 +539,11 @@ export function InstructorsSection({
     setConfirming(null);
     setBusyId(null);
     // 내보낸 사람에게 온 대기 이전 요청도 사라진다.
-    onTransferChanged();
+    onTransferChanged(undefined, seenRevAtStart);
   }
 
   async function create() {
+    const seenRevAtStart = onCommandStart();
     setCreating(true);
     setError(null);
     setCreatedNote("");
@@ -545,7 +552,7 @@ export function InstructorsSection({
       setFocusInviteId(result.data.id);
       setCreatedNote("초대 링크를 만들었습니다");
       // 같은 변경의 서버 신호와 합쳐 클래스 화면이 한 번만 다시 읽는다(#1471 ②).
-      onTransferChanged();
+      onTransferChanged(undefined, seenRevAtStart);
     } else {
       setError(result.detail);
     }
@@ -553,6 +560,7 @@ export function InstructorsSection({
   }
 
   async function cancel(inviteId: number) {
+    const seenRevAtStart = onCommandStart();
     setCancellingId(inviteId);
     setError(null);
     const result = await cancelCoInstructorInvite(classId, inviteId);
@@ -560,7 +568,7 @@ export function InstructorsSection({
       setError(result.detail);
     }
     // 실패해도 다시 읽는다 — 그 사이 누가 수락했거나 다른 강사가 먼저 취소했으면 목록에서 빠진다.
-    onTransferChanged();
+    onTransferChanged(undefined, seenRevAtStart);
     if (result.ok) createButtonRef.current?.focus();
     setConfirmingInviteId(null);
     setCancellingId(null);

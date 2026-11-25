@@ -350,6 +350,7 @@ def _serialize_class(
         published_template=_published_template_summary(_live_class_template(class_obj), viewer_id=viewer_id),
         role="owner" if viewer_is_owner else "co_instructor",
         pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
+        signal_rev=class_obj.signal_rev,
         **row_stats,
     )
 

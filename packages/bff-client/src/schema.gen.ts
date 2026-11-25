@@ -6366,6 +6366,11 @@ export interface components {
             /** Scoring Server Url */
             scoring_server_url?: string | null;
             /**
+             * Signal Rev
+             * @default 0
+             */
+            signal_rev: number;
+            /**
              * Token Usage Estimated
              * @default 0
              */
