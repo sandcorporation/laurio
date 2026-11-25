@@ -114,7 +114,7 @@ export function ConsentPanel({ params }: { params: AuthorizeParams }) {
           type="button"
           className={buttonClass("primary")}
           data-testid="consent-approve"
-          disabled={submitting !== null}
+          aria-disabled={(submitting !== null) || undefined}
           onClick={() => decide(true)}
         >
           {submitting === "approve" ? "연결하는 중…" : "허락"}
@@ -123,7 +123,7 @@ export function ConsentPanel({ params }: { params: AuthorizeParams }) {
           type="button"
           className={buttonClass("secondary")}
           data-testid="consent-deny"
-          disabled={submitting !== null}
+          aria-disabled={(submitting !== null) || undefined}
           onClick={() => decide(false)}
         >
           거절

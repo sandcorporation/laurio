@@ -23,7 +23,8 @@ export type NoteTone = "neutral" | "attention";
 
 const BUTTON_BASE =
   "inline-flex items-center justify-center whitespace-nowrap text-sm " +
-  "transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+  "transition-colors disabled:cursor-not-allowed disabled:opacity-50 " +
+  "aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
 
 const BUTTON_TONE: Record<ButtonTone, string> = {
   primary: "bg-ink text-paper hover:bg-ink/85",

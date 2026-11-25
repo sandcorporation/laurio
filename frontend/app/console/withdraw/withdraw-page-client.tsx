@@ -138,7 +138,7 @@ export function WithdrawPageClient({ returnOrigin, returnUrl }: { returnOrigin: 
               <button
                 type="button"
                 onClick={handleWithdraw}
-                disabled={!acknowledged || submitting}
+                aria-disabled={(!acknowledged || submitting) || undefined}
                 data-testid="withdraw-submit"
                 className={`mt-4 ${buttonClass("dangerFilled")}`}
               >

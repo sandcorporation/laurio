@@ -100,12 +100,12 @@ export function FeedbackPermissionAccountRow({
                 type="button"
                 data-testid={`${rowTestId}-confirm`}
                 onClick={handleConfirm}
-                disabled={pending}
+                aria-disabled={pending || undefined}
                 className={PRIMARY_BUTTON}
               >
                 {pending ? "처리 중..." : account.is_granted ? "회수 확정" : "부여 확정"}
               </button>
-              <button type="button" onClick={resetAndClose} disabled={pending} className={SECONDARY_BUTTON}>
+              <button type="button" onClick={resetAndClose} aria-disabled={pending || undefined} className={SECONDARY_BUTTON}>
                 취소
               </button>
             </div>

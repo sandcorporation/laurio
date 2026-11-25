@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BusyGuard } from "@codemit/bff-client/busy-guard";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import localFont from "next/font/local";
@@ -109,6 +110,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         {metricsSrc && <script defer src={metricsSrc} data-site="codemit" />}
       </head>
       <body>
+        <BusyGuard />
         <MeProvider>
           <EventStreamProvider>
             <header className="border-b border-rule bg-surface">

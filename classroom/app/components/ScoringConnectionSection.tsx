@@ -131,8 +131,7 @@ function VendorSwitch({
                 type="button"
                 role="radio"
                 aria-checked={checked}
-                disabled={busy}
-                aria-disabled={reason !== null || undefined}
+                aria-disabled={busy || reason !== null || undefined}
                 aria-describedby={reason ? reasonId : undefined}
                 data-testid={`scoring-connection-kind-${option.kind}`}
                 onClick={() => {
@@ -260,7 +259,7 @@ function VendorKeyRow({
           <button
             type="button"
             data-testid={`vendor-key-${provider}-delete-confirm-button`}
-            disabled={deleting}
+            aria-disabled={deleting || undefined}
             onClick={() => void handleDelete()}
             className={buttonClass("dangerFilled", "sm")}
           >
@@ -269,7 +268,7 @@ function VendorKeyRow({
           <button
             ref={deleteConfirm.keepRef}
             type="button"
-            disabled={deleting}
+            aria-disabled={deleting || undefined}
             onClick={() => setConfirming(false)}
             className={buttonClass("secondary", "sm")}
           >
@@ -376,7 +375,7 @@ function KeyForm({
         <button
           type="submit"
           data-testid={`${provider}-key-submit`}
-          disabled={saving || apiKey.trim() === ""}
+          aria-disabled={(saving || apiKey.trim() === "") || undefined}
           className={buttonClass("primary")}
         >
           {saving ? "저장하는 중..." : "저장"}
@@ -491,7 +490,7 @@ function CompatibleServerForm({
         <button
           type="submit"
           data-testid="scoring-server-submit"
-          disabled={saving || serverUrl.trim() === ""}
+          aria-disabled={(saving || serverUrl.trim() === "") || undefined}
           className={buttonClass("primary")}
         >
           {saving ? "서버에 닿아 보는 중..." : "확인하고 저장"}

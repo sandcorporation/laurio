@@ -479,13 +479,7 @@ export default function EditProblemPage() {
             type="submit"
             form="edit-problem-form"
             data-testid="edit-problem-submit"
-            disabled={
-              isArchived ||
-              mainSave.pending ||
-              title.trim() === "" ||
-              submissionFormats.length === 0 ||
-              !isGradingGuidelineValid(gradingGuideline)
-            }
+            aria-disabled={(isArchived || mainSave.pending || title.trim() === "" || submissionFormats.length === 0 || !isGradingGuidelineValid(gradingGuideline)) || undefined}
             className={buttonClass("primary")}
           >
             {mainSave.pending ? "저장하는 중..." : "저장"}
@@ -639,7 +633,7 @@ export default function EditProblemPage() {
                                 <button
                                   type="button"
                                   data-testid={`zip-git-history-make-optional-${item.id}`}
-                                  disabled={isArchived || checklistMutation.pending}
+                                  aria-disabled={(isArchived || checklistMutation.pending) || undefined}
                                   onClick={() => handleItemGradeChange(item.id, "optional")}
                                   className={buttonClass("secondary", "sm")}
                                 >
@@ -652,7 +646,7 @@ export default function EditProblemPage() {
                       <button
                         type="button"
                         data-testid="zip-git-history-repository-only"
-                        disabled={isArchived || checklistMutation.pending}
+                        aria-disabled={(isArchived || checklistMutation.pending) || undefined}
                         onClick={handleRepositoryOnly}
                         className={`${buttonClass("secondary", "sm")} self-start`}
                       >

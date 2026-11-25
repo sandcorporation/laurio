@@ -46,3 +46,9 @@ input[type="file"]:not(:disabled),
 input[type="file"]:not(:disabled)::file-selector-button {
   cursor: pointer;
 }
+
+/* 진행 중 단추는 disabled 가 아니라 aria-disabled 다(초점을 지킨다) — 흐리게만 보인다. 누름은 BusyGuard 가 막는다. */
+button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
