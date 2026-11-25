@@ -170,7 +170,7 @@ export default function CoInstructorInvitePage() {
             <button
               type="submit"
               data-testid="invite-accept"
-              disabled={submitting || displayName.trim() === ""}
+              aria-disabled={(submitting || displayName.trim() === "") || undefined}
               className={`${buttonClass("primary")} w-full sm:w-auto sm:self-start`}
             >
               {submitting ? "수락하는 중..." : "공동 강사로 수락"}

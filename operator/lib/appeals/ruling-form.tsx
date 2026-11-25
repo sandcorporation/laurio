@@ -156,7 +156,7 @@ export function RulingForm({
           type="button"
           data-testid="ruling-uphold-button"
           onClick={() => submit("uphold")}
-          disabled={submitting}
+          aria-disabled={submitting || undefined}
           className="bg-ink px-4 py-2 text-[13.5px] font-medium text-paper disabled:opacity-50"
         >
           인용 — 심판 확정
@@ -165,7 +165,7 @@ export function RulingForm({
           type="button"
           data-testid="ruling-reject-button"
           onClick={() => submit("reject")}
-          disabled={submitting}
+          aria-disabled={submitting || undefined}
           className="border border-rule bg-surface px-4 py-2 text-[13.5px] text-ink disabled:opacity-50"
         >
           기각 — 심판 확정

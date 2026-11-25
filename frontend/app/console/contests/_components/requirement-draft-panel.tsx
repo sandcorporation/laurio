@@ -81,7 +81,7 @@ function SponsorDisplayNameGate({
         />
         <button
           type="button"
-          disabled={saving || !input.trim() || !onSave}
+          aria-disabled={(saving || !input.trim() || !onSave) || undefined}
           onClick={() => void onSave?.(input.trim())}
           data-testid="grill-sponsor-display-name-save"
           className={buttonClass("secondary", "sm")}
@@ -227,7 +227,7 @@ function RequirementRow({
           />
           <button
             type="button"
-            disabled={busy || !text.trim()}
+            aria-disabled={(busy || !text.trim()) || undefined}
             onClick={() => void save()}
             data-testid={`requirement-row-${requirement.id}-save`}
             className={buttonClass("primary", "sm")}
@@ -294,7 +294,7 @@ function RequirementRow({
         </button>
         <button
           type="button"
-          disabled={busy}
+          aria-disabled={busy || undefined}
           onClick={() => void onDelete(requirement.id)}
           data-testid={`requirement-row-${requirement.id}-delete`}
           className="text-xs text-error hover:opacity-70"

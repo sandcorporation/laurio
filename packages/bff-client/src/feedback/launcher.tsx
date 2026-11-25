@@ -296,8 +296,8 @@ export function FeedbackLauncher({
                 </label>
                 {error && <p id={errorId} role="alert" data-testid="feedback-error" className="text-[13px] text-error">{error}</p>}
                 <div className="flex justify-end gap-2">
-                  <button type="button" onClick={close} disabled={phase === "sending"} className={buttonClass}>닫기</button>
-                  <button type="button" data-testid="feedback-submit" onClick={submit} disabled={phase === "sending"} className={buttonClass}>
+                  <button type="button" onClick={close} aria-disabled={(phase === "sending") || undefined} className={buttonClass}>닫기</button>
+                  <button type="button" data-testid="feedback-submit" onClick={submit} aria-disabled={(phase === "sending") || undefined} className={buttonClass}>
                     {phase === "sending" ? "보내는 중" : "보내기"}
                   </button>
                 </div>

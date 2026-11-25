@@ -72,7 +72,7 @@ export function ModerationForm({
           type="button"
           data-testid={`moderation-takedown-${templateId}`}
           onClick={() => submit("takedown")}
-          disabled={submitting}
+          aria-disabled={submitting || undefined}
           className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
         >
           내리기
@@ -81,7 +81,7 @@ export function ModerationForm({
           type="button"
           data-testid={`moderation-dismiss-${templateId}`}
           onClick={() => submit("dismiss")}
-          disabled={submitting}
+          aria-disabled={submitting || undefined}
           className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
         >
           기각

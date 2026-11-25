@@ -235,7 +235,7 @@ function PendingAcceptance({
             <button
               type="button"
               onClick={onConfirm}
-              disabled={isSaving}
+              aria-disabled={isSaving || undefined}
               className={buttonClass("dangerFilled")}
               data-testid="handover-accept-confirm"
             >
@@ -244,7 +244,7 @@ function PendingAcceptance({
             <button
               type="button"
               onClick={onCancel}
-              disabled={isSaving}
+              aria-disabled={isSaving || undefined}
               className={buttonClass("secondary")}
               data-testid="handover-accept-cancel"
             >

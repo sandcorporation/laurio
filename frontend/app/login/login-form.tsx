@@ -267,7 +267,7 @@ function LoginButtons({
                   key={provider.id}
                   type="button"
                   onClick={() => handleDevSeedLogin(provider.id)}
-                  disabled={pending !== null}
+                  aria-disabled={(pending !== null) || undefined}
                   data-testid={`login-${provider.id}`}
                   className={buttonClass("secondary")}
                 >
