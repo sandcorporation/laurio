@@ -6,6 +6,7 @@ name: workflow-lint
 
 on:
   pull_request:
+    branches-ignore: [staging]
     paths:
       - ".github/workflows/**"
       - "scripts/ci/actionlint.sh"

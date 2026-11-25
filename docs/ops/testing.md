@@ -127,6 +127,9 @@ Contest 에 매달린 append-only `Score` 는 `scoring.models.hard_delete_demo_s
 cd backend && CODEMIT_DB_PORT=55432 uv run python manage.py seed_demo_classroom --email <계정>
 ```
 
+`--many-notifications` 를 주면 `demo-classroom-1@example.com` 의 알림이 60건이 된다(2주차 시도를 늘린다, #1380) —
+알림 화면의 「더 보기」를 걸을 때 쓴다. 접힌 2주차 묶음이 「시도 50건」에서 「더 보기」 뒤 「시도 58건」이 되고 1주차 묶음이 나타난다.
+
 **채점을 돌리지 않고 `ClassroomScore` 를 직접 만든다** — 데모를 심는 데 강사의 OpenAI
 키를 태울 이유가 없고, 통과·미통과를 의도대로 배치해야 화면의 모든 갈래가 보인다.
 같은 이유로 클래스에 키를 넣지 않는다. 제출은 **저장소 형식만** 심는다 — 소스 형식은

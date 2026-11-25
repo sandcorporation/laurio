@@ -320,6 +320,25 @@ def test_exact_deadlines_are_not_late_and_deadline_wins_after_boundary(client, d
     check(at - timedelta(microseconds=1), at - timedelta(microseconds=1), "deadline")
 
 
+@pytest.mark.parametrize("field,stage", [("due_at", "deadline"), ("recommended_due_at", "recommended")])
+@pytest.mark.parametrize("seconds_after,on_time", [(0, True), (1, False)])
+def test_a_submission_at_the_deadline_is_on_time_and_one_second_later_is_late(
+    client, db, field, stage, seconds_after, on_time,
+):
+    instructor, participant, class_id, problem_id = _setup_with_participant(client)
+    submitted = submit_repository(client, participant["access"], class_id, problem_id)
+    submitted_at = ClassroomSubmission.objects.get(pk=submitted["id"]).created_at
+
+    # 제출 시각이 기한보다 `seconds_after` 초 뒤가 되도록 기한을 놓는다.
+    patched = _patch(client, instructor["access"], class_id, problem_id, {
+        field: _iso(submitted_at - timedelta(seconds=seconds_after)),
+    })
+
+    assert patched.status_code == 200, patched.content
+    attempt = mine(client, participant["access"], class_id, problem_id)["submissions"][0]
+    assert attempt["late"] == (None if on_time else stage)
+
+
 @pytest.mark.parametrize("reason", ["archived", "expelled"])
 def test_membership_blocks_remain_after_deadline(client, db, reason):
     instructor, participant, class_id, problem_id = _setup_with_participant(client, due=PAST)

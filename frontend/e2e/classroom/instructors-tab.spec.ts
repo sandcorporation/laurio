@@ -82,3 +82,32 @@ test("강사 탭 — 공동 강사는 소유자 전용 행동 없이 떠나기�
   );
   expect(gone.ok()).toBeFalsy();
 });
+
+test("강사 탭 — 공동 강사 초대는 「정말 취소」를 눌러야 취소된다", async ({
+  page,
+}) => {
+  const seed = `instructors-tab-invite-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const created = await api.post("/api/backend/classroom/classes", {
+    data: { name: `초대 취소 ${seed}`, instructor_display_name: "김소유" },
+  });
+  const classId = (await created.json()).id as number;
+  const invitesPath = `/api/backend/classroom/classes/${classId}/co-instructor-invites`;
+  await api.post(invitesPath);
+
+  await page.goto(`/classes/${classId}?tab=instructors`);
+  const confirm = page.getByTestId("co-instructor-invite-cancel-confirm-button");
+
+  // 한 번 눌러서는 취소되지 않는다(#1378).
+  await page.getByTestId("co-instructor-invite-cancel").click();
+  await expect(confirm).toHaveText("정말 취소");
+  expect(await (await api.get(invitesPath)).json()).toHaveLength(1);
+
+  await page.getByTestId("co-instructor-invite-cancel-keep").click();
+  await expect(confirm).toHaveCount(0);
+
+  await page.getByTestId("co-instructor-invite-cancel").click();
+  await confirm.click();
+  await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(0);
+});

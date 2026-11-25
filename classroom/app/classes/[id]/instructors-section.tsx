@@ -5,7 +5,7 @@
 // 아직 쓰이지 않은 공동 강사 초대를 보여 준다. 초대는 소유자 전용이 아니다 — 강사 누구나
 // 만들고, 누가 만든 초대든 복사하고 취소한다. 보관된 클래스에서도 된다(사람을 들이는 일은
 // 클래스의 존폐 쪽이다). 여러 개를 만들어도 앞의 것이 죽지 않는다 — 가입 링크의
-// 「다시 뽑기」와 다르다.
+// 「다시 뽑기」와 다르다. 취소는 되돌릴 수 없어 그 줄에서 「정말 취소」를 한 번 더 누른다(#1378).
 //
 // 떠나기·내보내기(#563): 소유자는 공동 강사 줄마다 「내보내기」를, 공동 강사는 맨 아래
 // 「이 클래스 떠나기」를 본다. 둘 다 한 번 더 확인한다. 소유자는 떠날 수 없어 그 카드가 없다(#1381).
@@ -190,15 +190,21 @@ function InstructorRow({
 function PendingInviteRow({
   invite,
   copied,
+  confirming,
   cancelling,
   onCopy,
+  onAsk,
   onCancel,
+  onKeep,
 }: {
   invite: PendingCoInstructorInvite;
   copied: boolean;
+  confirming: boolean;
   cancelling: boolean;
   onCopy: (url: string) => void;
+  onAsk: () => void;
   onCancel: () => void;
+  onKeep: () => void;
 }) {
   const url = typeof window === "undefined" ? "" : coInstructorInviteUrl(window.location.origin, invite.token);
   const maker = invite.created_by_me ? "내가" : `${invite.created_by_name || "소유자"}님이`;
@@ -222,15 +228,32 @@ function PendingInviteRow({
         >
           {copied ? "복사됨" : "복사"}
         </button>
-        <button
-          type="button"
-          data-testid="co-instructor-invite-cancel"
-          onClick={onCancel}
-          disabled={cancelling}
-          className={LINK_ACTION}
-        >
-          {cancelling ? "취소하는 중..." : "취소"}
-        </button>
+        {confirming ? (
+          <>
+            <button
+              type="button"
+              data-testid="co-instructor-invite-cancel-confirm-button"
+              onClick={onCancel}
+              disabled={cancelling}
+              className={buttonClass("dangerFilled", "sm")}
+            >
+              {cancelling ? "취소하는 중..." : "정말 취소"}
+            </button>
+            <button
+              type="button"
+              data-testid="co-instructor-invite-cancel-keep"
+              onClick={onKeep}
+              disabled={cancelling}
+              className={buttonClass("secondary", "sm")}
+            >
+              그대로 두기
+            </button>
+          </>
+        ) : (
+          <button type="button" data-testid="co-instructor-invite-cancel" onClick={onAsk} className={LINK_ACTION}>
+            취소
+          </button>
+        )}
       </span>
     </li>
   );
@@ -327,6 +350,7 @@ export function InstructorsSection({
   const [creating, setCreating] = useState(false);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [confirmingInviteId, setConfirmingInviteId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 한 번에 한 줄의 한 확인만 연다 — 내보내기 또는 소유권 넘기기.
   const [confirming, setConfirming] = useState<{ id: number; what: Exclude<RowConfirm, null> } | null>(null);
@@ -396,6 +420,7 @@ export function InstructorsSection({
     }
     // 실패해도 다시 읽는다 — 그 사이 누가 수락했거나 다른 강사가 먼저 취소했으면 목록에서 빠진다.
     reloadInvites();
+    setConfirmingInviteId(null);
     setCancellingId(null);
   }
 
@@ -476,9 +501,12 @@ export function InstructorsSection({
                   key={invite.id}
                   invite={invite}
                   copied={copiedId === invite.id}
+                  confirming={confirmingInviteId === invite.id}
                   cancelling={cancellingId === invite.id}
                   onCopy={(url) => void copy(invite.id, url)}
+                  onAsk={() => setConfirmingInviteId(invite.id)}
                   onCancel={() => void cancel(invite.id)}
+                  onKeep={() => setConfirmingInviteId(null)}
                 />
               ))}
             </ul>
