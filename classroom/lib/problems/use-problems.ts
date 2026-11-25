@@ -16,7 +16,13 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { ATTEMPT_SCORED, type StreamEvent } from "@/lib/events/types";
+import {
+  ATTEMPT_SCORED,
+  INSTRUCTORS_CHANGED,
+  PARTICIPATION_CHANGED,
+  isClassSignal,
+  type StreamEvent,
+} from "@/lib/events/types";
 
 import { reorderProblems, type ProblemRow } from "./api";
 
@@ -39,8 +45,13 @@ export function useProblems(classId: number) {
     refetch();
   }, [refetch]);
 
+  // 채점 끝과, 달성률의 분모(참여자)·대상(열린 문제)을 바꾸는 신호 — 참여자가 공동 강사가 되거나 공동
+  // 강사가 떠나면(instructors-changed), 문제가 열리거나 숨겨지면(participation-changed) 다시 읽는다(#1471 ⑦).
   const matches = useCallback(
-    (event: StreamEvent) => event.kind === ATTEMPT_SCORED && event.payload.class_id === classId,
+    (event: StreamEvent) =>
+      isClassSignal(event, ATTEMPT_SCORED, classId) ||
+      isClassSignal(event, INSTRUCTORS_CHANGED, classId) ||
+      isClassSignal(event, PARTICIPATION_CHANGED, classId),
     [classId],
   );
   useRealtimeRefresh({ matches, waiting: true, fallbackPollMs: FALLBACK_POLL_MS, reload });
