@@ -14,6 +14,7 @@ type State = Awaited<ReturnType<BrowserContext["storageState"]>>;
 let ownerState: State;
 let classId: number;
 let submissionId: number;
+let secondSubmissionId: number;
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(30_000);
@@ -54,7 +55,20 @@ test.beforeAll(async ({ browser }) => {
   expect(submitted.ok()).toBeTruthy();
   submissionId = (await submitted.json()).id as number;
   await member.close();
+  // 둘째 시도 — 다른 탭 갱신 시험이 쓴다(첫째는 뒤 시험이 다시 채점한다).
+  const second = await browser.newContext();
+  const secondPage = await second.newPage();
+  await establishClassroomSession(secondPage, `${seed}-b`);
+  const secondApi = classroomApi(secondPage);
+  await secondApi.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "민하준" } });
+  const secondSubmitted = await secondApi.post(`${base}/submissions`, {
+    data: { value: `https://github.com/octocat/${marker}`, submission_format: "repository" },
+  });
+  expect(secondSubmitted.ok()).toBeTruthy();
+  secondSubmissionId = (await secondSubmitted.json()).id as number;
+  await second.close();
   await runSeed("classroom-failed-score", { submission_id: submissionId });
+  await runSeed("classroom-failed-score", { submission_id: secondSubmissionId });
 
   expect(
     (await api.put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } })).ok(),
@@ -95,6 +109,49 @@ test("「다시 채점」 확인 창은 초점이 안으로 들어가 갇히고 
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   await expect(opener).toBeFocused();
+});
+
+// 예상 금액이 정해진 뒤에야 창이 열린다 — 초점이 들어갈 때 낭독기가 읽는 설명에 금액이 들어 있다(#1484 ⑥).
+test("「다시 채점」 확인 창은 예상 금액을 받은 뒤에 열린다", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/scoring-calculator**", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.goto(`/classes/${classId}/submissions`);
+  await page.getByTestId(`regrade-${secondSubmissionId}`).click();
+  await expect(page.getByRole("dialog", { name: "다시 채점" })).toHaveCount(0);
+  release();
+  const dialog = page.getByRole("dialog", { name: "다시 채점" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAccessibleDescription(/예상 금액 .*원/);
+  await expect(dialog.getByRole("button", { name: "취소" })).toBeFocused();
+});
+
+// 창을 연 동안 다른 탭이 같은 시도를 다시 채점하면 원래 단추가 사라진다 — 취소해도 초점은 body 로 빠지지 않고 제목에 간다(#1484 ①).
+test("「다시 채점」 창을 연 동안 다른 탭이 같은 시도를 다시 채점해 단추가 사라져도, 취소하면 초점이 제목으로 간다", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+  await page.goto(`/classes/${classId}/submissions`);
+  const opener = page.getByTestId(`regrade-${secondSubmissionId}`);
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "다시 채점" });
+  await expect(dialog).toBeVisible();
+
+  const other = await (await browser.newContext({ storageState: ownerState })).newPage();
+  await other.goto(`/classes/${classId}/submissions`);
+  const response = await classroomApi(other).post(`/api/backend/classroom/classes/${classId}/score-corrections`, {
+    data: { submission_ids: [secondSubmissionId] },
+  });
+  expect(response.ok()).toBeTruthy();
+
+  await expect(opener).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByTestId("class-attempts-heading")).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
 });
 
 test("「다시 채점」은 확인 창을 거쳐 걸리고, 새로고침 뒤 그 줄은 정정된 판정이며 버튼이 없다", async ({ browser }) => {
