@@ -3026,6 +3026,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             submit_blocked_reason=_instructor_submit_blocked_reason(class_obj, problem),
             instructor_problem_status=problem.status,
             viewing_as_instructor=True,
+            viewer_role="owner" if is_owner(class_obj, request.auth_user.id) else "co_instructor",
         )
 
     member = _get_member_or_404(class_id, request.auth_user.id)

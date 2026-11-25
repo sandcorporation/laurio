@@ -42,6 +42,7 @@ import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
 import { unpassedBadge } from "@/lib/submissions/unpassed-badge";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
+import { waitingNote } from "@/lib/submissions/waiting-note";
 import type { ChecklistVerdict, ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
 import { attemptEntryLabel } from "@/lib/submissions/contest-entry";
@@ -135,6 +136,8 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
    *  이 값을 쓰지 않는다 — 미리보기는 애초에 참여자도 강사도 아닌, 아직
    *  아무도 아닌 화면이다. */
   viewingAsInstructor?: boolean;
+  /** 강사로 볼 때의 역할 — 멈춘 시도의 한 줄이 이 값으로 갈린다(#1422). 참여자에게는 `null`. */
+  viewerRole?: "owner" | "co_instructor" | null;
   /** `viewingAsInstructor`가 참일 때만 뜻이 있다 — 띠가 몇 줄을 더 말할지
    *  상태 배지를 정한다(초안·숨김이면 배지 하나 더, 열림이면 「강사로 보는 중」뿐). */
   instructorProblemStatus?: "draft" | "open" | "hidden" | null;
@@ -237,6 +240,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     submissionFormats,
     submissions,
     viewingAsInstructor,
+    viewerRole,
     instructorProblemStatus,
     backHref,
     backLabel = "문제 목록으로",
@@ -320,6 +324,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 items={checklistItems}
                 syntaxCheckEnabled={syntaxCheckEnabled}
                 checklistLabelById={checklistLabelById}
+                viewerRole={viewingAsInstructor ? viewerRole : null}
                 open={openIds.has(submission.id)}
                 onToggle={() =>
                   setOpenIds((current) => {
@@ -737,6 +742,7 @@ function AttemptRow({
   items,
   syntaxCheckEnabled,
   checklistLabelById,
+  viewerRole,
   open,
   onToggle,
 }: {
@@ -744,6 +750,7 @@ function AttemptRow({
   items: ParticipantChecklistItem[];
   syntaxCheckEnabled: boolean;
   checklistLabelById: Map<number, string>;
+  viewerRole: "owner" | "co_instructor" | null | undefined;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -809,7 +816,7 @@ function AttemptRow({
             // 키가 아예 없는 것(#346)과 거부된 것, 채점 모델을 그 키로 못 쓰는 것(#403)을 여기서는
             // 구별하지 않는다 — 강사가 설정을 고쳐야 풀리는 사유라 참여자에게는 같은 한 줄이다.
             <span data-testid={`submission-row-${submission.id}-no-api-key-note`} className="min-w-0">
-              강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다
+              {waitingNote(submission.pending_reason === "model_rejected" ? "model_rejected" : "no_api_key", viewerRole)}
             </span>
           ) : null}
           {submission.status === "pending" && submission.pending_reason === "rejected" ? (

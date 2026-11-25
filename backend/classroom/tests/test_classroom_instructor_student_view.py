@@ -329,3 +329,31 @@ def test_a_stranger_still_gets_404_when_submitting(client, db):
         **_auth_header(stranger["access"]),
     )
     assert response.status_code == 404
+
+
+# --- 보는 사람의 역할(#1421·#1422) — 채점 키 안내가 역할로 갈린다 -----------------
+
+
+def test_viewer_role_is_owner_for_the_owner_co_instructor_for_the_co_instructor_and_null_for_participants(
+    client, db
+):
+    from tests.classroom_scenarios import add_co_instructor
+
+    owner = _login(client)
+    created = _create_class(client, owner["access"])
+    problem_id = _create_draft_problem(client, owner["access"], created["id"])
+    _add_required_item(client, owner["access"], created["id"], problem_id)
+    _open_problem(client, owner["access"], created["id"], problem_id)
+    co = _login(client, uid="co-1")
+    add_co_instructor(client, owner["access"], created["id"], co["access"])
+    participant = _login(client, uid="participant-1")
+    _join(client, participant["access"], created["join_code"])
+
+    def role(access):
+        response = client.get(_mine_url(created["id"], problem_id), **_auth_header(access))
+        assert response.status_code == 200
+        return response.json()["viewer_role"]
+
+    assert role(owner["access"]) == "owner"
+    assert role(co["access"]) == "co_instructor"
+    assert role(participant["access"]) is None

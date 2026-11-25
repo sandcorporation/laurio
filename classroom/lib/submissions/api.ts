@@ -225,6 +225,8 @@ export type ProblemSubmissions = {
   // 있게 되면서 둘이 갈렸다 — 띠는 이 값으로, 제출 잠금은
   // `submit_blocked_reason`으로 정한다.
   viewing_as_instructor: boolean;
+  // 강사가 열었을 때의 역할 — 멈춘 시도의 안내가 소유자와 공동 강사에서 갈린다(#1422). 참여자는 null.
+  viewer_role: "owner" | "co_instructor" | null;
 };
 
 // 참여자 본인이 그 클래스에서 불릴 이름을 스스로 바꾼다(#372) — 강사는 이

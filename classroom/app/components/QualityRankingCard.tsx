@@ -252,15 +252,18 @@ export function QualityRankingCard({
               {...keyNote}
               noteTestId="quality-no-api-key-note"
               settingsLinkTestId="quality-no-api-key-settings-link"
-              actionLabel={classroom?.role === "owner" ? keyNote.actionLabel : null}
             />
           ) : confirm.estimate.blocked_reason === "model_rejected" ? (
             <MissingScoringKeyNote
               classId={classId}
-              message="이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+              message={
+                classroom?.role === "owner"
+                  ? "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+                  : "이 키로 쓸 수 없는 채점 모델입니다 — 소유자에게 채점 모델을 바꿔 달라고 하세요."
+              }
               noteTestId="quality-model-rejected-note"
               settingsLinkTestId="quality-model-rejected-settings-link"
-              actionLabel="채점 모델 바꾸기"
+              actionLabel={classroom?.role === "owner" ? "채점 모델 바꾸기" : null}
               settingsAnchor="scoring-model"
             />
           ) : (
