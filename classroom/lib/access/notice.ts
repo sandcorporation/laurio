@@ -28,6 +28,7 @@ export function accessNotice({
   taught,
   former,
   hadAccess,
+  wasInstructor,
   classId,
 }: {
   page: AccessPage;
@@ -38,6 +39,8 @@ export function accessNotice({
   former?: AccessListState;
   /** 이 화면이 방금까지 열려 있었다(열어 둔 채 접근을 잃었다) — 그 사람은 이미 아는 화면이라 이유를 말해도 새지 않는다. */
   hadAccess?: boolean;
+  /** 제출 화면을 강사(학생 화면으로 보기)로 열어 두었다 — 참여자 이력이 겹쳐도 사라진 이유는 문제가 아니라 강사 권한이다(#1471 ③). */
+  wasInstructor?: boolean;
   classId: number;
 }): AccessDecision {
   const unrelated = notice("클래스를 찾을 수 없습니다", "홈으로", "/");
@@ -60,7 +63,8 @@ export function accessNotice({
     return page === "problem" ? toClass("문제를 찾을 수 없습니다") : unrelated;
   }
   // 강사에서 빠진 사람에게만 이유를 말한다 — 증거(수락한 초대·이전)가 없는 사람은 아래 「찾을 수 없음」이다(#1465 2).
-  if ((page === "class" || page === "problem") && former?.status === "ready" && former.classes.some((row) => row.id === classId)) {
+  const lostInstructorView = page === "submit" && wasInstructor === true;
+  if ((page === "class" || page === "problem" || lostInstructorView) && former?.status === "ready" && former.classes.some((row) => row.id === classId)) {
     return notice("더 이상 이 클래스의 강사가 아닙니다", "홈으로", "/");
   }
   const isParticipant = joined.classes.some((row) => row.id === classId);

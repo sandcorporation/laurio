@@ -21,7 +21,7 @@ export type AccessRetry = {
   turns: readonly object[];
 };
 
-type Props = { classId: number; testId: string; focusOnShow?: boolean; hadAccess?: boolean } & (
+type Props = { classId: number; testId: string; focusOnShow?: boolean; hadAccess?: boolean; wasInstructor?: boolean } & (
   | { page: Extract<AccessPage, "class" | "problem">; retry: AccessRetry }
   | { page: Extract<AccessPage, "mine" | "submit">; retry?: undefined }
 );
@@ -31,7 +31,7 @@ export function AccessNotice(props: Props) {
   return <Notice key={`${props.page}:${props.classId}`} {...props} />;
 }
 
-function Notice({ page, classId, testId, retry, focusOnShow, hadAccess }: Props) {
+function Notice({ page, classId, testId, retry, focusOnShow, hadAccess, wasInstructor }: Props) {
   const joined = useJoinedClasses();
   const taught = useMyClasses();
   const former = useFormerClasses();
@@ -47,6 +47,7 @@ function Notice({ page, classId, testId, retry, focusOnShow, hadAccess }: Props)
     taught,
     former,
     hadAccess,
+    wasInstructor,
     classId,
   });
 
