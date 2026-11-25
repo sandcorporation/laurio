@@ -37,3 +37,32 @@ test("새 문제 화면의 「문제 가져오기」에서 공모전 탭으로 �
   await expect(page).toHaveURL(new RegExp(`/classes/${classId}/problems/\\d+`));
   await expect(page.getByRole("heading", { name: title })).toBeVisible();
 });
+
+// 키보드만으로(#1463 의 같은 결함) — 열리면 창 안으로 초점, Tab 은 창 안, Escape 로 닫히고 여는 단추로 돌아온다.
+test("「문제 가져오기」 시트는 초점이 안으로 들어가 갇히고 Escape 로 닫히며 단추로 돌아온다", async ({ page }) => {
+  const seed = `problem-import-kbd-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const created = await classroomApi(page).post("/api/backend/classroom/classes", {
+    data: { name: `가져오기 키보드 ${Date.now()}`, instructor_display_name: "강사" },
+  });
+  const classId = (await created.json()).id as number;
+
+  await page.goto(`/classes/${classId}/problems/new`);
+  const opener = page.getByTestId("open-problem-import");
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "문제 가져오기" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  for (let i = 0; i < 30; i++) {
+    await page.keyboard.press("Tab");
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  for (let i = 0; i < 30; i++) {
+    await page.keyboard.press("Shift+Tab");
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
