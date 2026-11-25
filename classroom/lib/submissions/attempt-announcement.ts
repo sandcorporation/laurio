@@ -3,6 +3,7 @@
 import { STAMP_LABEL, stampKind } from "../design/stamp";
 import { withLate } from "../problems/due-dates";
 
+import { pendingLabel } from "./status-names";
 import type { ClassroomSubmissionRow } from "./api";
 
 type Attempt = Pick<
@@ -18,7 +19,7 @@ export function attemptAnnouncement(submissions: readonly Attempt[]): string {
   if (latest === null) return "";
   let label: string;
   if (latest.status === "pending") {
-    label = latest.pending_reason === "rejected" ? "반려" : latest.pending_reason ? "채점 대기" : "채점 중";
+    label = latest.pending_reason === "rejected" ? "반려" : pendingLabel(latest.pending_reason !== null);
   } else {
     const kind = stampKind(latest.passed, latest.perfect);
     label = kind ? STAMP_LABEL[kind] : "미통과";
