@@ -160,11 +160,12 @@ for (const viewport of viewports) {
     await expect(page.getByRole("link", { name: "채점 키 넣기" })).toBeVisible();
     await page.getByRole("link", { name: "채점 키 넣기" }).focus();
 
-    // 새 소유자가 다른 탭에서 키를 저장한다 — 이 탭은 다음 강사 신호로 클래스를 다시 읽는다.
-    const key = await classroomApi(page).put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } });
+    // 새 소유자가 같은 사용자의 다른 탭에서 키만 저장한다 — 이 탭은 클래스 신호만으로 스스로 다시 읽는다.
+    const otherTab = await page.context().newPage();
+    await otherTab.goto("/");
+    const key = await classroomApi(otherTab).put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } });
     expect(key.ok()).toBeTruthy();
-    const invite = await classroomApi(page).post(`/api/backend/classroom/classes/${classId}/co-instructor-invites`);
-    expect(invite.ok()).toBeTruthy();
+    await otherTab.close();
 
     await expect(page.getByRole("link", { name: "채점 키 넣기" })).toHaveCount(0, { timeout: 10_000 });
     await expect(page.getByTestId("ownership-transfer-accepted-note")).toHaveCount(0);
