@@ -71,11 +71,29 @@ function ClassDetail() {
       isClassSignal(event, INSTRUCTORS_CHANGED, classId) || (waitingForAnswer && event.kind === NOTIFICATION_CHANGED),
     [classId, waitingForAnswer],
   );
+  // 같은 변경의 재조회는 여기서 한 번만 시작한다(#1459 ⑥) — 강사 영역은 이 응답에 맞춰 명단·대기 초대를 읽는다.
+  // 초대 수락 신호와 이전 답 알림이 잇따라 와도 클래스 요청은 하나다.
+  const signalPending = useRef(false);
+  const reloadTimer = useRef<number | null>(null);
+  const reloadForSignal = useCallback(() => {
+    signalPending.current = true;
+    if (reloadTimer.current !== null) return;
+    reloadTimer.current = window.setTimeout(() => {
+      reloadTimer.current = null;
+      reloadClass();
+    }, 100);
+  }, [reloadClass]);
+  useEffect(
+    () => () => {
+      if (reloadTimer.current !== null) window.clearTimeout(reloadTimer.current);
+    },
+    [],
+  );
   useRealtimeRefresh({
     matches: matchesClassChange,
     waiting: waitingForAnswer,
     fallbackPollMs: TRANSFER_FALLBACK_POLL_MS,
-    reload: reloadClass,
+    reload: reloadForSignal,
   });
   const currentRole = ready?.role ?? null;
   useEffect(() => {
@@ -264,6 +282,8 @@ function ClassDetail() {
                 reloadClass();
               }}
               focusPendingTransfer={focusPendingTransfer}
+              classVersion={classroom}
+              signalPending={signalPending}
             />
           )}
         </div>
