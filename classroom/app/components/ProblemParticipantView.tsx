@@ -1111,7 +1111,8 @@ function InteractiveSubmissionForm(
               onChange={(event) => {
                 setSubmittedEmpty(false);
                 // 다시 적는 동안은 오류를 숨기고 다음 blur·제출에서 다시 판정한다(#1448 일부-7).
-                                onRepositoryUrlChange(event.target.value);
+                setUrlTouched(false);
+                onRepositoryUrlChange(event.target.value);
               }}
               readOnly={submitting}
               aria-invalid={repositoryInvalid}
