@@ -51,6 +51,8 @@ def assert_class_mutable(class_obj: Class) -> None:
 #: (`classroom.api.get_my_problem`)가 보관 하나만 본다(`instructor_can_submit`).
 SUBMIT_BLOCKED_ARCHIVED = "archived"
 SUBMIT_BLOCKED_EXPELLED = "expelled"
+#: 스스로 나갔다(#1492-5, `ClassMember.left_by_self`) — 막는 것은 「내보냄」과 같고 말만 다르다.
+SUBMIT_BLOCKED_LEFT = "left"
 SUBMIT_BLOCKED_HIDDEN = "hidden"
 
 
@@ -63,7 +65,7 @@ def participant_membership_blocked_reason(class_obj: Class, member: ClassMember)
     if class_obj.archived_at is not None:
         return SUBMIT_BLOCKED_ARCHIVED
     if member.expelled_at is not None:
-        return SUBMIT_BLOCKED_EXPELLED
+        return SUBMIT_BLOCKED_LEFT if member.left_by_self else SUBMIT_BLOCKED_EXPELLED
     return None
 
 

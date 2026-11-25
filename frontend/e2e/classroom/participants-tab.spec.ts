@@ -89,6 +89,61 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
   await expect(page.getByTestId("participants-table")).toBeVisible();
 });
 
+// 스스로 나간 공동 강사는 「내보냄」이 아니라 「나감」이다(#1492-5). 참여자였던 사람이 공동 강사가 됐다가 떠나면
+// 참여자 행도 닫히는데(`co_instructors.depart`), 그것은 누가 내보낸 것이 아니다. 참여자 표·내 클래스·제출 안내
+// 셋이 같은 값(`left`·`submit_blocked_reason: "left"`)을 읽는다. 390px 에서 본다 — 넓은 화면은 같은 마크업이다.
+test("참여자 탭 — 스스로 나간 공동 강사는 「나감」이고 본인 화면도 내보내졌다고 하지 않는다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const seed = `participants-left-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const base = `/api/backend/classroom/classes`;
+  const classId = (await (
+    await api.post(base, { data: { name: `나간 조교 ${Date.now()}`, instructor_display_name: "강사" } })
+  ).json()).id as number;
+  const problemId = (await (
+    await api.post(`${base}/${classId}/problems`, { data: { title: "나감 문제", submission_formats: ["repository"] } })
+  ).json()).id as number;
+  await api.post(`${base}/${classId}/problems/${problemId}/checklist-items`, { data: { label: "통과 조건", required: true } });
+  expect((await api.post(`${base}/${classId}/problems/${problemId}/open`)).ok()).toBeTruthy();
+  const joinCode = (await (await api.get(`${base}/${classId}`)).json()).join_code as string;
+  const token = (await (await api.post(`${base}/${classId}/co-instructor-invites`)).json()).token as string;
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-helper`);
+  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "조교였던학생" } })).ok()).toBeTruthy();
+  expect(
+    (await api.post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, { data: { display_name: "조교" } })).ok(),
+  ).toBeTruthy();
+  expect((await api.post(`${base}/${classId}/instructors/me/leave`)).status()).toBe(204);
+
+  // 나간 본인 — 내 클래스 줄과 제출 안내.
+  await page.goto("/");
+  const joinedRow = page.getByTestId(`classroom-joined-row-${classId}`);
+  await expect(joinedRow.getByTestId(`classroom-joined-row-${classId}-left-badge`)).toHaveText("나감");
+  await expect(joinedRow).not.toContainText("내보내짐");
+  await page.goto(`/classes/${classId}/problems/${problemId}/submit`);
+  const note = page.getByRole("alert").filter({ hasText: "이 클래스에서 나가 새로 제출할 수 없습니다." });
+  await expect(note).toBeVisible();
+  await expect(page.getByTestId("member-expelled-note")).toHaveCount(0);
+  await expect(page.getByTestId("submit-repository")).toHaveCount(0);
+
+  // 소유자 — 참여자 표. 낭독기는 칸 내용으로 「나감」을 듣는다.
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  const members = (await (await api.get(`${base}/${classId}/members`)).json()) as { id: number; display_name: string }[];
+  const memberId = members.find((m) => m.display_name === "조교였던학생")!.id;
+  await page.goto(`/classes/${classId}?tab=participants`);
+  const nameCell = page.getByTestId(`participant-row-${memberId}-name`);
+  await expect(page.getByRole("cell", { name: /조교였던학생\s*나감/ })).toBeVisible();
+  await expect(page.getByTestId(`participant-row-${memberId}-left-badge`)).toHaveText("나감");
+  await expect(page.getByTestId(`participant-row-${memberId}-expelled-badge`)).toHaveCount(0);
+  await expect(nameCell).not.toContainText("내보냄");
+  // 취소선은 「내보냄」만의 표시다.
+  await expect(nameCell.getByText("조교였던학생", { exact: true })).not.toHaveCSS("text-decoration-line", "line-through");
+  await expect(page.getByTestId(`participant-row-${memberId}-menu`)).toHaveCount(0);
+});
+
 // 키보드만으로 — 행 메뉴(⋮)는 WAI-ARIA 메뉴 단추 꼴(#1465 1번), 내보내기 확인창은 초점이 안으로 들어가 갇히고
 // Escape 로 닫히며 ⋮ 로 돌아온다(#1463).
 test("참여자 탭 — 행 메뉴와 내보내기 확인창은 키보드만으로 다룬다", async ({ page }) => {

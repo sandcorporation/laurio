@@ -6658,6 +6658,11 @@ export interface components {
             joined_at?: string | null;
             /** Last Submitted At */
             last_submitted_at?: string | null;
+            /**
+             * Left
+             * @default false
+             */
+            left: boolean;
         };
         /**
          * ClassroomHiddenSummaryOut
@@ -8588,6 +8593,11 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+            /**
+             * Left
+             * @default false
+             */
+            left: boolean;
             /** Name */
             name: string;
             /**
@@ -8787,6 +8797,11 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+            /**
+             * Left
+             * @default false
+             */
+            left: boolean;
         };
         /** MemberRenameIn */
         MemberRenameIn: {

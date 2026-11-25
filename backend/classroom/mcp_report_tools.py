@@ -227,6 +227,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                 "display_name": member.display_name,
                 "is_instructor": is_instructor(class_obj, member.user_id),
                 "expelled": member.expelled_at is not None,
+                "left": member.left_by_self,
                 "problems": cells,
             }
         )
@@ -353,6 +354,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
             "id": submission.member.id,
             "display_name": submission.member.display_name,
             "expelled": submission.member.expelled_at is not None,
+            "left": submission.member.left_by_self,
             "is_instructor": is_instructor(scope.class_obj, submission.member.user_id),
         },
         "attempt_number": submission.attempt_number,
@@ -470,7 +472,8 @@ _REPORT_OUTPUT = {
                     "id": {"type": "integer", "description": "참여자 번호"},
                     "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
                     "is_instructor": {"type": "boolean", "description": "강사(소유자·공동 강사)가 참여자로도 들어온 자리인가 — 집계에서 빠진다"},
-                    "expelled": {"type": "boolean", "description": "내보낸 참여자인가 — 기록은 남는다"},
+                    "expelled": {"type": "boolean", "description": "내보냈거나 스스로 나간 참여자인가 — 기록은 남는다"},
+                    "left": {"type": "boolean", "description": "expelled 가 참인 까닭이 스스로 나간 것인가(공동 강사였다가 떠남·탈퇴)"},
                     "problems": {
                         "type": "array",
                         "items": {
@@ -520,7 +523,7 @@ _REPORT_OUTPUT = {
                         },
                     },
                 },
-                "required": ["id", "display_name", "is_instructor", "expelled", "problems"],
+                "required": ["id", "display_name", "is_instructor", "expelled", "left", "problems"],
             },
         },
     },
@@ -540,9 +543,10 @@ _SOURCE_OUTPUT = {
                 "id": {"type": "integer"},
                 "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
                 "expelled": {"type": "boolean"},
+                "left": {"type": "boolean"},
                 "is_instructor": {"type": "boolean"},
             },
-            "required": ["id", "display_name", "expelled", "is_instructor"],
+            "required": ["id", "display_name", "expelled", "left", "is_instructor"],
         },
         "attempt_number": {"type": "integer"},
         "submitted_at": _DATETIME,

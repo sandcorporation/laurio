@@ -1037,17 +1037,18 @@ function InteractiveSubmissionForm(
       </>
     );
   }
-  if (submitBlockedReason === "expelled") {
+  if (submitBlockedReason === "expelled" || submitBlockedReason === "left") {
+    const left = submitBlockedReason === "left";
     return (
       <div className="flex flex-col gap-2">
         <p
           ref={blockedNoteRef}
           tabIndex={-1}
           role="alert"
-          data-testid="member-expelled-note"
+          data-testid={left ? "member-left-note" : "member-expelled-note"}
           className="text-[13px] text-warning outline-none"
         >
-          이 클래스에서 내보내져 새로 제출할 수 없습니다.
+          {left ? "이 클래스에서 나가 새로 제출할 수 없습니다." : "이 클래스에서 내보내져 새로 제출할 수 없습니다."}
         </p>
         {draftLine}
       </div>
