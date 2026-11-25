@@ -9,11 +9,14 @@
 // 실제로 그리는 일은 `ProblemParticipantView`(#325)가 한다 — 문제 만들기/
 // 편집의 「미리보기」 탭이 **같은 조각**을 쓴다. 이 파일은 데이터를 불러오고
 // 제출 요청을 보내는 배선만 맡는다.
+import { blockedChange } from "@/lib/submissions/blocked-change";
 import { submitRejectedAsBlocked } from "@/lib/submissions/submit-blocked";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+
+import type { SubmissionFormat } from "@/lib/problems/api";
 
 import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 
@@ -108,6 +111,22 @@ export default function ProblemSubmitPage() {
     if (state.status === "ready") setHadForm(true);
   }, [state.status]);
 
+  // 고르던 형식 — 숨김 안내로 화면이 바뀌면 폼이 사라지니 여기 들고 있다가 돌아올 때 펼친 채로 돌려준다(#1528).
+  const [chosenFormat, setChosenFormat] = useState<SubmissionFormat | null>(null);
+  // 숨김 안내로 바뀌었다가 돌아오면 알리고, 초점이 안내와 함께 사라졌을 때(body)만 입력하던 칸이나 제목으로 옮긴다.
+  const lostForm = useRef(false);
+  const [reopenedNote, setReopenedNote] = useState("");
+  useEffect(() => {
+    if (state.status === "notFound" && hadForm) lostForm.current = true;
+    if (state.status !== "ready" || !lostForm.current) return;
+    lostForm.current = false;
+    setReopenedNote(blockedChange("hidden", state.data.submit_blocked_reason).note);
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const draft = repositoryUrl.trim() !== "" ? document.querySelector<HTMLElement>("#repository-url") : null;
+    (draft ?? document.querySelector<HTMLElement>("[data-testid=my-problem-title]"))?.focus();
+  }, [state, hadForm]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useClassroomTabTitle({
     screenName: "문제 제출",
     className: state.status === "ready" ? state.data.class_name : undefined,
@@ -117,6 +136,9 @@ export default function ProblemSubmitPage() {
   if (state.status === "loading") {
     return (
       <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
         <p data-testid="my-problem-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
       </PageShell>
     );
@@ -125,6 +147,9 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
         <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} hadAccess={hadForm} wasInstructor={wasInstructor} />
         {hadForm && repositoryUrl.trim() !== "" ? (
           <div className="mt-4">
@@ -142,6 +167,9 @@ export default function ProblemSubmitPage() {
   if (state.status === "error") {
     return (
       <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
         <BackToMyProblems classId={classId} />
         <ErrorNote>
           <span data-testid="my-problem-error">문제 정보를 불러오지 못했습니다.</span>
@@ -246,7 +274,12 @@ export default function ProblemSubmitPage() {
 
   return (
     <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
       <ProblemParticipantView
+        initialFormat={chosenFormat}
+        onFormatChange={setChosenFormat}
         quality={quality}
         interactive
         backHref={viewingAsInstructor ? `/classes/${classId}` : `/classes/${classId}/problems/mine`}

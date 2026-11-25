@@ -88,6 +88,9 @@ type InteractiveProps = {
   /** 필수 항목이 Git 기록을 물어 zip 으로는 언제나 놓치는 문제인가(#587, 백엔드 판정) —
    *  zip 을 고르면 보이는 안내가 경고 띠로 바뀐다. */
   zipGitHistoryWarning?: boolean;
+  /** 화면이 다시 그려져도(숨김 안내로 바뀌었다 돌아옴, #1528) 고르던 형식을 잇는다 — 없으면 이 조각이 혼자 든다. */
+  initialFormat?: SubmissionFormat | null;
+  onFormatChange?: (format: SubmissionFormat | null) => void;
 };
 
 type PreviewProps = {
@@ -467,7 +470,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {createElement(
               headingLevel,
-              { className: "text-[22px] font-semibold tracking-[-0.01em]", "data-testid": titleTestId },
+              { className: "text-[22px] font-semibold tracking-[-0.01em] outline-none", "data-testid": titleTestId, tabIndex: -1 },
               title,
             )}
             {passed === undefined ? null : (
@@ -1003,6 +1006,8 @@ function InteractiveSubmissionFormBody(
     contestEntry,
     zipGitHistoryWarning = false,
     deadlinePassed,
+    initialFormat,
+    onFormatChange,
   } = props;
   // 마감 경고는 차단 사유가 없을 때만 그려진다 — 그릴 때만 잇는다.
   const deadlineNoteId = deadlinePassed && submitBlockedReason === null ? DEADLINE_NOTE_ID : null;
@@ -1010,7 +1015,11 @@ function InteractiveSubmissionFormBody(
   // 둘 다 열린 문제는 형식 선택을 먼저 보인다(#373 AC) — 하나만 열린
   // 문제는 고르는 단계 없이 그 형식의 입력만 보인다.
   const [chosenFormat, setChosenFormat] = useState<SubmissionFormat | null>(
-    submissionFormats.length === 1 ? submissionFormats[0] : null,
+    submissionFormats.length === 1
+      ? submissionFormats[0]
+      : initialFormat != null && submissionFormats.includes(initialFormat)
+        ? initialFormat
+        : null,
   );
   const resolvedFormat = chosenFormat ?? submissionFormats[0];
   const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
@@ -1030,6 +1039,7 @@ function InteractiveSubmissionFormBody(
   function chooseFormat(next: SubmissionFormat | null) {
     focusAfterChoice.current = true;
     setChosenFormat(next);
+    onFormatChange?.(next);
   }
   useEffect(() => {
     if (!focusAfterChoice.current) return;
