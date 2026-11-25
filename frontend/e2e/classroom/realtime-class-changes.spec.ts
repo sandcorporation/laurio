@@ -791,6 +791,99 @@ for (const view of [
   });
 }
 
+// #1528 B — 숨긴 문제를 강사가 다시 열면 제출 화면이 돌아왔다고 알리고, 입력하던 형식·주소가 펼쳐진 채 초점이 간다.
+async function openSubmitWithBothFormats(page: Page, browser: Browser, seed: string) {
+  const instructor = await otherSession(browser, seed);
+  const classId = (
+    await (
+      await instructor.api.post("/api/backend/classroom/classes", {
+        data: { name: `실시간 재개 ${seed}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const problemId = (
+    await (
+      await instructor.api.post(`${base}/problems`, { data: { title: "1주차", submission_formats: ["repository", "source"] } })
+    ).json()
+  ).id as number;
+  await instructor.api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "동작한다", required: true } });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+  const joinCode = (await (await instructor.api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } })).ok(),
+  ).toBeTruthy();
+  await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+  return { instructor, base, problemId };
+}
+
+for (const view of [
+  { name: "데스크톱", size: { width: 1280, height: 800 } },
+  { name: "390px 터치", size: { width: 390, height: 844 } },
+]) {
+  test(`${view.name} — 주소를 입력하던 중 문제가 숨겨졌다 다시 열리면 status 가 읽히고 입력하던 칸에 초점·값이 돌아온다`, async ({ page, browser }) => {
+    test.setTimeout(30_000);
+    await page.setViewportSize(view.size);
+    const seed = `rt-reopen-url-${view.size.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { instructor, base, problemId } = await openSubmitWithBothFormats(page, browser, seed);
+    await page.getByTestId("submission-format-option-repository").click();
+    const url = page.locator("#repository-url");
+    await url.fill("https://github.com/codemit/sample");
+    expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+    await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeFocused({ timeout: 10_000 });
+    expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+    await instructor.context.close();
+
+    await expect(page.getByRole("status").filter({ hasText: "문제가 다시 열려 제출할 수 있습니다" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("#repository-url")).toHaveValue("https://github.com/codemit/sample");
+    await expect(page.getByTestId("submission-format-option-repository")).toHaveCount(0);
+    await expect(page.locator("#repository-url")).toBeFocused();
+  });
+}
+
+test("입력하던 것이 없이 문제가 숨겨졌다 다시 열리면 초점이 제목으로 가고, 다른 칸에 초점이 있으면 빼앗지 않는다", async ({ page, browser }) => {
+  test.setTimeout(40_000);
+  const seed = `rt-reopen-title-${test.info().workerIndex}-${Date.now()}`;
+  const { instructor, base, problemId } = await openSubmitWithBothFormats(page, browser, seed);
+  expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+  await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeFocused({ timeout: 10_000 });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+  await expect(page.getByRole("status").filter({ hasText: "문제가 다시 열려 제출할 수 있습니다" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("my-problem-title")).toBeFocused();
+
+  // 한 바퀴 더: 다시 숨기면 숨김 안내 위에 「다시 열려」가 남지 않고, 다시 열면 같은 문구가 비웠다 다시 채워진다.
+  const reopened = page.getByRole("status").filter({ hasText: "문제가 다시 열려 제출할 수 있습니다" });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+  await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeVisible({ timeout: 10_000 });
+  await expect(reopened).toHaveCount(0);
+  await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=submit-reopened-note]")!;
+    let filled = 0;
+    new MutationObserver(() => {
+      if (el.textContent) document.body.dataset.reopenedFilled = String(++filled);
+    }).observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+  await expect(reopened).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("body")).toHaveAttribute("data-reopened-filled", /^[1-9]/);
+
+  // 두 번째: 숨김 안내 밖으로 초점을 옮겨 둔 채 다시 열면 그대로다.
+  expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+  await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeVisible({ timeout: 10_000 });
+  await page.evaluate(() => {
+    const el = document.createElement("button");
+    el.id = "elsewhere";
+    el.textContent = "다른 곳";
+    document.body.prepend(el);
+    el.focus();
+  });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+  await instructor.context.close();
+  await expect(page.getByTestId("submission-format-option-repository")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#elsewhere")).toBeFocused();
+});
+
 test("보관이 풀릴 때 초점이 안내 밖에 있으면 초점을 빼앗지 않는다", async ({ page, browser }) => {
   const seed = `rt-unarchived-keep-${test.info().workerIndex}-${Date.now()}`;
   const instructor = await otherSession(browser, seed);
