@@ -599,9 +599,10 @@ class ClassMember(models.Model):
     expelled_at = models.DateTimeField(null=True, blank=True)
     #: `expelled_at` 이 찬 까닭이 스스로 나간 것인가(#1492-5). 참여자였던 공동 강사가 떠나거나
     #: 탈퇴하면(`classroom.co_instructors.depart`) 참여자 행도 닫히는데, 그것은 누가 내보낸 것이
-    #: 아니다 — 화면이 「나감」과 「내보냄」을 가른다. 새 제출이 막히는 것은 둘이 같다. 이 칸을 모르는
-    #: 쓰기(칸 이전의 행·옛 서버)가 있어 판정은 이 칸만 보지 않는다 — `classroom.departures`(#1503).
-    left_by_self = models.BooleanField(default=False, db_default=False)
+    #: 아니다 — 화면이 「나감」과 「내보냄」을 가른다. 새 제출이 막히는 것은 둘이 같다. 새 코드는 닫을
+    #: 때마다 참(나감)·거짓(내보냄)을 적는다. NULL 은 사유 불명 — 이 칸을 모르는 쓰기(칸 이전의 행·옛
+    #: 서버)가 남긴 것이고, 그때만 남은 흔적으로 추론한다(`classroom.departures`, #1503·#1509 ①).
+    left_by_self = models.BooleanField(null=True)
 
     class Meta:
         ordering = ["joined_at", "id"]
