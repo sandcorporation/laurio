@@ -84,15 +84,14 @@ function groupHasUnread(group: NotificationGroup): boolean {
   return groupUnreadCount(group) > 0;
 }
 
-/** 그 문제의 **지금** 통과 상태 — 가장 최근 시도가 아니라 시도 전체에 대한
- * OR이다(CONTEXT.md 「통과」: "최신 시도가 아니라 「결국 풀었는가」를 센다,
- * 고쳐서 다시 내는 것이 학습의 정상적인 모양이기 때문"). 그래서 최근 시도가
- * 미통과여도 그 전에 한 번이라도 통과했다면 이 그룹은 여전히 통과다. */
-export function groupCurrentlyPassed(group: NotificationGroup): boolean {
-  return group.notifications.some((n) => {
-    const context = (n.context ?? {}) as Record<string, unknown>;
-    return context.passed === true;
-  });
+/** 접힌 묶음의 머리글. 「지금 상태」와 시도 수는 서버가 준 `problem_status` 를 그대로 적는다(#1405) —
+ * 불러온 알림에서 세면 「더 보기」 전후로 값이 바뀐다. 쪽마다 불러온 때가 다르므로 가장 최근 알림의
+ * 것을 따르고(실시간으로 다시 불러오는 첫 쪽에 실린다), 없으면 상태를 말하지 않는다. */
+export function groupHeaderText(group: NotificationGroup): string {
+  const subject = `'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제`;
+  const status = group.notifications[0].problem_status;
+  if (!status) return subject;
+  return `${subject} — 지금 상태 ${status.passed ? "통과" : "미통과"} (시도 ${status.attempt_count}건)`;
 }
 
 /** 안 읽은 것이 위, 그 안에서 최신순 — 정렬 규칙은 그대로다(AC). 안정 정렬이라

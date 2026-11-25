@@ -8944,6 +8944,7 @@ export interface components {
             is_transactional: boolean;
             /** Notification Type */
             notification_type: string;
+            problem_status?: components["schemas"]["ProblemStatusOut"] | null;
             /** Read At */
             read_at: string | null;
             /** Scheduled For */
@@ -9932,6 +9933,13 @@ export interface components {
         ProblemReorderIn: {
             /** Problem Ids */
             problem_ids: number[];
+        };
+        /** ProblemStatusOut */
+        ProblemStatusOut: {
+            /** Attempt Count */
+            attempt_count: number;
+            /** Passed */
+            passed: boolean;
         };
         /** ProblemTemplateChecklistItemOut */
         ProblemTemplateChecklistItemOut: {
