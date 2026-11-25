@@ -176,7 +176,7 @@ function InstructorRow({
               data-testid="ownership-transfer-cancel"
               aria-label={cancelTransferButtonLabel(name)}
               onClick={onCancelTransfer}
-              disabled={busy}
+              aria-disabled={busy}
               className={LINK_ACTION}
             >
               {busy ? "취소하는 중..." : "요청 취소"}
@@ -199,12 +199,12 @@ function InstructorRow({
               type="button"
               data-testid="ownership-transfer-confirm-button"
               onClick={onTransfer}
-              disabled={busy}
+              aria-disabled={busy}
               className={buttonClass("primary", "sm")}
             >
               {busy ? "요청하는 중..." : "이전 요청 보내기"}
             </button>
-            <button ref={transferConfirm.keepRef} type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
+            <button ref={transferConfirm.keepRef} type="button" onClick={onKeep} aria-disabled={busy} className={buttonClass("secondary", "sm")}>
               그만두기
             </button>
           </div>
@@ -221,12 +221,12 @@ function InstructorRow({
               type="button"
               data-testid="co-instructor-remove-confirm-button"
               onClick={onRemove}
-              disabled={busy}
+              aria-disabled={busy}
               className={buttonClass("dangerFilled", "sm")}
             >
               {busy ? "내보내는 중..." : "내보내기"}
             </button>
-            <button ref={removeConfirm.keepRef} type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
+            <button ref={removeConfirm.keepRef} type="button" onClick={onKeep} aria-disabled={busy} className={buttonClass("secondary", "sm")}>
               취소
             </button>
           </div>
@@ -305,7 +305,7 @@ function PendingInviteRow({
               type="button"
               data-testid="co-instructor-invite-cancel-confirm-button"
               onClick={onCancel}
-              disabled={cancelling}
+              aria-disabled={cancelling}
               className={buttonClass("dangerFilled", "sm")}
             >
               {cancelling ? "취소하는 중..." : "정말 취소"}
@@ -315,7 +315,7 @@ function PendingInviteRow({
               data-testid="co-instructor-invite-cancel-keep"
               ref={cancelConfirm.keepRef}
               onClick={onKeep}
-              disabled={cancelling}
+              aria-disabled={cancelling}
               className={buttonClass("secondary", "sm")}
             >
               그대로 두기
@@ -373,7 +373,7 @@ function LeaveSection({ classId }: { classId: number }) {
                 type="button"
                 data-testid="class-leave-confirm-button"
                 onClick={() => void leave()}
-                disabled={leaving}
+                aria-disabled={leaving}
                 className={buttonClass("dangerFilled", "sm")}
               >
                 {leaving ? "떠나는 중..." : "떠나기"}
@@ -382,7 +382,7 @@ function LeaveSection({ classId }: { classId: number }) {
                 ref={leaveConfirm.keepRef}
                 type="button"
                 onClick={() => setConfirming(false)}
-                disabled={leaving}
+                aria-disabled={leaving}
                 className={buttonClass("secondary", "sm")}
               >
                 그대로 있기
@@ -743,7 +743,7 @@ export function InstructorsSection({
               data-testid="co-instructor-invite-create"
               ref={createButtonRef}
               onClick={() => void create()}
-              disabled={creating}
+              aria-disabled={creating}
               className={buttonClass("primary", "sm")}
             >
               {creating ? "만드는 중..." : "초대 링크 만들기"}
