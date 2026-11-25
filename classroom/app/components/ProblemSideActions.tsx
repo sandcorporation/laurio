@@ -320,7 +320,7 @@ function DeletePanel({
   return (
     <PanelFrame>
       <Note tone="warning">
-        <span data-testid="delete-problem-warning">
+        <span id="delete-problem-warning" data-testid="delete-problem-warning">
           지우면 체크리스트 항목 {problem.checklist_items.length}개가 함께 사라지고 되돌릴 수 없습니다.
         </span>
       </Note>
@@ -332,6 +332,7 @@ function DeletePanel({
       <input
         id="delete-problem-confirm-input"
         data-testid="delete-problem-confirm-input"
+        aria-describedby="delete-problem-warning"
         value={typedTitle}
         onChange={(event) => setTypedTitle(event.target.value)}
         className={INPUT_CLASS}

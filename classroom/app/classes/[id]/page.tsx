@@ -16,7 +16,7 @@ import { ErrorNote, PageShell } from "@/app/components/ui";
 import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
-import { offerEndNote } from "@/lib/co-instructors/transfer-end-note";
+import { offerArrivedNote, offerEndNote } from "@/lib/co-instructors/transfer-end-note";
 import { useClass } from "@/lib/classes/use-class";
 import { useClassSignalReload } from "@/lib/classes/use-class-signal-reload";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
@@ -53,7 +53,7 @@ function ClassDetail() {
   const [justTookOver, setJustTookOver] = useState(false);
   const [justDeclined, setJustDeclined] = useState(false);
   // 이전 요청을 보낸 직후 한 번 — 강사 탭이 다시 그려진 뒤 「이전 대기」 줄로 초점을 옮긴다(#1435).
-  const focusPendingTransfer = useRef(false);
+  const [focusPendingTransfer, setFocusPendingTransfer] = useState(false);
   // 소유자가 보낸 이전 요청을 눌러 취소하려다 거절당했는가 — 그 사이 넘어갔으면 「이미 넘겨받았습니다」로 말한다(#1441).
   const cancelFailed = useRef(false);
   const [ownershipTaken, setOwnershipTaken] = useState<{ afterCancelAttempt: boolean } | null>(null);
@@ -89,10 +89,26 @@ function ClassDetail() {
   const [offerEnd, setOfferEnd] = useState("");
   const offerOpen = ready?.pending_ownership_transfer?.recipient_is_me === true;
   const previousOffer = useRef(false);
+  // 나에게 온 요청이 나타났을 때(열어 둔 채 신호로 오거나 처음 열 때) — 초점이 아무 데도 없으면 카드로 가서 읽히고,
+  // 다른 곳에 있으면 초점을 빼앗지 않고 늘 있는 상태 영역이 읽어 준다(#1490).
+  const offerRef = useRef<HTMLElement>(null);
+  const [offerArrived, setOfferArrived] = useState("");
   useEffect(() => {
     if (ready === null) return;
     const wasOpen = previousOffer.current;
     previousOffer.current = offerOpen;
+    if (offerOpen && !wasOpen) {
+      setOfferEnd("");
+      const active = document.activeElement;
+      if (active === null || active === document.body) {
+        offerRef.current?.focus();
+        setOfferArrived("");
+      } else {
+        setOfferArrived(offerArrivedNote(ready.instructor_display_name));
+      }
+      return;
+    }
+    if (!offerOpen) setOfferArrived("");
     if (!wasOpen || offerOpen) return;
     const byMe = answeredByMe.current;
     answeredByMe.current = false;
@@ -173,6 +189,9 @@ function ClassDetail() {
 
       <div className="flex flex-col gap-5">
         {/* 나에게 온 소유권 이전 요청(#564) — 답을 기다리는 일이라 맨 위에 둔다. */}
+        <p role="status" data-testid="ownership-transfer-offer-arrived-note" className="sr-only">
+          {offerArrived}
+        </p>
         <p
           ref={offerEndRef}
           role="status"
@@ -197,6 +216,7 @@ function ClassDetail() {
               classId={classId}
               transfer={classroom.pending_ownership_transfer}
               ownerName={classroom.instructor_display_name}
+              sectionRef={offerRef}
               onDone={(accepted) => {
                 answeredByMe.current = true;
                 setOfferEnd("");
@@ -262,12 +282,13 @@ function ClassDetail() {
               pendingTransfer={classroom.pending_ownership_transfer}
               onCommandStart={beginCommand}
               onTransferChanged={(change, seenRevAtStart) => {
-                if (change === "requested") focusPendingTransfer.current = true;
+                if (change === "requested") setFocusPendingTransfer(true);
                 if (change === "cancel-failed") cancelFailed.current = true;
                 // 같은 변경의 서버 신호는 번호로 알아본다 — 이미 읽은 번호면 건너뛰고, 명령 사이에 먼저 왔으면 그 신호가 읽는다(#1484 ④).
                 reloadAfterCommand(seenRevAtStart);
               }}
               focusPendingTransfer={focusPendingTransfer}
+              onFocusedPendingTransfer={() => setFocusPendingTransfer(false)}
               classVersion={classroom}
               signalPending={signalPending}
             />
