@@ -173,17 +173,20 @@ def _requested_row(client, access: str) -> dict:
     return next(row for row in _notifications(client, access) if row["notification_type"] == REQUESTED)
 
 
-def test_the_request_notification_says_whether_the_request_is_still_pending(client, db):
-    """받은 알림의 문구는 받은 때의 것이다 — 목록은 그 요청이 지금도 답을 기다리는지 함께 싣는다(#1435)."""
+def test_the_request_notification_says_what_state_the_request_is_in(client, db):
+    """받은 알림의 문구는 받은 때의 것이다 — 목록은 그 요청의 지금 상태를 함께 싣는다(#1435·#1441)."""
 
     owner, co, other, class_id = _three_instructors(client)
     _request(client, owner, class_id)
 
-    assert _requested_row(client, co["access"])["transfer_pending"] is True
+    assert _requested_row(client, co["access"])["transfer_status"] == "pending"
 
 
-@pytest.mark.parametrize("ending", ["accept", "decline", "cancel"])
-def test_the_request_notification_stops_being_pending_once_the_request_ends(client, db, ending):
+@pytest.mark.parametrize(
+    ("ending", "status"),
+    [("accept", "accepted"), ("decline", "declined"), ("cancel", "cancelled")],
+)
+def test_the_request_notification_names_how_the_request_ended(client, db, ending, status):
     owner, co, other, class_id = _three_instructors(client)
     transfer = _request(client, owner, class_id)
     if ending == "accept":
@@ -193,7 +196,48 @@ def test_the_request_notification_stops_being_pending_once_the_request_ends(clie
     else:
         assert cancel_ownership_transfer(client, owner["access"], class_id, transfer["id"]).status_code == 204
 
-    assert _requested_row(client, co["access"])["transfer_pending"] is False
+    assert _requested_row(client, co["access"])["transfer_status"] == status
+
+
+def test_an_expired_request_notification_says_expired(client, db):
+    start = timezone.now()
+    ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": start})
+    owner, co, other, class_id = _three_instructors(client)
+    _request(client, owner, class_id)
+    ClockOverride.objects.update_or_create(pk=1, defaults={"overridden_at": start + timedelta(days=8)})
+
+    assert _requested_row(client, co["access"])["transfer_status"] == "expired"
+
+
+def test_two_requests_to_the_same_person_keep_their_own_states(client, db):
+    owner, co, other, class_id = _three_instructors(client)
+    first = _request(client, owner, class_id)
+    assert cancel_ownership_transfer(client, owner["access"], class_id, first["id"]).status_code == 204
+    _request(client, owner, class_id)
+
+    rows = [r for r in _notifications(client, co["access"]) if r["notification_type"] == REQUESTED]
+    assert sorted(r["transfer_status"] for r in rows) == ["cancelled", "pending"]
+
+
+@pytest.mark.parametrize("answer", ["accept", "decline"])
+def test_answering_marks_the_recipients_request_notification_read(client, db, answer):
+    owner, co, other, class_id = _three_instructors(client)
+    transfer = _request(client, owner, class_id)
+    assert _requested_row(client, co["access"])["read_at"] is None
+    if answer == "accept":
+        assert accept_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 200
+    else:
+        assert decline_ownership_transfer(client, co["access"], class_id, transfer["id"]).status_code == 204
+
+    assert _requested_row(client, co["access"])["read_at"] is not None
+
+
+def test_cancelling_leaves_the_recipients_notification_unread(client, db):
+    owner, co, other, class_id = _three_instructors(client)
+    transfer = _request(client, owner, class_id)
+    assert cancel_ownership_transfer(client, owner["access"], class_id, transfer["id"]).status_code == 204
+
+    assert _requested_row(client, co["access"])["read_at"] is None
 
 
 def test_other_notifications_carry_no_transfer_state(client, db):
@@ -203,4 +247,4 @@ def test_other_notifications_carry_no_transfer_state(client, db):
 
     rows = _notifications(client, owner["access"])
     assert [row["notification_type"] for row in rows] == [ACCEPTED]
-    assert rows[0]["transfer_pending"] is None
+    assert rows[0]["transfer_status"] is None

@@ -142,24 +142,29 @@ describe("소유권 이전 알림 (#575)", () => {
     expect(text).toContain("까지 클래스 화면에서 수락하거나 거절해 주세요");
   });
 
-  it("답을 기다리지 않는 요청이면 끝난 요청이라고 말하고 수락·거절을 청하지 않는다 (#1435)", () => {
+  it.each([
+    ["accepted", "'알고리즘 1반' 클래스의 소유권 이전 요청을 수락했습니다 — 이제 내가 이 클래스의 소유자입니다."],
+    ["declined", "'알고리즘 1반' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로입니다."],
+    ["cancelled", "'알고리즘 1반' 클래스의 소유권 이전 요청이 취소됐습니다 — 요청한 쪽이 거두었습니다."],
+    ["expired", "'알고리즘 1반' 클래스의 소유권 이전 요청이 기한이 지나 만료됐습니다."],
+  ] as const)("끝난 요청이면 어떻게 끝났는지(%s) 말하고 수락·거절을 청하지 않는다 (#1441)", (transfer_status, expected) => {
     const text = describeNotification(
       row({
         notification_type: "classroom_ownership_transfer_requested",
-        transfer_pending: false,
+        transfer_status,
         context: { class_name: "알고리즘 1반", requester_display_name: "주강사", expires_at: "2026-10-13T03:00:00Z" },
       }),
     );
-    expect(text).toBe("주강사님이 '알고리즘 1반' 클래스의 소유권을 넘기려 했던 요청은 끝났습니다.");
+    expect(text).toBe(expected);
     expect(text).not.toContain("수락하거나");
   });
 
   it("아직 답을 기다리는 요청이거나 상태를 모르면 받은 때의 문구 그대로다 (#1435)", () => {
-    for (const transfer_pending of [true, null, undefined]) {
+    for (const transfer_status of ["pending", null, undefined] as const) {
       const text = describeNotification(
         row({
           notification_type: "classroom_ownership_transfer_requested",
-          transfer_pending,
+          transfer_status,
           context: { class_name: "알고리즘 1반", requester_display_name: "주강사" },
         }),
       );

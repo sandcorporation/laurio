@@ -84,11 +84,11 @@ class ClassroomConfig(AppConfig):
         from .notification_problem_status import problem_statuses_for
 
         CLASSROOM_PROBLEM_STATUSES.register(problem_statuses_for)
-        from notifications.ports import CLASSROOM_TRANSFER_PENDING
+        from notifications.ports import CLASSROOM_TRANSFER_STATES
 
-        from .notification_problem_status import transfer_pending_class_ids
+        from .notification_problem_status import transfer_states_for
 
-        CLASSROOM_TRANSFER_PENDING.register(transfer_pending_class_ids)
+        CLASSROOM_TRANSFER_STATES.register(transfer_states_for)
 
         # 채점 방식 실험의 `classroom_call` 줄(#1262) — `scoring` 이 강의실을 import 하지 않고 강의실 프롬프트로 채점한다.
         from core.experiment_material import CLASSROOM_EXPERIMENT_CALL, CLASSROOM_EXPERIMENT_STAGED_CALL
