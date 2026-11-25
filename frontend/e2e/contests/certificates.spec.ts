@@ -243,6 +243,66 @@ test("취소 확인창은 돌아가기에 초점을 두고 Tab 을 가두며 Esc
   await expect(opener).toBeFocused();
 });
 
+// 초점 없이 열어도(낭독기 활성화·초점을 못 받는 터치) 닫으면 초점은 연 단추로 돌아온다 — 제목으로 가지 않는다(#1518 ③).
+for (const how of ["Escape", "돌아가기 단추"] as const) {
+  test(`초점 없이 연 취소 확인창을 ${how}로 닫으면 초점이 취소 단추에 있다`, async ({ page }) => {
+    await openBoard(page, 1);
+    const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+    const opener = row.getByRole("button", { name: "취소", exact: true });
+    await opener.evaluate((el) => (el as HTMLElement).blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await opener.dispatchEvent("click");
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await dialog.getByRole("button", { name: "돌아가기" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+
+  test(`초점 없이 연 발급 확인창을 ${how}로 닫으면 초점이 발급 단추에 있다`, async ({ page }) => {
+    const { id, submissionId } = await openBoardWithoutLoading(page, 0);
+    await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+      const response = await route.fetch();
+      const board = await response.json();
+      board.certificates = board.certificates.filter((c: { submission_id: number }) => c.submission_id !== submissionId);
+      board.recipients = board.recipients.map((r: { submission_id: number }) =>
+        r.submission_id === submissionId ? { ...r, certificate_id: null } : r,
+      );
+      await route.fulfill({ response, json: board });
+    });
+    await page.goto(`/console/contests/${id}/certificates`);
+    await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
+    await page.getByTestId(`certificates-pick-${submissionId}`).check();
+    const opener = page.getByTestId("certificates-issue");
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await opener.dispatchEvent("click");
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await dialog.getByRole("button", { name: "돌아가기" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+}
+
+// 390px(터치 폭)에서도 같다 — 초점 없이 연 취소창을 Escape 로 닫으면 초점이 취소 단추에 있다(#1518 ③).
+test("390px 에서 초점 없이 연 취소 확인창을 Escape 로 닫으면 초점이 취소 단추에 있다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openBoard(page, 1);
+  const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+  const opener = row.getByRole("button", { name: "취소", exact: true });
+  await opener.evaluate((el) => (el as HTMLElement).blur());
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await opener.dispatchEvent("click");
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
 test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기·다시 발급이 꺼진다", async ({ page }) => {
   await establishDeveloperSession(page, seeded.judging.sponsor_login_seed, null);
   const { id } = seeded.judging;
