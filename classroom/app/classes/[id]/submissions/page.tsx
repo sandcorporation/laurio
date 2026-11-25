@@ -207,8 +207,9 @@ function ClassAttempts() {
     className: classState.status === "ready" ? classState.classroom.name : undefined,
   });
 
-  function open(attempt: ClassAttemptRow) {
-    regradeOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // 연 단추는 클릭의 currentTarget 이다 — document.activeElement 는 낭독기 활성화·일부 터치에서 body 라 복귀가 body 가 된다(#1509 ②).
+  function open(attempt: ClassAttemptRow, opener: HTMLElement) {
+    regradeOpener.current = opener;
     setFailed(false);
     setStartedNote("");
     setTarget(attempt);
@@ -308,7 +309,7 @@ function ClassAttempts() {
                           type="button"
                           data-testid={`regrade-${attempt.id}`}
                           aria-label={`다시 채점 ${attempt.member_display_name} ${attempt.problem_title}`}
-                          onClick={() => open(attempt)}
+                          onClick={(event) => open(attempt, event.currentTarget)}
                           className={`${buttonClass("secondary", "sm")} shrink-0`}
                         >
                           다시 채점
