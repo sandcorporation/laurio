@@ -103,9 +103,9 @@ function RuntimeSettingsScreen() {
           {tabSettings.length > 0 && (
             <div data-testid="runtime-settings-list" className="border border-rule bg-surface">
               {tabSettings.map((setting) => (
-                // 저장 뒤 다시 읽으면 key 가 같아도 updated_at 이 달라 입력 상태를 새로 시작한다.
+                // key 는 설정 키뿐이다 — 저장 뒤 다시 읽어도 줄을 새로 만들지 않아 눌렀던 단추의 초점이 남는다.
                 <RuntimeSettingRow
-                  key={`${setting.key}-${setting.updated_at ?? "none"}-${setting.source}`}
+                  key={setting.key}
                   setting={setting}
                   editable={editable}
                   onChanged={reload}

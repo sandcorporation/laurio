@@ -76,6 +76,8 @@ export function RuntimeSettingRow({
       () => clearRuntimeSetting(setting.key),
       () => {
         setProbe(null);
+        // 지우면 「지우기」 단추가 사라진다 — 초점이 body 로 빠지지 않게 같은 줄의 입력칸이 먼저 받는다.
+        document.getElementById(`${id}-input`)?.focus();
         onChanged();
       },
     );
@@ -84,7 +86,12 @@ export function RuntimeSettingRow({
   function handleConfirm() {
     void run(
       () => confirmRuntimeSetting(setting.key),
-      () => onChanged(),
+      () => {
+        setProbe(null);
+        // 확인하면 「이대로 둔다」 단추가 사라진다 — 같은 줄의 입력칸이 초점을 받는다.
+        document.getElementById(`${id}-input`)?.focus();
+        onChanged();
+      },
     );
   }
 

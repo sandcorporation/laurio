@@ -98,7 +98,9 @@ test("초점 없이 연 제보 창을 Escape 로 닫으면 초점이 「제보�
   const page = await context.newPage();
   await page.goto("/");
   const opener = page.getByTestId("feedback-open");
-  await opener.evaluate((el) => (el as HTMLElement).blur());
+  // 화면이 다 그려지면 제목이 초점을 받는다(#1517) — 그 뒤에 초점을 거둬야 「초점 없이 연」 전제가 선다.
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
   expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
   await opener.dispatchEvent("click");
   const dialog = page.getByRole("dialog", { name: "제보" });
@@ -130,6 +132,8 @@ test("제보 캡처 중 Escape 로 그만두면 캡처가 끝나도 창이 다�
   });
   await page.goto("/");
   const opener = page.getByTestId("feedback-open");
+  // 화면이 다 그려져 제목이 초점을 받은 뒤에 단추에 초점을 준다(#1517) — 캡처 중 단추가 꺼져 초점이 body 로 빠진 뒤에 제목이 가로채지 않게.
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
   await opener.focus();
   await page.keyboard.press("Enter");
   await expect(opener).toBeDisabled();

@@ -97,6 +97,7 @@ test.describe("운영 설정(#922)", () => {
 
     await page.getByTestId(`${row}-confirm`).click();
     await expect(page.getByTestId(`${row}-confirm`)).toHaveCount(0);
+    await expect(page.getByTestId(`${row}-input`)).toBeFocused();
     await expect(page.getByTestId(`${row}-confirmed`)).toContainText(su.username);
     await page.reload();
     await expect(page.getByTestId(`${row}-confirmed`)).toContainText(su.username);

@@ -83,7 +83,9 @@ for (const how of ["Escape", "닫기 단추"] as const) {
       await page.goto(where === "새 문제 화면" ? `/classes/${classId}/problems/new` : `/classes/${classId}?tab=problems`);
       const opener = page.getByTestId(where === "새 문제 화면" ? "open-problem-import" : "problems-empty-import");
       await expect(opener).toBeVisible();
-      await opener.evaluate((el) => (el as HTMLElement).blur());
+      // 클래스 화면은 다 그려지면 제목이 초점을 받는다(#1517) — 그 뒤에 초점을 거둬야 「초점 없이 연」 전제가 선다.
+      if (where === "클래스 문제 탭") await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+      await page.evaluate(() => (document.activeElement as HTMLElement).blur());
       expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
       await opener.dispatchEvent("click");
       const dialog = page.getByRole("dialog", { name: "문제 가져오기" });
