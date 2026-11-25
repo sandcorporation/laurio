@@ -923,6 +923,9 @@ function InteractiveSubmissionForm(
   const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
   // 빈 칸으로 낸 뒤에만 안내한다 — 다시 치기 시작하면 걷는다.
   const [submittedEmpty, setSubmittedEmpty] = useState(false);
+  // 잘못된 주소와 빈 칸 제출 둘 다 오류 문구가 보인다 — 칸이 같이 무효로 알리고 문구와 이어진다(#1422).
+  const repositoryInvalid =
+    (repositoryCheck !== null && !repositoryCheck.ok) || (submittedEmpty && repositoryCheck === null);
   const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
 
   // 낼 수 없는 이유는 제출 카드 자리에 한 줄이다 — 지난 시도와 판정은 옆 열에 그대로 남는다.
@@ -1017,11 +1020,12 @@ function InteractiveSubmissionForm(
                 onRepositoryUrlChange(event.target.value);
               }}
               readOnly={submitting}
-              aria-invalid={repositoryCheck !== null && !repositoryCheck.ok}
+              aria-invalid={repositoryInvalid}
+              aria-describedby={repositoryInvalid ? "repository-url-error" : undefined}
               className={`${INPUT_CLASS} font-mono`}
             />
             {repositoryCheck !== null && !repositoryCheck.ok ? (
-              <p data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
+              <p id="repository-url-error" data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
                 {repositoryCheck.message}
                 {repositoryCheck.suggestion ? (
                   <>
@@ -1039,7 +1043,7 @@ function InteractiveSubmissionForm(
                 ) : null}
               </p>
             ) : submittedEmpty && repositoryCheck === null ? (
-              <p data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
+              <p id="repository-url-error" data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
                 GitHub 저장소 주소를 넣어 주세요.
               </p>
             ) : null}

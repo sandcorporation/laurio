@@ -277,6 +277,61 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
           </ErrorNote>
         </div>
       ) : null}
+      {/* 범례는 40줄 표 아래로 밀리지 않게 표 위에 둔다(#1422). */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-rule px-4 py-3">
+        <ul data-testid="participants-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {(Object.keys(STATUS_LABEL) as GridCellStatus[]).map((status) => (
+            <li
+              key={status}
+              data-testid={`participants-legend-${status}`}
+              className="flex items-center gap-2 text-[12px] text-ink/60"
+            >
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <StatusMark status={status} />
+              </span>
+              {STATUS_LABEL[status]}
+            </li>
+          ))}
+          {hasPerfect ? (
+            <li data-testid="participants-legend-perfect" className="flex items-center gap-2 text-[12px] text-ink/60">
+              <Stamp kind="perfect" size="sm" />
+            </li>
+          ) : null}
+        </ul>
+        {hasLate ? (
+          <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <LateMark late="recommended" inline />
+              </span>
+              권장 기한 뒤 제출
+            </li>
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <LateMark late="deadline" inline />
+              </span>
+              마감 기한 뒤 제출
+            </li>
+          </ul>
+        ) : null}
+        {hasContestEntries ? (
+          <ul data-testid="participants-contest-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <ContestEntryMark entry="current" inline />
+              </span>
+              지금 공모전 제출
+            </li>
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <ContestEntryMark entry="entered" inline />
+              </span>
+              공모전에도 냈었음
+            </li>
+          </ul>
+        ) : null}
+      </div>
+
       {/* 가로 스크롤은 이 div 안에서만 일어난다 — 페이지 전체가 아니라 이 wrapper 가 overflow 를 갖는다. */}
       <div className="max-w-full overflow-x-auto" data-testid="participants-scroll-area">
         <table data-testid="participants-table" className="w-full border-collapse text-[13px]">
@@ -403,60 +458,6 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
             </tr>
           </tbody>
         </table>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-        <ul data-testid="participants-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {(Object.keys(STATUS_LABEL) as GridCellStatus[]).map((status) => (
-            <li
-              key={status}
-              data-testid={`participants-legend-${status}`}
-              className="flex items-center gap-2 text-[12px] text-ink/60"
-            >
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <StatusMark status={status} />
-              </span>
-              {STATUS_LABEL[status]}
-            </li>
-          ))}
-          {hasPerfect ? (
-            <li data-testid="participants-legend-perfect" className="flex items-center gap-2 text-[12px] text-ink/60">
-              <Stamp kind="perfect" size="sm" />
-            </li>
-          ) : null}
-        </ul>
-        {hasLate ? (
-          <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <LateMark late="recommended" inline />
-              </span>
-              권장 기한 뒤 제출
-            </li>
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <LateMark late="deadline" inline />
-              </span>
-              마감 기한 뒤 제출
-            </li>
-          </ul>
-        ) : null}
-        {hasContestEntries ? (
-          <ul data-testid="participants-contest-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <ContestEntryMark entry="current" inline />
-              </span>
-              지금 공모전 제출
-            </li>
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <ContestEntryMark entry="entered" inline />
-              </span>
-              공모전에도 냈었음
-            </li>
-          </ul>
-        ) : null}
       </div>
 
       {expelling ? (
