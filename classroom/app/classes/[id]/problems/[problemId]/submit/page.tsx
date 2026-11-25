@@ -120,7 +120,14 @@ export default function ProblemSubmitPage() {
     if (state.status === "notFound" && hadForm) lostForm.current = true;
     // 다시 엶 안내는 ready 화면의 것이다 — 숨김·오류 화면으로 바뀌면 비워 두어야 다음 다시 엶에서 비었다 채워져 또 읽힌다.
     if (state.status === "notFound" || state.status === "error") setReopenedNote("");
-    if (state.status !== "ready" || !lostForm.current) return;
+    if (state.status !== "ready") return;
+    // 다시 막혔으면(보관·내보냄 등) 「제출할 수 있습니다」를 걷는다 — 이유는 막힘 안내가 하나로 말한다(#1532 ①).
+    if (state.data.submit_blocked_reason !== null) {
+      lostForm.current = false;
+      setReopenedNote("");
+      return;
+    }
+    if (!lostForm.current) return;
     lostForm.current = false;
     setReopenedNote(blockedChange("hidden", state.data.submit_blocked_reason).note);
     const active = document.activeElement;
@@ -226,6 +233,8 @@ export default function ProblemSubmitPage() {
     });
     if (result.ok) {
       setRepositoryUrl("");
+      // 낸 뒤에는 다시 엶 안내가 낡았다 — 걷는다(#1532 ①).
+      setReopenedNote("");
       reload();
       // 공모전에 냈으면 「이미 낸 제출」이 생겼다 — 칸을 새로 읽어 다음 시도의 확인을 받는다.
       if (contestEntry !== null) void loadEntryForm();
