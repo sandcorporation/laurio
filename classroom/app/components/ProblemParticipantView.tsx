@@ -16,7 +16,7 @@ import { MyQualityCard } from "@/app/components/MyQualityCard";
 import type { MyQuality } from "@/lib/quality/api";
 import Link from "next/link";
 import { createElement, useEffect, useRef, useState } from "react";
-import type { ChangeEvent, FormEvent, MouseEvent, ReactNode } from "react";
+import type { ChangeEvent, FormEvent, MouseEvent, ReactNode, Ref } from "react";
 
 import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 import { MarkdownView } from "@codemit/markdown";
@@ -147,9 +147,17 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   quality?: MyQuality | null;
 };
 
-function ArchivedNote() {
+function ArchivedNote({ noteRef }: { noteRef?: Ref<HTMLParagraphElement> }) {
+  // 제출 화면에서는 폼이 사라지며 초점이 body 로 빠진다 — 안내가 초점을 받아 낭독된다(#1459 ③).
+  // 강사 띠의 한 줄은 늘 떠 있는 안내라 ref 를 받지 않는다.
   return (
-    <p data-testid="class-archived-note" className="text-[13px] text-warning">
+    <p
+      ref={noteRef}
+      tabIndex={noteRef ? -1 : undefined}
+      role={noteRef ? "alert" : undefined}
+      data-testid="class-archived-note"
+      className={`text-[13px] text-warning${noteRef ? " outline-none" : ""}`}
+    >
       이 클래스는 보관되어 새 제출을 받지 않습니다.
     </p>
   );
@@ -1001,7 +1009,7 @@ function InteractiveSubmissionForm(
   if (submitBlockedReason === "archived") {
     return (
       <>
-        <ArchivedNote />
+        <ArchivedNote noteRef={blockedNoteRef} />
         {draftLine}
       </>
     );
