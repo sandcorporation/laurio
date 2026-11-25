@@ -16,7 +16,7 @@ import { MyQualityCard } from "@/app/components/MyQualityCard";
 import type { MyQuality } from "@/lib/quality/api";
 import Link from "next/link";
 import { createElement, useEffect, useState } from "react";
-import type { ChangeEvent, FormEvent, ReactNode } from "react";
+import type { ChangeEvent, FormEvent, MouseEvent, ReactNode } from "react";
 
 import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 import { MarkdownView } from "@codemit/markdown";
@@ -203,6 +203,19 @@ function formatMegabytes(bytes: number): string {
 }
 
 const SUBMIT_CARD_ID = "submit-card";
+
+// 「제출 칸으로」 뒤 초점(#1400-8) — 스크롤만 되고 초점이 머리에 남지 않게 첫 입력칸으로 보낸다.
+function focusSubmitField(event: MouseEvent<HTMLAnchorElement>) {
+  const card = document.getElementById(SUBMIT_CARD_ID);
+  if (!card) return;
+  event.preventDefault();
+  window.history.replaceState(null, "", `#${SUBMIT_CARD_ID}`);
+  card.scrollIntoView({ block: "start" });
+  const field =
+    document.getElementById("repository-url") ??
+    card.querySelector<HTMLElement>("input:not([type=hidden]):not(:disabled), textarea, button:not(:disabled)");
+  field?.focus({ preventScroll: true });
+}
 
 export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   const {
@@ -415,7 +428,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 {stampKind(passed, perfect) ? (
                   <Stamp kind={stampKind(passed, perfect)!} />
                 ) : (
-                  <Badge tone={unpassedBadge(submissions.length).tone}>{unpassedBadge(submissions.length).label}</Badge>
+                  <Badge tone={unpassedBadge(submissions).tone}>{unpassedBadge(submissions).label}</Badge>
                 )}
               </span>
             )}
@@ -427,6 +440,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             <a
               href={`#${SUBMIT_CARD_ID}`}
               data-testid="my-problem-submit-jump"
+              onClick={focusSubmitField}
               className={`${buttonClass("secondary", "sm")} min-[1200px]:hidden`}
             >
               제출 칸으로
