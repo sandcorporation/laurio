@@ -16,6 +16,7 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+import { useTablist } from "@/app/components/use-tablist";
 import { Card, EmptyState, ErrorNote, FieldLabel, INPUT_CLASS, Num, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useClassTemplates } from "@/lib/class-templates/use-class-templates";
 import { useProblemTemplates } from "@/lib/problem-templates/use-problem-templates";
@@ -28,6 +29,7 @@ function TemplatesPageInner() {
   const [kind, setKind] = useState<Kind>(searchParams.get("kind") === "class" ? "class" : "problem");
   const [query, setQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
+  const tablist = useTablist(kind);
 
   const problemTemplates = useProblemTemplates(kind === "problem" ? committedQuery : "");
   const classTemplates = useClassTemplates(kind === "class" ? committedQuery : "");
@@ -51,7 +53,7 @@ function TemplatesPageInner() {
       />
 
       <div
-        role="tablist"
+        {...tablist.listProps}
         aria-label="템플릿 종류"
         className="mb-5 flex items-end gap-0.5 border-b border-rule"
       >
@@ -64,8 +66,7 @@ function TemplatesPageInner() {
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={kind === key}
+            {...tablist.tabProps(key)}
             data-testid={testId}
             onClick={() => {
               setKind(key);
@@ -83,6 +84,7 @@ function TemplatesPageInner() {
         ))}
       </div>
 
+      <div {...tablist.panelProps()}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -121,6 +123,7 @@ function TemplatesPageInner() {
           committedQuery={committedQuery}
         />
       )}
+      </div>
     </PageShell>
   );
 }

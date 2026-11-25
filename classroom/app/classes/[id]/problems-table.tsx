@@ -5,7 +5,7 @@
 // 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 상태 문구와 입구 둘(새 문제·문제 가져오기).
 // 달성률·통과 수는 목록 응답의 값이고, 위쪽 통계 바의 평균은 클래스 응답의 값이다 — 다시 세지 않는다.
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { DueInline } from "@/app/components/DueLabel";
 import { useMenuFocus } from "@/app/components/use-menu-focus";
@@ -134,6 +134,31 @@ export function ProblemsTable({
   onMove: (problemId: number, direction: "up" | "down") => void;
   onOpenPicker: (tab: PickerTab) => void;
 }) {
+  // 옮긴 뒤 안내(#1478 6번) — 낙관 갱신이 끝나 목록이 바뀐 자리에서 몇 번째인지 읽는다. 실패하면 오류 줄이 말한다.
+  const pendingMove = useRef<{ id: number; position: number } | null>(null);
+  const [moveStatus, setMoveStatus] = useState("");
+  useEffect(() => {
+    const pending = pendingMove.current;
+    if (!pending) return;
+    if (reorderError) {
+      pendingMove.current = null;
+      setMoveStatus("");
+      return;
+    }
+    const moved = problems[pending.position - 1];
+    if (moved?.id !== pending.id) return;
+    pendingMove.current = null;
+    setMoveStatus(`${moved.title} — ${pending.position}번째로 옮겼습니다`);
+  }, [problems, reorderError]);
+  function moveProblem(problemId: number, direction: "up" | "down") {
+    const index = problems.findIndex((p) => p.id === problemId);
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || target < 0 || target >= problems.length) return;
+    pendingMove.current = { id: problemId, position: target + 1 };
+    setMoveStatus("");
+    onMove(problemId, direction);
+  }
+
   const newProblem = archived ? (
     <span
       data-testid="new-problem-blocked"
@@ -195,6 +220,9 @@ export function ProblemsTable({
 
   return (
     <Card className="border-t-0">
+      <p role="status" data-testid="problems-move-status" className="sr-only">
+        {moveStatus}
+      </p>
       {reorderError ? (
         <div className="p-4 pb-0">
           <ErrorNote>
@@ -280,7 +308,7 @@ export function ProblemsTable({
                       problem={problem}
                       disabledUp={index === 0}
                       disabledDown={index === problems.length - 1}
-                      onMove={(direction) => onMove(problem.id, direction)}
+                      onMove={(direction) => moveProblem(problem.id, direction)}
                     />
                   )}
                 </td>
