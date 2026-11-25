@@ -18,7 +18,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
-import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
+import { ErrorNote, Note, PageShell, buttonClass } from "@/app/components/ui";
 import { ContestEntryFields } from "@/app/components/ContestEntryFields";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { useMyQuality } from "@/lib/quality/use-quality";
@@ -121,6 +121,15 @@ export default function ProblemSubmitPage() {
     return (
       <PageShell>
         <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} />
+        {hadForm && repositoryUrl.trim() !== "" ? (
+          <div className="mt-4">
+            <Note tone="warning">
+              <span data-testid="my-problem-lost-draft">
+                적던 저장소 주소: <span className="break-all">{repositoryUrl.trim()}</span>
+              </span>
+            </Note>
+          </div>
+        ) : null}
       </PageShell>
     );
   }
