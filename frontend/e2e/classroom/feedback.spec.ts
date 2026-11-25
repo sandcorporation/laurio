@@ -67,6 +67,31 @@ test("켠 계정은 강의실에서 제보 버튼 → 가리기 → 보내기 �
   await context.close();
 });
 
+// 제보 창의 초점 규약(#1496 ⑧) — 키보드로 열면 내용 칸으로 들어가고, Tab·Shift+Tab 은 창 안에 갇히며, Escape 로 닫히면 「제보」 단추로 돌아온다.
+test("제보 창은 초점이 안으로 들어가 갇히고 Escape 로 닫히며 「제보」 단추로 돌아온다", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: onState });
+  const page = await context.newPage();
+  await page.goto("/");
+  const opener = page.getByTestId("feedback-open");
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "제보" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId("feedback-body")).toBeFocused();
+  // 창 안 대상 수보다 많이 눌러 가장자리를 넘긴다.
+  const count = await dialog.evaluate(
+    (el) => el.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])').length,
+  );
+  for (const key of Array(count + 2).fill("Tab").concat(Array(count + 2).fill("Shift+Tab"))) {
+    await page.keyboard.press(key);
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await context.close();
+});
+
 test("내 제보 목록에 접수로 보이고 상세가 열린다", async ({ browser }) => {
   const context = await browser.newContext({ storageState: onState });
   const page = await context.newPage();

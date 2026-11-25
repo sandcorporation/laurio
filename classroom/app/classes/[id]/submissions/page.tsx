@@ -4,7 +4,7 @@
 // (문제, 학생)의 최근 시도에만 「다시 채점」이 붙는다. 누르면 확인 창이 「예상 비용」 카드와 같은 셈의 금액을 보인다.
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
@@ -43,8 +43,34 @@ type RegradeDialogProps = {
 function RegradeDialog({ classId, ...props }: RegradeDialogProps & { classId: number }) {
   // 「예상 비용」 카드와 같은 셈 — 지금 이 클래스의 조합으로 그 문제의 제출 한 건.
   const { state } = useBackendQuery<ScoringCalculator>(bffClient, calculatorPath(classId, { problemId: props.attempt.problem_id }));
-  if (state.status === "loading") return null;
+  if (state.status === "loading") return <RegradeLoading onCancel={props.onCancel} />;
   return <RegradeDialogBody {...props} amount={state.status === "ready" ? submissionAmount(state.data) : "—"} />;
+}
+
+// 금액을 기다리는 동안(#1496 ⑦) — 창은 아직 없지만 누른 사람은 취소할 수 있어야 한다. 낭독되는 상태와 「취소」 단추(터치),
+// Escape(키보드)로 그만두면 응답이 와도 창은 열리지 않는다(이 컴포넌트가 사라지며 응답은 버려진다). 초점은 누른 단추에 그대로 있다.
+function RegradeLoading({ onCancel }: { onCancel: () => void }) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onCancel();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+  return (
+    <div
+      role="status"
+      data-testid="regrade-loading"
+      className="fixed bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-3 border border-rule bg-surface px-4 py-2 text-[13px]"
+    >
+      <span>예상 금액을 불러오는 중...</span>
+      <button type="button" data-testid="regrade-loading-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
+        취소
+      </button>
+    </div>
+  );
 }
 
 function RegradeDialogBody({
