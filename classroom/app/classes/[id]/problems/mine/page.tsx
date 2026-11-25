@@ -18,6 +18,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import {
   Badge,
   Card,
@@ -339,12 +340,7 @@ export default function MyProblemsPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <h1
-          data-testid="my-problems-not-found"
-          className="text-[22px] font-semibold"
-        >
-          클래스를 찾을 수 없습니다
-        </h1>
+        <AccessNotice page="mine" classId={classId} testId="my-problems-not-found" />
       </PageShell>
     );
   }

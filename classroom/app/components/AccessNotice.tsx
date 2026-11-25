@@ -1,0 +1,76 @@
+"use client";
+
+// 강의실 404 화면의 안내(#1390) — 화면이 `notFound` 일 때만 그린다. 목록 둘은 여기서
+// 읽으므로 이 조각이 새로 뜰 때마다(=404 가 날 때마다) 새로 묻는다. 홈이나 이전 렌더의
+// 목록은 쓰이지 않는다. 판정은 `lib/access/notice.ts` 가 한다.
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+import { buttonClass } from "@/app/components/ui";
+import { accessNotice, type AccessPage } from "@/lib/access/notice";
+import { useJoinedClasses } from "@/lib/classes/use-joined-classes";
+import { useMyClasses } from "@/lib/classes/use-my-classes";
+
+/** 낡은 404 를 한 번 다시 확인하는 법. */
+export type AccessRetry = {
+  /** 이 화면의 원래 데이터를 다시 부른다. */
+  reload: () => void;
+  /** 404 를 낸 조회들의 상태 객체 — 모두 새 객체가 되면 다시 부른 답이 온 것이다. */
+  turns: readonly object[];
+};
+
+type Props = { classId: number; testId: string } & (
+  | { page: Extract<AccessPage, "class" | "problem">; retry: AccessRetry }
+  | { page: Extract<AccessPage, "mine" | "submit">; retry?: undefined }
+);
+
+export function AccessNotice(props: Props) {
+  // 다른 클래스로 옮겨 가면 새로 마운트해 목록을 다시 묻는다.
+  return <Notice key={`${props.page}:${props.classId}`} {...props} />;
+}
+
+function Notice({ page, classId, testId, retry }: Props) {
+  const joined = useJoinedClasses();
+  const taught = useMyClasses();
+  const [turnsBeforeRetry, setTurnsBeforeRetry] = useState<readonly object[] | null>(null);
+  const answeredAgain =
+    turnsBeforeRetry !== null &&
+    retry !== undefined &&
+    retry.turns.every((turn, index) => turn !== turnsBeforeRetry[index]);
+  const decision = accessNotice({
+    page,
+    status: answeredAgain ? "retried" : "initial",
+    joined,
+    taught,
+    classId,
+  });
+
+  const shouldRetry = decision.kind === "retry" && turnsBeforeRetry === null;
+  useEffect(() => {
+    if (!shouldRetry || retry === undefined) return;
+    setTurnsBeforeRetry(retry.turns);
+    retry.reload();
+    // 한 번만 부른다 — `retry` 는 렌더마다 새 객체라 의존성에 넣지 않는다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldRetry]);
+
+  if (decision.kind !== "notice") {
+    return (
+      <p data-testid="access-notice-loading" className="text-[13.5px] text-ink/45">
+        불러오는 중...
+      </p>
+    );
+  }
+  return (
+    <>
+      <h1 data-testid={testId} className="text-[22px] font-semibold">
+        {decision.title}
+      </h1>
+      <p className="mt-4">
+        <Link href={decision.link.href} data-testid="access-notice-link" className={buttonClass("secondary", "sm")}>
+          {decision.link.label}
+        </Link>
+      </p>
+    </>
+  );
+}

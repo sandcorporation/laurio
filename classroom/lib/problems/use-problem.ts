@@ -12,13 +12,17 @@ import type { ProblemRow } from "./api";
 
 export type ProblemDetailState =
   | { status: "loading" }
+  | { status: "notFound" }
   | { status: "error" }
   | { status: "ready"; problem: ProblemRow };
 
+const NOT_FOUND = Symbol("problem-not-found");
+
 export function useProblem(classId: number, problemId: number) {
-  const { state: queryState, reload: refetch } = useBackendQuery<ProblemRow>(
+  const { state: queryState, reload: refetch } = useBackendQuery<ProblemRow | typeof NOT_FOUND>(
     bffClient,
     `/api/backend/classroom/classes/${classId}/problems/${problemId}`,
+    { onFailure: (failure) => (failure.status === 404 ? NOT_FOUND : undefined) },
   );
   // `refetch-keeps-screen.test.ts`가 이 이름의 로컬 선언을 찾는다.
   const reload = useCallback(() => {
@@ -35,7 +39,9 @@ export function useProblem(classId: number, problemId: number) {
         ? { status: "loading" }
         : queryState.status === "error"
           ? { status: "error" }
-          : { status: "ready", problem: queryState.data },
+          : queryState.data === NOT_FOUND
+            ? { status: "notFound" }
+            : { status: "ready", problem: queryState.data },
     [queryState],
   );
 

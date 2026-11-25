@@ -1,8 +1,8 @@
 "use client";
 
 // 클래스 상세 (#278/#279/#281/#282, 시안 v2 #633). 머리(이름·상태·통계 바) · 가입 링크 띠 · 탭 셋
-// (문제 · 참여자 · 강사) · 문제 탭의 표와 오른쪽 「채점」·「최근 제출」 카드. 남의 클래스는 백엔드가
-// 404를 주므로 그대로 "찾을 수 없다"로 보여준다(존재를 알려주지 않는다). 「클래스를 템플릿으로
+// (문제 · 참여자 · 강사) · 문제 탭의 표와 오른쪽 「채점」·「최근 제출」 카드. 비강사에게는 백엔드가 404를 준다
+// (존재를 알려주지 않는다) — 그때의 문구는 `AccessNotice` 가 그 사람의 목록 둘로 고른다(#1390). 「클래스를 템플릿으로
 // 공개」는 여기 살지 않는다 — 학기에 한 번 할까 말까 한 일이라 「클래스 설정」으로 옮겼다(#323).
 //
 // 화면에 설명 문장을 두지 않는다 — 라벨·값·배지·버튼만. 채점 연결의 문제(키 없음·거부됨·크레딧
@@ -11,6 +11,7 @@
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { ErrorNote, PageShell } from "@/app/components/ui";
 import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
@@ -43,7 +44,7 @@ function ClassDetail() {
   const { state: classState, reload: reloadClass, regenerateJoinCode } = useClass(classId);
   // 방금 소유권을 넘겨받았는가(#564) — 키 넣기로 가는 안내를 한 번 보인다.
   const [justTookOver, setJustTookOver] = useState(false);
-  const { state: problemsState, move } = useProblems(classId);
+  const { state: problemsState, reload: reloadProblems, move } = useProblems(classId);
   const router = useRouter();
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
   const [pickerTab, setPickerTab] = useState<PickerTab | null>(null);
@@ -64,9 +65,18 @@ function ClassDetail() {
   if (classState.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="classroom-detail-not-found" className="text-[22px] font-semibold">
-          클래스를 찾을 수 없습니다
-        </h1>
+        <AccessNotice
+          page="class"
+          classId={classId}
+          testId="classroom-detail-not-found"
+          retry={{
+            reload: () => {
+              reloadClass();
+              reloadProblems();
+            },
+            turns: [classState],
+          }}
+        />
       </PageShell>
     );
   }

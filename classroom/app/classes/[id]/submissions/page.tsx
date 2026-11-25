@@ -8,6 +8,7 @@ import { Suspense, useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { Card, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import {
@@ -123,7 +124,7 @@ function ClassAttempts() {
   const classId = Number(params.id);
   const page = Math.max(1, Number(useSearchParams().get("page")) || 1);
   const { state, reload } = useClassAttempts(classId, page);
-  const { state: classState } = useClass(classId);
+  const { state: classState, reload: reloadClass } = useClass(classId);
   const [target, setTarget] = useState<ClassAttemptRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -154,6 +155,26 @@ function ClassAttempts() {
 
   const pageHref = (n: number) => `/classes/${classId}/submissions?page=${n}`;
 
+  // 클래스를 먼저 본다 — 강사가 아니면 시도 목록의 404 는 오류가 아니라 접근 안내다(#1390).
+  if (classState.status === "notFound") {
+    return (
+      <PageShell>
+        <AccessNotice
+          page="class"
+          classId={classId}
+          testId="class-attempts-not-found"
+          retry={{
+            reload: () => {
+              reloadClass();
+              reload();
+            },
+            turns: [classState],
+          }}
+        />
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell>
       <PageHeader
@@ -161,11 +182,11 @@ function ClassAttempts() {
         title="제출"
         titleTestId="class-attempts-heading"
       />
-      {state.status === "loading" ? (
+      {classState.status === "loading" || state.status === "loading" ? (
         <p data-testid="class-attempts-loading" className="text-[13.5px] text-ink/45">
           불러오는 중...
         </p>
-      ) : state.status === "error" ? (
+      ) : classState.status === "error" || state.status === "error" ? (
         <ErrorNote>
           <span data-testid="class-attempts-error">제출을 불러오지 못했습니다.</span>
         </ErrorNote>

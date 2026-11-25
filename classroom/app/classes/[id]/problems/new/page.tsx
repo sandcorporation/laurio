@@ -30,6 +30,7 @@ import { ProblemParticipantView } from "@/app/components/ProblemParticipantView"
 import { ProblemDueCard } from "@/app/components/ProblemDueCard";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { GRADABILITY_FORM_NOTE, stashWarnings } from "@/lib/problems/gradability";
@@ -58,7 +59,7 @@ export default function NewProblemPage() {
   const classId = Number(params.id);
   // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속). 불러오는 중에는
   // 비워 둔다 — 「클래스」 같은 자리표시를 잠깐 보였다 바꾸면 깜빡임만 는다.
-  const { state: classState } = useClass(classId);
+  const { state: classState, reload: reloadClass } = useClass(classId);
   const costState = useScoringCost(classId);
   const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const router = useRouter();
@@ -228,7 +229,39 @@ export default function NewProblemPage() {
     void submitProblem(true);
   }
 
-  if (classState.status === "ready" && classState.classroom.archived) {
+  // 클래스를 읽기 전에는 폼을 그리지 않는다 — 강사가 아닌 사람에게 빈 폼이 비치지 않게(#1390).
+  if (classState.status === "notFound") {
+    return (
+      <PageShell>
+        <AccessNotice
+          page="class"
+          classId={classId}
+          testId="new-problem-not-found"
+          retry={{ reload: reloadClass, turns: [classState] }}
+        />
+      </PageShell>
+    );
+  }
+
+  if (classState.status === "loading") {
+    return (
+      <PageShell>
+        <p data-testid="new-problem-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
+      </PageShell>
+    );
+  }
+
+  if (classState.status === "error") {
+    return (
+      <PageShell>
+        <ErrorNote>
+          <span data-testid="new-problem-class-error">클래스 정보를 불러오지 못했습니다.</span>
+        </ErrorNote>
+      </PageShell>
+    );
+  }
+
+  if (classState.classroom.archived) {
     // 클래스 상세는 이 화면으로 가는 링크 자체를 감추지만(#438), 주소를 직접
     // 열면 여기까지 온다 — 서버도 같은 요청을 403으로 거절하므로 폼을 아예
     // 보여주지 않고 이유만 말한다.
