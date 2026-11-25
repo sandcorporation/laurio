@@ -34,8 +34,9 @@ export type NotificationRow = {
   // 시도가 없는 문제(지워졌거나 클래스를 떠난 경우)는 `null`이다.
   problem_status?: { passed: boolean; attempt_count: number } | null;
   // 소유권 이전 요청 알림이 가리키는 요청의 **지금** 상태(#1435·#1441) — 문구는 받은 때의 것이다.
+  // `gone` 은 요청을 찾지 못한 것 — `transfer_id` 없는 옛 알림이거나 받는 사람이 떠나 요청이 지워졌다(#1448).
   // 다른 유형·옛 응답은 없거나 `null`.
-  transfer_status?: "pending" | "accepted" | "declined" | "cancelled" | "expired" | null;
+  transfer_status?: "pending" | "accepted" | "declined" | "cancelled" | "expired" | "gone" | null;
 };
 
 export type UnreadCount = { count: number };

@@ -52,6 +52,10 @@ test("강사 탭 — 소유자가 초대 링크를 만들고 소유권을 넘기
   await expect(page.getByRole("button", { name: "공동 강사 박조교 내보내기" })).toBeVisible();
 
   await page.getByTestId("ownership-transfer-start").click();
+  const transferConfirm = page.getByTestId("ownership-transfer-confirm");
+  await expect(transferConfirm.getByRole("button", { name: "그만두기" })).toBeFocused();
+  await expect(transferConfirm).toHaveAttribute("role", "group");
+  await expect(transferConfirm).toHaveAccessibleDescription(/소유권을 넘길까요/);
   await page.getByTestId("ownership-transfer-confirm-button").click();
   await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
   // 보낸 뒤 초점이 BODY 로 떨어지지 않고 보낸 요청의 상태로 옮겨 가며, 읽힌다(#1435).

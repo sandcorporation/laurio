@@ -86,10 +86,10 @@ function DisconnectAction({
   onKeep: () => void;
   onDisconnect: () => void;
 }) {
-  const { triggerRef, keepRef, onKeyDown } = useInlineConfirm(confirming, onKeep);
+  const { triggerRef, keepRef, questionId, groupProps } = useInlineConfirm(confirming, onKeep);
   return confirming ? (
-    <div className="flex flex-wrap items-center gap-2" onKeyDown={onKeyDown}>
-      <span className="text-[12.5px] text-ink/60">끊으면 이 앱은 다시 허락받기 전까지 강의실에 닿지 못합니다.</span>
+    <div className="flex flex-wrap items-center gap-2" {...groupProps}>
+      <span id={questionId} className="text-[12.5px] text-ink/60">끊으면 이 앱은 다시 허락받기 전까지 강의실에 닿지 못합니다.</span>
       <button
         type="button"
         className={buttonClass("dangerFilled", "sm")}

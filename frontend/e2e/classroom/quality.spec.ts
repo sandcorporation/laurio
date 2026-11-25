@@ -99,6 +99,9 @@ test.describe.serial("완성도", () => {
     // 다시 누르면 할 일이 없다.
     await page.getByTestId("quality-run-button").click();
     await expect(page.getByTestId("quality-confirm-line")).toHaveText("새로 채점할 사람이 없습니다");
+    // 낭독기: 줄은 role=status 로 읽히고, 「닫기」는 그 줄을 설명으로 가진다(#1448 ⑤).
+    await expect(page.getByRole("status").filter({ hasText: "새로 채점할 사람이 없습니다" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "닫기", exact: true })).toHaveAccessibleDescription("새로 채점할 사람이 없습니다");
   });
 
   test("완성도 공개: 켜면 참여자는 자기 등수만 본다", async ({ page }) => {
