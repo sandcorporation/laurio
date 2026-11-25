@@ -57,6 +57,13 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
   await expect(page.getByTestId(`participant-row-${instructorId}-instructor-badge`)).toBeVisible();
   await expect(page.getByTestId(`participant-row-${instructorId}-menu`)).toHaveCount(0);
   await expect(page.getByTestId(`participant-cell-${memberId}-${problemId}`)).toHaveAttribute("data-status", "not_submitted");
+  // 칸은 모양으로만 그리니 뜻은 범례·툴팁·표식 이름이 진다(#1398). 이름은 칸 **안**의 표식에 있어야 칸 내용을 읽는
+  // 스크린리더에도 빈 칸이 아니다.
+  const cell = page.getByTestId(`participant-cell-${memberId}-${problemId}`);
+  await expect(page.getByTestId("participants-legend-not_submitted")).toHaveText("미제출");
+  await expect(page.getByTestId("participants-legend-attempted_not_passed")).toHaveText("시도했으나 미통과");
+  await expect(cell).toHaveAttribute("title", "미제출");
+  await expect(cell.getByRole("img", { name: "미제출", exact: true })).toBeVisible();
 
   await page.getByTestId(`participant-row-${memberId}-menu`).click();
   await page.getByTestId(`participant-row-${memberId}-expel`).click();
