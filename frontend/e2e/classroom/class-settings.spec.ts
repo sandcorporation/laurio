@@ -32,6 +32,9 @@ test("채점 연결은 「연결 없음」에서 시작해 OpenAI 키를 넣으�
   await expect(page.getByTestId("openai-key-status")).toContainText("7f2a");
   await expect(page.getByTestId("scoring-connection-verified")).toHaveText(/^\d{1,2}\/\d{1,2} 확인$/);
   await expect(page.getByTestId("openai-key-input")).toHaveCount(0);
+  // 저장하면 폼이 사라진다 — 초점은 「바꾸기」로, 결과는 상태 영역으로(#1447).
+  await expect(page.getByTestId("vendor-key-openai-change")).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "OpenAI 키를 저장했습니다." })).toBeVisible();
   await expect(page.getByTestId("vendor-key-openai-masked")).toContainText("7f2a");
   await expect(page.getByTestId("scoring-connection-kind-openai_key")).toHaveAttribute("aria-checked", "true");
 
@@ -181,7 +184,15 @@ test("채점·완성도 검사 방식 — OpenAI 키 클래스의 기본 모델(
   for (const id of ["scoring-method", "quality-method"]) {
     await expect(page.getByTestId(`${id}-single`)).toHaveAttribute("aria-checked", "true");
     await expect(page.getByTestId(`${id}-agent`)).toBeDisabled();
-    await expect(page.getByTestId(`${id}-agent`)).toHaveAttribute("title", "gpt-5-mini 이상");
+    // 까닭은 title 이 아니라 보이는 글이고 선택 그룹이 가리킨다 — 키 까닭이 아니라 모델 까닭이다(#1447).
+    const note = page.getByTestId(`${id}-blocked-note`);
+    await expect(note).toBeVisible();
+    await expect(note).toHaveAttribute("data-reason", "model");
+    await expect(note).toContainText("gpt-5-mini 이상");
+    await expect(page.getByTestId(`${id}-agent`)).not.toHaveAttribute("title", /.+/);
+    await expect(
+      page.getByRole("radiogroup", { name: id === "scoring-method" ? "채점 방식" : "완성도 검사 방식" }),
+    ).toHaveAccessibleDescription(/gpt-5-mini 이상/);
     await expect(page.getByTestId(`${id}-vendor`)).toHaveText("OpenAI");
   }
 
@@ -343,4 +354,32 @@ test("채점 키 지우기는 줄 안에서 한 번 더 묻는다 — 브라우�
   await expect(trigger).toHaveCount(0);
   await expect(page.getByTestId("vendor-key-openai-change")).toBeFocused();
   expect(dialogs).toBe(0);
+});
+
+test("채점 키 입력칸 — 확인 결과·저장 오류가 칸에 연결되고 확정 오류에만 aria-invalid 가 붙는다(#1447)", async ({ page }) => {
+  const { classId } = await newClass(page, "key-describe");
+  await page.route("https://api.openai.com/v1/models", (route) => route.fulfill({ status: 401, body: "{}" }));
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+  await page.getByTestId("vendor-key-openai-change").click();
+  const input = page.getByTestId("openai-key-input");
+  const live = page.getByRole("status").filter({ hasText: "이 키는 쓸 수 없습니다" });
+  await expect(input).not.toHaveAttribute("aria-invalid", "true");
+  await input.fill("sk-e2e-bad-key-0000");
+  await expect(live).toBeVisible();
+  await expect(input).toHaveAccessibleDescription(/이 키는 쓸 수 없습니다/);
+  await expect(input).toHaveAttribute("aria-invalid", "true");
+});
+
+test("기한 순서 — 권장 기한이 마감보다 늦으면 문구가 보이고 날짜·시각 칸이 그것을 가리킨다(#1447)", async ({ page }) => {
+  const { classId } = await newClass(page, "due-order");
+  await page.goto(`/classes/${classId}/problems/new`);
+  await page.getByTestId("new-problem-recommended-due-date").fill("2030-05-10");
+  await page.getByTestId("new-problem-due-date").fill("2030-05-01");
+  await page.getByTestId("new-problem-title-input").fill("기한 순서 시험");
+  await page.getByTestId("new-problem-submit").click();
+  await expect(page.getByRole("alert").filter({ hasText: "권장 기한이 마감보다 늦습니다" })).toBeVisible();
+  for (const id of ["new-problem-recommended-due-date", "new-problem-recommended-due-time", "new-problem-due-date", "new-problem-due-time"]) {
+    await expect(page.getByTestId(id)).toHaveAccessibleDescription(/권장 기한이 마감보다 늦습니다/);
+    await expect(page.getByTestId(id)).toHaveAttribute("aria-invalid", "true");
+  }
 });
