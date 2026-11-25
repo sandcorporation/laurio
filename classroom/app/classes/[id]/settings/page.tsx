@@ -448,6 +448,8 @@ export default function ClassSettingsPage() {
   const [instructorDisplayName, setInstructorDisplayName] = useState("");
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+  // 저장 확인(#1455 2) — 늘 있는 상태 영역에 적어 낭독되게 하고, 다시 고치기 시작하면 비운다.
+  const [nameSaved, setNameSaved] = useState(false);
 
   useClassroomTabTitle({
     screenName: "클래스 설정",
@@ -558,6 +560,7 @@ export default function ClassSettingsPage() {
     }
     setNameSaving(true);
     setNameError(null);
+    setNameSaved(false);
     // 클래스 이름은 클래스 설정으로, 강사 이름은 부른 사람 자신의 자리로(#565) 보낸다.
     let failure: { status: number; detail: string } | null = null;
     if (namesPatch?.name !== undefined) {
@@ -569,6 +572,7 @@ export default function ClassSettingsPage() {
       if (!result.ok) failure = result;
     }
     setNameError(failure?.detail ?? null);
+    setNameSaved(failure === null);
     // 실패했는데 다시 읽으면 새로 읽은 값이 적던 칸을 덮는다(#1447 11) — 접근을 잃었는지 볼 때만 읽는다.
     if (reloadAfterNameSave(failure)) reload();
     setNameSaving(false);
@@ -813,7 +817,10 @@ export default function ClassSettingsPage() {
                   id="class-name-input"
                   data-testid="class-name-input"
                   value={classNameDraft}
-                  onChange={(event) => setClassNameDraft(event.target.value)}
+                  onChange={(event) => {
+                    setClassNameDraft(event.target.value);
+                    setNameSaved(false);
+                  }}
                   required
                   maxLength={200}
                   className={INPUT_CLASS}
@@ -827,7 +834,10 @@ export default function ClassSettingsPage() {
                   id="class-instructor-display-name-input"
                   data-testid="class-instructor-display-name-input"
                   value={instructorDisplayName}
-                  onChange={(event) => setInstructorDisplayName(event.target.value)}
+                  onChange={(event) => {
+                    setInstructorDisplayName(event.target.value);
+                    setNameSaved(false);
+                  }}
                   required
                   maxLength={100}
                   className={INPUT_CLASS}
@@ -843,6 +853,9 @@ export default function ClassSettingsPage() {
                   {nameSaving ? "저장하는 중..." : "저장"}
                 </button>
               </div>
+              <p role="status" data-testid="class-names-saved" className="text-[12.5px] text-ink/60">
+                {nameSaved ? "저장했습니다." : ""}
+              </p>
               {nameError ? (
                 <ErrorNote>
                   <span data-testid="class-instructor-display-name-error">{nameError}</span>

@@ -64,6 +64,15 @@ export default function ProblemTemplatePreviewPage() {
   useEffect(() => {
     if (reportDone) reportDoneRef.current?.focus();
   }, [reportDone]);
+  // 신고 칸을 열면 사유 칸으로, 닫으면 신고 단추로 초점을 돌려준다(#1454).
+  const reportReasonRef = useRef<HTMLTextAreaElement>(null);
+  const reportOpenRef = useRef<HTMLButtonElement>(null);
+  const [reportFocus, setReportFocus] = useState<"reason" | "button" | null>(null);
+  useEffect(() => {
+    if (reportFocus === "reason") reportReasonRef.current?.focus();
+    if (reportFocus === "button") reportOpenRef.current?.focus();
+    if (reportFocus) setReportFocus(null);
+  }, [reportFocus, reportOpen]);
   const [reportError, setReportError] = useState<string | null>(null);
 
   const [takingDown, setTakingDown] = useState(false);
@@ -374,6 +383,7 @@ export default function ProblemTemplatePreviewPage() {
                     </label>
                     <textarea
                       id="template-report-reason"
+                      ref={reportReasonRef}
                       data-testid="template-report-reason-input"
                       value={reportReason}
                       onChange={(event) => setReportReason(event.target.value)}
@@ -389,12 +399,29 @@ export default function ProblemTemplatePreviewPage() {
                     >
                       {reportSubmitting ? "접수하는 중..." : "신고하기"}
                     </button>
+                    <button
+                      type="button"
+                      data-testid="template-report-cancel"
+                      onClick={() => {
+                        setReportOpen(false);
+                        setReportError(null);
+                        setReportFocus("button");
+                      }}
+                      disabled={reportSubmitting}
+                      className={buttonClass("secondary")}
+                    >
+                      취소
+                    </button>
                   </form>
                 ) : (
                   <button
                     type="button"
                     data-testid="template-report-open"
-                    onClick={() => setReportOpen(true)}
+                    ref={reportOpenRef}
+                    onClick={() => {
+                      setReportOpen(true);
+                      setReportFocus("reason");
+                    }}
                     className={buttonClass("secondary")}
                   >
                     부적절한 템플릿 신고
