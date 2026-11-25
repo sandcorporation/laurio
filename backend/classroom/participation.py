@@ -28,6 +28,7 @@ from __future__ import annotations
 from django.db.models import Q, QuerySet
 from ninja.errors import HttpError
 
+from .departures import is_left
 from .models import Class, ClassMember, ClassroomSubmission, Problem
 
 #: 강사 전용 엔드포인트가 보관된 클래스에서 거절할 때 쓰는 공통 문구 —
@@ -65,7 +66,7 @@ def participant_membership_blocked_reason(class_obj: Class, member: ClassMember)
     if class_obj.archived_at is not None:
         return SUBMIT_BLOCKED_ARCHIVED
     if member.expelled_at is not None:
-        return SUBMIT_BLOCKED_LEFT if member.left_by_self else SUBMIT_BLOCKED_EXPELLED
+        return SUBMIT_BLOCKED_LEFT if is_left(member) else SUBMIT_BLOCKED_EXPELLED
     return None
 
 
