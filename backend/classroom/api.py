@@ -31,6 +31,8 @@ from django.db import connections, transaction
 from django.db.models import Count, Max
 from django.http import HttpRequest, StreamingHttpResponse
 from django.utils import timezone
+from notifications.models import NotificationType
+from notifications.services import notify_safely
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -2176,6 +2178,12 @@ def expel_class_member(member: ClassMember) -> ClassMember:
     if member.expelled_at is None:
         member.expelled_at = timezone.now()
         member.save(update_fields=["expelled_at"])
+        # 처음 내보낼 때만 — 내보내진 사람에게 알린다(#1441-8). 알림이 실패해도 내보내기는 그대로다.
+        notify_safely(
+            recipient=member.user,
+            notification_type=NotificationType.CLASSROOM_MEMBER_EXPELLED,
+            context={"class_id": member.classroom_id, "class_name": member.classroom.name},
+        )
     return member
 
 
