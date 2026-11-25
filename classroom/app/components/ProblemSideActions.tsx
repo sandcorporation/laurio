@@ -85,7 +85,7 @@ export function ProblemSideActions({
         <DeletePanel
           classId={classId}
           problemId={problemId}
-          problem={problem} 
+          problem={problem}
           onCancel={() => {
             setOpen(null);
             // 취소 단추가 사라지며 초점이 BODY 로 떨어지지 않게 연 링크로 되돌린다.

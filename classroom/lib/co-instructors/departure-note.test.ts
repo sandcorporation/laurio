@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { departureNote, departureNotes, parseDeparture, vanishedInstructors } from "./departure-note";
+import { departureNote, departureNotes, parseDeparture, rosterChangeNote, vanishedInstructors } from "./departure-note";
 
 describe("departure note", () => {
   it("떠남과 내보냄을 가른다", () => {
@@ -23,5 +23,19 @@ describe("departure note", () => {
     expect(departureNotes(vanished, new Map([[1, { coInstructorId: 1, displayName: "가", left: true }]]))).toBe(
       "가님이 클래스를 떠났습니다",
     );
+  });
+});
+
+describe("rosterChangeNote", () => {
+  it("떠남과 초대 수락이 한 응답에 같이 오면 한 문장으로 모은다", () => {
+    expect(rosterChangeNote("가님이 클래스를 떠났습니다", ["나"])).toEqual({
+      kind: "departed",
+      text: "가님이 클래스를 떠났습니다. 나 님이 초대를 수락했습니다",
+    });
+  });
+  it("하나만 오면 그 종류 그대로", () => {
+    expect(rosterChangeNote("", ["나", "다"])).toEqual({ kind: "accepted", text: "나, 다 님이 초대를 수락했습니다" });
+    expect(rosterChangeNote("가님이 클래스를 떠났습니다", [])).toEqual({ kind: "departed", text: "가님이 클래스를 떠났습니다" });
+    expect(rosterChangeNote("", [])).toBeNull();
   });
 });

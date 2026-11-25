@@ -29,3 +29,16 @@ export function departureNotes(vanished: Array<{ id: number; name: string }>, de
     })
     .join(". ");
 }
+
+/** 한 명단 응답의 변경(떠남·내보냄 문구와 초대로 들어온 이름)을 한 안내로 모은다 — 둘이 같이 오면 한 문장이다.
+ *  안내 칸은 하나씩만 남아 둘을 따로 알리면 뒤의 것이 앞의 것을 지운다. */
+export function rosterChangeNote(
+  departedText: string,
+  joinedNames: string[],
+): { kind: "departed" | "accepted"; text: string } | null {
+  const accepted = joinedNames.length > 0 ? `${joinedNames.join(", ")} 님이 초대를 수락했습니다` : "";
+  if (departedText && accepted) return { kind: "departed", text: `${departedText}. ${accepted}` };
+  if (departedText) return { kind: "departed", text: departedText };
+  if (accepted) return { kind: "accepted", text: accepted };
+  return null;
+}

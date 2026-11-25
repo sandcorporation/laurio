@@ -77,10 +77,21 @@ function ClassDetail() {
   const pendingTransferId = ready?.pending_ownership_transfer?.id ?? null;
   const hasPastTransferNote = justTookOver || justDeclined || ownershipTaken !== null;
   const lastPendingTransferId = useRef(pendingTransferId);
+  // 지난 안내를 걷을 때 초점이 그 안(안내 자체·「채점 키 넣기」)에 있으면 BODY 로 떨어진다 — 걷기 직전에 다음 자리로 옮긴다.
+  // 새 요청 카드가 있으면 그 카드, 없으면 제목. 초점이 안내 밖이면 건드리지 않는다.
+  const pastNotesRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const offerRef = useRef<HTMLElement>(null);
+  function keepFocusBeforeDroppingNotes() {
+    const active = document.activeElement;
+    if (active === null || !pastNotesRef.current?.contains(active)) return;
+    (offerRef.current ?? titleRef.current)?.focus();
+  }
   useEffect(() => {
     if (lastPendingTransferId.current === pendingTransferId) return;
     lastPendingTransferId.current = pendingTransferId;
     if (pendingTransferId === null) return;
+    keepFocusBeforeDroppingNotes();
     setJustTookOver(false);
     setJustDeclined(false);
     setOwnershipTaken(null);
@@ -88,6 +99,7 @@ function ClassDetail() {
   useEffect(() => {
     if (!hasPastTransferNote) return;
     const timer = window.setTimeout(() => {
+      keepFocusBeforeDroppingNotes();
       setJustTookOver(false);
       setJustDeclined(false);
       setOwnershipTaken(null);
@@ -112,7 +124,6 @@ function ClassDetail() {
   const previousOffer = useRef(false);
   // 나에게 온 요청이 나타났을 때(열어 둔 채 신호로 오거나 처음 열 때) — 초점이 아무 데도 없으면 카드로 가서 읽히고,
   // 다른 곳에 있으면 초점을 빼앗지 않고 늘 있는 상태 영역이 읽어 준다(#1490).
-  const offerRef = useRef<HTMLElement>(null);
   const [offerArrived, setOfferArrived] = useState("");
   useEffect(() => {
     if (ready === null) return;
@@ -121,7 +132,7 @@ function ClassDetail() {
     if (offerOpen && !wasOpen) {
       setOfferEnd("");
       const active = document.activeElement;
-      if (active === null || active === document.body) {
+      if (active === null || active === document.body || active === offerRef.current) {
         offerRef.current?.focus();
         setOfferArrived("");
       } else {
@@ -152,7 +163,6 @@ function ClassDetail() {
   const pickerOpener = useRef<HTMLElement | null>(null);
 
   // 삭제 뒤 이동처럼 초점이 갈 곳 없이 body 에 있을 때만 제목이 받는다(#1517) — 다른 곳의 초점은 빼앗지 않는다.
-  const titleRef = useRef<HTMLHeadingElement>(null);
   const classReady = classState.status === "ready";
   useEffect(() => {
     if (classReady && document.activeElement === document.body) titleRef.current?.focus();
@@ -256,6 +266,7 @@ function ClassDetail() {
             />
           </div>
         ) : null}
+        <div ref={pastNotesRef} className="contents">
         {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote classId={classId} /> : null}
         {justDeclined && !classroom.pending_ownership_transfer?.recipient_is_me ? <OwnershipTransferDeclinedNote /> : null}
         {ownershipTaken !== null && classroom.role !== "owner" ? (
@@ -264,6 +275,7 @@ function ClassDetail() {
             afterCancelAttempt={ownershipTaken.afterCancelAttempt}
           />
         ) : null}
+        </div>
 
         <JoinLinkStrip
           joinCode={classroom.join_code}
