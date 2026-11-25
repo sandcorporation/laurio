@@ -214,7 +214,7 @@ def import_template(request, share_code: str, payload: ImportTemplateIn):
     target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True, owner=False).class_obj
 
     problem = import_problem_template(template, target_class)
-    return 201, _serialize_problem(problem, target_class)
+    return 201, _serialize_problem(problem, target_class, viewer_id=request.auth_user.id)
 
 
 @router.post(

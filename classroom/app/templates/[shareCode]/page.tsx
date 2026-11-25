@@ -4,7 +4,7 @@
 // 이미 보장한다 — `/join/[code]`와 달리 needsLogin 분기가 없다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
@@ -59,6 +59,11 @@ export default function ProblemTemplatePreviewPage() {
   const [reportReason, setReportReason] = useState("");
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportDone, setReportDone] = useState(false);
+  // 신고 폼이 접수 안내로 바뀌면 누른 단추가 사라진다 — 초점을 안내로 옮겨 낭독기가 결과를 읽게 한다(#1447 2-1).
+  const reportDoneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (reportDone) reportDoneRef.current?.focus();
+  }, [reportDone]);
   const [reportError, setReportError] = useState<string | null>(null);
 
   const [takingDown, setTakingDown] = useState(false);
@@ -352,9 +357,16 @@ export default function ProblemTemplatePreviewPage() {
               <CardHeader title="신고" />
               <div className="flex flex-col gap-2.5 p-4">
                 {reportDone ? (
-                  <Note>
-                    <span data-testid="template-report-done">신고가 접수되었습니다. 운영자가 확인합니다.</span>
-                  </Note>
+                  <div
+                    ref={reportDoneRef}
+                    role="status"
+                    tabIndex={-1}
+                    className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
+                  >
+                    <Note>
+                      <span data-testid="template-report-done">신고가 접수되었습니다. 운영자가 확인합니다.</span>
+                    </Note>
+                  </div>
                 ) : reportOpen ? (
                   <form onSubmit={handleReport} className="flex flex-col gap-2.5">
                     <label htmlFor="template-report-reason">

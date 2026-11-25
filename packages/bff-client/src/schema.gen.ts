@@ -10096,6 +10096,11 @@ export interface components {
          */
         PublishedTemplateSummaryOut: {
             /**
+             * Can Take Down
+             * @default false
+             */
+            can_take_down: boolean;
+            /**
              * Created At
              * Format: date-time
              */

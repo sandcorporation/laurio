@@ -170,7 +170,7 @@ def _problem_summary(screen: dict) -> dict:
 
 def _list_problems(grant: ConnectedApp, arguments: dict) -> dict:
     class_obj = class_scope(_class_id(arguments), grant.instructor_id, write=False, owner=False).class_obj
-    return {"problems": [_problem_summary(p) for p in _as_screen_json(_serialize_problem_list(class_obj))]}
+    return {"problems": [_problem_summary(p) for p in _as_screen_json(_serialize_problem_list(class_obj, viewer_id=grant.instructor_id))]}
 
 
 def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
@@ -178,7 +178,7 @@ def _get_problem(grant: ConnectedApp, arguments: dict) -> dict:
     problem = scope.problem
     estimate = scoring_cost_estimate(scope.class_obj, problem)
     return {
-        **_as_screen_json(_serialize_problem(problem, scope.class_obj)),
+        **_as_screen_json(_serialize_problem(problem, scope.class_obj, viewer_id=grant.instructor_id)),
         "scoring_cost_estimate": _cost_summary(
             estimate, problem.effective_model(), problem.effective_reasoning_effort()
         ),
