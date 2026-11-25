@@ -26,7 +26,7 @@ import {
   type CertificateOut,
   type CertificateTextIn,
 } from "@/lib/certificates/types";
-import { useDialogFocus } from "@/app/components/use-dialog-focus";
+import { useDialogFocus } from "@codemit/bff-client/dialog-focus";
 import { buttonClass } from "@/lib/ui/classnames";
 
 import { CertificateFields } from "./certificate-fields";
@@ -73,7 +73,7 @@ function ConfirmDialog({
   onDismiss: () => void;
   returnTo: () => HTMLElement | null;
   /** 연 단추(클릭의 currentTarget) — 초점 없이 열려도 닫으면 여기로 돌아온다. */
-  opener: HTMLElement | null;
+  opener?: HTMLElement | null;
   children: ReactNode;
   dismissLabel?: string;
   actions: ReactNode;
@@ -118,8 +118,8 @@ export default function ContestCertificatesPage() {
   const [pickResult, setPickResult] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [cancelling, setCancelling] = useState<number | null>(null);
-  // 확인창을 연 단추 — 낭독기 활성화·일부 터치는 초점을 옮기지 않아 activeElement 로는 돌아갈 곳을 모른다.
-  const [confirmOpener, setConfirmOpener] = useState<HTMLElement | null>(null);
+  // 취소창을 연 단추 — 낭독기 활성화·일부 터치는 초점을 옮기지 않아 activeElement 로는 돌아갈 곳을 모른다.
+  // (발급창은 돌아갈 곳이 늘 발급 단추라 fallback 이 대신한다.)
   const [cancelOpener, setCancelOpener] = useState<HTMLElement | null>(null);
   // 묶어 받을 발급된 상장 id. 비어 있으면 받을 수 있는 것 전부를 받는다.
   const [bundlePicked, setBundlePicked] = useState<ReadonlySet<number>>(new Set());
@@ -474,7 +474,6 @@ export default function ContestCertificatesPage() {
             <ConfirmDialog
               testId="certificates-confirm"
               label="상장 발급 확인"
-              opener={confirmOpener}
               onDismiss={() => setConfirming(false)}
               returnTo={() =>
                 document.querySelector<HTMLElement>('[data-testid="certificates-issue"]') ?? focusIssuedHeading()
@@ -502,10 +501,7 @@ export default function ContestCertificatesPage() {
                 type="button"
                 className={buttonClass("primary")}
                 disabled={busy}
-                onClick={(event) => {
-                  setConfirmOpener(event.currentTarget);
-                  setConfirming(true);
-                }}
+                onClick={() => setConfirming(true)}
                 data-testid="certificates-issue"
               >
                 {picked.length}장 발급

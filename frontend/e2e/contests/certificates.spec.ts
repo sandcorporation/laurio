@@ -287,6 +287,22 @@ for (const how of ["Escape", "돌아가기 단추"] as const) {
   });
 }
 
+// 390px(터치 폭)에서도 같다 — 초점 없이 연 취소창을 Escape 로 닫으면 초점이 취소 단추에 있다(#1518 ③).
+test("390px 에서 초점 없이 연 취소 확인창을 Escape 로 닫으면 초점이 취소 단추에 있다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openBoard(page, 1);
+  const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+  const opener = row.getByRole("button", { name: "취소", exact: true });
+  await opener.evaluate((el) => (el as HTMLElement).blur());
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await opener.dispatchEvent("click");
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
 test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기·다시 발급이 꺼진다", async ({ page }) => {
   await establishDeveloperSession(page, seeded.judging.sponsor_login_seed, null);
   const { id } = seeded.judging;
