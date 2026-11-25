@@ -7,7 +7,7 @@ import { useState } from "react";
 
 import { Badge } from "@/app/components/ui";
 import { DEFAULT_MODEL_UNAVAILABLE_ID, defaultModelGroupDescribedBy } from "@/lib/problems/model-rejection-description";
-import { findCostRow, modelCostCell } from "@/lib/scoring/cost";
+import { findCostRow, modelCostBasis, modelCostCell } from "@/lib/scoring/cost";
 import type { ScoringModelRow } from "@/lib/scoring/use-scoring-models";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 
@@ -62,6 +62,7 @@ export function DefaultModelTable({
         // 줄이 그 어림을 쓴다. OpenAI 키는 모델마다 줄이 있다.
         const row = estimate === null ? null : estimate.unit === "tokens" ? (estimate.rows[0] ?? null) : findCostRow(estimate, model.id, reasoningEffort);
         const cost = estimate === null ? "—" : modelCostCell(estimate, row);
+        const basis = estimate === null ? null : modelCostBasis(estimate);
         const prefix = estimate?.unit === "tokens" || isSelected ? "시도 1건 " : "";
         return (
           <label
@@ -93,6 +94,11 @@ export function DefaultModelTable({
             >
               {prefix}
               {cost}
+              {basis ? (
+                <span data-testid={`scoring-model-basis-${model.id}`} className="block text-[11px] text-ink/45">
+                  {basis}
+                </span>
+              ) : null}
             </span>
           </label>
         );
