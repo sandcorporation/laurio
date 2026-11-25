@@ -24,6 +24,7 @@ from ninja.errors import HttpError
 
 from core.contest_catalog import ContestSource, contest_catalog
 
+from .events import publish_problems_changed
 from .models import ChecklistItem, Class, Problem
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,8 @@ def import_contest_problem(class_obj: Class, contest_id: int) -> Problem:
             contest_id=source.contest_id,
         )
         _apply_source(problem, source)
+        # 들여온 문제는 초안이라 강사 화면만 바뀐다(#1471 ⑦).
+        publish_problems_changed(class_obj, participants_see_it=False)
     return problem
 
 
@@ -83,10 +86,14 @@ def sync_contest_problem(problem: Problem, source: ContestSource | None = None) 
     if source is None:
         return
     with transaction.atomic():
-        _apply_source(problem, source)
+        if _apply_source(problem, source):
+            # 원본을 따라 제목·설명·체크리스트가 바뀌었다 — 그 클래스의 열린 화면이 다시 읽는다(#1471 ⑦).
+            publish_problems_changed(problem.classroom, participants_see_it=problem.status != Problem.Status.DRAFT)
 
 
-def _apply_source(problem: Problem, source: ContestSource) -> None:
+def _apply_source(problem: Problem, source: ContestSource) -> bool:
+    """바뀐 것이 있으면 참."""
+
     update_fields = []
     title = source.title[:200]
     if problem.title != title:
@@ -95,6 +102,7 @@ def _apply_source(problem: Problem, source: ContestSource) -> None:
     if problem.description != source.description:
         problem.description = source.description
         update_fields.append("description")
+    changed = bool(update_fields)
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
 
@@ -117,13 +125,17 @@ def _apply_source(problem: Problem, source: ContestSource) -> None:
                 order=index,
                 contest_requirement_id=requirement.requirement_id,
             )
+            changed = True
         elif (item.label, item.grade, item.points, item.hidden, item.order) != wanted:
             item.label, item.grade, item.points, item.hidden, item.order = wanted
             item.save(update_fields=["label", "grade", "points", "hidden", "order"])
+            changed = True
         kept.add(requirement.requirement_id)
     for requirement_id, item in existing.items():
         if requirement_id not in kept:
             item.delete()
+            changed = True
+    return changed
 
 
 def on_contest_source_changed(sender, contest_id: int, **kwargs) -> None:

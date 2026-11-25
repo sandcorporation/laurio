@@ -206,3 +206,83 @@ test("공동 강사가 참여자 탭을 연 채로 소유자가 참여자를 내
   await expect(page.getByTestId(`participant-row-${aliceId}-expelled-badge`)).toBeVisible();
   await expect(page.getByTestId("class-stat-members")).toContainText("0");
 });
+
+// #1471 ⑦ 후속 2 — 문제 쓰기(만들기·가져오기·고치기·지우기·순서·체크리스트)도 강사에게 instructors-changed, 참여자에게
+// 보이는 문제면 participation-changed 로 온다. 화면 하나씩: 강사 격자의 열, 참여자 문제 목록의 줄.
+test("공동 강사가 참여자 탭을 연 채로 소유자가 초안 문제를 만들면 그 열이 「초안」으로 생긴다", async ({ page, browser }) => {
+  const seed = `rt-roster-newcol-${test.info().workerIndex}-${Date.now()}`;
+  const { owner, classId } = await coInstructorScene(page, browser, seed);
+
+  await openParticipantsTab(page, classId);
+  await expect(page.getByTestId(/^participants-header-problem-\d+$/)).toHaveCount(1);
+
+  const created = await owner.api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+    data: { title: "새 초안", submission_formats: ["repository"] },
+  });
+  expect(created.ok()).toBeTruthy();
+  const draftId = (await created.json()).id as number;
+  await owner.context.close();
+
+  await expect(page.getByTestId(`participants-header-problem-${draftId}-draft-badge`)).toHaveText("초안");
+  await expect(page.getByTestId(/^participants-header-problem-\d+$/)).toHaveCount(2);
+});
+
+test("참여자가 문제 목록을 연 채로 강사가 문제를 바로 열어 만들면 그 줄이 생긴다", async ({ page, browser }) => {
+  const seed = `rt-mine-newrow-${test.info().workerIndex}-${Date.now()}`;
+  const owner = await otherSession(browser, `${seed}-owner`);
+  const { api: ownerApi, classId, joinCode } = await setUpClass(owner.page, seed);
+  await establishClassroomSession(page, seed);
+  expect((await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "앨리스" } })).ok()).toBeTruthy();
+
+  const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
+  await page.goto(`/classes/${classId}/problems/mine`);
+  await stream;
+  await expect(page.getByTestId(/^my-problem-row-\d+$/)).toHaveCount(1);
+  // TEST-WAIT-EXCEPTION: 재연결 재조회가 있을지 없을지 모르는 상태에서 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
+
+  const created = await ownerApi.post(`/api/backend/classroom/classes/${classId}/problems`, {
+    data: {
+      title: "바로 연 문제",
+      submission_formats: ["repository"],
+      open: true,
+      checklist_items: [{ label: "통과 조건", required: true }],
+    },
+  });
+  expect(created.ok()).toBeTruthy();
+  const openedId = (await created.json()).id as number;
+  await owner.context.close();
+
+  await expect(page.getByTestId(`my-problem-row-${openedId}`)).toContainText("바로 연 문제");
+  await expect(page.getByTestId(/^my-problem-row-\d+$/)).toHaveCount(2);
+});
+
+// #1484 ③ — 참여자 행이 있는 강사는 보관 한 번에 participation-changed·instructors-changed 를 함께 받는다. 열어 둔
+// 제출 화면은 그 둘을 한 번의 재조회로 받는다.
+test("참여자 행이 있는 강사가 제출 화면을 연 채로 클래스가 보관되면 내 시도를 한 번만 다시 읽는다", async ({ page }) => {
+  const seed = `rt-archive-once-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const { api, classId, joinCode } = await setUpClass(page, seed);
+  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "김소유" } })).ok()).toBeTruthy();
+  const problems = (await (await api.get(`/api/backend/classroom/classes/${classId}/problems`)).json()) as { id: number }[];
+  const mine = `/api/backend/classroom/classes/${classId}/problems/${problems[0].id}/mine`;
+  let reads = 0;
+  page.on("response", (response) => {
+    if (response.request().method() === "GET" && new URL(response.url()).pathname === mine) reads += 1;
+  });
+
+  const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
+  await page.goto(`/classes/${classId}/problems/${problems[0].id}/submit`);
+  await stream;
+  // TEST-WAIT-EXCEPTION: 재연결 재조회가 있을지 없을지 모르는 상태에서 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
+  const before = reads;
+  const reread = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === mine);
+
+  expect((await api.post(`/api/backend/classroom/classes/${classId}/archive`)).ok()).toBeTruthy();
+
+  await reread;
+  // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
+  expect(reads - before).toBe(1);
+});

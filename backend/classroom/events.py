@@ -135,3 +135,14 @@ def publish_participation_changed(class_id: int, *, member_user_ids=None) -> Non
     payload = {"class_id": class_id}
     for recipient_id in set(member_user_ids):
         publish_after_commit(Event(kind=PARTICIPATION_CHANGED, recipient_id=recipient_id, payload=payload))
+
+
+def publish_problems_changed(class_obj, *, participants_see_it: bool) -> None:
+    """문제 목록·격자 열이 바뀌었다 — 만들기·가져오기·복사·고치기·지우기·순서, 체크리스트 항목(#1471 ⑦).
+    그 클래스 강사 전원에게 `instructors-changed`(클래스 머리·격자·문제 목록이 다시 읽는다), 참여자에게 보이는
+    문제(초안이 아닌 것)가 바뀌었으면 살아 있는 참여자에게 `participation-changed`(문제 목록·제출 화면이 다시
+    읽는다)도 보낸다. 본문은 `class_id`(강사 신호는 변경 번호 `rev` 도, #1484 ④)다."""
+
+    publish_instructors_changed(class_obj)
+    if participants_see_it:
+        publish_participation_changed(class_obj.id)
