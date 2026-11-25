@@ -199,6 +199,8 @@ function ClassAttempts() {
   const [startedNote, setStartedNote] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  // 금액을 기다리는 동안에도 초점이 돌아갈 곳 — 로딩 단계부터 연 단추를 기억한다(#1503 ④).
+  const regradeOpener = useRef<HTMLElement | null>(null);
 
   useClassroomTabTitle({
     screenName: "제출",
@@ -206,9 +208,18 @@ function ClassAttempts() {
   });
 
   function open(attempt: ClassAttemptRow) {
+    regradeOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setFailed(false);
     setStartedNote("");
     setTarget(attempt);
+  }
+
+  // 그만둘 때 초점을 먼저 옮긴다 — 「취소」 단추가 사라지며 초점이 body 로 빠지지 않게. 연 단추가 없으면 제목.
+  function cancelRegrade() {
+    const back = regradeOpener.current;
+    regradeOpener.current = null;
+    (back?.isConnected ? back : titleRef.current)?.focus();
+    setTarget(null);
   }
 
   async function confirm() {
@@ -331,7 +342,7 @@ function ClassAttempts() {
           attempt={target}
           busy={busy}
           failed={failed}
-          onCancel={() => setTarget(null)}
+          onCancel={cancelRegrade}
           onConfirm={confirm}
           fallbackFocus={() => titleRef.current}
         />
