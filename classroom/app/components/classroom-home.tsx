@@ -258,13 +258,15 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
                 caption="통과"
                 plain
               />
-              {/* 내보내진 사람은 새로 풀 수 없다 — 지난 시도를 읽는 길만 남긴다. */}
+              {/* 내보내진 사람·보관된 클래스는 새로 풀 수 없다 — 지난 시도를 읽는 길만 남긴다(#1507 B).
+                  같은 글자의 링크가 줄마다 있으니 접근성 이름에 클래스 이름을 담는다(#1507 C, #1492-4 와 같은 꼴). */}
               <Link
                 href={href}
                 data-testid={`classroom-joined-row-${classroom.id}-solve`}
+                aria-label={`${classroom.expelled || classroom.archived ? "지난 시도 보기" : "문제 풀기"} ${classroom.name}`}
                 className={buttonClass("secondary", "sm")}
               >
-                {classroom.expelled ? "지난 시도 보기" : "문제 풀기"}
+                {classroom.expelled || classroom.archived ? "지난 시도 보기" : "문제 풀기"}
               </Link>
             </li>
           );

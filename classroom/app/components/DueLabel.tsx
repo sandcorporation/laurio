@@ -31,8 +31,19 @@ export function DueInline({ problem, testId }: { problem: DueFields; testId: str
 
 /** 참여자 문제 목록 — 권장 100px · 마감 150px 고정 폭, 왼쪽 정렬. 앞뒤 글자 길이와 무관하게 같은 x 에 선다.
  *  좁은 폭(<sm)에서는 칸 폭을 풀고 행(`flex-wrap`) 맨 아래 한 줄로 내려 제목 아래에 선다(#1440) — 표시할 기한이 없으면 줄도 없다. */
-export function DueCells({ problem, passed, testId }: { problem: DueFields; passed: boolean; testId: string }) {
-  const { recommended, due } = describeDue(problem, { passed });
+export function DueCells({
+  problem,
+  passed,
+  testId,
+  archived = false,
+}: {
+  problem: DueFields;
+  passed: boolean;
+  testId: string;
+  /** 보관된 클래스 — 재촉하는 표시(「곧 마감」·붉은 「마감 지남」)를 끈다(#1507 B). */
+  archived?: boolean;
+}) {
+  const { recommended, due } = describeDue(problem, { passed, archived });
   return (
     <span
       data-testid={`${testId}-due-line`}
