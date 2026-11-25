@@ -13,7 +13,7 @@
 // **이 티켓은 조각을 세우기만 한다.** 기존 화면을 이 조각으로 옮기는 것은
 // 다음 티켓들(#368·#369)의 몫이다.
 import { createElement } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 import {
   INPUT_CLASS,
@@ -42,7 +42,10 @@ export function PageHeader({
   description,
   actions,
   headingLevel = "h1",
+  titleRef,
 }: {
+  /** 화면이 어떤 동작 뒤 초점을 제목으로 옮겨야 할 때 쓴다 — 주면 `tabIndex=-1` 이 붙는다(강의실과 같다). */
+  titleRef?: Ref<HTMLHeadingElement>;
   eyebrow?: string;
   title: string;
   /** 화면의 제목은 `h1` 하나여야 한다 — 테스트가 잡을 자리를 여기로 준다. */
@@ -60,7 +63,11 @@ export function PageHeader({
         {eyebrow ? <div className="text-xs tracking-wide text-ink/45">{eyebrow}</div> : null}
         {createElement(
           headingLevel,
-          { className: "text-2xl font-semibold tracking-tight", "data-testid": titleTestId },
+          {
+            className: `text-2xl font-semibold tracking-tight${titleRef ? " outline-none" : ""}`,
+            "data-testid": titleTestId,
+            ...(titleRef ? { ref: titleRef, tabIndex: -1 } : {}),
+          },
           title,
         )}
         {description ? <p className="text-sm leading-relaxed text-ink/60">{description}</p> : null}

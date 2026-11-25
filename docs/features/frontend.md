@@ -439,6 +439,13 @@ Tailwind 스캔은 `feedback.css` 를 `globals.css` 가 들인다.
 (`lib/auth/sibling-origins.ts`, #297 후속)으로 검증해 우리 형제 오리진일 때만
 보여준다 — 임의의 값이나 설정에 없는 오리진이면 조용히 그 링크만 없다.
 
+**돌아가기는 떠난 화면으로 간다**(#1478 5) — 강의실이 `from_path`(경로·쿼리)도 싣고,
+`resolveSiblingReturnUrl` 이 허용 오리진 **안의 같은 출처 경로**일 때만 이어 붙인다.
+`//`·절대 주소·`javascript:`·역슬래시·제어 문자는 오리진 첫 화면으로 떨어진다. 탈퇴 화면으로도 이어진다.
+
+**모든 화면의 탭 제목에 화면 이름이 있다**(#1478 4, 「알림 · Codemit」) — 서버 화면은 `metadata`,
+클라이언트 화면은 옆의 `layout.tsx` 가 단다. `lib/rendering/tab-title-coverage.test.ts` 가 새 화면의 누락을 막는다.
+
 ## `/console/withdraw` 탈퇴
 
 **막는 것이 먼저다.** 진행 중인 공모전이나 미지급 상태, 또는 보관하지 않은 클래스가

@@ -1,3 +1,5 @@
+import { isSafeNextPath } from "./next-path";
+
 // 우리 형제 오리진 목록 (#297 후속). 로그인은 공개 앱 하나에만 있고(ADR-0038)
 // 강의실은 거기로 사람을 보낸다. 로그인이 끝나면 **원래 있던 곳으로** 돌아와야
 // 하는데, `next` 는 같은 오리진 상대 경로만 허용하므로(lib/auth/next-path.ts)
@@ -43,4 +45,22 @@ export function resolveSiblingOrigin(candidate: string | null | undefined): stri
   const normalized = normalizeOrigin(candidate);
   if (normalized === null) return null;
   return configuredSiblingOrigins().includes(normalized) ? normalized : null;
+}
+
+/**
+ * 돌아가기 주소 — 허용 오리진 **안의** 경로까지 이어 준다(#1478 5).
+ *
+ * 오리진이 허용목록과 맞지 않으면 null. 경로(`from_path`)는 같은 출처 경로(`isSafeNextPath`)이고 제어 문자가
+ * 없을 때만 붙고, 아니면 오리진 첫 화면으로 떨어진다(열린 리다이렉트 방지). 최종 주소는 문자열을 이어 붙이지 않고
+ * `URL` 로 풀어, 결과의 오리진이 허용 오리진 그대로인지 한 번 더 본다.
+ */
+export function resolveSiblingReturnUrl(
+  origin: string | null | undefined,
+  path: string | null | undefined,
+): string | null {
+  const allowed = resolveSiblingOrigin(origin);
+  if (allowed === null) return null;
+  if (!path || /[\u0000-\u001f\u007f\\]/.test(path) || !isSafeNextPath(path)) return allowed;
+  const resolved = new URL(path, allowed);
+  return resolved.origin === allowed ? resolved.toString() : allowed;
 }

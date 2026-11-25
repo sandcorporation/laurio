@@ -32,6 +32,7 @@ import { UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { AFTER_LOGOUT_PATH } from "@/lib/auth/logout";
+import { withFromPath } from "@/lib/auth/return-link";
 import { useMe } from "@/lib/auth/use-me";
 
 import { buttonClass } from "./ui";
@@ -109,7 +110,7 @@ export function AccountMenuClient({
             className="absolute right-0 z-20 mt-1.5 flex w-44 flex-col border border-rule bg-surface text-[13px]"
           >
             <a
-              href={profileUrl}
+              href={withFromPath(profileUrl, `${window.location.pathname}${window.location.search}`)}
               data-testid="account-menu-profile-link"
               className="px-3 py-2 text-ink hover:bg-paper"
             >
