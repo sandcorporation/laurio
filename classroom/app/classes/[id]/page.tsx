@@ -75,7 +75,8 @@ function ClassDetail() {
   const currentRole = ready?.role ?? null;
   // 지난 소유권 안내(넘겨받음·거절·넘어감)는 새 이전 요청이 걸리면 걷고, 아무 일 없어도 낭독기가 읽을 시간 뒤 걷는다(#1517 취향 1).
   const pendingTransferId = ready?.pending_ownership_transfer?.id ?? null;
-  const hasPastTransferNote = justTookOver || justDeclined || ownershipTaken !== null;
+  // 「넘겨받았습니다」에는 할 일(채점 키 넣기)이 들어 있다 — 시간으로 걷지 않는다. 새 요청이 오거나 닫을 때만 걷힌다(#1528 A).
+  const hasTimedTransferNote = justDeclined || ownershipTaken !== null;
   const lastPendingTransferId = useRef(pendingTransferId);
   // 지난 안내를 걷을 때 초점이 그 안(안내 자체·「채점 키 넣기」)에 있으면 BODY 로 떨어진다 — 걷기 직전에 다음 자리로 옮긴다.
   // 새 요청 카드가 있으면 그 카드, 없으면 제목. 초점이 안내 밖이면 건드리지 않는다.
@@ -97,15 +98,25 @@ function ClassDetail() {
     setOwnershipTaken(null);
   }, [pendingTransferId]);
   useEffect(() => {
-    if (!hasPastTransferNote) return;
+    if (!hasTimedTransferNote) return;
     const timer = window.setTimeout(() => {
       keepFocusBeforeDroppingNotes();
-      setJustTookOver(false);
       setJustDeclined(false);
       setOwnershipTaken(null);
     }, 20_000);
     return () => window.clearTimeout(timer);
-  }, [hasPastTransferNote, justTookOver, justDeclined, ownershipTaken]);
+  }, [hasTimedTransferNote, justDeclined, ownershipTaken]);
+  // 다른 사람(소유자)이 클래스를 보관·해제하면 머리 배지만 바뀐다 — 낭독기에 한 번 알린다(#1528 C). 초점은 건드리지 않는다.
+  const archivedNow = ready?.archived ?? null;
+  const previousArchived = useRef<boolean | null>(null);
+  const [archivedNote, setArchivedNote] = useState("");
+  useEffect(() => {
+    if (archivedNow === null) return;
+    if (previousArchived.current !== null && previousArchived.current !== archivedNow) {
+      setArchivedNote(archivedNow ? "클래스가 보관됐습니다" : "클래스 보관이 해제됐습니다");
+    }
+    previousArchived.current = archivedNow;
+  }, [archivedNow]);
   useEffect(() => {
     if (ready === null) return;
     if (previousRole.current === "owner" && currentRole !== "owner") {
@@ -240,6 +251,9 @@ function ClassDetail() {
         >
           {offerEnd}
         </p>
+        <p role="status" data-testid="class-archived-note" className="sr-only">
+          {archivedNote}
+        </p>
         {classroom.pending_ownership_transfer?.recipient_is_me ? (
           <div
             onFocus={() => {
@@ -267,7 +281,13 @@ function ClassDetail() {
           </div>
         ) : null}
         <div ref={pastNotesRef} className="contents">
-        {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote classId={classId} /> : null}
+        {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote
+            classId={classId}
+            onDismiss={() => {
+              titleRef.current?.focus();
+              setJustTookOver(false);
+            }}
+          /> : null}
         {justDeclined && !classroom.pending_ownership_transfer?.recipient_is_me ? <OwnershipTransferDeclinedNote /> : null}
         {ownershipTaken !== null && classroom.role !== "owner" ? (
           <OwnershipTransferTakenNote
