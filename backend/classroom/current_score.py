@@ -135,6 +135,12 @@ def with_current_score(queryset: QuerySet[M], *, path: str = "") -> QuerySet[M]:
     return queryset.select_related(f"{path}classroom_score").prefetch_related(current_score_prefetch(path=path))
 
 
+def without_score_prompt(queryset: QuerySet[ClassroomSubmission]) -> QuerySet[ClassroomSubmission]:
+    """판정만 읽는 목록은 원래 점수의 프롬프트를 부르지 않는다 — 제출 소스를 품어 시도마다 수십 KB 다(#819)."""
+
+    return queryset.defer("classroom_score__prompt")
+
+
 def scores_with_current_fields() -> QuerySet[ClassroomScore]:
     """원래 점수 전부에 현재 값을 붙인 쿼리셋 — 집계(가격 대조·실측 평균)가 SQL 안에서 현재 값을 쓰게. 붙는 이름은
     `current_model_version`, `current_prompt_length`, `current_created_at` 이다. 거르기·집계는 이 이름으로만 한다."""

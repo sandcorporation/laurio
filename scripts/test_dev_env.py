@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""`docker/dev-env.sh` 의 CODEMIT_DEV_OFFSET 지정을 고정한다(#1106).
+"""`docker/dev-env.sh` 의 CODEMIT_DEV_OFFSET 지정(#1106)과 해시 칸 고르기(#1409)를 고정한다.
 
 `python3 scripts/test_dev_env.py` 하나로 돈다. 가짜 docker 를 PATH 앞에 둔다.
 """
@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -141,6 +142,84 @@ class DevOffset(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn(str(live), r.stderr)
         self.assertFalse(log.exists())
+
+
+    # ── 해시 분기(#1409) ──────────────────────────────────────────────────────────
+    def stacks(self, owners: dict[str, str]) -> None:
+        """`{프로젝트: working_dir}` 만큼의 컨테이너 라벨을 흉내 낸다 — 목록과 프로젝트별 주인 조회에 답한다."""
+        state = Path(self._tmp.name) / "stacks"
+        state.write_text("".join(f"{p}|{o}\n" for p, o in owners.items()))
+        d = self.bin / "docker"
+        d.write_text(
+            "#!/bin/sh\n"
+            '[ "$1" = ps ] || exit 0\n'
+            'p=; for a in "$@"; do case "$a" in label=com.docker.compose.project=*) p=${a##*=} ;; esac; done\n'
+            f"if [ -n \"$p\" ]; then awk -F'|' -v p=\"$p\" '$1==p{{print $2}}' '{state}'; else cut -d'|' -f1 '{state}'; fi\n"
+        )
+        d.chmod(d.stat().st_mode | stat.S_IEXEC)
+
+    def linked_worktree(self) -> None:
+        """self.script 를 주 워크트리가 아닌 체크아웃의 것으로 바꾼다 — 해시 분기를 탄다."""
+        git = ["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+        self.root = self.root.parent / "linked"
+        subprocess.run([*git, "worktree", "add", "-q", "--detach", str(self.root)], check=True)
+        (self.root / "docker").mkdir()
+        self.script = self.root / "docker" / "dev-env.sh"
+        self.script.write_text(SRC.read_text())
+        (self.root / "docker" / "dev-stack-orphans.sh").write_text((SRC.parent / "dev-stack-orphans.sh").read_text())
+
+    def offset_of(self, r: subprocess.CompletedProcess[str]) -> int:
+        self.assertEqual(r.returncode, 0, r.stderr)
+        found = re.search(r"^export COMPOSE_PROJECT_NAME=codemit-dev-([1-9])$", r.stdout, re.M)
+        assert found, r.stdout
+        return int(found.group(1))
+
+    def hashed(self) -> int:
+        self.linked_worktree()
+        self.stacks({})
+        return self.offset_of(self.run_env(None))
+
+    def test_hash_slot_of_another_checkout_moves_to_next_free_slot(self) -> None:
+        first = self.hashed()
+        second = first % 9 + 1
+        third = second % 9 + 1
+        # dev 스택이든 `-e2e` 스택만 떠 있든(`test.sh e2e`) 남의 칸이다.
+        for suffix in ("", "-e2e"):
+            with self.subTest(suffix=suffix):
+                self.stacks({f"codemit-dev-{first}{suffix}": self.other})
+                r = self.run_env(None)
+                self.assertEqual(self.offset_of(r), second)
+                self.assertIn(self.other, r.stderr)
+        self.stacks({f"codemit-dev-{first}": self.other, f"codemit-dev-{second}-e2e": self.other})
+        self.assertEqual(self.offset_of(self.run_env(None)), third)
+
+    def test_own_slot_is_kept_on_the_next_call(self) -> None:
+        first = self.hashed()
+        second = first % 9 + 1
+        mine = str(self.root / "docker")
+        for suffix in ("", "-e2e"):
+            with self.subTest(suffix=suffix):
+                # 밀려난 칸에 내 라벨이 붙은 뒤, 해시 칸의 남이 내려가 비어도 내 칸에 남는다.
+                self.stacks({f"codemit-dev-{second}{suffix}": mine})
+                self.assertEqual(self.offset_of(self.run_env(None)), second)
+        self.stacks({f"codemit-dev-{first}": mine})
+        self.assertEqual(self.offset_of(self.run_env(None)), first)
+
+    def test_gone_checkout_does_not_hold_a_slot(self) -> None:
+        first = self.hashed()
+        self.stacks({f"codemit-dev-{first}-e2e": "/gone/worktree/docker"})
+        self.assertEqual(self.offset_of(self.run_env(None)), first)
+
+    def test_all_slots_taken_is_refused(self) -> None:
+        self.linked_worktree()
+        self.stacks({f"codemit-dev-{n}{'-e2e' if n % 2 else ''}": self.other for n in range(1, 10)})
+        r = self.run_env(None)
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertNotIn("export ", r.stdout)
+        self.assertIn("false", r.stdout.split())
+        self.assertIn(self.other, r.stderr)
+        self.assertIn("고칠 길", r.stderr)
 
 
 if __name__ == "__main__":

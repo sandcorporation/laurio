@@ -34,6 +34,7 @@ ALLOWLIST: dict[tuple[str, str], str] = {
     ("classroom/models.py", "<module>"): "정정이 원래 점수를 가리킨다(FK).",
     ("classroom/current_score.py", "<module>"): "현재 점수 모듈 자신이다 — 다루는 쿼리셋의 모델 타입.",
     ("classroom/current_score.py", "original_score"): "현재 점수 모듈 자신이다 — 원래 점수 행을 꺼내는 한 자리.",
+    ("classroom/current_score.py", "without_score_prompt"): "현재 점수 모듈 자신이다 — 원래 점수의 프롬프트 칸을 뺀다.",
     ("classroom/current_score.py", "scores_with_current_fields"): "현재 점수 모듈 자신이다 — 원래 점수에 현재 값을 붙인다.",
     ("classroom/api.py", "<module>"): "목록 질의가 불러 둘 칸(프롬프트 빼기·통과 판정 칸만) — 읽기는 `current_score` 로 한다.",
     ("classroom/api.py", "_class_row_stats"): "클래스별 「채점된 시도 수」 — 채점이 한 번 돌았나(원래 점수 유무).",

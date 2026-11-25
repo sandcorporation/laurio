@@ -419,17 +419,32 @@ def _active_member_ids(class_obj: Class) -> set[int]:
 
 def _problem_pass_stats(
     problem: Problem, active_member_ids: set[int], *, submissions=None
-) -> tuple[int, int]:
-    """(passed_count, member_count) — `_problem_stats` 에서 통과 수와 분모만."""
+) -> tuple[int, int, float | None]:
+    """(passed_count, member_count, pass_rate) — `_problem_stats` 에서 「완벽」만 뺀 것."""
 
-    passed_count, _perfect_count, member_count = _problem_stats(problem, active_member_ids, submissions=submissions)
-    return passed_count, member_count
+    passed_count, _perfect_count, member_count, pass_rate = _problem_stats(
+        problem, active_member_ids, submissions=submissions
+    )
+    return passed_count, member_count, pass_rate
+
+
+def _pass_rate(passed_count: int, member_count: int, submissions) -> float | None:
+    """달성률 — 참여자가 없거나 채점된 시도가 하나도 없으면 `None` 이다(#1400): 채점 대기를 0% 로
+    말하지 않는다. 실패 상한의 자동 점수는 채점된 것이 아니다."""
+
+    if not member_count:
+        return None
+    if not passed_count:
+        scores = (current_score(submission) for submission in submissions)
+        if not any(s is not None and s.model_version != PLATFORM_FAILURE_MODEL_VERSION for s in scores):
+            return None
+    return passed_count / member_count
 
 
 def _problem_stats(
     problem: Problem, active_member_ids: set[int], *, submissions=None
-) -> tuple[int, int | None, int]:
-    """(passed_count, perfect_count, member_count) — 분모는 `active_member_ids`의 크기,
+) -> tuple[int, int | None, int, float | None]:
+    """(passed_count, perfect_count, member_count, pass_rate) — 분모는 `active_member_ids`의 크기,
     분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). `perfect_count` 는 그중 한 번이라도
     「완벽」(`Problem.is_score_perfect`, #962)을 받은 사람 수이고, 심화 항목이 없는 문제는 `None` 이다.
     같은 시도 묶음을 한 번 훑어 둘을 함께 센다 — 질의는 늘지 않는다. 매번 지금의
@@ -441,10 +456,7 @@ def _problem_stats(
     checklist_items = list(problem.checklist_items.all())
     has_advanced = Problem.has_advanced_items(checklist_items)
     if not active_member_ids:
-        return 0, (0 if has_advanced else None), 0
-
-    if not any(item.required for item in checklist_items):
-        return 0, (0 if has_advanced else None), member_count
+        return 0, (0 if has_advanced else None), 0, None
 
     if submissions is None:
         submissions = ClassroomSubmission.objects.filter(
@@ -453,7 +465,9 @@ def _problem_stats(
 
     passed_member_ids: set[int] = set()
     perfect_member_ids: set[int] = set()
-    for submission in submissions:
+    # 필수 항목이 없으면 통과할 수 있는 시도가 없다.
+    has_required = any(item.required for item in checklist_items)
+    for submission in submissions if has_required else ():
         if submission.member_id in passed_member_ids and (
             not has_advanced or submission.member_id in perfect_member_ids
         ):
@@ -464,7 +478,12 @@ def _problem_stats(
             if has_advanced and problem.is_score_perfect(score, checklist_items=checklist_items):
                 perfect_member_ids.add(submission.member_id)
 
-    return len(passed_member_ids), (len(perfect_member_ids) if has_advanced else None), member_count
+    return (
+        len(passed_member_ids),
+        (len(perfect_member_ids) if has_advanced else None),
+        member_count,
+        _pass_rate(len(passed_member_ids), member_count, submissions),
+    )
 
 
 # --- 집계 필드 (#632, 시안 v2) ------------------------------------------------
@@ -546,19 +565,22 @@ def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
 
     stats: dict[int, dict] = {}
     for cid in class_ids:
-        rates = []
+        rates: list[float | None] = []
         for problem in problems_by_class[cid]:
             if problem.status != Problem.Status.OPEN:
                 continue
-            passed_count, member_count = _problem_pass_stats(
+            _passed_count, member_count, pass_rate = _problem_pass_stats(
                 problem, active_ids[cid], submissions=submissions_by_problem.get(problem.id, [])
             )
             if member_count:
-                rates.append(passed_count / member_count)
+                rates.append(pass_rate)
+        # 열린 문제 전부에 채점된 시도가 없으면 평균도 비운다. 하나라도 있으면 나머지는
+        # 아직 아무도 못 푼 몫(0)으로 센다(#1400).
+        graded = any(rate is not None for rate in rates)
         stats[cid] = {
             "member_count": len(active_ids[cid]),
             "problem_count": len(problems_by_class[cid]),
-            "average_pass_rate": (sum(rates) / len(rates)) if rates else None,
+            "average_pass_rate": (sum(rate or 0 for rate in rates) / len(rates)) if graded else None,
             "last_submitted_at": last_by_class.get(cid),
             "scored_attempt_count": scored_by_class.get(cid, 0),
         }
@@ -646,7 +668,7 @@ def _serialize_problem(
     last_submitted_at, participant_attempt_count = submission_marks_by_problem.get(problem.id, (None, 0))
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
-    passed_count, perfect_count, member_count = _problem_stats(
+    passed_count, perfect_count, member_count, pass_rate = _problem_stats(
         problem,
         active_member_ids,
         submissions=None if submissions_by_problem is None else submissions_by_problem.get(problem.id, []),
@@ -683,7 +705,7 @@ def _serialize_problem(
         checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
         passed_count=passed_count,
         member_count=member_count,
-        pass_rate=(passed_count / member_count) if member_count else None,
+        pass_rate=pass_rate,
         perfect_count=perfect_count,
         published_template=_published_template_summary(live_template),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
@@ -2269,7 +2291,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
 
     problem_stats = []
     for problem in problems:
-        passed_count, perfect_count, member_count = _problem_stats(problem, active_member_ids)
+        passed_count, perfect_count, member_count, pass_rate = _problem_stats(problem, active_member_ids)
         problem_stats.append(
             ClassroomProblemStatsOut(
                 id=problem.id,
@@ -2277,7 +2299,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 status=problem.status,
                 passed_count=passed_count,
                 member_count=member_count,
-                pass_rate=(passed_count / member_count) if member_count else None,
+                pass_rate=pass_rate,
                 perfect_count=perfect_count,
                 recommended_due_at=problem.recommended_due_at,
                 due_at=problem.due_at,

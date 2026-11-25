@@ -14,6 +14,7 @@ import {
 } from "@/lib/class-templates/api";
 import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import { fetchMyProblemTemplates, takedownProblemTemplate, type ProblemTemplateRow } from "@/lib/problem-templates/api";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type Kind = "problem" | "class";
 
@@ -29,6 +30,7 @@ type ClassState =
 
 export default function MyTemplatesPage() {
   const [kind, setKind] = useState<Kind>("problem");
+  useClassroomTabTitle({ screenName: "내가 올린 템플릿" });
 
   const [problemState, setProblemState] = useState<ProblemState>({ status: "loading" });
   const [classState, setClassState] = useState<ClassState>({ status: "loading" });

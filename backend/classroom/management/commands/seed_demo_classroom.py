@@ -397,7 +397,7 @@ class Command(BaseCommand):
                         "checklist_item_id": item.id,
                         "is_met": passed or not item.required,
                         "reasoning": (
-                            "충족했다." if (passed or not item.required) else "아직 확인되지 않았다."
+                            "확인되었습니다." if (passed or not item.required) else "아직 확인되지 않았습니다."
                         ),
                     }
                     for item in items

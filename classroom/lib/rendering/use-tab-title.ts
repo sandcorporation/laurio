@@ -11,6 +11,16 @@ export function useClassroomTabTitle(parts: ClassroomTabTitleParts): void {
   const { screenName, className, problemTitle } = parts;
 
   useEffect(() => {
-    document.title = buildClassroomTabTitle({ screenName, className, problemTitle });
+    const title = buildClassroomTabTitle({ screenName, className, problemTitle });
+    // 같은 화면 안에서 주소만 바뀌어도(`?tab=`) Next 가 루트 레이아웃의 제목을 다시 써 넣는데, 위 세
+    // 값은 그대로라 이 효과는 다시 돌지 않는다(#1400). 화면이 떠 있는 동안 지켜본다 — Next 의 스트리밍
+    // metadata 는 `<title>` 을 `<body>` 에 넣기도 해서 `<head>` 가 아니라 문서 전체다.
+    const apply = () => {
+      if (document.title !== title) document.title = title;
+    };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
   }, [screenName, className, problemTitle]);
 }

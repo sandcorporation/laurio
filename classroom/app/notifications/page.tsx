@@ -45,7 +45,7 @@ import {
   formatDateTime,
 } from "@/lib/notifications/format";
 import {
-  groupCurrentlyPassed,
+  groupHeaderText,
   groupHref,
   groupNotifications,
   groupUnreadCount,
@@ -57,6 +57,7 @@ import { notificationHref } from "@/lib/notifications/link";
 import { loadNextPage, mergePage, type UpdateList } from "@/lib/notifications/merge";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
 import { useUnreadCount } from "@/lib/notifications/use-unread-count";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 function isNotificationChanged(event: StreamEvent): boolean {
   return event.kind === NOTIFICATION_CHANGED;
@@ -78,6 +79,7 @@ export default function NotificationsPage() {
   // 전부 읽어도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다.
   const unreadCountState = useUnreadCount();
   useSessionRecheck();
+  useClassroomTabTitle({ screenName: "알림" });
 
   useEffect(() => {
     let cancelled = false;
@@ -281,13 +283,10 @@ function NotificationGroupRow({
   }
 
   const latest = group.notifications[0];
-  const currentlyPassed = groupCurrentlyPassed(group);
   const unreadCount = groupUnreadCount(group);
   const testKey = group.problemId ?? group.key;
   const href = groupHref(group);
-  const headerText = `'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제 — 지금 상태 ${
-    currentlyPassed ? "통과" : "미통과"
-  } (시도 ${group.notifications.length}건)`;
+  const headerText = groupHeaderText(group);
   const headerBody = (
     <>
       <p className="text-[13.5px] leading-relaxed">{headerText}</p>

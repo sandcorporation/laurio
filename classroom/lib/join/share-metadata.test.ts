@@ -13,13 +13,13 @@ const base = { class_name: "알고리즘 스터디", open_problem_count: 3, arch
 describe("joinShareMetadata", () => {
   it("열린 문제가 있으면 이름과 문제 수·AI 채점을 한 줄로 싣는다", () => {
     const m = joinShareMetadata(base);
-    expect(m.title).toBe("알고리즘 스터디 — Codemit 클래스");
+    expect(m.title).toBe("알고리즘 스터디 · Codemit");
+    expect(m.openGraph?.title).toBe("알고리즘 스터디 — Codemit 클래스");
     expect(m.description).toBe(
       "열린 문제 3개 · 제출할 때마다 AI가 체크리스트 항목별로 채점합니다",
     );
-    expect(m.openGraph?.title).toBe(m.title);
     expect(m.openGraph?.description).toBe(m.description);
-    expect(m.twitter?.title).toBe(m.title);
+    expect(m.twitter?.title).toBe(m.openGraph?.title);
     expect(m.twitter?.description).toBe(m.description);
     expect((m.openGraph as { type?: string }).type).toBe("website");
     expect((m.twitter as { card?: string }).card).toBe("summary_large_image");
@@ -52,17 +52,17 @@ describe("joinShareMetadata", () => {
 
   it("긴 이름은 상한에서 줄임표로 자르고 접미사는 남긴다", () => {
     const long = "가".repeat(MAX_CLASS_NAME_LENGTH + 30);
-    const title = joinShareMetadata({ ...base, class_name: long }).title as string;
+    const title = joinShareMetadata({ ...base, class_name: long }).openGraph?.title;
     expect(title).toBe(`${"가".repeat(MAX_CLASS_NAME_LENGTH)}… — Codemit 클래스`);
     const exact = "나".repeat(MAX_CLASS_NAME_LENGTH);
-    expect(joinShareMetadata({ ...base, class_name: exact }).title).toBe(
+    expect(joinShareMetadata({ ...base, class_name: exact }).openGraph?.title).toBe(
       `${exact} — Codemit 클래스`,
     );
   });
 
   it("미리보기가 없거나 보관된 클래스면 일반 카드다", () => {
     for (const m of [joinShareMetadata(null), joinShareMetadata({ ...base, archived: true })]) {
-      expect(m.title).toBe(GENERIC_JOIN_TITLE);
+      expect(m.title).toBe("클래스 가입 · Codemit");
       expect(m.description).toBe(LANDING_DESCRIPTION);
       expect(m.openGraph?.title).toBe(GENERIC_JOIN_TITLE);
       expect(m.twitter?.description).toBe(LANDING_DESCRIPTION);

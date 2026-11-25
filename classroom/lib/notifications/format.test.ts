@@ -38,6 +38,15 @@ describe("describeNotification — classroom_submission_scored", () => {
     expect(text).not.toContain("미통과");
   });
 
+  it("늦게 낸 시도는 결과 뒤에 늦음 단계를 붙인다(#1400)", () => {
+    const base = { class_name: "1반", problem_title: "문제", attempt_number: 2, passed: true };
+    expect(describeNotification(row({ context: { ...base, late: "deadline" } }))).toContain("통과 · 마감 기한 뒤.");
+    expect(describeNotification(row({ context: { ...base, late: "recommended" } }))).toContain("통과 · 권장 기한 뒤.");
+    // 늦지 않았거나 늦음 값이 없는 옛 알림은 결과에서 끝난다.
+    expect(describeNotification(row({ context: { ...base, late: null } }))).toMatch(/통과\.$/);
+    expect(describeNotification(row({ context: base }))).toMatch(/통과\.$/);
+  });
+
   it("미통과 결과는 미통과라고 말한다", () => {
     const text = describeNotification(
       row({ context: { class_name: "1반", problem_title: "문제", attempt_number: 1, passed: false } }),

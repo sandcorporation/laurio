@@ -33,6 +33,7 @@ import { useClass } from "@/lib/classes/use-class";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
 import type { InstructorSubmissionRow } from "@/lib/submissions/api";
 import {
+  countTone,
   latestPerMember,
   participantAttempts,
   participantIdsOf,
@@ -57,11 +58,11 @@ function StatBar({ stats, perfect }: { stats: ReturnType<typeof submissionStats>
       key: "passed",
       label: "통과",
       value: `${stats.passed}/${stats.participants ?? "—"}`,
-      tone: "text-success",
+      tone: countTone(stats.passed, "text-success"),
     },
     ...(perfect === null
       ? []
-      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: PERFECT_TEXT_CLASS }]),
+      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: countTone(perfect, PERFECT_TEXT_CLASS) }]),
     { key: "attempts", label: "시도", value: String(stats.attempts) },
     { key: "scoring", label: "채점 중", value: String(stats.scoring) },
     { key: "waiting", label: "채점 대기", value: String(stats.waiting) },

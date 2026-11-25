@@ -12,6 +12,7 @@ import {
   type ConnectedAppRow,
 } from "@/lib/connected-apps/api";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
+import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 
 type State = { status: "loading" } | { status: "error" } | { status: "ready"; apps: ConnectedAppRow[] };
 
@@ -70,6 +71,49 @@ function ConnectAddress({ url }: { url: string }) {
         </ol>
       </div>
     </Card>
+  );
+}
+
+function DisconnectAction({
+  confirming,
+  busy,
+  onAsk,
+  onKeep,
+  onDisconnect,
+}: {
+  confirming: boolean;
+  busy: boolean;
+  onAsk: () => void;
+  onKeep: () => void;
+  onDisconnect: () => void;
+}) {
+  const { triggerRef, keepRef, onKeyDown } = useInlineConfirm(confirming, onKeep);
+  return confirming ? (
+    <div className="flex flex-wrap items-center gap-2" onKeyDown={onKeyDown}>
+      <span className="text-[12.5px] text-ink/60">끊으면 이 앱은 다시 허락받기 전까지 강의실에 닿지 못합니다.</span>
+      <button
+        type="button"
+        className={buttonClass("dangerFilled", "sm")}
+        data-testid="connected-app-disconnect-confirm"
+        disabled={busy}
+        onClick={onDisconnect}
+      >
+        {busy ? "끊는 중…" : "끊기"}
+      </button>
+      <button ref={keepRef} type="button" className={buttonClass("secondary", "sm")} onClick={onKeep} disabled={busy}>
+        그대로 두기
+      </button>
+    </div>
+  ) : (
+    <button
+      ref={triggerRef}
+      type="button"
+      className={buttonClass("danger", "sm")}
+      data-testid="connected-app-disconnect"
+      onClick={onAsk}
+    >
+      끊기
+    </button>
   );
 }
 
@@ -147,36 +191,13 @@ export default function ConnectedAppsPage() {
                     {app.last_used_at ? formatDate(app.last_used_at) : "아직 쓰지 않음"}
                   </span>
                 </div>
-                {confirming === app.id ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[12.5px] text-ink/60">끊으면 이 앱은 다시 허락받기 전까지 강의실에 닿지 못합니다.</span>
-                    <button
-                      type="button"
-                      className={buttonClass("dangerFilled", "sm")}
-                      data-testid="connected-app-disconnect-confirm"
-                      disabled={busy === app.id}
-                      onClick={() => disconnect(app.id)}
-                    >
-                      {busy === app.id ? "끊는 중…" : "끊기"}
-                    </button>
-                    <button
-                      type="button"
-                      className={buttonClass("secondary", "sm")}
-                      onClick={() => setConfirming(null)}
-                    >
-                      그대로 두기
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className={buttonClass("danger", "sm")}
-                    data-testid="connected-app-disconnect"
-                    onClick={() => setConfirming(app.id)}
-                  >
-                    끊기
-                  </button>
-                )}
+                <DisconnectAction
+                  confirming={confirming === app.id}
+                  busy={busy === app.id}
+                  onAsk={() => setConfirming(app.id)}
+                  onKeep={() => setConfirming(null)}
+                  onDisconnect={() => disconnect(app.id)}
+                />
               </li>
             ))}
           </ul>

@@ -29,6 +29,7 @@ import { importProblemTemplate, reportProblemTemplate, takedownProblemTemplate }
 import { useTemplatePreview } from "@/lib/problem-templates/use-template-preview";
 import { formatSubmissionFormats } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function ProblemTemplatePreviewPage() {
   const params = useParams<{ shareCode: string }>();
@@ -36,6 +37,10 @@ export default function ProblemTemplatePreviewPage() {
   const router = useRouter();
   const { state, reload } = useTemplatePreview(shareCode);
   const myClassesState = useMyClasses();
+  useClassroomTabTitle({
+    screenName: "문제 템플릿",
+    problemTitle: state.status === "ready" ? state.template.title : undefined,
+  });
 
   const [targetClassId, setTargetClassId] = useState("");
   const [importing, setImporting] = useState(false);

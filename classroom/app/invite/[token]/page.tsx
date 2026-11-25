@@ -19,6 +19,7 @@ import { acceptCoInstructorInvite } from "@/lib/co-instructors/api";
 import { inviteView } from "@/lib/co-instructors/invite-view";
 import { useInvitePreview } from "@/lib/co-instructors/use-invite-preview";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function CoInstructorInvitePage() {
   const params = useParams<{ token: string }>();
@@ -26,6 +27,7 @@ export default function CoInstructorInvitePage() {
   const preview = useInvitePreview(token);
   const me = useMe();
   const router = useRouter();
+  useClassroomTabTitle({ screenName: "강사 초대" });
   const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
