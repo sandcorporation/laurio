@@ -170,6 +170,8 @@ function formatMegabytes(bytes: number): string {
   return Number.isInteger(mb) ? String(mb) : mb.toFixed(1);
 }
 
+const SUBMIT_CARD_ID = "submit-card";
+
 export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   const {
     headingLevel = "h1",
@@ -290,51 +292,54 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
 
   const side = (
     <>
-      <Card>
-        {deadlinePassed ? (
-          <>
-            <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
-              <h2 className="text-[15px] font-semibold tracking-[-0.005em]">제출</h2>
-              <span data-testid="submit-deadline-passed">
-                <Badge tone={passed === true ? "neutral" : "warning"}>마감 지남</Badge>
-              </span>
-            </div>
-            {dueAt ? (
-              <div
-                data-testid="submit-due-rows-due"
-                className="flex justify-between gap-3 border-b border-rule px-4 py-2.5 text-[12.5px] text-ink/60"
-              >
-                <span>마감</span>
-                <span className="font-mono">{formatDueDateTime(dueAt)}</span>
+      {/* 한 열 폭에서 머리의 「제출 칸으로」가 닿는 자리(#1376). */}
+      <div id={props.interactive ? SUBMIT_CARD_ID : undefined} className="scroll-mt-4">
+        <Card>
+          {deadlinePassed ? (
+            <>
+              <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
+                <h2 className="text-[15px] font-semibold tracking-[-0.005em]">제출</h2>
+                <span data-testid="submit-deadline-passed">
+                  <Badge tone={passed === true ? "neutral" : "warning"}>마감 지남</Badge>
+                </span>
               </div>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <CardHeader title="제출" />
-            <DueRows
-              problem={{ recommended_due_at: recommendedDueAt, due_at: dueAt }}
-              passed={passed === true}
-              testId="submit-due-rows"
-            />
-          </>
-        )}
-        <div
-          data-testid="submit-form-area"
-          className="flex flex-col gap-3.5 p-4"
-        >
-          {deadlinePassed && props.submitBlockedReason === null ? (
-            <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
-              마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
-            </p>
-          ) : null}
-          {props.interactive ? (
-            <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
+              {dueAt ? (
+                <div
+                  data-testid="submit-due-rows-due"
+                  className="flex justify-between gap-3 border-b border-rule px-4 py-2.5 text-[12.5px] text-ink/60"
+                >
+                  <span>마감</span>
+                  <span className="font-mono">{formatDueDateTime(dueAt)}</span>
+                </div>
+              ) : null}
+            </>
           ) : (
-            <PreviewSubmissionForm submissionFormats={submissionFormats} />
+            <>
+              <CardHeader title="제출" />
+              <DueRows
+                problem={{ recommended_due_at: recommendedDueAt, due_at: dueAt }}
+                passed={passed === true}
+                testId="submit-due-rows"
+              />
+            </>
           )}
-        </div>
-      </Card>
+          <div
+            data-testid="submit-form-area"
+            className="flex flex-col gap-3.5 p-4"
+          >
+            {deadlinePassed && props.submitBlockedReason === null ? (
+              <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
+                마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
+              </p>
+            ) : null}
+            {props.interactive ? (
+              <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
+            ) : (
+              <PreviewSubmissionForm submissionFormats={submissionFormats} />
+            )}
+          </div>
+        </Card>
+      </div>
       {props.interactive ? (
         <ProblemProgressCard
           met={judgedSummary?.met ?? null}
@@ -370,15 +375,27 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             )}
           </div>
         </div>
-        {backHref ? (
-          <Link
-            href={backHref}
-            data-testid="my-problem-back-link"
-            className={buttonClass("secondary", "sm")}
-          >
-            문제 목록으로
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {props.interactive ? (
+            // 두 열(1200px 이상)에서는 제출 카드가 첫 화면에 있어 숨긴다.
+            <a
+              href={`#${SUBMIT_CARD_ID}`}
+              data-testid="my-problem-submit-jump"
+              className={`${buttonClass("secondary", "sm")} min-[1200px]:hidden`}
+            >
+              제출 칸으로
+            </a>
+          ) : null}
+          {backHref ? (
+            <Link
+              href={backHref}
+              data-testid="my-problem-back-link"
+              className={buttonClass("secondary", "sm")}
+            >
+              문제 목록으로
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {props.interactive ? (
@@ -731,7 +748,7 @@ function AttemptRow({
           {waitingOnInstructor ? (
             // 키가 아예 없는 것(#346)과 거부된 것, 채점 모델을 그 키로 못 쓰는 것(#403)을 여기서는
             // 구별하지 않는다 — 강사가 설정을 고쳐야 풀리는 사유라 참여자에게는 같은 한 줄이다.
-            <span data-testid={`submission-row-${submission.id}-no-api-key-note`} className="min-w-0 truncate">
+            <span data-testid={`submission-row-${submission.id}-no-api-key-note`} className="min-w-0">
               강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다
             </span>
           ) : null}
