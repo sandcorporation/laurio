@@ -24,7 +24,7 @@ import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
-import { ClassDetailTabs } from "./class-detail-tabs";
+import { ClassDetailTabs, classDetailPanelProps } from "./class-detail-tabs";
 import { ClassHead } from "./class-head";
 import { GettingStartedCard, startSteps } from "./getting-started-card";
 import { InstructorsSection } from "./instructors-section";
@@ -249,6 +249,7 @@ function ClassDetail() {
         <div>
           <ClassDetailTabs classId={classId} active={tab} />
 
+          <div {...classDetailPanelProps(tab)}>
           {tab === "problems" ? (
             <div className="flex flex-col gap-5 lg:flex-row lg:items-start">
               <div className="min-w-0 flex-1">
@@ -293,6 +294,7 @@ function ClassDetail() {
               signalPending={signalPending}
             />
           )}
+          </div>
         </div>
       </div>
 

@@ -30,6 +30,7 @@ import {
   tabFromSearchParams,
 } from "@/lib/usage/class-detail-tab";
 import type { ClassUsage, ClassUsageDay, ClassUsageProblem } from "@/lib/usage/class-usage-types";
+import { useTablist } from "@/app/components/use-tablist";
 import { periodFromSearchParams, periodQuery, type UsagePeriod } from "@/lib/usage/period";
 import { useClassDetailUsage } from "@/lib/usage/use-class-detail-usage";
 
@@ -336,17 +337,20 @@ function DaysPanel({
 
 // --- 화면 ------------------------------------------------------------------------
 
+// 패널은 아래 화면이 그린다 — 탭 줄(`usage-tab-*`)과 같은 id 로 잇는다.
+function usageTabPanelProps(tab: ClassDetailTab) {
+  return { id: "usage-panel", role: "tabpanel" as const, "aria-labelledby": `usage-tab-${tab}` };
+}
+
 function TabBar({ tab, onSelect }: { tab: ClassDetailTab; onSelect: (tab: ClassDetailTab) => void }) {
+  const tablist = useTablist(tab, { id: "usage" });
   return (
-    <div role="tablist" aria-label="리포트" className="flex items-end gap-0.5 border-b border-rule">
+    <div {...tablist.listProps} aria-label="리포트" className="flex items-end gap-0.5 border-b border-rule">
       {CLASS_DETAIL_TABS.map(({ key, label }) => (
         <button
           key={key}
           type="button"
-          role="tab"
-          id={`usage-tab-${key}`}
-          aria-selected={tab === key}
-          aria-controls="usage-tab-panel"
+          {...tablist.tabProps(key)}
           data-testid={`usage-tab-${key}`}
           onClick={() => onSelect(key)}
           className={
@@ -418,9 +422,7 @@ function ClassUsageInner() {
           <div>
             <TabBar tab={tab} onSelect={(next) => go(period, next)} />
             <div
-              role="tabpanel"
-              id="usage-tab-panel"
-              aria-labelledby={`usage-tab-${tab}`}
+              {...usageTabPanelProps(tab)}
               data-testid={`usage-tab-panel-${tab}`}
               className="border border-t-0 border-rule bg-surface"
             >

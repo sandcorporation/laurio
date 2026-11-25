@@ -18,6 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useDialogFocus } from "@/app/components/use-dialog-focus";
+import { useTablist } from "@/app/components/use-tablist";
 import type { ReactNode } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
@@ -74,6 +75,7 @@ export function ProblemImportSheet({
   initialTab?: PickerTab;
 }) {
   const [tab, setTab] = useState<PickerTab>(initialTab);
+  const tablist = useTablist(tab);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -281,9 +283,9 @@ export function ProblemImportSheet({
         </div>
 
         <div
-          role="tablist"
+          {...tablist.listProps}
           aria-label="가져올 곳"
-          className="flex items-end gap-0.5 overflow-x-auto border-b border-rule px-3 pt-2 sm:px-5"
+          className="flex flex-wrap items-end gap-0.5 border-b border-rule px-3 pt-2 sm:px-5"
         >
           {(
             [
@@ -300,8 +302,7 @@ export function ProblemImportSheet({
             <button
               key={key}
               type="button"
-              role="tab"
-              aria-selected={tab === key}
+              {...tablist.tabProps(key)}
               data-testid={testId}
               onClick={() => switchTab(key)}
               className={
@@ -315,254 +316,265 @@ export function ProblemImportSheet({
           ))}
         </div>
 
-        {tab === "public" || tab === "contest" ? (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (tab === "contest")
-                setContestCommittedQuery(contestQuery.trim());
-              else setPublicCommittedQuery(publicQuery.trim());
-            }}
-            className="flex gap-2 border-b border-rule px-5 py-3"
-          >
-            <input
-              data-testid="problem-import-search-input"
-              value={tab === "contest" ? contestQuery : publicQuery}
-              onChange={(event) =>
-                tab === "contest"
-                  ? setContestQuery(event.target.value)
-                  : setPublicQuery(event.target.value)
-              }
-              placeholder={
-                tab === "contest"
-                  ? "공모전 제목으로 찾기"
-                  : "문제 제목으로 찾기"
-              }
-              className={INPUT_CLASS}
-            />
-            <button
-              type="submit"
-              data-testid="problem-import-search-submit"
-              className={buttonClass("secondary", "sm")}
+        <div {...tablist.panelProps()} className="flex min-h-0 flex-1 flex-col">
+          {tab === "public" || tab === "contest" ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (tab === "contest")
+                  setContestCommittedQuery(contestQuery.trim());
+                else setPublicCommittedQuery(publicQuery.trim());
+              }}
+              className="flex gap-2 border-b border-rule px-5 py-3"
             >
-              검색
-            </button>
-          </form>
-        ) : null}
+              <input
+                data-testid="problem-import-search-input"
+                value={tab === "contest" ? contestQuery : publicQuery}
+                onChange={(event) =>
+                  tab === "contest"
+                    ? setContestQuery(event.target.value)
+                    : setPublicQuery(event.target.value)
+                }
+                placeholder={
+                  tab === "contest"
+                    ? "공모전 제목으로 찾기"
+                    : "문제 제목으로 찾기"
+                }
+                className={INPUT_CLASS}
+              />
+              <button
+                type="submit"
+                data-testid="problem-import-search-submit"
+                className={buttonClass("secondary", "sm")}
+              >
+                검색
+              </button>
+            </form>
+          ) : null}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto lg:flex-row">
-          <div className="min-h-0 flex-1 overflow-y-auto border-b border-rule lg:w-1/2 lg:border-b-0 lg:border-r">
-            {tab === "public" ? (
-              <PickerList
-                state={publicState}
-                isEmpty={
-                  publicState.status === "ready" &&
-                  publicState.data.length === 0
-                }
-                emptyMessage={
-                  publicCommittedQuery
-                    ? "검색 결과가 없습니다. 다른 제목으로 찾아보세요."
-                    : "아직 공개된 템플릿이 없습니다."
-                }
-              >
-                {publicState.status === "ready"
-                  ? publicState.data.map((item) => (
-                      <PickerRow
-                        key={item.share_code}
-                        name="problem-import-selection"
-                        testId={`problem-import-row-public-${item.share_code}`}
-                        selected={selectedKey === `public:${item.share_code}`}
-                        title={item.title}
-                        meta={`${item.publisher_display_name} · ${formatPickerDate(item.created_at)} 공개`}
-                        onSelect={() => selectItem(`public:${item.share_code}`)}
-                      />
-                    ))
-                  : null}
-              </PickerList>
-            ) : tab === "mine" ? (
-              <PickerList
-                state={mineState}
-                isEmpty={
-                  mineState.status === "ready" && mineState.data.length === 0
-                }
-                emptyMessage="아직 공개한 템플릿이 없습니다."
-              >
-                {mineState.status === "ready"
-                  ? mineState.data.map((item) => (
-                      <PickerRow
-                        key={item.share_code}
-                        name="problem-import-selection"
-                        testId={`problem-import-row-mine-${item.share_code}`}
-                        selected={selectedKey === `mine:${item.share_code}`}
-                        title={item.title}
-                        meta={`${formatPickerDate(item.created_at)} 공개`}
-                        onSelect={() => selectItem(`mine:${item.share_code}`)}
-                      />
-                    ))
-                  : null}
-              </PickerList>
-            ) : tab === "contest" ? (
-              <>
+          <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto lg:flex-row">
+            <div className="max-h-[40vh] flex-none overflow-y-auto border-b border-rule lg:max-h-none lg:min-h-0 lg:flex-1 lg:w-1/2 lg:border-b-0 lg:border-r">
+              {tab === "public" ? (
                 <PickerList
-                  state={
-                    contestState.status === "ready"
-                      ? { status: "ready", data: contestState.items }
-                      : contestState.status === "error"
-                        ? { status: "error" }
-                        : { status: "loading" }
-                  }
+                  state={publicState}
                   isEmpty={
-                    contestState.status === "ready" &&
-                    contestState.items.length === 0
+                    publicState.status === "ready" &&
+                    publicState.data.length === 0
                   }
                   emptyMessage={
-                    contestCommittedQuery
-                      ? `「${contestCommittedQuery}」이 든 공모전이 없습니다.`
-                      : "지금 들여올 수 있는 공모전이 없습니다."
+                    publicCommittedQuery
+                      ? "검색 결과가 없습니다. 다른 제목으로 찾아보세요."
+                      : "아직 공개된 템플릿이 없습니다."
                   }
                 >
-                  {contestState.status === "ready"
-                    ? contestState.items.map((item) => (
+                  {publicState.status === "ready"
+                    ? publicState.data.map((item) => (
                         <PickerRow
-                          key={item.contest_id}
+                          key={item.share_code}
                           name="problem-import-selection"
-                          testId={`problem-import-row-contest-${item.contest_id}`}
-                          selected={
-                            selectedKey === `contest:${item.contest_id}`
-                          }
+                          testId={`problem-import-row-public-${item.share_code}`}
+                          selected={selectedKey === `public:${item.share_code}`}
                           title={item.title}
-                          meta={`${formatPickerDate(item.deadline_at)} 마감 · 요구사항 ${item.requirement_count}개`}
+                          meta={`${item.publisher_display_name} · ${formatPickerDate(item.created_at)} 공개`}
                           onSelect={() =>
-                            selectItem(`contest:${item.contest_id}`)
+                            selectItem(`public:${item.share_code}`)
                           }
                         />
                       ))
                     : null}
                 </PickerList>
-                {contestState.status === "ready" &&
-                contestState.next !== null ? (
-                  <div className="border-t border-rule p-3">
-                    <button
-                      type="button"
-                      data-testid="problem-import-contest-more"
-                      disabled={contestState.loadingMore}
-                      onClick={() => void loadMoreContests()}
-                      className={`${buttonClass("secondary", "sm")} w-full`}
-                    >
-                      {contestState.loadingMore ? "불러오는 중..." : "더 보기"}
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <PickerList
-                state={otherState}
-                isEmpty={
-                  otherState.status === "ready" && otherState.data.length === 0
-                }
-                emptyMessage="다른 클래스에 가진 문제가 없습니다."
-              >
-                {otherState.status === "ready"
-                  ? otherState.data.map((item) => (
-                      <PickerRow
-                        key={item.id}
-                        name="problem-import-selection"
-                        testId={`problem-import-row-other-classes-${item.id}`}
-                        selected={selectedKey === `other:${item.id}`}
-                        title={item.title}
-                        meta={item.classroom_name}
-                        onSelect={() => selectItem(`other:${item.id}`)}
-                      />
-                    ))
-                  : null}
-              </PickerList>
-            )}
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-5 lg:w-1/2">
-            {selectedContest ? (
-              <div
-                className="flex flex-col gap-1"
-                data-testid="problem-import-preview"
-              >
-                <h3
-                  className="text-[15px] font-semibold"
-                  data-testid="problem-import-preview-title"
+              ) : tab === "mine" ? (
+                <PickerList
+                  state={mineState}
+                  isEmpty={
+                    mineState.status === "ready" && mineState.data.length === 0
+                  }
+                  emptyMessage="아직 공개한 템플릿이 없습니다."
                 >
-                  {selectedContest.title}
-                </h3>
-                <p className="text-[12px] text-ink/45">
-                  {formatPickerDate(selectedContest.deadline_at)} 마감 ·
-                  요구사항 {selectedContest.requirement_count}개
-                </p>
-              </div>
-            ) : !preview ? (
-              <EmptyState>
-                <span data-testid="problem-import-preview-empty">
-                  왼쪽에서 문제를 고르면 여기에 설명과 체크리스트가 보입니다.
-                </span>
-              </EmptyState>
-            ) : (
-              <div
-                className="flex flex-col gap-4"
-                data-testid="problem-import-preview"
-              >
-                <div>
+                  {mineState.status === "ready"
+                    ? mineState.data.map((item) => (
+                        <PickerRow
+                          key={item.share_code}
+                          name="problem-import-selection"
+                          testId={`problem-import-row-mine-${item.share_code}`}
+                          selected={selectedKey === `mine:${item.share_code}`}
+                          title={item.title}
+                          meta={`${formatPickerDate(item.created_at)} 공개`}
+                          onSelect={() => selectItem(`mine:${item.share_code}`)}
+                        />
+                      ))
+                    : null}
+                </PickerList>
+              ) : tab === "contest" ? (
+                <>
+                  <PickerList
+                    state={
+                      contestState.status === "ready"
+                        ? { status: "ready", data: contestState.items }
+                        : contestState.status === "error"
+                          ? { status: "error" }
+                          : { status: "loading" }
+                    }
+                    isEmpty={
+                      contestState.status === "ready" &&
+                      contestState.items.length === 0
+                    }
+                    emptyMessage={
+                      contestCommittedQuery
+                        ? `「${contestCommittedQuery}」이 든 공모전이 없습니다.`
+                        : "지금 들여올 수 있는 공모전이 없습니다."
+                    }
+                  >
+                    {contestState.status === "ready"
+                      ? contestState.items.map((item) => (
+                          <PickerRow
+                            key={item.contest_id}
+                            name="problem-import-selection"
+                            testId={`problem-import-row-contest-${item.contest_id}`}
+                            selected={
+                              selectedKey === `contest:${item.contest_id}`
+                            }
+                            title={item.title}
+                            meta={`${formatPickerDate(item.deadline_at)} 마감 · 요구사항 ${item.requirement_count}개`}
+                            onSelect={() =>
+                              selectItem(`contest:${item.contest_id}`)
+                            }
+                          />
+                        ))
+                      : null}
+                  </PickerList>
+                  {contestState.status === "ready" &&
+                  contestState.next !== null ? (
+                    <div className="border-t border-rule p-3">
+                      <button
+                        type="button"
+                        data-testid="problem-import-contest-more"
+                        disabled={contestState.loadingMore}
+                        onClick={() => void loadMoreContests()}
+                        className={`${buttonClass("secondary", "sm")} w-full`}
+                      >
+                        {contestState.loadingMore
+                          ? "불러오는 중..."
+                          : "더 보기"}
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <PickerList
+                  state={otherState}
+                  isEmpty={
+                    otherState.status === "ready" &&
+                    otherState.data.length === 0
+                  }
+                  emptyMessage="다른 클래스에 가진 문제가 없습니다."
+                >
+                  {otherState.status === "ready"
+                    ? otherState.data.map((item) => (
+                        <PickerRow
+                          key={item.id}
+                          name="problem-import-selection"
+                          testId={`problem-import-row-other-classes-${item.id}`}
+                          selected={selectedKey === `other:${item.id}`}
+                          title={item.title}
+                          meta={item.classroom_name}
+                          onSelect={() => selectItem(`other:${item.id}`)}
+                        />
+                      ))
+                    : null}
+                </PickerList>
+              )}
+            </div>
+
+            <div className="flex-none p-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:w-1/2">
+              {selectedContest ? (
+                <div
+                  className="flex flex-col gap-1"
+                  data-testid="problem-import-preview"
+                >
                   <h3
                     className="text-[15px] font-semibold"
                     data-testid="problem-import-preview-title"
                   >
-                    {preview.title}
+                    {selectedContest.title}
                   </h3>
-                  <p className="mt-1 text-[12px] text-ink/45">{preview.meta}</p>
+                  <p className="text-[12px] text-ink/45">
+                    {formatPickerDate(selectedContest.deadline_at)} 마감 ·
+                    요구사항 {selectedContest.requirement_count}개
+                  </p>
                 </div>
-                <div>
-                  <p className="mb-1.5 text-[12px] text-ink/60">설명</p>
-                  {preview.description === null ? (
-                    <p className="text-[12.5px] text-ink/45">불러오는 중...</p>
-                  ) : preview.description.trim() === "" ? (
-                    <p className="text-[12.5px] text-ink/45">
-                      설명이 없습니다.
-                    </p>
-                  ) : (
-                    <div data-testid="problem-import-preview-description">
-                      <MarkdownView
-                        markdown={preview.description}
-                        fileBaseName={preview.title}
-                      />
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="mb-1.5 text-[12px] text-ink/60">체크리스트</p>
-                  {preview.checklistItems === null ? null : preview
-                      .checklistItems.length === 0 ? (
-                    <p className="text-[12.5px] text-ink/45">
-                      아직 항목이 없습니다.
-                    </p>
-                  ) : (
-                    <ul
-                      data-testid="problem-import-preview-checklist"
-                      className="divide-y divide-rule border border-rule"
+              ) : !preview ? (
+                <EmptyState>
+                  <span data-testid="problem-import-preview-empty">
+                    문제를 고르면 설명과 체크리스트가 보입니다.
+                  </span>
+                </EmptyState>
+              ) : (
+                <div
+                  className="flex flex-col gap-4"
+                  data-testid="problem-import-preview"
+                >
+                  <div>
+                    <h3
+                      className="text-[15px] font-semibold"
+                      data-testid="problem-import-preview-title"
                     >
-                      {preview.checklistItems.map((item, index) => (
-                        <li
-                          key={index}
-                          className="flex items-center gap-2 px-3 py-2 text-[12.5px]"
-                        >
-                          <span className="flex-1">{item.label}</span>
-                          {item.required ? (
-                            <Badge tone="warning">필수</Badge>
-                          ) : (
-                            <Badge tone="neutral">선택</Badge>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                      {preview.title}
+                    </h3>
+                    <p className="mt-1 text-[12px] text-ink/45">
+                      {preview.meta}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-[12px] text-ink/60">설명</p>
+                    {preview.description === null ? (
+                      <p className="text-[12.5px] text-ink/45">
+                        불러오는 중...
+                      </p>
+                    ) : preview.description.trim() === "" ? (
+                      <p className="text-[12.5px] text-ink/45">
+                        설명이 없습니다.
+                      </p>
+                    ) : (
+                      <div data-testid="problem-import-preview-description">
+                        <MarkdownView
+                          markdown={preview.description}
+                          fileBaseName={preview.title}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="mb-1.5 text-[12px] text-ink/60">체크리스트</p>
+                    {preview.checklistItems === null ? null : preview
+                        .checklistItems.length === 0 ? (
+                      <p className="text-[12.5px] text-ink/45">
+                        아직 항목이 없습니다.
+                      </p>
+                    ) : (
+                      <ul
+                        data-testid="problem-import-preview-checklist"
+                        className="divide-y divide-rule border border-rule"
+                      >
+                        {preview.checklistItems.map((item, index) => (
+                          <li
+                            key={index}
+                            className="flex items-center gap-2 px-3 py-2 text-[12.5px]"
+                          >
+                            <span className="flex-1">{item.label}</span>
+                            {item.required ? (
+                              <Badge tone="warning">필수</Badge>
+                            ) : (
+                              <Badge tone="neutral">선택</Badge>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
