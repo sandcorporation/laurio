@@ -79,7 +79,10 @@ test.describe.serial("완성도", () => {
 
     await page.getByTestId("quality-run-button").click();
     await expect(page.getByTestId("quality-confirm-line")).toContainText("새로 채점할 2명");
+    // 단추를 누른 뒤 초점이 body 로 떨어지지 않는다(#1436 9번).
+    await expect(page.getByTestId("quality-confirm-run")).toBeFocused();
     await page.getByTestId("quality-confirm-run").click();
+    await expect(page.getByTestId("quality-run-button")).toBeFocused();
 
     const list = page.getByTestId("quality-list");
     await expect(list.locator(":scope > li")).toHaveCount(2);
