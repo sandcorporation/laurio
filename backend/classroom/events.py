@@ -114,7 +114,9 @@ INSTRUCTORS_CHANGED = "instructors-changed"
 PARTICIPATION_CHANGED = "participation-changed"
 
 
-def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = frozenset()) -> int:
+def publish_instructors_changed(
+    class_obj, *, also: frozenset[int] | set[int] = frozenset(), departed: dict | None = None
+) -> int:
     """바뀐 뒤의 강사 전원에게 보낸다(본문은 `class_id` 와 변경 번호 `rev`. 바꾸는 트랜잭션 안에서 부르면 바뀐 명단을 읽는다). 방금
     빠진 사람(떠나기·내보내기)은 `also` 로 더한다 — 그 사람의 열린 탭도 접근 안내로 바뀌어야 한다. 올린 번호를 돌려준다."""
 
@@ -122,6 +124,9 @@ def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = 
     Class.objects.filter(pk=class_obj.pk).update(signal_rev=F("signal_rev") + 1)
     class_obj.signal_rev = Class.objects.filter(pk=class_obj.pk).values_list("signal_rev", flat=True).first() or 0
     payload = {"class_id": class_obj.id, "rev": class_obj.signal_rev}
+    # 빠진 사람은 명단에서 사라져 화면이 까닭을 알 길이 없다 — 떠나기·내보내기는 누가 왜 빠졌는지 싣는다(#1517 1).
+    if departed is not None:
+        payload["departed"] = departed
     for recipient_id in {*instructor_user_ids(class_obj), *also}:
         publish_after_commit(Event(kind=INSTRUCTORS_CHANGED, recipient_id=recipient_id, payload=payload))
     return class_obj.signal_rev
