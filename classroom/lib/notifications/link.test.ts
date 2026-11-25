@@ -56,6 +56,20 @@ describe("notificationHref — classroom_scoring_key_rejected", () => {
   });
 });
 
+describe("notificationHref — classroom_scoring_key_missing", () => {
+  it("그 클래스의 설정 화면 채점 키 자리로 간다(#1389)", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_key_missing", context: { class_id: 7, class_name: "1반" } }),
+    );
+    expect(href).toBe("/classes/7/settings#scoring-key");
+  });
+
+  it("클래스 id가 빠진 옛 줄은 링크를 짓지 않는다", () => {
+    const href = notificationHref(row({ notification_type: "classroom_scoring_key_missing", context: {} }));
+    expect(href).toBeNull();
+  });
+});
+
 describe("notificationHref — classroom_scoring_quota_exhausted", () => {
   it("그 클래스의 설정 화면 채점 키 자리로 간다(#586)", () => {
     const href = notificationHref(

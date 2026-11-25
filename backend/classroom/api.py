@@ -68,6 +68,7 @@ from .models import (
     ClassroomScore,
     ClassroomScoreCorrection,
     ClassroomSubmission,
+    ClassScoringKeyMissingAlert,
     ClassTemplate,
     Problem,
     ProblemTemplate,
@@ -190,6 +191,7 @@ from .participation import (
 from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
+from .scoring_key_missing import alert_missing_key_safely, close_open_alert
 from . import rule_derivation, scoring_calculator, scoring_cost
 from .scoring_model_catalog import cached_scoring_model_catalog, get_scoring_model_catalog, remember_model_ids
 from . import scoring_connection
@@ -1205,6 +1207,10 @@ def _save_scoring_connection(
         )
         if not saved:
             raise HttpError(403, OWNER_ONLY_MESSAGE)
+        if connection_changed:
+            # 연결이 바뀌었다 — 열린 「연결 없음」 기록을 닫아, 다시 멈추면 다시 알린다(#1389). 위 UPDATE 가 이미
+            # `Class` 행을 잠갔다(`classroom.scoring_key_missing` 의 잠금 규칙 ②).
+            close_open_alert(class_obj.id, ClassScoringKeyMissingAlert.ClosedReason.OWNER)
         if vendor_kind is not None:
             _return_foreign_problem_models_to_default(class_obj, vendor_kind)
 
@@ -3177,6 +3183,9 @@ def _create_submission_row(request: HttpRequest, problem, member, payload):
         # 있다) 채점 워커가 아직 존재하지 않는 시도를 찾다 건너뛰기 때문이다.
         # dev·CI는 eager 라 이 콜백 안에서 채점까지 끝난다(ADR-0056).
         transaction.on_commit(lambda: _enqueue_immediate_scoring(submission.id))
+        # 채점 연결이 없어 이 시도가 멈추면 소유자에게 한 번 알린다(#1389) — 커밋 뒤라 제출의 잠금을 쥐고 있지 않고,
+        # 실패해도 제출은 실패하지 않는다(60초 스캔이 다시 한다). 강사 본인 시도만으로는 알리지 않는다(그 판정은 안에서).
+        transaction.on_commit(lambda: alert_missing_key_safely(problem.classroom_id))
         if contest_entry is not None:
             # 커밋된 뒤 공모전에 보낸다 — 결과는 신호로 돌아와 이 시도에 남는다.
             request_contest_entry(submission, contest_entry)
