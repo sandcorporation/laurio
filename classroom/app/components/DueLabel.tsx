@@ -29,15 +29,23 @@ export function DueInline({ problem, testId }: { problem: DueFields; testId: str
   );
 }
 
-/** 참여자 문제 목록 — 권장 100px · 마감 150px 고정 폭, 왼쪽 정렬. 앞뒤 글자 길이와 무관하게 같은 x 에 선다. */
+/** 참여자 문제 목록 — 권장 100px · 마감 150px 고정 폭, 왼쪽 정렬. 앞뒤 글자 길이와 무관하게 같은 x 에 선다.
+ *  좁은 폭(<sm)에서는 칸 폭을 풀고 행(`flex-wrap`) 맨 아래 한 줄로 내려 제목 아래에 선다(#1440) — 표시할 기한이 없으면 줄도 없다. */
 export function DueCells({ problem, passed, testId }: { problem: DueFields; passed: boolean; testId: string }) {
   const { recommended, due } = describeDue(problem, { passed });
   return (
-    <span className="flex shrink-0 text-[12.5px] max-sm:hidden">
-      <span className="inline-block w-[100px]">
+    <span
+      data-testid={`${testId}-due-line`}
+      className={`flex shrink-0 text-[12.5px] max-sm:order-last max-sm:basis-full max-sm:gap-3 ${
+        recommended || due ? "" : "max-sm:hidden"
+      }`}
+    >
+      <span className="inline-block w-[100px] max-sm:w-auto max-sm:empty:hidden">
         {recommended ? <Mark mark={recommended} testId={`${testId}-recommended`} /> : null}
       </span>
-      <span className="inline-block w-[150px]">{due ? <Mark mark={due} testId={`${testId}-due`} /> : null}</span>
+      <span className="inline-block w-[150px] max-sm:w-auto max-sm:empty:hidden">
+        {due ? <Mark mark={due} testId={`${testId}-due`} /> : null}
+      </span>
     </span>
   );
 }

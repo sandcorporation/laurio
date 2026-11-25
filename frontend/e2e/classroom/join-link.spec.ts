@@ -60,6 +60,7 @@ test("로그아웃 상태로 가입 링크를 열고 로그인하면 같은 가�
   await establishClassroomSession(page, `e2e-join-member-${stamp}`);
   await page.goto(returnPath ?? "/");
   await expect(page.getByTestId("join-login-link")).toHaveCount(0);
+  await expect(page).toHaveTitle(`클래스 가입 · ${className} · Codemit`);
   await expect(page.getByTestId("join-display-name-input")).toBeFocused();
   await page.getByTestId("join-display-name-input").fill("서지우");
   await expect(page.getByTestId("join-submit")).toHaveText("가입하고 문제 보기");
@@ -68,6 +69,8 @@ test("로그아웃 상태로 가입 링크를 열고 로그인하면 같은 가�
   // 중간 「가입 완료」 화면 없이 곧장 문제 목록이다(#658).
   await expect(page).toHaveURL(`/classes/${classId}/problems/mine`);
   await expect(page.getByTestId("my-problems-progress-count")).toHaveText("0/1 통과");
+  // 가입 뒤 초점은 body 가 아니라 문제 목록 제목이 받는다(#1441 9번).
+  await expect(page.getByRole("heading", { level: 1, name: "문제" })).toBeFocused();
 });
 
 // 공유 카드(#788) — 크롤러는 JS 를 돌리지 않으므로 서버가 만든 `<head>` 를 본다. 비로그인으로 연다.

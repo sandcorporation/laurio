@@ -13,7 +13,7 @@ const base = { class_name: "알고리즘 스터디", open_problem_count: 3, arch
 describe("joinShareMetadata", () => {
   it("열린 문제가 있으면 이름과 문제 수·AI 채점을 한 줄로 싣는다", () => {
     const m = joinShareMetadata(base);
-    expect(m.title).toBe("알고리즘 스터디 · Codemit");
+    expect(m.title).toBe("클래스 가입 · 알고리즘 스터디 · Codemit");
     expect(m.openGraph?.title).toBe("알고리즘 스터디 — Codemit 클래스");
     expect(m.description).toBe(
       "열린 문제 3개 · 제출할 때마다 AI가 체크리스트 항목별로 채점합니다",
