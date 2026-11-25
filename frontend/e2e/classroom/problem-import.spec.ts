@@ -68,3 +68,30 @@ test("「문제 가져오기」 시트는 초점이 안으로 들어가 갇히�
   await expect(dialog).toHaveCount(0);
   await expect(opener).toBeFocused();
 });
+
+// 초점 없이 열어도(낭독기 활성화·초점을 못 받는 터치) 닫으면 초점은 연 단추로 돌아온다 — BODY 로 돌아가지 않는다(#1509 ② 같은 꼴).
+for (const how of ["Escape", "닫기 단추"] as const) {
+  for (const where of ["새 문제 화면", "클래스 문제 탭"] as const) {
+    test(`${where}에서 초점 없이 연 「문제 가져오기」를 ${how}로 닫으면 초점이 연 단추에 있다`, async ({ page }) => {
+      const seed = `problem-import-nofocus-${test.info().workerIndex}-${Date.now()}`;
+      await establishClassroomSession(page, seed);
+      const created = await classroomApi(page).post("/api/backend/classroom/classes", {
+        data: { name: `가져오기 초점 ${Date.now()}`, instructor_display_name: "강사" },
+      });
+      const classId = (await created.json()).id as number;
+
+      await page.goto(where === "새 문제 화면" ? `/classes/${classId}/problems/new` : `/classes/${classId}?tab=problems`);
+      const opener = page.getByTestId(where === "새 문제 화면" ? "open-problem-import" : "problems-empty-import");
+      await expect(opener).toBeVisible();
+      await opener.evaluate((el) => (el as HTMLElement).blur());
+      expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+      await opener.dispatchEvent("click");
+      const dialog = page.getByRole("dialog", { name: "문제 가져오기" });
+      await expect(dialog).toBeVisible();
+      if (how === "Escape") await page.keyboard.press("Escape");
+      else await page.getByTestId("problem-import-close").click();
+      await expect(dialog).toHaveCount(0);
+      await expect(opener).toBeFocused();
+    });
+  }
+}

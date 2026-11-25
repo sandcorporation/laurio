@@ -128,6 +128,7 @@ function ClassDetail() {
   }, [classState.status]);
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
   const [pickerTab, setPickerTab] = useState<PickerTab | null>(null);
+  const pickerOpener = useRef<HTMLElement | null>(null);
 
   useClassroomTabTitle({
     screenName: "클래스 상세",
@@ -258,7 +259,10 @@ function ClassDetail() {
                   problems={problemsState.status === "ready" ? problemsState.problems : []}
                   reorderError={problemsState.status === "ready" && problemsState.reorderError}
                   onMove={move}
-                  onOpenPicker={setPickerTab}
+                  onOpenPicker={(tab, opener) => {
+                    pickerOpener.current = opener;
+                    setPickerTab(tab);
+                  }}
                 />
               </div>
               <div className="flex w-full shrink-0 flex-col gap-4 lg:w-[320px] lg:pt-5">
@@ -301,6 +305,7 @@ function ClassDetail() {
         <ProblemImportSheet
           classId={classId}
           initialTab={pickerTab}
+          opener={pickerOpener.current}
           onClose={() => setPickerTab(null)}
           onImported={(problem) => router.push(`/classes/${classId}/problems/${problem.id}`)}
         />

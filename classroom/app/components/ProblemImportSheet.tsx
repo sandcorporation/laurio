@@ -67,12 +67,15 @@ export function ProblemImportSheet({
   onClose,
   onImported,
   initialTab = "public",
+  opener,
 }: {
   classId: number;
   onClose: () => void;
   onImported: (problem: ProblemRow) => void;
   /** 처음 열 탭. 기본은 「공개된 문제」다. */
   initialTab?: PickerTab;
+  /** 시트를 연 단추(클릭의 currentTarget) — 닫으면 초점이 여기로 돌아온다. */
+  opener?: HTMLElement | null;
 }) {
   const [tab, setTab] = useState<PickerTab>(initialTab);
   const tablist = useTablist(tab);
@@ -82,7 +85,7 @@ export function ProblemImportSheet({
 
   // 초점은 창 안으로·Tab 은 창 안에·Escape 는 닫고 여는 단추로(#1463).
   const dialogRef = useRef<HTMLDivElement>(null);
-  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onClose });
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onClose, opener });
 
   // --- 공개된 문제 ---------------------------------------------------------
   const [publicQuery, setPublicQuery] = useState("");
