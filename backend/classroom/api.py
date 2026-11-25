@@ -2229,8 +2229,11 @@ def expel_class_member(member: ClassMember) -> ClassMember:
         return member
     # 조건부 갱신으로 최초 전이를 가린다(#1448 ④) — 두 강사가 동시에 내보내 둘 다 `expelled_at=None` 을
     # 읽었어도 행을 바꾼 쪽은 하나다. 진 쪽은 이긴 쪽이 남긴 시각을 읽어 돌려준다.
-    first = ClassMember.objects.filter(id=member.id, expelled_at__isnull=True).update(expelled_at=timezone.now())
-    member.refresh_from_db(fields=["expelled_at"])
+    # 사유를 확정으로 적는다 — 비워 두면 「사유 불명」이라 탈퇴 흔적 추론이 「나감」으로 덮는다(#1509 ①).
+    first = ClassMember.objects.filter(id=member.id, expelled_at__isnull=True).update(
+        expelled_at=timezone.now(), left_by_self=False
+    )
+    member.refresh_from_db(fields=["expelled_at", "left_by_self"])
     if first:
         # 내보내진 그 사람의 열린 제출 화면만 — 다른 참여자에게는 보내지 않는다(#1447 10-2).
         # 그 행·달성률 분모도 바뀐다 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 같은 변경 번호로 다시 읽는다(#1471 ⑦).

@@ -1,9 +1,11 @@
 """닫힌 참여자 행이 「나감」인가 「내보냄」인가(#1492-5, #1503 ①②).
 
-새 코드는 닫을 때 `ClassMember.left_by_self` 를 적는다(`co_instructors.depart`). 그 칸을 모르는 쓰기가
-둘 있다 — 0054 가 칸을 더하기 전에 닫힌 행(칸이 생길 때 전부 거짓)과, 이행 뒤 겹쳐 배포 중인 옛 서버나
-코드만 되돌린 서버가 `expelled_at` 만 채운 행. 일회성 행 채우기는 두 번째를 놓친다 — 그래서 읽을 때마다
-남은 흔적으로 다시 판정한다.
+새 코드는 닫을 때마다 `ClassMember.left_by_self` 에 확정 사유를 적는다 — 참(나감)·거짓(내보냄)
+(`co_instructors.depart`·`api.expel_class_member`). 그 칸을 모르는 쓰기가 둘 있다 — 0054 가 칸을 더하기 전에
+닫힌 행과, 이행 뒤 겹쳐 배포 중인 옛 서버나 코드만 되돌린 서버가 `expelled_at` 만 채운 행. 둘 다 칸이 NULL
+(사유 불명)로 남는다. 일회성 행 채우기는 두 번째를 놓친다 — 그래서 불명인 행만 읽을 때마다 남은 흔적으로
+판정한다. 확정 사유는 흔적이 무엇을 말하든 그대로다(#1509 ① — 공동 강사였던 사람이 참여자로 다시 들어와
+탈퇴한 직후 내보내지면 흔적은 「나감」을 가리킨다).
 
 흔적은 탈퇴뿐이다. 공동 강사의 떠나기와 소유자의 내보내기는 같은 쓰기라(공동 강사 줄을 지우고 행을 닫는다)
 옛 코드가 처리했으면 가를 수 없어 「내보냄」으로 남는다. 탈퇴는 `accounts.Withdrawal` 이 남는다: 그 사람이 이
@@ -24,11 +26,11 @@ SAME_TRANSACTION = timedelta(minutes=1)
 
 
 def left_member_ids(members: Iterable[ClassMember]) -> set[int]:
-    """`members` 가운데 스스로 나간 행의 id. 칸이 참이 아닌 닫힌 행이 있을 때만 쿼리를 낸다(많아야 셋)."""
+    """`members` 가운데 스스로 나간 행의 id. 사유 불명(NULL)인 닫힌 행이 있을 때만 쿼리를 낸다(많아야 셋)."""
 
     members = list(members)
-    left = {m.id for m in members if m.expelled_at is not None and m.left_by_self}
-    unsure = [m for m in members if m.expelled_at is not None and not m.left_by_self]
+    left = {m.id for m in members if m.expelled_at is not None and m.left_by_self is True}
+    unsure = [m for m in members if m.expelled_at is not None and m.left_by_self is None]
     if not unsure:
         return left
     withdrawn_at = dict(

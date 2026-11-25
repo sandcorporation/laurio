@@ -351,7 +351,8 @@ class Command(BaseCommand):
             )
             if expelled_index is not None and index == expelled_index:
                 member.expelled_at = timezone.now()
-                member.save(update_fields=["expelled_at"])
+                member.left_by_self = False
+                member.save(update_fields=["expelled_at", "left_by_self"])
             made.append(member)
         return made
 
