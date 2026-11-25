@@ -35,5 +35,5 @@ test("알림·초대·가입 화면의 제목도 같은 꼴이다", async ({ pag
   await page.goto("/invite/no-such-token");
   await expect(page).toHaveTitle("강사 초대 · Codemit");
   await page.goto(`/join/${join_code}`);
-  await expect(page).toHaveTitle(`${name} · Codemit`);
+  await expect(page).toHaveTitle(`클래스 가입 · ${name} · Codemit`);
 });

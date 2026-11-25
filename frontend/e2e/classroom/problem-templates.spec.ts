@@ -60,7 +60,7 @@ test("강사가 다른 강사의 템플릿을 목록에서 찾아 자기 클래�
   await page.getByTestId("template-search-submit").click();
 
   await expect(page.getByTestId("problem-templates-list")).toContainText(title);
-  await page.getByRole("link", { name: title }).click();
+  await page.getByRole("link", { name: title, exact: true }).click();
 
   await expect(page.getByTestId("template-preview-heading")).toHaveText(title);
   await expect(page.getByTestId("template-preview-checklist")).toContainText("테스트가 통과한다");
