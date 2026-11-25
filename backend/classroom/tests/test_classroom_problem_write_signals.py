@@ -3,7 +3,8 @@
 만들기·고치기·지우기·순서, 체크리스트 항목 넣기·고치기·지우기·순서, 다른 클래스로 복사, 템플릿·공모전에서
 가져오기, 공모전 원본 동기화 — 그 클래스 강사 전원에게 `instructors-changed`(클래스 머리·격자·문제 목록), 참여자에게
 보이는 문제(초안이 아닌 것)면 살아 있는 참여자에게 `participation-changed`(문제 목록·제출 화면)도 간다. 초안만
-바뀌면 참여자는 받지 않는다. 바깥 클래스의 강사·참여자는 어느 신호도 받지 않는다. 본문은 `class_id` 하나.
+바뀌면 참여자는 받지 않는다. 바깥 클래스의 강사·참여자는 어느 신호도 받지 않는다. 본문의 `class_id` 를 본다(강사
+신호의 `rev` 는 `test_classroom_refresh_signals.py` 가 본다).
 
 경로가 화면 API 든 연결된 앱(MCP)이든 같은 도메인 함수를 지난다 — MCP 는 만들기 하나로 그 사실을 본다.
 문제 열기·숨김·다시 열기는 `test_classroom_refresh_signals.py` 가 본다.
@@ -44,7 +45,7 @@ def _assert_only(kind: str, class_id: int, receivers: set[str]) -> None:
     for uid in EVERYONE:
         got = _signals(uid, kind)
         if uid in receivers:
-            assert got and all(p == {"class_id": class_id} for p in got), (kind, uid, got)
+            assert got and all(p["class_id"] == class_id for p in got), (kind, uid, got)
         else:
             assert got == [], (kind, uid, got)
 
@@ -159,7 +160,7 @@ def test_copying_a_problem_signals_the_target_class_instructors_only(client, sce
         client, "post", scene["owner"], f"{scene['class_id']}/problems/{scene['open'].id}/copy",
         {"target_class_id": target},
     ))
-    assert _signals("owner", INSTRUCTORS_CHANGED) == [{"class_id": target}]
+    assert [p["class_id"] for p in _signals("owner", INSTRUCTORS_CHANGED)] == [target]
     for uid in EVERYONE - {"owner"}:
         assert _signals(uid, INSTRUCTORS_CHANGED) == [], uid
         assert _signals(uid, PARTICIPATION_CHANGED) == [], uid

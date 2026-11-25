@@ -58,14 +58,26 @@ async function warmRoutes(): Promise<void> {
     `${operatorBase}/settings`,
     `${operatorBase}/deliverable-types`,
   ];
+  // 강의실 화면도 첫 방문에 라우트 모듈을 읽는다 — 덥히지 않으면 강의실 스펙의 첫 시험이 3초 한도를 넘었다
+  // (실시간 재조회 스펙, #1471 ⑦). 미들웨어는 세션 쿠키가 있는지만 보므로 아무 값이나 실어 화면 라우트까지 닿게 한다.
+  const classroomBase = process.env.CODEMIT_CLASSROOM_E2E_BASE_URL ?? "http://127.0.0.1:53002";
+  const classroomTargets = [
+    `${classroomBase}/classes/1`,
+    `${classroomBase}/classes/1/settings`,
+    `${classroomBase}/classes/1/problems/mine`,
+    `${classroomBase}/classes/1/problems/1/submit`,
+    `${classroomBase}/classes/1/problems/1/submissions`,
+    `${classroomBase}/notifications`,
+  ];
   const started = Date.now();
-  await Promise.all(
-    targets.map((url) =>
-      fetch(url, { redirect: "manual" }).catch(() => undefined),
+  await Promise.all([
+    ...targets.map((url) => fetch(url, { redirect: "manual" }).catch(() => undefined)),
+    ...classroomTargets.map((url) =>
+      fetch(url, { redirect: "manual", headers: { cookie: "codemit_access=warm" } }).catch(() => undefined),
     ),
-  );
+  ]);
   // eslint-disable-next-line no-console -- 워밍업이 실제로 돌았는지 CI 로그에서 보여야 한다.
-  console.log(`[global-setup] warmed ${targets.length} routes in ${Date.now() - started}ms`);
+  console.log(`[global-setup] warmed ${targets.length + classroomTargets.length} routes in ${Date.now() - started}ms`);
 }
 
 export default async function globalSetup(): Promise<void> {
