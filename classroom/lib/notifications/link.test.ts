@@ -117,6 +117,15 @@ describe("notificationHref — 소유권 이전 (#575)", () => {
   });
 });
 
+describe("notificationHref — 내보내짐 (#1441)", () => {
+  it("참여자 화면(지난 시도)으로 간다", () => {
+    expect(notificationHref(row({ notification_type: "classroom_member_expelled", context: { class_id: 7 } }))).toBe(
+      "/classes/7/problems/mine",
+    );
+    expect(notificationHref(row({ notification_type: "classroom_member_expelled", context: {} }))).toBeNull();
+  });
+});
+
 describe("notificationHref — 제보 상태 (#1242)", () => {
   it("제보 상세로 가고, id 가 없으면 목록으로 간다", () => {
     expect(notificationHref(row({ notification_type: "classroom_feedback_status_changed", context: { report_id: 5 } }))).toBe("/feedback/5");

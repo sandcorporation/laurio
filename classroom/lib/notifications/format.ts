@@ -97,6 +97,10 @@ export function describeNotification(notification: NotificationRow): string {
       const recipient = recipientSubject(context);
       return `${recipient} '${className}' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.`;
     }
+    case "classroom_member_expelled": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      return `'${className}' 클래스에서 내보내졌습니다 — 새로 제출할 수 없고, 지난 시도와 채점 결과는 그대로 볼 수 있습니다.`;
+    }
     case "classroom_feedback_status_changed": {
       const label = typeof context.status_label === "string" ? context.status_label : "";
       return label ? `보내신 제보가 '${label}' 상태로 바뀌었습니다.` : "보내신 제보의 상태가 바뀌었습니다.";

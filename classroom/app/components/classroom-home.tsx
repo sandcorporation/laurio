@@ -250,12 +250,13 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
                 caption="통과"
                 plain
               />
+              {/* 내보내진 사람은 새로 풀 수 없다 — 지난 시도를 읽는 길만 남긴다. */}
               <Link
                 href={href}
                 data-testid={`classroom-joined-row-${classroom.id}-solve`}
                 className={buttonClass("secondary", "sm")}
               >
-                문제 풀기
+                {classroom.expelled ? "지난 시도 보기" : "문제 풀기"}
               </Link>
             </li>
           );

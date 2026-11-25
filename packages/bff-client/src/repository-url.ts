@@ -5,7 +5,7 @@
 // - 받는 모양은 셋 — 저장소 `https://github.com/<owner>/<repo>`, 브랜치 `…/tree/<ref>`(뒤 전체가
 //   브랜치 이름, `release/2024` 처럼 슬래시 포함 — 디렉터리 경로와 구분하지 않고 GitHub 에 묻는다),
 //   커밋 `…/commit/<sha>`(7~40자 16진수).
-// - 끝의 `.git`·`/`, `http://`·`www.` 는 같은 저장소라 말없이 고친다.
+// - 끝의 `.git`·`/`, 빠진 `https://`(휴대폰 주소창 복사)·`http://`·`www.` 는 같은 저장소라 말없이 고친다.
 // - SSH 주소(`git@github.com:…`, `ssh://…`)·그 밖의 경로(`/blob/`·`/pull/`·ref 없는 `/tree/`)는
 //   거부하고, 고칠 수 있으면 https 저장소 주소를 제안한다.
 // React·Next 를 모르는 순수 함수다.
@@ -40,7 +40,7 @@ export function checkGithubRepositoryUrl(raw: string): RepositoryUrlCheck | null
     };
   }
 
-  const web = /^https?:\/\/(?:www\.)?github\.com\/([^/?#\s]+)\/([^/?#\s]+)(\/[^?#\s]*)?([?#]\S*)?$/i.exec(value);
+  const web = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([^/?#\s]+)\/([^/?#\s]+)(\/[^?#\s]*)?([?#]\S*)?$/i.exec(value);
   if (!web) return { ok: false, message: FORMAT_MESSAGE, suggestion: null };
 
   const url = repositoryUrl(web[1], web[2]);
