@@ -79,7 +79,7 @@ export function OwnershipTransferOffer({
             type="button"
             data-testid="ownership-transfer-accept"
             onClick={() => void answer(true)}
-            disabled={busy !== null}
+            aria-disabled={busy !== null}
             className={buttonClass("primary", "sm")}
           >
             {busy === "accept" ? "넘겨받는 중..." : "넘겨받기"}
@@ -88,7 +88,7 @@ export function OwnershipTransferOffer({
             type="button"
             data-testid="ownership-transfer-decline"
             onClick={() => void answer(false)}
-            disabled={busy !== null}
+            aria-disabled={busy !== null}
             className={buttonClass("secondary", "sm")}
           >
             {busy === "decline" ? "거절하는 중..." : "거절하기"}

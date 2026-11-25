@@ -78,7 +78,7 @@ def _body_is(kind: str, payload: dict, class_id: int) -> bool:
     """두 신호 모두 `class_id` 에 변경 번호 `rev` 하나만 싣는다(#1484 ④). 참여 신호의 번호는 같은 변경의 강사 신호와
     같은 값이다(#1496 ⑤ — 둘을 함께 받는 사람의 화면이 번호로 같은 변경을 알아본다)."""
 
-    return set(payload) == {"class_id", "rev"} and payload["class_id"] == class_id and isinstance(payload["rev"], int)
+    return set(payload) - {"departed"} == {"class_id", "rev"} and payload["class_id"] == class_id and isinstance(payload["rev"], int)
 
 
 def _assert_only(kind: str, class_id: int, receivers: set[str]) -> None:
@@ -145,6 +145,38 @@ def test_removing_a_co_instructor_signals_the_removed_one_too(client, db, django
     assert response.status_code in (200, 204), response.content
 
     _assert_only(INSTRUCTORS_CHANGED, s["class_id"], {"owner", "co"})
+
+
+@pytest.mark.parametrize("how", ["leave", "remove"])
+def test_a_departure_signal_names_who_went_and_why(client, db, django_capture_on_commit_callbacks, how):
+    """떠나기·내보내기 신호는 누가 어떤 까닭으로 빠졌는지 싣는다(#1517 1) — 강사 탭이 「○○님이 클래스를 떠났습니다」와
+    「내보내졌습니다」를 가르는 유일한 근거다(명단에는 빠진 줄이 없다)."""
+
+    s = _scene(client)
+    co_id = co_instructor_id_of(client, s["owner"]["access"], s["class_id"], "보조 강사")
+    _clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        if how == "leave":
+            response = _post(client, s["co"]["access"], f"{s['class_id']}/instructors/me/leave")
+        else:
+            response = _post(client, s["owner"]["access"], f"{s['class_id']}/co-instructors/{co_id}/remove")
+    assert response.status_code in (200, 204), response.content
+
+    for uid in ("owner", "co"):
+        assert [p["departed"] for p in _signals(uid, INSTRUCTORS_CHANGED)] == [
+            {"co_instructor_id": co_id, "display_name": "보조 강사", "left": how == "leave"}
+        ]
+
+
+def test_a_signal_that_is_not_a_departure_carries_no_departed(client, db, django_capture_on_commit_callbacks):
+    s = _scene(client)
+    newcomer = login(client, uid="newcomer")
+    token = create_co_instructor_invite(client, s["owner"]["access"], s["class_id"])["token"]
+    _clear()
+    with django_capture_on_commit_callbacks(execute=True):
+        accept_co_instructor_invite(client, newcomer["access"], token, display_name="새 강사")
+    assert all("departed" not in p for p in _signals("owner", INSTRUCTORS_CHANGED))
 
 
 # --- 10-2 제출 화면 --------------------------------------------------------------
