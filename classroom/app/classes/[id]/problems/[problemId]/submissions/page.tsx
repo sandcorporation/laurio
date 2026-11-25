@@ -38,6 +38,7 @@ import {
   requiredSummary,
   submissionStats,
 } from "@/lib/submissions/latest-attempts";
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
@@ -224,7 +225,7 @@ export default function ProblemSubmissionsPage() {
   const problemId = Number(params.problemId);
 
   const problemState = useProblem(classId, problemId);
-  const { state } = useProblemSubmissions(classId, problemId);
+  const { state, reload } = useProblemSubmissions(classId, problemId);
   const { state: classState } = useClass(classId);
   const { state: gridState } = useRosterGrid(classId);
   const [showAll, setShowAll] = useState(false);
@@ -244,12 +245,21 @@ export default function ProblemSubmissionsPage() {
     );
   }
 
-  if (state.status === "notFound") {
+  if (state.status === "notFound" || problemState.state.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="problem-submissions-not-found" className="text-[22px] font-semibold">
-          문제를 찾을 수 없습니다
-        </h1>
+        <AccessNotice
+          page="problem"
+          classId={classId}
+          testId="problem-submissions-not-found"
+          retry={{
+            reload: () => {
+              reload();
+              problemState.reload();
+            },
+            turns: [state, problemState.state],
+          }}
+        />
       </PageShell>
     );
   }

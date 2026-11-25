@@ -37,6 +37,7 @@ import {
 } from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { classNamesPatch } from "@/lib/classes/name-patch";
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useClass } from "@/lib/classes/use-class";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useMembers } from "@/lib/members/use-members";
@@ -468,7 +469,12 @@ export default function ClassSettingsPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="class-settings-not-found" className="text-[22px] font-semibold">클래스를 찾을 수 없습니다</h1>
+        <AccessNotice
+          page="class"
+          classId={classId}
+          testId="class-settings-not-found"
+          retry={{ reload, turns: [state] }}
+        />
       </PageShell>
     );
   }
