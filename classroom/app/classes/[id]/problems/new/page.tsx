@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { CharCount } from "@/app/components/CharCount";
 import {
   Badge,
   Card,
@@ -23,6 +24,7 @@ import {
 } from "@/app/components/ui";
 import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
 import { ChecklistRows, GradeToggle } from "@/app/components/ChecklistRows";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import { type ChecklistGrade, defaultPoints } from "@/lib/problems/grade";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
@@ -373,9 +375,11 @@ export default function NewProblemPage() {
                         value={title}
                         onChange={(event) => setTitle(event.target.value)}
                         required
+                        maxLength={INPUT_LIMITS.newProblemTitle}
                         className={INPUT_CLASS}
                         placeholder="예: fetch 로 목록 그리기"
                       />
+                      <CharCount value={title} limit={INPUT_LIMITS.newProblemTitle} testId="new-problem-title-count" />
                     </div>
 
                     <div className="flex flex-col gap-1.5">
@@ -440,14 +444,22 @@ export default function NewProblemPage() {
                     <label htmlFor="new-item-label" className="sr-only">
                       새 항목
                     </label>
-                    <input
-                      id="new-item-label"
-                      data-testid="new-problem-new-checklist-item-label-input"
-                      value={newItemLabel}
-                      onChange={(event) => setNewItemLabel(event.target.value)}
-                      placeholder="새 항목"
-                      className={`${INPUT_CLASS} min-w-0 flex-1`}
-                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <input
+                        id="new-item-label"
+                        data-testid="new-problem-new-checklist-item-label-input"
+                        value={newItemLabel}
+                        onChange={(event) => setNewItemLabel(event.target.value)}
+                        maxLength={INPUT_LIMITS.newChecklistLabel}
+                        placeholder="새 항목"
+                        className={INPUT_CLASS}
+                      />
+                      <CharCount
+                        value={newItemLabel}
+                        limit={INPUT_LIMITS.newChecklistLabel}
+                        testId="new-problem-new-checklist-item-label-count"
+                      />
+                    </div>
                     <GradeToggle
                       grade={newItemGrade}
                       onChange={setNewItemGrade}

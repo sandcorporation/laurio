@@ -33,30 +33,63 @@ export type ApiResult<T> = ApiSuccess<T> | ApiFailure;
 
 export const FALLBACK_DETAIL = "요청을 처리하지 못했습니다. 잠시 후 다시 시도해주세요.";
 
-type ValidationItem = { loc?: unknown; msg?: unknown };
+/** 필드명(`loc` 의 마지막 조각) → 화면 라벨. 폼이 넘기지 않으면 라벨 없이 문구만 나간다. */
+export type FieldLabels = Readonly<Record<string, string>>;
+
+type ValidationItem = {
+  type?: unknown;
+  loc?: unknown;
+  msg?: unknown;
+  ctx?: { max_length?: unknown; min_length?: unknown } | null;
+};
+
+const INVALID_INPUT = "입력값을 확인해 주세요.";
+const VALUE_ERROR_PREFIX = /^Value error, /;
+const HANGUL = /[가-힣]/;
+
+function sentenceFor(item: ValidationItem): string {
+  if (item.type === "string_too_long" && typeof item.ctx?.max_length === "number") {
+    return `${item.ctx.max_length}자까지 쓸 수 있습니다.`;
+  }
+  if (item.type === "string_too_short" && item.ctx?.min_length === 1) return "비워 둘 수 없습니다.";
+  if (item.type === "missing") return "빠진 값이 있습니다.";
+  return INVALID_INPUT;
+}
+
+function translateItem(item: ValidationItem, fieldLabels: FieldLabels | undefined): string {
+  // 우리 검증기가 한국어로 던지는 자리 — 이것만 원문을 보인다. 문장이 스스로 말하므로 라벨도 붙이지 않는다.
+  if (item.type === "value_error") {
+    const message = typeof item.msg === "string" ? item.msg.replace(VALUE_ERROR_PREFIX, "") : "";
+    return HANGUL.test(message) ? message : INVALID_INPUT;
+  }
+  const loc = Array.isArray(item.loc) ? item.loc : [];
+  const field = loc.length > 0 ? String(loc[loc.length - 1]) : "";
+  const label = fieldLabels && Object.hasOwn(fieldLabels, field) ? fieldLabels[field] : undefined;
+  return label ? `${label}: ${sentenceFor(item)}` : sentenceFor(item);
+}
 
 /** 서버의 `detail` 을 사람이 읽는 문자열 하나로 좁힌다.
  *
- * 문자열이면 그대로. django-ninja 요청 검증 422 의 배열이면 각 항목의 `msg` 를 이어 붙이고, 어느
- * 필드인지 알 수 있게 `loc` 의 마지막 조각을 앞에 붙인다(`body`·`payload` 같은 껍데기 조각은
- * 사람에게 의미가 없어 뺀다). 그 밖의 모양이면 `fallback` — 객체를 그대로 렌더해 화면을 죽이는
+ * 문자열이면 그대로. django-ninja 요청 검증 422 의 배열이면 항목마다 pydantic `type` 으로 한국어
+ * 문구를 골라 잇는다 — `msg` 원문(영어)과 `loc` 의 필드명은 나가지 않고, 필드는 `fieldLabels` 에
+ * 있을 때만 그 라벨로 부른다. 그 밖의 모양이면 `fallback` — 객체를 그대로 렌더해 화면을 죽이는
  * 경로가 여기서 닫힌다.
  */
-export function normalizeDetail(detail: unknown, fallback: string = FALLBACK_DETAIL): string {
+export function normalizeDetail(
+  detail: unknown,
+  fallback: string = FALLBACK_DETAIL,
+  fieldLabels?: FieldLabels,
+): string {
   if (typeof detail === "string" && detail.trim() !== "") return detail;
 
   if (Array.isArray(detail)) {
     const parts = detail
-      .map((entry) => {
-        if (entry === null || typeof entry !== "object") return null;
+      .filter((entry): entry is ValidationItem => {
+        if (entry === null || typeof entry !== "object") return false;
         const item = entry as ValidationItem;
-        if (typeof item.msg !== "string") return null;
-        const loc = Array.isArray(item.loc) ? item.loc : [];
-        const field = loc.length > 0 ? String(loc[loc.length - 1]) : "";
-        const named = field !== "" && field !== "body" && field !== "payload";
-        return named ? `${field}: ${item.msg}` : item.msg;
+        return typeof item.type === "string" || typeof item.msg === "string";
       })
-      .filter((part): part is string => part !== null);
+      .map((item) => translateItem(item, fieldLabels));
     if (parts.length > 0) return parts.join(" ");
   }
 

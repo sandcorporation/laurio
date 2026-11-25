@@ -16,6 +16,7 @@
     "./feedback.css": "./feedback.css"
   },
   "scripts": {
+    "test": "vitest run",
     "generate:api": "node scripts/generate-api-types.mjs"
   },
   "dependencies": {
@@ -25,7 +26,8 @@
   "devDependencies": {
     "@types/react": "^19.1.0",
     "openapi-typescript": "^7.13.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.0"
   },
   "peerDependencies": {
     "react": "^19.1.0"

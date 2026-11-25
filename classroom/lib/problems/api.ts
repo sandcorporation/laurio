@@ -3,6 +3,7 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
+import { PROBLEM_FIELD_LABELS } from "@/lib/forms/field-labels";
 import type { GradingStrictness } from "@/lib/problems/grading-guideline";
 import type { GradabilityWarning } from "@/lib/problems/gradability";
 import type { ChecklistGrade } from "@/lib/problems/grade";
@@ -213,6 +214,7 @@ export function createProblem(
   return bffClient.post<ProblemRow & { gradability_warnings?: GradabilityWarning[] }>(
     `/api/backend/classroom/classes/${classId}/problems`,
     input,
+    { fieldLabels: PROBLEM_FIELD_LABELS },
   );
 }
 
@@ -242,6 +244,7 @@ export function updateProblem(
     `/api/backend/classroom/classes/${classId}/problems/${problemId}`,
     "PATCH",
     patch,
+    PROBLEM_FIELD_LABELS,
   );
 }
 
@@ -339,7 +342,9 @@ export function createChecklistItem(
   problemId: number,
   input: { label: string; grade: ChecklistGrade },
 ): Promise<ApiResult<SavedChecklistItemRow>> {
-  return bffClient.post<SavedChecklistItemRow>(checklistItemsPath(classId, problemId), input);
+  return bffClient.post<SavedChecklistItemRow>(checklistItemsPath(classId, problemId), input, {
+    fieldLabels: PROBLEM_FIELD_LABELS,
+  });
 }
 
 export function updateChecklistItem(
@@ -352,6 +357,7 @@ export function updateChecklistItem(
     `${checklistItemsPath(classId, problemId)}/${itemId}`,
     "PATCH",
     patch,
+    PROBLEM_FIELD_LABELS,
   );
 }
 

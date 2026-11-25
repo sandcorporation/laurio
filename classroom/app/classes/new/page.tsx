@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
+import { CharCount } from "@/app/components/CharCount";
 import {
   Card,
   ErrorNote,
@@ -16,6 +17,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { createClass } from "@/lib/classes/api";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
@@ -78,9 +80,11 @@ export default function NewClassPage() {
               value={name}
               onChange={(event) => setName(event.target.value)}
               required
+              maxLength={INPUT_LIMITS.newClassName}
               className={INPUT_CLASS}
               placeholder="예: 프론트엔드 입문 3기"
             />
+            <CharCount value={name} limit={INPUT_LIMITS.newClassName} testId="new-class-name-count" />
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="class-instructor-display-name">
@@ -92,8 +96,14 @@ export default function NewClassPage() {
               value={instructorDisplayName}
               onChange={(event) => setInstructorDisplayName(event.target.value)}
               required
+              maxLength={INPUT_LIMITS.newClassInstructorName}
               className={INPUT_CLASS}
               placeholder="예: 김강사"
+            />
+            <CharCount
+              value={instructorDisplayName}
+              limit={INPUT_LIMITS.newClassInstructorName}
+              testId="new-class-instructor-display-name-count"
             />
             <span className="text-[11.5px] leading-relaxed text-ink/45">
               가입 미리보기에 이 이름으로 보입니다 — 계정 이름과 달라도 됩니다.

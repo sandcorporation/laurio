@@ -18,7 +18,7 @@
 // 보내기만 한다.
 
 import { createBffClient, createLoginRedirect } from "@codemit/bff-client";
-import type { ApiResult } from "@codemit/bff-client";
+import type { ApiResult, FieldLabels } from "@codemit/bff-client";
 
 // 한 화면의 요청 여럿이 함께 401 을 받아도 이동은 한 번이다(#501, 패키지의 `login-redirect`).
 const goToLogin = createLoginRedirect();
@@ -30,9 +30,15 @@ export const bffClient = createBffClient({
 
 /** `PATCH`·`PUT`·`DELETE` — `bffClient`는 `get`/`post` 편의만 준다(#122). 그
  * 밖의 메서드는 `request`를 이 모양으로 감싸 쓴다. */
-export function apiRequest<T>(path: string, method: string, body?: unknown): Promise<ApiResult<T>> {
+export function apiRequest<T>(
+  path: string,
+  method: string,
+  body?: unknown,
+  fieldLabels?: FieldLabels,
+): Promise<ApiResult<T>> {
   return bffClient.request<T>(path, {
     method,
+    fieldLabels,
     ...(body !== undefined
       ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
       : {}),

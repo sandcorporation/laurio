@@ -14,7 +14,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { CharCount } from "@/app/components/CharCount";
 import { Badge, INPUT_CLASS, buttonClass } from "@/app/components/ui";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import { type ChecklistReorderSave, createChecklistMover } from "@/lib/problems/checklist-reorder";
 import { BONUS_RATER_LABEL, type ChecklistGrade, GRADE_LABEL, nextGrade } from "@/lib/problems/grade";
 
@@ -64,6 +66,59 @@ export function GradeToggle({
 /** 배점 선택지 — 1~10 정수(#904). 완성도에만 쓴다. */
 export const POINTS_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
+type LabelMode =
+  | { kind: "commit"; onCommit: (key: ChecklistRowItem["key"], label: string) => void }
+  | { kind: "change"; onChange: (key: ChecklistRowItem["key"], label: string) => void };
+
+/** 줄의 라벨 칸과 그 아래 글자 수. `commit` 칸은 값을 DOM 이 들고 있어, 글자 수용으로만 따라 적는다. */
+function LabelInput({
+  item,
+  index,
+  testId,
+  labelMode,
+  locked,
+}: {
+  item: ChecklistRowItem;
+  index: number;
+  testId: string;
+  labelMode: LabelMode;
+  locked: boolean;
+}): ReactNode {
+  const [typed, setTyped] = useState(item.label);
+  const limit = INPUT_LIMITS.editChecklistLabel;
+  const shared = {
+    "data-testid": `${testId}-label-input`,
+    "aria-label": `${index + 1}번 항목`,
+    maxLength: limit,
+    disabled: locked,
+    className: INPUT_CLASS,
+  };
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-1">
+      {labelMode.kind === "commit" ? (
+        <input
+          {...shared}
+          defaultValue={item.label}
+          onChange={(event) => setTyped(event.target.value)}
+          onBlur={(event) => {
+            const value = event.target.value.trim();
+            if (value !== "" && event.target.value !== item.label) labelMode.onCommit(item.key, value);
+          }}
+        />
+      ) : (
+        <input {...shared} value={item.label} onChange={(event) => labelMode.onChange(item.key, event.target.value)} />
+      )}
+      {locked ? null : (
+        <CharCount
+          value={labelMode.kind === "commit" ? typed : item.label}
+          limit={limit}
+          testId={`${testId}-label-count`}
+        />
+      )}
+    </div>
+  );
+}
+
 export function ChecklistRows({
   items,
   rowTestId,
@@ -86,10 +141,7 @@ export function ChecklistRows({
   /** 공모전 문제 — 라벨·필수·순서·삭제 모두 공모전을 따라간다. */
   lockedStructure?: boolean;
   /** 라벨 칸: `commit` 은 포커스를 잃을 때 한 번 저장(편집), `change` 는 칠 때마다(초안). */
-  labelMode: { kind: "commit"; onCommit: (key: ChecklistRowItem["key"], label: string) => void } | {
-    kind: "change";
-    onChange: (key: ChecklistRowItem["key"], label: string) => void;
-  };
+  labelMode: LabelMode;
   onReorder: ChecklistReorderSave<ChecklistRowItem["key"]>;
   onGradeChange: (key: ChecklistRowItem["key"], grade: ChecklistGrade) => void;
   onPointsChange: (key: ChecklistRowItem["key"], points: number) => void;
@@ -205,28 +257,7 @@ export function ChecklistRows({
               </span>
             )}
             <span className="w-4 shrink-0 font-mono text-[11.5px] text-ink/30">{index + 1}</span>
-            {labelMode.kind === "commit" ? (
-              <input
-                data-testid={`${testId}-label-input`}
-                aria-label={`${index + 1}번 항목`}
-                defaultValue={item.label}
-                disabled={locked}
-                onBlur={(event) => {
-                  const value = event.target.value.trim();
-                  if (value !== "" && event.target.value !== item.label) labelMode.onCommit(item.key, value);
-                }}
-                className={`${INPUT_CLASS} min-w-0 flex-1`}
-              />
-            ) : (
-              <input
-                data-testid={`${testId}-label-input`}
-                aria-label={`${index + 1}번 항목`}
-                value={item.label}
-                disabled={locked}
-                onChange={(event) => labelMode.onChange(item.key, event.target.value)}
-                className={`${INPUT_CLASS} min-w-0 flex-1`}
-              />
-            )}
+            <LabelInput item={item} index={index} testId={testId} labelMode={labelMode} locked={locked} />
             <GradeToggle
               grade={item.grade}
               onChange={(grade) => onGradeChange(item.key, grade)}

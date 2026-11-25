@@ -67,3 +67,30 @@ test("제보를 작업 중으로 바꾸면 이력에 남는다", async ({ page }
   await expect(page.getByTestId("feedback-report-history").locator("li")).toHaveCount(1);
   await expect(page.getByTestId("feedback-report-history")).toContainText("확인했습니다.");
 });
+
+// 운영자 앱도 공용 `normalizeDetail` 의 422 한국어를 받는다(#1390) — 응답만 바꿔 끼운다.
+test("상태 바꾸기가 422 면 한국어가 보이고 영어 원문은 없다", async ({ page }) => {
+  await page.route(
+    (url) => url.pathname === `/api/backend/operator/feedback-reports/${reportId}/status`,
+    (route) =>
+      route.fulfill({
+        status: 422,
+        json: {
+          detail: [
+            {
+              type: "string_too_long",
+              loc: ["body", "payload", "title"],
+              msg: "String should have at most 200 characters",
+              ctx: { max_length: 200 },
+            },
+          ],
+        },
+      }),
+  );
+  await establishOperatorSession(page, operatorName, E2E_OPERATOR_PASSWORD, `/feedback-reports/${reportId}`);
+
+  await page.getByTestId("feedback-report-change").click();
+
+  await expect(page.getByTestId("feedback-report-change-error")).toHaveText("200자까지 쓸 수 있습니다.");
+  await expect(page.getByText("String should")).toHaveCount(0);
+});
