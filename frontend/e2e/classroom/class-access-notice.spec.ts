@@ -204,6 +204,13 @@ test("강사의 낡은 404 는 한 번만 다시 부른다", async ({ browser })
   const seed = `access-stale-${test.info().workerIndex}-${Date.now()}`;
   const { classId, instructor } = await seedClass(browser, seed);
   const classPath = `/api/backend/classroom/classes/${classId}`;
+  // 실시간 스트림을 열지 않는다 — 스트림이 이어지는 순간 클래스 화면은 끊긴 사이의 변경을 줍기 위해 한 번 더 읽는다
+  // (`decideStreamRefresh`, 404 재시도와 무관한 재조회). 그 순간이 404 재시도 앞이냐 뒤냐에 따라 호출 수가 2·3 으로
+  // 흔들렸다(#1496) — 이 시험은 404 재시도만 센다.
+  await instructor.route(
+    (url) => url.pathname === "/api/backend/classroom/events/stream",
+    (route) => route.abort(),
+  );
   let calls = 0;
   let stale = 1;
   await instructor.route(
@@ -231,6 +238,17 @@ test("강사의 낡은 404 는 한 번만 다시 부른다", async ({ browser })
   await expect(instructor).toHaveURL(/\/$/);
   expect(calls).toBe(2);
 });
+
+/** 제출 화면을 열고 실시간 스트림이 이어진 뒤의 재연결 재조회까지 조용해질 때까지 기다린다. 스트림이 늦게 이어지면 그
+ * 재조회(`GET .../mine`)가 시험이 건 가로채기에 걸려 폼이 누르기 전에 사라지거나, 시험이 끝난 뒤 가로채기가 돌았다(#1496). */
+async function openSubmitSettled(page: Page, url: string) {
+  const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
+  await page.goto(url);
+  await stream;
+  await expect(page.getByTestId("repository-url-input")).toBeVisible();
+  // TEST-WAIT-EXCEPTION: 재연결 재조회가 있을지 없을지 모르는 상태에서 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
+}
 
 const EMPTY_REPOSITORY = "GitHub 저장소 주소를 넣어 주세요.";
 const INSTRUCTOR_WARNING = "여기서 낸 시도는 강사 본인 시도로 남고 달성률·제출 현황에 들지 않습니다.";
@@ -378,8 +396,7 @@ test("제출 중 내보내짐(403)을 받으면 새로 고친 뒤처럼 폼이 �
   const seed = `access-403-${test.info().workerIndex}-${Date.now()}`;
   const { classId, openId, joinCode } = await seedClass(browser, seed);
   await joinAs(page, seed, joinCode);
-  await page.goto(`/classes/${classId}/problems/${openId}/submit`);
-  await expect(page.getByTestId("repository-url-input")).toBeVisible();
+  await openSubmitSettled(page, `/classes/${classId}/problems/${openId}/submit`);
 
   // 폼을 연 채 내보내진 상황 — 제출은 403, 다시 읽은 문제는 내보냄 사유를 준다.
   await page.route(
@@ -411,8 +428,7 @@ test("폼을 연 채 문제가 숨겨지면 적던 저장소 주소를 안내 �
   const seed = `access-hidden-${test.info().workerIndex}-${Date.now()}`;
   const { classId, openId, joinCode } = await seedClass(browser, seed);
   await joinAs(page, seed, joinCode);
-  await page.goto(`/classes/${classId}/problems/${openId}/submit`);
-  await expect(page.getByTestId("repository-url-input")).toBeVisible();
+  await openSubmitSettled(page, `/classes/${classId}/problems/${openId}/submit`);
 
   await page.getByTestId("repository-url-input").fill("https://github.com/owner/repo");
   await page.route(

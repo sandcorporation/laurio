@@ -257,32 +257,57 @@ test("참여자가 문제 목록을 연 채로 강사가 문제를 바로 열어
   await expect(page.getByTestId(/^my-problem-row-\d+$/)).toHaveCount(2);
 });
 
-// #1484 ③ — 참여자 행이 있는 강사는 보관 한 번에 participation-changed·instructors-changed 를 함께 받는다. 열어 둔
-// 제출 화면은 그 둘을 한 번의 재조회로 받는다.
-test("참여자 행이 있는 강사가 제출 화면을 연 채로 클래스가 보관되면 내 시도를 한 번만 다시 읽는다", async ({ page }) => {
-  const seed = `rt-archive-once-${test.info().workerIndex}-${Date.now()}`;
-  await establishClassroomSession(page, seed);
-  const { api, classId, joinCode } = await setUpClass(page, seed);
-  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "김소유" } })).ok()).toBeTruthy();
-  const problems = (await (await api.get(`/api/backend/classroom/classes/${classId}/problems`)).json()) as { id: number }[];
-  const mine = `/api/backend/classroom/classes/${classId}/problems/${problems[0].id}/mine`;
-  let reads = 0;
-  page.on("response", (response) => {
-    if (response.request().method() === "GET" && new URL(response.url()).pathname === mine) reads += 1;
+// #1484 ③·#1496 ⑤ — 참여자 행이 있는 강사는 보관 한 번에 participation-changed·instructors-changed 를 함께 받는다. 열어 둔
+// 제출 화면은 그 둘을 한 번의 재조회로 받는다 — 시간 창이 아니라 두 신호의 같은 변경 번호로 알아본다. 한 신호를 1초
+// 늦게 닿게 해(어느 쪽이 먼저든) 창으로는 묶이지 않는 간격을 만든다.
+const SIGNAL_GAP_MS = 1000;
+for (const late of ["participation-changed", "instructors-changed"] as const) {
+  test(`참여자 행이 있는 강사가 제출 화면을 연 채로 클래스가 보관되면 ${late} 가 1초 늦어도 내 시도를 한 번만 다시 읽는다`, async ({
+    page,
+  }) => {
+    test.setTimeout(20_000);
+    const seed = `rt-archive-once-${late}-${test.info().workerIndex}-${Date.now()}`;
+    await establishClassroomSession(page, seed);
+    const { api, classId, joinCode } = await setUpClass(page, seed);
+    expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "김소유" } })).ok()).toBeTruthy();
+    const problems = (await (await api.get(`/api/backend/classroom/classes/${classId}/problems`)).json()) as { id: number }[];
+    const mine = `/api/backend/classroom/classes/${classId}/problems/${problems[0].id}/mine`;
+    await page.addInitScript(
+      ({ kind, delay }) => {
+        const original = EventSource.prototype.addEventListener;
+        EventSource.prototype.addEventListener = function (this: EventSource, name: string, listener: unknown, ...rest: unknown[]) {
+          if (name === kind && typeof listener === "function") {
+            const late = (event: Event) => {
+              // TEST-WAIT-EXCEPTION: 같은 변경의 두 신호 사이를 묶음 창보다 넓게 벌린다.
+              window.setTimeout(() => (listener as (e: Event) => void)(event), delay);
+            };
+            return (original as (...args: unknown[]) => void).call(this, name, late, ...rest);
+          }
+          return (original as (...args: unknown[]) => void).call(this, name, listener, ...rest);
+        } as typeof EventSource.prototype.addEventListener;
+      },
+      { kind: late, delay: SIGNAL_GAP_MS },
+    );
+    let reads = 0;
+    page.on("response", (response) => {
+      if (response.request().method() === "GET" && new URL(response.url()).pathname === mine) reads += 1;
+    });
+
+    const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
+    await page.goto(`/classes/${classId}/problems/${problems[0].id}/submit`);
+    await stream;
+    // TEST-WAIT-EXCEPTION: 재연결 재조회가 있을지 없을지 모르는 상태에서 조용해질 때까지 기다린다.
+    await page.waitForLoadState("networkidle");
+    const before = reads;
+    const reread = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === mine);
+
+    expect((await api.post(`/api/backend/classroom/classes/${classId}/archive`)).ok()).toBeTruthy();
+
+    await reread;
+    // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라, 늦게 닿게 한 신호 뒤까지 기다린다.
+    await page.waitForTimeout(SIGNAL_GAP_MS + 1000);
+    // TEST-WAIT-EXCEPTION: 위와 같은 부정 단언.
+    await page.waitForLoadState("networkidle");
+    expect(reads - before).toBe(1);
   });
-
-  const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
-  await page.goto(`/classes/${classId}/problems/${problems[0].id}/submit`);
-  await stream;
-  // TEST-WAIT-EXCEPTION: 재연결 재조회가 있을지 없을지 모르는 상태에서 조용해질 때까지 기다린다.
-  await page.waitForLoadState("networkidle");
-  const before = reads;
-  const reread = page.waitForResponse((r) => r.request().method() === "GET" && new URL(r.url()).pathname === mine);
-
-  expect((await api.post(`/api/backend/classroom/classes/${classId}/archive`)).ok()).toBeTruthy();
-
-  await reread;
-  // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라 조용해질 때까지 기다린다.
-  await page.waitForLoadState("networkidle");
-  expect(reads - before).toBe(1);
-});
+}

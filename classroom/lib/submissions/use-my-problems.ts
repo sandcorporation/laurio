@@ -46,9 +46,6 @@ export type MyProblemsState =
 //: 벨(`use-unread-count.ts`)과 같은 30초로 잡는다.
 const FALLBACK_POLL_MS = 30_000;
 
-//: 강사가 잇달아 고치면(순서 바꾸기 뒤 고치기 등) 신호가 잇달아 온다 — 클래스 화면과 같은 간격으로 묶는다.
-const SIGNAL_COALESCE_MS = 250;
-
 const NOT_FOUND = Symbol("my-problems-not-found");
 
 export function useMyProblems(classId: number) {
@@ -75,7 +72,6 @@ export function useMyProblems(classId: number) {
     waiting: true,
     fallbackPollMs: FALLBACK_POLL_MS,
     reload,
-    coalesceSignalsMs: SIGNAL_COALESCE_MS,
   });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는

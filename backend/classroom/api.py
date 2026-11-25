@@ -2229,9 +2229,8 @@ def expel_class_member(member: ClassMember) -> ClassMember:
     member.refresh_from_db(fields=["expelled_at"])
     if first:
         # 내보내진 그 사람의 열린 제출 화면만 — 다른 참여자에게는 보내지 않는다(#1447 10-2).
-        publish_participation_changed(member.classroom_id, member_user_ids=[member.user_id])
-        # 그 행·달성률 분모가 바뀐다 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 다시 읽는다(#1471 ⑦).
-        publish_instructors_changed(member.classroom)
+        # 그 행·달성률 분모도 바뀐다 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 같은 변경 번호로 다시 읽는다(#1471 ⑦).
+        publish_participation_changed(member.classroom, member_user_ids=[member.user_id])
         # 처음 내보낼 때만 — 내보내진 사람에게 알린다(#1441-8). 알림이 실패해도 내보내기는 그대로다.
         notify_safely(
             recipient=member.user,

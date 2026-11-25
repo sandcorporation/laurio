@@ -38,9 +38,6 @@ export type MyProblemState =
 //: 보고 있는 화면이라 체감이 더 중요하다.
 const FALLBACK_POLL_MS = 4_000;
 
-//: 한 변경이 신호 둘로 오는 사람(참여자 행이 있는 강사)의 재조회를 묶는 간격(#1484 ③).
-const SIGNAL_COALESCE_MS = 250;
-
 const NOT_FOUND = Symbol("my-problem-not-found");
 
 export function useMyProblem(classId: number, problemId: number) {
@@ -78,13 +75,13 @@ export function useMyProblem(classId: number, problemId: number) {
     [classId, problemId],
   );
   // 참여자 행이 있는 강사는 보관·문제 쓰기 한 번에 participation-changed·instructors-changed 를 함께 받는다 —
-  // 둘이 따로 도착하면 같은 재조회가 두 번 돈다(#1484 ③). 클래스 화면과 같은 250ms 로 묶는다.
+  // 둘이 따로 도착하면 같은 재조회가 두 번 돈다(#1484 ③). 두 신호가 싣는 같은 변경 번호로 하나가 된다(#1496 ⑤,
+  // `useRealtimeRefresh`).
   useRealtimeRefresh({
     matches,
     waiting: hasPendingAttempt,
     fallbackPollMs: FALLBACK_POLL_MS,
     reload,
-    coalesceSignalsMs: SIGNAL_COALESCE_MS,
   });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는

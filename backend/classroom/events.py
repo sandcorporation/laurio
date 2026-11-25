@@ -109,13 +109,14 @@ INSTRUCTORS_CHANGED = "instructors-changed"
 
 #: 참여자가 그 클래스에 낼 수 있는지가 바뀌었다 — 문제 열기·숨김·다시 열기, 클래스 보관·되돌리기,
 #: 내보내기(#1447 10-2). 그 클래스의 (내보내지지 않은) 참여자에게만, 내보내기는 내보내진 그 사람
-#: 에게만 간다. 열어 둔 제출 화면이 제출 가능 상태를 다시 읽는 신호라 본문은 `class_id` 하나뿐이다.
+#: 에게만 간다. 열어 둔 제출 화면이 제출 가능 상태를 다시 읽는 신호라 본문은 `class_id` 와, 같은 변경의
+#: `instructors-changed` 와 같은 변경 번호 `rev` 뿐이다(#1496 ⑤).
 PARTICIPATION_CHANGED = "participation-changed"
 
 
-def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = frozenset()) -> None:
+def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = frozenset()) -> int:
     """바뀐 뒤의 강사 전원에게 보낸다(본문은 `class_id` 와 변경 번호 `rev`. 바꾸는 트랜잭션 안에서 부르면 바뀐 명단을 읽는다). 방금
-    빠진 사람(떠나기·내보내기)은 `also` 로 더한다 — 그 사람의 열린 탭도 접근 안내로 바뀌어야 한다."""
+    빠진 사람(떠나기·내보내기)은 `also` 로 더한다 — 그 사람의 열린 탭도 접근 안내로 바뀌어야 한다. 올린 번호를 돌려준다."""
 
     # 변경 번호를 하나 올려 본문에 싣는다 — 클래스 응답이 같은 번호를 싣는다(`Class.signal_rev`, #1484 ④).
     Class.objects.filter(pk=class_obj.pk).update(signal_rev=F("signal_rev") + 1)
@@ -123,16 +124,21 @@ def publish_instructors_changed(class_obj, *, also: frozenset[int] | set[int] = 
     payload = {"class_id": class_obj.id, "rev": class_obj.signal_rev}
     for recipient_id in {*instructor_user_ids(class_obj), *also}:
         publish_after_commit(Event(kind=INSTRUCTORS_CHANGED, recipient_id=recipient_id, payload=payload))
+    return class_obj.signal_rev
 
 
-def publish_participation_changed(class_id: int, *, member_user_ids=None) -> None:
-    """`member_user_ids` 를 주지 않으면 그 클래스의 내보내지지 않은 참여자 전원에게 보낸다."""
+def publish_participation_changed(class_obj, *, member_user_ids=None) -> None:
+    """참여 쪽이 바뀌는 일은 늘 강사 쪽도 바꾼다 — 강사 전원에게 `instructors-changed` 를, 참여자에게 같은 변경 번호의
+    `participation-changed` 를 보낸다(#1496 ⑤). 참여자 행이 있는 강사는 둘을 함께 받는데, 열어 둔 제출 화면이 번호로
+    같은 변경을 알아보고 한 번만 다시 읽는다(시간 창이 아니다). `member_user_ids` 를 주지 않으면 그 클래스의
+    내보내지지 않은 참여자 전원에게 보낸다."""
 
+    rev = publish_instructors_changed(class_obj)
     if member_user_ids is None:
         member_user_ids = ClassMember.objects.filter(
-            classroom_id=class_id, expelled_at__isnull=True
+            classroom_id=class_obj.id, expelled_at__isnull=True
         ).values_list("user_id", flat=True)
-    payload = {"class_id": class_id}
+    payload = {"class_id": class_obj.id, "rev": rev}
     for recipient_id in set(member_user_ids):
         publish_after_commit(Event(kind=PARTICIPATION_CHANGED, recipient_id=recipient_id, payload=payload))
 
@@ -141,8 +147,9 @@ def publish_problems_changed(class_obj, *, participants_see_it: bool) -> None:
     """문제 목록·격자 열이 바뀌었다 — 만들기·가져오기·복사·고치기·지우기·순서, 체크리스트 항목(#1471 ⑦).
     그 클래스 강사 전원에게 `instructors-changed`(클래스 머리·격자·문제 목록이 다시 읽는다), 참여자에게 보이는
     문제(초안이 아닌 것)가 바뀌었으면 살아 있는 참여자에게 `participation-changed`(문제 목록·제출 화면이 다시
-    읽는다)도 보낸다. 본문은 `class_id`(강사 신호는 변경 번호 `rev` 도, #1484 ④)다."""
+    읽는다)도 보낸다. 본문은 `class_id` 와 변경 번호 `rev`(#1484 ④, 두 신호가 같은 값 #1496 ⑤)다."""
 
-    publish_instructors_changed(class_obj)
     if participants_see_it:
-        publish_participation_changed(class_obj.id)
+        publish_participation_changed(class_obj)
+    else:
+        publish_instructors_changed(class_obj)

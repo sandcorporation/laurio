@@ -49,7 +49,7 @@ from dataclasses import dataclass
 
 from ninja.errors import HttpError
 
-from .events import publish_instructors_changed, publish_participation_changed
+from .events import publish_participation_changed
 from .models import ChecklistGrade, Class, Problem
 
 #: 전이가 막혔을 때의 이유 — 강사용 문제 응답의 `available_transitions`와
@@ -166,10 +166,9 @@ def execute_transition(name: str, problem: Problem) -> Problem:
 
     problem.status = edge.to_state
     problem.save(update_fields=["status", "updated_at"])
-    # 열어 둔 참여자 제출 화면이 낼 수 있는지를 다시 읽는다(#1447 10-2).
-    publish_participation_changed(problem.classroom_id)
-    # 열린 문제 수(n/N 의 N·달성률)가 바뀐다 — 다른 강사가 열어 둔 클래스 머리·격자·문제 목록도 다시 읽는다(#1471 ⑦).
-    publish_instructors_changed(problem.classroom)
+    # 열어 둔 참여자 제출 화면이 낼 수 있는지를 다시 읽는다(#1447 10-2). 열린 문제 수(n/N 의 N·달성률)도 바뀐다 —
+    # 다른 강사가 열어 둔 클래스 머리·격자·문제 목록도 다시 읽는다(#1471 ⑦). 두 신호는 같은 변경 번호다(#1496 ⑤).
+    publish_participation_changed(problem.classroom)
     return problem
 
 

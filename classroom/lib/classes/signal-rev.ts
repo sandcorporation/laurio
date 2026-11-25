@@ -1,20 +1,71 @@
-// 강사 쪽 변경 신호(`instructors-changed`)의 변경 번호 판단 (#1484 ④). 번호는 백엔드가 변경마다 하나 올려 신호 본문과
-// 클래스 응답에 같은 값으로 싣는다 — 시간 창이 아니라 「이미 읽은 번호인가」로 같은 변경의 재조회를 하나로 모은다.
+// 클래스 상세가 강사 쪽 변경 신호(`instructors-changed`)로 클래스를 다시 읽는 판단 (#1484 ④, #1496 ③④). 번호는 백엔드가
+// 변경마다 하나 올려 신호 본문과 클래스 응답에 같은 값으로 싣는다 — 시간 창이 아니라 「이미 읽은 번호인가」로 같은 변경의
+// 재조회를 하나로 모은다. 겹쳐 배포 중의 옛 서버는 번호를 싣지 않는다 — 번호 없는 신호는 「한 번 더 읽을 것」으로만 세고,
+// 번호 없는 응답은 그 요청을 보낼 때까지 본 신호를 읽은 것으로 친다. 서버가 채울 수 없는 번호를 만들지 않는다.
+// 재조회의 끝은 성공·실패 모두 받는다 — 실패가 「읽는 중」을 붙잡아 두면 다음 신호를 놓친다.
 
-/** 신호 본문의 변경 번호 — 없거나 숫자가 아니면 모른다(null). */
-export function signalRev(payload: Record<string, unknown>): number | null {
-  const rev = payload.rev;
-  return typeof rev === "number" && Number.isFinite(rev) ? rev : null;
-}
+export { changeRev as signalRev } from "../events/same-change";
 
-/** 지금 클래스를 다시 읽어야 하는가 — 본 가장 큰 번호가 읽은 번호보다 크고, 읽는 중이 아닐 때만.
- * 읽는 중이면 응답이 와서 읽은 번호가 바뀐 뒤 다시 판단한다. */
-export function shouldReloadForRev(seenRev: number, loadedRev: number, inFlight: boolean): boolean {
-  return seenRev > loadedRev && !inFlight;
-}
+export class ClassSignalReload {
+  /** 신호에서 본 가장 큰 번호. */
+  private seenRev = 0;
+  /** 읽은 클래스 응답이 담은 번호. */
+  private loadedRev = 0;
+  /** 번호 없는 신호가 와서 한 번 더 읽어야 한다. */
+  private unnumbered = false;
+  private inFlight = false;
+  /** 지금 읽는 요청을 보낼 때까지 본 번호 — 번호 없는 응답은 여기까지를 읽은 것으로 친다. */
+  private revAtRequest = 0;
+  /** 읽기를 부른 신호의 수 — 명령이 도는 사이 그런 신호가 왔는지 가른다. */
+  private demands = 0;
 
-/** 내 명령이 끝났을 때 자체 재조회를 건너뛰는가 — 명령이 도는 사이 신호가 왔으면(내 변경의 것일 수 있다) 그 신호 길이
- * 번호를 비교해 읽는다. 신호가 아직 안 왔으면 자체 재조회가 읽고, 뒤따라 온 그 신호는 번호가 이미 읽은 값이라 건너뛴다. */
-export function signalArrivedDuringCommand(seenRevNow: number, seenRevAtStart: number): boolean {
-  return seenRevNow > seenRevAtStart;
+  /** 신호 하나를 받았다 — 지금 읽기를 시작해야 하면 참. */
+  signal(rev: number | null): boolean {
+    if (rev === null) {
+      this.unnumbered = true;
+      this.demands += 1;
+    } else if (rev > this.seenRev) {
+      this.seenRev = rev;
+      if (rev > this.loadedRev) this.demands += 1;
+    }
+    return this.due();
+  }
+
+  /** 읽는 중이 아니고, 읽을 것이 남았는가. */
+  due(): boolean {
+    return !this.inFlight && (this.unnumbered || this.seenRev > this.loadedRev);
+  }
+
+  get reading(): boolean {
+    return this.inFlight;
+  }
+
+  /** 읽기를 보낸다(어느 길이든). */
+  started(): void {
+    this.inFlight = true;
+    this.unnumbered = false;
+    this.revAtRequest = this.seenRev;
+  }
+
+  /** 응답이 왔다 — 응답의 번호(없으면 null). 그 사이 더 읽을 것이 왔으면 참(한 번 더 읽는다). */
+  succeeded(responseRev: number | null): boolean {
+    this.inFlight = false;
+    this.loadedRev = Math.max(this.loadedRev, responseRev ?? this.revAtRequest);
+    return this.due();
+  }
+
+  /** 읽기가 실패했다 — 읽는 중을 푼다. 곧바로 다시 두드리지 않는다: 다음 신호·재연결·폴링이 다시 읽는다. */
+  failed(): void {
+    this.inFlight = false;
+  }
+
+  /** 내 명령이 시작될 때의 표식 — 끝날 때 `signalSince` 에 넘긴다. */
+  commandMark(): number {
+    return this.demands;
+  }
+
+  /** 명령이 도는 사이 읽기를 부른 신호가 왔는가 — 왔으면 그 신호 길이 읽는다(읽는 중이거나 곧 읽는다). */
+  signalSince(mark: number): boolean {
+    return this.demands > mark;
+  }
 }
