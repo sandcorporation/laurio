@@ -498,7 +498,8 @@ export default function EditProblemPage() {
           </Note>
         </div>
       ) : null}
-      {mainSave.error ? (
+      {/* 기한 순서 오류는 기한 카드가 한 번만 알린다 — 여기서도 띄우면 낭독기가 두 번 읽는다. */}
+      {mainSave.error && mainSave.error !== DUE_ORDER_MESSAGE ? (
         <div className="mb-5">
           <ErrorNote>
             <span data-testid="edit-problem-error-message">{mainSave.error}</span>

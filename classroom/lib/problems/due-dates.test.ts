@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   dueDraftFromIso,
   dueDraftToIso,
+  dueOrderNote,
   dueOrderViolated,
   describeDue,
   formatDueDateTime,
@@ -126,5 +127,14 @@ describe("due draft", () => {
     expect(dueOrderViolated(due, due)).toBe(false);
     expect(dueOrderViolated({ date: "2026-10-24", time: "23:59" }, due)).toBe(false);
     expect(dueOrderViolated(rec, { date: "", time: "" })).toBe(false);
+  });
+});
+
+describe("dueOrderNote", () => {
+  it("권장 기한이 마감보다 늦으면 두 날짜를 짚는 문구를 준다", () => {
+    expect(dueOrderNote(true)).toBe("권장 기한이 마감보다 늦습니다. 권장 기한을 마감 이전으로 바꾸세요.");
+  });
+  it("순서가 맞으면 없다", () => {
+    expect(dueOrderNote(false)).toBeNull();
   });
 });

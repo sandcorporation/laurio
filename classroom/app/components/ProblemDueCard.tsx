@@ -5,7 +5,7 @@
 // 한다 — 이 카드는 값을 들고 있지 않고 부모의 초안(`DueDraft`)을 비춘다. 둘 다 있을 때 권장이
 // 마감 뒤면 부모가 `invalid` 를 주고 두 칸이 붉어진다(서버 422 도 같은 표시).
 import { Card, CardHeader } from "@/app/components/ui";
-import { EMPTY_DUE_DRAFT, pickDueDate, type DueDraft } from "@/lib/problems/due-dates";
+import { EMPTY_DUE_DRAFT, dueOrderNote, pickDueDate, type DueDraft } from "@/lib/problems/due-dates";
 
 function DueField({
   label,
@@ -13,6 +13,7 @@ function DueField({
   value,
   onChange,
   invalid,
+  describedBy,
   disabled,
 }: {
   label: string;
@@ -20,6 +21,7 @@ function DueField({
   value: DueDraft;
   onChange: (next: DueDraft) => void;
   invalid: boolean;
+  describedBy?: string;
   disabled: boolean;
 }) {
   const field =
@@ -47,6 +49,7 @@ function DueField({
           data-testid={`${testId}-date`}
           aria-label={`${label} 날짜`}
           aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? describedBy : undefined}
           value={value.date}
           disabled={disabled}
           onChange={(event) => onChange(pickDueDate(value, event.target.value))}
@@ -57,6 +60,7 @@ function DueField({
           data-testid={`${testId}-time`}
           aria-label={`${label} 시각`}
           aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? describedBy : undefined}
           value={value.time}
           disabled={disabled || !value.date}
           onChange={(event) => onChange({ ...value, time: event.target.value })}
@@ -84,6 +88,8 @@ export function ProblemDueCard({
   invalid: boolean;
   disabled?: boolean;
 }) {
+  const noteId = `${testIdPrefix}-due-order-note`;
+  const note = dueOrderNote(invalid);
   return (
     <Card>
       <CardHeader title="기한" />
@@ -94,10 +100,24 @@ export function ProblemDueCard({
           value={recommended}
           onChange={onRecommendedChange}
           invalid={invalid}
+          describedBy={noteId}
           disabled={disabled}
         />
-        <DueField label="마감" testId={`${testIdPrefix}-due`} value={due} onChange={onDueChange} invalid={invalid} disabled={disabled} />
+        <DueField
+          label="마감"
+          testId={`${testIdPrefix}-due`}
+          value={due}
+          onChange={onDueChange}
+          invalid={invalid}
+          describedBy={noteId}
+          disabled={disabled}
+        />
       </div>
+      {note ? (
+        <p id={noteId} role="alert" data-testid={noteId} className="px-4 pb-2 text-[13px] leading-relaxed text-error">
+          {note}
+        </p>
+      ) : null}
       <p className="px-4 pb-4 text-[12px] leading-relaxed text-ink/60">
         마감이 지나도 제출할 수 있고, 그 뒤 제출은 「마감 기한 뒤 제출」로 표시됩니다.
       </p>
