@@ -41,25 +41,24 @@ async function memberIdOf(page: Page, classId: number, name: string) {
   return members.find((m) => m.display_name === name)!.id;
 }
 
-// 격자·문제 목록 GET 을 센다. 화면을 열 때 한 번, 스트림이 이어질 때 한 번 읽는다 — 그 둘째 읽기가 끝난 뒤부터
-// 센다(그 전에 상대가 움직이면 재연결 재조회가 바뀐 상태를 주워 신호 없이도 통과한다).
+// 격자·문제 목록 GET 을 센다. 화면을 열 때 읽고, 스트림이 이어질 때 마운트돼 있던 훅은 한 번 더 읽는다 — 그
+// 재조회까지 끝난 뒤부터 센다(그 전에 상대가 움직이면 재연결 재조회가 바뀐 상태를 주워 신호 없이도 통과한다).
 async function openParticipantsTab(page: Page, classId: number) {
   const base = `/api/backend/classroom/classes/${classId}`;
   const reads = { grid: 0, problems: 0 };
-  let settled!: () => void;
-  const secondReads = new Promise<void>((resolve) => (settled = resolve));
   page.on("response", (response) => {
     if (response.request().method() !== "GET") return;
     const path = new URL(response.url()).pathname;
     if (path === `${base}/roster-grid`) reads.grid += 1;
     else if (path === `${base}/problems`) reads.problems += 1;
-    else return;
-    if (reads.grid >= 2 && reads.problems >= 2) settled();
   });
   const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
   await page.goto(`/classes/${classId}?tab=participants`);
   await stream;
-  await secondReads;
+  await expect(page.getByTestId("participants-achievement-row")).toBeVisible();
+  // 탭이 스트림보다 먼저 마운트됐는지에 따라 재연결 재조회가 있기도 없기도 해 이름 붙일 사건이 하나로 정해지지 않는다.
+  // TEST-WAIT-EXCEPTION: 재연결 재조회가 있을지 없을지 모르는 상태에서 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
   const problemsRead = () =>
     page.waitForResponse(
       (r) => r.request().method() === "GET" && new URL(r.url()).pathname === `${base}/problems`,
