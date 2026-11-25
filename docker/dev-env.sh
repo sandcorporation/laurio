@@ -16,9 +16,9 @@
 # 그 판정 기준은 이름이 아니라 **git 이 말하는 주 워크트리인가**이다 — 디렉터리
 # 이름으로 판정하면 저장소를 다른 이름으로 클론한 사람이 조용히 오프셋을 받는다.
 #
-# 해시가 겹치면 두 워크트리가 같은 포트를 받고, 그러면 나중에 뜨는 쪽이 **포트 바인딩
-# 실패로 죽는다.** 그 편이 낫다 — 조용히 남의 스택에 붙어 서로의 데이터를 보는 것보다
-# 못 뜨는 것이 언제나 진단하기 쉽다.
+# 해시가 겹치면 두 워크트리가 같은 compose 프로젝트 이름을 받고, 그러면 나중에 뜨는 쪽의
+# `up` 이 **남의 컨테이너를 다시 만든다**(#1409). 그래서 해시 칸이 다른 체크아웃 것이면
+# 다음 빈 칸으로 넘긴다. 주인은 컨테이너 라벨로 본다(`dev-stack-orphans.sh`).
 
 set -eu
 
@@ -51,6 +51,54 @@ if command -v docker >/dev/null 2>&1; then
   dev_stack_reap_orphans
 fi
 
+# 프로젝트 $1 의 주인 중 이 체크아웃($root) 밖의 첫 디렉터리. 없으면 빈 줄.
+foreign_owner() {
+  for _owner in $(dev_stack_owners "$1"); do
+    case "$_owner" in
+      "$root" | "$root"/*) ;;
+      *) echo "$_owner"; return 0 ;;
+    esac
+  done
+}
+
+# 해시 칸 $1 부터 1~9 를 한 바퀴 돌아 offset 을 정한다(#1409). 한 칸은 dev 스택과 `-e2e` 스택을 함께 본다
+# (`test.sh e2e` 는 `-e2e` 만 띄운다). 내 라벨이 붙은 칸이 있으면 그 칸(다시 불러도 같다), 없으면 비었거나
+# 사라진 체크아웃의 라벨만 남은 첫 칸. 살아 있는 남의 라벨이 하나라도 있는 칸은 쓰지 않는다.
+pick_hash_offset() {
+  _projects=$(docker ps -a --filter "label=com.docker.compose.project" \
+    --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u || true)
+  _mine_slot= _free_slot= _taken= _hash_owner=
+  _i=0
+  while [ "$_i" -lt 9 ]; do
+    _slot=$(( ($1 - 1 + _i) % 9 + 1 ))
+    _i=$((_i + 1))
+    _mine= _other=
+    for _project in "codemit-dev-$_slot" "codemit-dev-$_slot-e2e"; do
+      printf '%s\n' "$_projects" | grep -qx "$_project" || continue
+      for _owner in $(dev_stack_owners "$_project"); do
+        case "$_owner" in
+          "$root" | "$root"/*) _mine=1 ;;
+          *) if [ -d "$_owner" ]; then _other=$_owner; fi ;;
+        esac
+      done
+    done
+    if [ -n "$_other" ]; then
+      _taken="$_taken $_slot($_other)"
+      if [ "$_slot" -eq "$1" ]; then _hash_owner=$_other; fi
+    elif [ -n "$_mine" ]; then
+      _mine_slot=$_slot
+      break
+    elif [ -z "$_free_slot" ]; then
+      _free_slot=$_slot
+    fi
+  done
+  offset=${_mine_slot:-$_free_slot}
+  [ -n "$offset" ] || refuse "오프셋 1~9 가 모두 다른 체크아웃의 스택이다:$_taken"
+  if [ -n "$_hash_owner" ]; then
+    echo "dev-env.sh: 해시 칸 $1 은 다른 체크아웃($_hash_owner)의 스택이라 오프셋 $offset 을 쓴다" >&2
+  fi
+}
+
 if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   # 사람이 오프셋을 직접 고른다(#1106). 0~9 의 한 자리 숫자만 받는다.
   case "$CODEMIT_DEV_OFFSET" in
@@ -62,22 +110,14 @@ if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   # 그 오프셋의 compose 프로젝트가 다른 체크아웃 것이면 멈춘다 — 남의 스택에 붙지 않는다.
   project=codemit-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$offset" )
   if command -v docker >/dev/null 2>&1; then
-    . "$script_dir/dev-stack-orphans.sh"
-    owners=$(dev_stack_owners "$project")
     # 주인 디렉터리가 모두 사라진 스택은 고아다 — 컨테이너를 내리고(볼륨은 남긴다) 그 오프셋을 쓴다(#1186).
     if dev_stack_is_orphan "$project"; then
-      echo "dev-env.sh: 오프셋 $offset($project)은 사라진 체크아웃($(echo $owners))의 고아 스택이라 내렸다(볼륨은 남겼다)" >&2
+      echo "dev-env.sh: 오프셋 $offset($project)은 사라진 체크아웃($(echo $(dev_stack_owners "$project")))의 고아 스택이라 내렸다(볼륨은 남겼다)" >&2
       dev_stack_down_orphan "$project"
-      owners=
+    else
+      owner=$(foreign_owner "$project")
+      [ -z "$owner" ] || refuse "오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다"
     fi
-    for owner in $owners; do
-      case "$owner" in
-        "$root" | "$root"/*) ;;
-        *)
-          refuse "오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다"
-          ;;
-      esac
-    done
   fi
 elif [ "$root" = "$main_worktree" ]; then
   offset=0
@@ -89,6 +129,10 @@ else
   if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum; else hash='shasum -a 256'; fi
   digits=$(printf '%s' "$root" | $hash | tr -dc '0-9' | cut -c1-3 | sed 's/^0*//')
   offset=$(( (${digits:-0} % 9) + 1 ))
+  # docker 가 없으면 주인을 물을 곳이 없다 — 해시 칸 그대로.
+  if command -v docker >/dev/null 2>&1; then
+    pick_hash_offset "$offset"
+  fi
 fi
 
 slot=$(( offset * 100 ))
