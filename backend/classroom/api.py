@@ -59,6 +59,7 @@ from submissions.models import (
 )
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
+from .departures import is_left, left_member_ids
 from .models import (
     ANTHROPIC_KEY_FIELDS,
     OPENAI_KEY_FIELDS,
@@ -1049,6 +1050,7 @@ def list_joined_classes(request: HttpRequest):
     )
     memberships = list(memberships)
     progress = _joined_progress(memberships)
+    left_ids = left_member_ids(memberships)
     return 200, [
         JoinedClassOut(
             id=m.classroom.id,
@@ -1057,7 +1059,7 @@ def list_joined_classes(request: HttpRequest):
             joined_at=m.joined_at,
             archived=m.classroom.archived_at is not None,
             expelled=m.expelled_at is not None,
-            left=m.left_by_self,
+            left=m.id in left_ids,
             passed_count=progress[m.id][0],
             open_problem_count=progress[m.id][1],
         )
@@ -2152,13 +2154,13 @@ def accept_co_instructor_invite(request: HttpRequest, token: str, payload: CoIns
 # --- Member (#281) ---------------------------------------------------------------
 
 
-def _serialize_member(member: ClassMember, class_obj: Class) -> MemberOut:
+def _serialize_member(member: ClassMember, class_obj: Class, *, left: bool | None = None) -> MemberOut:
     return MemberOut(
         id=member.id,
         display_name=member.display_name,
         joined_at=member.joined_at,
         expelled=member.expelled_at is not None,
-        left=member.left_by_self,
+        left=is_left(member) if left is None else left,
         is_instructor=is_instructor(class_obj, member.user_id),
     )
 
@@ -2179,7 +2181,9 @@ def _serialize_members(class_obj: Class) -> list[MemberOut]:
     """참여자 명단 — 화면(`list_members`)과 연결된 앱의 읽기 도구
     (`classroom.mcp_read_tools`, #513)가 함께 부른다."""
 
-    return [_serialize_member(m, class_obj) for m in class_obj.members.all()]
+    members = list(class_obj.members.all())
+    left_ids = left_member_ids(members)
+    return [_serialize_member(m, class_obj, left=m.id in left_ids) for m in members]
 
 
 @router.post(
@@ -2369,6 +2373,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
     checklist_by_problem = {p.id: list(p.checklist_items.all()) for p in problems}
     marks = entry_marks(problems)
     member_rows = []
+    left_ids = left_member_ids(members)
     for member in members:
         cells = [
             ClassroomGridCellOut(
@@ -2394,7 +2399,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 display_name=member.display_name,
                 is_instructor=is_instructor(class_obj, member.user_id),
                 expelled=member.expelled_at is not None,
-                left=member.left_by_self,
+                left=member.id in left_ids,
                 cells=cells,
                 joined_at=member.joined_at,
                 last_submitted_at=max(

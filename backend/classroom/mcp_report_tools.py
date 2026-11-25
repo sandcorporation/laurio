@@ -56,6 +56,7 @@ from . import pending_scoring
 from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pass_stats
 from .contest_entries import entry_marks
 from .current_score import current_score, current_score_prefetch
+from .departures import is_left, left_member_ids
 from .instructor_scope import class_scope, problem_scope
 from .instructors import classes_taught_by, is_instructor
 from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA, LATE_STATUS_SCHEMA
@@ -196,6 +197,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
         )
 
     participant_rows = []
+    left_ids = left_member_ids(members)
     for member in members:
         cells = []
         for problem in problems:
@@ -227,7 +229,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                 "display_name": member.display_name,
                 "is_instructor": is_instructor(class_obj, member.user_id),
                 "expelled": member.expelled_at is not None,
-                "left": member.left_by_self,
+                "left": member.id in left_ids,
                 "problems": cells,
             }
         )
@@ -354,7 +356,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
             "id": submission.member.id,
             "display_name": submission.member.display_name,
             "expelled": submission.member.expelled_at is not None,
-            "left": submission.member.left_by_self,
+            "left": is_left(submission.member),
             "is_instructor": is_instructor(scope.class_obj, submission.member.user_id),
         },
         "attempt_number": submission.attempt_number,
