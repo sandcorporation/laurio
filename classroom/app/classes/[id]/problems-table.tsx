@@ -282,12 +282,13 @@ export function ProblemsTable({
                   {formatRelativeTime(problem.last_submitted_at)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right">
-                  <Link href={`/classes/${classId}/problems/${problem.id}`} data-testid={`problem-row-${problem.id}-edit`} className={`${LINK_BUTTON} hidden sm:inline-block`}>
+                  <Link href={`/classes/${classId}/problems/${problem.id}`} data-testid={`problem-row-${problem.id}-edit`} aria-label={`편집 ${problem.title}`} className={`${LINK_BUTTON} hidden sm:inline-block`}>
                     편집
                   </Link>
                   <Link
                     href={`/classes/${classId}/problems/${problem.id}/submissions`}
                     data-testid={`problem-row-${problem.id}-submissions`}
+                    aria-label={`제출 현황 ${problem.title}`}
                     className={LINK_BUTTON}
                   >
                     제출 현황

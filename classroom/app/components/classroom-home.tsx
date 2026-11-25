@@ -169,6 +169,7 @@ function ClassList({
                   <Link
                     href={`/classes/${classroom.id}`}
                     data-testid={`classroom-row-${classroom.id}-view`}
+                    aria-label={`지난 기록 보기 ${classroom.name}`}
                     className={buttonClass("secondary", "sm")}
                   >
                     지난 기록 보기
@@ -176,6 +177,7 @@ function ClassList({
                   <Link
                     href={`/classes/${classroom.id}/settings#class-archive`}
                     data-testid={`classroom-row-${classroom.id}-copy`}
+                    aria-label={`복사해서 새 기수 열기 ${classroom.name}`}
                     className={buttonClass("secondary", "sm")}
                   >
                     복사해서 새 기수 열기
@@ -185,6 +187,7 @@ function ClassList({
                 <Link
                   href={`/classes/${classroom.id}`}
                   data-testid={`classroom-row-${classroom.id}-open`}
+                  aria-label={`열기 ${classroom.name}`}
                   className={buttonClass("secondary", "sm")}
                 >
                   열기
