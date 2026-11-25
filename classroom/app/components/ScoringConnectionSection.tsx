@@ -20,6 +20,7 @@ import {
 import { CLAUDE_KEY_LABEL, connectionKindOptions, type ConnectionKind } from "@/lib/classes/connection-kinds";
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
+import { normalizeServerUrl } from "@/lib/classes/server-url";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
 import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 
@@ -169,6 +170,7 @@ function VendorKeyRow({
   const active = classroom.scoring_connection_kind === `${provider}_key`;
 
   async function handleDelete() {
+    announce("");
     setDeleting(true);
     setError(null);
     const result = await deleteVendorKey(classroom.id, provider);
@@ -206,7 +208,10 @@ function VendorKeyRow({
             type="button"
             data-testid={`vendor-key-${provider}-change`}
             aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => {
+              announce("");
+              setOpen((value) => !value);
+            }}
             className={buttonClass("secondary", "sm")}
           >
             {open ? "닫기" : vendorKey ? "바꾸기" : "넣기"}
@@ -394,9 +399,15 @@ function CompatibleServerForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const checked = normalizeServerUrl(serverUrl);
+    if (!checked.ok) {
+      setError(checked.message);
+      return;
+    }
+    setServerUrl(checked.url);
     setSaving(true);
     setError(null);
-    const result = await setCompatibleServer(classroom.id, serverUrl.trim(), authValue);
+    const result = await setCompatibleServer(classroom.id, checked.url, authValue);
     if (result.ok) {
       setAuthValue("");
       onSaved();
@@ -407,17 +418,27 @@ function CompatibleServerForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
+    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-2.5">
       <label htmlFor="scoring-server-url" className="flex flex-col gap-1.5">
         <FieldLabel>주소</FieldLabel>
         <input
           id="scoring-server-url"
           data-testid="scoring-server-url-input"
-          type="url"
+          type="text"
           inputMode="url"
+          autoCapitalize="none"
+          spellCheck={false}
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
-          required
+          // 칸을 떠날 때 판정한다 — 빠진 https:// 는 채워 주고, 읽을 수 없는 주소는 앱 문장으로 말한다.
+          onBlur={() => {
+            if (serverUrl.trim() === "") return;
+            const checked = normalizeServerUrl(serverUrl);
+            if (checked.ok) {
+              setServerUrl(checked.url);
+              setError(null);
+            } else setError(checked.message);
+          }}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? "scoring-server-error" : undefined}
           className={`${INPUT_CLASS} font-mono`}
@@ -480,6 +501,7 @@ export function ScoringConnectionSection({
   const showClaude = classroom.anthropic_key_selectable || classroom.anthropic_key !== null;
 
   async function handleSwitch(kind: VendorKind) {
+    setNotice("");
     setSwitching(true);
     setSwitchError(null);
     const result = await switchScoringVendor(classroom.id, kind);
@@ -491,7 +513,7 @@ export function ScoringConnectionSection({
   return (
     <div className="flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div ref={statusRef} tabIndex={-1} className="min-w-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink">
+        <div ref={statusRef} tabIndex={-1} data-testid="scoring-connection-focus" className="min-w-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink">
           <ConnectionStatus classroom={classroom} />
         </div>
         {!isOwner ? (
@@ -503,7 +525,10 @@ export function ScoringConnectionSection({
             type="button"
             data-testid="scoring-connection-change"
             aria-expanded={compatibleOpen}
-            onClick={() => setCompatibleOpen((value) => !value)}
+            onClick={() => {
+              setNotice("");
+              setCompatibleOpen((value) => !value);
+            }}
             className={buttonClass("secondary", "sm")}
           >
             {compatibleOpen ? "닫기" : "바꾸기"}
@@ -520,7 +545,10 @@ export function ScoringConnectionSection({
             compatibleOpen={compatibleOpen && !compatible}
             busy={switching}
             onSwitch={handleSwitch}
-            onCompatible={() => setCompatibleOpen((value) => !value)}
+            onCompatible={() => {
+              setNotice("");
+              setCompatibleOpen((value) => !value);
+            }}
           />
           {switchError ? (
             <ErrorNote>
