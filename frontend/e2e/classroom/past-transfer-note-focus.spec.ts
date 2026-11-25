@@ -148,3 +148,27 @@ for (const viewport of viewports) {
     await expect(page.getByTestId("classroom-detail-heading")).toBeFocused();
   });
 }
+
+// 넘겨받은 안내의 「채점 키 넣기」는 키가 들어와 채점 연결이 확인되면 걷힌다(#1532 ②).
+for (const viewport of viewports) {
+  test(`${viewport.width}px — 다른 탭에서 키를 넣고 다시 불러오면 키 안내가 걷히고 완료를 한 번 알리며 초점은 제목이 받는다`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const seed = `past-keyadded-${viewport.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { classId } = await classWithRequestForHelper(page, seed);
+    await openWithStream(page, `/classes/${classId}`);
+    await page.getByTestId("ownership-transfer-accept").click();
+    await expect(page.getByRole("link", { name: "채점 키 넣기" })).toBeVisible();
+    await page.getByRole("link", { name: "채점 키 넣기" }).focus();
+
+    // 새 소유자가 다른 탭에서 키를 저장한다 — 이 탭은 다음 강사 신호로 클래스를 다시 읽는다.
+    const key = await classroomApi(page).put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } });
+    expect(key.ok()).toBeTruthy();
+    const invite = await classroomApi(page).post(`/api/backend/classroom/classes/${classId}/co-instructor-invites`);
+    expect(invite.ok()).toBeTruthy();
+
+    await expect(page.getByRole("link", { name: "채점 키 넣기" })).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByTestId("ownership-transfer-accepted-note")).toHaveCount(0);
+    await expect(page.getByTestId("scoring-key-added-note")).toHaveText("채점 키를 넣었습니다");
+    await expect(page.getByTestId("classroom-detail-heading")).toBeFocused();
+  });
+}
