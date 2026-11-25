@@ -25,3 +25,10 @@ class ProblemStatus:
 CLASSROOM_PROBLEM_STATUSES: Slot[Callable[[int, Collection[int]], Mapping[int, ProblemStatus]]] = Slot(
     "강의실 문제의 지금 상태", "classroom.apps"
 )
+
+
+#: `classroom.notification_problem_status.transfer_pending_class_ids` — (받는 사람 pk, 클래스 pk 들) → 그 사람 앞으로
+#: **지금 답을 기다리는** 소유권 이전 요청이 있는 클래스 pk 들(#1435).
+CLASSROOM_TRANSFER_PENDING: Slot[Callable[[int, Collection[int]], Collection[int]]] = Slot(
+    "강의실 소유권 이전 요청의 지금 상태", "classroom.apps"
+)

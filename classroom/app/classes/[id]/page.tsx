@@ -9,7 +9,7 @@
 // 소진·서버 연결 불가)는 배너가 아니라 「채점」 카드의 상태 한 줄이 말한다.
 // 강사 탭의 내용은 #635 가 다시 짠다 — 그때까지는 예전 화면을 그 자리에 둔다.
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
 import { ErrorNote, PageShell } from "@/app/components/ui";
@@ -26,7 +26,7 @@ import { ClassHead } from "./class-head";
 import { GettingStartedCard, startSteps } from "./getting-started-card";
 import { InstructorsSection } from "./instructors-section";
 import { JoinLinkStrip } from "./join-link-strip";
-import { OwnershipTransferAcceptedNote, OwnershipTransferOffer } from "./ownership-transfer-offer";
+import { OwnershipTransferAcceptedNote, OwnershipTransferDeclinedNote, OwnershipTransferOffer } from "./ownership-transfer-offer";
 import { ParticipantsTab } from "./participants-tab";
 import { ProblemsTable } from "./problems-table";
 import { RecentAttemptsCard } from "./recent-attempts-card";
@@ -44,6 +44,9 @@ function ClassDetail() {
   const { state: classState, reload: reloadClass, regenerateJoinCode } = useClass(classId);
   // 방금 소유권을 넘겨받았는가(#564) — 키 넣기로 가는 안내를 한 번 보인다.
   const [justTookOver, setJustTookOver] = useState(false);
+  const [justDeclined, setJustDeclined] = useState(false);
+  // 이전 요청을 보낸 직후 한 번 — 강사 탭이 다시 그려진 뒤 「이전 대기」 줄로 초점을 옮긴다(#1435).
+  const focusPendingTransfer = useRef(false);
   const { state: problemsState, reload: reloadProblems, move } = useProblems(classId);
   const router = useRouter();
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
@@ -115,11 +118,13 @@ function ClassDetail() {
             ownerName={classroom.instructor_display_name}
             onDone={(accepted) => {
               setJustTookOver(accepted);
+              setJustDeclined(!accepted);
               reloadClass();
             }}
           />
         ) : null}
         {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote classId={classId} /> : null}
+        {justDeclined && !classroom.pending_ownership_transfer?.recipient_is_me ? <OwnershipTransferDeclinedNote /> : null}
 
         <JoinLinkStrip
           joinCode={classroom.join_code}
@@ -164,7 +169,11 @@ function ClassDetail() {
               key={`${classroom.role}-${classroom.pending_ownership_transfer?.id ?? "none"}`}
               classId={classId}
               pendingTransfer={classroom.pending_ownership_transfer}
-              onTransferChanged={reloadClass}
+              onTransferChanged={(requested) => {
+                if (requested) focusPendingTransfer.current = true;
+                reloadClass();
+              }}
+              focusPendingTransfer={focusPendingTransfer}
             />
           )}
         </div>

@@ -10,7 +10,7 @@
 // 흐르고 버튼이 가로 전체를 쓴다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Badge, Card, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
@@ -18,6 +18,7 @@ import { useMe } from "@/lib/auth/use-me";
 import { acceptCoInstructorInvite } from "@/lib/co-instructors/api";
 import { inviteView } from "@/lib/co-instructors/invite-view";
 import { useInvitePreview } from "@/lib/co-instructors/use-invite-preview";
+import { focusUnlessTaken } from "@/lib/dom/focus-unless-taken";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
@@ -27,7 +28,12 @@ export default function CoInstructorInvitePage() {
   const preview = useInvitePreview(token);
   const me = useMe();
   const router = useRouter();
-  useClassroomTabTitle({ screenName: "강사 초대" });
+  useClassroomTabTitle({
+    screenName: "강사 초대",
+    className: preview.status === "ready" ? preview.preview.class_name : null,
+  });
+  // 이름 칸이 처음 그려질 때 초점을 받는다 — 참여 화면과 같다(#1436-3).
+  const focusNameField = useCallback((input: HTMLInputElement | null) => focusUnlessTaken(input), []);
   const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +153,7 @@ export default function CoInstructorInvitePage() {
               </label>
               <input
                 id="invite-display-name"
+                ref={focusNameField}
                 data-testid="invite-display-name-input"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}

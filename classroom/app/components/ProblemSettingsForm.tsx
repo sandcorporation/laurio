@@ -26,6 +26,7 @@ import {
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ProblemCostLine } from "@/app/components/ScoringCost";
 import type { SubmissionFormat } from "@/lib/problems/api";
+import { modelRejectionNoteId, modelSelectDescribedBy } from "@/lib/problems/model-rejection-description";
 import { isSelectedModelReasoning, REASONING_EFFORT_OPTIONS } from "@/lib/scoring/reasoning";
 import type { ScoringCostState } from "@/lib/scoring/use-scoring-cost";
 import type { ScoringModelsState } from "@/lib/scoring/use-scoring-models";
@@ -129,7 +130,7 @@ export function ProblemSettingsForm({
         <div id="scoring-model" className="flex flex-col gap-2.5 p-4">
           {modelRejection ? (
             <Note tone="error">
-              <div data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
+              <div id={modelRejectionNoteId(testIdPrefix)} data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <Badge tone="error">모델 거부</Badge>
                 </div>
@@ -165,6 +166,7 @@ export function ProblemSettingsForm({
                 <input
                   id={`${testIdPrefix}-model`}
                   data-testid={`${testIdPrefix}-model-input`}
+                  aria-describedby={modelSelectDescribedBy(testIdPrefix, Boolean(modelRejection))}
                   value={model}
                   onChange={(event) => onModelChange(event.target.value)}
                   className={`${INPUT_CLASS} font-mono`}
@@ -175,6 +177,7 @@ export function ProblemSettingsForm({
               <select
                 id={`${testIdPrefix}-model`}
                 data-testid={`${testIdPrefix}-model-select`}
+                aria-describedby={modelSelectDescribedBy(testIdPrefix, Boolean(modelRejection))}
                 value={model}
                 onChange={(event) => onModelChange(event.target.value)}
                 className={INPUT_CLASS}
