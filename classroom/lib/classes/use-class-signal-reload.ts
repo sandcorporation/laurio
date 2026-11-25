@@ -41,14 +41,15 @@ export function useClassSignalReload({
     reloadClass();
   }, [machine, reloadClass]);
 
-  // 요청 하나가 끝났다 — 성공이면 읽은 번호를 갱신하고 그 사이 더 읽을 것이 왔으면 한 번 더 읽는다. 실패면 읽는 중만 푼다.
+  // 요청 하나가 끝났다 — 성공이면 읽은 번호를 갱신하고 그 사이 더 읽을 것이 왔으면 한 번 더 읽는다. 실패면 읽는 중을 풀고,
+  // 읽는 중에 건너뛴 신호가 있었으면 그 몫으로 한 번 더 읽는다(#1503 ③).
   const lastSettled = useRef(settled);
   useEffect(() => {
     if (lastSettled.current === settled) return;
     lastSettled.current = settled;
     if (settled.status === "loading") return;
     if (settled.status === "error") {
-      machine.failed();
+      if (machine.failed()) startReload();
       return;
     }
     if (machine.succeeded(classroomSignalRev)) startReload();

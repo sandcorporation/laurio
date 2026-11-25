@@ -59,6 +59,7 @@ export function useProblems(classId: number) {
     waiting: true,
     fallbackPollMs: FALLBACK_POLL_MS,
     reload,
+    settled: queryState,
   });
 
   const serverProblems = queryState.status === "ready" ? queryState.data : null;

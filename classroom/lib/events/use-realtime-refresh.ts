@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { decideStreamRefresh } from "./policy";
-import { createSameChangeFilter } from "./same-change";
+import { SameChangeReads } from "./same-change";
 import { useEventStream } from "./stream-context";
 import type { StreamConnectionState, StreamEvent } from "./types";
 
@@ -26,6 +26,10 @@ export interface RealtimeRefreshOptions {
   fallbackPollMs: number;
   /** 신호를 받거나, 재연결됐거나, 폴링 차례가 됐을 때 부를 재조회. */
   reload: () => void;
+  /** 조회의 끝 — 조회 하나가 끝날 때마다(성공·실패) 새 값이 된다(`useBackendQuery` 의 `state`). 이것을 주는 화면만
+   *  같은 변경 번호의 두 신호를 하나로 모은다(#1496 ⑤) — 번호는 성공한 조회까지만 읽은 것으로 친다(#1503 ③). 주지
+   *  않으면 번호를 보지 않고 신호마다 읽는다(조회가 실패했는지 모르면 번호를 버릴 수 없다). */
+  settled?: { status: "loading" | "ready" | "error" };
 }
 
 export function useRealtimeRefresh({
@@ -33,22 +37,34 @@ export function useRealtimeRefresh({
   waiting,
   fallbackPollMs,
   reload,
+  settled,
 }: RealtimeRefreshOptions): void {
   const { connectionState, subscribe } = useEventStream();
   const previousConnectionState = useRef<StreamConnectionState>(connectionState);
   // 한 변경이 신호 둘로 오는 사람(참여자 행이 있는 강사가 보관·문제 쓰기에 `participation-changed`·`instructors-changed` 를
   // 함께 받는다, #1471 ⑦)의 재조회를 하나로 — 두 신호의 같은 변경 번호로 알아본다(#1496 ⑤). 예전의 250ms 창은 두 신호가
   // 그보다 벌어지면 두 번 읽었다. 재연결·폴링 재조회는 거르지 않는다. 다시 구독해도 기억은 이어진다.
-  const [alreadyRead] = useState(createSameChangeFilter);
+  // 번호는 조회가 성공한 뒤에야 읽은 것이 된다(#1503 ③) — 첫 조회가 실패하면 같은 번호의 다음 신호가 다시 읽는다.
+  const [reads] = useState(() => new SameChangeReads());
+  const tracksOutcome = settled !== undefined;
 
   useEffect(
     () =>
       subscribe((event) => {
-        if (!matches(event) || alreadyRead(event)) return;
+        if (!matches(event)) return;
+        if (tracksOutcome && !reads.signal(event)) return;
         reload();
       }),
-    [subscribe, reload, matches, alreadyRead],
+    [subscribe, reload, matches, reads, tracksOutcome],
   );
+
+  const lastSettled = useRef(settled);
+  useEffect(() => {
+    if (lastSettled.current === settled) return;
+    lastSettled.current = settled;
+    if (settled === undefined || settled.status === "loading") return;
+    if (reads.settled(settled.status === "ready")) reload();
+  }, [settled, reads, reload]);
 
   useEffect(() => {
     const decision = decideStreamRefresh(
