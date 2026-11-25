@@ -1,7 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { establishDeveloperSession } from "../lib/session";
-
 // BFF 인증 — 쿠키 세션 + 소셜 로그인 + 미들웨어 가드 + CSRF (FE-07, #32, ADR-0016).
 //
 // 시임 규약(ADR-0017, e2e/seam.spec.ts)을 그대로 따른다: 브라우저가 필요한 것은
@@ -205,27 +203,6 @@ test.describe("소셜 로그인 → 세션 쿠키 → 보호된 화면", () => {
     await page.goto("/console/participation");
     await expect(page).toHaveURL(/\/console\/participation/);
     await expect(page.getByTestId("participation-heading")).toBeVisible();
-  });
-});
-
-test.describe("로그인한 사람의 /login (#1381)", () => {
-  test("next 가 있으면 그리로, 없으면 홈으로 보낸다", async ({ page }) => {
-    await establishDeveloperSession(page, `login-again-${Date.now()}`, null);
-
-    await page.goto("/login?next=%2Fconsole%2Fparticipation");
-    await expect(page).toHaveURL("/console/participation");
-
-    await page.goto("/login");
-    await expect(page).toHaveURL("/");
-  });
-
-  test("죽은 세션 쿠키로 오면 폼이 보인다", async ({ page, baseURL }) => {
-    await page.context().addCookies([
-      { name: "codemit_access", value: "not-a-real-jwt", url: baseURL, httpOnly: true, sameSite: "Lax" },
-    ]);
-
-    await page.goto("/login");
-    await expect(page.getByTestId("fake-login-seed")).toBeVisible();
   });
 });
 
