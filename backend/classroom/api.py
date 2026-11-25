@@ -179,7 +179,12 @@ from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality, score_corrections
 from .score_reuse import score_reused
-from .events import publish_attempt_submitted, publish_instructors_changed, publish_participation_changed
+from .events import (
+    publish_attempt_submitted,
+    publish_instructors_changed,
+    publish_participation_changed,
+    publish_problems_changed,
+)
 from .current_score import CurrentClassroomScore, current_score, current_score_prefetch
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -2845,7 +2850,10 @@ def remove_problem(class_obj: Class, problem: Problem) -> None:
         # 그 채점에 덧댄 정정(#1317)도 같은 범위로 먼저 걷는다 — 정정이 점수를 PROTECT 로 가리킨다.
         ClassroomScoreCorrection.objects.filter(score__in=own).delete()
         own.delete()
+        participants_saw_it = problem.status != Problem.Status.DRAFT
         problem.delete()
+        # 격자 열·문제 목록에서 빠진다 — 그 클래스의 열린 화면이 다시 읽는다(#1471 ⑦).
+        publish_problems_changed(class_obj, participants_see_it=participants_saw_it)
 
 
 @router.post(
