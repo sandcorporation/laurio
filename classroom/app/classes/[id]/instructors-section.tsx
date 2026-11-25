@@ -528,9 +528,7 @@ export function InstructorsSection({
     if (!result.ok) {
       setError(result.detail);
     }
-    // 내보낸 사람이 만든 대기 초대도 취소되므로 둘 다 다시 읽는다.
-    reloadRoster();
-    reloadInvites();
+    // 내보낸 사람이 만든 대기 초대도 취소되므로 명단·초대를 다시 읽는다 — 같은 변경의 서버 신호와 한 번에(#1471 ②).
     if (result.ok) createButtonRef.current?.focus();
     setConfirming(null);
     setBusyId(null);
@@ -546,7 +544,8 @@ export function InstructorsSection({
     if (result.ok) {
       setFocusInviteId(result.data.id);
       setCreatedNote("초대 링크를 만들었습니다");
-      reloadInvites();
+      // 같은 변경의 서버 신호와 합쳐 클래스 화면이 한 번만 다시 읽는다(#1471 ②).
+      onTransferChanged();
     } else {
       setError(result.detail);
     }
@@ -561,7 +560,7 @@ export function InstructorsSection({
       setError(result.detail);
     }
     // 실패해도 다시 읽는다 — 그 사이 누가 수락했거나 다른 강사가 먼저 취소했으면 목록에서 빠진다.
-    reloadInvites();
+    onTransferChanged();
     if (result.ok) createButtonRef.current?.focus();
     setConfirmingInviteId(null);
     setCancellingId(null);
