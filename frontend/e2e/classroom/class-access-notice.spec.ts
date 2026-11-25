@@ -229,3 +229,108 @@ test("강사의 낡은 404 는 한 번만 다시 부른다", async ({ browser })
   await expect(instructor).toHaveURL(/\/$/);
   expect(calls).toBe(2);
 });
+
+const EMPTY_REPOSITORY = "GitHub 저장소 주소를 넣어 주세요.";
+const INSTRUCTOR_WARNING = "여기서 낸 시도는 강사 본인 시도로 남고 달성률·제출 현황에 들지 않습니다.";
+
+/** 이 화면에서 나간 제출 POST 의 본문을 모은다. */
+function watchSubmissions(page: Page) {
+  const bodies: { value: string }[] = [];
+  page.on("request", (request) => {
+    if (request.method() === "POST" && new URL(request.url()).pathname.endsWith("/submissions")) {
+      bodies.push(request.postDataJSON() as { value: string });
+    }
+  });
+  return bodies;
+}
+
+test("강사의 학생 화면은 결과 경고와 갈 곳을 말하고 빈 저장소 제출에는 안내가 뜬다", async ({ browser }) => {
+  const seed = `access-view-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, instructor } = await seedClass(browser, seed);
+  const sent = watchSubmissions(instructor);
+  const root = `/classes/${classId}`;
+
+  await instructor.goto(`${root}/problems/${openId}/submit`);
+
+  const banner = instructor.getByTestId("instructor-viewing-banner");
+  await expect(banner).toContainText(INSTRUCTOR_WARNING);
+  await expect(banner.getByRole("link", { name: "문제 편집" })).toHaveAttribute("href", `${root}/problems/${openId}`);
+  await expect(instructor.getByRole("link", { name: "제출 현황" })).toHaveCount(1);
+  await expect(banner.getByRole("link", { name: "제출 현황" })).toHaveAttribute(
+    "href",
+    `${root}/problems/${openId}/submissions`,
+  );
+  const back = instructor.getByTestId("my-problem-back-link");
+  await expect(back).toHaveText("클래스로");
+  await expect(back).toHaveAttribute("href", root);
+  await expect(instructor.getByRole("heading", { name: "강사 본인 시도" })).toBeVisible();
+  await expect(instructor.getByTestId("submissions-empty-state")).toHaveText("강사 본인이 낸 시도가 없습니다.");
+
+  await expect(instructor.getByTestId("repository-url-input")).toBeVisible();
+  await instructor.getByTestId("submit-repository").click();
+  await expect(instructor.getByTestId("repository-url-invalid")).toHaveText(EMPTY_REPOSITORY);
+  expect(sent).toHaveLength(0);
+});
+
+test("참여자의 빈 저장소 제출에도 안내가 뜨고 화면 말은 참여자의 것이다", async ({ page, browser }) => {
+  const seed = `access-empty-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, joinCode } = await seedClass(browser, seed);
+  await joinAs(page, seed, joinCode);
+  const sent = watchSubmissions(page);
+
+  await page.goto(`/classes/${classId}/problems/${openId}/submit`);
+  await page.getByTestId("submit-repository").click();
+
+  await expect(page.getByTestId("repository-url-invalid")).toHaveText(EMPTY_REPOSITORY);
+  await expect(page.getByTestId("my-problem-back-link")).toHaveText("문제 목록으로");
+  await expect(page.getByRole("heading", { name: "내 시도" })).toBeVisible();
+  await expect(page.getByTestId("instructor-viewing-banner")).toHaveCount(0);
+  expect(sent).toHaveLength(0);
+});
+
+test("제출 중에 거듭 내도 누른 시점의 주소로 한 번만 간다", async ({ browser }) => {
+  const seed = `access-once-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, instructor } = await seedClass(browser, seed);
+  const sent = watchSubmissions(instructor);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await instructor.route(
+    (url) => url.pathname.endsWith(`/problems/${openId}/submissions`),
+    async (route: Route) => {
+      await held;
+      await route.continue();
+    },
+  );
+
+  await instructor.goto(`/classes/${classId}/problems/${openId}/submit`);
+  const input = instructor.getByTestId("repository-url-input");
+  await input.fill("https://github.com/octocat/Hello-World");
+  // 잠긴 버튼을 거치지 않고 폼을 세 번 낸다 — 다시 그려지기 전의 연타까지 진행 표지가 막아야 한다.
+  await input.evaluate((element: HTMLInputElement) => {
+    for (let i = 0; i < 3; i += 1) element.form!.requestSubmit();
+  });
+
+  await expect(instructor.getByTestId("submit-repository")).toBeDisabled();
+  await expect(input).not.toBeEditable();
+  release();
+  await expect(input).toHaveValue("");
+  await expect(input).toBeEditable();
+  expect(sent.map((body) => body.value)).toEqual(["https://github.com/octocat/Hello-World"]);
+});
+
+test("보관한 클래스의 학생 화면에는 띠에 보관 한 줄이 있고 결과 경고는 없다", async ({ browser }) => {
+  const seed = `access-archived-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, instructor } = await seedClass(browser, seed);
+  const archived = await classroomApi(instructor).post(`/api/backend/classroom/classes/${classId}/archive`);
+  expect(archived.ok()).toBeTruthy();
+
+  await instructor.goto(`/classes/${classId}/problems/${openId}/submit`);
+
+  const banner = instructor.getByTestId("instructor-viewing-banner");
+  await expect(banner.getByTestId("class-archived-note")).toHaveText("이 클래스는 보관되어 새 제출을 받지 않습니다.");
+  await expect(instructor.getByTestId("class-archived-note")).toHaveCount(1);
+  await expect(instructor.getByText(INSTRUCTOR_WARNING)).toHaveCount(0);
+  await expect(banner.getByRole("link", { name: "문제 편집" })).toBeVisible();
+  await expect(banner.getByRole("link", { name: "제출 현황" })).toBeVisible();
+  await expect(instructor.getByTestId("submit-form-area")).toHaveCount(0);
+});

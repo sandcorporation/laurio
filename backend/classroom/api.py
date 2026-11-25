@@ -182,7 +182,6 @@ from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
     SUBMIT_BLOCKED_HIDDEN,
-    SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
     instructor_can_submit,
     participant_membership_blocked_reason,
     participant_submit_blocked_reason,
