@@ -17,7 +17,9 @@
 // 로그인 여부와 무관하게 항상 보인다(spec #396 user story 9) — `AccountMenu`
 // 처럼 세션을 확인하지 않는다.
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+
+import { useMenuFocus } from "@/app/components/use-menu-focus";
 
 import { themeAttribute, type ThemePreference } from "@/lib/theme/preference";
 import { broadcastThemeChange } from "@/lib/theme/theme-bus";
@@ -49,10 +51,13 @@ function ThemeIcon({ preference }: { preference: ThemePreference }) {
 export function ThemeToggle({ initialPreference }: { initialPreference: ThemePreference }) {
   const [preference, setPreference] = useState(initialPreference);
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { onKeyDown, closeToTrigger } = useMenuFocus({ open, setOpen, triggerRef, menuRef });
 
   async function choose(next: ThemePreference) {
     setPreference(next);
-    setOpen(false);
+    closeToTrigger();
     applyThemeAttribute(next);
     await fetch("/api/theme", {
       method: "POST",
@@ -66,10 +71,11 @@ export function ThemeToggle({ initialPreference }: { initialPreference: ThemePre
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         data-testid="theme-toggle-trigger"
-        aria-haspopup="true"
+        aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`테마: ${currentLabel}, 누르면 테마를 고른다`}
         className="inline-flex h-[34px] items-center border border-rule px-2.5 text-[13px] text-ink hover:border-ink sm:px-3"
@@ -85,12 +91,15 @@ export function ThemeToggle({ initialPreference }: { initialPreference: ThemePre
           <button
             type="button"
             aria-label="메뉴 닫기"
+            tabIndex={-1}
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-10 cursor-default"
           />
           <div
+            ref={menuRef}
             data-testid="theme-toggle-panel"
             role="menu"
+            onKeyDown={onKeyDown}
             aria-label="테마 선택"
             className="absolute right-0 z-20 mt-1.5 flex w-32 flex-col border border-rule bg-surface text-[13px]"
           >
