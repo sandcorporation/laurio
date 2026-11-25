@@ -1,10 +1,12 @@
 "use client";
 
-// 모달 창의 초점 규약(#1463) — 열리면 창 안으로, Tab 은 창 안에 갇히고, Escape 로 닫히며, 닫히면 연 단추로
-// 돌아온다. 가장자리 셈은 순수 함수(`lib/dom/focus-trap`)가 진다.
+// 모달 창(시트·role=alertdialog 확인창)의 초점 규약(#1463) — 열리면 창 안으로(확인창은 안전한 쪽), Tab 은 창 안에
+// 갇히고, Escape 로 닫히며, 닫히면 연 단추로 돌아온다. 연 단추가 닫히며 사라졌으면 `fallbackFocus` 가 돌려주는
+// 자리(머리글 등)로 간다. 세 앱이 이 훅 하나를 쓴다(#1518). 가장자리 셈·돌아갈 곳 고르기는 순수 함수가 진다.
 import { useEffect, useId, useRef, type RefObject } from "react";
 
-import { trapTabTarget } from "@/lib/dom/focus-trap";
+import { trapTabTarget } from "../feedback/focus-trap";
+import { pickOpener, pickReturnTarget } from "./return-target";
 
 const FOCUSABLE =
   'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -13,7 +15,7 @@ export function useDialogFocus(
   dialogRef: RefObject<HTMLElement | null>,
   options: {
     onEscape: () => void;
-    /** 열릴 때 초점을 받을 곳 — 없으면 창 안 첫 초점 대상. */
+    /** 열릴 때 초점을 받을 곳(확인창은 안전한 쪽) — 없으면 창 안 첫 초점 대상. */
     initialFocus?: RefObject<HTMLElement | null>;
     /** 연 단추 — 클릭의 currentTarget. 낭독기 활성화·일부 터치는 초점을 옮기지 않아 activeElement 가 body 라, 알면 이것이 이긴다. */
     opener?: HTMLElement | null;
@@ -29,11 +31,10 @@ export function useDialogFocus(
   fallback.current = fallbackFocus;
 
   useEffect(() => {
-    opener.current = given ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    opener.current = pickOpener(given, document.activeElement instanceof HTMLElement ? document.activeElement : null);
     (initialFocus?.current ?? dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE))?.focus();
     return () => {
-      const back = opener.current?.isConnected && opener.current !== document.body ? opener.current : null;
-      const target = back ?? fallback.current?.() ?? null;
+      const target = pickReturnTarget(opener.current, document.body, fallback.current);
       if (!document.activeElement || document.activeElement === document.body) target?.focus();
     };
     // 열릴 때 한 번만.
