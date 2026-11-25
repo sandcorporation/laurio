@@ -368,7 +368,10 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   );
 
   // 마감은 제출을 막지 않고 안내와 늦음 표시에 쓴다(#941).
-  const deadlinePassed = props.interactive && dueAt !== null && Date.parse(dueAt) < Date.now();
+  // 보관된 클래스는 낼 수 없으니 마감을 재촉하지 않는다 — 「마감 지남」 배지 없이 흐린 마감 줄만(#1507 A).
+  const archivedForParticipant = props.interactive && props.submitBlockedReason === "archived";
+  const deadlinePassed =
+    props.interactive && !archivedForParticipant && dueAt !== null && Date.parse(dueAt) < Date.now();
 
   const instructorArchived =
     viewingAsInstructor === true && props.interactive && props.submitBlockedReason === "archived";
@@ -415,6 +418,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 problem={{ recommended_due_at: recommendedDueAt, due_at: dueAt }}
                 passed={passed === true}
                 testId="submit-due-rows"
+                archived={archivedForParticipant}
               />
             </>
           )}
