@@ -59,6 +59,7 @@ test("제출 현황: 통계 바·참여자별 최신 시도·판정 펼치기·�
   await page.goto(`/classes/${classId}/problems/${problemId}/submissions`);
 
   await expect(page.getByTestId("submissions-stat-passed")).toContainText("1/2");
+  await expect(page.getByTestId("submissions-stat-passed").getByText("1/2")).toHaveClass(/text-success/);
   await expect(page.getByTestId("submissions-stat-attempts")).toContainText("2");
   // 최신 시도 한 줄 — 두 번째 시도.
   const list = page.getByTestId("problem-submissions-list");

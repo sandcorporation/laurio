@@ -45,6 +45,11 @@ export function submissionStats(
   return { passed: passedMembers.size, participants, attempts: rows.length, scoring, waiting };
 }
 
+/** 통과·완벽 「n/N」의 색 — n 이 0 이면 좋은 소식이 아니라 색을 켜지 않는다(#1400). */
+export function countTone(count: number, tone: string): string | undefined {
+  return count > 0 ? tone : undefined;
+}
+
 /** 참여자마다 가장 높은 시도 번호 한 줄 — 가장 최근에 낸 사람이 위. */
 export function latestPerMember(rows: InstructorSubmissionRow[]): InstructorSubmissionRow[] {
   const latest = new Map<number, InstructorSubmissionRow>();
