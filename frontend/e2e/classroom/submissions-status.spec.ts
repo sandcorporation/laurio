@@ -83,6 +83,51 @@ test("제출 현황: 통계 바·참여자별 최신 시도·판정 펼치기·�
   );
 });
 
+// #1397 — 연결이 없는 클래스의 배너는 「키 문제」가 아니라 원인을 말하고, 단추는 문장의 동사를 쓴다.
+test("제출 현황: 채점 연결이 없으면 배너가 원인을 말하고 「넣기」로 이어진다", async ({ page }) => {
+  const seed = `submissions-nokey-${test.info().workerIndex}-${Date.now()}`;
+
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const classId = (
+    await (
+      await api.post("/api/backend/classroom/classes", {
+        data: { name: `연결 없음 ${Date.now()}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const problemId = (
+    await (
+      await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+        data: { title: "1주차", submission_formats: ["repository"] },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}/problems/${problemId}`;
+  await api.post(`${base}/checklist-items`, { data: { label: "README 가 있다", required: true } });
+  await api.post(`${base}/open`);
+  const joinCode = (await (await api.get(`/api/backend/classroom/classes/${classId}`)).json()).join_code as string;
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-a`);
+  await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "서지우" } });
+  const submitted = await api.post(`${base}/submissions`, {
+    data: { value: "https://github.com/octocat/e2e-nokey", submission_format: "repository" },
+  });
+  expect(submitted.ok()).toBeTruthy();
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  await page.goto(`/classes/${classId}/problems/${problemId}/submissions`);
+
+  await expect(page.getByTestId("submissions-no-api-key-note")).toHaveText(
+    "채점 연결이 없어 참여자의 제출이 채점되지 않고 있습니다 — 클래스 설정에서 채점 키를 넣으면 밀린 제출부터 채점됩니다.",
+  );
+  const settingsLink = page.getByTestId("submissions-no-api-key-settings-link");
+  await expect(settingsLink).toHaveText("클래스 설정에서 넣기");
+  await expect(settingsLink).toHaveAttribute("href", `/classes/${classId}/settings#scoring-key`);
+});
+
 // #964 — 강사 제출 현황: 심화 항목을 다 채운 시도는 완벽 도장, 통계 바에 「완벽 n/N」.
 test("제출 현황: 완벽 시도는 완벽 도장 하나만, 통계 바에 완벽 칸", async ({ page }) => {
   const seed = `submissions-perfect-${test.info().workerIndex}-${Date.now()}`;

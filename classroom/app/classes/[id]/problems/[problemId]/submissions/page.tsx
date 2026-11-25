@@ -27,6 +27,7 @@ import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { QualityRankingCard } from "@/app/components/QualityRankingCard";
 import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
 import { detailTabHref } from "@/lib/classes/detail-tab";
+import { scoringBlockNote } from "@/lib/classes/scoring-block-note";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { useClass } from "@/lib/classes/use-class";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
@@ -344,10 +345,10 @@ export default function ProblemSubmissionsPage() {
       <div className="flex flex-col gap-4">
         <StatBar stats={stats} perfect={perfectCount} />
 
-        {blockedByMissingKey ? (
+        {blockedByMissingKey && classState.status === "ready" ? (
           <MissingScoringKeyNote
             classId={classId}
-            message="이 클래스의 채점 키 문제로 일부 시도가 채점되지 않고 있습니다 — 클래스 설정에서 확인해주세요."
+            {...scoringBlockNote(classState.classroom, "submissions")}
             noteTestId="submissions-no-api-key-note"
             settingsLinkTestId="submissions-no-api-key-settings-link"
           />
@@ -434,7 +435,7 @@ export default function ProblemSubmissionsPage() {
         <QualityRankingCard
           classId={classId}
           problemId={problemId}
-          canChangeKey={classState.status === "ready" && classState.classroom.role === "owner"}
+          classroom={classState.status === "ready" ? classState.classroom : null}
         />
       </div>
     </PageShell>
