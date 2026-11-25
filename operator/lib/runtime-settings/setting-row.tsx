@@ -38,15 +38,6 @@ export function RuntimeSettingRow({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [probe, setProbe] = useState<ProbeResult | null>(null);
-  // 저장·지우기·확인으로 값이 바뀌어 다시 읽히면 입력 상태를 새로 시작한다 — 줄을 새로 만들지 않고 여기서 맞춘다(초점 유지).
-  const stamp = `${setting.updated_at ?? "none"}-${setting.source}`;
-  const [seenStamp, setSeenStamp] = useState(stamp);
-  if (seenStamp !== stamp) {
-    setSeenStamp(stamp);
-    setInput(initialInput(setting));
-    setError(null);
-    setProbe(null);
-  }
   const id = `runtime-setting-${setting.key}`;
   const attrs = inputAttributes(setting);
   const options = choiceOptions(setting);
@@ -85,6 +76,8 @@ export function RuntimeSettingRow({
       () => clearRuntimeSetting(setting.key),
       () => {
         setProbe(null);
+        // 지우면 「지우기」 단추가 사라진다 — 초점이 body 로 빠지지 않게 같은 줄의 입력칸이 먼저 받는다.
+        document.getElementById(`${id}-input`)?.focus();
         onChanged();
       },
     );
@@ -93,7 +86,12 @@ export function RuntimeSettingRow({
   function handleConfirm() {
     void run(
       () => confirmRuntimeSetting(setting.key),
-      () => onChanged(),
+      () => {
+        setProbe(null);
+        // 확인하면 「이대로 둔다」 단추가 사라진다 — 같은 줄의 입력칸이 초점을 받는다.
+        document.getElementById(`${id}-input`)?.focus();
+        onChanged();
+      },
     );
   }
 

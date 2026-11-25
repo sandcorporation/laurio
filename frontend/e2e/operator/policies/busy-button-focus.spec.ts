@@ -36,3 +36,19 @@ for (const [name, viewport] of [
     await page.getByTestId(`${MODEL_ROW}-clear`).click();
   });
 }
+
+// 「지우기」는 지운 뒤 사라지는 단추다 — 초점이 body 로 빠지지 않고 같은 줄의 입력칸이 받는다.
+test("@exclusive 데스크톱: 지우기를 누르면 단추가 사라져도 초점이 그 줄의 입력칸에 있다", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const su = await seedE2eOperator({ username: `e2e-op-clear-${Date.now()}`, superuser: true });
+  await establishOperatorSession(page, su.username, E2E_OPERATOR_PASSWORD, "/settings");
+  await page.getByTestId(`${MODEL_ROW}-input`).fill("gpt-e2e-clear");
+  await page.getByTestId(`${MODEL_ROW}-save`).click();
+  const clear = page.getByTestId(`${MODEL_ROW}-clear`);
+  await expect(clear).toBeVisible();
+
+  await clear.focus();
+  await page.keyboard.press("Enter");
+  await expect(clear).toHaveCount(0);
+  await expect(page.getByTestId(`${MODEL_ROW}-input`)).toBeFocused();
+});
