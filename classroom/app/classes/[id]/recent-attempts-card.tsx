@@ -110,7 +110,7 @@ export function RecentAttemptsCard({ classId }: { classId: number }) {
         </p>
       ) : state.data.length === 0 ? (
         <p data-testid="recent-attempts-empty" className="px-4 py-3 text-[12.5px] text-ink/45">
-          —
+          아직 제출이 없습니다.
         </p>
       ) : (
         <ol data-testid="recent-attempts" className="divide-y divide-rule">
