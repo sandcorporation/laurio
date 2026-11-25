@@ -160,6 +160,7 @@ function ArchivedNote({ noteRef }: { noteRef?: Ref<HTMLParagraphElement> }) {
       tabIndex={noteRef ? -1 : undefined}
       role={noteRef ? "alert" : undefined}
       data-testid="class-archived-note"
+      data-blocked-note={noteRef ? "" : undefined}
       className={`text-[13px] text-warning${noteRef ? " outline-none" : ""}`}
     >
       이 클래스는 보관되어 새 제출을 받지 않습니다.
@@ -1107,6 +1108,7 @@ function InteractiveSubmissionFormBody(
           tabIndex={-1}
           role="alert"
           data-testid={left ? "member-left-note" : "member-expelled-note"}
+          data-blocked-note=""
           className="text-[13px] text-warning outline-none"
         >
           {left ? "이 클래스에서 나가 새로 제출할 수 없습니다." : "이 클래스에서 내보내져 새로 제출할 수 없습니다."}
@@ -1123,6 +1125,7 @@ function InteractiveSubmissionFormBody(
           tabIndex={-1}
           role="alert"
           data-testid="problem-hidden-note"
+          data-blocked-note=""
           className="text-[13px] text-warning outline-none"
         >
           강사가 숨긴 문제라 새로 낼 수 없습니다.
