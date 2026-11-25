@@ -6,6 +6,8 @@ import { useState } from "react";
 
 import { Badge, Card, CardHeader, EmptyState, ErrorNote, Num, buttonClass } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
+import type { ClassRow } from "@/lib/classes/api";
+import { scoringBlockNote } from "@/lib/classes/scoring-block-note";
 import { updateProblem } from "@/lib/problems/api";
 import { BonusScoreEditor } from "@/app/components/BonusScoreEditor";
 import { GRADE_LABEL } from "@/lib/problems/grade";
@@ -115,13 +117,15 @@ function QualityRow({
 export function QualityRankingCard({
   classId,
   problemId,
-  canChangeKey,
+  classroom,
 }: {
   classId: number;
   problemId: number;
-  canChangeKey: boolean;
+  /** 연결 때문에 막혔을 때 원인을 말하고, 키 링크를 소유자에게만 보인다. 못 읽었으면 null. */
+  classroom: ClassRow | null;
 }) {
   const { state, reload } = useProblemQuality(classId, problemId);
+  const keyNote = scoringBlockNote(classroom, "quality");
   const [confirm, setConfirm] = useState<Confirm>({ step: "idle" });
   const [openIds, setOpenIds] = useState<ReadonlySet<number>>(new Set());
   const [publicSaving, setPublicSaving] = useState(false);
@@ -245,10 +249,10 @@ export function QualityRankingCard({
           {confirm.estimate.blocked_reason === "no_api_key" ? (
             <MissingScoringKeyNote
               classId={classId}
-              message="이 클래스의 채점 키 문제로 채점할 수 없습니다 — 클래스 설정에서 확인해주세요."
+              {...keyNote}
               noteTestId="quality-no-api-key-note"
               settingsLinkTestId="quality-no-api-key-settings-link"
-              actionLabel={canChangeKey ? undefined : null}
+              actionLabel={classroom?.role === "owner" ? keyNote.actionLabel : null}
             />
           ) : confirm.estimate.blocked_reason === "model_rejected" ? (
             <MissingScoringKeyNote
