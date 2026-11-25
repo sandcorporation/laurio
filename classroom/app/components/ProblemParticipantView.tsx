@@ -939,7 +939,7 @@ function InteractiveSubmissionForm(
   const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
   // 빈 칸으로 낸 뒤에만 안내한다 — 다시 치기 시작하면 걷는다.
   const [submittedEmpty, setSubmittedEmpty] = useState(false);
-  // 잘못된 모양의 문구는 칸을 떠나거나 낼 때 띄운다 — 적는 동안 빨간 글이 계속 보이지 않게.
+  // 잘못된 모양의 문구는 칸을 떠나거나 낼 때 띄운다 — 적는 동안(다시 적는 동안도) 빨간 글이 보이지 않게.
   const [urlTouched, setUrlTouched] = useState(false);
   // 잘못된 주소와 빈 칸 제출 둘 다 오류 문구가 보인다 — 칸이 같이 무효로 알리고 문구와 이어진다(#1422).
   const showShapeError = urlTouched && repositoryCheck !== null && !repositoryCheck.ok;
@@ -1110,7 +1110,8 @@ function InteractiveSubmissionForm(
               onBlur={() => setUrlTouched(true)}
               onChange={(event) => {
                 setSubmittedEmpty(false);
-                onRepositoryUrlChange(event.target.value);
+                // 다시 적는 동안은 오류를 숨기고 다음 blur·제출에서 다시 판정한다(#1448 일부-7).
+                                onRepositoryUrlChange(event.target.value);
               }}
               readOnly={submitting}
               aria-invalid={repositoryInvalid}
