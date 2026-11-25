@@ -1,8 +1,7 @@
-// 강의실 탭 제목 조립 (#393). 문제 제목·클래스 이름처럼 그 화면을 구체적으로
-// 가리키는 조각이 있으면 그것으로 탭을 구별하고, 하나도 없으면(불러오기
-// 전을 포함해) 화면 이름만 쓴다 — 「반복문 연습 · 파이썬 기초반 · Codemit」
-// 처럼 화면 이름을 굳이 더 얹지 않는다, 문제·클래스 이름 자체가 이미 그
-// 화면을 충분히 가리키기 때문이다.
+// 강의실 탭 제목 조립 (#393, #1431). 화면 이름이 맨 앞에 서고, 문제 제목·클래스 이름이 있으면
+// 그 뒤에 붙는다 — 「문제 편집 · 반복문 연습 · 파이썬 기초반 · Codemit」. 같은 클래스·문제를 여는
+// 화면들(클래스 첫 화면·설정, 문제 편집·제출 현황)이 이름만으로는 탭에서 갈리지 않았다.
+// 조각이 하나도 없으면(불러오기 전 포함) 화면 이름만 쓴다.
 export type ClassroomTabTitleParts = {
   screenName: string;
   className?: string | null;
@@ -18,7 +17,6 @@ export function buildClassroomTabTitle({
   className,
   problemTitle,
 }: ClassroomTabTitleParts): string {
-  const specific = [problemTitle, className].filter(nonEmpty);
-  const label = specific.length > 0 ? specific.join(" · ") : screenName;
+  const label = [screenName, problemTitle, className].filter(nonEmpty).join(" · ");
   return `${label} · Codemit`;
 }

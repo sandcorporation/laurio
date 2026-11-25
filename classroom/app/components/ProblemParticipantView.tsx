@@ -39,6 +39,7 @@ import { DueRows } from "@/app/components/DueLabel";
 import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
+import { attemptAnnouncement } from "@/lib/submissions/attempt-announcement";
 import { unpassedBadge } from "@/lib/submissions/unpassed-badge";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
@@ -306,8 +307,15 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     </>
   );
 
+  // 결과 변화를 알리는 live 영역 하나(#1431) — 처음 읽은 상태는 말하지 않고, 그 뒤 상태가 바뀔 때만 한 번 읽힌다.
+  const announcement = attemptAnnouncement(submissions);
+  const [firstAnnouncement] = useState(announcement);
+
   const attempts = (
     <>
+      <p role="status" aria-live="polite" data-testid="attempt-live" className="sr-only">
+        {announcement === firstAnnouncement ? "" : announcement}
+      </p>
       <Card>
         <CardHeader title={viewingAsInstructor ? "강사 본인 시도" : "내 시도"} hint={submissions.length > 0 ? `${submissions.length}회` : undefined} />
         {submissions.length === 0 ? (
@@ -936,6 +944,37 @@ function InteractiveSubmissionForm(
     (repositoryCheck !== null && !repositoryCheck.ok) || (submittedEmpty && repositoryCheck === null);
   const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
 
+  // 형식을 고르면 눌린 단추가 사라진다 — 초점을 새로 나온 칸(저장소 주소·파일 고르기)으로 옮긴다(#1431).
+  // 처음부터 하나만 열린 문제는 초점을 건드리지 않는다.
+  const focusAfterChoice = useRef(false);
+  function chooseFormat(next: SubmissionFormat | null) {
+    focusAfterChoice.current = true;
+    setChosenFormat(next);
+  }
+  useEffect(() => {
+    if (!focusAfterChoice.current) return;
+    focusAfterChoice.current = false;
+    const target = needsFormatChoice
+      ? "[data-testid=submission-format-option-source]"
+      : resolvedFormat === "repository"
+        ? "#repository-url"
+        : "#source-file";
+    document.querySelector<HTMLElement>(target)?.focus();
+  }, [needsFormatChoice, resolvedFormat]);
+
+  // 제출·업로드 동안 단추와 파일 칸이 잠겨 초점이 body 로 떨어진다 — 끝나면 돌려놓는다(#1431).
+  const busy = submitting || uploadStatus === "uploading";
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    const finished = wasBusy.current && !busy;
+    wasBusy.current = busy;
+    if (!finished) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const target = resolvedFormat === "repository" ? "[data-testid=submit-repository]" : "#source-file";
+    document.querySelector<HTMLElement>(target)?.focus();
+  }, [busy, resolvedFormat]);
+
   // 폼이 보이던 중에 제출이 막히면(403 뒤 다시 읽기, #1423) 폼과 함께 초점도 사라져 `body` 로 빠진다 —
   // 안내로 초점을 옮겨 스크린리더가 읽게 한다. 처음부터 막힌 채 열린 화면은 초점을 뺏지 않는다.
   const blockedNoteRef = useRef<HTMLParagraphElement>(null);
@@ -988,7 +1027,7 @@ function InteractiveSubmissionForm(
             <button
               type="button"
               data-testid="submission-format-option-source"
-              onClick={() => setChosenFormat("source")}
+              onClick={() => chooseFormat("source")}
               className={buttonClass("secondary")}
             >
               zip 파일
@@ -996,7 +1035,7 @@ function InteractiveSubmissionForm(
             <button
               type="button"
               data-testid="submission-format-option-repository"
-              onClick={() => setChosenFormat("repository")}
+              onClick={() => chooseFormat("repository")}
               className={buttonClass("secondary")}
             >
               GitHub 저장소
@@ -1013,7 +1052,7 @@ function InteractiveSubmissionForm(
         <button
           type="button"
           data-testid="submission-format-change"
-          onClick={() => setChosenFormat(null)}
+          onClick={() => chooseFormat(null)}
           className="self-start text-[12px] text-ink/45 hover:underline"
         >
           다른 형식으로 내기
@@ -1101,7 +1140,7 @@ function InteractiveSubmissionForm(
                   <button
                     type="button"
                     data-testid="zip-git-history-use-repository"
-                    onClick={() => setChosenFormat("repository")}
+                    onClick={() => chooseFormat("repository")}
                     className={`${buttonClass("secondary", "sm")} self-start`}
                   >
                     저장소로 내기

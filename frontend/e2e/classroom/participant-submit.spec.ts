@@ -57,11 +57,16 @@ test("형식을 고르고 저장소를 내면 내 시도에 줄이 생긴다", a
   const side = page.getByTestId("my-problem-side");
   await side.getByTestId("submission-format-option-source").click();
   await expect(side.getByTestId("source-file-input")).toBeAttached();
+  await expect(side.getByTestId("source-file-input")).toBeFocused();
   await expect(side.getByTestId("source-file-max-size")).toHaveText("최대 50MB");
   await side.getByTestId("submission-format-change").click();
   await side.getByTestId("submission-format-option-repository").click();
+  await expect(side.getByTestId("repository-url-input")).toBeFocused();
   await side.getByTestId("repository-url-input").fill("https://github.com/octocat/e2e-submit");
   await side.getByTestId("submit-repository").click();
+  // 제출이 끝나면 초점이 body 로 떨어지지 않고, 결과 변화는 live 영역 하나가 알린다(#1431).
+  await expect(side.getByTestId("submit-repository")).toBeFocused();
+  await expect(page.getByTestId("attempt-live")).toHaveAttribute("role", "status");
 
   const rows = page.getByTestId("submissions-list").locator(":scope > li");
   await expect(rows).toHaveCount(1);

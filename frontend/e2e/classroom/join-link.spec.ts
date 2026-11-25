@@ -60,6 +60,7 @@ test("로그아웃 상태로 가입 링크를 열고 로그인하면 같은 가�
   await establishClassroomSession(page, `e2e-join-member-${stamp}`);
   await page.goto(returnPath ?? "/");
   await expect(page.getByTestId("join-login-link")).toHaveCount(0);
+  await expect(page.getByTestId("join-display-name-input")).toBeFocused();
   await page.getByTestId("join-display-name-input").fill("서지우");
   await expect(page.getByTestId("join-submit")).toHaveText("가입하고 문제 보기");
   await page.getByTestId("join-submit").click();

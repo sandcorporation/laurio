@@ -4,7 +4,7 @@
 // 읽으므로 이 조각이 새로 뜰 때마다(=404 가 날 때마다) 새로 묻는다. 홈이나 이전 렌더의
 // 목록은 쓰이지 않는다. 판정은 `lib/access/notice.ts` 가 한다.
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { buttonClass } from "@/app/components/ui";
 import { accessNotice, type AccessNoticeContent, type AccessPage } from "@/lib/access/notice";
@@ -20,7 +20,7 @@ export type AccessRetry = {
   turns: readonly object[];
 };
 
-type Props = { classId: number; testId: string } & (
+type Props = { classId: number; testId: string; focusOnShow?: boolean } & (
   | { page: Extract<AccessPage, "class" | "problem">; retry: AccessRetry }
   | { page: Extract<AccessPage, "mine" | "submit">; retry?: undefined }
 );
@@ -30,7 +30,7 @@ export function AccessNotice(props: Props) {
   return <Notice key={`${props.page}:${props.classId}`} {...props} />;
 }
 
-function Notice({ page, classId, testId, retry }: Props) {
+function Notice({ page, classId, testId, retry, focusOnShow }: Props) {
   const joined = useJoinedClasses();
   const taught = useMyClasses();
   const [turnsBeforeRetry, setTurnsBeforeRetry] = useState<readonly object[] | null>(null);
@@ -62,15 +62,28 @@ function Notice({ page, classId, testId, retry }: Props) {
       </p>
     );
   }
-  return <NoticeBody testId={testId} content={decision} />;
+  return <NoticeBody testId={testId} content={decision} focusOnShow={focusOnShow === true} />;
 }
 
-function NoticeBody({ testId, content }: { testId: string; content: AccessNoticeContent }) {
+function NoticeBody({
+  testId,
+  content,
+  focusOnShow,
+}: {
+  testId: string;
+  content: AccessNoticeContent;
+  focusOnShow: boolean;
+}) {
+  // 쓰던 폼이 사라지며 안내로 바뀐 경우(#1431)에만 초점을 가져온다 — 처음 열린 화면은 건드리지 않는다.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusOnShow) headingRef.current?.focus();
+  }, [focusOnShow]);
   // 어느 주소에서 막혔든 탭 제목은 안내 제목이다(#1406) — 화면이 단 제목보다 앞선다.
   useClassroomTabTitle({ screenName: content.title }, { override: true });
   return (
     <>
-      <h1 data-testid={testId} className="text-[22px] font-semibold">
+      <h1 ref={headingRef} tabIndex={-1} data-testid={testId} className="text-[22px] font-semibold outline-none">
         {content.title}
       </h1>
       <p className="mt-4">

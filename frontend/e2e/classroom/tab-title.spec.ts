@@ -19,10 +19,13 @@ async function newClass(page: Page, label: string) {
 test("클래스 상세는 탭을 바꿔도 제목이 클래스 이름이다", async ({ page }) => {
   const { id, name } = await newClass(page, "tabs");
   await page.goto(`/classes/${id}`);
-  await expect(page).toHaveTitle(`${name} · Codemit`);
+  await expect(page).toHaveTitle(`클래스 상세 · ${name} · Codemit`);
   await page.getByTestId("detail-tab-instructors").click();
   await expect(page.getByTestId("co-instructor-invite-create")).toBeVisible();
-  await expect(page).toHaveTitle(`${name} · Codemit`);
+  await expect(page).toHaveTitle(`클래스 상세 · ${name} · Codemit`);
+  // 같은 클래스의 설정은 제목으로 갈린다(#1431).
+  await page.goto(`/classes/${id}/settings`);
+  await expect(page).toHaveTitle(`클래스 설정 · ${name} · Codemit`);
 });
 
 test("알림·초대·가입 화면의 제목도 같은 꼴이다", async ({ page }) => {
