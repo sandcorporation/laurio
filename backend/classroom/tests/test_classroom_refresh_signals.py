@@ -4,6 +4,9 @@
   거절·수락. 그 클래스 강사에게만 간다(방금 빠진 사람은 함께).
 - `participation-changed` — 문제 열기·숨김·다시 열기, 클래스 보관·되돌리기는 그 클래스의 살아 있는
   참여자 전원에게(보관·되돌리기는 강사에게도 `instructors-changed` 로), 내보내기는 내보내진 그 사람에게만 간다.
+- 참여자 구성·집계 대상이 바뀌는 일 — 새 참여(가입), 내보내기, 문제 열기·숨김·다시 열기 — 은 그 클래스 강사에게
+  `instructors-changed` 로 간다(#1471 ⑦ 후속). 다른 탭·다른 강사가 열어 둔 클래스 머리·참여자 격자·문제 목록의
+  참여자 수·n/N·달성률이 그것으로 다시 읽는다.
 
 두 신호 모두 본문은 `class_id` 하나다 — 이름·소스 같은 것을 싣지 않는다. 준비는 마운트된 HTTP API
 (`tests.classroom_scenarios`), 신호는 fake 이벤트 버스의 수신자별 큐로 본다.
@@ -138,7 +141,7 @@ def test_removing_a_co_instructor_signals_the_removed_one_too(client, db, django
 # --- 10-2 제출 화면 --------------------------------------------------------------
 
 
-def test_hiding_a_problem_signals_the_live_participants_only(client, db, django_capture_on_commit_callbacks):
+def test_hiding_a_problem_signals_the_live_participants_and_the_instructors(client, db, django_capture_on_commit_callbacks):
     s = _scene(client)
     _clear()
 
@@ -147,7 +150,8 @@ def test_hiding_a_problem_signals_the_live_participants_only(client, db, django_
     assert response.status_code == 200, response.content
 
     _assert_only(PARTICIPATION_CHANGED, s["class_id"], {"alice", "bob"})
-    _assert_only(INSTRUCTORS_CHANGED, s["class_id"], set())
+    # 열린 문제 수(n/N 의 N·달성률)가 바뀐다 — 다른 강사가 열어 둔 격자·문제 목록도 다시 읽는다(#1471 ⑦ 후속).
+    _assert_only(INSTRUCTORS_CHANGED, s["class_id"], {"owner", "co"})
 
 
 def test_archiving_a_class_signals_the_live_participants_and_the_instructors(
@@ -194,7 +198,7 @@ def test_archiving_skips_the_expelled_and_unrelated_users(client, db, django_cap
     _assert_only(INSTRUCTORS_CHANGED, s["class_id"], {"owner", "co"})
 
 
-def test_expelling_signals_only_the_expelled_participant(client, db, django_capture_on_commit_callbacks):
+def test_expelling_signals_the_expelled_participant_and_the_instructors(client, db, django_capture_on_commit_callbacks):
     s = _scene(client)
     members = client.get(f"{CLASSES_URL}/{s['class_id']}/members", **auth_header(s["owner"]["access"])).json()
     alice_id = next(m["id"] for m in members if m["display_name"] == "앨리스")
@@ -205,9 +209,53 @@ def test_expelling_signals_only_the_expelled_participant(client, db, django_capt
     assert response.status_code == 200, response.content
 
     _assert_only(PARTICIPATION_CHANGED, s["class_id"], {"alice"})
+    # 격자의 그 행·달성률 분모가 바뀐다 — 강사의 열린 화면이 다시 읽는다(#1471 ⑦ 후속). 내보내진 사람은 강사 신호를
+    # 받지 않는다(강사가 아니다).
+    _assert_only(INSTRUCTORS_CHANGED, s["class_id"], {"owner", "co"})
 
     # 내보내진 사람은 그 뒤의 숨김 신호를 받지 않는다.
     _clear()
     with django_capture_on_commit_callbacks(execute=True):
         _post(client, s["owner"]["access"], f"{s['class_id']}/problems/{s['problem'].id}/hide")
     _assert_only(PARTICIPATION_CHANGED, s["class_id"], {"bob"})
+
+
+def test_joining_signals_the_class_instructors_only(client, db, django_capture_on_commit_callbacks):
+    """새 참여자는 격자의 새 행이고 달성률 분모다 — 강사의 열린 화면이 다시 읽는다(#1471 ⑦ 후속).
+    다른 참여자·바깥 사람은 받지 않는다."""
+
+    s = _scene(client)
+    newcomer = login(client, uid="newcomer")
+    _clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        join_class(client, newcomer["access"], s["class_id"], instructor_access=s["owner"]["access"], display_name="새내기")
+
+    _assert_only(INSTRUCTORS_CHANGED, s["class_id"], {"owner", "co"})
+    assert _signals("newcomer", INSTRUCTORS_CHANGED) == []
+    _assert_only(PARTICIPATION_CHANGED, s["class_id"], set())
+
+
+def test_joining_again_sends_no_signal(client, db, django_capture_on_commit_callbacks):
+    """이미 참여자면 행이 그대로다 — 바뀐 것이 없으니 신호도 없다."""
+
+    s = _scene(client)
+    _clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        join_class(client, s["alice"]["access"], s["class_id"], instructor_access=s["owner"]["access"], display_name="앨리스")
+
+    _assert_only(INSTRUCTORS_CHANGED, s["class_id"], set())
+
+
+def test_expelling_twice_signals_only_once(client, db, django_capture_on_commit_callbacks):
+    s = _scene(client)
+    members = client.get(f"{CLASSES_URL}/{s['class_id']}/members", **auth_header(s["owner"]["access"])).json()
+    alice_id = next(m["id"] for m in members if m["display_name"] == "앨리스")
+    _post(client, s["owner"]["access"], f"{s['class_id']}/members/{alice_id}/expel")
+    _clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        _post(client, s["owner"]["access"], f"{s['class_id']}/members/{alice_id}/expel")
+
+    _assert_only(INSTRUCTORS_CHANGED, s["class_id"], set())

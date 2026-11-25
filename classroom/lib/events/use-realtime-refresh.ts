@@ -25,6 +25,10 @@ export interface RealtimeRefreshOptions {
   fallbackPollMs: number;
   /** 신호를 받거나, 재연결됐거나, 폴링 차례가 됐을 때 부를 재조회. */
   reload: () => void;
+  /** 주면 이 시간 안에 잇따라 온 신호를 재조회 한 번으로 묶는다 — 한 변경이 신호 둘로 오는 화면(강사이면서
+   *  참여자인 사람이 문제 전이에 `participation-changed`·`instructors-changed` 를 함께 받는다, #1471 ⑦)이 쓴다.
+   *  재연결·폴링 재조회는 묶지 않는다. */
+  coalesceSignalsMs?: number;
 }
 
 export function useRealtimeRefresh({
@@ -32,15 +36,30 @@ export function useRealtimeRefresh({
   waiting,
   fallbackPollMs,
   reload,
+  coalesceSignalsMs,
 }: RealtimeRefreshOptions): void {
   const { connectionState, subscribe } = useEventStream();
   const previousConnectionState = useRef<StreamConnectionState>(connectionState);
 
   useEffect(() => {
-    return subscribe((event) => {
-      if (matches(event)) reload();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = subscribe((event) => {
+      if (!matches(event)) return;
+      if (coalesceSignalsMs === undefined) {
+        reload();
+        return;
+      }
+      if (timer !== null) return;
+      timer = setTimeout(() => {
+        timer = null;
+        reload();
+      }, coalesceSignalsMs);
     });
-  }, [subscribe, reload, matches]);
+    return () => {
+      unsubscribe();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [subscribe, reload, matches, coalesceSignalsMs]);
 
   useEffect(() => {
     const decision = decideStreamRefresh(

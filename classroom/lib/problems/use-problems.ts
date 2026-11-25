@@ -35,6 +35,10 @@ export type ProblemsState =
 //: 과 같은 30초로 잡는다 — 목록 전체는 늘 기다리는 셈이다.
 const FALLBACK_POLL_MS = 30_000;
 
+//: 한 변경이 신호 둘로 올 수 있다 — 강사이면서 참여자인 사람은 문제 전이에 participation-changed 와
+//: instructors-changed 를 함께 받는다(#1471 ⑦). 클래스 화면의 신호 재조회(250ms)와 같은 간격으로 묶는다.
+const SIGNAL_COALESCE_MS = 250;
+
 export function useProblems(classId: number) {
   const { state: queryState, reload: refetch } = useBackendQuery<ProblemRow[]>(
     bffClient,
@@ -54,7 +58,13 @@ export function useProblems(classId: number) {
       isClassSignal(event, PARTICIPATION_CHANGED, classId),
     [classId],
   );
-  useRealtimeRefresh({ matches, waiting: true, fallbackPollMs: FALLBACK_POLL_MS, reload });
+  useRealtimeRefresh({
+    matches,
+    waiting: true,
+    fallbackPollMs: FALLBACK_POLL_MS,
+    reload,
+    coalesceSignalsMs: SIGNAL_COALESCE_MS,
+  });
 
   const serverProblems = queryState.status === "ready" ? queryState.data : null;
   // 순서 변경은 응답을 기다리지 않고 먼저 반영한다 — 성공하면 서버가 돌려준

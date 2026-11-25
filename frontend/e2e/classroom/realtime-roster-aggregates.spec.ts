@@ -4,14 +4,15 @@ import { classroomApi, establishClassroomSession } from "./lib/cross-app-session
 
 // 강의실 — 집계 대상이 바뀌면 열어 둔 참여자 격자와 문제 목록이 새로고침 없이 다시 읽는다(#1471 ⑦).
 // 참여자가 공동 강사가 되면(instructors-changed) 그 행은 강사 행이 되고, 문제가 열리면(participation-changed)
-// n/N 의 N 이 는다. 두 신호 모두 격자(`roster-grid`)와 문제 목록(`problems`)을 각각 한 번만 다시 읽는다.
+// n/N 의 N 이 는다. 새 참여·내보내기도 그 클래스 강사에게 instructors-changed 로 온다(#1471 ⑦ 후속) — 격자 줄이
+// 늘고 「내보냄」이 붙는다. 신호 하나에 격자(`roster-grid`)와 문제 목록(`problems`)을 각각 한 번만 다시 읽는다.
 // `page.reload()` 를 어디서도 부르지 않는 것이 이 스펙의 단언이다.
 
 async function otherSession(browser: Browser, seed: string) {
   const context = await browser.newContext({ baseURL: test.info().project.use.baseURL });
   const page = await context.newPage();
   await establishClassroomSession(page, seed);
-  return { context, api: classroomApi(page) };
+  return { context, page, api: classroomApi(page) };
 }
 
 async function setUpClass(page: Page, seed: string) {
@@ -135,4 +136,73 @@ test("참여자이기도 한 강사가 참여자 탭을 연 채로 문제가 열
   await page.waitForLoadState("networkidle");
   expect(reads.grid - before.grid).toBe(1);
   expect(reads.problems - before.problems).toBe(1);
+});
+
+// 소유자·공동 강사(이 페이지)·참여자 「앨리스」가 있는 클래스 — 공동 강사는 참여자 행이 없다.
+async function coInstructorScene(page: Page, browser: Browser, seed: string) {
+  const owner = await otherSession(browser, `${seed}-owner`);
+  const { api: ownerApi, classId, joinCode } = await setUpClass(owner.page, seed);
+  const token = (await (
+    await ownerApi.post(`/api/backend/classroom/classes/${classId}/co-instructor-invites`)
+  ).json()).token as string;
+  await establishClassroomSession(page, seed);
+  expect(
+    (
+      await classroomApi(page).post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, {
+        data: { display_name: "박조교" },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const alice = await otherSession(browser, `${seed}-alice`);
+  expect((await alice.api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "앨리스" } })).ok()).toBeTruthy();
+  await alice.context.close();
+  return { owner, classId, joinCode };
+}
+
+test("공동 강사가 참여자 탭을 연 채로 학생이 새로 참여하면 줄과 참여자 수가 늘고 격자·문제 목록을 한 번씩 다시 읽는다", async ({
+  page,
+  browser,
+}) => {
+  const seed = `rt-roster-join-${test.info().workerIndex}-${Date.now()}`;
+  const { owner, classId, joinCode } = await coInstructorScene(page, browser, seed);
+  await owner.context.close();
+  const bob = await otherSession(browser, `${seed}-bob`);
+
+  const rows = page.getByTestId(/^participant-row-\d+$/);
+  const { reads, problemsRead } = await openParticipantsTab(page, classId);
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByTestId("class-stat-members")).toContainText("1");
+  const before = { ...reads };
+  const problemsReread = problemsRead();
+
+  expect((await bob.api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "밥" } })).ok()).toBeTruthy();
+  await bob.context.close();
+
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByTestId("class-stat-members")).toContainText("2");
+  await problemsReread;
+  // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
+  expect(reads.grid - before.grid).toBe(1);
+  expect(reads.problems - before.problems).toBe(1);
+});
+
+test("공동 강사가 참여자 탭을 연 채로 소유자가 참여자를 내보내면 그 줄에 「내보냄」이 붙고 참여자 수가 준다", async ({
+  page,
+  browser,
+}) => {
+  const seed = `rt-roster-expel-${test.info().workerIndex}-${Date.now()}`;
+  const { owner, classId } = await coInstructorScene(page, browser, seed);
+  const aliceId = await memberIdOf(page, classId, "앨리스");
+
+  await openParticipantsTab(page, classId);
+  await expect(page.getByTestId(`participant-row-${aliceId}-name`)).toContainText("앨리스");
+  await expect(page.getByTestId(`participant-row-${aliceId}-expelled-badge`)).toHaveCount(0);
+  await expect(page.getByTestId("class-stat-members")).toContainText("1");
+
+  expect((await owner.api.post(`/api/backend/classroom/classes/${classId}/members/${aliceId}/expel`)).ok()).toBeTruthy();
+  await owner.context.close();
+
+  await expect(page.getByTestId(`participant-row-${aliceId}-expelled-badge`)).toBeVisible();
+  await expect(page.getByTestId("class-stat-members")).toContainText("0");
 });
