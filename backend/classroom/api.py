@@ -191,6 +191,7 @@ from .instructors import active_participant_q, classes_owned_by, classes_taught_
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
+    SUBMIT_BLOCKED_LEFT,
     SUBMIT_BLOCKED_HIDDEN,
     instructor_can_submit,
     participant_membership_blocked_reason,
@@ -1056,6 +1057,7 @@ def list_joined_classes(request: HttpRequest):
             joined_at=m.joined_at,
             archived=m.classroom.archived_at is not None,
             expelled=m.expelled_at is not None,
+            left=m.left_by_self,
             passed_count=progress[m.id][0],
             open_problem_count=progress[m.id][1],
         )
@@ -2156,6 +2158,7 @@ def _serialize_member(member: ClassMember, class_obj: Class) -> MemberOut:
         display_name=member.display_name,
         joined_at=member.joined_at,
         expelled=member.expelled_at is not None,
+        left=member.left_by_self,
         is_instructor=is_instructor(class_obj, member.user_id),
     )
 
@@ -2263,7 +2266,7 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
     reason = participant_membership_blocked_reason(member.classroom, member)
     if reason == SUBMIT_BLOCKED_ARCHIVED:
         raise HttpError(403, "이 클래스는 보관되어 이름을 바꿀 수 없습니다.")
-    if reason == SUBMIT_BLOCKED_EXPELLED:
+    if reason in (SUBMIT_BLOCKED_EXPELLED, SUBMIT_BLOCKED_LEFT):
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
     _reject_if_banned_name(payload.display_name)
 
@@ -2392,6 +2395,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 display_name=member.display_name,
                 is_instructor=is_instructor(class_obj, member.user_id),
                 expelled=member.expelled_at is not None,
+                left=member.left_by_self,
                 cells=cells,
                 joined_at=member.joined_at,
                 last_submitted_at=max(
@@ -3182,7 +3186,7 @@ def create_classroom_submission(
         # #294 AC "보관된 클래스에는 새 제출을 낼 수 없다" — 지난 시도는
         # 그대로 읽히므로(`get_my_problem`) 이 엔드포인트만 막는다.
         raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
-    if blocked_reason == SUBMIT_BLOCKED_EXPELLED:
+    if blocked_reason in (SUBMIT_BLOCKED_EXPELLED, SUBMIT_BLOCKED_LEFT):
         # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔
         # 자리다 — 행은 지우지 않되 새 제출만 막는다. 강사가 이미 그 사실을
         # 아는 사람에게는 404(존재 자체를 숨김)보다 403(권한이 없다는 것을

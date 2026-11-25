@@ -49,6 +49,8 @@ export type GridMemberRow = {
   display_name: string;
   is_instructor: boolean;
   expelled: boolean;
+  // `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5) — 공동 강사였다가 떠났거나 탈퇴했다. 「나감」으로 적는다.
+  left: boolean;
   // 가입한 때·마지막으로 낸 때(#632) — 강사 본인·내보낸 행에도 채워지고, 낸 적이 없으면 null.
   joined_at: string | null;
   last_submitted_at: string | null;

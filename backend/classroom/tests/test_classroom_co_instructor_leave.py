@@ -29,9 +29,11 @@ from tests.classroom_scenarios import (
     list_problems,
     list_taught_classes,
     login,
+    mine,
     preview_co_instructor_invite,
     remove_co_instructor,
     respond_with_verdict,
+    roster_grid,
     run_scan,
     submit_repository,
 )
@@ -174,6 +176,24 @@ def test_a_departed_participant_becomes_an_expelled_participant_and_the_rate_doe
     members = _members(client, owner["access"], class_id)
     assert (members["조교였던 학생"]["expelled"], members["조교였던 학생"]["is_instructor"]) == (True, False)
     assert members["학생"]["expelled"] is False
+    # 스스로 나간 사람과 내보낸 사람을 가른다(#1492-5) — 참여자 표가 「나감」과 「내보냄」을 나눠 그린다.
+    assert members["조교였던 학생"]["left"] is (how == "leave")
+    assert members["학생"]["left"] is False
+    grid = {m["display_name"]: m for m in roster_grid(client, owner["access"], class_id)["members"]}
+    assert (grid["조교였던 학생"]["expelled"], grid["조교였던 학생"]["left"]) == (True, how == "leave")
+    assert grid["학생"]["left"] is False
+    joined = client.get(f"{CLASSES_URL}/joined", **auth_header(helper["access"])).json()
+    assert [(c["id"], c["expelled"], c["left"]) for c in joined] == [(class_id, True, how == "leave")]
+    expected_reason = "left" if how == "leave" else "expelled"
+    assert mine(client, helper["access"], class_id, problem.id)["submit_blocked_reason"] == expected_reason
+    # 나갔어도 새 제출은 내보낸 사람과 똑같이 막힌다.
+    blocked = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem.id}/submissions",
+        data={"value": "https://github.com/octocat/hello-world", "submission_format": "repository"},
+        content_type="application/json",
+        **auth_header(helper["access"]),
+    )
+    assert blocked.status_code == 403, blocked.content
     # 떠난 사람의 시도는 내보낸 참여자의 시도로 남아 삭제를 막는다(ADR-0050).
     assert after["deletable"] is False
     deleted = client.delete(f"{CLASSES_URL}/{class_id}/problems/{problem.id}", **auth_header(owner["access"]))
@@ -254,6 +274,21 @@ def test_someone_who_only_co_teaches_can_withdraw_and_leaves_the_class(client, d
     assert preview_co_instructor_invite(client, invite["token"]).json()["status"] == "cancelled"
 
 
+def test_a_co_instructor_who_withdraws_shows_as_left_not_expelled(client, db):
+    """탈퇴도 스스로 나간 것이다(#1492-5) — 참여자였던 공동 강사의 행은 「나감」이다."""
+
+    owner = login(client, "owner")
+    co = login(client, "co")
+    class_id = create_class(client, owner["access"])
+    join_class(client, co["access"], class_id, instructor_access=owner["access"], display_name="조교였던 학생")
+    add_co_instructor(client, owner["access"], class_id, co["access"], display_name="보조 강사")
+
+    assert _withdraw(client, co["access"]).status_code == 200
+
+    row = _members(client, owner["access"], class_id)["조교였던 학생"]
+    assert (row["expelled"], row["left"]) == (True, True)
+
+
 def test_an_owner_with_an_open_class_is_still_blocked_and_keeps_co_teaching(client, db):
     """소유한 클래스가 진행 중이면 탈퇴는 지금처럼 막힌다 — 막힌 탈퇴는 공동 강사 자리도
     건드리지 않는다."""
@@ -267,3 +302,42 @@ def test_an_owner_with_an_open_class_is_still_blocked_and_keeps_co_teaching(clie
     assert _withdraw(client, co["access"]).status_code == 409
 
     assert _teaches(client, co["access"], class_id)
+
+
+def test_backfill_marks_only_rows_closed_by_a_co_instructors_withdrawal(client, db):
+    """기존 행 채우기(`classroom.0054`) — 탈퇴만 흔적(`Withdrawal`)이 남아 「나감」으로 채운다. 소유자가
+    내보낸 공동 강사와 강사가 내보낸 참여자는 그대로 「내보냄」이다."""
+
+    import importlib
+
+    from django.apps import apps
+
+    from classroom.models import ClassMember
+
+    backfill = importlib.import_module("classroom.migrations.0054_classmember_left_by_self")
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"])
+    withdrawn = login(client, "withdrawn")
+    removed = login(client, "removed")
+    learner = login(client, "learner")
+    join_class(client, withdrawn["access"], class_id, instructor_access=owner["access"], display_name="탈퇴한 조교")
+    join_class(client, removed["access"], class_id, instructor_access=owner["access"], display_name="내보낸 조교")
+    join_class(client, learner["access"], class_id, instructor_access=owner["access"], display_name="내보낸 학생")
+    add_co_instructor(client, owner["access"], class_id, withdrawn["access"], display_name="조교1")
+    add_co_instructor(client, owner["access"], class_id, removed["access"], display_name="조교2")
+    co_id = _co_instructor_id(client, owner["access"], class_id, "조교2")
+    assert remove_co_instructor(client, owner["access"], class_id, co_id).status_code == 204
+    assert _withdraw(client, withdrawn["access"]).status_code == 200
+    learner_id = _members(client, owner["access"], class_id)["내보낸 학생"]["id"]
+    expelled = client.post(f"{CLASSES_URL}/{class_id}/members/{learner_id}/expel", **auth_header(owner["access"]))
+    assert expelled.status_code == 200, expelled.content
+    ClassMember.objects.update(left_by_self=False)  # 필드가 생기기 전의 행
+
+    backfill.mark_withdrawn_co_instructors_as_left(apps, None)
+
+    rows = _members(client, owner["access"], class_id)
+    assert {name: (row["expelled"], row["left"]) for name, row in rows.items()} == {
+        "탈퇴한 조교": (True, True),
+        "내보낸 조교": (True, False),
+        "내보낸 학생": (True, False),
+    }

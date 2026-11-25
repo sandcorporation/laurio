@@ -235,7 +235,12 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
                   {/* 내보내져도 행을 지우지 않는다 — 지난 시도·판정은 그대로 읽힌다
                       (member_expelled와 같은 신호, #300). 여기서는 그 상태를
                       알리기만 하고 링크는 그대로 열어 둔다. */}
-                  {classroom.expelled ? (
+                  {/* 공동 강사였다가 스스로 떠났으면(#1492-5) 내보내진 것이 아니다. */}
+                  {classroom.expelled && classroom.left ? (
+                    <span data-testid={`classroom-joined-row-${classroom.id}-left-badge`}>
+                      <Badge>나감</Badge>
+                    </span>
+                  ) : classroom.expelled ? (
                     <span data-testid={`classroom-joined-row-${classroom.id}-expelled-badge`}>
                       <Badge tone="warning">내보내짐</Badge>
                     </span>

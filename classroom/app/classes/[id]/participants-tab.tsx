@@ -403,13 +403,20 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
             {members.map((member) => (
               <tr key={member.id} data-testid={`participant-row-${member.id}`}>
                 <td className={STICKY} data-testid={`participant-row-${member.id}-name`}>
-                  <span className={member.expelled ? "text-ink/40 line-through" : ""}>{member.display_name}</span>
+                  {/* 취소선은 「내보냄」만 — 스스로 나간 사람(#1492-5)은 흐리게만 한다. */}
+                  <span className={member.expelled ? (member.left ? "text-ink/40" : "text-ink/40 line-through") : ""}>
+                    {member.display_name}
+                  </span>
                   {member.is_instructor ? (
                     <span data-testid={`participant-row-${member.id}-instructor-badge`} className="ml-2 inline-block">
                       <Badge>강사 본인</Badge>
                     </span>
                   ) : null}
-                  {member.expelled ? (
+                  {member.expelled && member.left ? (
+                    <span data-testid={`participant-row-${member.id}-left-badge`} className="ml-2 inline-block">
+                      <Badge>나감</Badge>
+                    </span>
+                  ) : member.expelled ? (
                     <span data-testid={`participant-row-${member.id}-expelled-badge`} className="ml-2 inline-block">
                       <Badge tone="warning">내보냄</Badge>
                     </span>
