@@ -15,8 +15,8 @@ import { useEffect, useRef, useState } from "react";
 import { Stamp } from "@/app/components/Stamp";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
-import { trapTabTarget } from "@/lib/dom/focus-trap";
-import { nextMenuIndex } from "@/lib/dom/menu-keys";
+import { useDialogFocus } from "@/app/components/use-dialog-focus";
+import { useMenuFocus } from "@/app/components/use-menu-focus";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { describeDue, lateLabel, type LateStatus, type DueFields } from "@/lib/problems/due-dates";
 import { achievementTone, describeAchievementRate } from "@/lib/problems/achievement";
@@ -116,39 +116,7 @@ function RowMenu({ member, onExpel }: { member: GridMemberRow; onExpel: () => vo
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLSpanElement>(null);
 
-  // 열면 초점이 첫 항목으로 간다(WAI-ARIA menu button).
-  useEffect(() => {
-    if (open) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-
-  function onMenuKeyDown(event: React.KeyboardEvent<HTMLSpanElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      setOpen(false);
-      triggerRef.current?.focus();
-      return;
-    }
-    if (event.key === "Tab") {
-      // 메뉴는 닫고 초점은 ⋮ 에서 이어 간다 — 사라질 항목에 초점이 남지 않게.
-      setOpen(false);
-      triggerRef.current?.focus();
-      return;
-    }
-    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
-    const next = nextMenuIndex(event.key, items.indexOf(document.activeElement as HTMLElement), items.length);
-    if (next === null) return;
-    event.preventDefault();
-    items[next]?.focus();
-  }
+  const { onKeyDown: onMenuKeyDown } = useMenuFocus({ open, setOpen, triggerRef, menuRef, containerRef: ref });
 
   return (
     <span ref={ref} className="relative inline-block align-middle">
@@ -205,28 +173,11 @@ function ExpelDialog({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-
-  // 열리면 안전한 「취소」가 초점을 받는다.
-  useEffect(() => {
-    cancelRef.current?.focus();
-  }, []);
-
-  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onCancel();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])") ?? []);
-    const target = trapTabTarget(event.shiftKey, items.indexOf(document.activeElement as HTMLElement), items.length);
-    if (target === null) return;
-    event.preventDefault();
-    items[target]?.focus();
-  }
+  // 열리면 안전한 「취소」가 초점을 받는다. 닫힌 뒤 초점은 ParticipantsTab 이 정한다(#1447).
+  useDialogFocus(dialogRef, { onEscape: onCancel, initialFocus: cancelRef });
 
   return (
-    <div onKeyDown={onKeyDown} className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
       <button type="button" tabIndex={-1} aria-label="닫기" onClick={onCancel} className="fixed inset-0 cursor-default" />
       <div
         ref={dialogRef}

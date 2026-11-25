@@ -5,9 +5,10 @@
 // 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 상태 문구와 입구 둘(새 문제·문제 가져오기).
 // 달성률·통과 수는 목록 응답의 값이고, 위쪽 통계 바의 평균은 클래스 응답의 값이다 — 다시 세지 않는다.
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { DueInline } from "@/app/components/DueLabel";
+import { useMenuFocus } from "@/app/components/use-menu-focus";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { PERFECT_TEXT_CLASS } from "@/lib/design/stamp";
@@ -56,27 +57,15 @@ function RowMenu({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === "Escape") setOpen(false);
-      } else if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  const { onKeyDown, closeToTrigger } = useMenuFocus({ open, setOpen, triggerRef, menuRef, containerRef: ref });
 
   const item = "block w-full px-4 py-2 text-left text-[13px] hover:bg-paper disabled:cursor-not-allowed disabled:opacity-40";
   return (
     <span ref={ref} className="relative inline-block align-middle">
       <button
+        ref={triggerRef}
         type="button"
         data-testid={`problem-row-${problem.id}-menu`}
         aria-label={`${problem.title} 순서 메뉴`}
@@ -88,14 +77,19 @@ function RowMenu({
         ⋮
       </button>
       {open ? (
-        <span role="menu" className="absolute right-0 top-full z-10 mt-1 block w-24 border border-rule bg-surface py-1 shadow-none">
+        <span
+          ref={menuRef}
+          role="menu"
+          aria-label={`${problem.title} 순서 메뉴`}
+          onKeyDown={onKeyDown}
+          className="absolute right-0 top-full z-10 mt-1 block w-24 border border-rule bg-surface py-1 shadow-none">
           <button
             type="button"
             role="menuitem"
             data-testid={`problem-row-${problem.id}-move-up`}
             disabled={disabledUp}
             onClick={() => {
-              setOpen(false);
+              closeToTrigger();
               onMove("up");
             }}
             className={item}
@@ -108,7 +102,7 @@ function RowMenu({
             data-testid={`problem-row-${problem.id}-move-down`}
             disabled={disabledDown}
             onClick={() => {
-              setOpen(false);
+              closeToTrigger();
               onMove("down");
             }}
             className={item}
