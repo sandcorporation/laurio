@@ -195,7 +195,7 @@ describe("modelRejectedNote — 키 사유는 소유자 몫, 모델 사유는 �
     expect(note.actionLabel).toBe(action);
     expect(note.href).toBe("/classes/7/problems/3#scoring-model");
     expect(note.message).toBe(
-      `${message} 클래스 기본 모델이 원인입니다 — 같은 기본 모델을 쓰는 다른 문제도 멈춰 있으니 소유자에게 클래스 설정의 기본 모델을 바꿔 달라고 하세요.`,
+      `${message} 클래스 기본 모델이 원인입니다 — 같은 기본 모델을 쓰는 다른 문제도 채점되지 않으니 소유자에게 클래스 설정의 기본 모델을 바꿔 달라고 하세요.`,
     );
   });
 

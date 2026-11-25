@@ -103,7 +103,7 @@ export function modelRejectedNote(
   // 원인이 클래스 기본 모델임을 말하고 소유자에게 부탁하게 한다(#1441-3, 키 사유의 부탁 문장과 짝).
   const ownerAsk =
     role === "co_instructor" && inherits
-      ? " 클래스 기본 모델이 원인입니다 — 같은 기본 모델을 쓰는 다른 문제도 멈춰 있으니 소유자에게 클래스 설정의 기본 모델을 바꿔 달라고 하세요."
+      ? " 클래스 기본 모델이 원인입니다 — 같은 기본 모델을 쓰는 다른 문제도 채점되지 않으니 소유자에게 클래스 설정의 기본 모델을 바꿔 달라고 하세요."
       : "";
   return {
     message: `${message}${ownerAsk}`,
