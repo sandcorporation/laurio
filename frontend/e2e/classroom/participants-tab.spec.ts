@@ -84,3 +84,63 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
   await expect(page).toHaveURL(`/classes/${classId}?tab=participants`);
   await expect(page.getByTestId("participants-table")).toBeVisible();
 });
+
+// 키보드만으로 — 행 메뉴(⋮)는 WAI-ARIA 메뉴 단추 꼴(#1465 1번), 내보내기 확인창은 초점이 안으로 들어가 갇히고
+// Escape 로 닫히며 ⋮ 로 돌아온다(#1463).
+test("참여자 탭 — 행 메뉴와 내보내기 확인창은 키보드만으로 다룬다", async ({ page }) => {
+  const seed = `participants-kbd-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const created = await api.post("/api/backend/classroom/classes", {
+    data: { name: `참여자 키보드 ${Date.now()}`, instructor_display_name: "강사" },
+  });
+  const classId = (await created.json()).id as number;
+  const joinCode = (await (await api.get(`/api/backend/classroom/classes/${classId}`)).json()).join_code as string;
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-p`);
+  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "키보드참여자" } })).ok()).toBeTruthy();
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+
+  await page.goto(`/classes/${classId}?tab=participants`);
+  const members = (await (await api.get(`/api/backend/classroom/classes/${classId}/members`)).json()) as {
+    id: number;
+    display_name: string;
+  }[];
+  const id = members.find((m) => m.display_name === "키보드참여자")!.id;
+  const trigger = page.getByTestId(`participant-row-${id}-menu`);
+  const item = page.getByRole("menuitem", { name: "내보내기" });
+
+  // 메뉴: 열면 첫 항목에 초점, ↑↓·Home/End, Escape 는 닫고 ⋮ 로.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("menu", { name: "키보드참여자 메뉴" })).toBeVisible();
+  await expect(item).toBeFocused();
+  for (const key of ["ArrowDown", "ArrowUp", "End", "Home"]) {
+    await page.keyboard.press(key);
+    await expect(item).toBeFocused();
+  }
+  await page.keyboard.press("Escape");
+  await expect(item).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  // 항목에서 Tab 은 메뉴를 닫는다.
+  await page.keyboard.press("Enter");
+  await expect(item).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(item).toHaveCount(0);
+
+  // 확인창: 열리면 「취소」, Tab 을 여러 번 눌러도 창 안, Escape 로 닫히고 ⋮ 로 돌아온다.
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "참여자 내보내기" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "취소" })).toBeFocused();
+  for (const shift of [false, false, false, true, true, true, true]) {
+    await page.keyboard.press(shift ? "Shift+Tab" : "Tab");
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
