@@ -76,6 +76,43 @@ test("참여자를 내보내거나 취소하면 초점이 메뉴 단추로, 내�
   await expect(page.getByTestId("participants-header-name")).toBeFocused();
 });
 
+test("내보내기가 실패하면 알림 영역에 까닭이 보이고 초점은 메뉴 단추로 돌아온다", async ({ page }) => {
+  const seed = `focus-expel-fail-${test.info().workerIndex}-${Date.now()}`;
+  const { api, classId, joinCode } = await createClass(page, seed);
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-p`);
+  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "남는사람" } })).ok()).toBeTruthy();
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  const members = (await (await api.get(`/api/backend/classroom/classes/${classId}/members`)).json()) as {
+    id: number;
+    display_name: string;
+  }[];
+  const id = members.find((m) => m.display_name === "남는사람")!.id;
+
+  await page.route(/\/members\/\d+\/expel$/, (route) =>
+    route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "서버가 내보내기를 거절했습니다." }) }),
+  );
+  await page.goto(`/classes/${classId}?tab=participants`);
+  await page.getByTestId(`participant-row-${id}-menu`).click();
+  await page.getByTestId(`participant-row-${id}-expel`).click();
+  await page.getByTestId("expel-confirm").click();
+  await expect(page.getByRole("alert").filter({ hasText: "내보내지 못했습니다" }).or(page.getByRole("alert").filter({ hasText: "거절했습니다" }))).toBeVisible();
+  await expect(page.getByTestId("participants-expel-error")).not.toHaveText("");
+  await expect(page.getByTestId(`participant-row-${id}-menu`)).toBeFocused();
+});
+
+test("연결 주소 복사는 상태 영역이 알린다", async ({ page }) => {
+  await establishClassroomSession(page, `focus-mcp-copy-${Date.now()}`);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto("/connected-apps");
+  const copied = page.getByTestId("connected-apps-mcp-url-copied");
+  await expect(copied).toHaveAttribute("role", "status");
+  await expect(copied).toHaveText("");
+  await page.getByTestId("connected-apps-mcp-url-copy").click();
+  await expect(page.getByRole("status").filter({ hasText: "복사됨" })).toHaveCount(1);
+});
+
 test("가입 링크 복사는 상태 영역이 알리고 연결된 앱을 끊으면 다음 앱의 단추로 초점이 간다", async ({ page }) => {
   const seed = `focus-apps-${test.info().workerIndex}-${Date.now()}`;
   const { classId } = await createClass(page, seed);

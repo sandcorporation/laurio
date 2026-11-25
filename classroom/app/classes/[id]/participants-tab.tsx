@@ -299,7 +299,7 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
       {expelError ? (
         <div className="border-b border-rule p-3">
           <ErrorNote>
-            <span data-testid="participants-expel-error">내보내지 못했습니다. 다시 시도해주세요.</span>
+            <span data-testid="participants-expel-error">{expelError}</span>
           </ErrorNote>
         </div>
       ) : null}
