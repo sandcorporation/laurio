@@ -46,35 +46,55 @@ async function openWithStream(page: Page, url: string) {
 }
 
 for (const viewport of viewports) {
-  test(`${viewport.width}px — 넘겨받은 안내의 「채점 키 넣기」에 초점이 있어도 20초 뒤 안내가 걷히면 제목이 초점을 받는다`, async ({ page }) => {
+  test(`${viewport.width}px — 거절 안내는 20초 뒤 걷히고 초점은 제목이 받는다`, async ({ page }) => {
     await page.setViewportSize(viewport);
     const seed = `past-timer-${viewport.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { classId } = await classWithRequestForHelper(page, seed);
+    await page.clock.install();
+    await openWithStream(page, `/classes/${classId}`);
+    await page.getByTestId("ownership-transfer-decline").click();
+    const note = page.getByRole("status").filter({ has: page.getByTestId("ownership-transfer-declined-note") });
+    await expect(note).toBeFocused();
+
+    await page.clock.fastForward(21_000);
+    await expect(page.getByTestId("ownership-transfer-declined-note")).toHaveCount(0);
+    await expect(page.getByTestId("classroom-detail-heading")).toBeFocused();
+  });
+
+  test(`${viewport.width}px — 채점 키 안내는 20초가 지나도 걷히지 않고 초점도 그대로, 닫으면 제목이 초점을 받는다`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const seed = `past-key-${viewport.width}-${test.info().workerIndex}-${Date.now()}`;
     const { classId } = await classWithRequestForHelper(page, seed);
     await page.clock.install();
     await openWithStream(page, `/classes/${classId}`);
     await page.getByTestId("ownership-transfer-accept").click();
     const note = page.getByRole("status").filter({ has: page.getByTestId("ownership-transfer-accepted-note") });
     await expect(note).toBeFocused();
-    await page.getByRole("link", { name: "채점 키 넣기" }).focus();
+    const keyLink = page.getByRole("link", { name: "채점 키 넣기" });
+    await keyLink.focus();
 
-    await page.clock.fastForward(21_000);
+    await page.clock.fastForward(60_000);
+    await expect(page.getByTestId("ownership-transfer-accepted-note")).toBeVisible();
+    await expect(keyLink).toBeFocused();
+
+    await page.getByRole("button", { name: "닫기" }).click();
     await expect(page.getByTestId("ownership-transfer-accepted-note")).toHaveCount(0);
     await expect(page.getByTestId("classroom-detail-heading")).toBeFocused();
   });
 
-  test(`${viewport.width}px — 초점이 안내 밖(제목 아닌 다른 칸)이면 걷어도 초점을 빼앗지 않는다`, async ({ page }) => {
+  test(`${viewport.width}px — 초점이 안내 밖이면 거절 안내를 걷어도 초점을 빼앗지 않는다`, async ({ page }) => {
     await page.setViewportSize(viewport);
     const seed = `past-outside-${viewport.width}-${test.info().workerIndex}-${Date.now()}`;
     const { classId } = await classWithRequestForHelper(page, seed);
     await page.clock.install();
     await openWithStream(page, `/classes/${classId}`);
-    await page.getByTestId("ownership-transfer-accept").click();
-    await expect(page.getByTestId("ownership-transfer-accepted-note")).toBeVisible();
+    await page.getByTestId("ownership-transfer-decline").click();
+    await expect(page.getByTestId("ownership-transfer-declined-note")).toBeVisible();
     const settings = page.getByTestId("class-settings-link");
     await settings.focus();
 
     await page.clock.fastForward(21_000);
-    await expect(page.getByTestId("ownership-transfer-accepted-note")).toHaveCount(0);
+    await expect(page.getByTestId("ownership-transfer-declined-note")).toHaveCount(0);
     await expect(settings).toBeFocused();
   });
 
