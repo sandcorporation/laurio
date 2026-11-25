@@ -92,6 +92,47 @@ test("제보 창은 초점이 안으로 들어가 갇히고 Escape 로 닫히며
   await context.close();
 });
 
+// 캡처가 끝나기 전에 Escape 로 그만두면 늦게 끝난 캡처가 창을 다시 열지 않는다(#1503 ⑤) — 초점은 「제보」 단추에 그대로다.
+// 캡처의 마지막 단계(그림 해독)를 시험이 쥐고 있다가 Escape 뒤에 풀어 늦게 끝나는 캡처를 만든다.
+test("제보 캡처 중 Escape 로 그만두면 캡처가 끝나도 창이 다시 열리지 않는다", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: onState });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    const w = window as unknown as { __release: () => void };
+    const gate = new Promise<void>((resolve) => (w.__release = resolve));
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = async function (this: HTMLImageElement) {
+      await gate;
+      return decode.call(this);
+    };
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
+      document.documentElement.dataset.captureDrawn = "1";
+      return (drawImage as (...a: unknown[]) => void).apply(this, args);
+    } as typeof drawImage;
+  });
+  await page.goto("/");
+  const opener = page.getByTestId("feedback-open");
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  await expect(opener).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(opener).toBeEnabled();
+  await expect(opener).toBeFocused();
+
+  await page.evaluate(() => (window as unknown as { __release: () => void }).__release());
+  await expect(page.locator("html")).toHaveAttribute("data-capture-drawn", "1");
+  // 캡처가 끝난 뒤의 마이크로태스크·렌더가 지나가도록 두 프레임.
+  await page.evaluate(
+    // TEST-WAIT-EXCEPTION: 「일어나지 않음」을 보이려면 늦은 캡처 결과가 반영될 두 프레임을 흘려야 한다 — 기다릴 사건이 없다.
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+  await expect(page.getByRole("dialog", { name: "제보" })).toHaveCount(0);
+  await expect(opener).toBeEnabled();
+  await expect(opener).toBeFocused();
+  await context.close();
+});
+
 test("내 제보 목록에 접수로 보이고 상세가 열린다", async ({ browser }) => {
   const context = await browser.newContext({ storageState: onState });
   const page = await context.newPage();
