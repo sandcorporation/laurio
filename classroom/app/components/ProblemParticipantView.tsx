@@ -942,6 +942,57 @@ function AttemptRow({
 function InteractiveSubmissionForm(
   props: InteractiveProps & { submissionFormats: SubmissionFormat[]; deadlinePassed: boolean },
 ) {
+  const released = useReleasedNote(props.submitBlockedReason);
+  return (
+    <>
+      {/* 늘 떠 있는 자리 — 안내가 사라진 뒤에 생긴 status 는 낭독기가 읽지 않는다(#1507 A). */}
+      <p
+        role="status"
+        data-testid="submit-released-note"
+        className={released ? "text-[13px] text-ink/70" : "sr-only"}
+      >
+        {released}
+      </p>
+      <InteractiveSubmissionFormBody {...props} />
+    </>
+  );
+}
+
+const RELEASED_NOTE: Record<NonNullable<InteractiveProps["submitBlockedReason"]>, string> = {
+  archived: "보관이 풀려 다시 제출할 수 있습니다.",
+  expelled: "이 클래스에 다시 들어와 제출할 수 있습니다.",
+  left: "이 클래스에 다시 들어와 제출할 수 있습니다.",
+  hidden: "문제가 다시 열려 제출할 수 있습니다.",
+};
+
+// 낼 수 없던 이유가 풀리면 안내와 함께 초점도 사라져 body 로 빠진다 — 풀렸다고 알리고,
+// 초점이 안내(또는 body)에 있었을 때만 제출 칸으로 옮긴다. 다른 곳에 있던 초점은 빼앗지 않는다.
+function useReleasedNote(reason: InteractiveProps["submitBlockedReason"]): string {
+  const previous = useRef(reason);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = reason;
+    if (reason !== null) {
+      setNote("");
+      return;
+    }
+    if (before === null) return;
+    setNote(RELEASED_NOTE[before]);
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    document
+      .querySelector<HTMLElement>(
+        "#repository-url, #source-file, [data-testid=submission-format-option-source]",
+      )
+      ?.focus();
+  }, [reason]);
+  return note;
+}
+
+function InteractiveSubmissionFormBody(
+  props: InteractiveProps & { submissionFormats: SubmissionFormat[]; deadlinePassed: boolean },
+) {
   const {
     submitBlockedReason,
     maxSourceAssetBytes,
