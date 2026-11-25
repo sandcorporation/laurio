@@ -122,13 +122,13 @@ export default function CoInstructorInvitePage() {
         </Card>
       ) : me.status === "error" ? (
         <Card className="p-5">
-          <Link
+          <a
             href={`/login?next=${encodeURIComponent(`/invite/${token}`)}`}
             data-testid="invite-login-link"
             className={`${buttonClass("primary")} w-full`}
           >
             로그인하고 수락하기
-          </Link>
+          </a>
         </Card>
       ) : me.status === "loading" ? (
         <p data-testid="invite-login-status-loading" className="text-[13.5px] text-ink/45">

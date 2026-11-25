@@ -1,6 +1,6 @@
 // 의도적으로 인바운드 링크가 없는 라우트(#166) — 강의실 몫. "/"는 header
-// brand가, "/login"은 middleware.ts의 `new URL("/login", ...)`가 각각 링크를
-// 낸다.
+// brand가 링크를 낸다. "/login"은 화면이 아니라 라우트 핸들러(app/login/route.ts,
+// #1388)라 라우트 목록에 들지 않는다.
 import type { OrphanAllowlistEntry } from "@codemit/route-audit";
 
 export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [

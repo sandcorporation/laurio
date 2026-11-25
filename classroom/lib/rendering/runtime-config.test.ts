@@ -1,6 +1,6 @@
 // 런타임 설정을 읽는 화면은 빌드 시점에 구워지면 안 된다 (#297).
 //
-// **실제로 배포를 망가뜨렸다.** `app/login/page.tsx` 는 `CODEMIT_WEB_ORIGIN` 을 읽어
+// **실제로 배포를 망가뜨렸다.** `app/login/page.tsx`(지금은 `route.ts`, #1388) 는 `CODEMIT_WEB_ORIGIN` 을 읽어
 // 공개 앱의 로그인 주소를 만드는데, `searchParams`·`cookies`·`headers` 를 하나도
 // 읽지 않아 Next 가 정적으로 판정했다. `next build` 시점에는 그 환경변수가 없으므로
 // **dev 폴백(`http://127.0.0.1:53000`)이 HTML 에 박제되어** 1년 캐시로 서빙됐다
@@ -14,7 +14,7 @@
 // 그래서 두 곳에서 잡는다. 여기(로컬 게이트)는 **구조**를 본다 — 런타임 환경변수를
 // 읽는 모듈에 닿는 page/route 는 `dynamic = "force-dynamic"` 을 선언해야 한다.
 // CI 의 `classroom-deploy-guard` 는 **결과**를 본다 — 실제로 구운 이미지의 /login
-// HTML 에 로컬호스트가 없는지.
+// 리다이렉트 `Location` 에 로컬호스트가 없는지.
 //
 // 공개 설정(`CODEMIT_PUBLIC_*`, #711)도 실행 env 라 대상이다 — 루트 레이아웃이 읽는다.
 import * as fs from "node:fs";

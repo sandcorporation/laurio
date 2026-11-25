@@ -12,10 +12,10 @@
 //   `lib/auth/session.ts`)의 401 하나로 켜 둔 탭이 로그인으로 튕겼다.
 // - `onUnauthorized`: 되살려도 401 이면 그 자리에서 로그인으로 보낸다.
 //
-// `/login` 은 이 앱 자신의 화면이다(app/login/page.tsx) — 거기서 `next_origin`
-// 을 실어 공개 앱 로그인으로 다시 보내고, 로그인이 끝나면 그 오리진으로
-// 돌아온다. `?next=` 는 그 화면이 이미 검증한다(lib/auth/next-path.ts) — 여기서는
-// 실어 보내기만 한다.
+// `/login` 은 이 앱 자신의 경로다(app/login/route.ts) — 화면 없이 `next_origin`
+// 을 실어 공개 앱 로그인으로 307 하고, 로그인이 끝나면 그 오리진으로 돌아온다.
+// `?next=` 는 그 경로가 검증한다(lib/auth/public-login-url.ts) — 여기서는 실어
+// 보내기만 한다.
 
 import { createBffClient, createLoginRedirect } from "@codemit/bff-client";
 import type { ApiResult } from "@codemit/bff-client";
