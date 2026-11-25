@@ -97,6 +97,28 @@ function ClassDetail() {
     setJustDeclined(false);
     setOwnershipTaken(null);
   }, [pendingTransferId]);
+  // 채점 연결이 「연결됨」인가 — 카드가 보이는 같은 값(scoringStatus)이다. 넘겨받은 안내가 처음 보인 때의 값을 기억해 두고,
+  // 키 없이 시작했다가 다시 불러온 결과에서 연결이 확인되면 안내를 걷고 완료 문구를 한 번 알린다(#1532 ②).
+  const connectedNow = ready ? scoringStatus(ready).kind === "connected" : null;
+  const [takeoverBaseline, setTakeoverBaseline] = useState<boolean | null>(null);
+  const [keyAddedNote, setKeyAddedNote] = useState("");
+  const takeoverNoteShown = justTookOver && ready?.role === "owner";
+  useEffect(() => {
+    if (!takeoverNoteShown) {
+      setTakeoverBaseline(null);
+      return;
+    }
+    if (connectedNow === null) return;
+    if (takeoverBaseline === null) {
+      setTakeoverBaseline(connectedNow);
+      return;
+    }
+    if (takeoverBaseline === false && connectedNow) {
+      keepFocusBeforeDroppingNotes();
+      setJustTookOver(false);
+      setKeyAddedNote("채점 키를 넣었습니다");
+    }
+  }, [takeoverNoteShown, connectedNow, takeoverBaseline]);
   useEffect(() => {
     if (!hasTimedTransferNote) return;
     const timer = window.setTimeout(() => {
@@ -281,6 +303,9 @@ function ClassDetail() {
           </div>
         ) : null}
         <div ref={pastNotesRef} className="contents">
+        <p role="status" data-testid="scoring-key-added-note" className="sr-only">
+          {keyAddedNote}
+        </p>
         {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote
             classId={classId}
             onDismiss={() => {

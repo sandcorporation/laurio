@@ -1280,6 +1280,8 @@ def _save_scoring_connection(
             close_open_alert(class_obj.id, ClassScoringKeyMissingAlert.ClosedReason.OWNER)
         if vendor_kind is not None:
             _return_foreign_problem_models_to_default(class_obj, vendor_kind)
+        # 열어 둔 클래스 상세(다른 탭·공동 강사)가 채점 연결을 다시 읽는다(#1532 ②) — 본문은 class_id·rev 뿐, 키 값은 싣지 않는다.
+        publish_instructors_changed(class_obj)
 
 
 _VENDOR_KEY_LABELS = {
