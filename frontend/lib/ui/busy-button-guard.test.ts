@@ -14,7 +14,6 @@ const OTHER_TICKETS = [
   "settings/page",
   "ProblemSideActions",
   "MarkdownEditor",
-  "certificates/page",
 ];
 
 function walk(dir: string, out: string[] = []): string[] {
