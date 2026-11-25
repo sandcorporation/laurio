@@ -748,3 +748,83 @@ test("학생 화면을 보던 공동 강사가 내보내지면 문제 비공개�
   });
   await expect(page.getByRole("heading", { name: "더 이상 이 클래스의 강사가 아닙니다" })).toBeFocused();
 });
+
+// #1507 A — 보관이 풀리면 낼 수 없다는 안내가 사라지며 초점이 body 로 떨어지고 아무 알림도 없었다.
+for (const view of [
+  { name: "데스크톱", size: { width: 1280, height: 800 } },
+  { name: "390px 터치", size: { width: 390, height: 844 } },
+]) {
+  test(`${view.name} — 제출 화면을 연 채 보관이 풀리면 풀렸다는 상태가 읽히고 초점이 제출 칸으로 간다`, async ({ page, browser }) => {
+    await page.setViewportSize(view.size);
+    const seed = `rt-unarchived-${view.size.width}-${test.info().workerIndex}-${Date.now()}`;
+    const instructor = await otherSession(browser, seed);
+    const created = await instructor.api.post("/api/backend/classroom/classes", {
+      data: { name: `실시간 해제 ${seed}`, instructor_display_name: "강사" },
+    });
+    const classId = (await created.json()).id as number;
+    const base = `/api/backend/classroom/classes/${classId}`;
+    const problemId = (
+      await (await instructor.api.post(`${base}/problems`, { data: { title: "1주차", submission_formats: ["repository"] } })).json()
+    ).id as number;
+    await instructor.api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "동작한다", required: true } });
+    expect((await instructor.api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+    const joinCode = (await (await instructor.api.get(base)).json()).join_code as string;
+
+    await establishClassroomSession(page, `${seed}-participant`);
+    expect(
+      (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } })).ok(),
+    ).toBeTruthy();
+    await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+    await expect(page.getByTestId("submit-repository")).toBeVisible();
+
+    expect((await instructor.api.post(`${base}/archive`)).ok()).toBeTruthy();
+    const archivedNote = page.getByTestId("class-archived-note");
+    await expect(archivedNote).toBeFocused({ timeout: 10_000 });
+
+    expect((await instructor.api.post(`${base}/unarchive`)).ok()).toBeTruthy();
+    await instructor.context.close();
+
+    await expect(page.getByTestId("submit-repository")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("status").filter({ hasText: "보관이 풀려 다시 제출할 수 있습니다" })).toBeVisible();
+    await expect(page.getByTestId("repository-url-input")).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement !== document.body)).toBe(true);
+  });
+}
+
+test("보관이 풀릴 때 초점이 안내 밖에 있으면 초점을 빼앗지 않는다", async ({ page, browser }) => {
+  const seed = `rt-unarchived-keep-${test.info().workerIndex}-${Date.now()}`;
+  const instructor = await otherSession(browser, seed);
+  const classId = (
+    await (
+      await instructor.api.post("/api/backend/classroom/classes", {
+        data: { name: `실시간 해제 ${seed}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const problemId = (
+    await (await instructor.api.post(`${base}/problems`, { data: { title: "1주차", submission_formats: ["repository"] } })).json()
+  ).id as number;
+  await instructor.api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "동작한다", required: true } });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+  const joinCode = (await (await instructor.api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } })).ok(),
+  ).toBeTruthy();
+  await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+  expect((await instructor.api.post(`${base}/archive`)).ok()).toBeTruthy();
+  await expect(page.getByTestId("class-archived-note")).toBeFocused({ timeout: 10_000 });
+  // 낭독 중 초점을 다른 곳(머리말 링크 아닌 문서 위 제목)으로 옮겨 둔다.
+  await page.evaluate(() => {
+    const el = document.createElement("button");
+    el.id = "elsewhere";
+    el.textContent = "다른 곳";
+    document.body.prepend(el);
+    el.focus();
+  });
+  expect((await instructor.api.post(`${base}/unarchive`)).ok()).toBeTruthy();
+  await instructor.context.close();
+  await expect(page.getByRole("status").filter({ hasText: "보관이 풀려 다시 제출할 수 있습니다" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("#elsewhere")).toBeFocused();
+});

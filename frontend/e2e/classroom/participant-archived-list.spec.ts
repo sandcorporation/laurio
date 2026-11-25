@@ -116,3 +116,25 @@ for (const viewport of [
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }
+
+// #1507 A — 보관된 클래스의 제출 화면은 마감 지남 배지·붉은 마감 줄로 재촉하지 않는다.
+test("보관된 클래스의 제출 화면은 마감 지남 배지와 주의색 없이 흐린 마감만 보인다", async ({ page, browser }) => {
+  const stamp = `${test.info().workerIndex}-${Date.now()}`;
+  const seed = `participant-archived-submit-${stamp}`;
+  const archived = await setup(browser, test.info().project.use.baseURL, seed, `보관 제출 ${stamp}`);
+  const past = await archived.openProblem("마감 지난 문제", new Date(Date.now() - 36 * 3600_000));
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${archived.joinCode}`, { data: { display_name: "서지우" } })).ok(),
+  ).toBeTruthy();
+  expect((await archived.api.post(`${archived.base}/archive`)).ok()).toBeTruthy();
+
+  await page.goto(`/classes/${archived.classId}/problems/${past}/submit`);
+  await expect(page.getByTestId("class-archived-note")).toBeVisible();
+  await expect(page.getByTestId("submit-deadline-passed")).toHaveCount(0);
+  await expect(page.getByTestId("submit-deadline-note")).toHaveCount(0);
+  const due = page.getByTestId("submit-due-rows-due");
+  await expect(due).toBeVisible();
+  await expect(due).not.toContainText("마감 지남");
+  await expect(due).toHaveAttribute("data-tone", "faint");
+});

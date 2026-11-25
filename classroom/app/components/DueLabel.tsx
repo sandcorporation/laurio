@@ -62,8 +62,19 @@ export function DueCells({
 }
 
 /** 제출 카드 머리 아래 — 라벨 왼쪽, 값 오른쪽(요일 포함). 권장이 지났으면 그 줄이 흐려진다. */
-export function DueRows({ problem, passed, testId }: { problem: DueFields; passed: boolean; testId: string }) {
-  const { recommended, due } = describeDue(problem, { passed });
+export function DueRows({
+  problem,
+  passed,
+  testId,
+  archived = false,
+}: {
+  problem: DueFields;
+  passed: boolean;
+  testId: string;
+  /** 보관된 클래스 — 재촉하는 표시를 끈다(#1507 A). */
+  archived?: boolean;
+}) {
+  const { recommended, due } = describeDue(problem, { passed, archived });
   if (!recommended && !due) return null;
   const row = (label: string, iso: string, tone: DueTone, id: string) => (
     <div data-testid={id} data-tone={tone} className={`flex justify-between gap-3 ${TONE_CLASS[tone]}`}>
