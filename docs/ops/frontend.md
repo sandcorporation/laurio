@@ -36,12 +36,13 @@ docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm
 
 **강의실은 자기 로그인을 갖지 않는다**(ADR-0038, #276) — 회원은 공개 앱과 공유한다.
 그래서 강의실 e2e 스펙은 강의실에서 로그인하지 않는다: 부모 도메인 쿠키 공유는
-dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 공유는 배포 환경(prod)에서만
-검증된다(#277). 강의실의 인증 구역을 걷는 스펙(과 dev에서 눈으로 확인할 때)은 공개
-앱에 로그인해 받은 `codemit_access`/`codemit_refresh` 쿠키 값을 강의실 오리진에 수동으로
-심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
-`context.addCookies`) — 실제 브라우저가 두 쿠키를 부모 도메인으로 공유하는 것을
-로컬에서 흉내 내는 유일한 길이다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
+e2e 조각(호스트 포트를 커널이 고르고, 강의실이 짓는 공개 앱 주소로는 닿지 못한다)에서
+재현할 수 없고, 실제 공유는 배포 환경(prod)에서만 검증된다(#277). 강의실의 인증 구역을
+걷는 스펙은 공개 앱에 로그인해 받은 `codemit_access`/`codemit_refresh` 쿠키 값을 강의실
+오리진에 수동으로 심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
+`context.addCookies`). **dev 브라우저로 걸을 때는 두 앱을 모두 `localhost` 로 열면 세션이
+그대로 실린다** — 도메인 없는 쿠키는 포트를 가리지 않는다(2026-11-25, #1388 에서 강의실 가입
+링크 → 공개 앱 시드 로그인 → 강의실 복귀로 확인). 한쪽만 `127.0.0.1` 로 열면 실리지 않는다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
 아니라 공개 앱도 띄운다** — 빼면 그 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다
 (#318 이 그 스펙을 더한 뒤 main 에서 여섯 번 연속 그렇게 빨갛게 났다).
 **e2e 프로젝트가 닿을 수 있는 앱은 자기 조각이 띄우는 것뿐이다** — 로컬은 세 앱이 다 떠 있어 통과하고 CI 조각에서만 붉던 실수(#1247)를 `scripts/test_e2e_origins.py` 가 정적으로 잡는다(조각 정의는 `scripts/ci/e2e.sh` 의 `want_*`, 닿음은 spec 에서 상대 import 를 따라 쓰이는 선언만 본다). 다른 앱이 필요하면 backend 포트를 직접 치거나 `e2e.sh` 조각에 앱을 더한다. 글자로만 있는 예외는 그 시험의 `ALLOWED` 에 이유와 함께 둔다.

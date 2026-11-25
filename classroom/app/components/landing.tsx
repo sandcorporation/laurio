@@ -8,7 +8,6 @@
 // 「강의실」·「과제」같은 접힌 낱말을 쓰지 않는다(CONTEXT.md 「클래스」절
 // Avoid 목록). 비용·OpenAI 키 안내는 넣지 않는다(#391 Implementation
 // Decisions — 강사가 직접 내는 비용이라 랜딩에서 미리 겁줄 이유가 없다).
-import Link from "next/link";
 
 import { Card, PageShell, buttonClass } from "@/app/components/ui";
 
@@ -52,13 +51,13 @@ export function Landing() {
           </h1>
           <p className="max-w-[560px] text-[15px] leading-relaxed text-ink/70">{LANDING_DESCRIPTION}</p>
           <div>
-            <Link
+            <a
               href="/login?next=/classes/new"
               data-testid="classroom-landing-cta"
               className={buttonClass("primary")}
             >
               클래스 만들기
-            </Link>
+            </a>
           </div>
         </section>
 

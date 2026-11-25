@@ -17,4 +17,13 @@ test("비로그인 authorize 의 127.0.0.1 redirect_uri 가 로그인 next 에 �
   expect(login.pathname).toBe("/login");
   const next = new URL(login.searchParams.get("next")!, "http://x");
   expect(next.searchParams.get("redirect_uri")).toBe(redirectUri);
+
+  // 강의실 `/login` 을 한 번 더 거쳐 공개 앱으로 갈 때도 그대로다(#1388).
+  const hop = await request.get(res.headers()["location"]!, { maxRedirects: 0 });
+  expect(hop.status()).toBe(307);
+  const publicLogin = new URL(hop.headers()["location"]!);
+  expect(publicLogin.pathname).toBe("/login");
+  const publicNext = new URL(publicLogin.searchParams.get("next")!, "http://x");
+  expect(publicNext.pathname).toBe("/oauth/authorize");
+  expect(publicNext.searchParams.get("redirect_uri")).toBe(redirectUri);
 });

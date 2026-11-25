@@ -37,12 +37,17 @@ test("로그아웃 상태로 초대 링크를 열고 로그인하면 같은 초�
   await page.goto(`/invite/${token}`);
   await expect(page.getByTestId("invite-class-name")).toHaveText(className);
   await expect(page.getByTestId("invite-instructors")).toContainText("김소유");
-  await page.getByTestId("invite-login-link").click();
+  await expect(page.getByTestId("invite-login-link")).toHaveAttribute(
+    "href",
+    `/login?next=${encodeURIComponent(`/invite/${token}`)}`,
+  );
 
-  // 강의실 `/login` 이 공개 앱으로 보내며 돌아올 자리를 싣는다.
-  await expect(page).toHaveURL(/\/login\?next=/);
-  const href = await page.getByTestId("classroom-login-link").getAttribute("href");
-  const returnPath = new URL(href ?? "").searchParams.get("next");
+  // 강의실 `/login` 은 화면 없이 공개 앱 로그인으로 307 하며 돌아올 자리를 싣는다(#1388).
+  // 이 조각에서는 공개 앱 오리진에 닿지 못하므로 따라가지 않고 `Location` 만 본다.
+  const href = await page.getByTestId("invite-login-link").getAttribute("href");
+  const login = await page.request.get(href ?? "/login", { maxRedirects: 0 });
+  expect(login.status()).toBe(307);
+  const returnPath = new URL(login.headers()["location"]!).searchParams.get("next");
   expect(returnPath).toBe(`/invite/${token}`);
 
   // 공개 앱 로그인이 끝난 것과 같다 — 세션을 심고 돌아올 자리로 간다.

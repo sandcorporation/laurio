@@ -31,6 +31,7 @@ import Link from "next/link";
 import { UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { AFTER_LOGOUT_PATH } from "@/lib/auth/logout";
 import { useMe } from "@/lib/auth/use-me";
 
 import { buttonClass } from "./ui";
@@ -63,20 +64,20 @@ export function AccountMenuClient({
 
   if (me.status === "error") {
     return (
-      <Link
+      <a
         href="/login"
         data-testid="account-menu-login-link"
         className={buttonClass("secondary", "sm")}
       >
         로그인
-      </Link>
+      </a>
     );
   }
 
   async function handleLogout() {
     setOpen(false);
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-    window.location.href = "/login";
+    window.location.href = AFTER_LOGOUT_PATH;
   }
 
   return (

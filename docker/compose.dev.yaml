@@ -621,8 +621,8 @@ services:
       # 붙는다.
       #
       # CODEMIT_WEB_ORIGIN은 이 앱 자신의 Origin 검증에는 쓰이지 않는다(그건
-      # CODEMIT_CLASSROOM_ORIGIN 몫이다) — /login 화면이 "공개 앱으로 가서
-      # 로그인하라"는 링크를 지을 때만 읽는다(lib/auth/public-app.ts). 이 스택의
+      # CODEMIT_CLASSROOM_ORIGIN 몫이다) — /login 이 공개 앱 로그인으로 보낼
+      # 주소를 지을 때만 읽는다(lib/auth/public-app.ts, #1388). 이 스택의
       # frontend 서비스가 실제로 뜨는 포트와 항상 같은 값이어야 하므로 하드코딩하지
       # 않고 그 서비스의 포트 변수를 그대로 참조한다 — 오프셋 워크트리
       # (docker/dev-env.sh)에서도 자동으로 맞는다.

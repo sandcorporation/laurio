@@ -7,7 +7,6 @@
 // **폰으로 열린다는 전제다**(#298, 시안 Join.dc.html 은 390×844) — 링크를 받은
 // 사람이 대개 폰에서 연다. 그래서 고정 너비를 두지 않고, 좁은 폭에서 한 칸으로
 // 흐르며 버튼이 가로 전체를 쓰는 레이아웃이다.
-import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
@@ -172,13 +171,13 @@ export function JoinView() {
         // 폼을 보다가 세션이 만료되면 제출 시 `bffClient`가 곧장 공개 앱
         // 로그인으로 보낸다(#462, #385 Further Notes).
         <Card className="p-5">
-          <Link
+          <a
             href={`/login?next=${encodeURIComponent(`/join/${code}`)}`}
             data-testid="join-login-link"
             className={`${buttonClass("primary")} w-full`}
           >
             로그인하고 가입하기
-          </Link>
+          </a>
         </Card>
       ) : me.status === "loading" ? (
         // `me`가 아직 로딩 중이면 이름 칸도 로그인 버튼도 보이지 않는다 —

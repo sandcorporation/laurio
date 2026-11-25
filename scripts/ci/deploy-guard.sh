@@ -325,18 +325,21 @@ case "$app" in
     ;;
   classroom)
     step "런타임 설정을 요청 때 읽는다(빌드에 굳지 않는다)"
-    html="$(c -sS --max-time 10 http://127.0.0.1:3000/login)"
-    case "$html" in
-      *"https://codemit.example/login"*) ;;
-      *) printf '%s' "$html" | head -c 4000; fail "/login 이 CODEMIT_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?" ;;
+    # /login 은 화면 없이 공개 앱 로그인으로 307 한다(#1388) — HTML 대신 Location 을 본다.
+    # 빌드 시점 값이 구워지면 dev 폴백(127.0.0.1)이 Location 에 남는다(#297).
+    got="$(c -sS --max-time 10 -o /dev/null -w '%{http_code} %{redirect_url}' http://127.0.0.1:3000/login)"
+    echo "$got"
+    code="${got%% *}"
+    location="${got#* }"
+    [ "$code" = 307 ] || fail "/login 이 307 이 아니다($code) — 화면 없는 리다이렉트가 아닌가?"
+    case "$location" in
+      "https://codemit.example/login?"*) ;;
+      *) fail "/login 의 Location 이 CODEMIT_WEB_ORIGIN 을 안 읽는다 — 빌드 시점 값이 구워졌는가?" ;;
     esac
-    case "$html" in
-      *127.0.0.1*)
-        printf '%s' "$html" | grep -o "http://127[^\"']*" | head -5 || true
-        fail "/login HTML 에 로컬호스트가 남아 있다 — dev 폴백이 박제됐다(#297)"
-        ;;
+    case "$location" in
+      *127.0.0.1*) fail "/login 의 Location 에 로컬호스트가 남아 있다 — dev 폴백이 박제됐다(#297)" ;;
     esac
-    echo "로그인 링크가 런타임 설정을 읽는다"
+    echo "로그인 리다이렉트가 런타임 설정을 읽는다"
     ;;
 esac
 
