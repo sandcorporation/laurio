@@ -299,6 +299,22 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
   const [typedName, setTypedName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 열면 이름 입력칸으로, 취소하면 「클래스 삭제」 단추로 초점을 옮긴다 — 누른 단추가 사라지며
+  // 초점이 BODY 로 떨어지면 낭독기에 아무것도 읽히지 않고 키보드 사용자는 처음부터 다시 Tab 한다.
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const focusAfterToggle = useRef<"input" | "open" | null>(null);
+
+  useEffect(() => {
+    const target = focusAfterToggle.current;
+    focusAfterToggle.current = null;
+    if (target === "input") {
+      inputRef.current?.focus();
+      inputRef.current?.scrollIntoView({ block: "center" });
+    } else if (target === "open") {
+      openButtonRef.current?.focus();
+    }
+  }, [confirming]);
 
   const previewReady = problemsState.status === "ready" && membersState.status === "ready";
   const problemCount = problemsState.status === "ready" ? problemsState.problems.length : null;
@@ -311,10 +327,12 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
   function openConfirm() {
     setError(null);
     setTypedName("");
+    focusAfterToggle.current = "input";
     setConfirming(true);
   }
 
   function cancel() {
+    focusAfterToggle.current = "open";
     setConfirming(false);
     setTypedName("");
     setError(null);
@@ -350,6 +368,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
         {!confirming ? (
           <button
             type="button"
+            ref={openButtonRef}
             data-testid="delete-class-open"
             onClick={openConfirm}
             disabled={!previewReady}
@@ -382,6 +401,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
             </label>
             <input
               id="delete-class-confirm-input"
+              ref={inputRef}
               data-testid="delete-class-confirm-input"
               aria-describedby="delete-class-warning delete-class-template-note"
               value={typedName}

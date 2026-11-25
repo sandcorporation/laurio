@@ -97,3 +97,33 @@ test("시도가 있는 문제는 삭제 버튼 대신 숨기기 안내가 뜬다
   await expect(page.getByTestId("delete-problem-blocked")).toContainText("지울 수 없습니다");
   await expect(page.getByTestId("delete-problem-open")).toHaveCount(0);
 });
+
+test("문제 삭제 확인을 열면 제목 입력칸으로, 취소하면 「문제 삭제」 링크로 초점이 간다 (#1517)", async ({ page }) => {
+  const seed = `problem-deletion-focus-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const classResponse = await api.post("/api/backend/classroom/classes", {
+    data: { name: `문제 삭제 초점 ${Date.now()}`, instructor_display_name: "강사" },
+  });
+  const classId = (await classResponse.json()).id as number;
+  const problemResponse = await api.post(`/api/backend/classroom/classes/${classId}/problems`, {
+    data: { title: `초점 문제 ${Date.now()}`, submission_formats: ["repository"] },
+  });
+  const problemId = (await problemResponse.json()).id as number;
+
+  for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 700 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/classes/${classId}/problems/${problemId}`);
+    const open = page.getByRole("button", { name: "문제 삭제" });
+    await open.focus();
+    await page.keyboard.press("Enter");
+
+    const input = page.getByTestId("delete-problem-confirm-input");
+    await expect(input).toBeFocused();
+    await expect(input).toBeInViewport();
+    await expect(input).toHaveAccessibleDescription(/되돌릴 수 없습니다/);
+
+    await page.getByTestId("delete-problem-cancel").press("Enter");
+    await expect(page.getByRole("button", { name: "문제 삭제" })).toBeFocused();
+  }
+});

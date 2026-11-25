@@ -38,7 +38,7 @@ import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemSideActions } from "@/app/components/ProblemSideActions";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
@@ -153,6 +153,17 @@ export default function EditProblemPage() {
   // 바로 실행하지 않는다.
   const [confirmingHide, setConfirmingHide] = useState(false);
   const hideMutation = useMutationRequest();
+  // 숨기기 확인을 열면 안전한 「취소」가, 취소하면 「숨기기」 단추가 초점을 받는다 — 취소 단추가 사라지며
+  // 초점이 BODY 로 떨어지지 않게(#1517).
+  const hideButtonRef = useRef<HTMLButtonElement>(null);
+  const hideCancelRef = useRef<HTMLButtonElement>(null);
+  const focusAfterHideToggle = useRef<"cancel" | "hide" | null>(null);
+  useEffect(() => {
+    const target = focusAfterHideToggle.current;
+    focusAfterHideToggle.current = null;
+    if (target === "cancel") hideCancelRef.current?.focus();
+    else if (target === "hide") hideButtonRef.current?.focus();
+  }, [confirmingHide]);
   const reopenMutation = useMutationRequest();
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
@@ -808,8 +819,12 @@ export default function EditProblemPage() {
                       ) : transition?.name === "hide" ? (
                         <button
                           type="button"
+                          ref={hideButtonRef}
                           data-testid="hide-problem-button"
-                          onClick={() => setConfirmingHide(true)}
+                          onClick={() => {
+                            focusAfterHideToggle.current = "cancel";
+                            setConfirmingHide(true);
+                          }}
                           className={buttonClass("danger", "sm")}
                         >
                           숨기기
@@ -824,17 +839,20 @@ export default function EditProblemPage() {
                       // 숨기기 전 한 번 더 확인한다(#405 AC "결과를 알고 숨기기 위해서다").
                       <Note tone="warning">
                         <div className="flex flex-col gap-2.5">
-                          <span data-testid="hide-problem-confirm-notice">
+                          <span id="hide-problem-confirm-notice" data-testid="hide-problem-confirm-notice">
                             숨기면 참여자 목록에서 빠지고 새로 낼 수 없습니다. 이미 낸 참여자는 자기 시도와 판정을 계속 볼 수 있습니다.
                           </span>
                           <div className="flex gap-2">
-                            <button type="button" data-testid="hide-problem-confirm" onClick={handleHide} className={buttonClass("danger", "sm")}>
+                            <button type="button" data-testid="hide-problem-confirm" aria-describedby="hide-problem-confirm-notice" onClick={handleHide} className={buttonClass("danger", "sm")}>
                               숨기기
                             </button>
                             <button
                               type="button"
+                              ref={hideCancelRef}
                               data-testid="hide-problem-cancel"
+                              aria-describedby="hide-problem-confirm-notice"
                               onClick={() => {
+                                focusAfterHideToggle.current = "hide";
                                 setConfirmingHide(false);
                                 hideMutation.setError(null);
                               }}
