@@ -5,7 +5,7 @@
 // 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 상태 문구와 입구 둘(새 문제·문제 가져오기).
 // 달성률·통과 수는 목록 응답의 값이고, 위쪽 통계 바의 평균은 클래스 응답의 값이다 — 다시 세지 않는다.
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { DueInline } from "@/app/components/DueLabel";
 import { useMenuFocus } from "@/app/components/use-menu-focus";
@@ -131,32 +131,21 @@ export function ProblemsTable({
   error: boolean;
   problems: ProblemRow[];
   reorderError: boolean;
-  onMove: (problemId: number, direction: "up" | "down") => void;
+  onMove: (problemId: number, direction: "up" | "down") => Promise<boolean>;
   onOpenPicker: (tab: PickerTab) => void;
 }) {
-  // 옮긴 뒤 안내(#1478 6번) — 낙관 갱신이 끝나 목록이 바뀐 자리에서 몇 번째인지 읽는다. 실패하면 오류 줄이 말한다.
-  const pendingMove = useRef<{ id: number; position: number } | null>(null);
+  // 옮긴 뒤 안내(#1478 6번, #1484 ②) — 서버가 확정한 뒤에 성공·실패를 읽는다. 낙관 배열만 보고 알리지 않는다.
   const [moveStatus, setMoveStatus] = useState("");
-  useEffect(() => {
-    const pending = pendingMove.current;
-    if (!pending) return;
-    if (reorderError) {
-      pendingMove.current = null;
-      setMoveStatus("");
-      return;
-    }
-    const moved = problems[pending.position - 1];
-    if (moved?.id !== pending.id) return;
-    pendingMove.current = null;
-    setMoveStatus(`${moved.title} — ${pending.position}번째로 옮겼습니다`);
-  }, [problems, reorderError]);
-  function moveProblem(problemId: number, direction: "up" | "down") {
+  async function moveProblem(problemId: number, direction: "up" | "down") {
     const index = problems.findIndex((p) => p.id === problemId);
     const target = direction === "up" ? index - 1 : index + 1;
     if (index < 0 || target < 0 || target >= problems.length) return;
-    pendingMove.current = { id: problemId, position: target + 1 };
+    const title = problems[index].title;
     setMoveStatus("");
-    onMove(problemId, direction);
+    const ok = await onMove(problemId, direction);
+    setMoveStatus(
+      ok ? `${title} — ${target + 1}번째로 옮겼습니다` : `${title} — 순서를 바꾸지 못해 원래 자리로 돌아갔습니다`,
+    );
   }
 
   const newProblem = archived ? (
