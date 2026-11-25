@@ -27,8 +27,8 @@ CLASSROOM_PROBLEM_STATUSES: Slot[Callable[[int, Collection[int]], Mapping[int, P
 )
 
 
-#: `classroom.notification_problem_status.transfer_pending_class_ids` — (받는 사람 pk, 클래스 pk 들) → 그 사람 앞으로
-#: **지금 답을 기다리는** 소유권 이전 요청이 있는 클래스 pk 들(#1435).
-CLASSROOM_TRANSFER_PENDING: Slot[Callable[[int, Collection[int]], Collection[int]]] = Slot(
+#: `classroom.notification_problem_status.transfer_states_for` — (받는 사람 pk, 이전 요청 pk 들) → 요청 pk 별 지금의
+#: 상태(`pending`·`accepted`·`declined`·`cancelled`·`expired`, #1441). 그 사람 앞으로 온 요청만 답한다.
+CLASSROOM_TRANSFER_STATES: Slot[Callable[[int, Collection[int]], Mapping[int, str]]] = Slot(
     "강의실 소유권 이전 요청의 지금 상태", "classroom.apps"
 )

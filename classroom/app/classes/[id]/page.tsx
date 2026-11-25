@@ -9,7 +9,7 @@
 // 소진·서버 연결 불가)는 배너가 아니라 「채점」 카드의 상태 한 줄이 말한다.
 // 강사 탭의 내용은 #635 가 다시 짠다 — 그때까지는 예전 화면을 그 자리에 둔다.
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
 import { ErrorNote, PageShell } from "@/app/components/ui";
@@ -17,6 +17,8 @@ import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
 import { useClass } from "@/lib/classes/use-class";
+import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
+import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
@@ -26,7 +28,12 @@ import { ClassHead } from "./class-head";
 import { GettingStartedCard, startSteps } from "./getting-started-card";
 import { InstructorsSection } from "./instructors-section";
 import { JoinLinkStrip } from "./join-link-strip";
-import { OwnershipTransferAcceptedNote, OwnershipTransferDeclinedNote, OwnershipTransferOffer } from "./ownership-transfer-offer";
+import {
+  OwnershipTransferAcceptedNote,
+  OwnershipTransferDeclinedNote,
+  OwnershipTransferOffer,
+  OwnershipTransferTakenNote,
+} from "./ownership-transfer-offer";
 import { ParticipantsTab } from "./participants-tab";
 import { ProblemsTable } from "./problems-table";
 import { RecentAttemptsCard } from "./recent-attempts-card";
@@ -36,6 +43,13 @@ function joinLinkUrl(joinCode: string): string {
   if (typeof window === "undefined") return "";
   return `${window.location.origin}/join/${joinCode}`;
 }
+
+// 소유권 이전의 답(수락)은 요청한 사람에게 알림으로 온다 — 그 신호가 강사 탭의 「이전 대기」를 맞춘다(#1441).
+function isNotificationChanged(event: StreamEvent): boolean {
+  return event.kind === NOTIFICATION_CHANGED;
+}
+
+const TRANSFER_FALLBACK_POLL_MS = 30_000;
 
 function ClassDetail() {
   const params = useParams<{ id: string }>();
@@ -47,6 +61,30 @@ function ClassDetail() {
   const [justDeclined, setJustDeclined] = useState(false);
   // 이전 요청을 보낸 직후 한 번 — 강사 탭이 다시 그려진 뒤 「이전 대기」 줄로 초점을 옮긴다(#1435).
   const focusPendingTransfer = useRef(false);
+  // 소유자가 보낸 이전 요청을 눌러 취소하려다 거절당했는가 — 그 사이 넘어갔으면 「이미 넘겨받았습니다」로 말한다(#1441).
+  const cancelFailed = useRef(false);
+  const [ownershipTaken, setOwnershipTaken] = useState<{ afterCancelAttempt: boolean } | null>(null);
+  const previousRole = useRef<string | null>(null);
+  const ready = classState.status === "ready" ? classState.classroom : null;
+  const waitingForAnswer = ready?.role === "owner" && ready.pending_ownership_transfer !== null;
+  const reloadWhileWaiting = useCallback(() => {
+    if (waitingForAnswer) reloadClass();
+  }, [waitingForAnswer, reloadClass]);
+  useRealtimeRefresh({
+    matches: isNotificationChanged,
+    waiting: waitingForAnswer,
+    fallbackPollMs: TRANSFER_FALLBACK_POLL_MS,
+    reload: reloadWhileWaiting,
+  });
+  const currentRole = ready?.role ?? null;
+  useEffect(() => {
+    if (ready === null) return;
+    if (previousRole.current === "owner" && currentRole !== "owner") {
+      setOwnershipTaken({ afterCancelAttempt: cancelFailed.current });
+    }
+    previousRole.current = currentRole;
+    cancelFailed.current = false;
+  }, [ready, currentRole]);
   const { state: problemsState, reload: reloadProblems, move } = useProblems(classId);
   const router = useRouter();
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
@@ -125,6 +163,12 @@ function ClassDetail() {
         ) : null}
         {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote classId={classId} /> : null}
         {justDeclined && !classroom.pending_ownership_transfer?.recipient_is_me ? <OwnershipTransferDeclinedNote /> : null}
+        {ownershipTaken !== null && classroom.role !== "owner" ? (
+          <OwnershipTransferTakenNote
+            newOwnerName={classroom.instructor_display_name}
+            afterCancelAttempt={ownershipTaken.afterCancelAttempt}
+          />
+        ) : null}
 
         <JoinLinkStrip
           joinCode={classroom.join_code}
@@ -169,8 +213,9 @@ function ClassDetail() {
               key={`${classroom.role}-${classroom.pending_ownership_transfer?.id ?? "none"}`}
               classId={classId}
               pendingTransfer={classroom.pending_ownership_transfer}
-              onTransferChanged={(requested) => {
-                if (requested) focusPendingTransfer.current = true;
+              onTransferChanged={(change) => {
+                if (change === "requested") focusPendingTransfer.current = true;
+                if (change === "cancel-failed") cancelFailed.current = true;
                 reloadClass();
               }}
               focusPendingTransfer={focusPendingTransfer}

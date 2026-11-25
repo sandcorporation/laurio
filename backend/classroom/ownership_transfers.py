@@ -38,7 +38,7 @@ from ninja.errors import HttpError
 
 from core.clock import Clock
 from notifications.models import NotificationType
-from notifications.services import notify_safely
+from notifications.services import mark_read_safely, notify_safely
 
 from .instructor_scope import OWNER_ONLY_MESSAGE
 from .instructors import is_owner
@@ -118,6 +118,7 @@ def request(class_obj: Class, owner_id: int, co_instructor_id: int) -> Ownership
         notification_type=NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
         context={
             "class_id": locked.id,
+            "transfer_id": transfer.id,
             "class_name": locked.name,
             "requester_display_name": locked.instructor_display_name,
             "expires_at": transfer.expires_at.isoformat(),
@@ -160,6 +161,7 @@ def decline(class_obj: Class, user_id: int, transfer_id: int) -> None:
         transfer.save(update_fields=["declined_at"])
         locked = Class.objects.get(id=class_obj.id)
         row = ClassCoInstructor.objects.filter(classroom_id=locked.id, user_id=user_id).first()
+    _mark_request_read(transfer)
     _notify_requester(
         transfer,
         locked,
@@ -231,6 +233,7 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         # 키를 비웠으니 열린 「연결 없음」 기록은 옛 소유자 몫으로 닫는다(#1389) — 남은 참여자 대기 시도는 다음 제출이나
         # 60초 스캔이 새 소유자에게 새로 알린다. `Class` 를 이미 잠갔다(`classroom.scoring_key_missing` 잠금 규칙 ③).
         close_open_alert(locked.id, ClassScoringKeyMissingAlert.ClosedReason.TRANSFER)
+    _mark_request_read(transfer)
     _notify_requester(
         transfer,
         locked,
@@ -238,6 +241,16 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         recipient_display_name=locked.instructor_display_name,
     )
     return locked
+
+
+def _mark_request_read(transfer: OwnershipTransfer) -> None:
+    """받는 사람이 답했으면 그 사람의 「넘기려 합니다」 알림은 처리된 것이다 — 읽음으로(#1441)."""
+
+    mark_read_safely(
+        recipient=transfer.recipient,
+        notification_type=NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED,
+        context_match={"transfer_id": transfer.id},
+    )
 
 
 def _notify_requester(

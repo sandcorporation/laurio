@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { Card, CardHeader, ErrorNote, Note, buttonClass } from "@/app/components/ui";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
+import { takenOverNoteText } from "@/lib/co-instructors/transfer-notes";
 import { acceptOwnershipTransfer, declineOwnershipTransfer } from "@/lib/co-instructors/api";
 
 function formatWhen(iso: string): string {
@@ -133,6 +134,18 @@ export function OwnershipTransferDeclinedNote() {
     <div ref={ref} role="status" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40">
       <Note>
         <span data-testid="ownership-transfer-declined-note">소유권 이전 요청을 거절했습니다. 소유권은 그대로입니다.</span>
+      </Note>
+    </div>
+  );
+}
+
+/** 소유자 화면에서 소유권이 이미 넘어갔음을 말한다 — 눌렀던 「요청 취소」가 사라진 자리에서 읽히고 초점을 받는다(#1441). */
+export function OwnershipTransferTakenNote({ newOwnerName, afterCancelAttempt }: { newOwnerName: string; afterCancelAttempt: boolean }) {
+  const ref = useFocusOnMount<HTMLDivElement>();
+  return (
+    <div ref={ref} role="status" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40">
+      <Note>
+        <span data-testid="ownership-transfer-taken-note">{takenOverNoteText(newOwnerName, afterCancelAttempt)}</span>
       </Note>
     </div>
   );

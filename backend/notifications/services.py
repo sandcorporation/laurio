@@ -205,6 +205,23 @@ def notify_safely(*, recipient, notification_type: str, context: dict) -> None:
         )
 
 
+def mark_read_safely(*, recipient, notification_type: str, context_match: dict) -> None:
+    """받는 사람이 그 알림이 청한 일을 처리했을 때 그 알림을 읽음으로 — `context` 가 `context_match` 를 담은
+    안 읽은 알림만(#1441). 최초 읽은 시각은 건드리지 않고, 실패해도 호출자의 흐름은 계속된다."""
+
+    try:
+        filters = {f"context__{key}": value for key, value in context_match.items()}
+        marked = Notification.objects.filter(
+            recipient=recipient, notification_type=notification_type, read_at__isnull=True, **filters
+        ).update(read_at=Clock.now())
+        if marked and notification_type in CLASSROOM_NOTIFICATION_TYPES:
+            from notifications.realtime import publish_notification_changed
+
+            publish_notification_changed(recipient_id=recipient.id)
+    except Exception:  # noqa: BLE001 - 읽음 처리 실패가 호출자의 흐름을 막으면 안 된다.
+        logger.exception("Notification(type=%s, recipient=%s) 읽음 처리 중 예외", notification_type, recipient.id)
+
+
 def notify_once(*, recipient, notification_type: str, dedup_context: dict, context: dict) -> None:
     """`recipient` 에게 이 `dedup_context` 에 대한 알림을 정확히 한 번만(재시도
     안전하게) 만든다.

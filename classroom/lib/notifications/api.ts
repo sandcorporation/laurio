@@ -33,9 +33,9 @@ export type NotificationRow = {
   // 채점 알림이 가리키는 문제의 **지금** 상태(#1405) — 목록 응답만 채운다. 받는 사람 자신의
   // 시도가 없는 문제(지워졌거나 클래스를 떠난 경우)는 `null`이다.
   problem_status?: { passed: boolean; attempt_count: number } | null;
-  // 소유권 이전 요청 알림이 가리키는 요청이 **지금도** 답을 기다리는지(#1435) — 문구는 받은 때의 것이다.
+  // 소유권 이전 요청 알림이 가리키는 요청의 **지금** 상태(#1435·#1441) — 문구는 받은 때의 것이다.
   // 다른 유형·옛 응답은 없거나 `null`.
-  transfer_pending?: boolean | null;
+  transfer_status?: "pending" | "accepted" | "declined" | "cancelled" | "expired" | null;
 };
 
 export type UnreadCount = { count: number };

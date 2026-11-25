@@ -79,10 +79,9 @@ export function describeNotification(notification: NotificationRow): string {
         typeof context.requester_display_name === "string" && context.requester_display_name
           ? `${context.requester_display_name}님이`
           : "소유자가";
-      // 문구는 받은 때의 것이다 — 서버가 요청이 끝났다고 알려 주면 수락·거절을 청하지 않는다(#1435).
-      if (notification.transfer_pending === false) {
-        return `${requester} '${className}' 클래스의 소유권을 넘기려 했던 요청은 끝났습니다.`;
-      }
+      // 문구는 받은 때의 것이다 — 서버가 요청이 끝났다고 알려 주면 수락·거절을 청하지 않고 어떻게 끝났는지 말한다(#1435·#1441).
+      const ended = endedTransferText(notification.transfer_status, className);
+      if (ended !== null) return ended;
       const until =
         typeof context.expires_at === "string" ? `${formatShortDateTime(context.expires_at)}까지` : "7일 안에";
       return `${requester} '${className}' 클래스의 소유권을 나에게 넘기려 합니다 — 넘겨받으면 지금 채점 키가 비워져 내 채점 키를 넣어야 채점이 이어집니다. ${until} 클래스 화면에서 수락하거나 거절해 주세요.`;
@@ -103,6 +102,22 @@ export function describeNotification(notification: NotificationRow): string {
     }
     default:
       return "새 알림이 있습니다.";
+  }
+}
+
+function endedTransferText(status: NotificationRow["transfer_status"], className: string): string | null {
+  const subject = `'${className}' 클래스의 소유권 이전 요청`;
+  switch (status) {
+    case "accepted":
+      return `${subject}을 수락했습니다 — 이제 내가 이 클래스의 소유자입니다.`;
+    case "declined":
+      return `${subject}을 거절했습니다 — 소유권은 그대로입니다.`;
+    case "cancelled":
+      return `${subject}이 취소됐습니다 — 요청한 쪽이 거두었습니다.`;
+    case "expired":
+      return `${subject}이 기한이 지나 만료됐습니다.`;
+    default:
+      return null;
   }
 }
 

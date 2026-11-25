@@ -28,6 +28,7 @@ import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import { formatDay } from "@/lib/classes/format-day";
 import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
+import { cancelTransferButtonLabel, removeButtonLabel, transferButtonLabel } from "@/lib/co-instructors/instructor-labels";
 import {
   cancelCoInstructorInvite,
   cancelOwnershipTransfer,
@@ -125,7 +126,7 @@ function InstructorRow({
               type="button"
               data-testid="ownership-transfer-start"
               ref={transferConfirm.triggerRef}
-              aria-label={`${name} 소유권 넘기기`}
+              aria-label={transferButtonLabel(name)}
               onClick={() => onAsk("transfer")}
               className={LINK_ACTION}
             >
@@ -138,7 +139,7 @@ function InstructorRow({
               type="button"
               data-testid="co-instructor-remove"
               ref={removeConfirm.triggerRef}
-              aria-label={`${name} 내보내기`}
+              aria-label={removeButtonLabel(name)}
               onClick={() => onAsk("remove")}
               className={LINK_ACTION}
             >
@@ -149,7 +150,7 @@ function InstructorRow({
             <button
               type="button"
               data-testid="ownership-transfer-cancel"
-              aria-label={`${name} 소유권 이전 요청 취소`}
+              aria-label={cancelTransferButtonLabel(name)}
               onClick={onCancelTransfer}
               disabled={busy}
               className={LINK_ACTION}
@@ -375,8 +376,8 @@ export function InstructorsSection({
   classId: number;
   // 클래스의 대기 중 소유권 이전 요청 — 클래스 응답(`ClassRow`)에서 온다.
   pendingTransfer: PendingOwnershipTransfer | null;
-  // 요청·취소 뒤 클래스를 다시 읽는다.
-  onTransferChanged: (requested?: boolean) => void;
+  // 요청·취소 뒤 클래스를 다시 읽는다. 취소가 거절당하면(그 사이 끝났을 수 있다) `cancel-failed`.
+  onTransferChanged: (change?: "requested" | "cancel-failed") => void;
   // 요청을 보낸 뒤 강사 목록이 다시 그려지므로(key) 초점 표시는 그 바깥에 둔다.
   focusPendingTransfer: RefObject<boolean>;
 }) {
@@ -409,7 +410,7 @@ export function InstructorsSection({
     }
     setConfirming(null);
     setBusyId(null);
-    onTransferChanged(result.ok);
+    onTransferChanged(result.ok ? "requested" : undefined);
   }
 
   async function cancelTransfer(coInstructorId: number, transferId: number) {
@@ -420,7 +421,7 @@ export function InstructorsSection({
       setError(result.detail);
     }
     setBusyId(null);
-    onTransferChanged();
+    onTransferChanged(result.ok ? undefined : "cancel-failed");
   }
 
   async function remove(coInstructorId: number) {
