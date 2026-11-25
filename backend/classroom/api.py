@@ -72,6 +72,8 @@ from .models import (
     ClassroomSubmission,
     ClassScoringKeyMissingAlert,
     ClassTemplate,
+    CoInstructorInvite,
+    OwnershipTransfer,
     Problem,
     ProblemTemplate,
     key_fields_for,
@@ -141,6 +143,7 @@ from .schemas import (
     InstructorNameIn,
     PendingCoInstructorInviteOut,
     ImportableProblemOut,
+    FormerClassOut,
     JoinedClassOut,
     JoinIn,
     JoinLinkOut,
@@ -1052,6 +1055,34 @@ def list_joined_classes(request: HttpRequest):
         )
         for m in memberships
     ]
+
+
+@router.get("/classes/former-instructor", response={200: list[FormerClassOut]}, auth=jwt_auth)
+def list_former_instructor_classes(request: HttpRequest):
+    """한때 이 사람이 강사(공동 강사·넘겨준 소유자)였다가 지금은 아닌 클래스(#1465 2). 증거는 **그 사람이 수락한
+    초대**와 **그 사람이 오간 수락된 소유권 이전**뿐이다 — 초대를 받기만 했거나 처음부터 관계 없던 사람은 빈 목록이라
+    남의 클래스의 존재가 새지 않는다(#278). 지금도 강사인 클래스는 뺀다."""
+
+    user_id = request.auth_user.id
+    touched = (
+        set(
+            CoInstructorInvite.objects.filter(accepted_by_id=user_id, accepted_at__isnull=False).values_list(
+                "classroom_id", flat=True
+            )
+        )
+        | set(
+            OwnershipTransfer.objects.filter(accepted_at__isnull=False, requested_by_id=user_id).values_list(
+                "classroom_id", flat=True
+            )
+        )
+        | set(
+            OwnershipTransfer.objects.filter(accepted_at__isnull=False, recipient_id=user_id).values_list(
+                "classroom_id", flat=True
+            )
+        )
+    )
+    taught = set(classes_taught_by(user_id).values_list("id", flat=True))
+    return 200, [FormerClassOut(id=class_id) for class_id in sorted(touched - taught)]
 
 
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)

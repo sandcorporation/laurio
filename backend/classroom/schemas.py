@@ -224,6 +224,13 @@ class CompatibleServerIn(Schema):
     auth_value: str = Field(default="", max_length=400)
 
 
+class FormerClassOut(Schema):
+    """강사에서 빠진 클래스 한 줄(#1465 2) — 번호만 준다. 화면이 404 를 만났을 때 「더 이상 강사가 아닙니다」와
+    「찾을 수 없습니다」를 가르는 데만 쓴다."""
+
+    id: int
+
+
 class JoinedClassOut(Schema):
     """「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassOut`과
     달리 `join_code`·OpenAI 키·토큰 사용량을 싣지 않는다: 그 값들은 강사만의

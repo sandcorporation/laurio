@@ -120,7 +120,7 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} />
+        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} hadAccess={hadForm} />
         {hadForm && repositoryUrl.trim() !== "" ? (
           <div className="mt-4">
             <Note tone="warning">

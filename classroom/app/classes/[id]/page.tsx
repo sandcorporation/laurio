@@ -128,6 +128,11 @@ function ClassDetail() {
   }, [ready, offerOpen]);
   const { state: problemsState, reload: reloadProblems, move } = useProblems(classId);
   const router = useRouter();
+  // 화면이 그려져 있던 클래스가 접근을 잃으면(강사에서 빠짐) 쓰던 화면과 함께 초점이 사라진다 — 안내가 받는다(#1465 2).
+  const [hadClass, setHadClass] = useState(false);
+  useEffect(() => {
+    if (classState.status === "ready") setHadClass(true);
+  }, [classState.status]);
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
   const [pickerTab, setPickerTab] = useState<PickerTab | null>(null);
 
@@ -151,6 +156,7 @@ function ClassDetail() {
           page="class"
           classId={classId}
           testId="classroom-detail-not-found"
+          focusOnShow={hadClass}
           retry={{
             reload: () => {
               reloadClass();

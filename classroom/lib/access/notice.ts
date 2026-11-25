@@ -26,17 +26,25 @@ export function accessNotice({
   status,
   joined,
   taught,
+  former,
+  hadAccess,
   classId,
 }: {
   page: AccessPage;
   status: AccessStatus;
   joined: AccessListState;
   taught: AccessListState;
+  /** 한때 강사였던 클래스(#1465 2) — 실패하거나 주지 않으면 이유를 말하지 않는 쪽이다. */
+  former?: AccessListState;
+  /** 이 화면이 방금까지 열려 있었다(열어 둔 채 접근을 잃었다) — 그 사람은 이미 아는 화면이라 이유를 말해도 새지 않는다. */
+  hadAccess?: boolean;
   classId: number;
 }): AccessDecision {
   const unrelated = notice("클래스를 찾을 수 없습니다", "홈으로", "/");
   // 두 목록이 다 오기 전에는 정하지 않는다 — 최종 문구끼리 바뀌어 보이지 않게.
-  if (joined.status === "loading" || taught.status === "loading") return { kind: "pending" };
+  if (joined.status === "loading" || taught.status === "loading" || former?.status === "loading") {
+    return { kind: "pending" };
+  }
   // 하나라도 실패하면 덜 알려 주는 쪽이다.
   if (joined.status === "error" || taught.status === "error") return unrelated;
 
@@ -51,7 +59,16 @@ export function accessNotice({
     if (status === "initial") return { kind: "retry" };
     return page === "problem" ? toClass("문제를 찾을 수 없습니다") : unrelated;
   }
-  if (page === "mine" || !joined.classes.some((row) => row.id === classId)) return unrelated;
+  // 강사에서 빠진 사람에게만 이유를 말한다 — 증거(수락한 초대·이전)가 없는 사람은 아래 「찾을 수 없음」이다(#1465 2).
+  if ((page === "class" || page === "problem") && former?.status === "ready" && former.classes.some((row) => row.id === classId)) {
+    return notice("더 이상 이 클래스의 강사가 아닙니다", "홈으로", "/");
+  }
+  const isParticipant = joined.classes.some((row) => row.id === classId);
+  // 열어 둔 문제가 사라졌다 — 참여자는 강사가 숨기거나 지운 것이다. 처음부터 없는 주소에는 말하지 않는다.
+  if (page === "submit" && isParticipant && hadAccess === true) {
+    return toMyProblems("강사가 이 문제를 숨기거나 삭제했습니다");
+  }
+  if (page === "mine" || !isParticipant) return unrelated;
   return toMyProblems(page === "submit" ? "문제를 찾을 수 없습니다" : "강사만 볼 수 있는 화면입니다");
 }
 

@@ -216,6 +216,8 @@ function InstructorRow({
 function PendingInviteRow({
   invite,
   copied,
+  focusCopy,
+  onFocusedCopy,
   confirming,
   cancelling,
   onCopy,
@@ -225,6 +227,9 @@ function PendingInviteRow({
 }: {
   invite: PendingCoInstructorInvite;
   copied: boolean;
+  // 방금 만든 링크 — 그 줄의 「복사」가 초점을 받는다(#1465 3).
+  focusCopy: boolean;
+  onFocusedCopy: () => void;
   confirming: boolean;
   cancelling: boolean;
   onCopy: (url: string) => void;
@@ -233,6 +238,12 @@ function PendingInviteRow({
   onKeep: () => void;
 }) {
   const cancelConfirm = useInlineConfirm(confirming, onKeep);
+  const copyRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!focusCopy) return;
+    copyRef.current?.focus();
+    onFocusedCopy();
+  }, [focusCopy, onFocusedCopy]);
   const url = typeof window === "undefined" ? "" : coInstructorInviteUrl(window.location.origin, invite.token);
   const maker = invite.created_by_me ? "내가" : `${invite.created_by_name || "소유자"}님이`;
   return (
@@ -250,6 +261,7 @@ function PendingInviteRow({
         <button
           type="button"
           data-testid="co-instructor-invite-copy"
+          ref={copyRef}
           onClick={() => onCopy(url)}
           className={buttonClass("secondary", "sm")}
         >
@@ -400,6 +412,10 @@ export function InstructorsSection({
   // 내보내기·초대 취소가 끝나면 누른 줄이 사라진다 — 초점을 늘 있는 「초대 링크 만들기」로 옮긴다(#1400).
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
+  // 만든 링크는 그 줄의 「복사」로 초점을 옮기고 늘 있는 상태 영역에 적는다(#1465 3, 템플릿 공개 #1447 1-3 과 같은 꼴).
+  const [createdNote, setCreatedNote] = useState("");
+  const [focusInviteId, setFocusInviteId] = useState<number | null>(null);
+  const clearFocusInvite = useCallback(() => setFocusInviteId(null), []);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [confirmingInviteId, setConfirmingInviteId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -436,8 +452,9 @@ export function InstructorsSection({
       cancelledByMe: cancelledByMe.current,
     });
     cancelledByMe.current = false;
+    // 새 요청이 걸렸거나 역할이 바뀌었으면 앞의 끝남 문구는 더 맞지 않는다(#1464).
+    setTransferNote(note ?? "");
     if (note === null) return;
-    setTransferNote(note);
     const active = document.activeElement;
     const lost = active === null || active === document.body || !rootRef.current?.contains(active);
     if (focusWithin.current && lost) headingRef.current?.focus();
@@ -524,8 +541,11 @@ export function InstructorsSection({
   async function create() {
     setCreating(true);
     setError(null);
+    setCreatedNote("");
     const result = await createCoInstructorInvite(classId);
     if (result.ok) {
+      setFocusInviteId(result.data.id);
+      setCreatedNote("초대 링크를 만들었습니다");
       reloadInvites();
     } else {
       setError(result.detail);
@@ -578,6 +598,9 @@ export function InstructorsSection({
         </p>
         <p role="status" data-testid="co-instructor-accepted-note" className={acceptedNote ? "text-[13px] text-ink/70" : "sr-only"}>
           {acceptedNote}
+        </p>
+        <p role="status" data-testid="co-instructor-created-note" className="sr-only">
+          {createdNote}
         </p>
         <Card>
           <h2
@@ -658,6 +681,8 @@ export function InstructorsSection({
                   key={invite.id}
                   invite={invite}
                   copied={copiedId === invite.id}
+                  focusCopy={focusInviteId === invite.id}
+                  onFocusedCopy={clearFocusInvite}
                   confirming={confirmingInviteId === invite.id}
                   cancelling={cancellingId === invite.id}
                   onCopy={(url) => void copy(invite.id, url)}

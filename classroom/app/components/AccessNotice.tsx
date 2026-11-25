@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { buttonClass } from "@/app/components/ui";
 import { accessNotice, type AccessNoticeContent, type AccessPage } from "@/lib/access/notice";
 import { useJoinedClasses } from "@/lib/classes/use-joined-classes";
+import { useFormerClasses } from "@/lib/classes/use-former-classes";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
@@ -20,7 +21,7 @@ export type AccessRetry = {
   turns: readonly object[];
 };
 
-type Props = { classId: number; testId: string; focusOnShow?: boolean } & (
+type Props = { classId: number; testId: string; focusOnShow?: boolean; hadAccess?: boolean } & (
   | { page: Extract<AccessPage, "class" | "problem">; retry: AccessRetry }
   | { page: Extract<AccessPage, "mine" | "submit">; retry?: undefined }
 );
@@ -30,9 +31,10 @@ export function AccessNotice(props: Props) {
   return <Notice key={`${props.page}:${props.classId}`} {...props} />;
 }
 
-function Notice({ page, classId, testId, retry, focusOnShow }: Props) {
+function Notice({ page, classId, testId, retry, focusOnShow, hadAccess }: Props) {
   const joined = useJoinedClasses();
   const taught = useMyClasses();
+  const former = useFormerClasses();
   const [turnsBeforeRetry, setTurnsBeforeRetry] = useState<readonly object[] | null>(null);
   const answeredAgain =
     turnsBeforeRetry !== null &&
@@ -43,6 +45,8 @@ function Notice({ page, classId, testId, retry, focusOnShow }: Props) {
     status: answeredAgain ? "retried" : "initial",
     joined,
     taught,
+    former,
+    hadAccess,
     classId,
   });
 

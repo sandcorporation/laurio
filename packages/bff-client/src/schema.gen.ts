@@ -377,6 +377,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/former-instructor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Former Instructor Classes
+         * @description 한때 이 사람이 강사(공동 강사·넘겨준 소유자)였다가 지금은 아닌 클래스(#1465 2). 증거는 **그 사람이 수락한
+         *     초대**와 **그 사람이 오간 수락된 소유권 이전**뿐이다 — 초대를 받기만 했거나 처음부터 관계 없던 사람은 빈 목록이라
+         *     남의 클래스의 존재가 새지 않는다(#278). 지금도 강사인 클래스는 뺀다.
+         */
+        get: operations["classroom_api_list_former_instructor_classes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/joined": {
         parameters: {
             query?: never;
@@ -8169,6 +8191,15 @@ export interface components {
             text?: string | null;
         };
         /**
+         * FormerClassOut
+         * @description 강사에서 빠진 클래스 한 줄(#1465 2) — 번호만 준다. 화면이 404 를 만났을 때 「더 이상 강사가 아닙니다」와
+         *     「찾을 수 없습니다」를 가르는 데만 쓴다.
+         */
+        FormerClassOut: {
+            /** Id */
+            id: number;
+        };
+        /**
          * FreeContestCreateIn
          * @description 무료 공모전 초안 생성 입력 (#415, ADR-0048) — `ContestCreateIn`과 달리
          *     `prize`가 없다: 무료 공모전은 상금·결제·Escrow가 없으므로 애초에 받지
@@ -12318,6 +12349,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_former_instructor_classes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormerClassOut"][];
                 };
             };
         };
