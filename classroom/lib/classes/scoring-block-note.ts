@@ -5,7 +5,7 @@
 // 단추는 내지 않는다(#1421). 채점 모델은 공동 강사도 문제 편집에서 바꾸므로(`update_problem` owner=False)
 // `modelRejectedNote` 는 역할과 상관없이 같은 문장이고 단추만 갈 곳이 다르다(#1425).
 import { knownOr } from "../util/known-or";
-import { scoringStatus, type ScoringStatus } from "./scoring-status";
+import { scoringStatus, scoringStatusTone, type ScoringStatus } from "./scoring-status";
 
 export type ScoringBlockSurface = "submissions" | "quality";
 
@@ -109,4 +109,13 @@ export function modelRejectedNote(
     };
   }
   return { message, actionLabel: null, href: null };
+}
+
+/** 「채점」 카드가 공동 강사에게 붙이는 할 일 한 줄(#1431) — 소유자는 카드의 단추가 있으니 없다. */
+export function coInstructorCardHint(
+  classroom: Parameters<typeof scoringBlockNote>[0],
+): string | null {
+  if (classroom?.role !== "co_instructor") return null;
+  if (scoringStatusTone(scoringStatus(classroom)) !== "warning") return null;
+  return scoringBlockNote(classroom, "quality").message;
 }

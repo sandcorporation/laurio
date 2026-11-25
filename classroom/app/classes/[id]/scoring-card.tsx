@@ -14,6 +14,7 @@ import {
   scoringStatusTone,
   type ScoringStatus,
 } from "@/lib/classes/scoring-status";
+import { coInstructorCardHint } from "@/lib/classes/scoring-block-note";
 import { findCostRow, usageCostText } from "@/lib/scoring/cost";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 
@@ -127,6 +128,11 @@ export function ScoringCard({ classroom }: { classroom: ClassRow }) {
               {status.kind === "missing" ? "채점 연결 넣기" : "설정 열기"}
             </Link>
           </div>
+        ) : null}
+        {coInstructorCardHint(classroom) ? (
+          <p data-testid="scoring-card-co-hint" className="text-[12.5px] text-ink/60">
+            {coInstructorCardHint(classroom)}
+          </p>
         ) : null}
       </div>
     </Card>

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NotificationRow } from "../notifications/api";
 import { describeNotification } from "../notifications/format";
 
-import { modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
+import { coInstructorCardHint, modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
 
 const connected = {
   archived: false,
@@ -195,5 +195,18 @@ describe("modelRejectedNote — 키 사유는 소유자 몫, 모델 사유는 �
     const co = scoringBlockNote({ ...missing, role: "co_instructor" as const }, "submissions");
     expect(co.actionLabel).toBeNull();
     expect(co.message).toContain("소유자에게");
+  });
+});
+
+describe("coInstructorCardHint — 채점 카드 (#1431)", () => {
+  const co = { ...missing, role: "co_instructor" as const };
+
+  it("공동 강사가 연결 없음만 보면 소유자에게 부탁하는 할 일을 준다", () => {
+    expect(coInstructorCardHint(co)).toBe("채점 연결이 없어 채점할 수 없습니다 — 소유자에게 채점 키를 넣어 달라고 하세요.");
+  });
+
+  it("소유자·연결됨이면 없다", () => {
+    expect(coInstructorCardHint(missing)).toBeNull();
+    expect(coInstructorCardHint({ ...connected, role: "co_instructor" })).toBeNull();
   });
 });
