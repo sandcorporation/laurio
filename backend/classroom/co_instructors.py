@@ -300,7 +300,11 @@ def depart(row: ClassCoInstructor, *, by_self: bool) -> bool:
         CoInstructorInvite.objects.filter(
             _pending_q(now), classroom_id=row.classroom_id, created_by_id=row.user_id
         ).update(cancelled_at=now)
-        publish_instructors_changed(row.classroom, also={row.user_id})
+        publish_instructors_changed(
+            row.classroom,
+            also={row.user_id},
+            departed={"co_instructor_id": row.id, "display_name": row.display_name, "left": by_self},
+        )
     return True
 
 

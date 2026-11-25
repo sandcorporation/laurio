@@ -24,6 +24,9 @@ import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 
 import { useBackendQuery } from "@codemit/bff-client";
 
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
+import { INSTRUCTORS_CHANGED, isClassSignal } from "@/lib/events/types";
+import { useEventStream } from "@/lib/events/stream-context";
+import { departureNotes, parseDeparture, vanishedInstructors, type Departure } from "@/lib/co-instructors/departure-note";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import { pendingTransferEndNote, pendingTransferRowText } from "@/lib/co-instructors/transfer-end-note";
@@ -45,6 +48,11 @@ import {
 } from "@/lib/co-instructors/api";
 
 // 시안의 줄 끝 행동 — 테두리 없는 밑줄 글자.
+// 안내는 낭독기가 읽을 시간만 화면에 둔다 — 새 안내나 상태 변화가 오면 앞의 것은 걷히고, 아무 일 없어도 이만큼 뒤 걷힌다(#1517 취향 1).
+const NOTE_VISIBLE_MS = 12_000;
+type NoteKind = "transfer" | "accepted" | "created" | "departed";
+const NO_NOTES: Record<NoteKind, string> = { transfer: "", accepted: "", created: "", departed: "" };
+
 const LINK_ACTION =
   "inline-flex items-center whitespace-nowrap px-3 py-1.5 text-xs text-ink/60 underline underline-offset-[3px] " +
   "transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-45";
@@ -442,7 +450,14 @@ export function InstructorsSection({
   const createButtonRef = useRef<HTMLButtonElement>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   // 만든 링크는 그 줄의 「복사」로 초점을 옮기고 늘 있는 상태 영역에 적는다(#1465 3, 템플릿 공개 #1447 1-3 과 같은 꼴).
-  const [createdNote, setCreatedNote] = useState("");
+  const [notes, setNotes] = useState(NO_NOTES);
+  // 한 번에 한 안내만 남긴다 — 새 안내는 앞의 안내(다른 종류 포함)를 걷는다.
+  const announce = useCallback((kind: NoteKind, text: string) => setNotes({ ...NO_NOTES, [kind]: text }), []);
+  useEffect(() => {
+    if (!Object.values(notes).some(Boolean)) return;
+    const timer = window.setTimeout(() => setNotes(NO_NOTES), NOTE_VISIBLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [notes]);
   const [focusInviteId, setFocusInviteId] = useState<number | null>(null);
   const clearFocusInvite = useCallback(() => setFocusInviteId(null), []);
   const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -462,7 +477,6 @@ export function InstructorsSection({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const focusWithin = useRef(false);
   const cancelledByMe = useRef(false);
-  const [transferNote, setTransferNote] = useState("");
   const previous = useRef({ role, pendingTransfer });
   useEffect(() => {
     const before = previous.current;
@@ -482,12 +496,12 @@ export function InstructorsSection({
     });
     cancelledByMe.current = false;
     // 새 요청이 걸렸거나 역할이 바뀌었으면 앞의 끝남 문구는 더 맞지 않는다(#1464).
-    setTransferNote(note ?? "");
+    announce("transfer", note ?? "");
     if (note === null) return;
     const active = document.activeElement;
     const lost = active === null || active === document.body || !rootRef.current?.contains(active);
     if (focusWithin.current && lost) headingRef.current?.focus();
-  }, [role, pendingTransfer, classVersion, signalPending, reloadBoth]);
+  }, [role, pendingTransfer, classVersion, signalPending, reloadBoth, announce]);
 
   const roster = rosterState.status === "ready" ? rosterState.data : [];
 
@@ -496,20 +510,47 @@ export function InstructorsSection({
   const inviteListFocus = useRef(false);
   const knownInstructorIds = useRef<Set<number> | null>(null);
   const knownInviteIds = useRef<Set<number> | null>(null);
-  const [acceptedNote, setAcceptedNote] = useState("");
+  // 빠진 공동 강사는 명단에 줄이 없어 까닭(떠남·내보냄)을 신호 본문만이 안다 — 신호가 오는 대로 적어 두고 줄이 사라질 때 쓴다(#1517 1).
+  const knownInstructorNames = useRef<Map<number, string>>(new Map());
+  const departures = useRef<Map<number, Departure>>(new Map());
+  const { subscribe } = useEventStream();
+  useEffect(
+    () =>
+      subscribe((event) => {
+        if (!isClassSignal(event, INSTRUCTORS_CHANGED, classId)) return;
+        const departure = parseDeparture(event.payload);
+        if (departure !== null) departures.current.set(departure.coInstructorId, departure);
+      }),
+    [subscribe, classId],
+  );
   useEffect(() => {
     if (rosterState.status !== "ready") return;
     const known = knownInstructorIds.current;
+    const knownNames = knownInstructorNames.current;
     knownInstructorIds.current = new Set(
       rosterState.data.flatMap((instructor) => (instructor.co_instructor_id === null ? [] : [instructor.co_instructor_id])),
     );
+    knownInstructorNames.current = new Map(
+      rosterState.data.flatMap((instructor) =>
+        instructor.co_instructor_id === null ? [] : [[instructor.co_instructor_id, instructor.display_name] as [number, string]],
+      ),
+    );
     if (known === null) return;
+    // 줄이 사라졌다 — 떠났거나 내보내졌다. 읽어 주고, 초점이 그 줄과 함께 사라졌으면 늘 있는 「초대 링크 만들기」로 옮긴다.
+    const vanished = vanishedInstructors(knownNames, knownInstructorIds.current);
+    if (vanished.length > 0) {
+      const text = departureNotes(vanished, departures.current);
+      vanished.forEach(({ id }) => departures.current.delete(id));
+      if (text) announce("departed", text);
+      const active = document.activeElement;
+      if (active === null || active === document.body) createButtonRef.current?.focus();
+    }
     const joined = rosterState.data.filter(
       (instructor) =>
         instructor.co_instructor_id !== null && !known.has(instructor.co_instructor_id) && instructor.joined_by === "invite",
     );
-    if (joined.length > 0) setAcceptedNote(`${joined.map((instructor) => instructor.display_name).join(", ")} 님이 초대를 수락했습니다`);
-  }, [rosterState]);
+    if (joined.length > 0) announce("accepted", `${joined.map((instructor) => instructor.display_name).join(", ")} 님이 초대를 수락했습니다`);
+  }, [rosterState, announce]);
   useEffect(() => {
     if (invitesState.status !== "ready") return;
     const known = knownInviteIds.current;
@@ -561,7 +602,14 @@ export function InstructorsSection({
       setError(result.detail);
     }
     // 내보낸 사람이 만든 대기 초대도 취소되므로 명단·초대를 다시 읽는다 — 같은 변경의 서버 신호와 한 번에(#1471 ②).
-    if (result.ok) createButtonRef.current?.focus();
+    if (result.ok) {
+      departures.current.set(coInstructorId, {
+        coInstructorId,
+        displayName: knownInstructorNames.current.get(coInstructorId) ?? "",
+        left: false,
+      });
+      createButtonRef.current?.focus();
+    }
     setConfirming(null);
     setBusyId(null);
     // 내보낸 사람에게 온 대기 이전 요청도 사라진다.
@@ -572,11 +620,11 @@ export function InstructorsSection({
     const seenRevAtStart = onCommandStart();
     setCreating(true);
     setError(null);
-    setCreatedNote("");
+    announce("created", "");
     const result = await createCoInstructorInvite(classId);
     if (result.ok) {
       setFocusInviteId(result.data.id);
-      setCreatedNote("초대 링크를 만들었습니다");
+      announce("created", "초대 링크를 만들었습니다");
       // 같은 변경의 서버 신호와 합쳐 클래스 화면이 한 번만 다시 읽는다(#1471 ②).
       onTransferChanged(undefined, seenRevAtStart);
     } else {
@@ -626,14 +674,17 @@ export function InstructorsSection({
       className="flex flex-col gap-5 pt-5 lg:flex-row lg:items-start"
     >
       <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <p role="status" data-testid="ownership-transfer-ended-note" className={transferNote ? "text-[13px] text-ink/70" : "sr-only"}>
-          {transferNote}
+        <p role="status" data-testid="ownership-transfer-ended-note" className={notes.transfer ? "text-[13px] text-ink/70" : "sr-only"}>
+          {notes.transfer}
         </p>
-        <p role="status" data-testid="co-instructor-accepted-note" className={acceptedNote ? "text-[13px] text-ink/70" : "sr-only"}>
-          {acceptedNote}
+        <p role="status" data-testid="co-instructor-accepted-note" className={notes.accepted ? "text-[13px] text-ink/70" : "sr-only"}>
+          {notes.accepted}
+        </p>
+        <p role="status" data-testid="co-instructor-departed-note" className={notes.departed ? "text-[13px] text-ink/70" : "sr-only"}>
+          {notes.departed}
         </p>
         <p role="status" data-testid="co-instructor-created-note" className="sr-only">
-          {createdNote}
+          {notes.created}
         </p>
         <Card>
           <h2
