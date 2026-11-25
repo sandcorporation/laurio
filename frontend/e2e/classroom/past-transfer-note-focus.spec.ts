@@ -173,3 +173,49 @@ for (const viewport of viewports) {
     await expect(page.getByTestId("classroom-detail-heading")).toBeFocused();
   });
 }
+
+// 오류 뒤 회복(#1535 ①)과 완료 status 비우기(#1535 ③).
+for (const viewport of viewports) {
+  test(`${viewport.width}px — 다시 불러오기가 한 번 실패한 뒤 회복해도 키 안내가 걷히고 완료를 알린다`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const seed = `past-keyerr-${viewport.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { classId } = await classWithRequestForHelper(page, seed);
+    await openWithStream(page, `/classes/${classId}`);
+    await page.getByTestId("ownership-transfer-accept").click();
+    await expect(page.getByRole("link", { name: "채점 키 넣기" })).toBeVisible();
+
+    const detail = `**/api/backend/classroom/classes/${classId}`;
+    await page.route(detail, (route) => (route.request().method() === "GET" ? route.fulfill({ status: 500, body: "{}" }) : route.fallback()));
+    const otherTab = await page.context().newPage();
+    await otherTab.goto("/");
+    const put = () => classroomApi(otherTab).put(`/api/backend/classroom/classes/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } });
+    expect((await put()).ok()).toBeTruthy();
+    await expect(page.getByTestId("classroom-detail-error")).toBeVisible({ timeout: 10_000 });
+
+    await page.unroute(detail);
+    expect((await put()).ok()).toBeTruthy();
+    await otherTab.close();
+    await expect(page.getByTestId("scoring-key-added-note")).toHaveText("채점 키를 넣었습니다", { timeout: 10_000 });
+    await expect(page.getByRole("link", { name: "채점 키 넣기" })).toHaveCount(0);
+    await expect(page.getByTestId("classroom-detail-heading")).toBeFocused();
+  });
+
+  test(`${viewport.width}px — 다른 탭에서 키를 지우면 지난 완료 status 가 비워진다`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    const seed = `past-keygone-${viewport.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { classId } = await classWithRequestForHelper(page, seed);
+    await openWithStream(page, `/classes/${classId}`);
+    await page.getByTestId("ownership-transfer-accept").click();
+    await expect(page.getByRole("link", { name: "채점 키 넣기" })).toBeVisible();
+
+    const otherTab = await page.context().newPage();
+    await otherTab.goto("/");
+    const keyUrl = `/api/backend/classroom/classes/${classId}/openai-key`;
+    expect((await classroomApi(otherTab).put(keyUrl, { data: { api_key: "sk-e2e-test-key" } })).ok()).toBeTruthy();
+    await expect(page.getByTestId("scoring-key-added-note")).toHaveText("채점 키를 넣었습니다", { timeout: 10_000 });
+
+    expect((await classroomApi(otherTab).delete(keyUrl)).ok()).toBeTruthy();
+    await otherTab.close();
+    await expect(page.getByTestId("scoring-key-added-note")).toHaveText("", { timeout: 10_000 });
+  });
+}
