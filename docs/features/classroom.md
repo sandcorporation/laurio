@@ -1512,7 +1512,8 @@ spec #474, #475·#476)가 든 이름은 가입 때와 같은 규칙으로 거절
 체크리스트와 합친 줄은 `ProblemParticipantView` 의 `ChecklistWithVerdict` 가 그리고, 필수 m/n 은
 `lib/submissions/latest-attempts.ts`의 `requiredSummary`다 — 문법 검사 기본 항목은 문제의 지금
 `syntax_check_enabled` 로 세어(통과 배지를 정하는 백엔드 `is_score_passed` 와 같은 기준, #670) 진행
-막대의 분모도 채점 전후가 같고, 문법 결과 없이 만든 자동 미달 점수에서는 「문법 검사」가 미충족으로 남는다.
+막대의 분모도 채점 전후가 같고, 문법 결과 없이 만든 자동 미달 점수에서는 문법 항목이 미충족으로 남는다.
+문법 항목이 미충족이면 미충족 이름은 어느 까닭이든 체크리스트 문구 「소스에 문법 오류가 없다」 그대로다(#1406).
 카드의 문법 검사 줄도 같은 판정(`RequiredSummary.syntaxMet`)으로 그린다(#674). 그 줄 밑의 사유는
 `syntaxLineReasoning` 이 정해 점수의 `is_platform_failure` 가 참일 때(자동 미달)만 그 점수의 공통 문구가
 붙는다 — 채점 뒤 문법 검사를 켜 문법 결과가 없는 일반 점수는 미충족 줄에 「이 시도에는 문법 검사 결과가 없다」만 붙는다(#679, #985).
