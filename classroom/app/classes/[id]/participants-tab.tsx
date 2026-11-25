@@ -8,7 +8,7 @@
 // 이름 열을 고정한 뜻을 잃는다.
 //
 // 셀을 글자가 아니라 **모양**으로 그린다 — 스물몇 행 × 열몇 개에 「시도했으나 미통과」를 글자로 채우면
-// 읽히지 않는다. 글자는 `aria-label` 과 범례가 진다. 화면에 설명 문장은 두지 않는다 — 내보내기의 뜻은
+// 읽히지 않는다. 글자는 표식의 `aria-label`·칸의 `title`·범례가 진다. 화면에 설명 문장은 두지 않는다 — 내보내기의 뜻은
 // 확인 대화가 말한다.
 import { useEffect, useRef, useState } from "react";
 
@@ -343,10 +343,10 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                     data-perfect={cell.perfect === true ? "true" : undefined}
                     data-contest-entry={cell.contest_entry ?? undefined}
                     data-late={cell.late || undefined}
-                    aria-label={cellLabel(cell)}
                     title={cellLabel(cell)}
                   >
-                    <span className="relative mx-auto block w-fit">
+                    {/* 이름은 `td` 속성이 아니라 칸 내용인 표식이 갖는다(#1398) — 칸 내용을 읽는 스크린리더에 빈 칸이 아니게. */}
+                    <span role="img" aria-label={cellLabel(cell)} className="relative mx-auto block w-fit">
                       <StatusMark status={cell.status} perfect={cell.perfect === true} />
                       {cell.contest_entry ? <ContestEntryMark entry={cell.contest_entry} /> : null}
                       {cell.late ? <LateMark late={cell.late} /> : null}
