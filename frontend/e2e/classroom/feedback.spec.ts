@@ -92,6 +92,23 @@ test("제보 창은 초점이 안으로 들어가 갇히고 Escape 로 닫히며
   await context.close();
 });
 
+// 초점 없이 열어도(낭독기 활성화·초점을 못 받는 터치) Escape 로 닫히면 초점은 「제보」 단추로 돌아온다(#1509 ②).
+test("초점 없이 연 제보 창을 Escape 로 닫으면 초점이 「제보」 단추에 있다", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: onState });
+  const page = await context.newPage();
+  await page.goto("/");
+  const opener = page.getByTestId("feedback-open");
+  await opener.evaluate((el) => (el as HTMLElement).blur());
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await opener.dispatchEvent("click");
+  const dialog = page.getByRole("dialog", { name: "제보" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await context.close();
+});
+
 // 캡처가 끝나기 전에 Escape 로 그만두면 늦게 끝난 캡처가 창을 다시 열지 않는다(#1503 ⑤) — 초점은 「제보」 단추에 그대로다.
 // 캡처의 마지막 단계(그림 해독)를 시험이 쥐고 있다가 Escape 뒤에 풀어 늦게 끝나는 캡처를 만든다.
 test("제보 캡처 중 Escape 로 그만두면 캡처가 끝나도 창이 다시 열리지 않는다", async ({ browser }) => {

@@ -175,6 +175,28 @@ for (const how of ["Escape", "취소 단추"] as const) {
   });
 }
 
+// 초점 없이 열어도(낭독기 활성화·초점을 못 받는 터치) 그만두면 초점은 연 단추로 돌아온다 — BODY 로 돌아가지 않는다(#1509 ②).
+for (const how of ["Escape", "취소 단추"] as const) {
+  test(`초점 없이 연 금액 조회를 ${how}로 그만두면 초점이 연 단추에 있다`, async ({ browser }) => {
+    const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+    await page.route("**/scoring-calculator**", async (route) => {
+      await new Promise(() => {});
+      await route.continue();
+    });
+    await page.goto(`/classes/${classId}/submissions`);
+    const opener = page.getByTestId(`regrade-${secondSubmissionId}`);
+    await opener.evaluate((el) => (el as HTMLElement).blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await opener.dispatchEvent("click");
+    const loading = page.getByRole("status").filter({ hasText: "예상 금액을 불러오는 중" });
+    await expect(loading).toBeVisible();
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await loading.getByRole("button", { name: "취소" }).click();
+    await expect(loading).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+}
+
 // 조회 중 원래 단추가 다른 탭의 다시 채점으로 사라진 뒤 그만두면 — 클릭이든 Escape 든 초점은 제목으로 간다(#1503 ④).
 for (const how of ["Escape", "취소 단추"] as const) {
   test(`금액 조회 중 연 단추가 사라진 뒤 ${how}로 그만두면 초점이 제목으로 간다`, async ({ browser }) => {
