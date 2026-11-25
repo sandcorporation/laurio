@@ -828,3 +828,51 @@ test("보관이 풀릴 때 초점이 안내 밖에 있으면 초점을 빼앗지
   await expect(page.getByRole("status").filter({ hasText: "보관이 풀려 다시 제출할 수 있습니다" })).toBeVisible({ timeout: 10_000 });
   await expect(page.locator("#elsewhere")).toBeFocused();
 });
+
+// #1507 A 남은 것 — 막힘 사유 사이 전환(보관 → 내보냄 → 보관 해제)에도 알림이 있고 초점이 새 안내로 간다.
+for (const view of [
+  { name: "데스크톱", size: { width: 1280, height: 800 } },
+  { name: "390px 터치", size: { width: 390, height: 844 } },
+]) {
+  test(`${view.name} — 보관 중 내보내지고 보관이 풀리면 상태가 읽히고 초점이 새 안내로 간다`, async ({ page, browser }) => {
+    test.setTimeout(30_000);
+    await page.setViewportSize(view.size);
+    const seed = `rt-archived-expelled-${view.size.width}-${test.info().workerIndex}-${Date.now()}`;
+    const instructor = await otherSession(browser, seed);
+    const classId = (
+      await (
+        await instructor.api.post("/api/backend/classroom/classes", {
+          data: { name: `실시간 사유 전환 ${seed}`, instructor_display_name: "강사" },
+        })
+      ).json()
+    ).id as number;
+    const base = `/api/backend/classroom/classes/${classId}`;
+    const problemId = (
+      await (await instructor.api.post(`${base}/problems`, { data: { title: "1주차", submission_formats: ["repository"] } })).json()
+    ).id as number;
+    await instructor.api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "동작한다", required: true } });
+    expect((await instructor.api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+    const joinCode = (await (await instructor.api.get(base)).json()).join_code as string;
+    await establishClassroomSession(page, `${seed}-participant`);
+    expect(
+      (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } })).ok(),
+    ).toBeTruthy();
+    await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+
+    // 보관 중 내보내지고 보관이 풀리면 — 보관 → 내보냄. 내보내진 참여자는 신호를 못 받으니 탭을 다시 보일 때 읽는다.
+    expect((await instructor.api.post(`${base}/archive`)).ok()).toBeTruthy();
+    await expect(page.getByTestId("class-archived-note")).toBeFocused({ timeout: 10_000 });
+    const members = (await (await instructor.api.get(`${base}/members`)).json()) as { id: number; display_name: string }[];
+    const memberId = members.find((m) => m.display_name === "참여자")!.id;
+    expect((await instructor.api.post(`${base}/members/${memberId}/expel`)).ok()).toBeTruthy();
+    expect((await instructor.api.post(`${base}/unarchive`)).ok()).toBeTruthy();
+    await instructor.context.close();
+    await setVisibility(page, "hidden");
+    await setVisibility(page, "visible");
+
+    const expelled = page.getByTestId("member-expelled-note");
+    await expect(expelled).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("status").filter({ hasText: "보관은 풀렸지만 아직 제출할 수 없습니다" })).toBeVisible();
+    await expect(expelled).toBeFocused();
+  });
+}

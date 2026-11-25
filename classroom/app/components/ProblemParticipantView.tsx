@@ -45,6 +45,7 @@ import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSum
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
 import { waitingNote } from "@/lib/submissions/waiting-note";
 import type { ChecklistVerdict, ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
+import { blockedChange } from "@/lib/submissions/blocked-change";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
 import { attemptEntryLabel } from "@/lib/submissions/contest-entry";
 import { checklistSummaryLine, verdictGlyph, verdictStatusText } from "@/lib/submissions/checklist-summary";
@@ -962,27 +963,17 @@ function InteractiveSubmissionForm(
   );
 }
 
-const RELEASED_NOTE: Record<NonNullable<InteractiveProps["submitBlockedReason"]>, string> = {
-  archived: "보관이 풀려 다시 제출할 수 있습니다.",
-  expelled: "이 클래스에 다시 들어와 제출할 수 있습니다.",
-  left: "이 클래스에 다시 들어와 제출할 수 있습니다.",
-  hidden: "문제가 다시 열려 제출할 수 있습니다.",
-};
-
-// 낼 수 없던 이유가 풀리면 안내와 함께 초점도 사라져 body 로 빠진다 — 풀렸다고 알리고,
-// 초점이 안내(또는 body)에 있었을 때만 제출 칸으로 옮긴다. 다른 곳에 있던 초점은 빼앗지 않는다.
+// 낼 수 없던 이유가 풀리거나 다른 이유로 바뀌면 안내와 함께 초점도 사라져 body 로 빠진다 — 바뀐 것을 알리고,
+// 초점이 안내(또는 body)에 있었을 때만 제출 칸(또는 새 안내)으로 옮긴다. 다른 곳에 있던 초점은 빼앗지 않는다.
 function useReleasedNote(reason: InteractiveProps["submitBlockedReason"]): string {
   const previous = useRef(reason);
   const [note, setNote] = useState("");
   useEffect(() => {
     const before = previous.current;
     previous.current = reason;
-    if (reason !== null) {
-      setNote("");
-      return;
-    }
-    if (before === null) return;
-    setNote(RELEASED_NOTE[before]);
+    const change = blockedChange(before, reason);
+    setNote(change.note);
+    if (change.focus !== "form") return;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
     document
@@ -1071,7 +1062,14 @@ function InteractiveSubmissionFormBody(
   useEffect(() => {
     const before = previousBlockedReason.current;
     previousBlockedReason.current = submitBlockedReason;
-    if (before === null && submitBlockedReason !== null) blockedNoteRef.current?.focus();
+    const focus = blockedChange(before, submitBlockedReason).focus;
+    if (focus === "blocked-note-always") {
+      blockedNoteRef.current?.focus();
+    } else if (focus === "blocked-note") {
+      // 이전 안내가 사라지며 초점이 body 로 떨어졌을 때만 새 안내로 — 다른 곳 초점은 두고 본다.
+      const active = document.activeElement;
+      if (active === null || active === document.body) blockedNoteRef.current?.focus();
+    }
   }, [submitBlockedReason]);
 
   // 낼 수 없는 이유는 제출 카드 자리에 한 줄이다 — 지난 시도와 판정은 옆 열에 그대로 남는다.
