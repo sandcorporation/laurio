@@ -113,7 +113,7 @@ describe("제출 현황 계산", () => {
     expect(requiredSummary(autoFail, items, true)).toEqual({
       met: 0,
       total: 2,
-      unmet: ["오류 화면", "문법 검사"],
+      unmet: ["오류 화면", "소스에 문법 오류가 없다"],
       syntaxMet: false,
     });
   });
@@ -132,7 +132,7 @@ describe("제출 현황 계산", () => {
     expect(requiredSummary(scored, items, false)).toEqual({ met: 1, total: 1, unmet: [], syntaxMet: null });
   });
 
-  it("문법 검사가 켜져 있고 오류가 있으면 「문법 오류」", () => {
+  it("문법 검사가 켜져 있고 오류가 있으면 미충족 이름은 체크리스트 문구다", () => {
     const scored = row({
       score: {
         model_version: "m",
@@ -142,7 +142,7 @@ describe("제출 현황 계산", () => {
         reasoning: verdicts,
       },
     });
-    expect(requiredSummary(scored, items, true)).toEqual({ met: 1, total: 2, unmet: ["문법 오류"], syntaxMet: false });
+    expect(requiredSummary(scored, items, true)).toEqual({ met: 1, total: 2, unmet: ["소스에 문법 오류가 없다"], syntaxMet: false });
   });
 
   it("문법 검사를 통과하면 문법 줄은 충족이다", () => {

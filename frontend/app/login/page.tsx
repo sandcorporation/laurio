@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { ACCESS_COOKIE, REFRESH_COOKIE, isDeployedEnvironment } from "@/lib/auth/cookies";
 import { readGithubOAuthConfig } from "@/lib/auth/github";
 import { readGoogleOAuthConfig } from "@/lib/auth/google";
-import { LOGIN_BOUNCE_COOKIE, shouldCheckSessionOnLogin } from "@/lib/auth/login-auto-continue";
+import { LOGIN_BOUNCE_COOKIE, isAutoContinueStopped, shouldCheckSessionOnLogin } from "@/lib/auth/login-auto-continue";
 
 import LoginForm from "./login-form";
 
@@ -41,16 +41,17 @@ const single = (value: string | string[] | undefined) => (typeof value === "stri
 export default async function LoginPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const params = await searchParams;
   const jar = await cookies();
-  const checkSessionFirst = shouldCheckSessionOnLogin({
+  const autoContinueInput = {
     hasSessionCookie: Boolean(jar.get(ACCESS_COOKIE)?.value || jar.get(REFRESH_COOKIE)?.value),
     error: single(params.error),
     bounced: jar.has(LOGIN_BOUNCE_COOKIE),
     next: single(params.next),
     nextOrigin: single(params.next_origin),
-  });
+  };
   return (
     <LoginForm
-      checkSessionFirst={checkSessionFirst}
+      checkSessionFirst={shouldCheckSessionOnLogin(autoContinueInput)}
+      autoContinueStopped={isAutoContinueStopped(autoContinueInput)}
       showDevSeedForm={!isDeployedEnvironment()}
       githubConfigured={readGithubOAuthConfig() !== null}
       googleConfigured={readGoogleOAuthConfig() !== null}

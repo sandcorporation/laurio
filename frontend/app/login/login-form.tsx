@@ -35,7 +35,7 @@ import { normalizeDetail } from "@codemit/bff-client";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 
-import { Card, ErrorNote, INPUT_CLASS } from "@/app/components/ui";
+import { Card, ErrorNote, INPUT_CLASS, Note } from "@/app/components/ui";
 import { autoContinuePath } from "@/lib/auth/login-auto-continue";
 import { continuePath } from "@/lib/auth/login-destination";
 import { resolveNextPath } from "@/lib/auth/next-path";
@@ -81,6 +81,8 @@ function describeOAuthError(code: string | null): string | null {
 interface LoginButtonsProps {
   /** 세션 쿠키가 있어 먼저 세션을 확인할지(app/login/page.tsx 가 판정). */
   checkSessionFirst: boolean;
+  /** 순환 차단기가 자동 넘김을 막아 폼이 뜬 것인지. */
+  autoContinueStopped: boolean;
   showDevSeedForm: boolean;
   githubConfigured: boolean;
   googleConfigured: boolean;
@@ -97,6 +99,7 @@ interface OAuthButtonSpec {
 
 function LoginButtons({
   checkSessionFirst,
+  autoContinueStopped,
   showDevSeedForm,
   githubConfigured,
   googleConfigured,
@@ -189,6 +192,12 @@ function LoginButtons({
       <Card className="flex w-full max-w-sm flex-col gap-6 p-8">
         <h1 className="text-2xl font-semibold">로그인</h1>
 
+        {autoContinueStopped && (
+          <Note tone="attention">
+            <span data-testid="login-bounce-notice">자동 이동을 멈췄습니다. 다시 로그인해 주세요.</span>
+          </Note>
+        )}
+
         <div className="flex flex-col items-stretch gap-3">
           {/* 카카오 로그인 버튼은 카카오가 배포하는 공식 이미지 그대로다
               (public/kakao/README.md — 심볼을 우리가 그리면 가이드의 「형태·비율·
@@ -275,6 +284,7 @@ function LoginButtons({
 
 export default function LoginForm({
   checkSessionFirst,
+  autoContinueStopped,
   showDevSeedForm,
   githubConfigured,
   googleConfigured,
@@ -283,6 +293,7 @@ export default function LoginForm({
     <Suspense fallback={null}>
       <LoginButtons
         checkSessionFirst={checkSessionFirst}
+        autoContinueStopped={autoContinueStopped}
         showDevSeedForm={showDevSeedForm}
         githubConfigured={githubConfigured}
         googleConfigured={googleConfigured}

@@ -7,9 +7,10 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { buttonClass } from "@/app/components/ui";
-import { accessNotice, type AccessPage } from "@/lib/access/notice";
+import { accessNotice, type AccessNoticeContent, type AccessPage } from "@/lib/access/notice";
 import { useJoinedClasses } from "@/lib/classes/use-joined-classes";
 import { useMyClasses } from "@/lib/classes/use-my-classes";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 /** 낡은 404 를 한 번 다시 확인하는 법. */
 export type AccessRetry = {
@@ -61,14 +62,20 @@ function Notice({ page, classId, testId, retry }: Props) {
       </p>
     );
   }
+  return <NoticeBody testId={testId} content={decision} />;
+}
+
+function NoticeBody({ testId, content }: { testId: string; content: AccessNoticeContent }) {
+  // 어느 주소에서 막혔든 탭 제목은 안내 제목이다(#1406) — 화면이 단 제목보다 앞선다.
+  useClassroomTabTitle({ screenName: content.title }, { override: true });
   return (
     <>
       <h1 data-testid={testId} className="text-[22px] font-semibold">
-        {decision.title}
+        {content.title}
       </h1>
       <p className="mt-4">
-        <Link href={decision.link.href} data-testid="access-notice-link" className={buttonClass("secondary", "sm")}>
-          {decision.link.label}
+        <Link href={content.link.href} data-testid="access-notice-link" className={buttonClass("secondary", "sm")}>
+          {content.link.label}
         </Link>
       </p>
     </>

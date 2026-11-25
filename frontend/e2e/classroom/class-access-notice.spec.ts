@@ -59,6 +59,8 @@ function instructorScreens(classId: number, problemId: number) {
 
 async function expectNotice(page: Page, testId: string, title: string, label: string, href: string) {
   await expect(page.getByTestId(testId)).toHaveText(title);
+  // 안내 화면의 탭 제목은 어느 주소든 안내 제목이다(#1406).
+  await expect(page).toHaveTitle(`${title} · Codemit`);
   const link = page.getByTestId("access-notice-link");
   await expect(link).toHaveText(label);
   await expect(link).toHaveAttribute("href", href);

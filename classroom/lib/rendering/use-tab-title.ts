@@ -6,21 +6,30 @@
 import { useEffect } from "react";
 
 import { buildClassroomTabTitle, type ClassroomTabTitleParts } from "./tab-title";
+import { createTabTitleClaims, type TabTitleTarget } from "./tab-title-claims";
 
-export function useClassroomTabTitle(parts: ClassroomTabTitleParts): void {
-  const { screenName, className, problemTitle } = parts;
-
-  useEffect(() => {
-    const title = buildClassroomTabTitle({ screenName, className, problemTitle });
-    // 같은 화면 안에서 주소만 바뀌어도(`?tab=`) Next 가 루트 레이아웃의 제목을 다시 써 넣는데, 위 세
-    // 값은 그대로라 이 효과는 다시 돌지 않는다(#1400). 화면이 떠 있는 동안 지켜본다 — Next 의 스트리밍
-    // metadata 는 `<title>` 을 `<body>` 에 넣기도 해서 `<head>` 가 아니라 문서 전체다.
-    const apply = () => {
-      if (document.title !== title) document.title = title;
-    };
-    apply();
-    const observer = new MutationObserver(apply);
+// 같은 화면 안에서 주소만 바뀌어도(`?tab=`) Next 가 루트 레이아웃의 제목을 다시 써 넣는데, 훅의 값은
+// 그대로라 효과가 다시 돌지 않는다(#1400). 그래서 지켜본다 — Next 의 스트리밍 metadata 는 `<title>` 을
+// `<body>` 에 넣기도 해서 `<head>` 가 아니라 문서 전체다.
+const documentTitle: TabTitleTarget = {
+  read: () => document.title,
+  write: (title) => {
+    document.title = title;
+  },
+  watch: (onChange) => {
+    const observer = new MutationObserver(onChange);
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     return () => observer.disconnect();
-  }, [screenName, className, problemTitle]);
+  },
+};
+const claimTabTitle = createTabTitleClaims(documentTitle);
+
+/** `override` 는 화면이 단 제목보다 앞선다 — 접근 안내가 쓴다(#1406). */
+export function useClassroomTabTitle(parts: ClassroomTabTitleParts, { override = false } = {}): void {
+  const { screenName, className, problemTitle } = parts;
+
+  useEffect(
+    () => claimTabTitle(buildClassroomTabTitle({ screenName, className, problemTitle }), override),
+    [screenName, className, problemTitle, override],
+  );
 }

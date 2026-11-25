@@ -78,6 +78,12 @@ class ClassroomConfig(AppConfig):
         from .withdrawal import instructor_has_class_in_progress
 
         INSTRUCTOR_CLASS_IN_PROGRESS.register(instructor_has_class_in_progress)
+        # 알림 목록이 싣는 「그 문제의 지금 상태」(#1405) — 공유층 `notifications` 가 강의실을 import 하지 않게.
+        from notifications.ports import CLASSROOM_PROBLEM_STATUSES
+
+        from .notification_problem_status import problem_statuses_for
+
+        CLASSROOM_PROBLEM_STATUSES.register(problem_statuses_for)
 
         # 채점 방식 실험의 `classroom_call` 줄(#1262) — `scoring` 이 강의실을 import 하지 않고 강의실 프롬프트로 채점한다.
         from core.experiment_material import CLASSROOM_EXPERIMENT_CALL, CLASSROOM_EXPERIMENT_STAGED_CALL

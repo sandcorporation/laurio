@@ -33,7 +33,7 @@ plugs = ["accounts"]
 [classroom]
 group = "classroom"
 uses = ["accounts", "core", "notifications", "ops_metrics", "policies", "storage", "submissions"]
-plugs = ["accounts", "core", "submissions"]
+plugs = ["accounts", "core", "notifications", "submissions"]
 
 [contests]
 group = "contest"

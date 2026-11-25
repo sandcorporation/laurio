@@ -8,6 +8,7 @@ import {
   LOGIN_BOUNCE_COOKIE,
   LOGIN_BOUNCE_MAX_AGE_SECONDS,
   autoContinuePath,
+  isAutoContinueStopped,
   shouldCheckSessionOnLogin,
 } from "./login-auto-continue";
 
@@ -50,6 +51,21 @@ describe("shouldCheckSessionOnLogin", () => {
   });
 });
 
+describe("isAutoContinueStopped — 차단기가 폼을 세웠을 때만 알린다(#1406)", () => {
+  it("세션 쿠키 + bounce 쿠키 + 형제 목적지면 참이다", () => {
+    expect(isAutoContinueStopped({ ...base, bounced: true })).toBe(true);
+  });
+
+  it.each([
+    ["처음 로그인하는 사람", { hasSessionCookie: false, bounced: true }],
+    ["bounce 쿠키 없음", { bounced: false }],
+    ["?error= 는 그 이유를 따로 보인다", { bounced: true, error: "login_failed" }],
+    ["공개 앱 안 목적지", { bounced: true, nextOrigin: null }],
+  ])("%s 이면 거짓이다", (_name, patch) => {
+    expect(isAutoContinueStopped({ ...base, ...patch })).toBe(false);
+  });
+});
+
 describe("autoContinuePath", () => {
   it("/api/auth/continue 에 auto=1 을 더한다", () => {
     const url = new URL(autoContinuePath("/join/x", CLASSROOM), "http://public.test");
@@ -81,6 +97,13 @@ describe("/login 이 이 판정을 쓴다", () => {
     expect(source).toContain("LOGIN_BOUNCE_COOKIE");
     expect(source).toContain("checkSessionFirst={");
     expect(source).toContain('export const dynamic = "force-dynamic"');
+  });
+
+  it("차단기가 세운 폼은 그렇다고 알린다(#1406)", () => {
+    expect(read("app/login/page.tsx")).toContain("autoContinueStopped={isAutoContinueStopped(");
+    expect(read("app/login/login-form.tsx")).toMatch(
+      /autoContinueStopped && \([\s\S]*?data-testid="login-bounce-notice">자동 이동을 멈췄습니다\. 다시 로그인해 주세요\./,
+    );
   });
 
   it("로그인 폼은 /api/auth/session 이 200 일 때만 auto=1 로 replace 한다", () => {

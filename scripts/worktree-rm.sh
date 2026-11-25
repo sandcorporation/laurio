@@ -7,6 +7,7 @@
 # 선 채로도 돈다. 순서가 중요하다 — 컨테이너·dev 서버를 먼저 내리고 워크트리를 지운다. 거꾸로면 주인 디렉터리가
 # 사라져 스택이 고아가 되고(오프셋이 막힌다) dev 서버가 `.vite` 같은 캐시를 다시 만든다.
 # `-e2e` 스택은 볼륨까지 지우고(일회용) dev 스택 볼륨은 남긴다. 작업자가 손으로 기억할 일이 아니다.
+# 그 워크트리의 dev 칸 예약(#1411)도 푼다.
 set -euo pipefail
 
 wt="${1:?워크트리 경로}"
@@ -19,6 +20,7 @@ src="$(cd "$(dirname "$0")/.." && pwd -P)"
 aux="$(mktemp -d "${TMPDIR:-/tmp}/worktree-rm.XXXXXX")"
 trap 'rm -f "$aux"/* 2>/dev/null; rmdir "$aux" 2>/dev/null || true' EXIT
 cp "$src/docker/dev-stack-orphans.sh" "$aux/dev-stack-orphans.sh"
+cp "$src/docker/dev-slots.sh" "$aux/dev-slots.sh"
 [ ! -f "$src/scripts/dev-server.sh" ] || cp "$src/scripts/dev-server.sh" "$aux/dev-server.sh"
 
 # git 에 지우기를 시키는 기준은 주 워크트리다(= git-common-dir 의 부모). 지울 워크트리가 곧 셸 위치여도 거기서 나온다.
@@ -50,5 +52,13 @@ if ! git -C "$main" worktree remove --force "$wt" >/dev/null 2>&1; then
   git -C "$main" worktree prune
   rmdir "$wt" 2>/dev/null || true
 fi
+# 칸 예약은 디렉터리가 사라진 뒤에 푼다 — 위 dev-server.sh 가 포트를 물으며 다시 적을 수 있다. 못 풀어도 경로가
+# 사라진 예약은 고아라 다음 dev-env.sh 가 회수한다.
+. "$aux/dev-slots.sh"
+if [ ! -d "$wt" ] && dev_slots_lock; then
+  dev_slot_release_owned_by "$wt"
+  dev_slots_unlock
+fi
+
 [ -z "$branch" ] || git -C "$main" branch -D "$branch" >/dev/null 2>&1 || true
 echo "워크트리 $wt 정리 끝"

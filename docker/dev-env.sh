@@ -16,9 +16,10 @@
 # 그 판정 기준은 이름이 아니라 **git 이 말하는 주 워크트리인가**이다 — 디렉터리
 # 이름으로 판정하면 저장소를 다른 이름으로 클론한 사람이 조용히 오프셋을 받는다.
 #
-# 해시가 겹치면 두 워크트리가 같은 포트를 받고, 그러면 나중에 뜨는 쪽이 **포트 바인딩
-# 실패로 죽는다.** 그 편이 낫다 — 조용히 남의 스택에 붙어 서로의 데이터를 보는 것보다
-# 못 뜨는 것이 언제나 진단하기 쉽다.
+# 해시가 겹치면 두 워크트리가 같은 compose 프로젝트 이름을 받고, 그러면 나중에 뜨는 쪽의
+# `up` 이 **남의 컨테이너를 다시 만든다**(#1409). 그래서 해시 칸이 다른 체크아웃 것이면
+# 다음 빈 칸으로 넘긴다. 주인은 칸 예약 파일(`dev-slots.sh`, #1411)과 컨테이너 라벨
+# (`dev-stack-orphans.sh`) 둘로 본다 — 라벨만으로는 컨테이너가 없는 동안 주인이 없다.
 
 set -eu
 
@@ -30,7 +31,7 @@ set -eu
 refuse() {
   {
     echo "dev-env.sh: $1"
-    echo "  고칠 길: 빈 오프셋을 고르거나(CODEMIT_DEV_OFFSET=<0~9>, 비우면 경로 해시), 묵은 워크트리의 스택을 정리한다(git worktree remove, docker compose -p <프로젝트> down)."
+    echo "  고칠 길: ${2:-빈 오프셋을 고르거나(CODEMIT_DEV_OFFSET=<0~9>, 비우면 경로 해시), 묵은 워크트리를 정리한다(scripts/worktree-rm.sh <워크트리> — 스택과 칸 예약 $DEV_SLOTS_DIR/<칸> 을 함께 푼다).}"
   } >&2
   printf '%s\n' \
     'docker() { echo "dev-env.sh 가 오프셋을 거절해 docker 를 돌리지 않는다 — 위 까닭을 고친 뒤 다시 eval 한다" >&2; return 1; }' \
@@ -44,12 +45,96 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(git -C "$script_dir" rev-parse --show-toplevel)
 main_worktree=$(git -C "$script_dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
 
+. "$script_dir/dev-slots.sh"
+# dash 는 신호로 죽을 때 EXIT trap 을 돌리지 않는다 — 신호를 exit 로 바꿔 잠금을 놓는다.
+trap dev_slots_unlock EXIT
+trap 'exit 130' INT TERM HUP
+
 # 어느 길로 오프셋을 받든 먼저 주인 없는 dev 스택을 내린다(#1275). 해시 길·주 워크트리 길은 주인을 보지 않아
 # 고아 db 가 그대로 남아 새 작업자가 그 위에 붙었다. stdout 은 eval 이 실행하니 알림은 stderr 로만 낸다.
 if command -v docker >/dev/null 2>&1; then
   . "$script_dir/dev-stack-orphans.sh"
   dev_stack_reap_orphans
 fi
+
+# 프로젝트 $1 의 주인 중 이 체크아웃($root) 밖의 첫 디렉터리. 없으면 빈 줄.
+foreign_owner() {
+  for _owner in $(dev_stack_owners "$1"); do
+    case "$_owner" in
+      "$root" | "$root"/*) ;;
+      *) echo "$_owner"; return 0 ;;
+    esac
+  done
+}
+
+# 칸 고르기부터 예약 쓰기까지를 잠금 하나로 감싼다 — 그 사이에 다른 호출이 끼면 같은 칸을 받는다(#1411).
+# 잠금은 EXIT trap 이 놓지만, 다 썼으면 바로 놓는다.
+lock_slots() {
+  dev_slots_lock && return 0
+  if [ $? -eq 2 ]; then
+    refuse "칸 예약 폴더를 쓸 수 없다: $DEV_SLOTS_DIR" "HOME 또는 XDG_STATE_HOME 을 쓸 수 있는 곳으로 둔다."
+  fi
+  refuse "칸 예약 잠금을 ${DEV_SLOTS_LOCK_TIMEOUT}초 안에 잡지 못했다: $DEV_SLOTS_DIR/.lock" \
+    "다른 dev-env.sh 가 끝난 뒤 다시 부른다. 도는 dev-env.sh 가 없는데도 같으면 $DEV_SLOTS_DIR 의 .lock.pid·.lock.reclaim 파일을 지운다."
+}
+
+reserve_slot() {
+  dev_slot_reserve "$1" "$root" || refuse "칸 예약을 쓰지 못했다: $DEV_SLOTS_DIR/$1" "$DEV_SLOTS_DIR 의 권한·디스크를 본다."
+}
+
+# 칸 $1 의 예약이 살아 있는 남의 것이면 그 경로. 아니면(없음·내 것·고아) 빈 줄.
+foreign_reservation() {
+  _reserved_by=$(dev_slot_owner "$1")
+  if [ -n "$_reserved_by" ] && [ "$_reserved_by" != "$root" ] && [ -d "$_reserved_by" ]; then
+    echo "$_reserved_by"
+  fi
+}
+
+# 해시 칸 $1 부터 1~9 를 한 바퀴 돌아 offset 을 정한다(#1409·#1411). 한 칸은 dev 스택과 `-e2e` 스택을 함께 본다
+# (`test.sh e2e` 는 `-e2e` 만 띄운다). 순서: 내 예약이 있는 칸 → 내 라벨이 붙은 칸(예약 없이 뜬 스택) → 비었거나
+# 고아 예약·라벨만 남은 첫 칸. 살아 있는 남의 예약이나 라벨이 하나라도 있는 칸은 쓰지 않는다.
+pick_hash_offset() {
+  # docker 가 없거나 답하지 않으면 목록이 비고, 예약만으로 고른다.
+  _projects=$(docker ps -a --filter "label=com.docker.compose.project" \
+    --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null | sort -u || true)
+  _reserved_slot= _labeled_slot= _free_slot= _taken= _hash_owner= _previous=
+  _i=0
+  while [ "$_i" -lt 9 ]; do
+    _slot=$(( ($1 - 1 + _i) % 9 + 1 ))
+    _i=$((_i + 1))
+    _mine= _other=$(foreign_reservation "$_slot")
+    for _project in "codemit-dev-$_slot" "codemit-dev-$_slot-e2e"; do
+      printf '%s\n' "$_projects" | grep -qx "$_project" || continue
+      for _owner in $(dev_stack_owners "$_project"); do
+        case "$_owner" in
+          "$root" | "$root"/*) _mine=1 ;;
+          *) if [ -d "$_owner" ]; then _other=$_owner; fi ;;
+        esac
+      done
+    done
+    _reserved_mine=
+    if [ "$(dev_slot_owner "$_slot")" = "$root" ]; then _reserved_mine=1 _previous=$_slot; fi
+    if [ -n "$_other" ]; then
+      _taken="$_taken $_slot($_other)"
+      if [ "$_slot" -eq "$1" ]; then _hash_owner=$_other; fi
+    elif [ -n "$_reserved_mine" ]; then
+      _reserved_slot=$_slot
+      break
+    elif [ -n "$_mine" ]; then
+      _labeled_slot=${_labeled_slot:-$_slot}
+    elif [ -z "$_free_slot" ]; then
+      _free_slot=$_slot
+    fi
+  done
+  offset=${_reserved_slot:-${_labeled_slot:-$_free_slot}}
+  [ -n "$offset" ] || refuse "오프셋 1~9 가 모두 다른 체크아웃의 것이다:$_taken"
+  if [ -n "$_previous" ] && [ "$_previous" -ne "$offset" ]; then
+    echo "dev-env.sh: 예약했던 칸 $_previous 에 다른 체크아웃의 스택이 있어 오프셋 $offset 으로 옮긴다(포트가 바뀐다)" >&2
+  fi
+  if [ -n "$_hash_owner" ]; then
+    echo "dev-env.sh: 해시 칸 $1 은 다른 체크아웃($_hash_owner)의 것이라 오프셋 $offset 을 쓴다" >&2
+  fi
+}
 
 if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   # 사람이 오프셋을 직접 고른다(#1106). 0~9 의 한 자리 숫자만 받는다.
@@ -61,23 +146,30 @@ if [ -n "${CODEMIT_DEV_OFFSET:-}" ]; then
   esac
   # 그 오프셋의 compose 프로젝트가 다른 체크아웃 것이면 멈춘다 — 남의 스택에 붙지 않는다.
   project=codemit-dev$( [ "$offset" -eq 0 ] || printf '%s' "-$offset" )
-  if command -v docker >/dev/null 2>&1; then
-    . "$script_dir/dev-stack-orphans.sh"
-    owners=$(dev_stack_owners "$project")
+  orphan=
+  if command -v docker >/dev/null 2>&1 && dev_stack_is_orphan "$project"; then
     # 주인 디렉터리가 모두 사라진 스택은 고아다 — 컨테이너를 내리고(볼륨은 남긴다) 그 오프셋을 쓴다(#1186).
-    if dev_stack_is_orphan "$project"; then
-      echo "dev-env.sh: 오프셋 $offset($project)은 사라진 체크아웃($(echo $owners))의 고아 스택이라 내렸다(볼륨은 남겼다)" >&2
-      dev_stack_down_orphan "$project"
-      owners=
-    fi
-    for owner in $owners; do
-      case "$owner" in
-        "$root" | "$root"/*) ;;
-        *)
-          refuse "오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다"
-          ;;
-      esac
-    done
+    # 내리기는 오래 걸릴 수 있어 잠금 밖에서 한다.
+    orphan=1
+    echo "dev-env.sh: 오프셋 $offset($project)은 사라진 체크아웃($(echo $(dev_stack_owners "$project")))의 고아 스택이라 내렸다(볼륨은 남겼다)" >&2
+    dev_stack_down_orphan "$project"
+  fi
+  # 주 워크트리의 0 은 늘 그 몫이라 예약하지 않는다.
+  reservable=1
+  if [ "$offset" -eq 0 ] && [ "$root" = "$main_worktree" ]; then reservable=; fi
+  if [ -n "$reservable" ]; then
+    lock_slots
+    owner=$(foreign_reservation "$offset")
+    [ -z "$owner" ] || refuse "오프셋 $offset 은 다른 체크아웃($owner)이 예약했다: $DEV_SLOTS_DIR/$offset" \
+      "빈 오프셋을 고르거나(CODEMIT_DEV_OFFSET=<0~9>, 비우면 경로 해시), 그 체크아웃이 더는 쓰지 않으면 $DEV_SLOTS_DIR/$offset 파일을 지운다."
+  fi
+  if [ -z "$orphan" ] && command -v docker >/dev/null 2>&1; then
+    owner=$(foreign_owner "$project")
+    [ -z "$owner" ] || refuse "오프셋 $offset($project)은 다른 체크아웃($owner)의 스택이다"
+  fi
+  if [ -n "$reservable" ]; then
+    reserve_slot "$offset"
+    dev_slots_unlock
   fi
 elif [ "$root" = "$main_worktree" ]; then
   offset=0
@@ -89,6 +181,10 @@ else
   if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum; else hash='shasum -a 256'; fi
   digits=$(printf '%s' "$root" | $hash | tr -dc '0-9' | cut -c1-3 | sed 's/^0*//')
   offset=$(( (${digits:-0} % 9) + 1 ))
+  lock_slots
+  pick_hash_offset "$offset"
+  reserve_slot "$offset"
+  dev_slots_unlock
 fi
 
 slot=$(( offset * 100 ))

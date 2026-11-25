@@ -121,3 +121,53 @@ test("채점이 끝나면 알림이 오고, 그 알림을 누르면 그 시도�
   await toggle.click();
   await expect(verdicts).toContainText("충족");
 });
+
+test("같은 문제의 묶음 줄은 서버가 말하는 지금 상태와 시도 수를 적는다", async ({ page }) => {
+  const seed = `notification-group-${test.info().workerIndex}-${Date.now()}`;
+  const marker = `codemit-e2e-group-${test.info().workerIndex}-${Date.now()}`;
+
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const classes = "/api/backend/classroom/classes";
+
+  const created = await api.post(classes, {
+    data: { name: `알림 묶음 클래스 ${Date.now()}`, instructor_display_name: "강사" },
+  });
+  const classId = (await created.json()).id as number;
+  await api.put(`${classes}/${classId}/openai-key`, { data: { api_key: "sk-e2e-test-key" } });
+  const problem = await api.post(`${classes}/${classId}/problems`, {
+    data: { title: "묶음 문제", submission_formats: ["repository"] },
+  });
+  const problemId = (await problem.json()).id as number;
+  const problemUrl = `${classes}/${classId}/problems/${problemId}`;
+  await api.post(`${problemUrl}/checklist-items`, { data: { label: marker, required: true } });
+  expect((await api.post(`${problemUrl}/open`)).ok()).toBeTruthy();
+  const joinCode = (await (await api.get(`${classes}/${classId}`)).json()).join_code as string;
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-participant`);
+  await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } });
+
+  // 첫 시도는 통과(주소에 체크리스트 문구가 있다), 뒤 시도는 미통과 — 지금 상태는 통과다.
+  for (const [index, repository] of [marker, "hello-world"].entries()) {
+    const submitted = await api.post(`${problemUrl}/submissions`, {
+      data: { value: `https://github.com/octocat/${repository}`, submission_format: "repository" },
+    });
+    expect(submitted.ok()).toBeTruthy();
+    await expect
+      .poll(
+        async () => {
+          const mine = await (await api.get(`${problemUrl}/mine`)).json();
+          return mine.submissions.filter((s: { status: string }) => s.status === "scored").length;
+        },
+        { timeout: 2_500 },
+      )
+      .toBe(index + 1);
+  }
+
+  await page.goto("/notifications");
+
+  await expect(page.getByTestId(`notification-group-${problemId}`)).toContainText(
+    "'묶음 문제' 문제 — 지금 상태 통과 (시도 2건)",
+  );
+});
