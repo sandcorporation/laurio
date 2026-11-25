@@ -359,7 +359,7 @@ export default function ProblemSubmissionsPage() {
         {blockedByRejectedModel ? (
           <MissingScoringKeyNote
             classId={classId}
-            {...modelRejectedNote(classState.status === "ready" ? classState.classroom.role : null, classId, problemId)}
+            {...modelRejectedNote(classState.status === "ready" ? classState.classroom.role : null, classId, problemId, problem?.model)}
             noteTestId="submissions-model-rejected-note"
             settingsLinkTestId="submissions-model-rejected-settings-link"
             settingsAnchor="scoring-model"
@@ -436,6 +436,7 @@ export default function ProblemSubmissionsPage() {
         <QualityRankingCard
           classId={classId}
           problemId={problemId}
+          problemModel={problem?.model}
           classroom={classState.status === "ready" ? classState.classroom : null}
         />
       </div>

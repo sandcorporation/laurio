@@ -87,26 +87,24 @@ export function scoringBlockNote(
   };
 }
 
-// 채점 모델이 키에 거부된 사유(#403) — 모델을 바꾸면 풀리고, 공동 강사도 바꿀 수 있다(#1425).
+// 채점 모델이 키에 거부된 사유(#403) — 모델을 바꾸면 풀리고, 공동 강사도 바꾼다(#1425).
+// 거부 표시는 문제 모델을 바꿀 때 그 문제 것이 지워지고, 클래스 기본 모델을 바꿀 때는 모델이 빈 문제만 지워진다.
+// 그래서 문제가 자기 모델을 쓰면 역할과 상관없이 문제 편집의 채점 모델 칸으로, 모델이 비었고 소유자면 클래스 설정으로 보낸다(#1429).
 export function modelRejectedNote(
   role: "owner" | "co_instructor" | null | undefined,
   classId: number,
   problemId: number,
+  problemModel: string | null | undefined = "",
 ): { message: string; actionLabel: string | null; href: string | null } {
   const message = "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요.";
-  if (role === "owner") {
-    return {
-      message,
-      actionLabel: "채점 모델 바꾸기",
-      href: `/classes/${classId}/settings#scoring-model`,
-    };
-  }
-  if (role === "co_instructor") {
-    return {
-      message,
-      actionLabel: "채점 모델 바꾸기",
-      href: `/classes/${classId}/problems/${problemId}`,
-    };
-  }
-  return { message, actionLabel: null, href: null };
+  if (role !== "owner" && role !== "co_instructor") return { message, actionLabel: null, href: null };
+  const inherits = !problemModel;
+  return {
+    message,
+    actionLabel: "채점 모델 바꾸기",
+    href:
+      role === "owner" && inherits
+        ? `/classes/${classId}/settings#scoring-model`
+        : `/classes/${classId}/problems/${problemId}#scoring-model`,
+  };
 }
