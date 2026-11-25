@@ -1,6 +1,9 @@
-import { isDeployedEnvironment } from "@/lib/auth/cookies";
+import { cookies } from "next/headers";
+
+import { ACCESS_COOKIE, REFRESH_COOKIE, isDeployedEnvironment } from "@/lib/auth/cookies";
 import { readGithubOAuthConfig } from "@/lib/auth/github";
 import { readGoogleOAuthConfig } from "@/lib/auth/google";
+import { LOGIN_BOUNCE_COOKIE, shouldCheckSessionOnLogin } from "@/lib/auth/login-auto-continue";
 
 import LoginForm from "./login-form";
 
@@ -28,9 +31,26 @@ import LoginForm from "./login-form";
 // 매 요청마다 다시 렌더해 컨테이너가 실제로 뜬 배포 환경의 값을 보게 한다.
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+type SearchParams = { next?: string | string[]; next_origin?: string | string[]; error?: string | string[] };
+
+const single = (value: string | string[] | undefined) => (typeof value === "string" ? value : null);
+
+// 로그인한 사람에게는 폼 대신 목적지로 넘긴다(#1388 T3, lib/auth/login-auto-continue.ts).
+// 여기서는 세션 쿠키가 **있는지**만 본다 — 산 세션인지는 화면이 `/api/auth/session` 으로
+// 백엔드에 묻는다. 쿠키가 없으면 그 요청도 하지 않는다.
+export default async function LoginPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const params = await searchParams;
+  const jar = await cookies();
+  const checkSessionFirst = shouldCheckSessionOnLogin({
+    hasSessionCookie: Boolean(jar.get(ACCESS_COOKIE)?.value || jar.get(REFRESH_COOKIE)?.value),
+    error: single(params.error),
+    bounced: jar.has(LOGIN_BOUNCE_COOKIE),
+    next: single(params.next),
+    nextOrigin: single(params.next_origin),
+  });
   return (
     <LoginForm
+      checkSessionFirst={checkSessionFirst}
       showDevSeedForm={!isDeployedEnvironment()}
       githubConfigured={readGithubOAuthConfig() !== null}
       googleConfigured={readGoogleOAuthConfig() !== null}
