@@ -311,6 +311,7 @@ Escrow 해제·지급 절차 자체가 없다. 그 결과 `POST/GET .../handover
 | | |
 | --- | --- |
 | `POST`·`GET /api/classroom/classes[/{id}]` | 클래스를 열고 내가 강사인 것만 본다 — 소유한 것과 공동 강사인 것, 어느 쪽인지 `role` 이 말한다(#561) |
+| `GET /api/classroom/classes/former-instructor` | 한때 강사(수락한 초대·오간 이전)였다가 지금은 아닌 클래스 번호 — 404 안내가 이유를 말하는 데만 쓴다(#1465 2) |
 | `GET /api/classroom/classes/joined` | 참여자로 들어간 클래스 — 본인이 강사인 클래스는 여기 겹쳐 나오지 않는다(#328) |
 | `PATCH /api/classroom/classes/{id}` | 이름·기본 채점 모델·기본 추론 강도·「추론 모델」 스위치(`default_model_is_reasoning`, 호환 서버만 뜻이 있다, #602)를 고친다(#402) — 소유자의 강사 이름 칸은 소유자만. 채점 상한 칸은 없다(#629, ADR-0060) — 응답의 `token_usage_total`·`token_usage_estimated` 가 누적 사용량이다. 호환 서버에서 모델이나 스위치가 바뀌면 시험 호출(`classroom.scoring_model_probe`)이 채점과 같은 `json_schema` 판정 하나를 받아 보고, 못 지키면 이유 문장의 422. 통과는 (연결, 모델, 추론 여부) 단위로 하루 캐시한다. 채점 방식 두 칸 `scoring_method`·`quality_method`(`single`·`agent`, #1036) — 호환 서버 연결이면 `agent` 는 422(까닭 코드 `compatible_server`). 읽기 응답은 두 칸과 `grading_method_options`(선택지마다 `selectable`·`unavailable_reason`)를 싣는다 |
 | `PUT /api/classroom/classes/{id}/openai-key` | 강사 본인의 OpenAI 키를 저장한다 — 마스킹된 값만 돌려준다(#284). OpenAI 키·Claude 키는 따로 산다(#1269, `ClassOut.openai_key`·`anthropic_key` 에 끝 네 자리·상태·`switchable`). 채점 연결이 「OpenAI 키」로 넘어가는 것은 이미 OpenAI 이거나, 지금 연결로 채점할 수 없거나(키 없음·거부됨), 호환 서버 연결일 때(인증 값이 같은 칸이라 덮는다 — 주소도 지운다, #601)뿐이다. 그 밖에는 키만 넣어 두고 스위치는 그대로다 |

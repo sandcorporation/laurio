@@ -199,6 +199,13 @@ for (const blocker of BLOCKERS) {
 
     await expect(page.getByTestId(blocker.expected)).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("submit-repository")).toHaveCount(0);
+    if (blocker.expected === "my-problem-not-found") {
+      // 열어 둔 화면은 이유를 말한다(#1465 2). 새로 연 주소는 낸 적 없는 숨긴 문제와 없는 문제를 가르지 않는다.
+      await expect(page.getByTestId("my-problem-not-found")).toContainText("강사가 이 문제를 숨기거나 삭제했습니다");
+      await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeFocused();
+      await page.goto(`/classes/${classId}/problems/${problemId}/submit`);
+      await expect(page.getByTestId("my-problem-not-found")).toContainText("문제를 찾을 수 없습니다");
+    }
     if (blocker.expected !== "my-problem-not-found") {
       // 보관·내보내기 안내는 낭독되고 초점을 받는다(#1459 ③) — 폼과 함께 초점이 body 로 빠지지 않는다.
       await expect(page.getByTestId(blocker.expected)).toHaveAttribute("role", "alert");
@@ -471,3 +478,48 @@ for (const width of [1280, 390]) {
     await expect(page.getByTestId("co-instructor-invite-copy")).toBeFocused();
   });
 }
+
+// #1465 2 — 강사에서 빠진 사람에게는 「클래스를 찾을 수 없습니다」가 아니라 이유를 말한다. 열어 둔 화면과 새로 연 주소 둘 다.
+// 처음부터 관계 없는 사람에게는 그대로 「찾을 수 없습니다」다(존재를 말하지 않는다).
+test("공동 강사가 내보내지면 열어 둔 화면과 새로 연 주소가 이유를 말하고, 관계 없는 사람은 찾을 수 없음이다", async ({
+  page,
+  browser,
+}) => {
+  const seed = `rt-removed-${test.info().workerIndex}-${Date.now()}`;
+  const owner = await otherSession(browser, seed);
+  const created = await owner.api.post("/api/backend/classroom/classes", {
+    data: { name: `내보냄 ${seed}`, instructor_display_name: "김소유" },
+  });
+  const classId = (await created.json()).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const token = (await (await owner.api.post(`${base}/co-instructor-invites`)).json()).token as string;
+  await establishClassroomSession(page, `${seed}-co`);
+  expect(
+    (
+      await classroomApi(page).post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, {
+        data: { display_name: "박조교" },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const roster = (await (await owner.api.get(`${base}/instructors`)).json()) as { co_instructor_id: number | null }[];
+  const coId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+
+  await openWithStream(page, `/classes/${classId}`);
+  await expect(page.getByTestId("class-instructors-count").or(page.getByRole("tab", { name: /강사/ }))).toBeVisible();
+  expect((await owner.api.post(`${base}/co-instructors/${coId}/remove`)).ok()).toBeTruthy();
+  await owner.context.close();
+
+  await expect(page.getByTestId("classroom-detail-not-found")).toContainText("더 이상 이 클래스의 강사가 아닙니다", {
+    timeout: 10_000,
+  });
+  await expect(page.getByRole("heading", { name: "더 이상 이 클래스의 강사가 아닙니다" })).toBeFocused();
+  await page.goto(`/classes/${classId}`);
+  await expect(page.getByTestId("classroom-detail-not-found")).toContainText("더 이상 이 클래스의 강사가 아닙니다");
+
+  const stranger = await otherSession(browser, `${seed}-stranger`);
+  await stranger.context.pages()[0].goto(`/classes/${classId}`);
+  await expect(stranger.context.pages()[0].getByTestId("classroom-detail-not-found")).toContainText(
+    "클래스를 찾을 수 없습니다",
+  );
+  await stranger.context.close();
+});

@@ -128,3 +128,44 @@ describe("/problems/{pid}/submit — taught → joined → 무관", () => {
     expect(decide("submit", has, has)).toEqual(problemForInstructor);
   });
 });
+
+describe("접근을 잃은 이유(#1465 2) — 증거가 있는 사람에게만 말한다", () => {
+  const former: AccessListState = { status: "ready", classes: [{ id: CLASS_ID }] };
+  const noFormer: AccessListState = { status: "ready", classes: [] };
+  const noLongerInstructor = {
+    kind: "notice",
+    title: "더 이상 이 클래스의 강사가 아닙니다",
+    link: { label: "홈으로", href: "/" },
+  };
+  for (const page of ["class", "problem"] as const) {
+    it(`${page}: 강사에서 빠진 사람은 이유를 듣는다`, () => {
+      expect(accessNotice({ page, status: "initial", joined: lacks, taught: lacks, former, classId: CLASS_ID })).toEqual(
+        noLongerInstructor,
+      );
+    });
+    it(`${page}: 증거가 없거나 목록을 못 읽으면 찾을 수 없음이다`, () => {
+      for (const f of [noFormer, failed, undefined]) {
+        expect(accessNotice({ page, status: "initial", joined: lacks, taught: lacks, former: f, classId: CLASS_ID })).toEqual(
+          unrelated,
+        );
+      }
+    });
+  }
+  it("목록이 오기 전에는 정하지 않는다", () => {
+    expect(
+      accessNotice({ page: "class", status: "initial", joined: lacks, taught: lacks, former: loading, classId: CLASS_ID }),
+    ).toEqual({ kind: "pending" });
+  });
+  it("제출 화면: 열어 둔 채 문제가 사라진 참여자만 이유를 듣는다", () => {
+    const opened = accessNotice({ page: "submit", status: "initial", joined: has, taught: lacks, hadAccess: true, classId: CLASS_ID });
+    expect(opened).toEqual({
+      kind: "notice",
+      title: "강사가 이 문제를 숨기거나 삭제했습니다",
+      link: { label: "문제 목록으로", href: "/classes/7/problems/mine" },
+    });
+    expect(decide("submit", has, lacks)).toEqual(problemForParticipant);
+    expect(accessNotice({ page: "submit", status: "initial", joined: lacks, taught: lacks, hadAccess: true, classId: CLASS_ID })).toEqual(
+      unrelated,
+    );
+  });
+});
