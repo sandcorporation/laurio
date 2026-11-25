@@ -66,9 +66,8 @@ function Notice({ page, classId, testId, retry }: Props) {
 }
 
 function NoticeBody({ testId, content }: { testId: string; content: AccessNoticeContent }) {
-  // 어느 주소에서 막혔든 탭 제목은 안내 제목이다(#1406). 문구가 정해진 뒤에야 마운트돼 화면이 먼저
-  // 단 제목을 덮는다.
-  useClassroomTabTitle({ screenName: content.title });
+  // 어느 주소에서 막혔든 탭 제목은 안내 제목이다(#1406) — 화면이 단 제목보다 앞선다.
+  useClassroomTabTitle({ screenName: content.title }, { override: true });
   return (
     <>
       <h1 data-testid={testId} className="text-[22px] font-semibold">
