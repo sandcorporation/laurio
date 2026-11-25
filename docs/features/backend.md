@@ -1194,9 +1194,10 @@ id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 센다 — 자기 시도가 없는 문제와 다른 알림 유형은 `null`이다. 읽음 처리 응답은 언제나
 `null`이다. 강의실 앱이 `notifications.ports.CLASSROOM_PROBLEM_STATUSES`에 구현을
 올리고, 한 쪽의 문제들을 한 번에 물어 질의 수가 문제 수만큼 늘지 않는다.
-소유권 이전 요청 알림에는 `transfer_status`(그 요청의 지금 상태, #1441)를 싣고, 요청을 찾지 못하면
-(`context.transfer_id` 가 없거나 요청 행이 지워졌다) `gone` 이다(#1448) — 대기 중인 요청은 언제나 찾히므로
-끝난 요청이다. 다른 유형은 `null`.
+소유권 이전 요청 알림에는 `transfer_status`(그 요청의 지금 상태, #1441)를 싣는다. 요청 행이 지워졌으면 `gone`
+(끝난 요청, #1448). `context.transfer_id` 가 없는 옛 알림(`classroom.0052` 가 요청 하나로 정하지 못함)은 그 클래스에
+그 사람 앞 대기 요청이 있으면 `unknown`(그 요청인지 모른다), 없으면 `gone` 이다(#1459 ①) — 대기 요청 확인은
+`notifications.ports.CLASSROOM_PENDING_TRANSFER_CLASSES` 로 한 쪽에 질의 한 번. 다른 유형은 `null`.
 
 ## 정책 값
 

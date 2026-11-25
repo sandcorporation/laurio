@@ -32,3 +32,11 @@ CLASSROOM_PROBLEM_STATUSES: Slot[Callable[[int, Collection[int]], Mapping[int, P
 CLASSROOM_TRANSFER_STATES: Slot[Callable[[int, Collection[int]], Mapping[int, str]]] = Slot(
     "강의실 소유권 이전 요청의 지금 상태", "classroom.apps"
 )
+
+
+#: `classroom.notification_problem_status.classes_with_pending_transfer_for` — (받는 사람 pk, 클래스 pk 들) → 그 사람
+#: 앞으로 지금 대기 중인 소유권 이전 요청이 있는 클래스 pk 들(#1459 ①). 요청에 잇지 못한 옛 알림이 「끝남」인지
+#: 「모름」인지 가른다 — 대기 요청이 없으면 그 알림의 요청도 대기일 수 없다.
+CLASSROOM_PENDING_TRANSFER_CLASSES: Slot[Callable[[int, Collection[int]], Collection[int]]] = Slot(
+    "강의실 소유권 이전 요청이 대기 중인 클래스", "classroom.apps"
+)
