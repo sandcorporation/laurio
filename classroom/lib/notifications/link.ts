@@ -53,7 +53,8 @@ export function notificationHref(notification: NotificationRow): string | null {
     case "classroom_scoring_server_unreachable": {
       const classId = context.class_id;
       if (typeof classId !== "number") return null;
-      return `/classes/${classId}/settings#scoring-key`;
+      // 설정이냐 클래스 화면이냐는 여는 때의 역할로 고른다(#1426) — 도착 화면이 갈라 준다.
+      return `/classes/${classId}/scoring-key`;
     }
     // 소유권 이전(#575) — 받는 사람은 클래스 화면 맨 위의 요청 카드로, 넘긴 사람은 강사 목록이
     // 있는 강사 탭(#635)으로 간다(#669).

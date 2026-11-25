@@ -63,7 +63,7 @@ test("연결 없는 클래스에 참여자가 두 번 내도 강사 알림은 �
     await establishClassroomSession(page, ownerSeed);
   };
 
-  const missingLink = page.locator(`a[href$="/classes/${classId}/settings#scoring-key"]`);
+  const missingLink = page.locator(`a[href$="/classes/${classId}/scoring-key"]`);
   const badge = page.getByTestId("classroom-notification-badge");
 
   // 시나리오 2 — 참여자가 한 번 낸다.
