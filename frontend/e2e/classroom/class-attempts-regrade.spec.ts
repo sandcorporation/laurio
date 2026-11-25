@@ -74,6 +74,25 @@ test("「최근 제출」의 「전체」가 「제출」 화면을 열고, 「�
   await expect(page.getByTestId(`regrade-${submissionId}`)).toBeVisible();
 });
 
+// 키보드만으로(#1463 의 같은 결함) — 열리면 「취소」, Tab 은 창 안, Escape 로 닫히고 「다시 채점」 단추로 돌아온다.
+test("「다시 채점」 확인 창은 초점이 안으로 들어가 갇히고 Escape 로 닫히며 단추로 돌아온다", async ({ browser }) => {
+  const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+  await page.goto(`/classes/${classId}/submissions`);
+  const opener = page.getByTestId(`regrade-${submissionId}`);
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "다시 채점" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "취소" })).toBeFocused();
+  for (const key of ["Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"]) {
+    await page.keyboard.press(key);
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
 test("「다시 채점」은 확인 창을 거쳐 걸리고, 새로고침 뒤 그 줄은 정정된 판정이며 버튼이 없다", async ({ browser }) => {
   const page = await (await browser.newContext({ storageState: ownerState })).newPage();
   await page.goto(`/classes/${classId}/submissions`);
