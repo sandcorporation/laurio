@@ -48,7 +48,8 @@ test("로그아웃 상태로 초대 링크를 열고 로그인하면 같은 초�
   // 공개 앱 로그인이 끝난 것과 같다 — 세션을 심고 돌아올 자리로 간다.
   await establishClassroomSession(page, `e2e-co-helper-${stamp}`);
   await page.goto(returnPath ?? "/");
-  await page.getByTestId("invite-display-name-input").fill("박보조");
+  // 이름 칸은 라벨로 찾는다 — 접근성 이름이 끊기면 여기서 붉어진다(#1377).
+  await page.getByLabel("이 클래스에서 불릴 강사 이름").fill("박보조");
   await page.getByTestId("invite-accept").click();
 
   await expect(page).toHaveURL(`/classes/${classId}`);
