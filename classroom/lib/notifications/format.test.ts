@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { NotificationRow } from "./api";
-import { describeNotification } from "./format";
+import { EMPTY_NOTIFICATIONS_TEXT, describeNotification } from "./format";
 
 function row(overrides: Partial<NotificationRow>): NotificationRow {
   return {
@@ -197,5 +197,11 @@ describe("describeNotification — classroom_scoring_failure_capped", () => {
     expect(text).toContain("'알고리즘 1반' 클래스 김하늘 님의 '두 수의 합' 문제 2번째 시도");
     expect(text).toContain("자동으로 미달");
     expect(text).toContain("제한 시간 안에 답하지 않았습니다");
+  });
+});
+
+describe("EMPTY_NOTIFICATIONS_TEXT", () => {
+  it("강사 여부와 무관하게 한 줄이고, 언제 채워지는지 말하지 않는다(#1389)", () => {
+    expect(EMPTY_NOTIFICATIONS_TEXT).toBe("아직 알림이 없습니다.");
   });
 });

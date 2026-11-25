@@ -31,7 +31,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import {
   fetchMyNotifications,
   markAllRead,
@@ -39,7 +38,11 @@ import {
   markOneRead,
   type NotificationRow,
 } from "@/lib/notifications/api";
-import { describeNotification, formatDateTime } from "@/lib/notifications/format";
+import {
+  EMPTY_NOTIFICATIONS_TEXT,
+  describeNotification,
+  formatDateTime,
+} from "@/lib/notifications/format";
 import {
   groupCurrentlyPassed,
   groupHref,
@@ -69,7 +72,6 @@ export default function NotificationsPage() {
   const [markingAll, setMarkingAll] = useState(false);
   // 강사인 클래스가 있는가 — 채점 연결 알림(키 거부·크레딧 소진)은 강사에게만 오므로 빈
   // 상태 문구가 그것을 언급할지 여기 판정으로 가른다(#343).
-  const teacherGate = useTeacherClassGate();
   // 헤더 종과 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
   // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로만 보이면, 1페이지를
   // 전부 읽어도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다.
@@ -206,24 +208,11 @@ export default function NotificationsPage() {
           <span data-testid="notifications-load-error">알림을 불러오지 못했습니다.</span>
         </ErrorNote>
       ) : load.items.length === 0 ? (
-        // 강사인 클래스 판정이 끝나기 전에는 어느 쪽 문구로도 단정하지
-        // 않는다(#343, #332와 같은 규칙) — 판정이 늦게 끝나 문구가 바뀌는
-        // 깜빡임을 막는다.
-        teacherGate.pending ? (
-          <p data-testid="notifications-empty-pending" className="text-[13.5px] text-ink/45">
-            불러오는 중...
-          </p>
-        ) : (
-          <Card>
-            <EmptyState>
-              <span data-testid="notifications-empty">
-                {teacherGate.hasTaughtClasses
-                  ? "아직 알림이 없습니다 — 제출이 채점되거나 채점 연결에 문제가 생기면 여기 나타납니다."
-                  : "아직 알림이 없습니다 — 제출이 채점되면 여기 나타납니다."}
-              </span>
-            </EmptyState>
-          </Card>
-        )
+        <Card>
+          <EmptyState>
+            <span data-testid="notifications-empty">{EMPTY_NOTIFICATIONS_TEXT}</span>
+          </EmptyState>
+        </Card>
       ) : (
         <ul
           data-testid="notifications-list"

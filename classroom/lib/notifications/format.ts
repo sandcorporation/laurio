@@ -4,6 +4,9 @@
 // 이 유형들의 문구를 아예 갖고 있지도 않다. 이 파일이 유일한 문구 출처다.
 import type { NotificationRow } from "./api";
 
+/** 알림 목록이 비었을 때의 한 줄 — 강사인 클래스가 있든 없든 같다(#1389). */
+export const EMPTY_NOTIFICATIONS_TEXT = "아직 알림이 없습니다.";
+
 export function describeNotification(notification: NotificationRow): string {
   const context = (notification.context ?? {}) as Record<string, unknown>;
 
