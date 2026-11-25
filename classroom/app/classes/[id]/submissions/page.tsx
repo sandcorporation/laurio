@@ -29,30 +29,40 @@ import { calculatorPath, submissionAmount, type ScoringCalculator } from "@/lib/
 import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
 import { AttemptLine } from "../recent-attempts-card";
 
-function RegradeDialog({
-  classId,
-  attempt,
-  busy,
-  failed,
-  onCancel,
-  onConfirm,
-}: {
-  classId: number;
+type RegradeDialogProps = {
   attempt: ClassAttemptRow;
   busy: boolean;
   failed: boolean;
   onCancel: () => void;
   onConfirm: () => void;
-}) {
+  /** 연 단추가 다른 탭의 갱신으로 사라진 채 닫힐 때 초점을 받을 곳. */
+  fallbackFocus: () => HTMLElement | null;
+};
+
+// 금액이 정해진 뒤에야 창을 연다 — 창이 열리며 초점이 들어갈 때 낭독기가 읽는 설명에 「…」 대신 금액이 들어 있게(#1484 ⑥).
+function RegradeDialog({ classId, ...props }: RegradeDialogProps & { classId: number }) {
   // 「예상 비용」 카드와 같은 셈 — 지금 이 클래스의 조합으로 그 문제의 제출 한 건.
-  const { state } = useBackendQuery<ScoringCalculator>(bffClient, calculatorPath(classId, { problemId: attempt.problem_id }));
+  const { state } = useBackendQuery<ScoringCalculator>(bffClient, calculatorPath(classId, { problemId: props.attempt.problem_id }));
+  if (state.status === "loading") return null;
+  return <RegradeDialogBody {...props} amount={state.status === "ready" ? submissionAmount(state.data) : "—"} />;
+}
+
+function RegradeDialogBody({
+  attempt,
+  amount,
+  busy,
+  failed,
+  onCancel,
+  onConfirm,
+  fallbackFocus,
+}: RegradeDialogProps & { amount: string }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const { descriptionId } = useDialogFocus(dialogRef, {
     onEscape: onCancel,
     initialFocus: cancelRef,
+    fallbackFocus,
   });
-  const amount = state.status === "ready" ? submissionAmount(state.data) : state.status === "error" ? "—" : "…";
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
       <button type="button" tabIndex={-1} aria-label="닫기" onClick={onCancel} className="fixed inset-0 cursor-default" />
@@ -292,6 +302,7 @@ function ClassAttempts() {
           failed={failed}
           onCancel={() => setTarget(null)}
           onConfirm={confirm}
+          fallbackFocus={() => titleRef.current}
         />
       ) : null}
     </PageShell>
