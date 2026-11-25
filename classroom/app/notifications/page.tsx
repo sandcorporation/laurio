@@ -26,7 +26,7 @@
 // 읽음」이 서버를 다시 불러오지 않고 로컬에서 `read_at`만 바꾸는 자리
 // (`applyRead`)가 그 훅에는 없다.
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useSessionRecheck } from "@/lib/auth/use-session-recheck";
@@ -72,6 +72,11 @@ export default function NotificationsPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
+  // 「모두 읽음」을 누르면 그 단추가 사라진다 — 초점이 BODY 로 떨어지지 않게 제목으로 옮기고(#1476),
+  // 결과는 늘 있는 status 영역이 읽는다(영역이 눌린 뒤에 생기면 낭독기가 놓친다).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const markAllRef = useRef<HTMLButtonElement>(null);
+  const [announcement, setAnnouncement] = useState("");
   // 강사인 클래스가 있는가 — 채점 연결 알림(키 거부·크레딧 소진)은 강사에게만 오므로 빈
   // 상태 문구가 그것을 언급할지 여기 판정으로 가른다(#343).
   // 헤더 종과 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
@@ -174,8 +179,13 @@ export default function NotificationsPage() {
       const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
       applyRead(unreadIds, now);
       broadcastNotificationsRead();
+      setAnnouncement("알림을 모두 읽음으로 표시했습니다");
+      headingRef.current?.focus();
+    } else {
+      setAnnouncement("모두 읽음으로 표시하지 못했습니다. 다시 시도해 주세요");
     }
     setMarkingAll(false);
+    if (!result.ok) markAllRef.current?.focus();
   }
 
   if (load.status === "loading") {
@@ -193,9 +203,10 @@ export default function NotificationsPage() {
   return (
     <PageShell>
       <div className="flex items-center justify-between gap-3">
-        <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" />
+        <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" titleRef={headingRef} />
         {unreadCount > 0 && (
           <button
+            ref={markAllRef}
             type="button"
             onClick={handleMarkAllRead}
             disabled={markingAll}
@@ -206,6 +217,10 @@ export default function NotificationsPage() {
           </button>
         )}
       </div>
+
+      <p role="status" data-testid="notifications-status" className="sr-only">
+        {announcement}
+      </p>
 
       {load.status === "error" ? (
         <ErrorNote>

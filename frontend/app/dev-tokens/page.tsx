@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { isDeployedEnvironment } from "@/lib/auth/cookies";
+
+export const metadata: Metadata = { title: "토큰 배선" };
 
 // 토큰 배선 증명 페이지(FE-02 #27이 세운 단언, #93이 현관에서 옮겼다).
 //

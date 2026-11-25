@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 
 import { ACCESS_COOKIE, REFRESH_COOKIE, isDeployedEnvironment } from "@/lib/auth/cookies";
@@ -6,6 +7,8 @@ import { readGoogleOAuthConfig } from "@/lib/auth/google";
 import { LOGIN_BOUNCE_COOKIE, isAutoContinueStopped, shouldCheckSessionOnLogin } from "@/lib/auth/login-auto-continue";
 
 import LoginForm from "./login-form";
+
+export const metadata: Metadata = { title: "로그인" };
 
 // 서버 컴포넌트다 — dev seed 폼을 보일지, GitHub·구글 버튼을 실제 링크로 그릴지는
 // 여기서 서버가 결정한다(#95, spec #92 / #189). client_id·secret 자체는 절대
