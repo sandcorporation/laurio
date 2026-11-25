@@ -165,6 +165,18 @@ export default function EditProblemPage() {
     else if (target === "hide") hideButtonRef.current?.focus();
   }, [confirmingHide]);
   const reopenMutation = useMutationRequest();
+  // 열기·숨기기·다시 열기가 성공하면 누른 단추가 다음 전이의 단추로 바뀐다 — 초점이 body 로 떨어졌을 때만
+  // 새 단추로 옮긴다(다른 곳에 있는 초점은 뺏지 않는다, #1519). 상태 전이 단추는 한 자리에 하나다.
+  const transitionButtonRef = useRef<HTMLButtonElement>(null);
+  const transitionFrom = useRef<string | null>(null);
+  const transitionName = state.status === "ready" ? state.problem.available_transitions[0]?.name ?? null : null;
+  useEffect(() => {
+    const from = transitionFrom.current;
+    if (from === null || transitionName === null || transitionName === from) return;
+    transitionFrom.current = null;
+    const active = document.activeElement;
+    if (active === null || active === document.body) transitionButtonRef.current?.focus();
+  }, [transitionName]);
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
@@ -426,6 +438,7 @@ export default function EditProblemPage() {
   }
 
   function handleOpen() {
+    transitionFrom.current = transitionName;
     void openMutation.run(() => openProblem(classId, problemId), {
       fallbackMessage: "문제를 열지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -433,6 +446,7 @@ export default function EditProblemPage() {
   }
 
   function handleHide() {
+    transitionFrom.current = transitionName;
     void hideMutation.run(() => hideProblem(classId, problemId), {
       fallbackMessage: "문제를 숨기지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -441,6 +455,7 @@ export default function EditProblemPage() {
   }
 
   function handleReopen() {
+    transitionFrom.current = transitionName;
     void reopenMutation.run(() => reopenProblem(classId, problemId), {
       fallbackMessage: "문제를 다시 열지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -813,13 +828,16 @@ export default function EditProblemPage() {
                           {transitionBlockedReasonText(transition.blocked_reason)}
                         </span>
                       ) : transition?.name === "open" ? (
-                        <button type="button" data-testid="open-problem-button" onClick={handleOpen} className={buttonClass("primary", "sm")}>
+                        <button type="button" ref={transitionButtonRef} data-testid="open-problem-button" onClick={handleOpen} className={buttonClass("primary", "sm")}>
                           문제 열기
                         </button>
                       ) : transition?.name === "hide" ? (
                         <button
                           type="button"
-                          ref={hideButtonRef}
+                          ref={(node) => {
+                            hideButtonRef.current = node;
+                            transitionButtonRef.current = node;
+                          }}
                           data-testid="hide-problem-button"
                           onClick={() => {
                             focusAfterHideToggle.current = "cancel";
@@ -830,7 +848,7 @@ export default function EditProblemPage() {
                           숨기기
                         </button>
                       ) : transition?.name === "reopen" ? (
-                        <button type="button" data-testid="reopen-problem-button" onClick={handleReopen} className={buttonClass("primary", "sm")}>
+                        <button type="button" ref={transitionButtonRef} data-testid="reopen-problem-button" onClick={handleReopen} className={buttonClass("primary", "sm")}>
                           다시 열기
                         </button>
                       ) : null}

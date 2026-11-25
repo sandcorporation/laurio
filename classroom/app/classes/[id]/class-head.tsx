@@ -6,6 +6,7 @@
 // 「복사해서 새로 열기」·「보관하기」·「보관 되돌리기」는 설정의 「보관과 삭제」 구획(`#class-archive`)으로
 // 옮겼다(#636). 보관된 클래스는 복사가 주 행동이라 「클래스 설정」이 그 구획으로 곧장 가는 주 버튼이다.
 import Link from "next/link";
+import type { Ref } from "react";
 
 import { Badge, buttonClass } from "@/app/components/ui";
 import type { ClassRow } from "@/lib/classes/api";
@@ -38,7 +39,7 @@ export function ClassStatBar({ classroom }: { classroom: ClassRow }) {
   );
 }
 
-export function ClassHead({ classroom }: { classroom: ClassRow }) {
+export function ClassHead({ classroom, titleRef }: { classroom: ClassRow; titleRef?: Ref<HTMLHeadingElement> }) {
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
       <div className="flex min-w-0 flex-col gap-1.5">
@@ -49,7 +50,12 @@ export function ClassHead({ classroom }: { classroom: ClassRow }) {
           › {classroom.name}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <h1 data-testid="classroom-detail-heading" className="text-[22px] font-semibold tracking-[-0.01em]">
+          <h1
+            ref={titleRef}
+            tabIndex={titleRef ? -1 : undefined}
+            data-testid="classroom-detail-heading"
+            className={`text-[22px] font-semibold tracking-[-0.01em]${titleRef ? " outline-none" : ""}`}
+          >
             {classroom.name}
           </h1>
           <span data-testid="classroom-detail-status">
