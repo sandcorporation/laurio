@@ -358,10 +358,16 @@ export default function ProblemSubmissionsPage() {
         {blockedByRejectedModel ? (
           <MissingScoringKeyNote
             classId={classId}
-            message="이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+            message={
+              classState.status === "ready" && classState.classroom.role === "co_instructor"
+                ? "이 키로 쓸 수 없는 채점 모델입니다 — 소유자에게 채점 모델을 바꿔 달라고 하세요."
+                : "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+            }
             noteTestId="submissions-model-rejected-note"
             settingsLinkTestId="submissions-model-rejected-settings-link"
-            actionLabel="채점 모델 바꾸기"
+            actionLabel={
+              classState.status === "ready" && classState.classroom.role === "co_instructor" ? null : "채점 모델 바꾸기"
+            }
             settingsAnchor="scoring-model"
           />
         ) : null}

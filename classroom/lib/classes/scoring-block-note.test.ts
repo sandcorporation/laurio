@@ -14,6 +14,7 @@ const connected = {
   scoring_connection_kind: "openai_key",
   openai_key_masked: "sk-…7f2a",
   scoring_server_host: null,
+  role: "owner" as const,
 };
 
 const missing = { ...connected, has_openai_key: false, openai_key_status: null, openai_key_masked: null };
@@ -95,5 +96,59 @@ describe("scoringBlockNote — 완성도 채점", () => {
 
     expect(note.message).toBe(message);
     expect(note.actionLabel).toBe(scoringBlockNote(classroom, "submissions").actionLabel);
+  });
+});
+
+describe("scoringBlockNote — 공동 강사(#1421)", () => {
+  const co = { role: "co_instructor" as const };
+
+  it.each([
+    [
+      "연결 없음",
+      { ...missing, ...co },
+      "채점 연결이 없어 참여자의 제출이 채점되지 않고 있습니다 — 소유자에게 채점 키를 넣어 달라고 하세요.",
+      "채점 연결이 없어 채점할 수 없습니다 — 소유자에게 채점 키를 넣어 달라고 하세요.",
+    ],
+    [
+      "거부됨",
+      { ...connected, ...co, openai_key_status: "rejected" as const },
+      "채점 키가 거부되어 채점이 멈췄습니다 — 소유자에게 새 키를 저장해 달라고 하세요.",
+      "채점 키가 거부되어 채점할 수 없습니다 — 소유자에게 새 키를 저장해 달라고 하세요.",
+    ],
+    [
+      "크레딧 소진",
+      { ...connected, ...co, scoring_quota_exhausted: true },
+      "채점 키의 크레딧이 떨어져 채점이 멈췄습니다 — 소유자가 충전하면 밀린 제출부터 이어서 채점됩니다.",
+      "채점 키의 크레딧이 떨어져 채점할 수 없습니다 — 소유자에게 충전해 달라고 하세요.",
+    ],
+    [
+      "원인 모름",
+      { ...connected, ...co },
+      "채점이 멈춰 있습니다 — 소유자에게 채점 연결을 확인해 달라고 하세요.",
+      "지금은 채점할 수 없습니다 — 소유자에게 채점 연결을 확인해 달라고 하세요.",
+    ],
+  ])("%s — 소유자에게 부탁하는 문장, 설정으로 가는 단추 없음", (_, classroom, submissions, quality) => {
+    expect(scoringBlockNote(classroom, "submissions")).toEqual({ message: submissions, actionLabel: null });
+    expect(scoringBlockNote(classroom, "quality")).toEqual({ message: quality, actionLabel: null });
+  });
+
+  it("서버 연결 불가 — 문장은 소유자와 같고 단추만 없다", () => {
+    const classroom = { ...connected, ...co, scoring_server_unreachable: true };
+
+    expect(scoringBlockNote(classroom, "submissions")).toEqual({
+      message: scoringBlockNote({ ...classroom, role: "owner" }, "submissions").message,
+      actionLabel: null,
+    });
+  });
+
+  it("소유자는 어느 원인에서나 단추가 있다", () => {
+    for (const patch of [{}, { openai_key_status: "rejected" as const }, { scoring_quota_exhausted: true }]) {
+      expect(scoringBlockNote({ ...connected, ...patch }, "submissions").actionLabel).not.toBeNull();
+    }
+    expect(scoringBlockNote(missing, "quality").actionLabel).toBe("클래스 설정에서 넣기");
+  });
+
+  it("클래스 정보를 못 읽으면 단추를 내지 않는다", () => {
+    expect(scoringBlockNote(null, "quality").actionLabel).toBeNull();
   });
 });

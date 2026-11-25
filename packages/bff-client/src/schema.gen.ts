@@ -6856,6 +6856,8 @@ export interface components {
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
             /** Submit Blocked Reason */
             submit_blocked_reason?: string | null;
+            /** Viewer Role */
+            viewer_role?: ("owner" | "co_instructor") | null;
             /**
              * Viewing As Instructor
              * @default false

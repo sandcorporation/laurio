@@ -1313,6 +1313,10 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 낼 수 있게 되면서 둘이 갈렸다 — 띠(「학생 화면으로 보고 있다」)는 이
     #: 값으로, 제출 잠금은 `submit_blocked_reason`으로 정한다.
     viewing_as_instructor: bool = False
+    #: 강사가 열었을 때만 채워지는 보는 사람의 역할("owner"|"co_instructor") — 채점 키·모델은 소유자만
+    #: 바꾸므로, 멈춘 시도의 안내가 소유자에게는 「넣으면」, 공동 강사에게는 「소유자에게 부탁」이 된다
+    #: (#1421·#1422). 참여자 시점에는 언제나 `None`이다.
+    viewer_role: Literal["owner", "co_instructor"] | None = None
 
 
 class ClassroomProblemStatsOut(Schema):
