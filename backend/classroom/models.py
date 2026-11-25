@@ -237,7 +237,7 @@ class Class(models.Model):
     #: 강사 쪽 변경 번호(#1484 ④) — `publish_instructors_changed` 가 바꿀 때마다 하나 올리고, 그 신호 본문과 클래스 응답이 같은
     #: 값을 싣는다. 열어 둔 화면은 이미 읽은 번호 이하의 신호를 건너뛴다(시간 창 없이 같은 변경의 재조회를 한 번으로).
     #: 오래 든 인스턴스의 `save()` 가 되돌리지 못하게 전체 저장에서는 빠진다(`save`).
-    signal_rev = models.PositiveBigIntegerField(default=0)
+    signal_rev = models.PositiveBigIntegerField(default=0, db_default=0)
 
     class Meta:
         ordering = ["-created_at"]
