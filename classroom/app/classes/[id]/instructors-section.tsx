@@ -19,14 +19,14 @@
 // 공동 강사에게만 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 역할 전용
 // 행동은 다른 역할에게 그 버튼이 없는 것으로 말한다.
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
-import { pendingTransferEndNote } from "@/lib/co-instructors/transfer-end-note";
+import { pendingTransferEndNote, pendingTransferRowText } from "@/lib/co-instructors/transfer-end-note";
 import { formatDay } from "@/lib/classes/format-day";
 import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 import { cancelTransferButtonLabel, removeButtonLabel, transferButtonLabel } from "@/lib/co-instructors/instructor-labels";
@@ -64,6 +64,7 @@ function InstructorRow({
   onCancelTransfer,
   onKeep,
   focusPending,
+  onFocusedPending,
 }: {
   instructor: ClassInstructor;
   // 부른 사람이 소유자이고 이 줄이 공동 강사일 때만 참이다.
@@ -80,16 +81,24 @@ function InstructorRow({
   onCancelTransfer: () => void;
   onKeep: () => void;
   // 방금 보낸 이전 요청이면 「답을 기다립니다」 줄이 그려질 때 초점을 받는다.
-  focusPending: RefObject<boolean>;
+  // 상태라서 신호·재조회가 응답보다 먼저 줄을 그렸어도, 요청이 끝나 참이 되는 순간 소비된다(#1496 ⑥).
+  focusPending: boolean;
+  onFocusedPending: () => void;
 }) {
   const pendingRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
-    if (transferPending && focusPending.current) {
-      focusPending.current = false;
-      pendingRef.current?.focus();
+    if (transferPending && focusPending && pendingRef.current) {
+      pendingRef.current.focus();
+      onFocusedPending();
     }
-  }, [transferPending, focusPending]);
+  }, [transferPending, focusPending, onFocusedPending]);
   const transferConfirm = useInlineConfirm(confirming === "transfer", onKeep);
+  // 되돌리기 어려운 결과(채점 키가 비워짐)의 경고 문단도 확인 묶음의 설명에 든다 — 낭독기가 질문과 함께 읽는다(#1489).
+  const transferWarningId = useId();
+  const transferGroupProps = {
+    ...transferConfirm.groupProps,
+    "aria-describedby": `${transferConfirm.questionId} ${transferWarningId}`,
+  };
   const removeConfirm = useInlineConfirm(confirming === "remove", onKeep);
   const owner = instructor.role === "owner";
   const name = instructor.display_name || (owner ? "이름을 정하지 않은 소유자" : "이름 없음");
@@ -110,7 +119,7 @@ function InstructorRow({
             {formatDay(instructor.accepted_at)} {instructor.joined_by === "ownership_transfer" ? "소유권 넘김" : "수락"}
           </span>
         ) : null}
-        {transferPending ? (
+        {transferPending && canRemove ? (
           <span
             ref={pendingRef}
             role="status"
@@ -118,7 +127,13 @@ function InstructorRow({
             data-testid="ownership-transfer-pending"
             className="text-[12px] text-ink/45 outline-none focus-visible:ring-2 focus-visible:ring-ink/40"
           >
-            {formatDay(transferPending.expires_at)} 까지 답을 기다립니다
+            {pendingTransferRowText(transferPending, formatDay(transferPending.expires_at))}
+          </span>
+        ) : transferPending ? (
+          // 보내는 쪽(소유자)만 상태로 읽힌다 — 받는 사람·다른 강사에게는 「답을 기다립니다」가 맥락에 맞지 않거나
+          // 남의 일이라 알리지 않는다. 받는 사람에게는 클래스 화면 맨 위 카드가 알린다(#1490).
+          <span data-testid="ownership-transfer-pending-other" className="text-[12px] text-ink/45">
+            {pendingTransferRowText(transferPending, formatDay(transferPending.expires_at))}
           </span>
         ) : null}
         <span className="ml-auto flex items-center gap-1.5">
@@ -162,12 +177,12 @@ function InstructorRow({
         </span>
       </div>
       {canTransfer && confirming === "transfer" ? (
-        <div data-testid="ownership-transfer-confirm" {...transferConfirm.groupProps} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+        <div data-testid="ownership-transfer-confirm" {...transferGroupProps} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
           <p id={transferConfirm.questionId} className="text-[12.5px] leading-relaxed text-ink/70">
             {name}님에게 이 클래스의 소유권을 넘길까요? {name}님이 수락해야 넘어가고, 수락하면 {name}님이
             소유자가 되고 나는 공동 강사로 남습니다.
           </p>
-          <p className="text-[12.5px] leading-relaxed text-ink/70">
+          <p id={transferWarningId} className="text-[12.5px] leading-relaxed text-ink/70">
             넘어가는 순간 지금 채점 키가 비워져, 새 소유자가 자기 키를 넣을 때까지 참여자의 제출은 채점되지
             않고 기다립니다. 지금까지 쓴 양은 그대로 남습니다. 요청은 7일 동안 유효합니다.
           </p>
@@ -257,7 +272,16 @@ function PendingInviteRow({
       <span data-testid="co-instructor-invite-meta" className="text-[12px] text-ink/45">
         {maker} {formatDay(invite.created_at)} 만듦 · {formatDay(invite.expires_at)} 까지
       </span>
-      <span className="flex items-center gap-1.5" onKeyDown={cancelConfirm.onKeyDown}>
+      <span
+        className="flex items-center gap-1.5"
+        {...(confirming ? { role: "group", "aria-describedby": cancelConfirm.questionId } : {})}
+        onKeyDown={cancelConfirm.onKeyDown}
+      >
+        {confirming ? (
+          <span id={cancelConfirm.questionId} className="sr-only">
+            이 초대 링크를 취소할까요? 취소한 링크는 다시 쓸 수 없습니다.
+          </span>
+        ) : null}
         <button
           type="button"
           data-testid="co-instructor-invite-copy"
@@ -387,6 +411,7 @@ export function InstructorsSection({
   onCommandStart,
   onTransferChanged,
   focusPendingTransfer,
+  onFocusedPendingTransfer,
   classVersion,
   signalPending,
 }: {
@@ -400,7 +425,8 @@ export function InstructorsSection({
   onCommandStart: () => number;
   onTransferChanged: (change: "requested" | "cancel-failed" | undefined, seenRevAtStart: number) => void;
   // 요청을 보낸 뒤 강사 목록이 다시 그려지므로(key) 초점 표시는 그 바깥에 둔다.
-  focusPendingTransfer: RefObject<boolean>;
+  focusPendingTransfer: boolean;
+  onFocusedPendingTransfer: () => void;
   // 클래스 응답 — 새로 도착할 때마다 바뀐다. 신호로 시작된 재조회의 응답이 오면 명단·대기 초대를 한 번 다시 읽는다(#1459 ⑥).
   classVersion: unknown;
   // 신호가 클래스 재조회를 시작했고 그 응답을 아직 못 받았다 — 재조회는 클래스 화면이 한 번만 시작하고 이 영역이 그 응답에 맞춰 읽는다.
@@ -646,6 +672,7 @@ export function InstructorsSection({
                     onCancelTransfer={() => id !== null && pendingHere && void cancelTransfer(id, pendingHere.id)}
                     onKeep={() => setConfirming(null)}
                     focusPending={focusPendingTransfer}
+                    onFocusedPending={onFocusedPendingTransfer}
                   />
                 );
               })}
