@@ -46,7 +46,7 @@ import {
 } from "@/lib/problems/due-dates";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
-import { openBlockedReason } from "@/lib/problems/open-blocked-reason";
+import { OPEN_BLOCKED_REASON_ID, openBlockedReason } from "@/lib/problems/open-blocked-reason";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type DraftChecklistItem = {
@@ -287,6 +287,7 @@ export default function NewProblemPage() {
 
   const createDisabled =
     submitting || title.trim() === "" || submissionFormats.length === 0 || !isGradingGuidelineValid(gradingGuideline);
+  const openBlockedText = openBlockedReason({ createDisabled, hasRequiredItem });
   const classLabel = classState.status === "ready" ? `${classState.classroom.name} › ` : "";
 
   return (
@@ -320,12 +321,21 @@ export default function NewProblemPage() {
             type="button"
             data-testid="new-problem-create-and-open-submit"
             disabled={createDisabled || !hasRequiredItem}
-            title={openBlockedReason({ createDisabled, hasRequiredItem }) ?? undefined}
+            aria-describedby={openBlockedText ? OPEN_BLOCKED_REASON_ID : undefined}
             onClick={handleCreateAndOpen}
             className={buttonClass("primary")}
           >
             {submitting ? "만드는 중..." : "만들고 바로 열기"}
           </button>
+          {openBlockedText ? (
+            <p
+              id={OPEN_BLOCKED_REASON_ID}
+              data-testid="new-problem-open-blocked-reason"
+              className="basis-full text-right text-[12px] text-ink/60"
+            >
+              {openBlockedText}
+            </p>
+          ) : null}
         </div>
       </div>
 
