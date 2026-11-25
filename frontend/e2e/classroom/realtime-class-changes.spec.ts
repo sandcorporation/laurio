@@ -909,6 +909,38 @@ for (const view of [
   });
 }
 
+// #1535 ② — 숨김 안내(제목)에 있던 초점은 다시 열고 곧바로 보관해도 지금의 막힘 안내로 간다.
+for (const view of [
+  { name: "데스크톱", size: { width: 1280, height: 800 } },
+  { name: "390px 터치", size: { width: 390, height: 844 } },
+]) {
+  test(`${view.name} — 숨김 안내에 있던 초점은 다시 열고 곧바로 보관해도 보관 안내가 받고, 다른 칸의 초점은 그대로다`, async ({ page, browser }) => {
+    test.setTimeout(50_000);
+    await page.setViewportSize(view.size);
+    const seed = `rt-reopen-arch-focus-${view.size.width}-${test.info().workerIndex}-${Date.now()}`;
+    const { instructor, base, problemId } = await openSubmitWithBothFormats(page, browser, seed);
+    expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+    const heading = page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" });
+    await expect(heading).toBeFocused({ timeout: 10_000 });
+    // 사이 조회 없이 — 다시 연 직후의 조회가 서버에 닿기 전에 보관까지 끝나게 붙잡아 둔다.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**${base}/problems/${problemId}/mine*`, async (route) => {
+      await gate;
+      await route.continue();
+    });
+    expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+    expect((await instructor.api.post(`${base}/archive`)).ok()).toBeTruthy();
+    release();
+    await instructor.context.close();
+    const note = page.getByTestId("class-archived-note");
+    await expect(note).toBeVisible({ timeout: 10_000 });
+    await expect(note).toBeFocused();
+    await expect(note).toHaveAttribute("role", "alert");
+    await expect(page.getByTestId("submit-reopened-note")).toBeEmpty();
+  });
+}
+
 test("다시 연 뒤 제출하면 다시 엶 안내가 걷히고, 다시 숨겨도 낡은 안내가 되살지 않는다", async ({ page, browser }) => {
   test.setTimeout(50_000);
   const seed = `rt-reopen-submit-${test.info().workerIndex}-${Date.now()}`;

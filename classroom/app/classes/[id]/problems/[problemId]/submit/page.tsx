@@ -9,7 +9,7 @@
 // 실제로 그리는 일은 `ProblemParticipantView`(#325)가 한다 — 문제 만들기/
 // 편집의 「미리보기」 탭이 **같은 조각**을 쓴다. 이 파일은 데이터를 불러오고
 // 제출 요청을 보내는 배선만 맡는다.
-import { blockedChange } from "@/lib/submissions/blocked-change";
+import { returnAction } from "@/lib/submissions/return-focus";
 import { submitRejectedAsBlocked } from "@/lib/submissions/submit-blocked";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -117,23 +117,20 @@ export default function ProblemSubmitPage() {
   const lostForm = useRef(false);
   const [reopenedNote, setReopenedNote] = useState("");
   useEffect(() => {
-    if (state.status === "notFound" && hadForm) lostForm.current = true;
-    // 다시 엶 안내는 ready 화면의 것이다 — 숨김·오류 화면으로 바뀌면 비워 두어야 다음 다시 엶에서 비었다 채워져 또 읽힌다.
-    if (state.status === "notFound" || state.status === "error") setReopenedNote("");
-    if (state.status !== "ready") return;
-    // 다시 막혔으면(보관·내보냄 등) 「제출할 수 있습니다」를 걷는다 — 이유는 막힘 안내가 하나로 말한다(#1532 ①).
-    if (state.data.submit_blocked_reason !== null) {
-      lostForm.current = false;
-      setReopenedNote("");
-      return;
-    }
-    if (!lostForm.current) return;
-    lostForm.current = false;
-    setReopenedNote(blockedChange("hidden", state.data.submit_blocked_reason).note);
     const active = document.activeElement;
-    if (active !== null && active !== document.body) return;
-    const draft = repositoryUrl.trim() !== "" ? document.querySelector<HTMLElement>("#repository-url") : null;
-    (draft ?? document.querySelector<HTMLElement>("[data-testid=my-problem-title]"))?.focus();
+    const action = returnAction({
+      status: state.status,
+      lost: lostForm.current,
+      hadForm,
+      reason: state.status === "ready" ? state.data.submit_blocked_reason : null,
+      focusAtBody: active === null || active === document.body,
+      hasDraft: repositoryUrl.trim() !== "",
+    });
+    lostForm.current = action.lost;
+    if (action.note !== null) setReopenedNote(action.note);
+    if (action.focus === "blocked-note") document.querySelector<HTMLElement>("[data-blocked-note]")?.focus();
+    else if (action.focus === "draft") document.querySelector<HTMLElement>("#repository-url")?.focus();
+    else if (action.focus === "title") document.querySelector<HTMLElement>("[data-testid=my-problem-title]")?.focus();
   }, [state, hadForm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useClassroomTabTitle({
