@@ -39,6 +39,19 @@ export function formatDueDateTime(iso: string): string {
   return `${formatDay(iso)} (${WEEKDAY[d.getDay()]}) ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
+const SOON_MS = 60 * 60 * 1000;
+
+function isSameLocalDay(a: number, b: number): boolean {
+  const x = new Date(a);
+  const y = new Date(b);
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+}
+
+function formatClock(ms: number): string {
+  const d = new Date(ms);
+  return `${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 /**
  * `passed` — 참여자 화면이면 그 참여자가 이 문제를 통과했는가, 강사 화면(표·격자)이면 null.
  */
@@ -61,10 +74,14 @@ export function describeDue(
   if (problem.due_at) {
     const behind = Date.parse(problem.due_at) < now;
     const attention = behind && passed === false;
+    const dueMs = Date.parse(problem.due_at);
+    // 아직 안 지난 오늘 마감은 날짜 대신 시각으로, 한 시간 안이면 「곧 마감」으로 알린다.
+    const today = !behind && isSameLocalDay(dueMs, now);
+    const soon = !behind && dueMs - now <= SOON_MS;
     due = {
-      label: attention ? "마감 지남" : "마감",
-      text: formatDay(problem.due_at),
-      tone: attention ? "attention" : done || behind ? "faint" : "normal",
+      label: attention ? "마감 지남" : soon ? "곧 마감" : today ? "오늘 마감" : "마감",
+      text: today ? formatClock(dueMs) : formatDay(problem.due_at),
+      tone: attention ? "attention" : done || behind ? "faint" : soon && passed === false ? "attention" : "normal",
       passed: behind,
     };
   }
