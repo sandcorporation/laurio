@@ -48,7 +48,7 @@ function RegradeDialog({
   const { state } = useBackendQuery<ScoringCalculator>(bffClient, calculatorPath(classId, { problemId: attempt.problem_id }));
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  useDialogFocus(dialogRef, {
+  const { descriptionId } = useDialogFocus(dialogRef, {
     onEscape: onCancel,
     initialFocus: cancelRef,
   });
@@ -61,16 +61,19 @@ function RegradeDialog({
         role="dialog"
         aria-modal="true"
         aria-label="다시 채점"
+        aria-describedby={descriptionId}
         data-testid="regrade-dialog"
         className="relative w-full max-w-[420px] border border-rule bg-surface p-5"
       >
         <h2 className="text-[16px] font-semibold">다시 채점할까요?</h2>
-        <p className="mt-2 break-keep text-[13px] text-ink/70">
-          {attempt.member_display_name} <span className="text-ink/45">·</span> {attempt.problem_title}
-        </p>
-        <p data-testid="regrade-amount" className="mt-1 text-[13px] text-ink/70">
-          예상 금액 {amount}
-        </p>
+        <div id={descriptionId}>
+          <p className="mt-2 break-keep text-[13px] text-ink/70">
+            {attempt.member_display_name} <span className="text-ink/45">·</span> {attempt.problem_title}
+          </p>
+          <p data-testid="regrade-amount" className="mt-1 text-[13px] text-ink/70">
+            예상 금액 {amount}
+          </p>
+        </div>
         {failed ? (
           <p data-testid="regrade-error" className="mt-2 text-[12.5px] text-error">
             다시 채점을 걸지 못했습니다.
@@ -252,6 +255,7 @@ function ClassAttempts() {
                         <button
                           type="button"
                           data-testid={`regrade-${attempt.id}`}
+                          aria-label={`다시 채점 ${attempt.member_display_name} ${attempt.problem_title}`}
                           onClick={() => open(attempt)}
                           className={`${buttonClass("secondary", "sm")} shrink-0`}
                         >

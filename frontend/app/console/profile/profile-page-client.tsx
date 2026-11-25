@@ -68,7 +68,7 @@ const ROLE_COPY: Record<Role, { title: string; description: string; path: string
   },
 };
 
-export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | null }) {
+export function ProfilePageClient({ returnOrigin, returnUrl }: { returnOrigin: string | null; returnUrl: string | null }) {
   const session = useSession();
 
   if (session.status === "unauthenticated") return null;
@@ -89,7 +89,7 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
         {returnOrigin && (
           <a
             className="text-sm text-ink/60"
-            href={returnOrigin}
+            href={returnUrl ?? returnOrigin}
             data-testid="profile-return-to-classroom"
           >
             강의실로 돌아가기 →
@@ -119,7 +119,7 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
         <Link
           href={
             returnOrigin
-              ? `/console/withdraw?from_origin=${encodeURIComponent(returnOrigin)}`
+              ? `/console/withdraw?from_origin=${encodeURIComponent(returnOrigin)}${returnUrl && returnUrl !== returnOrigin ? `&from_path=${encodeURIComponent(returnUrl.slice(returnOrigin.length))}` : ""}`
               : "/console/withdraw"
           }
           data-testid="profile-withdraw-link"

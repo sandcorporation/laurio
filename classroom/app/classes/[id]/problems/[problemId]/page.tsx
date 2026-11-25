@@ -8,6 +8,7 @@ import { MarkdownView } from "@codemit/markdown";
 import Link from "next/link";
 
 import { CharCount } from "@/app/components/CharCount";
+import { useTablist } from "@/app/components/use-tablist";
 import {
   Badge,
   Card,
@@ -156,6 +157,7 @@ export default function EditProblemPage() {
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const tablist = useTablist(tab, { panels: "each" });
 
   useClassroomTabTitle({
     screenName: "문제 편집",
@@ -508,7 +510,7 @@ export default function EditProblemPage() {
       ) : null}
 
       <div className="flex flex-col gap-5">
-        <div role="tablist" aria-label="문제 편집 화면" className="flex items-end gap-0.5 border-b border-rule">
+        <div {...tablist.listProps} aria-label="문제 편집 화면" className="flex items-end gap-0.5 border-b border-rule">
           {(
             [
               ["write", "작성", "edit-problem-tab-write"],
@@ -518,8 +520,7 @@ export default function EditProblemPage() {
             <button
               key={key}
               type="button"
-              role="tab"
-              aria-selected={tab === key}
+              {...tablist.tabProps(key)}
               data-testid={testId}
               onClick={() => setTab(key)}
               className={
@@ -533,7 +534,7 @@ export default function EditProblemPage() {
           ))}
         </div>
 
-        <div data-testid="edit-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
+        <div {...tablist.panelProps("write")} data-testid="edit-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
           <TwoColumnFrame
             sideTestId="edit-problem-side-rail"
             main={
@@ -933,6 +934,7 @@ export default function EditProblemPage() {
         </div>
 
         <div
+          {...tablist.panelProps("preview")}
           data-testid="edit-problem-preview-panel"
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >

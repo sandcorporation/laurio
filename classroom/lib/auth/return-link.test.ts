@@ -16,3 +16,21 @@ describe("buildProfileUrl", () => {
     );
   });
 });
+
+describe("buildProfileUrl — 떠난 화면", () => {
+  it("현재 경로·쿼리를 from_path 로 싣는다", () => {
+    const url = new URL(
+      buildProfileUrl("http://127.0.0.1:53000", "http://127.0.0.1:53002", "/classes/7?tab=participants"),
+    );
+    expect(url.searchParams.get("from_origin")).toBe("http://127.0.0.1:53002");
+    expect(url.searchParams.get("from_path")).toBe("/classes/7?tab=participants");
+  });
+
+  it.each(["//evil.example/x", "https://evil.example/x", "javascript:alert(1)", "/\\evil.example", "classes/7", ""])(
+    "안전하지 않은 경로 %j 는 싣지 않는다",
+    (path) => {
+      const url = new URL(buildProfileUrl("http://127.0.0.1:53000", "http://127.0.0.1:53002", path));
+      expect(url.searchParams.has("from_path")).toBe(false);
+    },
+  );
+});

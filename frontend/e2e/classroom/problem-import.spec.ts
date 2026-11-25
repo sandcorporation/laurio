@@ -53,6 +53,8 @@ test("「문제 가져오기」 시트는 초점이 안으로 들어가 갇히�
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "문제 가져오기" });
   await expect(dialog).toBeVisible();
+  // 낭독기는 이름과 함께 무엇이 일어나는지를 듣는다(#1477).
+  await expect(dialog).toHaveAccessibleDescription(/고른 문제가 지금 이 클래스에 초안으로 들어옵니다/);
   await expect(dialog.locator(":focus")).toHaveCount(1);
   for (let i = 0; i < 30; i++) {
     await page.keyboard.press("Tab");

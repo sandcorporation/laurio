@@ -9,6 +9,7 @@ import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { CharCount } from "@/app/components/CharCount";
+import { useTablist } from "@/app/components/use-tablist";
 import {
   Badge,
   Card,
@@ -98,6 +99,7 @@ export default function NewProblemPage() {
   // 자리에서 저장하지 않고 지금 상태를 그대로 비춘다(아래 렌더에서
   // `ProblemParticipantView`에 이 컴포넌트의 상태를 직접 넘긴다).
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const tablist = useTablist(tab, { panels: "each" });
 
   // 「이미 있는 문제로 시작하기」(#326) — 대상 클래스는 묻지 않는다, 지금
   // 이 클래스(`classId`)로 곧장 들어온다. 시트가 스스로 가져오기까지 끝내고
@@ -349,7 +351,7 @@ export default function NewProblemPage() {
       ) : null}
 
       <div className="flex flex-col gap-5">
-        <div role="tablist" aria-label="새 문제 화면" className="flex items-end gap-0.5 border-b border-rule">
+        <div {...tablist.listProps} aria-label="새 문제 화면" className="flex items-end gap-0.5 border-b border-rule">
           {(
             [
               ["write", "작성", "new-problem-tab-write"],
@@ -359,8 +361,7 @@ export default function NewProblemPage() {
             <button
               key={key}
               type="button"
-              role="tab"
-              aria-selected={tab === key}
+              {...tablist.tabProps(key)}
               data-testid={testId}
               onClick={() => setTab(key)}
               className={
@@ -374,7 +375,7 @@ export default function NewProblemPage() {
           ))}
         </div>
 
-        <div data-testid="new-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
+        <div {...tablist.panelProps("write")} data-testid="new-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
           <TwoColumnFrame
             sideTestId="new-problem-side-rail"
             main={
@@ -548,6 +549,7 @@ export default function NewProblemPage() {
         </div>
 
         <div
+          {...tablist.panelProps("preview")}
           data-testid="new-problem-preview-panel"
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >

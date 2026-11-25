@@ -79,11 +79,15 @@ test("「다시 채점」 확인 창은 초점이 안으로 들어가 갇히고 
   const page = await (await browser.newContext({ storageState: ownerState })).newPage();
   await page.goto(`/classes/${classId}/submissions`);
   const opener = page.getByTestId(`regrade-${submissionId}`);
+  // 줄마다 같은 글자의 단추 — 누구 것인지가 이름에 있다(#1478 3).
+  await expect(opener).toHaveAccessibleName(/^다시 채점 서지우 1주차$/);
   await opener.focus();
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "다시 채점" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "취소" })).toBeFocused();
+  // 낭독기는 이름과 함께 누구의 어느 문제인지·예상 금액을 듣는다(#1477).
+  await expect(dialog).toHaveAccessibleDescription(/서지우 · 1주차\s*예상 금액 .*원/);
   for (const key of ["Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"]) {
     await page.keyboard.press(key);
     await expect(dialog.locator(":focus")).toHaveCount(1);

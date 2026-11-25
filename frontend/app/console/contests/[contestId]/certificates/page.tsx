@@ -74,16 +74,17 @@ function ConfirmDialog({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const safeRef = useRef<HTMLButtonElement>(null);
-  useDialogFocus(dialogRef, { onEscape: onDismiss, initialFocus: safeRef, fallbackFocus: returnTo });
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onDismiss, initialFocus: safeRef, fallbackFocus: returnTo });
   return (
     <div
       ref={dialogRef}
       className="flex flex-col gap-3 border border-error p-4 text-sm"
       role="alertdialog"
       aria-modal="true"
+      aria-describedby={descriptionId}
       data-testid={testId}
     >
-      {children}
+      <div id={descriptionId}>{children}</div>
       <div className="flex gap-2">
         {actions}
         <button ref={safeRef} type="button" className={buttonClass("secondary", "sm")} onClick={onDismiss}>
