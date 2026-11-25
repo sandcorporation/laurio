@@ -179,7 +179,7 @@ from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality, score_corrections
 from .score_reuse import score_reused
-from .events import publish_attempt_submitted, publish_participation_changed
+from .events import publish_attempt_submitted, publish_instructors_changed, publish_participation_changed
 from .current_score import CurrentClassroomScore, current_score, current_score_prefetch
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
@@ -1904,11 +1904,14 @@ def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
     if class_obj.archived_at is not None:
         raise HttpError(403, "이 클래스는 보관되어 더 이상 가입할 수 없습니다.")
     _reject_if_banned_name(payload.display_name)
-    member, _created = ClassMember.objects.get_or_create(
+    member, created = ClassMember.objects.get_or_create(
         classroom=class_obj,
         user_id=request.auth_user.id,
         defaults={"display_name": payload.display_name},
     )
+    if created:
+        # 격자의 새 행·달성률 분모 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 다시 읽는다(#1471 ⑦).
+        publish_instructors_changed(class_obj)
     return 200, JoinResultOut(
         class_id=class_obj.id, class_name=class_obj.name, display_name=member.display_name
     )
@@ -2218,6 +2221,8 @@ def expel_class_member(member: ClassMember) -> ClassMember:
     if first:
         # 내보내진 그 사람의 열린 제출 화면만 — 다른 참여자에게는 보내지 않는다(#1447 10-2).
         publish_participation_changed(member.classroom_id, member_user_ids=[member.user_id])
+        # 그 행·달성률 분모가 바뀐다 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 다시 읽는다(#1471 ⑦).
+        publish_instructors_changed(member.classroom)
         # 처음 내보낼 때만 — 내보내진 사람에게 알린다(#1441-8). 알림이 실패해도 내보내기는 그대로다.
         notify_safely(
             recipient=member.user,
