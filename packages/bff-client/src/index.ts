@@ -10,5 +10,5 @@ export { createLoginRedirect } from "./login-redirect";
 export type { LoginNavigator, LoginRedirectOptions } from "./login-redirect";
 export type { BackendQueryOptions, PagedListState, QueryState } from "./hooks";
 export { FALLBACK_DETAIL, codeForStatus, normalizeDetail } from "./result";
-export type { ApiFailure, ApiResult, ApiSuccess } from "./result";
+export type { ApiFailure, ApiResult, ApiSuccess, FieldLabels } from "./result";
 export type { components, paths } from "./schema.gen";

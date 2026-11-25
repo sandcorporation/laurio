@@ -11,6 +11,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { CharCount } from "@/app/components/CharCount";
 import {
   Card,
   ErrorNote,
@@ -21,6 +22,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { useMe } from "@/lib/auth/use-me";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import { joinClass } from "@/lib/join/api";
 import { useJoinPreview } from "@/lib/join/use-join-preview";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
@@ -198,8 +200,10 @@ export function JoinView() {
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
                 required
+                maxLength={INPUT_LIMITS.joinDisplayName}
                 className={INPUT_CLASS}
               />
+              <CharCount value={displayName} limit={INPUT_LIMITS.joinDisplayName} testId="join-display-name-count" />
             </div>
             <button
               type="submit"

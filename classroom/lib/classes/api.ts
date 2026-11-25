@@ -4,6 +4,7 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
+import { CLASS_FIELD_LABELS } from "@/lib/forms/field-labels";
 
 // 이 클래스를 원본으로 하는, 지금 살아 있는(내리지 않은) 클래스 템플릿
 // (#333) — 없으면 `null`이다. 클래스 설정 화면이 새로고침 뒤에도 공개 상태를
@@ -144,10 +145,11 @@ export function createClass(
   name: string,
   instructorDisplayName: string,
 ): Promise<ApiResult<ClassRow>> {
-  return bffClient.post<ClassRow>("/api/backend/classroom/classes", {
-    name,
-    instructor_display_name: instructorDisplayName,
-  });
+  return bffClient.post<ClassRow>(
+    "/api/backend/classroom/classes",
+    { name, instructor_display_name: instructorDisplayName },
+    { fieldLabels: CLASS_FIELD_LABELS },
+  );
 }
 
 export function updateClass(
@@ -165,15 +167,18 @@ export function updateClass(
     oversize_agent_model: string;
   }>,
 ): Promise<ApiResult<ClassRow>> {
-  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch, CLASS_FIELD_LABELS);
 }
 
 // 부른 강사 자신의 강사 이름을 바꾼다(#565) — 소유자든 공동 강사든 자기 자리에만 쓴다.
 // 클래스 설정의 `instructor_display_name` 은 소유자의 이름 칸이라 공동 강사에게는 닫혀 있다.
 export function renameMyInstructorName(classId: number, displayName: string): Promise<ApiResult<unknown>> {
-  return apiRequest<unknown>(`/api/backend/classroom/classes/${classId}/instructors/me`, "PATCH", {
-    display_name: displayName,
-  });
+  return apiRequest<unknown>(
+    `/api/backend/classroom/classes/${classId}/instructors/me`,
+    "PATCH",
+    { display_name: displayName },
+    CLASS_FIELD_LABELS,
+  );
 }
 
 // 채점 키는 저장 뒤 다시 보이지 않는다(#284) — 응답도 언제나 마스킹된

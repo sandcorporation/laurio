@@ -8,7 +8,7 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 그 멤버다 — `packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사
 함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다, ADR-0021),
 `packages/bff-client`(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·
-`normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — **강의실도
+`normalizeDetail`(422 의 pydantic `type` 을 한국어로 옮긴다, 단위 시험 `pnpm --dir packages/bff-client test`)·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — **강의실도
 이제 이 패키지를 쓴다**(#462). 손으로 다시 쓴 클라이언트(`lib/backend/client.ts`)와
 그 사본이 낳던 결함 — 세션이 끊긴 사람을 로그인으로 보내는 동작이 강의실에만 없던
 것 — 을 함께 걷어냈다. 강의실도 공개 앱과 같이 `revive` 를 준다(#767) — 401 이면
@@ -298,6 +298,7 @@ primary·secondary·info·success·warning·error·advanced. 값은 옛 토큰�
 2026-09-16 에 늘었다: 강의실의 `test:unit` 은 **CI 에서 한 번도 돌지 않고 있었고**
 (그래서 위 토큰·로고 사본 대조와 런타임 설정 구조 검사가 실제로는 아무 문도 아니었다),
 마크다운 허용 목록 검사도 강의실 안에 있던 동안 같은 처지였다.
+`packages/bff-client` 의 `detail` 번역 시험도 같은 자리(`scripts/ci/sub-checks-inside.sh web`)에서 돈다(#1390).
 
 **다크 테마도 이 토큰 파일 하나에만 산다**(#397, spec #396 「따뜻한 먹」). 여섯
 색 각각이 `light-dark(라이트, 다크)`로 두 값을 갖고, 문서 루트(`<html>`)의

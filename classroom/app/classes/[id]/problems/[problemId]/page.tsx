@@ -6,6 +6,7 @@
 import { MarkdownView } from "@codemit/markdown";
 import Link from "next/link";
 
+import { CharCount } from "@/app/components/CharCount";
 import {
   Badge,
   Card,
@@ -19,6 +20,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { ChecklistRows, GradeToggle } from "@/app/components/ChecklistRows";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import type { ChecklistGrade } from "@/lib/problems/grade";
 import {
   GRADABILITY_FORM_NOTE,
@@ -556,9 +558,11 @@ export default function EditProblemPage() {
                         value={title}
                         onChange={(event) => setTitle(event.target.value)}
                         required
+                        maxLength={INPUT_LIMITS.editProblemTitle}
                         disabled={isArchived || followsContest}
                         className={INPUT_CLASS}
                       />
+                      <CharCount value={title} limit={INPUT_LIMITS.editProblemTitle} testId="edit-problem-title-count" />
                     </div>
 
                     {/* 참여자 화면과 같은 순서 — 수업용 안내가 설명 위다. */}
@@ -710,16 +714,24 @@ export default function EditProblemPage() {
                       <label htmlFor="new-item-label" className="sr-only">
                         새 항목
                       </label>
-                      <input
-                        id="new-item-label"
-                        data-testid="new-checklist-item-label-input"
-                        value={newItemLabel}
-                        onChange={(event) => setNewItemLabel(event.target.value)}
-                        required
-                        disabled={isArchived}
-                        placeholder="새 항목"
-                        className={`${INPUT_CLASS} min-w-0 flex-1`}
-                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <input
+                          id="new-item-label"
+                          data-testid="new-checklist-item-label-input"
+                          value={newItemLabel}
+                          onChange={(event) => setNewItemLabel(event.target.value)}
+                          required
+                          maxLength={INPUT_LIMITS.editChecklistLabel}
+                          disabled={isArchived}
+                          placeholder="새 항목"
+                          className={INPUT_CLASS}
+                        />
+                        <CharCount
+                          value={newItemLabel}
+                          limit={INPUT_LIMITS.editChecklistLabel}
+                          testId="new-checklist-item-label-count"
+                        />
+                      </div>
                       <GradeToggle
                         grade={newItemGrade}
                         onChange={setNewItemGrade}

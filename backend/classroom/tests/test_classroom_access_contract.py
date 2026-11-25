@@ -230,3 +230,21 @@ def test_too_long_class_name_is_a_422_with_the_shape_the_screen_translates(clien
     assert response.status_code == 422, response.content
     error = response.json()["detail"][0]
     assert (error["type"], error["ctx"]["max_length"]) == ("string_too_long", 200)
+
+
+def test_422_carries_the_type_and_limit_the_screens_translate(client):
+    """화면의 422 한국어(`normalizeDetail`)가 기대는 모양 — pydantic `type`·`loc`·`ctx`."""
+    access = login(client, "limit-owner")["access"]
+
+    response = client.post(
+        CLASSES_URL,
+        data={"name": "가" * 201, "instructor_display_name": "강사"},
+        content_type="application/json",
+        **auth_header(access),
+    )
+
+    assert response.status_code == 422
+    first = response.json()["detail"][0]
+    assert first["type"] == "string_too_long"
+    assert first["loc"][-1] == "name"
+    assert first["ctx"]["max_length"] == 200

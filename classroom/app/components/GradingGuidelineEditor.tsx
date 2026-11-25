@@ -4,7 +4,9 @@
 // 문제 편집 화면이 함께 쓴다. 시안 v2(#637)는 접지 않고 단계 칩 한 줄로 둔다.
 import { useState } from "react";
 
+import { CharCount } from "@/app/components/CharCount";
 import { Card, CardHeader, INPUT_CLASS } from "@/app/components/ui";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import {
   GRADING_STRICTNESS_OPTIONS,
   gradingGuidelineText,
@@ -98,8 +100,14 @@ export function GradingGuidelineEditor({
                 })
               }
               rows={4}
+              maxLength={INPUT_LIMITS.gradingGuidelineText}
               className={`${INPUT_CLASS} resize-y`}
               placeholder="예: 함수 이름은 solve 여야 하지만 출력 형식은 자유"
+            />
+            <CharCount
+              value={value.grading_guideline_text}
+              limit={INPUT_LIMITS.gradingGuidelineText}
+              testId={`${testIdPrefix}-grading-guideline-text-count`}
             />
             {isEmptyCustom ? (
               <span
