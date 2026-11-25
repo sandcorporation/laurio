@@ -14,9 +14,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 import { OAUTH_PROVIDER_ADAPTERS } from "@/lib/auth/oauth-adapters";
-import { resolveNextPath, withoutForeignNext } from "@/lib/auth/next-path";
+import { resolveLoginDestination } from "@/lib/auth/login-destination";
 import { generateOAuthState, setOAuthRoundTripCookies } from "@/lib/auth/oauth-state";
-import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
 import { loginPathWithError, redirectToPath } from "@/lib/auth/redirect";
 import { isSocialProvider } from "@/lib/auth/social-providers";
 
@@ -35,14 +34,16 @@ export async function GET(
   // 서브도메인에서 온 사람을 원래 있던 곳으로 돌려보낸다. `next` 의 같은-오리진
   // 검사는 그대로 두고, 오리진만 따로 **설정에 적힌 목록과 대조**한다. 목록에
   // 없으면 null 이 되어 지금까지와 똑같이 이 오리진 안에서 끝난다.
-  const requestedNextOrigin = searchParams.get("next_origin");
-  const returnOrigin = resolveSiblingOrigin(requestedNextOrigin);
+  // 판정은 공개 앱 서버 한 곳(#1388, lib/auth/login-destination.ts).
   // next_origin 을 요청했는데 대조에 실패하면 그 next 는 형제 앱(강의실 등)의
   // 경로일 수 있다 — 이 오리진 안에서 그대로 쓰면 존재하지 않는 경로라 404가
   // 난다(#334 코드리뷰 지적, lib/auth/next-path.ts의 withoutForeignNext 상단
   // 주석). 왕복 쿠키에는 이렇게 걸러낸 값만 싣는다 — 콜백은 이 쿠키 값을
   // 그대로 믿는다.
-  const next = withoutForeignNext(resolveNextPath(searchParams.get("next")), requestedNextOrigin, returnOrigin);
+  const { next, returnOrigin } = resolveLoginDestination(
+    searchParams.get("next"),
+    searchParams.get("next_origin"),
+  );
 
   const { provider } = await context.params;
   if (!isSocialProvider(provider)) {

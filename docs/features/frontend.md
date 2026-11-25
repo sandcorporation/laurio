@@ -217,6 +217,21 @@ CTA 가 상태에 따라 갈린다 — 아직 안 낸 사람에게는 「제출�
 카카오 로그인. GitHub·구글은 버튼이 있으나 **비활성(준비 중)** 이다. `?next=` 로 돌아갈
 곳을 받는다.
 
+**로그인 뒤 목적지는 공개 앱 서버 한 곳이 정한다**(#1388, `lib/auth/login-destination.ts`
+의 `resolveLoginDestination`). `next` 는 같은 오리진 경로만(`isSafeNextPath`), 강의실에서
+온 사람의 `?next_origin=` 은 허용목록 `CODEMIT_CLASSROOM_ORIGIN` 과 정규화한 오리진끼리
+완전 일치할 때만 받고, 아니면 공개 앱 `/` 에 남는다. OAuth authorize·콜백과
+`GET /api/auth/continue` 가 이 함수를 같이 쓴다.
+
+- `GET /api/auth/continue?next=…&next_origin=…` — 세션(`/api/accounts/me`, 필요하면
+  리프레시)을 확인해 인증됐으면 `303` 으로 목적지에, 아니면 검증한 값만 실어
+  `/login` 으로 보낸다. 리프레시된 쿠키를 응답에 싣고, 죽은 쿠키는 지운다.
+- dev 시드 로그인은 성공하면 `location.replace` 로 `/api/auth/continue` 에 간다 —
+  화면이 `next_origin` 으로 직접 이동하지 않는다(예전에는 검증 없이 바깥 오리진으로
+  나갔다).
+- dev 스택은 공개 앱의 `CODEMIT_CLASSROOM_ORIGIN` 기본값을 이 스택의 강의실 주소
+  (`http://localhost:<강의실 포트>`)로 둔다. 비우면 강의실로 돌아가지 못한다.
+
 **카카오 버튼은 카카오가 배포하는 공식 이미지 그대로다**(2026-09-16,
 `public/kakao/`). 카카오 로그인 디자인 가이드가 말풍선 심볼을 필수로 요구하면서
 심볼의 형태·비율·색상 변경을 금지하는데 공식 벡터를 배포하지 않으므로(PNG·PSD 뿐),
@@ -329,7 +344,7 @@ runtime-config.test.ts`가 그 구조를 지킨다).
 리다이렉트된다(`middleware.ts`) — 로그인 뒤 기본 도착지도 홈이다
 (`lib/auth/next-path.ts`의 `resolveNextPath` 기본값). 강의실에서 로그인하러
 온 사람은 지금처럼 원래 있던 곳으로 돌아간다(그 복귀는 `next_origin`이 실어
-나르는 별개의 경로라 이 기본값 변경과 무관하다). `/console/**` 하위 화면
+나르는 별개의 경로라 이 기본값 변경과 무관하다 — 위 「`/login` 로그인」). `/console/**` 하위 화면
 (참가 현황·공모전·프로필·탈퇴·알림)은 그대로다.
 
 ## 제보 버튼·`/console/feedback` 내 제보 (#1241, 스펙 #1237)

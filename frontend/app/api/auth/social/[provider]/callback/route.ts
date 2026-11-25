@@ -15,10 +15,9 @@ import type { NextRequest } from "next/server";
 
 import { setSessionCookies } from "@/lib/auth/cookies";
 import { OAUTH_PROVIDER_ADAPTERS } from "@/lib/auth/oauth-adapters";
-import { resolveNextPath, withoutForeignNext } from "@/lib/auth/next-path";
+import { destinationLocation, resolveLoginDestination } from "@/lib/auth/login-destination";
 import { loginPathWithError, redirectToPath } from "@/lib/auth/redirect";
 import { clearOAuthRoundTripCookies, readOAuthRoundTripCookies } from "@/lib/auth/oauth-state";
-import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
 import { loginWithSocialAccessToken } from "@/lib/auth/social-login";
 import { isSocialProvider } from "@/lib/auth/social-providers";
 
@@ -46,9 +45,8 @@ export async function GET(
     next: cookieNext,
     returnOrigin: cookieReturnOrigin,
   } = readOAuthRoundTripCookies(request);
-  // returnOrigin은 쿠키 값을 **다시** 허용목록과 대조한다(아래 성공 분기의 주석
-  // 참고) — 여기서 한 번만 계산해 이 함수 안에서 재사용한다.
-  const returnOrigin = resolveSiblingOrigin(cookieReturnOrigin);
+  // 목적지는 공개 앱 서버 한 곳에서 정한다(#1388, lib/auth/login-destination.ts) —
+  // returnOrigin은 쿠키 값을 **다시** 허용목록과 대조한다(아래 성공 분기의 주석 참고).
   // next는 쿠키에 저장해 둔 값을 쓴다 — authorize가 이미 같은 오리진 경로로
   // 검증해 둔 값이고, 제공자를 거쳐 오는 쿼리 파라미터에 다시 실으면 그 값이
   // 왕복 중 조작될 여지를 새로 여는 것이라 그러지 않는다. authorize가 이미
@@ -56,7 +54,8 @@ export async function GET(
   // 콜백 시점 사이에 달라질 수 있는 이상(설정이 바뀌는 등) 여기서도 같은
   // 방어를 다시 건다 — 그러지 않으면 형제 앱의 경로가 이 오리진 안에서 그대로
   // 쓰여 404로 떨어질 수 있다.
-  const next = withoutForeignNext(resolveNextPath(cookieNext), cookieReturnOrigin, returnOrigin);
+  const destination = resolveLoginDestination(cookieNext, cookieReturnOrigin);
+  const { next, returnOrigin } = destination;
 
   const { provider } = await context.params;
   if (!isSocialProvider(provider)) {
@@ -116,7 +115,7 @@ export async function GET(
     // 규율(lib/auth/redirect.ts)의 그 "외부"가 형제 서브도메인이다. 우리 오리진
     // 안에서 끝나는 경우는 지금까지처럼 상대 Location 이다.
     const response = returnOrigin
-      ? NextResponse.redirect(new URL(next, returnOrigin))
+      ? NextResponse.redirect(destinationLocation(destination))
       : redirectToPath(next);
     setSessionCookies(response, result.pair);
     clearOAuthRoundTripCookies(response);
