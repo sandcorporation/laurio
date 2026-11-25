@@ -100,7 +100,7 @@ function RequestSection({
         className={`mt-4 ${buttonClass("primary")}`}
         type="button"
         onClick={handleClick}
-        disabled={pending}
+        aria-disabled={pending || undefined}
         data-testid="payout-request-submit"
       >
         {pending ? "요청하는 중..." : "상금 지급 요청"}
@@ -295,7 +295,7 @@ function RetryFailedPayout({
         className={`mt-2 ${buttonClass("secondary")}`}
         type="button"
         onClick={handleClick}
-        disabled={pending}
+        aria-disabled={pending || undefined}
         data-testid="payout-retry-failed-submit"
       >
         {pending ? "다시 요청하는 중..." : "다시 요청"}
@@ -348,7 +348,7 @@ function SellerRetry({
         className={`mt-2 ${buttonClass("secondary")}`}
         type="button"
         onClick={handleClick}
-        disabled={pending}
+        aria-disabled={pending || undefined}
         data-testid="payout-seller-retry"
       >
         {pending ? "다시 시도하는 중..." : "다시 시도"}
@@ -460,7 +460,7 @@ function SellerContactForm({
       <button
         className={`self-start ${buttonClass("primary")}`}
         type="submit"
-        disabled={pending || !canSubmit}
+        aria-disabled={(pending || !canSubmit) || undefined}
         data-testid="payout-seller-contact-submit"
       >
         {pending ? "제출하는 중..." : "제출"}
@@ -579,7 +579,7 @@ function TaxIdentityForm({ payout, onSubmitted }: { payout: Payout; onSubmitted:
       <button
         className={`self-start ${buttonClass("primary")}`}
         type="submit"
-        disabled={pending || value.length !== 13}
+        aria-disabled={(pending || value.length !== 13) || undefined}
         data-testid="payout-identity-submit"
       >
         {pending ? "제출하는 중..." : "제출"}

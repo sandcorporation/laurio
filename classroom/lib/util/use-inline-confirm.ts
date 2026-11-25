@@ -22,7 +22,7 @@ export function useInlineConfirm(open: boolean, close: () => void) {
 
   function onKeyDown(event: KeyboardEvent) {
     // 요청이 가는 동안에는 「그대로 두기」가 disabled 라 Esc 도 닫지 않는다.
-    if (!open || event.key !== "Escape" || keepRef.current?.disabled) return;
+    if (!open || event.key !== "Escape" || keepRef.current?.disabled || keepRef.current?.getAttribute("aria-disabled") === "true") return;
     event.stopPropagation();
     close();
   }

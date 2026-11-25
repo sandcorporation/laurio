@@ -286,7 +286,7 @@ function MyDisplayName({
           <button
             type="submit"
             data-testid="my-display-name-submit"
-            disabled={saving || nameInput.trim() === ""}
+            aria-disabled={(saving || nameInput.trim() === "") || undefined}
             className={buttonClass("primary", "sm")}
           >
             {saving ? "저장하는 중..." : "저장"}
@@ -295,7 +295,7 @@ function MyDisplayName({
             type="button"
             data-testid="my-display-name-cancel"
             onClick={cancel}
-            disabled={saving}
+            aria-disabled={saving || undefined}
             className={buttonClass("secondary", "sm")}
           >
             취소

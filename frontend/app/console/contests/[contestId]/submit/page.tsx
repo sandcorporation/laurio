@@ -497,7 +497,7 @@ export default function SubmitPage() {
   }, [session.status]);
 
   async function handleSubmit() {
-    if (load.status !== "ready") return;
+    if (load.status !== "ready" || saveState.status === "saving") return;
     const hasSource = sourceAssets.some((row) => row.value.trim() !== "");
     const hasRepository = repositoryAssets.some((row) => row.value.trim() !== "");
     // #218(ADR-0030): 소스 또는 GitHub 저장소 중 최소 하나만 있으면 된다 —
@@ -956,7 +956,7 @@ export default function SubmitPage() {
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={saveState.status === "saving"}
+            aria-disabled={saveState.status === "saving" || undefined}
             data-testid="submit-button"
             className={buttonClass("primary")}
           >

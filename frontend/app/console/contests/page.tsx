@@ -69,7 +69,7 @@ export default function MyContestsPage() {
               className={`mt-4 ${buttonClass("secondary")}`}
               type="button"
               onClick={state.loadMore}
-              disabled={state.loadingMore}
+              aria-disabled={state.loadingMore || undefined}
               data-testid="my-contests-load-more"
             >
               {state.loadingMore

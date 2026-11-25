@@ -207,7 +207,7 @@ export function QualityRankingCard({
           ref={runButtonRef}
           data-testid="quality-run-button"
           onClick={() => void openConfirm()}
-          disabled={confirm.step !== "idle" && confirm.step !== "error"}
+          aria-disabled={(confirm.step !== "idle" && confirm.step !== "error") || undefined}
           className={buttonClass("primary", "sm")}
         >
           완성도 채점

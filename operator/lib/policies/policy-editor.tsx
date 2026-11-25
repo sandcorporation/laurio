@@ -160,7 +160,7 @@ export function PolicyEditor({
       <button
         type="submit"
         data-testid="policy-save-button"
-        disabled={pending}
+        aria-disabled={pending || undefined}
         className="w-fit border border-ink bg-ink px-3.5 py-1.5 text-[13px] text-paper disabled:opacity-50"
       >
         {pending ? "저장 중..." : "저장"}

@@ -90,7 +90,7 @@ function LoginFields() {
           <button
             type="submit"
             data-testid="login-submit"
-            disabled={pending}
+            aria-disabled={pending || undefined}
             className="mt-1.5 w-fit border border-ink bg-ink px-3 py-1.5 text-[12.5px] text-paper disabled:opacity-50"
           >
             {pending ? "로그인 중..." : "로그인"}

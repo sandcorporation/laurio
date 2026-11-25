@@ -86,7 +86,7 @@ export function CreateOperatorForm({
       <button
         type="submit"
         data-testid="create-operator-submit"
-        disabled={pending}
+        aria-disabled={pending || undefined}
         className="w-fit border border-ink bg-ink px-3 py-1.5 text-[12.5px] text-paper disabled:opacity-50"
       >
         {pending ? "생성 중..." : "Operator 생성"}

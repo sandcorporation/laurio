@@ -94,12 +94,12 @@ function DisconnectAction({
         type="button"
         className={buttonClass("dangerFilled", "sm")}
         data-testid="connected-app-disconnect-confirm"
-        disabled={busy}
+        aria-disabled={busy || undefined}
         onClick={onDisconnect}
       >
         {busy ? "끊는 중…" : "끊기"}
       </button>
-      <button ref={keepRef} type="button" className={buttonClass("secondary", "sm")} onClick={onKeep} disabled={busy}>
+      <button ref={keepRef} type="button" className={buttonClass("secondary", "sm")} onClick={onKeep} aria-disabled={busy || undefined}>
         그대로 두기
       </button>
     </div>

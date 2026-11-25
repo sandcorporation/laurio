@@ -138,6 +138,7 @@ export function BriefEditPanel({
             : null;
 
   async function submit() {
+    if (saving) return; // 버튼은 aria-disabled 라 눌려도 오므로 여기서 막는다(저장 중 초점을 잃지 않게).
     // `form.categoryId === ""`도 formInvalidReason이 이미 잡아내지만, TS는 그
     // 바깥 변수로부터 `form.categoryId`의 타입을 좁히지 못한다 — 아래
     // `category_id: form.categoryId`가 `number`를 요구하므로 여기서 한 번 더
@@ -345,7 +346,8 @@ export function BriefEditPanel({
             <button
               type="button"
               onClick={() => void submit()}
-              disabled={saving || !!formInvalidReason}
+              disabled={!!formInvalidReason}
+              aria-disabled={saving || undefined}
               data-testid="draft-edit-save"
               className={buttonClass("primary", "sm")}
             >
@@ -354,7 +356,7 @@ export function BriefEditPanel({
             <button
               type="button"
               onClick={cancelEditing}
-              disabled={saving}
+              aria-disabled={saving || undefined}
               data-testid="draft-edit-cancel"
               className={buttonClass("secondary", "sm")}
             >

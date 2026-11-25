@@ -126,7 +126,7 @@ export function RuntimeSettingRow({
             <button
               type="button"
               data-testid={`${id}-confirm`}
-              disabled={pending}
+              aria-disabled={pending || undefined}
               onClick={handleConfirm}
               className={BUTTON}
             >
@@ -173,14 +173,14 @@ export function RuntimeSettingRow({
               className="min-w-0 flex-1 basis-[220px] border border-rule bg-paper px-2.5 py-1.5 font-mono text-[13px] text-ink"
             />
           )}
-          <button type="submit" data-testid={`${id}-save`} disabled={pending} className={PRIMARY}>
+          <button type="submit" data-testid={`${id}-save`} aria-disabled={pending || undefined} className={PRIMARY}>
             저장
           </button>
           {canProbe(setting) && (
             <button
               type="button"
               data-testid={`${id}-probe`}
-              disabled={pending}
+              aria-disabled={pending || undefined}
               onClick={handleProbe}
               className={BUTTON}
             >
@@ -191,7 +191,7 @@ export function RuntimeSettingRow({
             <button
               type="button"
               data-testid={`${id}-clear`}
-              disabled={pending}
+              aria-disabled={pending || undefined}
               onClick={handleClear}
               className={BUTTON}
             >

@@ -76,7 +76,7 @@ export function SourceReveal({
             type="button"
             data-testid="appeal-source-reveal-button"
             onClick={reveal}
-            disabled={state.status === "revealing"}
+            aria-disabled={(state.status === "revealing") || undefined}
             className="w-fit border border-rule bg-surface px-3 py-1.5 text-[12.5px] text-ink disabled:opacity-50"
           >
             {state.status === "revealing" ? "펼치는 중..." : "소스 펼치기"}
