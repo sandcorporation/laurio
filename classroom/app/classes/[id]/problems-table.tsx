@@ -2,7 +2,7 @@
 
 // 클래스 상세 · 문제 탭의 표(#633, 시안 v2). 번호·제목(+숨김·초안 배지)·필수 항목 수·달성률 막대·
 // 통과 n/N·최근 제출, 행 끝에 「편집」「제출 현황」 글자 링크와 ⋮(위로·아래로). 아래에 「새 문제」·
-// 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 목록 안에 입구 둘(새 문제·문제 가져오기).
+// 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 상태 문구와 입구 둘(새 문제·문제 가져오기).
 // 달성률·통과 수는 목록 응답의 값이고, 위쪽 통계 바의 평균은 클래스 응답의 값이다 — 다시 세지 않는다.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { DueInline } from "@/app/components/DueLabel";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { PERFECT_TEXT_CLASS } from "@/lib/design/stamp";
 import { achievementTone, formatPassedPerfect } from "@/lib/problems/achievement";
 import type { ProblemRow } from "@/lib/problems/api";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
@@ -187,7 +188,7 @@ export function ProblemsTable({
     return (
       <Card className="border-t-0">
         <div data-testid="problems-empty-state" className="flex flex-col items-center gap-3.5 px-4 py-12 text-[13.5px] text-ink/45">
-          <span>—</span>
+          <span>아직 문제가 없습니다.</span>
           <div className="flex flex-wrap justify-center gap-2">
             {newProblem}
             {pickerButton("public", "문제 가져오기", "problems-empty-import")}
@@ -257,7 +258,7 @@ export function ProblemsTable({
                         <span
                           data-testid={`problem-row-${problem.id}-perfect`}
                           title={formatPassedPerfect(problem)}
-                          className="mt-0.5 block text-[11px] text-advanced"
+                          className={`mt-0.5 block text-[11px] ${PERFECT_TEXT_CLASS}`}
                         >
                           완벽 {problem.perfect_count}
                         </span>

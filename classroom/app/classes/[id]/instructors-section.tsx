@@ -8,8 +8,7 @@
 // 「다시 뽑기」와 다르다.
 //
 // 떠나기·내보내기(#563): 소유자는 공동 강사 줄마다 「내보내기」를, 공동 강사는 맨 아래
-// 「이 클래스 떠나기」를 본다. 둘 다 한 번 더 확인한다. 소유자는 떠날 수 없어 그 자리에
-// 대신 할 일(넘기기·보관·삭제)을 말한다.
+// 「이 클래스 떠나기」를 본다. 둘 다 한 번 더 확인한다. 소유자는 떠날 수 없어 그 카드가 없다(#1381).
 //
 // 소유권 이전(#564, CONTEXT.md 「소유권 이전」): 소유자는 공동 강사 줄마다 「소유권 넘기기」를
 // 보고, 넘기면 채점 키가 비워진다는 것을 확인한 뒤 요청한다. 요청은 클래스마다 하나라 대기 중이면
@@ -17,8 +16,8 @@
 // 클래스 화면 맨 위의 `OwnershipTransferOffer` 가 묻는다.
 //
 // 배치(시안 v2, #635): 「강사」 탭의 왼쪽에 「이 클래스의 강사 N명」과 「공동 강사 초대」 두 카드,
-// 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 소유자 전용 행동은
-// 공동 강사에게 그 버튼이 없는 것으로 말하고, 소유자는 떠나기 버튼이 비활성이다.
+// 공동 강사에게만 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 역할 전용
+// 행동은 다른 역할에게 그 버튼이 없는 것으로 말한다.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -237,7 +236,7 @@ function PendingInviteRow({
   );
 }
 
-function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
+function LeaveSection({ classId }: { classId: number }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -260,7 +259,7 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
     <Card>
       <h2 className="border-b border-rule px-4 py-3 text-[15px] font-semibold tracking-[-0.005em]">이 클래스 떠나기</h2>
       <div className="flex flex-col gap-3 px-4 py-3">
-        {confirming && !owner ? (
+        {confirming ? (
           <div data-testid="class-leave-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
             <p className="text-[12.5px] leading-relaxed text-ink/70">
               이 클래스를 떠날까요? 내 클래스 목록에서 사라지고, 다시 함께 가르치려면 새 초대를 받아야
@@ -292,7 +291,6 @@ function LeaveSection({ classId, owner }: { classId: number; owner: boolean }) {
             <button
               type="button"
               data-testid="class-leave"
-              disabled={owner}
               onClick={() => setConfirming(true)}
               className={buttonClass("danger", "sm")}
             >
@@ -498,7 +496,11 @@ export function InstructorsSection({
           ) : null}
         </Card>
       </div>
-      <div className="w-full shrink-0 lg:w-80">{me ? <LeaveSection classId={classId} owner={iAmOwner} /> : null}</div>
+      {me && !iAmOwner ? (
+        <div className="w-full shrink-0 lg:w-80">
+          <LeaveSection classId={classId} />
+        </div>
+      ) : null}
     </div>
   );
 }

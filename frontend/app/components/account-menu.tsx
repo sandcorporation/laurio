@@ -14,12 +14,24 @@
 // 그렇지 않은 서버 전용 값(`CODEMIT_CLASSROOM_ORIGIN`)이라 부모(`SiteHeader`,
 // 서버 컴포넌트)가 계산해 내려준다(`lib/auth/classroom-link.ts`).
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { contestProductEnabled } from "@/lib/contest-switch";
 
 export function AccountMenu({ classroomUrl }: { classroomUrl: string }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [open]);
 
   async function handleLogout() {
     setOpen(false);
@@ -30,6 +42,7 @@ export function AccountMenu({ classroomUrl }: { classroomUrl: string }) {
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         data-testid="account-menu-trigger"

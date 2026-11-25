@@ -46,7 +46,7 @@ test("형식을 고르고 저장소를 내면 내 시도에 줄이 생긴다", a
   await page.goto(`/classes/${classId}/problems/${problemId}/submit`);
 
   await expect(page.getByTestId("my-problem-title")).toHaveText("목록 그리기");
-  await expect(page.getByTestId("my-problem-passed-status")).toHaveText("아직 미통과");
+  await expect(page.getByTestId("my-problem-passed-status")).toHaveText("미제출");
   await expect(page.getByTestId("my-problem-back-link")).toHaveAttribute("href", `/classes/${classId}/problems/mine`);
   await expect(page.getByTestId("submissions-empty-state")).toBeVisible();
   // 체크리스트는 아직 판정이 없어 항목만 있다.

@@ -1,8 +1,13 @@
-import { isDeployedEnvironment } from "@/lib/auth/cookies";
+import { cookies } from "next/headers";
+
+import { ACCESS_COOKIE, isDeployedEnvironment, REFRESH_COOKIE } from "@/lib/auth/cookies";
 import { readGithubOAuthConfig } from "@/lib/auth/github";
 import { readGoogleOAuthConfig } from "@/lib/auth/google";
+import { loggedInDestination } from "@/lib/auth/login-destination";
+import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
 
 import LoginForm from "./login-form";
+import RedirectIfLoggedIn from "./redirect-if-logged-in";
 
 // 서버 컴포넌트다 — dev seed 폼을 보일지, GitHub·구글 버튼을 실제 링크로 그릴지는
 // 여기서 서버가 결정한다(#95, spec #92 / #189). client_id·secret 자체는 절대
@@ -28,12 +33,29 @@ import LoginForm from "./login-form";
 // 매 요청마다 다시 렌더해 컨테이너가 실제로 뜬 배포 환경의 값을 보게 한다.
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
-  return (
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string | string[]; next_origin?: string | string[] }>;
+}) {
+  const form = (
     <LoginForm
       showDevSeedForm={!isDeployedEnvironment()}
       githubConfigured={readGithubOAuthConfig() !== null}
       googleConfigured={readGoogleOAuthConfig() !== null}
     />
   );
+
+  const cookieStore = await cookies();
+  if (!cookieStore.has(ACCESS_COOKIE) && !cookieStore.has(REFRESH_COOKIE)) return form;
+
+  // 같은 키가 반복된 배열은 어느 값인지 알 수 없어 버린다.
+  const { next, next_origin: nextOrigin } = await searchParams;
+  const single = (value: string | string[] | undefined) => (typeof value === "string" ? value : null);
+  const destination = loggedInDestination(
+    single(next),
+    single(nextOrigin),
+    resolveSiblingOrigin(single(nextOrigin)),
+  );
+  return <RedirectIfLoggedIn destination={destination}>{form}</RedirectIfLoggedIn>;
 }

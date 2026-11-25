@@ -16,6 +16,7 @@ import type { FormEvent } from "react";
 import { Badge, Card, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
 import { useMe } from "@/lib/auth/use-me";
 import { acceptCoInstructorInvite } from "@/lib/co-instructors/api";
+import { inviteView } from "@/lib/co-instructors/invite-view";
 import { useInvitePreview } from "@/lib/co-instructors/use-invite-preview";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 
@@ -86,6 +87,7 @@ export default function CoInstructorInvitePage() {
   }
 
   const info = preview.preview;
+  const view = inviteView(info);
 
   return (
     <Shell>
@@ -101,11 +103,11 @@ export default function CoInstructorInvitePage() {
         ) : null}
       </div>
 
-      {info.status !== "pending" ? (
+      {view === "unusable" ? (
         <Note tone="error">
           <span data-testid="invite-unusable">{info.status_message}</span>
         </Note>
-      ) : info.already_instructor ? (
+      ) : view === "already_instructor" ? (
         <Card className="p-5">
           <div className="flex flex-col gap-3">
             <span data-testid="invite-already-instructor" className="text-[13.5px]">
