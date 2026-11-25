@@ -159,7 +159,7 @@ function RoleSection({ role }: { role: Role }) {
   }, [copy.path]);
 
   async function handleSave() {
-    if (save.status === "saving") return; // 중복 클릭 방지 — 버튼도 disabled 지만 방어로 한 번 더.
+    if (save.status === "saving") return; // 중복 클릭 방지 — 버튼은 disabled 가 아니라 aria-disabled 다(초점을 잃지 않게) — 이 가드가 진짜 막는다.
     // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
     // #474, #478). 서버가 진짜 문이고(#478) 이건 편의라, 여기서 걸러도
     // 걸러지지 않아도 서버가 같은 이유로 다시 거절한다.
@@ -256,7 +256,7 @@ function RoleSection({ role }: { role: Role }) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={save.status === "saving"}
+            aria-disabled={save.status === "saving" || undefined}
             data-testid={`profile-${role}-save`}
             className={`mt-4 ${buttonClass("primary")}`}
           >

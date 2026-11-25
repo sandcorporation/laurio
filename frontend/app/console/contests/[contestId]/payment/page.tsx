@@ -343,7 +343,7 @@ export default function ContestPaymentPage() {
    * 두 벌로 쓰면 언젠가 갈라진다. */
   async function saveDisplayNameAndContinue() {
     const trimmed = displayNameInput.trim();
-    if (!trimmed) return;
+    if (!trimmed || savingDisplayName) return;
     setDisplayNameError(null);
     setSavingDisplayName(true);
     try {
@@ -438,7 +438,8 @@ export default function ContestPaymentPage() {
         <button
           type="button"
           onClick={() => void saveDisplayNameAndContinue()}
-          disabled={savingDisplayName || !displayNameInput.trim()}
+          disabled={!displayNameInput.trim()}
+          aria-disabled={savingDisplayName || undefined}
           data-testid="payment-sponsor-display-name-save"
           className={`mt-4 ${buttonClass("primary")}`}
         >

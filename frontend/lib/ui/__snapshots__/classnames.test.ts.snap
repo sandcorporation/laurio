@@ -6,10 +6,10 @@ exports[`badgeClass > neutral 톤의 클래스를 고정한다 1`] = `"inline-bl
 
 exports[`badgeClass > verified 톤의 클래스를 고정한다 1`] = `"inline-block shrink-0 border px-2 py-0.5 text-xs leading-tight whitespace-nowrap border-success text-success"`;
 
-exports[`buttonClass > danger 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 border border-error bg-surface text-error hover:bg-error/5 px-4 py-2"`;
+exports[`buttonClass > danger 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 border border-error bg-surface text-error hover:bg-error/5 px-4 py-2"`;
 
-exports[`buttonClass > dangerFilled 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-error text-paper hover:bg-error/85 px-4 py-2"`;
+exports[`buttonClass > dangerFilled 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 bg-error text-paper hover:bg-error/85 px-4 py-2"`;
 
-exports[`buttonClass > primary 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 bg-ink text-paper hover:bg-ink/85 px-4 py-2"`;
+exports[`buttonClass > primary 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 bg-ink text-paper hover:bg-ink/85 px-4 py-2"`;
 
-exports[`buttonClass > secondary 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 border border-rule bg-surface text-ink hover:bg-paper px-4 py-2"`;
+exports[`buttonClass > secondary 톤의 클래스를 고정한다 1`] = `"inline-flex items-center justify-center whitespace-nowrap text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 border border-rule bg-surface text-ink hover:bg-paper px-4 py-2"`;
