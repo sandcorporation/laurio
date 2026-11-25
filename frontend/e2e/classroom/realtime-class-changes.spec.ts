@@ -852,6 +852,22 @@ test("입력하던 것이 없이 문제가 숨겨졌다 다시 열리면 초점�
   await expect(page.getByRole("status").filter({ hasText: "문제가 다시 열려 제출할 수 있습니다" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId("my-problem-title")).toBeFocused();
 
+  // 한 바퀴 더: 다시 숨기면 숨김 안내 위에 「다시 열려」가 남지 않고, 다시 열면 같은 문구가 비웠다 다시 채워진다.
+  const reopened = page.getByRole("status").filter({ hasText: "문제가 다시 열려 제출할 수 있습니다" });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
+  await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeVisible({ timeout: 10_000 });
+  await expect(reopened).toHaveCount(0);
+  await page.evaluate(() => {
+    const el = document.querySelector("[data-testid=submit-reopened-note]")!;
+    let filled = 0;
+    new MutationObserver(() => {
+      if (el.textContent) document.body.dataset.reopenedFilled = String(++filled);
+    }).observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/reopen`)).ok()).toBeTruthy();
+  await expect(reopened).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator("body")).toHaveAttribute("data-reopened-filled", /^[1-9]/);
+
   // 두 번째: 숨김 안내 밖으로 초점을 옮겨 둔 채 다시 열면 그대로다.
   expect((await instructor.api.post(`${base}/problems/${problemId}/hide`)).ok()).toBeTruthy();
   await expect(page.getByRole("heading", { name: "강사가 이 문제를 숨기거나 삭제했습니다" })).toBeVisible({ timeout: 10_000 });

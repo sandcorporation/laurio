@@ -118,6 +118,8 @@ export default function ProblemSubmitPage() {
   const [reopenedNote, setReopenedNote] = useState("");
   useEffect(() => {
     if (state.status === "notFound" && hadForm) lostForm.current = true;
+    // 다시 엶 안내는 ready 화면의 것이다 — 숨김·오류 화면으로 바뀌면 비워 두어야 다음 다시 엶에서 비었다 채워져 또 읽힌다.
+    if (state.status === "notFound" || state.status === "error") setReopenedNote("");
     if (state.status !== "ready" || !lostForm.current) return;
     lostForm.current = false;
     setReopenedNote(blockedChange("hidden", state.data.submit_blocked_reason).note);
