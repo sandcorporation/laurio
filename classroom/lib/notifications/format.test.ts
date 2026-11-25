@@ -58,6 +58,22 @@ describe("describeNotification — classroom_scoring_key_rejected", () => {
   });
 });
 
+describe("describeNotification — classroom_scoring_key_missing", () => {
+  it("연결이 없어 참여자의 제출이 멈췄고, 키를 넣으면 밀린 제출부터 채점되며, 미달이 되지 않는다고 말한다(#1389)", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_scoring_key_missing", context: { class_id: 7, class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toBe(
+      "'알고리즘 1반' 클래스에 채점 연결이 없어 참여자의 제출이 채점되지 않고 있습니다 — 클래스 설정에서 채점 키를 넣으면 밀린 제출부터 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.",
+    );
+  });
+
+  it("클래스 이름이 빠진 옛 줄도 문장을 짓는다", () => {
+    const text = describeNotification(row({ notification_type: "classroom_scoring_key_missing", context: {} }));
+    expect(text).toContain("'클래스' 클래스에 채점 연결이 없어");
+  });
+});
+
 describe("describeNotification — classroom_scoring_server_unreachable", () => {
   it("채점 서버에 닿지 않아 멈췄고, 서버가 돌아오면 이어지며, 참여자 시도는 미달이 되지 않는다고 말한다(#603)", () => {
     const text = describeNotification(

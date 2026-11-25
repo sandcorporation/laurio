@@ -20,6 +20,10 @@ class ClassroomConfig(AppConfig):
         from .scoring import CLASSROOM_SUBMISSION_SCORING_SCAN
 
         register_scan(CLASSROOM_SUBMISSION_SCORING_SCAN)
+        # 「채점 연결 없음」 알림(#1389) — 실패 재시도·배포 시점에 이미 멈춘 클래스·이전 뒤 남은 대기 시도를 맡는다.
+        from .scoring_key_missing import CLASSROOM_SCORING_KEY_MISSING_SCAN
+
+        register_scan(CLASSROOM_SCORING_KEY_MISSING_SCAN)
         # 공모전 문제(#548, ADR-0054) — 공개 중인 무료 공모전의 원본이 바뀌면 그 공모전을
         # 들여온 문제가 따라간다. 신호는 공유층에 있어 공모전 앱을 임포트하지 않는다.
         from core.contest_catalog import contest_source_changed

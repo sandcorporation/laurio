@@ -1507,3 +1507,44 @@ class ClassroomAgentRun(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassroomAgentRun(submission={self.submission_id}, {self.purpose}, {self.outcome})"
+
+
+class ClassScoringKeyMissingAlert(models.Model):
+    """「채점 연결 없음」 알림을 한 번 보냈다는 기록(#1389, CONTEXT.md 「강의실 알림」).
+
+    채점 연결이 없는 클래스에서 참여자의 시도가 멈추면 소유자에게 앱 안 알림을 **한 번** 보낸다. 그 「한 번」을
+    DB 가 지킨다 — 클래스마다 열린(`closed_at` 이 빈) 기록은 하나뿐이다(부분 유일 제약). 알림 행은 이 기록과
+    같은 트랜잭션에서 만들어 여기 잇는다(`classroom.scoring_key_missing.alert_missing_key`). 연결을 바꾸면
+    (`owner`) 또는 소유권이 넘어가면(`transfer`) 기록이 닫히고, 다시 멈추면 새 기록·새 알림이 생긴다.
+
+    받는 사람은 기록을 연 순간의 소유자다 — 나중에 소유권이 넘어가도 바꾸지 않는다(알림은 append-only)."""
+
+    class ClosedReason(models.TextChoices):
+        NONE = "", "열림"
+        OWNER = "owner", "소유자가 연결을 바꿨다"
+        TRANSFER = "transfer", "소유권이 넘어갔다"
+
+    classroom = models.ForeignKey(Class, related_name="scoring_key_missing_alerts", on_delete=models.CASCADE)
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="classroom_scoring_key_missing_alerts", on_delete=models.CASCADE
+    )
+    #: 이 기록과 같은 트랜잭션에서 만든 알림. 알림이 지워져도(탈퇴 정리 등) 기록은 남아 다시 보내지 않는다.
+    notification = models.ForeignKey(
+        "notifications.Notification", null=True, blank=True, related_name="+", on_delete=models.SET_NULL
+    )
+    opened_at = models.DateTimeField()
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_reason = models.CharField(max_length=10, choices=ClosedReason.choices, blank=True, default="")
+
+    class Meta:
+        ordering = ["-opened_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["classroom"],
+                condition=models.Q(closed_at__isnull=True),
+                name="unique_open_scoring_key_missing_alert",
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassScoringKeyMissingAlert(classroom={self.classroom_id}, closed_at={self.closed_at})"

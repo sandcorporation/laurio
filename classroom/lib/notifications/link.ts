@@ -48,6 +48,7 @@ export function notificationHref(notification: NotificationRow): string | null {
       return detailTabHref(classId, "problems");
     }
     case "classroom_scoring_key_rejected":
+    case "classroom_scoring_key_missing":
     case "classroom_scoring_quota_exhausted":
     case "classroom_scoring_server_unreachable": {
       const classId = context.class_id;

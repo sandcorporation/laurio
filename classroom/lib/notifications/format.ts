@@ -24,6 +24,10 @@ export function describeNotification(notification: NotificationRow): string {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       return `'${className}' 클래스의 채점 키가 거부되어 채점이 멈췄습니다 — 클래스 설정에서 새 키를 저장해 주세요.`;
     }
+    case "classroom_scoring_key_missing": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      return `'${className}' 클래스에 채점 연결이 없어 참여자의 제출이 채점되지 않고 있습니다 — 클래스 설정에서 채점 키를 넣으면 밀린 제출부터 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.`;
+    }
     case "classroom_scoring_quota_exhausted": {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       return `'${className}' 클래스 채점 키의 크레딧이 떨어져 채점이 멈췄습니다 — 충전하면 밀린 제출부터 이어서 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.`;

@@ -42,7 +42,14 @@ from notifications.services import notify_safely
 
 from .instructor_scope import OWNER_ONLY_MESSAGE
 from .instructors import is_owner
-from .models import OWNERSHIP_TRANSFER_TTL_DAYS, Class, ClassCoInstructor, OwnershipTransfer
+from .models import (
+    OWNERSHIP_TRANSFER_TTL_DAYS,
+    Class,
+    ClassCoInstructor,
+    ClassScoringKeyMissingAlert,
+    OwnershipTransfer,
+)
+from .scoring_key_missing import close_open_alert
 
 ALREADY_PENDING_MESSAGE = "이미 대기 중인 소유권 이전 요청이 있습니다. 그 요청을 취소한 뒤 다시 요청하세요."
 NOT_RECIPIENT_MESSAGE = "이 소유권 이전 요청을 받은 공동 강사만 할 수 있습니다."
@@ -221,6 +228,9 @@ def accept(class_obj: Class, user_id: int, transfer_id: int) -> Class:
         )
         transfer.accepted_at = now
         transfer.save(update_fields=["accepted_at"])
+        # 키를 비웠으니 열린 「연결 없음」 기록은 옛 소유자 몫으로 닫는다(#1389) — 남은 참여자 대기 시도는 다음 제출이나
+        # 60초 스캔이 새 소유자에게 새로 알린다. `Class` 를 이미 잠갔다(`classroom.scoring_key_missing` 잠금 규칙 ③).
+        close_open_alert(locked.id, ClassScoringKeyMissingAlert.ClosedReason.TRANSFER)
     _notify_requester(
         transfer,
         locked,

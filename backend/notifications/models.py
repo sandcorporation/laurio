@@ -46,6 +46,10 @@ class NotificationType(models.TextChoices):
     # rejected`) — 밀린 제출이 몇 건이든, tick이 몇 번을 돌든 상태 전이 한
     # 번에 하나다. 강사가 키를 고쳤다가 그 키도 거절당하면 그때 다시 간다.
     CLASSROOM_SCORING_KEY_REJECTED = "classroom_scoring_key_rejected", "강의실 채점 키 거부"
+    # 채점 연결이 없는 클래스에서 참여자의 시도가 채점 대기로 멈췄다(#1389) — 소유자에게만, 멈춘 동안 한 번 간다.
+    # 「한 번」은 `classroom.ClassScoringKeyMissingAlert` 의 열린 기록(클래스마다 하나)이 지킨다. 연결을 바꾸거나
+    # 소유권이 넘어가면 기록이 닫혀 다시 멈출 때 다시 간다. 강사 본인 시도·보관된 클래스는 알리지 않는다.
+    CLASSROOM_SCORING_KEY_MISSING = "classroom_scoring_key_missing", "강의실 채점 연결 없음"
     # 강의실 채점 키의 OpenAI 크레딧이 바닥났다(#586) — 키 거부와 같은 규율로 소유자에게만,
     # 채점이 **멈추는 순간**에만 한 번 간다(`classroom.scoring._mark_scoring_quota_exhausted`).
     # 다시 확인한 시도가 또 소진을 받아도 다시 가지 않는다. 풀렸다가 다시 바닥나면 다시 간다.
@@ -128,6 +132,7 @@ CLASSROOM_NOTIFICATION_TYPES = frozenset(
     {
         NotificationType.CLASSROOM_SUBMISSION_SCORED,
         NotificationType.CLASSROOM_SCORING_KEY_REJECTED,
+        NotificationType.CLASSROOM_SCORING_KEY_MISSING,
         NotificationType.CLASSROOM_SCORING_QUOTA_EXHAUSTED,
         NotificationType.CLASSROOM_SCORING_SERVER_UNREACHABLE,
         NotificationType.CLASSROOM_SCORING_PLATFORM_UNAVAILABLE,
@@ -231,6 +236,13 @@ NOTIFICATION_TYPE_FLAGS: dict[str, dict[str, bool]] = {
     # 필요 없다. 강의실 알림은 전부 서비스 안에서만이라는 같은 규칙을
     # 받는다(#301, #356).
     NotificationType.CLASSROOM_SCORING_KEY_REJECTED: {
+        "is_transactional": True,
+        "is_promotional": False,
+        "is_quiet_hours_exempt": False,
+        "is_internal_only": True,
+    },
+    # 소유자 본인의 클래스 설정(연결 없음)에 대한 경고다(#1389) — 키 거부와 같은 취급.
+    NotificationType.CLASSROOM_SCORING_KEY_MISSING: {
         "is_transactional": True,
         "is_promotional": False,
         "is_quiet_hours_exempt": False,

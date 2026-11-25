@@ -132,6 +132,43 @@ def needs_setup(class_obj: Class, problem: Problem) -> bool:
 QUOTA_RECHECK_INTERVAL = timedelta(minutes=10)
 
 
+def no_scoring_key_q(classroom: str = "") -> models.Q:
+    """「`classroom` 이 가리키는 클래스에 채점 연결이 없다」 — `Class.has_scoring_key()` 가 거짓인 것과 같은 기준의
+    `Q`(호환 서버는 주소로, 키 연결은 스위치가 고른 쪽 키 칸으로, #601·#1269). `classroom` 은 Class 까지의 경로다
+    (Class 자신이면 빈 문자열, 예: ``"problem__classroom"``)."""
+
+    prefix = f"{classroom}__" if classroom else ""
+    kind = f"{prefix}scoring_connection_kind"
+    return (
+        (models.Q(**{kind: Class.ScoringConnectionKind.COMPATIBLE_SERVER}) & models.Q(**{f"{prefix}scoring_server_url": ""}))
+        | (models.Q(**{kind: Class.ScoringConnectionKind.OPENAI_KEY}) & models.Q(**{f"{prefix}openai_api_key_encrypted": ""}))
+        | (
+            models.Q(**{kind: Class.ScoringConnectionKind.ANTHROPIC_KEY})
+            & models.Q(**{f"{prefix}anthropic_api_key_encrypted": ""})
+        )
+    )
+
+
+def awaiting_score(queryset: QuerySet[ClassroomSubmission]) -> QuerySet[ClassroomSubmission]:
+    """채점을 기다리는 시도만 남긴다 — 아직 `ClassroomScore` 가 없고, 반려(#1311)도 에이전트 채점 보류(#1036)도
+    아니다. 클래스·문제 쪽 사유(키·모델)는 보지 않는다 — 그것은 `pending_submissions` 가 더 거르고, 「연결 없음」
+    알림(`classroom.scoring_key_missing`, #1389)은 거르지 않고 그 사유로 멈춘 시도를 센다."""
+
+    return (
+        queryset.filter(classroom_score__isnull=True)
+        # 반려(#1311) — 다시 돌리지 않는다. 학생이 새로 낸 시도가 채점된다.
+        .exclude(models.Exists(_rejected_attempts()))
+        # 에이전트 채점 보류(#1036) — 다시 돌려 예산을 쓰지 않는다. 공모전 보류와 같다.
+        .exclude(
+            models.Exists(
+                ClassroomScoringAttempt.objects.filter(
+                    submission=models.OuterRef("pk"), error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX
+                )
+            )
+        )
+    )
+
+
 def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
     """아직 `ClassroomScore`가 없고 `blocking_reason`이 없는(=지금 채점될 수
     있는) 시도(#287, #355, #403). `classroom.scoring`의 스캔이 이
@@ -162,23 +199,9 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
     )
 
     return (
-        ClassroomSubmission.objects.filter(classroom_score__isnull=True)
-        # 반려(#1311) — 다시 돌리지 않는다. 학생이 새로 낸 시도가 채점된다.
-        .exclude(models.Exists(_rejected_attempts()))
-        # 채점 연결이 없는 클래스 — `Class.has_scoring_key` 와 같은 기준(호환 서버는 주소로, #601).
-        .exclude(
-            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.COMPATIBLE_SERVER)
-            & models.Q(problem__classroom__scoring_server_url="")
-        )
-        # 키 연결은 스위치가 고른 쪽 키 칸으로 가른다(#1269) — Claude 키 연결은 Claude 칸, 나머지는 OpenAI 칸.
-        .exclude(
-            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.OPENAI_KEY)
-            & models.Q(problem__classroom__openai_api_key_encrypted="")
-        )
-        .exclude(
-            models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY)
-            & models.Q(problem__classroom__anthropic_api_key_encrypted="")
-        )
+        awaiting_score(ClassroomSubmission.objects.all())
+        # 채점 연결이 없는 클래스 — `Class.has_scoring_key` 와 같은 기준(`no_scoring_key_q`).
+        .exclude(no_scoring_key_q("problem__classroom"))
         .exclude(
             ~models.Q(problem__classroom__scoring_connection_kind=Class.ScoringConnectionKind.ANTHROPIC_KEY)
             & models.Q(problem__classroom__openai_api_key_status=Class.ScoringKeyStatus.REJECTED)
@@ -191,14 +214,6 @@ def pending_submissions(as_of, ctx) -> QuerySet[ClassroomSubmission]:
         .exclude(problem__classroom__scoring_quota_exhausted_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         .exclude(problem__classroom__scoring_server_unreachable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
         .exclude(problem__classroom__scoring_platform_unavailable_at__gt=as_of - QUOTA_RECHECK_INTERVAL)
-        # 에이전트 채점 보류(#1036) — 다시 돌려 예산을 쓰지 않는다. 공모전 보류와 같다.
-        .exclude(
-            models.Exists(
-                ClassroomScoringAttempt.objects.filter(
-                    submission=models.OuterRef("pk"), error__startswith=AGENT_SCORING_HOLD_ERROR_PREFIX
-                )
-            )
-        )
         .annotate(attempt_count=models.functions.Coalesce(models.Subquery(attempt_count), 0))
         .select_related("problem", "problem__classroom", "member")
     )
