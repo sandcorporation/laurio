@@ -5,9 +5,10 @@
 // 알림이 가리킨다. 공동 강사에게는 소유자 전용 입력(채점 연결 폼·클래스 삭제)을 그리지 않는다.
 // 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
 
+import { useScrollToHash } from "@/lib/util/use-scroll-to-hash";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ReasoningModelSwitch } from "@/app/components/ReasoningModelSwitch";
 import { ScoringConnectionSection } from "@/app/components/ScoringConnectionSection";
@@ -447,16 +448,7 @@ export default function ClassSettingsPage() {
     setInstructorDisplayName(state.classroom.my_instructor_display_name);
   }
 
-  // 주소의 `#구획`(예: 보관 행·보관 클래스 머리의 `#class-archive`, #658)은 구획이 클래스를 읽은
-  // 뒤에야 그려져 브라우저의 첫 이동이 놓친다 — 처음 그려졌을 때 한 번 그 구획으로 옮긴다.
-  const ready = state.status === "ready";
-  const scrolledToHash = useRef(false);
-  useEffect(() => {
-    if (!ready || scrolledToHash.current) return;
-    scrolledToHash.current = true;
-    const id = window.location.hash.slice(1);
-    if (id) document.getElementById(id)?.scrollIntoView();
-  }, [ready]);
+  useScrollToHash(state.status === "ready");
 
   if (state.status === "loading") {
     return (
