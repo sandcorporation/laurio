@@ -11,13 +11,16 @@
 보인다(`notifications.api._transfer_status`, #1459 ①).
 
 이은 요청이 이미 수락·거절됐으면 그 답의 시각으로 읽음 처리한다 — 지금 코드가 답할 때 하는 일과 같다. 취소·만료는
-안 읽은 채로 둔다(받는 사람이 처리한 일이 아니다).
+안 읽은 채로 둔다(받는 사람이 처리한 일이 아니다). 연결과 읽음 보정은 따로 쓴다 — 읽음은 DB 에서 아직 안 읽음인 행에만
+채워, 이행이 읽은 뒤 받는 사람이 읽음 처리한 것을 덮지 않는다(#1471 ⑤).
 """
 
 from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import timedelta
+
+from django.db.models import Case, Value, When
 
 #: 요청 커밋과 알림 생성 사이 — 같은 요청 처리 안의 몇 밀리초다. 넉넉히 잡되 취소 뒤 다시 요청하는 간격보다는 짧게.
 WINDOW = timedelta(minutes=1)
@@ -28,7 +31,8 @@ REQUESTED = "classroom_ownership_transfer_requested"
 def link_legacy_request_notifications(Notification, OwnershipTransfer) -> int:
     """이은 알림 수를 돌려준다. 모델은 인자로 받는다 — 마이그레이션은 이력 모델을, 시험은 지금 모델을 준다.
 
-    질의 수는 알림 수와 무관하다(#1459 ②): 요청 알림 읽기 하나, 후보 요청 읽기 하나, 이은 알림 `bulk_update` 하나."""
+    질의 수는 알림 수와 무관하다(#1459 ②): 요청 알림 읽기 하나, 후보 요청 읽기 하나, 이은 알림 `bulk_update`
+    (연결만) 하나, 답한 요청의 알림이 있으면 읽음 보정 조건부 `UPDATE` 하나(#1471 ⑤)."""
 
     requested = list(Notification.objects.filter(notification_type=REQUESTED))
     already_linked = {
@@ -69,15 +73,23 @@ def link_legacy_request_notifications(Notification, OwnershipTransfer) -> int:
 
     claims = Counter(transfer.id for transfer in picked.values())
     linked = []
+    answered: dict[int, object] = {}
     for notification in legacy:
         transfer = picked.get(notification.id)
         if transfer is None or claims[transfer.id] != 1:
             continue
         notification.context = {**notification.context, "transfer_id": transfer.id}
-        answered_at = transfer.accepted_at or transfer.declined_at
-        if notification.read_at is None and answered_at is not None:
-            notification.read_at = answered_at
         linked.append(notification)
+        answered_at = transfer.accepted_at or transfer.declined_at
+        if answered_at is not None:
+            answered[notification.id] = answered_at
     if linked:
-        Notification.objects.bulk_update(linked, ["context", "read_at"])
+        # 연결만 쓴다 — `read_at` 은 위에서 읽은 뒤 받는 사람이 바꿨을 수 있다(#1471 ⑤).
+        Notification.objects.bulk_update(linked, ["context"])
+    if answered:
+        # 읽음 보정은 DB 가 아직 안 읽음인 행에만 — 읽음 API(`notifications.api.mark_one_read`)와 같은 조건부
+        # 갱신이라, 그 사이 사용자가 읽은 시각을 덮지 않는다. 행마다 시각이 달라도 질의 하나다.
+        Notification.objects.filter(pk__in=answered, read_at__isnull=True).update(
+            read_at=Case(*(When(pk=pk, then=Value(at)) for pk, at in answered.items()))
+        )
     return len(linked)

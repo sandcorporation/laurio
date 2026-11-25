@@ -3,7 +3,7 @@
 // 확인창(role=alertdialog)의 초점 규약 — 열리면 안전한 쪽으로, Tab 은 창 안에 갇히고, Escape 로 닫히며,
 // 닫히면 연 단추로 돌아온다. 연 단추가 닫히며 사라졌으면 `fallbackFocus` 가 돌려주는 자리(머리글 등)로 간다.
 // 가장자리 셈은 순수 함수(`lib/dom/focus-trap`)가 진다.
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useId, useRef, type RefObject } from "react";
 
 import { trapTabTarget } from "@/lib/dom/focus-trap";
 
@@ -21,6 +21,8 @@ export function useDialogFocus(
   },
 ) {
   const { onEscape, initialFocus, fallbackFocus } = options;
+  // 창 본문(질문·결과·금액)을 가리키는 id — 창 요소의 aria-describedby 와 본문 요소의 id 에 같이 건다.
+  const descriptionId = useId();
   const opener = useRef<HTMLElement | null>(null);
   const fallback = useRef(fallbackFocus);
   fallback.current = fallbackFocus;
@@ -57,4 +59,5 @@ export function useDialogFocus(
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [dialogRef]);
+  return { descriptionId };
 }
