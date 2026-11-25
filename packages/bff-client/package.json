@@ -12,6 +12,8 @@
     "./login-redirect": "./src/login-redirect.ts",
     "./repository-url": "./src/repository-url.ts",
     "./feedback": "./src/feedback/index.ts",
+    "./dialog-focus": "./src/dialog-focus/use-dialog-focus.ts",
+    "./dialog-focus/return-target": "./src/dialog-focus/return-target.ts",
     "./feedback-history": "./src/feedback/markup-history.ts",
     "./busy-guard": "./src/busy-guard.tsx",
     "./feedback.css": "./feedback.css"

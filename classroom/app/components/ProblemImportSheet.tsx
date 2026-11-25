@@ -17,7 +17,7 @@
 // 그 사실을 문구로만 말한다.
 import { useEffect, useRef, useState } from "react";
 
-import { useDialogFocus } from "@/app/components/use-dialog-focus";
+import { useDialogFocus } from "@codemit/bff-client/dialog-focus";
 import { useTablist } from "@/app/components/use-tablist";
 import type { ReactNode } from "react";
 

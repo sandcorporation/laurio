@@ -1063,10 +1063,8 @@ function InteractiveSubmissionFormBody(
     const before = previousBlockedReason.current;
     previousBlockedReason.current = submitBlockedReason;
     const focus = blockedChange(before, submitBlockedReason).focus;
-    if (focus === "blocked-note-always") {
-      blockedNoteRef.current?.focus();
-    } else if (focus === "blocked-note") {
-      // 이전 안내가 사라지며 초점이 body 로 떨어졌을 때만 새 안내로 — 다른 곳 초점은 두고 본다.
+    if (focus === "blocked-note") {
+      // 폼이 사라지며 초점이 body 로 떨어졌을 때만 안내로 — 다른 칸에 입력 중인 초점은 두고 본다.
       const active = document.activeElement;
       if (active === null || active === document.body) blockedNoteRef.current?.focus();
     }

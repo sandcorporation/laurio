@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { Stamp } from "@/app/components/Stamp";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
-import { useDialogFocus } from "@/app/components/use-dialog-focus";
+import { useDialogFocus } from "@codemit/bff-client/dialog-focus";
 import { useMenuFocus } from "@/app/components/use-menu-focus";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { describeDue, lateLabel, type LateStatus, type DueFields } from "@/lib/problems/due-dates";

@@ -8,7 +8,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
-import { useDialogFocus } from "@/app/components/use-dialog-focus";
+import { useDialogFocus } from "@codemit/bff-client/dialog-focus";
 import { AccessNotice } from "@/app/components/AccessNotice";
 import { Card, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";

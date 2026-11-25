@@ -872,7 +872,50 @@ for (const view of [
 
     const expelled = page.getByTestId("member-expelled-note");
     await expect(expelled).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByRole("status").filter({ hasText: "보관은 풀렸지만 아직 제출할 수 없습니다" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "클래스에서 내보내져 제출할 수 없습니다" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "보관은 풀렸지만" })).toHaveCount(0);
     await expect(expelled).toBeFocused();
   });
 }
+
+// #1518 ② — 폼이 보이던 중 처음 막혀도(열림 → 막힘) 다른 칸에 입력 중인 초점은 빼앗지 않는다. 초점이 body 면 안내로 간다(위 BLOCKERS).
+test("다른 칸에 초점이 있을 때 클래스가 보관되면 초점은 그 칸에 남고 안내는 낭독된다", async ({ page, browser }) => {
+  test.setTimeout(30_000);
+  const seed = `rt-blocked-keepfocus-${test.info().workerIndex}-${Date.now()}`;
+  const instructor = await otherSession(browser, seed);
+  const classId = (
+    await (
+      await instructor.api.post("/api/backend/classroom/classes", {
+        data: { name: `실시간 초점 보존 ${seed}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const problemId = (
+    await (await instructor.api.post(`${base}/problems`, { data: { title: "1주차", submission_formats: ["repository"] } })).json()
+  ).id as number;
+  await instructor.api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "동작한다", required: true } });
+  expect((await instructor.api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+  const joinCode = (await (await instructor.api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "참여자" } })).ok(),
+  ).toBeTruthy();
+  await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+  await expect(page.getByTestId("submit-repository")).toBeVisible();
+
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.id = "elsewhere";
+    input.setAttribute("aria-label", "다른 칸");
+    document.body.prepend(input);
+    input.focus();
+  });
+  expect((await instructor.api.post(`${base}/archive`)).ok()).toBeTruthy();
+  await instructor.context.close();
+
+  const note = page.getByTestId("class-archived-note");
+  await expect(note).toBeVisible({ timeout: 10_000 });
+  await expect(note).toHaveAttribute("role", "alert");
+  await expect(page.locator("#elsewhere")).toBeFocused();
+});
