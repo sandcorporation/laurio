@@ -50,7 +50,7 @@ import {
   type NotificationGroup,
 } from "@/lib/notifications/group";
 import { notificationHref } from "@/lib/notifications/link";
-import { mergeFirstPage } from "@/lib/notifications/merge";
+import { loadNextPage, mergePage, type UpdateList } from "@/lib/notifications/merge";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
 import { useUnreadCount } from "@/lib/notifications/use-unread-count";
 
@@ -92,18 +92,20 @@ export default function NotificationsPage() {
     };
   }, []);
 
-  // 실시간 신호(#1346) — 첫 쪽만 다시 불러와 지금 목록에 합친다(`mergeFirstPage`).
+  const updateList = useCallback<UpdateList>((change) => {
+    setLoad((current) =>
+      current.status === "ready" ? { ...current, ...change(current) } : current,
+    );
+  }, []);
+
+  // 실시간 신호(#1346) — 첫 쪽만 다시 불러와 지금 목록에 합친다(`mergePage`).
   // 아래 줄·다음 쪽 커서·스크롤은 그대로고, 실패해도 화면을 건드리지 않는다.
   const refreshFirstPage = useCallback(() => {
     fetchMyNotifications().then((result) => {
       if (!result.ok) return;
-      setLoad((current) =>
-        current.status === "ready"
-          ? { ...current, items: mergeFirstPage(current.items, result.data.items) }
-          : current,
-      );
+      updateList((current) => ({ ...current, items: mergePage(current.items, result.data.items) }));
     });
-  }, []);
+  }, [updateList]);
 
   useRealtimeRefresh({
     matches: isNotificationChanged,
@@ -115,14 +117,14 @@ export default function NotificationsPage() {
   async function loadMore() {
     if (load.status !== "ready" || load.nextCursor === null) return;
     setLoadingMore(true);
-    const result = await fetchMyNotifications(load.nextCursor);
-    if (result.ok) {
-      setLoad({
-        status: "ready",
-        items: [...load.items, ...result.data.items],
-        nextCursor: result.data.next,
-      });
-    }
+    await loadNextPage(
+      load.nextCursor,
+      async (after) => {
+        const result = await fetchMyNotifications(after);
+        return result.ok ? result.data : null;
+      },
+      updateList,
+    );
     setLoadingMore(false);
   }
 

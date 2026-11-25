@@ -104,3 +104,15 @@ def test_purge_only_removes_this_instructors_notifications(db):
 
     assert not Notification.objects.filter(context__class_id=class_a.id).exists()
     assert Notification.objects.filter(context__class_id=class_b.id).exists()
+
+
+def test_many_notifications_option_gives_one_participant_sixty(db):
+    """「더 보기」(한 쪽 50건)를 화면에서 걸어 보는 선택지(#1380) — 다시 심어도 60건이다."""
+
+    instructor = _instructor("many-notifications-inst@example.test")
+
+    call_command("seed_demo_classroom", email=instructor.email, many_notifications=True)
+    call_command("seed_demo_classroom", email=instructor.email, many_notifications=True)
+
+    participant = get_user_model().objects.get(email="demo-classroom-1@example.com")
+    assert Notification.objects.filter(recipient=participant).count() == 60
