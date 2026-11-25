@@ -4,7 +4,7 @@
 // 버튼 → 지금 화면 캡처 → 미리보기·가리기 → 갈래·내용 → 보내기. 화면 주소·앱·브라우저·화면 크기는
 // 자동으로 붙는다. 캡처에 실패하거나 「그림 빼기」면 그림 없이 보낸다.
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent } from "react";
 
 import type { BffClient } from "../client";
 import {
@@ -124,8 +124,9 @@ export function FeedbackLauncher({
 
   if (!granted) return null;
 
-  async function open() {
-    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // 연 단추는 클릭의 currentTarget 이다 — document.activeElement 는 낭독기 활성화·일부 터치에서 body 다(#1509 ②).
+  async function open(event: MouseEvent<HTMLButtonElement>) {
+    opener.current = event.currentTarget;
     setPhase("capturing");
     setError(null);
     const ticket = gate.current.begin();
