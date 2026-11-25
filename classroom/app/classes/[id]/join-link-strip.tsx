@@ -61,11 +61,10 @@ export function JoinLinkStrip({
         >
           {url}
         </span>
-        {copied ? (
-          <span data-testid="join-link-copied" className="text-[12px] text-success">
-            복사됨
-          </span>
-        ) : null}
+        {/* 상태 영역은 늘 있다 — 있다가 생기는 영역은 낭독기가 알리지 않는다(#1447 2-2). */}
+        <span role="status" data-testid="join-link-copied" className="text-[12px] text-success">
+          {copied ? "복사됨" : ""}
+        </span>
         <button type="button" data-testid="join-link-copy" onClick={copy} className={buttonClass("secondary", "sm")}>
           복사
         </button>

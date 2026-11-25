@@ -120,6 +120,9 @@ function endedTransferText(status: NotificationRow["transfer_status"], className
       return `${subject}이 취소됐습니다 — 요청한 쪽이 거두었습니다.`;
     case "expired":
       return `${subject}이 기한이 지나 만료됐습니다.`;
+    // 서버가 요청을 찾지 못했다(#1448) — 대기 중인 요청은 언제나 찾히므로 끝난 요청이다. 어떻게 끝났는지는 모른다.
+    case "gone":
+      return `${subject}은 이미 끝났습니다 — 더 답할 것이 없습니다.`;
     default:
       return null;
   }

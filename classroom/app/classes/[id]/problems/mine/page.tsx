@@ -209,6 +209,17 @@ function MyDisplayName({
   const [nameInput, setNameInput] = useState(displayName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 저장·취소로 폼이 닫히면 사라진 단추 대신 「바꾸기」가 초점을 받는다(#1447 1-1). 저장 성공은 늘 있는 상태 영역으로 알린다.
+  const editRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (!editing && restoreFocus.current) {
+      restoreFocus.current = false;
+      editRef.current?.focus();
+    }
+  }, [editing]);
 
   // 다시 불러온 이름(저장 직후 `onRenamed`가 부른 새로고침, 또는 다른 탭에서
   // 바꾼 값)으로 입력칸 초기값을 맞춘다 — 편집 중이 아닐 때만이다, 타이핑
@@ -232,6 +243,8 @@ function MyDisplayName({
     setError(null);
     const result = await renameMyself(classId, trimmedName);
     if (result.ok) {
+      restoreFocus.current = true;
+      setNotice("이름을 바꿨습니다.");
       setEditing(false);
       onRenamed();
     } else {
@@ -243,6 +256,7 @@ function MyDisplayName({
   function cancel() {
     setNameInput(displayName);
     setError(null);
+    restoreFocus.current = true;
     setEditing(false);
   }
 
@@ -293,8 +307,12 @@ function MyDisplayName({
               <span aria-hidden="true"> · </span>
               <button
                 type="button"
+                ref={editRef}
                 data-testid="my-display-name-edit"
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  setNotice("");
+                  setEditing(true);
+                }}
                 className="text-ink/60 underline underline-offset-2 hover:text-ink"
               >
                 바꾸기
@@ -303,6 +321,9 @@ function MyDisplayName({
           ) : null}
         </p>
       )}
+      <span role="status" data-testid="my-display-name-status" className="sr-only">
+        {notice}
+      </span>
       {error ? (
         <span
           data-testid="my-display-name-error"

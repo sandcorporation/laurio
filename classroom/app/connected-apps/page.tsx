@@ -2,7 +2,7 @@
 
 // 연결된 앱 (ADR-0052, #512, CONTEXT.md 「연결된 앱」) — 내 계정으로 쓰도록 허락한 외부
 // AI 앱의 목록과 끊기. 계정 메뉴에서 들어온다. 끊으면 그 앱의 토큰이 곧바로 거절된다.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Card, CardHeader, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import {
@@ -58,11 +58,10 @@ function ConnectAddress({ url }: { url: string }) {
           >
             복사
           </button>
-          {copied ? (
-            <span data-testid="connected-apps-mcp-url-copied" className="text-[12px] text-success">
-              복사됨
-            </span>
-          ) : null}
+          {/* 상태 영역은 늘 있다 — 있다가 생기는 영역은 낭독기가 알리지 않는다(#1447 2-2). */}
+          <span role="status" data-testid="connected-apps-mcp-url-copied" className="text-[12px] text-success">
+            {copied ? "복사됨" : ""}
+          </span>
         </div>
         <ol className="list-decimal space-y-1 pl-5 text-[12.5px] leading-relaxed text-ink/60">
           <li>Claude 같은 AI 앱에서 커넥터(MCP 서버)를 추가하는 화면을 열고 이 주소를 붙여 넣습니다.</li>
@@ -87,10 +86,10 @@ function DisconnectAction({
   onKeep: () => void;
   onDisconnect: () => void;
 }) {
-  const { triggerRef, keepRef, onKeyDown } = useInlineConfirm(confirming, onKeep);
+  const { triggerRef, keepRef, questionId, groupProps } = useInlineConfirm(confirming, onKeep);
   return confirming ? (
-    <div className="flex flex-wrap items-center gap-2" onKeyDown={onKeyDown}>
-      <span className="text-[12.5px] text-ink/60">끊으면 이 앱은 다시 허락받기 전까지 강의실에 닿지 못합니다.</span>
+    <div className="flex flex-wrap items-center gap-2" {...groupProps}>
+      <span id={questionId} className="text-[12.5px] text-ink/60">끊으면 이 앱은 다시 허락받기 전까지 강의실에 닿지 못합니다.</span>
       <button
         type="button"
         className={buttonClass("dangerFilled", "sm")}
@@ -123,6 +122,9 @@ export default function ConnectedAppsPage() {
   const [busy, setBusy] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mcpUrl, setMcpUrl] = useState("");
+  // 끊은 앱의 행이 목록에서 빠진 뒤 초점이 갈 곳(#1447 1-5) — 같은 자리로 올라온 다음 앱의 단추, 없으면 목록 제목.
+  const [afterDisconnect, setAfterDisconnect] = useState<{ id: number; index: number } | null>(null);
+  const listTitleRef = useRef<HTMLDivElement>(null);
 
   useClassroomTabTitle({ screenName: "연결된 앱" });
 
@@ -137,14 +139,28 @@ export default function ConnectedAppsPage() {
     reload();
   }, []);
 
+  useEffect(() => {
+    if (!afterDisconnect || state.status !== "ready") return;
+    if (state.apps.some((app) => app.id === afterDisconnect.id)) return; // 목록이 아직 옛것이다
+    setAfterDisconnect(null);
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const next = state.apps[afterDisconnect.index];
+    const button = next
+      ? document.querySelector<HTMLElement>(`[data-testid="connected-app-row"][data-app-id="${next.id}"] button`)
+      : null;
+    (button ?? listTitleRef.current)?.focus();
+  }, [afterDisconnect, state]);
+
   async function disconnect(id: number) {
     setBusy(id);
     setError(null);
     const result = await disconnectConnectedApp(id);
     setBusy(null);
     setConfirming(null);
-    if (result.ok) reload();
-    else setError(result.detail);
+    if (result.ok) {
+      if (state.status === "ready") setAfterDisconnect({ id, index: state.apps.findIndex((app) => app.id === id) });
+      reload();
+    } else setError(result.detail);
   }
 
   return (
@@ -165,7 +181,9 @@ export default function ConnectedAppsPage() {
       <ConnectAddress url={mcpUrl} />
 
       <Card className="mt-4">
-        <CardHeader title="허락한 앱" />
+        <div ref={listTitleRef} tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40">
+          <CardHeader title="허락한 앱" />
+        </div>
         {state.status === "loading" ? (
           <EmptyState>불러오는 중…</EmptyState>
         ) : state.status === "error" ? (
@@ -183,6 +201,7 @@ export default function ConnectedAppsPage() {
                 key={app.id}
                 className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
                 data-testid="connected-app-row"
+                data-app-id={app.id}
               >
                 <div className="flex min-w-0 flex-col gap-1">
                   <span className="text-[14px] font-medium text-ink">{appDisplayName(app.name)}</span>
