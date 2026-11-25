@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 
+from .events import publish_problems_changed
 from .instructors import active_participant_q, classes_taught_by
 
 from .models import (
@@ -204,7 +205,7 @@ def machine_rule_fields(item: MachineRuleFields) -> dict[str, object]:
     }
 
 
-def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
+def copy_problem_to_class(problem: Problem, target_class: Class, *, signal: bool = True) -> Problem:
     """`problem`을 `target_class` 안에 새 행으로 복사한다. 원본 상태(초안/열림)와
     무관하게 복사본은 언제나 초안으로 들어온다(#292 AC) — 대상 클래스에서는
     아직 아무도 그 문제를 통과한 적이 없으므로 열림이 뜻이 없다. 대상 클래스의
@@ -231,6 +232,9 @@ def copy_problem_to_class(problem: Problem, target_class: Class) -> Problem:
         )
         for item in problem.checklist_items.all()
     )
+    if signal:
+        # 복사본은 초안이라 대상 클래스 강사 화면만 바뀐다(#1471 ⑦).
+        publish_problems_changed(target_class, participants_see_it=False)
     return copy
 
 
@@ -272,7 +276,8 @@ def copy_class(class_obj: Class, instructor_id: int) -> Class:
         default_model=class_obj.default_model,
     )
     for problem in class_obj.problems.order_by("order", "id"):
-        copy_problem_to_class(problem, new_class)
+        # 방금 만든 클래스라 열어 둔 화면이 없다 — 문제마다 신호를 보내지 않는다.
+        copy_problem_to_class(problem, new_class, signal=False)
     return new_class
 
 
@@ -350,6 +355,8 @@ def import_problem_template(template: ProblemTemplate, target_class: Class) -> P
         )
         for item in template.checklist_items.all()
     )
+    # 가져온 문제는 초안이라 대상 클래스 강사 화면만 바뀐다(#1471 ⑦).
+    publish_problems_changed(target_class, participants_see_it=False)
     return problem
 
 

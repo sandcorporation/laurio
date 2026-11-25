@@ -23,6 +23,7 @@ from core.quality_review import default_points
 from core.banned_words import BannedWordViolation, find_banned_word_violation
 
 from .contest_problems import is_contest_problem, reject_if_locked
+from .events import publish_problems_changed
 from .models import ChecklistGrade, ChecklistItem, Class, Problem
 from .problem_transitions import NO_REQUIRED_ITEM_MESSAGE, assert_required_item_floor
 from .schemas import ChecklistItemIn, ChecklistItemPatchIn, ProblemIn, ProblemPatchIn, machine_rule_to_store
@@ -236,6 +237,7 @@ def create_problem(class_obj: Class, payload: ProblemIn) -> Problem:
                 machine_rule=machine_rule_to_store(item_in.machine_rule),
                 order=index,
             )
+        publish_problems_changed(class_obj, participants_see_it=problem.status != Problem.Status.DRAFT)
     return problem
 
 
@@ -353,6 +355,7 @@ def update_problem(class_obj: Class, problem: Problem, payload: ProblemPatchIn) 
         update_fields.append("quality_public")
     if update_fields:
         problem.save(update_fields=[*update_fields, "updated_at"])
+        publish_problems_changed(class_obj, participants_see_it=problem.status != Problem.Status.DRAFT)
     return problem
 
 
@@ -369,10 +372,19 @@ def reorder_problems(class_obj: Class, problem_ids: list[int]) -> list[Problem]:
         for index, problem_id in enumerate(problem_ids):
             problems[problem_id].order = index
         Problem.objects.bulk_update(problems.values(), ["order"])
+        publish_problems_changed(
+            class_obj, participants_see_it=any(p.status != Problem.Status.DRAFT for p in problems.values())
+        )
     return sorted(problems.values(), key=lambda p: p.order)
 
 
 # --- 체크리스트 ------------------------------------------------------------------
+
+
+def _checklist_changed(problem: Problem) -> None:
+    """체크리스트는 문제 목록(필수 수·채점 가능)과 참여자 제출 화면에 보인다 — 신호는 `publish_problems_changed`(#1471 ⑦)."""
+
+    publish_problems_changed(problem.classroom, participants_see_it=problem.status != Problem.Status.DRAFT)
 
 
 def owned_checklist_item_or_404(problem: Problem, item_id: int) -> ChecklistItem:
@@ -385,7 +397,7 @@ def owned_checklist_item_or_404(problem: Problem, item_id: int) -> ChecklistItem
 def add_checklist_item(problem: Problem, payload: ChecklistItemIn) -> ChecklistItem:
     reject_if_locked(problem)
     reject_banned_public_text(payload.label, "체크리스트 항목")
-    return ChecklistItem.objects.create(
+    item = ChecklistItem.objects.create(
         problem=problem,
         label=payload.label,
         grade=payload.resolved_grade(),
@@ -394,6 +406,8 @@ def add_checklist_item(problem: Problem, payload: ChecklistItemIn) -> ChecklistI
         machine_rule=machine_rule_to_store(payload.machine_rule),
         order=problem.checklist_items.count(),
     )
+    _checklist_changed(problem)
+    return item
 
 
 def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItemPatchIn) -> ChecklistItem:
@@ -430,6 +444,7 @@ def update_checklist_item(problem: Problem, item_id: int, payload: ChecklistItem
         update_fields.append("machine_rule")
     if update_fields:
         item.save(update_fields=update_fields)
+        _checklist_changed(problem)
     return item
 
 
@@ -449,6 +464,7 @@ def delete_checklist_item(problem: Problem, item_id: int) -> ChecklistItem:
     deleted_id = item.id
     item.delete()
     item.id = deleted_id
+    _checklist_changed(problem)
     return item
 
 
@@ -462,4 +478,5 @@ def reorder_checklist_items(problem: Problem, item_ids: list[int]) -> list[Check
         for index, item_id in enumerate(item_ids):
             items[item_id].order = index
         ChecklistItem.objects.bulk_update(items.values(), ["order"])
+        _checklist_changed(problem)
     return sorted(items.values(), key=lambda i: i.order)
