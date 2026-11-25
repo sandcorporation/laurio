@@ -51,7 +51,7 @@ test("문제 순서 행 메뉴는 키보드만으로 열고 오가고 닫으며,
   await expect(firstMenu.getByRole("menuitem", { name: "아래로" })).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(firstMenu).toHaveCount(0);
-  await expect(page.locator("body:focus")).toHaveCount(0);
+  await expect(page.locator("body")).not.toBeFocused();
 
   // 항목을 고르면 메뉴는 닫히고 초점이 ⋮ 에 남는다.
   await trigger.focus();
@@ -91,7 +91,7 @@ test("테마 메뉴는 열면 첫 항목에 초점이 서고 ↑↓·Home/End·E
   await page.keyboard.press("Tab");
   await expect(menu).toHaveCount(0);
   // Tab 은 ⋮ 에서 이어 간다 — 초점이 body 로 빠지지 않는다.
-  await expect(page.locator("body:focus")).toHaveCount(0);
+  await expect(page.locator("body")).not.toBeFocused();
 
   await trigger.focus();
   await page.keyboard.press("Enter");

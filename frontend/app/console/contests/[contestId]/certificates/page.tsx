@@ -59,6 +59,7 @@ function focusIssuedHeading(): HTMLElement | null {
 // 되돌릴 수 없는 확인창(role=alertdialog) — 열면 안전한 쪽(돌아가기), Tab 은 창 안에, Escape 는 닫기.
 function ConfirmDialog({
   testId,
+  label,
   onDismiss,
   returnTo,
   children,
@@ -66,6 +67,8 @@ function ConfirmDialog({
   actions,
 }: {
   testId: string;
+  /** 창의 접근성 이름 — 무엇을 확인하는 창인지. */
+  label: string;
   onDismiss: () => void;
   returnTo: () => HTMLElement | null;
   children: ReactNode;
@@ -81,6 +84,7 @@ function ConfirmDialog({
       className="flex flex-col gap-3 border border-error p-4 text-sm"
       role="alertdialog"
       aria-modal="true"
+      aria-label={label}
       aria-describedby={descriptionId}
       data-testid={testId}
     >
@@ -107,6 +111,8 @@ export default function ContestCertificatesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // 「전체 선택」의 결과 — 낭독기가 몇 명이 골라졌는지 듣는다(자리는 늘 떠 있어야 바뀐 글이 읽힌다).
+  const [pickResult, setPickResult] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [cancelling, setCancelling] = useState<number | null>(null);
   // 묶어 받을 발급된 상장 id. 비어 있으면 받을 수 있는 것 전부를 받는다.
@@ -182,6 +188,7 @@ export default function ContestCertificatesPage() {
   const pickedIds = new Set(picked.map((p) => p.submissionId));
 
   const togglePick = (submissionId: number, name: string) => {
+    setPickResult("");
     setConfirming(false);
     setError(null);
     setNotice(null);
@@ -216,9 +223,16 @@ export default function ContestCertificatesPage() {
     setError(null);
     if (picked.length === Math.min(issuable.length, ISSUE_BATCH_LIMIT) && picked.length > 0) {
       setPicked([]);
+      setPickResult("선택을 모두 풀었습니다.");
       return;
     }
     const base = picked.at(-1)?.text;
+    const chosen = Math.min(issuable.length, ISSUE_BATCH_LIMIT);
+    setPickResult(
+      chosen < issuable.length
+        ? `발급할 수 있는 ${issuable.length}명 중 한 번에 발급할 수 있는 ${chosen}명을 선택했습니다.`
+        : `${chosen}명을 모두 선택했습니다.`,
+    );
     setPicked(
       issuable.slice(0, ISSUE_BATCH_LIMIT).map((r) => ({
         submissionId: r.submission_id,
@@ -291,6 +305,8 @@ export default function ContestCertificatesPage() {
     }
     setNotice("상장을 취소했습니다.");
     await reload();
+    // 다시 불린 목록에서 취소된 장의 「취소」 단추가 사라진다 — 초점이 body 로 빠지지 않게 머리글로.
+    focusIssuedHeading()?.focus();
   };
 
   const reissueNow = async () => {
@@ -309,6 +325,8 @@ export default function ContestCertificatesPage() {
     setReissue(null);
     setNotice(`${result.data.number} 번으로 다시 발급했습니다.`);
     await reload();
+    // 다시 발급한 장의 옛 행에서 단추들이 사라진다 — 머리글로.
+    focusIssuedHeading()?.focus();
   };
 
   return (
@@ -324,21 +342,22 @@ export default function ContestCertificatesPage() {
       />
 
       {error ? <ErrorNote testId="certificates-error">{error}</ErrorNote> : null}
-      {notice ? (
-        <p className="text-sm text-success" role="status" data-testid="certificates-notice">
-          {notice}
-        </p>
-      ) : null}
+      <p className="text-sm text-success empty:hidden" role="status" data-testid="certificates-notice">
+        {notice}
+      </p>
 
       <section className="flex flex-col gap-3" data-testid="certificates-recipients">
         <SectionHeading
           title="제출자"
           hint={
-            <span data-testid="certificates-picked-count">
+            <span role="status" data-testid="certificates-picked-count">
               {picked.length}/{Math.min(issuable.length, ISSUE_BATCH_LIMIT)} 선택
             </span>
           }
         />
+        <p role="status" className="sr-only" data-testid="certificates-pick-result">
+          {pickResult}
+        </p>
         {board.recipients.length === 0 ? (
           <EmptyState>
             <span data-testid="certificates-recipients-empty">제출이 없습니다.</span>
@@ -448,6 +467,7 @@ export default function ContestCertificatesPage() {
           {confirming ? (
             <ConfirmDialog
               testId="certificates-confirm"
+              label="상장 발급 확인"
               onDismiss={() => setConfirming(false)}
               returnTo={() =>
                 document.querySelector<HTMLElement>('[data-testid="certificates-issue"]') ?? focusIssuedHeading()
@@ -599,6 +619,7 @@ export default function ContestCertificatesPage() {
                   {cancelling === c.id ? (
                     <ConfirmDialog
                       testId={`certificates-cancel-confirm-${c.id}`}
+                      label={`${c.number} 취소 확인`}
                       onDismiss={() => setCancelling(null)}
                       returnTo={focusIssuedHeading}
                       actions={

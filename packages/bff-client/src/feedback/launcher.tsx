@@ -4,7 +4,7 @@
 // 버튼 → 지금 화면 캡처 → 미리보기·가리기 → 갈래·내용 → 보내기. 화면 주소·앱·브라우저·화면 크기는
 // 자동으로 붙는다. 캡처에 실패하거나 「그림 빼기」면 그림 없이 보낸다.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import type { BffClient } from "../client";
 import {
@@ -52,6 +52,10 @@ export function FeedbackLauncher({
   const [hiddenForShare, setHiddenForShare] = useState(false);
   const markup = useRef<MarkupHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // 창의 설명 — 접수 결과, 아니면 지금 떠 있는 경고·오류. 가리킬 것이 없으면 속성을 달지 않는다.
+  const doneId = useId();
+  const captureFailedId = useId();
+  const errorId = useId();
 
   useEffect(() => {
     let alive = true;
@@ -150,6 +154,11 @@ export function FeedbackLauncher({
     setPhase("done");
   }
 
+  const describedBy =
+    phase === "done"
+      ? doneId
+      : [!source && captureFailed ? captureFailedId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined;
+
   return (
     <div {...{ [IGNORE_ATTR]: "" }}>
       <div className="fixed bottom-4 right-4 z-30 flex gap-2">
@@ -167,12 +176,13 @@ export function FeedbackLauncher({
             role="dialog"
             aria-modal="true"
             aria-label="제보"
+            aria-describedby={describedBy}
             data-testid="feedback-dialog"
             className="flex max-h-[96dvh] lg:h-[96dvh] w-full max-w-[96vw] flex-col gap-3 overflow-y-auto border border-rule bg-surface p-4 text-ink"
           >
             {phase === "done" ? (
               <>
-                <p data-testid="feedback-done" className="text-[15px]">접수했습니다.</p>
+                <p id={doneId} data-testid="feedback-done" className="text-[15px]">접수했습니다.</p>
                 <div className="flex gap-2">
                   <a href={myReportsHref} className={buttonClass}>내 제보</a>
                   <button type="button" onClick={close} className={buttonClass}>닫기</button>
@@ -184,7 +194,7 @@ export function FeedbackLauncher({
                   {source ? (
                     <MarkupEditor ref={markup} source={source} />
                   ) : (
-                    captureFailed && <p className="text-[13px] text-warning">화면을 뜨지 못했습니다.</p>
+                    captureFailed && <p id={captureFailedId} className="text-[13px] text-warning">화면을 뜨지 못했습니다.</p>
                   )}
                 </div>
                 <div className="flex flex-col gap-3">
@@ -235,7 +245,7 @@ export function FeedbackLauncher({
                   />
                   <span className="self-end text-[12px] text-ink/60">{body.length}/{FEEDBACK_BODY_MAX}</span>
                 </label>
-                {error && <p role="alert" data-testid="feedback-error" className="text-[13px] text-error">{error}</p>}
+                {error && <p id={errorId} role="alert" data-testid="feedback-error" className="text-[13px] text-error">{error}</p>}
                 <div className="flex justify-end gap-2">
                   <button type="button" onClick={close} disabled={phase === "sending"} className={buttonClass}>닫기</button>
                   <button type="button" data-testid="feedback-submit" onClick={submit} disabled={phase === "sending"} className={buttonClass}>

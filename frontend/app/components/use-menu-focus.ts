@@ -1,7 +1,7 @@
 "use client";
 
 // 메뉴(role=menu)의 초점 규약 — 열리면 첫 항목으로, ↑↓ 는 끝에서 돌아가고 Home/End 는 처음·끝,
-// Escape 는 닫고 여는 단추로 돌아온다. 항목을 골라 닫을 때도 여는 단추로 돌아온다(`closeToTrigger`).
+// Escape 는 닫고 여는 단추로 돌아온다. Tab 은 닫고 여는 단추에서 이어 간다. 항목을 골라 닫을 때도 여는 단추로 돌아온다(`closeToTrigger`).
 import { useCallback, useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 
 import { nextMenuIndex } from "@/lib/dom/menu-keys";
@@ -39,6 +39,11 @@ export function useMenuFocus(
 
   const onMenuKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
+      // Tab 은 메뉴를 닫고 여는 단추에서 이어 간다 — 안 닫으면 메뉴가 열린 채 초점만 떠난다.
+      if (event.key === "Tab") {
+        closeRef.current();
+        return;
+      }
       const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>(ITEMS) ?? []);
       const next = nextMenuIndex(event.key, items.indexOf(document.activeElement as HTMLElement), items.length);
       if (next === null) return;

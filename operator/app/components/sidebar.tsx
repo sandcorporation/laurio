@@ -21,13 +21,15 @@
 // 열고 닫기의 약속(#523 AC):
 // - 버튼이 `aria-expanded`·`aria-controls` 로 상태와 대상을 말한다.
 // - 열면 포커스가 덮개 안(지금 화면 항목, 없으면 첫 항목)으로 가고, 닫으면 버튼으로
-//   돌아온다. 덮개 밖(머리 줄·본문)은 `inert` 라 Tab 이 덮개 뒤로 사라지지 않는다 —
-//   그렇다고 덮개에 가두지도 않는다(Tab 은 브라우저 주소창으로 나갔다 돌아온다).
+//   돌아온다. 덮개는 모달(`role=dialog` `aria-modal`)이다 — 막 뒤로 문서가 굴러가지 않고, 밖(머리 줄·본문)은
+//   `inert` 이며, 이름 붙은 내비·계정·닫기 단추를 한 덩이로 품는다. 그래서 대화창 규약을 따라 Tab 이 덮개 안을 돈다.
 // - Esc · 바깥(어두운 막) 누르기 · 닫기 버튼 · 항목 고르기(주소가 바뀜)로 닫힌다.
 // - 미끄러져 들어오는 움직임은 `motion-safe:` 라 움직임 줄이기 설정이면 없다.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, type RefObject } from "react";
+
+import { trapTabTarget } from "@/lib/dom/focus-trap";
 
 import { useSession, type OperatorSessionState } from "@/lib/auth/use-session";
 import { NAV_GROUPS, isActiveHref, totalQueueCount } from "@/lib/nav/nav-groups";
@@ -38,6 +40,8 @@ import { ThemeToggle } from "./theme-toggle";
 import type { ThemePreference } from "@/lib/theme/preference";
 
 const DRAWER_ID = "operator-nav-drawer";
+const FOCUSABLE =
+  'button:not([disabled]):not([tabindex="-1"]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const WIDE_QUERY = "(min-width: 768px)";
 
 function Brand() {
@@ -139,6 +143,7 @@ export function Sidebar({
 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const navRef = useRef<HTMLElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
 
   // 항목을 골라 주소가 바뀌면 닫는다. 같은 항목을 다시 누른 경우는 주소가 그대로라
@@ -152,7 +157,17 @@ export function Sidebar({
   useEffect(() => {
     if (!menuOpen) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onMenuOpenChange(false);
+      if (event.key === "Escape") {
+        onMenuOpenChange(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      // 덮개 안에서 Tab 이 가장자리를 넘으려 하면 반대편 끝으로 — 초점이 주소창으로 새지 않는다.
+      const items = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []);
+      const target = trapTabTarget(event.shiftKey, items.indexOf(document.activeElement as HTMLElement), items.length);
+      if (target === null) return;
+      event.preventDefault();
+      items[target]?.focus();
     }
     const wide = window.matchMedia(WIDE_QUERY);
     function onWide(event: MediaQueryListEvent) {
@@ -246,6 +261,7 @@ export function Sidebar({
           />
           <div
             id={DRAWER_ID}
+            ref={drawerRef}
             role="dialog"
             aria-modal="true"
             data-testid="operator-menu-drawer"
