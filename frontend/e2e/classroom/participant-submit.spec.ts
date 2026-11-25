@@ -134,3 +134,63 @@ test("좁은 폭에서 대기 사유가 다 보이고 링크로 제출 칸에 �
     })),
   ).toEqual({ clipped: false, pageOverflows: false });
 });
+
+// 마감 지난 문제의 경고가 입력칸·제출 단추의 접근성 설명에 있다(#1462) — 「제출 칸으로」 뒤 낭독기가 경고를 건너뛰지 않는다.
+test("390px 마감 지난 문제는 경고가 입력칸·제출 단추의 설명에 있고 마감 전에는 없다", async ({ page, browser }) => {
+  const seed = `participant-deadline-desc-${test.info().workerIndex}-${Date.now()}`;
+  const instructorContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const instructorPage = await instructorContext.newPage();
+  await establishClassroomSession(instructorPage, seed);
+  const api = classroomApi(instructorPage);
+  const classId = (
+    await (
+      await api.post("/api/backend/classroom/classes", {
+        data: { name: `마감 설명 ${Date.now()}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+
+  async function openProblem(title: string, due: Date, formats: string[]): Promise<number> {
+    const created = await api.post(`${base}/problems`, {
+      data: { title, submission_formats: formats, due_at: due.toISOString() },
+    });
+    expect(created.ok()).toBeTruthy();
+    const id = (await created.json()).id as number;
+    for (let index = 1; index <= 8; index += 1) {
+      expect(
+        (await api.post(`${base}/problems/${id}/checklist-items`, { data: { label: `항목 ${index}`, required: true } })).ok(),
+      ).toBeTruthy();
+    }
+    expect((await api.post(`${base}/problems/${id}/open`)).ok()).toBeTruthy();
+    return id;
+  }
+  const past = await openProblem("마감 지난 문제", new Date(Date.now() - 36 * 3600_000), ["repository"]);
+  const pastZip = await openProblem("마감 지난 zip 문제", new Date(Date.now() - 36 * 3600_000), ["source"]);
+  const future = await openProblem("마감 전 문제", new Date(Date.now() + 36 * 3600_000), ["repository"]);
+
+  const joinCode = (await (await api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "서지우" } })).ok(),
+  ).toBeTruthy();
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const warning = "마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다";
+
+  await page.goto(`/classes/${classId}/problems/${past}/submit`);
+  await page.getByTestId("my-problem-submit-jump").click();
+  const url = page.getByTestId("repository-url-input");
+  await expect(url).toBeFocused();
+  await expect(url).toHaveAccessibleDescription(warning);
+  await expect(page.getByTestId("submit-repository")).toHaveAccessibleDescription(warning);
+
+  await page.goto(`/classes/${classId}/problems/${pastZip}/submit`);
+  await page.getByTestId("my-problem-submit-jump").click();
+  await expect(page.getByTestId("source-file-input")).toHaveAccessibleDescription(warning);
+
+  await page.goto(`/classes/${classId}/problems/${future}/submit`);
+  await expect(page.getByTestId("submit-deadline-note")).toHaveCount(0);
+  await expect(page.getByTestId("repository-url-input")).not.toHaveAttribute("aria-describedby", /.+/);
+  await expect(page.getByTestId("submit-repository")).not.toHaveAttribute("aria-describedby", /.+/);
+});
