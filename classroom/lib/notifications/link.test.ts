@@ -45,7 +45,7 @@ describe("notificationHref — classroom_scoring_key_rejected", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_key_rejected", context: { class_id: 7 } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 
   it("클래스 id가 없으면 링크를 짓지 않는다", () => {
@@ -61,7 +61,7 @@ describe("notificationHref — classroom_scoring_key_missing", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_key_missing", context: { class_id: 7, class_name: "1반" } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 
   it("클래스 id가 빠진 옛 줄은 링크를 짓지 않는다", () => {
@@ -75,7 +75,7 @@ describe("notificationHref — classroom_scoring_quota_exhausted", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_quota_exhausted", context: { class_id: 7 } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 });
 
@@ -84,7 +84,7 @@ describe("notificationHref — classroom_scoring_server_unreachable", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_server_unreachable", context: { class_id: 7 } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 });
 

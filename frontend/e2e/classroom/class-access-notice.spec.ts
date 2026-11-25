@@ -370,4 +370,7 @@ test("제출 중 내보내짐(403)을 받으면 새로 고친 뒤처럼 폼이 �
 
   await expect(page.getByTestId("member-expelled-note")).toHaveText("이 클래스에서 내보내져 새로 제출할 수 없습니다.");
   await expect(page.getByTestId("submit-repository")).toHaveCount(0);
+  // 폼이 사라져도 초점이 body 로 빠지지 않는다 — 안내가 알림으로 읽히고 초점을 받는다(#1426).
+  await expect(page.getByTestId("member-expelled-note")).toHaveAttribute("role", "alert");
+  await expect(page.getByTestId("member-expelled-note")).toBeFocused();
 });

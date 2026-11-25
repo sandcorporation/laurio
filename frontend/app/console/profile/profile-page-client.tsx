@@ -36,6 +36,7 @@ import { ErrorNote, INPUT_CLASS, PageHeader, PageShell, buttonClass } from "@/ap
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { checkDisplayNameForBannedWords } from "@/lib/profile/display-name-check";
+import { DEVELOPER_PROFILE_DESCRIPTION, PROFILE_FIELD_LABELS } from "@/lib/profile/field-labels";
 
 import { ConnectedAppsSection } from "./connected-apps-section";
 
@@ -62,8 +63,7 @@ const ROLE_COPY: Record<Role, { title: string; description: string; path: string
   },
   developer: {
     title: "참가자 표시 이름 · 소개",
-    description:
-      "공개 개발자 프로필과 제출물에서 보이는 이름입니다. 비워두면 참가자#{id}로 보입니다.",
+    description: DEVELOPER_PROFILE_DESCRIPTION,
     path: "developer-profile",
   },
 };
@@ -172,7 +172,7 @@ function RoleSection({ role }: { role: Role }) {
     const result = await bffClient.post<ProfileOut>(`/api/backend/accounts/${copy.path}`, {
       display_name: displayName,
       bio,
-    });
+    }, { fieldLabels: PROFILE_FIELD_LABELS });
     if (!result.ok) {
       setSave({ status: "error", message: result.detail });
       return;
