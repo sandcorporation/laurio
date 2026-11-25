@@ -161,8 +161,8 @@ function InstructorRow({
         </span>
       </div>
       {canTransfer && confirming === "transfer" ? (
-        <div data-testid="ownership-transfer-confirm" onKeyDown={transferConfirm.onKeyDown} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
-          <p className="text-[12.5px] leading-relaxed text-ink/70">
+        <div data-testid="ownership-transfer-confirm" {...transferConfirm.groupProps} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+          <p id={transferConfirm.questionId} className="text-[12.5px] leading-relaxed text-ink/70">
             {name}님에게 이 클래스의 소유권을 넘길까요? {name}님이 수락해야 넘어가고, 수락하면 {name}님이
             소유자가 되고 나는 공동 강사로 남습니다.
           </p>
@@ -187,8 +187,8 @@ function InstructorRow({
         </div>
       ) : null}
       {canRemove && confirming === "remove" ? (
-        <div data-testid="co-instructor-remove-confirm" onKeyDown={removeConfirm.onKeyDown} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
-          <p className="text-[12.5px] leading-relaxed text-ink/70">
+        <div data-testid="co-instructor-remove-confirm" {...removeConfirm.groupProps} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+          <p id={removeConfirm.questionId} className="text-[12.5px] leading-relaxed text-ink/70">
             {name}님을 내보낼까요? 이 클래스를 더는 다룰 수 없고, {name}님이 만든 아직 쓰이지 않은 초대도
             함께 취소됩니다. 이 클래스에서 낸 시도가 있으면 내보낸 참여자의 기록으로 남고 달성률에는 들지 않습니다.
           </p>
@@ -317,8 +317,8 @@ function LeaveSection({ classId }: { classId: number }) {
       <h2 className="border-b border-rule px-4 py-3 text-[15px] font-semibold tracking-[-0.005em]">이 클래스 떠나기</h2>
       <div className="flex flex-col gap-3 px-4 py-3">
         {confirming ? (
-          <div data-testid="class-leave-confirm" onKeyDown={leaveConfirm.onKeyDown} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
-            <p className="text-[12.5px] leading-relaxed text-ink/70">
+          <div data-testid="class-leave-confirm" {...leaveConfirm.groupProps} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+            <p id={leaveConfirm.questionId} className="text-[12.5px] leading-relaxed text-ink/70">
               이 클래스를 떠날까요? 내 클래스 목록에서 사라지고, 다시 함께 가르치려면 새 초대를 받아야
               합니다. 내가 만든 아직 쓰이지 않은 초대는 취소되고, 이 클래스에서 낸 시도는 지워지지 않고
               남습니다.

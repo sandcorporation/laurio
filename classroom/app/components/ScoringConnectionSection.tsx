@@ -224,10 +224,10 @@ function VendorKeyRow({
       {vendorKey && confirming ? (
         <div
           data-testid={`vendor-key-${provider}-delete-confirm`}
-          onKeyDown={deleteConfirm.onKeyDown}
+          {...deleteConfirm.groupProps}
           className="flex flex-wrap items-center gap-2 border border-rule bg-paper px-3 py-2.5"
         >
-          <span className="text-[12.5px] text-ink/70">
+          <span id={deleteConfirm.questionId} className="text-[12.5px] text-ink/70">
             {active ? `${label}를 지우면 채점이 멈춥니다.` : `${label}를 지웁니다.`}
           </span>
           <button

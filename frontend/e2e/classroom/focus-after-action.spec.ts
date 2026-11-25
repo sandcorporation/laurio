@@ -173,6 +173,9 @@ test("가입 링크 복사는 상태 영역이 알리고 연결된 앱을 끊으
   await expect(urlCopied).toHaveText("복사됨");
 
   await rows.first().getByTestId("connected-app-disconnect").click();
+  const keep = rows.first().getByRole("button", { name: "그대로 두기" });
+  await expect(keep).toBeFocused();
+  await expect(rows.first().getByRole("group")).toHaveAccessibleDescription(/다시 허락받기 전까지/);
   await rows.first().getByTestId("connected-app-disconnect-confirm").click();
   await expect(rows).toHaveCount(1);
   await expect(rows.first().getByTestId("connected-app-disconnect")).toBeFocused();
