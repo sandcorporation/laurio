@@ -115,7 +115,7 @@ function useFocusOnMount<T extends HTMLElement>() {
 }
 
 /** 방금 넘겨받은 사람에게 한 번 보이는 안내 — 다음에 할 일(채점 키 넣기)로 가는 길을 준다. */
-export function OwnershipTransferAcceptedNote({ classId }: { classId: number }) {
+export function OwnershipTransferAcceptedNote({ classId, onDismiss }: { classId: number; onDismiss: () => void }) {
   const ref = useFocusOnMount<HTMLDivElement>();
   return (
     <div ref={ref} role="status" tabIndex={-1} className="outline-none focus-visible:ring-2 focus-visible:ring-ink/40">
@@ -131,6 +131,9 @@ export function OwnershipTransferAcceptedNote({ classId }: { classId: number }) 
         >
           채점 키 넣기
         </Link>
+        <button type="button" data-testid="ownership-transfer-accepted-dismiss" onClick={onDismiss} className={buttonClass("secondary", "sm")}>
+          닫기
+        </button>
       </div>
     </Note>
     </div>
