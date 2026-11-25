@@ -42,6 +42,9 @@ test("시도가 없는 문제는 제목을 다시 쳐야 지워지고, 지우면
   // 지워질 것(체크리스트 1개)을 먼저 보여준다.
   await expect(page.getByTestId("delete-problem-warning")).toContainText("체크리스트 항목 1개");
 
+  // 되돌릴 수 없다는 경고가 입력칸의 설명으로 읽힌다(#1489 같은 꼴).
+  await expect(page.getByTestId("delete-problem-confirm-input")).toHaveAccessibleDescription(/되돌릴 수 없습니다/);
+
   // 잘못된 제목으로는 눌리지 않는다 — 실수로 지워지지 않는다는 AC.
   await page.getByTestId("delete-problem-confirm-input").fill("아무 제목");
   await expect(page.getByTestId("delete-problem-confirm")).toBeDisabled();
