@@ -36,7 +36,9 @@
 name: PR 검사
 
 on:
+  # staging 갈래로 가는 PR 은 돌지 않는다(대표 시범 2026-11-25) — staging 병합은 작업자 시험 + 조율자 diff 검토, 전체는 main 으로 들일 때.
   pull_request:
+    branches-ignore: [staging]
   # 병합 대기열(#1084) — 대기열이 만든 머지 커밋을 같은 검사로 판정한다. 필수 검사 「결과」가 여기서도 나온다.
   merge_group:
   # main 뒤따른 검사(#1325) — after-push.yml 만 부른다(대기열 밖 main 커밋)
