@@ -714,6 +714,11 @@ OR이고, 매번 지금의 체크리스트 기준으로 다시 셈된다. 분모
 `/classes/{id}/members` 는 `/classes/{id}?tab=participants` 로 돌려보내는 리다이렉트만 남았다.
 컴포넌트는 `app/classes/[id]/participants-tab.tsx`, 상태는 `lib/roster-grid/use-roster-grid.ts`(내보내기 포함).
 
+**열어 둔 표는 새로고침 없이 다시 읽는다** — 이 클래스의 제출·채점 신호(`attempt-submitted`·`attempt-scored`)와 함께,
+집계 대상을 바꾸는 `instructors-changed`(참여자가 공동 강사가 되거나 공동 강사가 떠남)·`participation-changed`(문제
+열기·숨김 등, 강사가 그 클래스 참여자이기도 할 때 받는다)에도 표와 문제 탭 목록(`lib/problems/use-problems.ts`)을
+한 번씩 다시 읽는다(#1471 ⑦). 스트림이 끊기면 30초 간격 폴링으로 물러난다.
+
 **표의 칸**(#290)은 참여자 행 × 문제 열 격자다 — 위 문제 탭이 「수업이 어디서 막혔나」를 답한다면 이 탭은 「누가 막혔나」를 답한다.
 셀은 그 참여자·그 문제의 **통과 이력**을 그린다(최신 시도가 아니다, 위 달성률과
 같은 규칙) — 통과·시도했으나 미통과·채점 대기·채점 중·미제출 다섯을 범례와
