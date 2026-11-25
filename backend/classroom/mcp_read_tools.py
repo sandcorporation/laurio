@@ -267,7 +267,7 @@ _PROBLEM_STATUS = {
 }
 _PASS_RATE = {
     "type": ["number", "null"],
-    "description": "달성률(통과한 참여자 수 / 참여자 수). 참여자가 없으면 null",
+    "description": "달성률(통과한 참여자 수 / 참여자 수). 참여자나 채점된 시도가 없으면 null",
 }
 _TEMPLATE_SUMMARY = {
     "type": ["object", "null"],

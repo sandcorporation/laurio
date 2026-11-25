@@ -19,6 +19,7 @@ import { useSearchParams } from "next/navigation";
 import { Card, EmptyState, ErrorNote, FieldLabel, INPUT_CLASS, Num, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useClassTemplates } from "@/lib/class-templates/use-class-templates";
 import { useProblemTemplates } from "@/lib/problem-templates/use-problem-templates";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type Kind = "problem" | "class";
 
@@ -125,6 +126,7 @@ function TemplatesPageInner() {
 }
 
 export default function TemplatesPage() {
+  useClassroomTabTitle({ screenName: "공개된 템플릿" });
   return (
     <Suspense fallback={null}>
       <TemplatesPageInner />

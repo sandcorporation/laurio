@@ -4,7 +4,7 @@
 // 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: OpenAI·Claude 키를 둘 다 넣어 두고 스위치로
 // 고르거나(#1269), 셋째 선택 「호환 서버」(소유자가 바깥에 열어 둔 OpenAI 호환 주소와 Bearer 값). 상태 한 줄이
 // 먼저 보이고(#636) 그 아래 스위치와 키 두 줄이 선다. 공동 강사는 상태 한 줄만 본다(ADR-0055).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
@@ -21,6 +21,7 @@ import { CLAUDE_KEY_LABEL, connectionKindOptions, type ConnectionKind } from "@/
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
+import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
@@ -157,18 +158,26 @@ function VendorKeyRow({
   const vendorKey = provider === "anthropic" ? classroom.anthropic_key : classroom.openai_key;
   const label = provider === "anthropic" ? CLAUDE_KEY_LABEL : "OpenAI 키";
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const deleteConfirm = useInlineConfirm(confirming, () => setConfirming(false));
+  // 지우면 「지우기」가 사라진다 — 초점은 늘 있는 「넣기」로.
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const active = classroom.scoring_connection_kind === `${provider}_key`;
 
   async function handleDelete() {
-    const active = classroom.scoring_connection_kind === `${provider}_key`;
-    if (!window.confirm(active ? `${label}를 지우면 채점이 멈춥니다.` : `${label}를 지웁니다.`)) return;
     setDeleting(true);
     setError(null);
     const result = await deleteVendorKey(classroom.id, provider);
     setDeleting(false);
-    if (result.ok) onSaved();
-    else setError(result.detail);
+    if (result.ok) {
+      changeButtonRef.current?.focus();
+      onSaved();
+    } else {
+      setError(result.detail);
+    }
+    setConfirming(false);
   }
 
   const badge = vendorKey ? KEY_STATUS_BADGE[vendorKey.status] : null;
@@ -190,6 +199,7 @@ function VendorKeyRow({
         </p>
         <div className="flex gap-2">
           <button
+            ref={changeButtonRef}
             type="button"
             data-testid={`vendor-key-${provider}-change`}
             aria-expanded={open}
@@ -198,12 +208,12 @@ function VendorKeyRow({
           >
             {open ? "닫기" : vendorKey ? "바꾸기" : "넣기"}
           </button>
-          {vendorKey ? (
+          {vendorKey && !confirming ? (
             <button
+              ref={deleteConfirm.triggerRef}
               type="button"
               data-testid={`vendor-key-${provider}-delete`}
-              disabled={deleting}
-              onClick={handleDelete}
+              onClick={() => setConfirming(true)}
               className={buttonClass("secondary", "sm")}
             >
               지우기
@@ -211,6 +221,35 @@ function VendorKeyRow({
           ) : null}
         </div>
       </div>
+      {vendorKey && confirming ? (
+        <div
+          data-testid={`vendor-key-${provider}-delete-confirm`}
+          onKeyDown={deleteConfirm.onKeyDown}
+          className="flex flex-wrap items-center gap-2 border border-rule bg-paper px-3 py-2.5"
+        >
+          <span className="text-[12.5px] text-ink/70">
+            {active ? `${label}를 지우면 채점이 멈춥니다.` : `${label}를 지웁니다.`}
+          </span>
+          <button
+            type="button"
+            data-testid={`vendor-key-${provider}-delete-confirm-button`}
+            disabled={deleting}
+            onClick={() => void handleDelete()}
+            className={buttonClass("dangerFilled", "sm")}
+          >
+            {deleting ? "지우는 중..." : "지우기"}
+          </button>
+          <button
+            ref={deleteConfirm.keepRef}
+            type="button"
+            disabled={deleting}
+            onClick={() => setConfirming(false)}
+            className={buttonClass("secondary", "sm")}
+          >
+            그대로 두기
+          </button>
+        </div>
+      ) : null}
       {error ? (
         <ErrorNote>
           <span data-testid={`vendor-key-${provider}-delete-error`}>{error}</span>

@@ -74,6 +74,7 @@ test("문제와 참여자가 생기면 표와 채점 카드가 들어오고, 키
 
   // 문제와 참여자가 둘 다 있으면 시작하기 대신 채점 카드다 — 키가 없으니 연결 없음과 갈 곳.
   await expect(page.getByTestId("getting-started")).toHaveCount(0);
+  await expect(page.getByTestId("recent-attempts-empty")).toHaveText("아직 제출이 없습니다.");
   await expect(page.getByTestId("classroom-missing-api-key-banner")).toContainText("연결 없음");
   await expect(page.getByTestId("classroom-missing-api-key-settings-link")).toHaveAttribute(
     "href",

@@ -2,6 +2,8 @@
 // format.ts)과 같은 이유로 백엔드 SMS 렌더러(`notifications/rendering.py`)와
 // 분리돼 있다 — 강의실 알림은 애초에 SMS로 안 나가므로(#301) 그 렌더러가
 // 이 유형들의 문구를 아예 갖고 있지도 않다. 이 파일이 유일한 문구 출처다.
+import { withLate } from "../problems/due-dates";
+
 import type { NotificationRow } from "./api";
 
 /** 알림 목록이 비었을 때의 한 줄 — 강사인 클래스가 있든 없든 같다(#1389). */
@@ -19,9 +21,11 @@ export function describeNotification(notification: NotificationRow): string {
         typeof context.attempt_number === "number" ? context.attempt_number : null;
       const passed = context.passed === true;
       const attemptLabel = attemptNumber !== null ? `${attemptNumber}번째 시도` : "제출";
-      return `'${className}' 클래스 '${problemTitle}' 문제 ${attemptLabel} 채점 결과 — ${
-        passed ? "통과" : "미통과"
-      }.`;
+      const late = context.late === "deadline" || context.late === "recommended" ? context.late : null;
+      return `'${className}' 클래스 '${problemTitle}' 문제 ${attemptLabel} 채점 결과 — ${withLate(
+        passed ? "통과" : "미통과",
+        late,
+      )}.`;
     }
     case "classroom_scoring_key_rejected": {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";

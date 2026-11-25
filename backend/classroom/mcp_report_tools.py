@@ -178,7 +178,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
 
     problem_rows = []
     for problem in problems:
-        passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+        passed_count, member_count, pass_rate = _problem_pass_stats(problem, active_member_ids)
         problem_rows.append(
             {
                 "id": problem.id,
@@ -191,7 +191,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                 ],
                 "passed_count": passed_count,
                 "member_count": member_count,
-                "pass_rate": (passed_count / member_count) if member_count else None,
+                "pass_rate": pass_rate,
             }
         )
 
@@ -457,7 +457,7 @@ _REPORT_OUTPUT = {
                     },
                     "passed_count": {**_COUNT, "description": "한 번이라도 통과한 참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
                     "member_count": {**_COUNT, "description": "참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
-                    "pass_rate": {"type": ["number", "null"], "description": "달성률. 참여자가 없으면 null"},
+                    "pass_rate": {"type": ["number", "null"], "description": "달성률. 참여자나 채점된 시도가 없으면 null"},
                 },
                 "required": ["id", "title", "status", "checklist_items", "passed_count", "member_count"],
             },

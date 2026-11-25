@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth import get_user_model
 
-from classroom.models import ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission
+from classroom.models import ClassroomScore, ClassroomScoringAttempt, ClassroomSubmission, Problem
 from notifications.models import Notification, NotificationType
 from tests.classroom_scenarios import (
     create_class,
@@ -365,6 +367,21 @@ def test_scoring_completion_notifies_the_submitter_on_pass(client, db, monkeypat
     assert notification.context["submission_id"] == ctx["submission_id"]
     assert notification.context["attempt_number"] == 1
     assert notification.context["passed"] is True
+    assert notification.context["late"] is None
+
+
+def test_scoring_notification_says_the_attempt_was_after_the_deadline(client, db, monkeypatch):
+    """늦음 단계는 채점 시각이 아니라 낸 시각으로 정한다(#1400)."""
+
+    ctx = _setup_submission(client)
+    submitted_at = ClassroomSubmission.objects.get(pk=ctx["submission_id"]).created_at
+    Problem.objects.filter(pk=ctx["problem_id"]).update(due_at=submitted_at - timedelta(hours=1))
+    respond_with_verdict(monkeypatch, ctx["item_id"], is_met=True)
+
+    run_scan(client)
+
+    notification = Notification.objects.get(notification_type=NotificationType.CLASSROOM_SUBMISSION_SCORED)
+    assert notification.context["late"] == "deadline"
 
 
 def test_scoring_completion_notifies_the_submitter_on_fail(client, db, monkeypatch):

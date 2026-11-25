@@ -311,3 +311,33 @@ test("채점 비용 예상표 — 문제가 있으면 그 문제의 항목 수�
   await expect(page.getByTestId("calculator-requirements")).toHaveValue("12");
   await expect(cost).not.toHaveText(before ?? "");
 });
+
+test("채점 키 지우기는 줄 안에서 한 번 더 묻는다 — 브라우저 확인 창이 아니고 Esc 로 닫힌다(#1400)", async ({ page }) => {
+  const { api, classId } = await newClass(page, "delete-key");
+  const key = await api.put(`/api/backend/classroom/classes/${classId}/openai-key`, {
+    data: { api_key: "sk-e2e-test-key-7f2a" },
+  });
+  expect(key.ok()).toBeTruthy();
+  let dialogs = 0;
+  page.on("dialog", (dialog) => {
+    dialogs += 1;
+    void dialog.dismiss();
+  });
+  await page.goto(`/classes/${classId}/settings#scoring-key`);
+
+  const trigger = page.getByTestId("vendor-key-openai-delete");
+  const confirm = page.getByTestId("vendor-key-openai-delete-confirm");
+  await trigger.click();
+  await expect(confirm).toContainText("채점이 멈춥니다");
+  await expect(confirm.getByRole("button", { name: "그대로 두기" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await page.getByTestId("vendor-key-openai-delete-confirm-button").click();
+  await expect(page.getByTestId("openai-key-status")).toContainText("연결 없음");
+  await expect(trigger).toHaveCount(0);
+  await expect(page.getByTestId("vendor-key-openai-change")).toBeFocused();
+  expect(dialogs).toBe(0);
+});

@@ -19,7 +19,7 @@
 // 공동 강사에게만 오른쪽에 「이 클래스 떠나기」 카드. 화면에는 설명 문장을 두지 않는다 — 역할 전용
 // 행동은 다른 역할에게 그 버튼이 없는 것으로 말한다.
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
@@ -27,6 +27,7 @@ import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import { formatDay } from "@/lib/classes/format-day";
+import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 import {
   cancelCoInstructorInvite,
   cancelOwnershipTransfer,
@@ -76,6 +77,8 @@ function InstructorRow({
   onCancelTransfer: () => void;
   onKeep: () => void;
 }) {
+  const transferConfirm = useInlineConfirm(confirming === "transfer", onKeep);
+  const removeConfirm = useInlineConfirm(confirming === "remove", onKeep);
   const owner = instructor.role === "owner";
   const name = instructor.display_name || (owner ? "이름을 정하지 않은 소유자" : "이름 없음");
   return (
@@ -105,6 +108,7 @@ function InstructorRow({
             <button
               type="button"
               data-testid="ownership-transfer-start"
+              ref={transferConfirm.triggerRef}
               onClick={() => onAsk("transfer")}
               className={LINK_ACTION}
             >
@@ -116,6 +120,7 @@ function InstructorRow({
             <button
               type="button"
               data-testid="co-instructor-remove"
+              ref={removeConfirm.triggerRef}
               onClick={() => onAsk("remove")}
               className={LINK_ACTION}
             >
@@ -136,7 +141,7 @@ function InstructorRow({
         </span>
       </div>
       {canTransfer && confirming === "transfer" ? (
-        <div data-testid="ownership-transfer-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+        <div data-testid="ownership-transfer-confirm" onKeyDown={transferConfirm.onKeyDown} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
           <p className="text-[12.5px] leading-relaxed text-ink/70">
             {name}님에게 이 클래스의 소유권을 넘길까요? {name}님이 수락해야 넘어가고, 수락하면 {name}님이
             소유자가 되고 나는 공동 강사로 남습니다.
@@ -155,14 +160,14 @@ function InstructorRow({
             >
               {busy ? "요청하는 중..." : "이전 요청 보내기"}
             </button>
-            <button type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
+            <button ref={transferConfirm.keepRef} type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
               그만두기
             </button>
           </div>
         </div>
       ) : null}
       {canRemove && confirming === "remove" ? (
-        <div data-testid="co-instructor-remove-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+        <div data-testid="co-instructor-remove-confirm" onKeyDown={removeConfirm.onKeyDown} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
           <p className="text-[12.5px] leading-relaxed text-ink/70">
             {name}님을 내보낼까요? 이 클래스를 더는 다룰 수 없고, {name}님이 만든 아직 쓰이지 않은 초대도
             함께 취소됩니다. 이 클래스에서 낸 시도가 있으면 내보낸 참여자의 기록으로 남고 달성률에는 들지 않습니다.
@@ -177,7 +182,7 @@ function InstructorRow({
             >
               {busy ? "내보내는 중..." : "내보내기"}
             </button>
-            <button type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
+            <button ref={removeConfirm.keepRef} type="button" onClick={onKeep} disabled={busy} className={buttonClass("secondary", "sm")}>
               취소
             </button>
           </div>
@@ -206,6 +211,7 @@ function PendingInviteRow({
   onCancel: () => void;
   onKeep: () => void;
 }) {
+  const cancelConfirm = useInlineConfirm(confirming, onKeep);
   const url = typeof window === "undefined" ? "" : coInstructorInviteUrl(window.location.origin, invite.token);
   const maker = invite.created_by_me ? "내가" : `${invite.created_by_name || "소유자"}님이`;
   return (
@@ -219,7 +225,7 @@ function PendingInviteRow({
       <span data-testid="co-instructor-invite-meta" className="text-[12px] text-ink/45">
         {maker} {formatDay(invite.created_at)} 만듦 · {formatDay(invite.expires_at)} 까지
       </span>
-      <span className="flex items-center gap-1.5">
+      <span className="flex items-center gap-1.5" onKeyDown={cancelConfirm.onKeyDown}>
         <button
           type="button"
           data-testid="co-instructor-invite-copy"
@@ -242,6 +248,7 @@ function PendingInviteRow({
             <button
               type="button"
               data-testid="co-instructor-invite-cancel-keep"
+              ref={cancelConfirm.keepRef}
               onClick={onKeep}
               disabled={cancelling}
               className={buttonClass("secondary", "sm")}
@@ -250,7 +257,13 @@ function PendingInviteRow({
             </button>
           </>
         ) : (
-          <button type="button" data-testid="co-instructor-invite-cancel" onClick={onAsk} className={LINK_ACTION}>
+          <button
+            ref={cancelConfirm.triggerRef}
+            type="button"
+            data-testid="co-instructor-invite-cancel"
+            onClick={onAsk}
+            className={LINK_ACTION}
+          >
             취소
           </button>
         )}
@@ -264,6 +277,7 @@ function LeaveSection({ classId }: { classId: number }) {
   const [confirming, setConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const leaveConfirm = useInlineConfirm(confirming, () => setConfirming(false));
 
   async function leave() {
     setLeaving(true);
@@ -283,7 +297,7 @@ function LeaveSection({ classId }: { classId: number }) {
       <h2 className="border-b border-rule px-4 py-3 text-[15px] font-semibold tracking-[-0.005em]">이 클래스 떠나기</h2>
       <div className="flex flex-col gap-3 px-4 py-3">
         {confirming ? (
-          <div data-testid="class-leave-confirm" className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
+          <div data-testid="class-leave-confirm" onKeyDown={leaveConfirm.onKeyDown} className="flex flex-col gap-2 border border-rule bg-paper px-3 py-2.5">
             <p className="text-[12.5px] leading-relaxed text-ink/70">
               이 클래스를 떠날까요? 내 클래스 목록에서 사라지고, 다시 함께 가르치려면 새 초대를 받아야
               합니다. 내가 만든 아직 쓰이지 않은 초대는 취소되고, 이 클래스에서 낸 시도는 지워지지 않고
@@ -300,6 +314,7 @@ function LeaveSection({ classId }: { classId: number }) {
                 {leaving ? "떠나는 중..." : "떠나기"}
               </button>
               <button
+                ref={leaveConfirm.keepRef}
                 type="button"
                 onClick={() => setConfirming(false)}
                 disabled={leaving}
@@ -314,6 +329,7 @@ function LeaveSection({ classId }: { classId: number }) {
             <button
               type="button"
               data-testid="class-leave"
+              ref={leaveConfirm.triggerRef}
               onClick={() => setConfirming(true)}
               className={buttonClass("danger", "sm")}
             >
@@ -348,6 +364,8 @@ export function InstructorsSection({
     pendingCoInstructorInvitesPath(classId),
   );
   const [creating, setCreating] = useState(false);
+  // 내보내기·초대 취소가 끝나면 누른 줄이 사라진다 — 초점을 늘 있는 「초대 링크 만들기」로 옮긴다(#1400).
+  const createButtonRef = useRef<HTMLButtonElement>(null);
   const [cancellingId, setCancellingId] = useState<number | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [confirmingInviteId, setConfirmingInviteId] = useState<number | null>(null);
@@ -393,6 +411,7 @@ export function InstructorsSection({
     // 내보낸 사람이 만든 대기 초대도 취소되므로 둘 다 다시 읽는다.
     reloadRoster();
     reloadInvites();
+    if (result.ok) createButtonRef.current?.focus();
     setConfirming(null);
     setBusyId(null);
     // 내보낸 사람에게 온 대기 이전 요청도 사라진다.
@@ -420,6 +439,7 @@ export function InstructorsSection({
     }
     // 실패해도 다시 읽는다 — 그 사이 누가 수락했거나 다른 강사가 먼저 취소했으면 목록에서 빠진다.
     reloadInvites();
+    if (result.ok) createButtonRef.current?.focus();
     setConfirmingInviteId(null);
     setCancellingId(null);
   }
@@ -487,6 +507,7 @@ export function InstructorsSection({
             <button
               type="button"
               data-testid="co-instructor-invite-create"
+              ref={createButtonRef}
               onClick={() => void create()}
               disabled={creating}
               className={buttonClass("primary", "sm")}

@@ -221,9 +221,9 @@ class FakeClassroomScoringAdapter:
             needle = requirement.text.strip()
             is_met = bool(needle) and needle in haystack
             reasoning = (
-                "체크리스트 문구가 제출된 소스에서 그대로 확인되어 충족으로 판정했다."
+                "체크리스트 문구가 제출된 소스에서 그대로 확인되었습니다."
                 if is_met
-                else "체크리스트 문구를 제출된 소스에서 찾지 못해 미달로 판정했다."
+                else "체크리스트 문구를 제출된 소스에서 찾지 못했습니다."
             )
             verdicts.append(
                 RequirementVerdict(
@@ -249,9 +249,9 @@ class FakeClassroomScoringAdapter:
                 required=item.required,
                 score=5 if item.label.strip() and item.label.strip() in quality_input.source_text else 1,
                 reasoning=(
-                    "체크리스트 문구가 제출된 소스에서 그대로 확인되어 5점으로 매겼다."
+                    "체크리스트 문구가 제출된 소스에서 그대로 확인되어 5점입니다."
                     if item.label.strip() in quality_input.source_text
-                    else "체크리스트 문구를 제출된 소스에서 찾지 못해 1점으로 매겼다."
+                    else "체크리스트 문구를 제출된 소스에서 찾지 못해 1점입니다."
                 ),
             )
             for item in quality_input.items
@@ -781,6 +781,8 @@ def _notify_submitter_of_score(submission: ClassroomSubmission, score: Classroom
             "submission_id": submission.id,
             "attempt_number": submission.attempt_number,
             "passed": passed,
+            # 늦음은 낸 시각으로 정한다 — 화면의 상태 글자와 같은 단계다(#1400).
+            "late": problem.lateness(submission.created_at),
         },
     )
     publish_attempt_scored(submission)

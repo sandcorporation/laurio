@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { InstructorSubmissionRow } from "./api";
 import {
   latestPerMember,
+  countTone,
   participantAttempts,
   participantIdsOf,
   requiredSummary,
@@ -58,6 +59,11 @@ describe("제출 현황 계산", () => {
       row({ id: 4, member_id: 3, status: "pending", pending_reason: "no_api_key" }),
     ];
     expect(submissionStats(rows, 5)).toEqual({ passed: 1, participants: 5, attempts: 4, scoring: 1, waiting: 1 });
+  });
+
+  it("통과·완벽 칸의 색은 하나라도 있을 때만 켠다(#1400)", () => {
+    expect(countTone(0, "text-success")).toBeUndefined();
+    expect(countTone(1, "text-success")).toBe("text-success");
   });
 
   it("참여자마다 가장 높은 시도 하나, 최근 제출이 위", () => {
