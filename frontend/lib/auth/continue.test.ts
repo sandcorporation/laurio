@@ -82,4 +82,48 @@ describe("handleContinue", () => {
     const response = await run("", result(401, { shouldClearCookies: true })).promise;
     expect(response.cookies.get("codemit_access")?.value).toBe("");
   });
+
+  describe("bounce 쿠키(순환 차단기)", () => {
+    const sibling = `?next=%2Fjoin%2Fabc&next_origin=${encodeURIComponent(CLASSROOM)}`;
+
+    it("auto=1 이고 형제 목적지면 30초 httpOnly 쿠키를 심는다", async () => {
+      const response = await run(`${sibling}&auto=1`, result(200)).promise;
+      expect(response.headers.get("location")).toBe(`${CLASSROOM}/join/abc`);
+      const cookie = response.cookies.get("codemit_login_bounce");
+      expect(cookie?.value).toBe("1");
+      expect(cookie?.maxAge).toBe(30);
+      expect(cookie?.httpOnly).toBe(true);
+      expect(cookie?.path).toBe("/");
+      expect(cookie?.domain).toBeUndefined();
+    });
+
+    it("auto 가 없으면 형제 목적지여도 심지 않는다(로그인 직후)", async () => {
+      const response = await run(sibling, result(200)).promise;
+      expect(response.cookies.get("codemit_login_bounce")).toBeUndefined();
+    });
+
+    it("auto=1 이어도 같은 오리진 목적지면 심지 않는다", async () => {
+      const response = await run("?next=%2Fconsole%2Fprofile&auto=1", result(200)).promise;
+      expect(response.cookies.get("codemit_login_bounce")).toBeUndefined();
+    });
+
+    it("auto=1 이어도 바깥 next_origin(→ 공개 앱 /)이면 심지 않는다", async () => {
+      const response = await run("?next=%2Fjoin%2Fabc&next_origin=https%3A%2F%2Fevil.example&auto=1", result(200))
+        .promise;
+      expect(response.headers.get("location")).toBe("/");
+      expect(response.cookies.get("codemit_login_bounce")).toBeUndefined();
+    });
+
+    it("인증되지 않았으면 심지 않는다", async () => {
+      const response = await run(`${sibling}&auto=1`, result(401)).promise;
+      expect(response.cookies.get("codemit_login_bounce")).toBeUndefined();
+    });
+  });
+
+  it("인증되지 않은 auto=1 은 /login 으로 가되 auto 를 다시 싣지 않는다", async () => {
+    const response = await run("?next=%2F&auto=1", result(401)).promise;
+    const location = new URL(response.headers.get("location")!, "http://public.test");
+    expect(location.pathname).toBe("/login");
+    expect(location.searchParams.has("auto")).toBe(false);
+  });
 });

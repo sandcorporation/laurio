@@ -30,12 +30,13 @@
 //    로그인하므로 여기는 손대지 않는다. `showDevSeedForm`이 false면(배포 환경,
 //    app/login/page.tsx가 서버에서 판정) 이 절 자체가 렌더되지 않는다 — 배포
 //    환경에 로그인 우회가 실려 나가는 것이 막는 값이다(#95).
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { normalizeDetail } from "@codemit/bff-client";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 
 import { Card, ErrorNote, INPUT_CLASS } from "@/app/components/ui";
+import { autoContinuePath } from "@/lib/auth/login-auto-continue";
 import { continuePath } from "@/lib/auth/login-destination";
 import { resolveNextPath } from "@/lib/auth/next-path";
 import type { SocialProvider } from "@/lib/auth/social-providers";
@@ -78,6 +79,8 @@ function describeOAuthError(code: string | null): string | null {
 }
 
 interface LoginButtonsProps {
+  /** 세션 쿠키가 있어 먼저 세션을 확인할지(app/login/page.tsx 가 판정). */
+  checkSessionFirst: boolean;
   showDevSeedForm: boolean;
   githubConfigured: boolean;
   googleConfigured: boolean;
@@ -92,7 +95,12 @@ interface OAuthButtonSpec {
   configured: boolean;
 }
 
-function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: LoginButtonsProps) {
+function LoginButtons({
+  checkSessionFirst,
+  showDevSeedForm,
+  githubConfigured,
+  googleConfigured,
+}: LoginButtonsProps) {
   const searchParams = useSearchParams();
   // 같은 오리진 경로가 아니면 기본값으로 떨어진다(오픈 리다이렉트 방어) —
   // authorize 라우트가 이 값을 다시 한번 같은 규칙으로 검증한다.
@@ -108,6 +116,29 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
     return `/api/auth/social/${provider}/authorize?${params.toString()}`;
   };
   const oauthError = describeOAuthError(searchParams.get("error"));
+
+  // 로그인한 사람은 폼 대신 목적지로(#1388 T3). 백엔드가 확인한 세션(200)일 때만
+  // 넘긴다 — 죽은 쿠키면 `/api/auth/session` 이 지우고 폼을 그린다(순환 없음).
+  const [checkingSession, setCheckingSession] = useState(checkSessionFirst);
+  useEffect(() => {
+    if (!checkSessionFirst) return;
+    let cancelled = false;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 200) {
+          window.location.replace(autoContinuePath(next, nextOrigin));
+          return;
+        }
+        setCheckingSession(false);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkSessionFirst, next, nextOrigin]);
 
   const [seed, setSeed] = useState("dev-user");
   const [pending, setPending] = useState<DevSeedProviderId | null>(null);
@@ -148,6 +179,10 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
     { provider: "github", label: "GitHub으로 로그인", configured: githubConfigured },
     { provider: "google", label: "Google로 로그인", configured: googleConfigured },
   ];
+
+  if (checkingSession) {
+    return <main className="min-h-screen" data-testid="login-session-check" aria-busy="true" />;
+  }
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-6">
@@ -239,6 +274,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
 }
 
 export default function LoginForm({
+  checkSessionFirst,
   showDevSeedForm,
   githubConfigured,
   googleConfigured,
@@ -246,6 +282,7 @@ export default function LoginForm({
   return (
     <Suspense fallback={null}>
       <LoginButtons
+        checkSessionFirst={checkSessionFirst}
         showDevSeedForm={showDevSeedForm}
         githubConfigured={githubConfigured}
         googleConfigured={googleConfigured}
