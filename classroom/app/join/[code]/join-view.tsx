@@ -8,7 +8,7 @@
 // 사람이 대개 폰에서 연다. 그래서 고정 너비를 두지 않고, 좁은 폭에서 한 칸으로
 // 흐르며 버튼이 가로 전체를 쓰는 레이아웃이다.
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { CharCount } from "@/app/components/CharCount";
@@ -44,6 +44,11 @@ export function JoinView() {
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
   const [submit, setSubmit] = useState<SubmitState>({ status: "idle" });
+  // 로그인하고 돌아온 사람이 처음 만나는 칸이 이름 칸이다(#1431) — 칸이 처음 그려질 때 초점이 갈 곳 없이
+  // body 에 있으면 이름 칸이 받는다. 이미 다른 곳에 있던 초점은 빼앗지 않는다.
+  const focusNameField = useCallback((input: HTMLInputElement | null) => {
+    if (input && document.activeElement === document.body) input.focus();
+  }, []);
 
   // 이미 가입한 사람(내보내진 사람 포함)이 링크를 다시 열면 이름 입력 폼이
   // 아니라 곧장 문제 목록으로 보낸다(#300 AC) — 두 번째 가입 요청은 보내지
@@ -196,6 +201,7 @@ export function JoinView() {
               </label>
               <input
                 id="join-display-name"
+                ref={focusNameField}
                 data-testid="join-display-name-input"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
