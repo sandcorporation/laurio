@@ -147,7 +147,7 @@ describe("소유권 이전 알림 (#575)", () => {
     ["declined", "'알고리즘 1반' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로입니다."],
     ["cancelled", "'알고리즘 1반' 클래스의 소유권 이전 요청이 취소됐습니다 — 요청한 쪽이 거두었습니다."],
     ["expired", "'알고리즘 1반' 클래스의 소유권 이전 요청이 기한이 지나 만료됐습니다."],
-    // 요청을 찾지 못함 — 옛 알림이거나 받는 사람이 떠나 요청이 지워졌다(#1448).
+    // 끝났는데 행이 없다 — 받는 사람이 떠나 요청이 지워졌거나, 잇지 못한 옛 알림인데 대기 요청이 없다(#1448).
     ["gone", "'알고리즘 1반' 클래스의 소유권 이전 요청은 이미 끝났습니다 — 더 답할 것이 없습니다."],
   ] as const)("끝난 요청이면 어떻게 끝났는지(%s) 말하고 수락·거절을 청하지 않는다 (#1441)", (transfer_status, expected) => {
     const text = describeNotification(
@@ -159,6 +159,22 @@ describe("소유권 이전 알림 (#575)", () => {
     );
     expect(text).toBe(expected);
     expect(text).not.toContain("수락하거나");
+  });
+
+  it("어느 요청인지 모르는 옛 알림은 끝났다고 단정하지 않고 클래스의 요청 카드로 보낸다 (#1459 ①)", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_requested",
+        transfer_status: "unknown",
+        context: { class_name: "알고리즘 1반", requester_display_name: "주강사", expires_at: "2026-10-13T03:00:00Z" },
+      }),
+    );
+    expect(text).toBe(
+      "'알고리즘 1반' 클래스에 나에게 온 소유권 이전 요청이 지금 대기 중입니다 — 이 알림이 그 요청인지는 알 수 없으니 클래스 화면의 요청 카드에서 확인하고 답해 주세요.",
+    );
+    expect(text).not.toContain("끝났습니다");
+    // 받은 때의 기한은 이 알림의 요청 것인지 모른다.
+    expect(text).not.toContain("까지");
   });
 
   it("아직 답을 기다리는 요청이거나 상태를 모르면 받은 때의 문구 그대로다 (#1435)", () => {

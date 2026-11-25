@@ -80,6 +80,7 @@ export function describeNotification(notification: NotificationRow): string {
           ? `${context.requester_display_name}님이`
           : "소유자가";
       // 문구는 받은 때의 것이다 — 서버가 요청이 끝났다고 알려 주면 수락·거절을 청하지 않고 어떻게 끝났는지 말한다(#1435·#1441).
+      // 어느 요청인지 모르면(`unknown`) 받은 때의 기한을 말하지 않고 요청 카드로 보낸다(#1459 ①).
       const ended = endedTransferText(notification.transfer_status, className);
       if (ended !== null) return ended;
       const until =
@@ -120,9 +121,14 @@ function endedTransferText(status: NotificationRow["transfer_status"], className
       return `${subject}이 취소됐습니다 — 요청한 쪽이 거두었습니다.`;
     case "expired":
       return `${subject}이 기한이 지나 만료됐습니다.`;
-    // 서버가 요청을 찾지 못했다(#1448) — 대기 중인 요청은 언제나 찾히므로 끝난 요청이다. 어떻게 끝났는지는 모른다.
+    // 요청이 끝났는데 어떻게 끝났는지는 모른다(#1448) — 받는 사람이 떠나 요청이 지워졌거나, 요청에 잇지 못한 옛
+    // 알림인데 그 클래스에 나에게 온 대기 요청이 없다.
     case "gone":
       return `${subject}은 이미 끝났습니다 — 더 답할 것이 없습니다.`;
+    // 요청에 잇지 못한 옛 알림인데 그 클래스에 나에게 온 대기 요청이 있다(#1459 ①) — 그것이 이 알림의 요청인지
+    // 모른다. 끝났다고 단정하지 않고, 알림 줄이 가는 클래스 화면의 요청 카드로 보낸다.
+    case "unknown":
+      return `'${className}' 클래스에 나에게 온 소유권 이전 요청이 지금 대기 중입니다 — 이 알림이 그 요청인지는 알 수 없으니 클래스 화면의 요청 카드에서 확인하고 답해 주세요.`;
     default:
       return null;
   }

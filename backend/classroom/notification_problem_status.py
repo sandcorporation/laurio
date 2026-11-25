@@ -48,3 +48,16 @@ def transfer_states_for(user_id: int, transfer_ids: Collection[int]) -> dict[int
         transfer.id: transfer.status_at(now)
         for transfer in OwnershipTransfer.objects.filter(recipient_id=user_id, id__in=transfer_ids)
     }
+
+
+def classes_with_pending_transfer_for(user_id: int, class_ids: Collection[int]) -> set[int]:
+    """이 사람 앞으로 지금 대기 중인 소유권 이전 요청이 있는 클래스들 — 질의 한 번(#1459 ①)."""
+
+    if not class_ids:
+        return set()
+    now = Clock.now()
+    return {
+        transfer.classroom_id
+        for transfer in OwnershipTransfer.objects.filter(recipient_id=user_id, classroom_id__in=class_ids)
+        if transfer.status_at(now) == OwnershipTransfer.Status.PENDING
+    }
