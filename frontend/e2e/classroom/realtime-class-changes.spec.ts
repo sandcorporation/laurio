@@ -317,3 +317,94 @@ test("390px 터치 — 「요청 취소」를 누르면 취소가 화면에 보�
   await expect(page.getByRole("heading", { name: /이 클래스의 강사/ })).toBeFocused();
   await context.close();
 });
+
+// #1459 ④ — 초대 행 안에 초점이 있는 채로 상대가 초대를 수락하면 그 행이 사라진다. 초점은 BODY 로 빠지지 않고
+// 늘 있는 「초대 링크 만들기」로 가고, 수락은 늘 있는 상태 영역에서 읽힌다.
+for (const width of [1280, 390]) {
+test(`${width}px — 초대 행의 「링크 복사」에 초점이 있을 때 상대가 수락하면 초점이 「초대 링크 만들기」로 가고 수락이 읽힌다`, async ({
+  page,
+  browser,
+}) => {
+  await page.setViewportSize({ width, height: 800 });
+  const seed = `rt-invite-focus-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const classId = await createClass(page, seed);
+  const token = await createInvite(page, classId);
+
+  await openWithStream(page, `/classes/${classId}?tab=instructors`);
+  await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(1);
+  const status = page.getByTestId("co-instructor-accepted-note");
+  await expect(status).toHaveAttribute("role", "status");
+  await expect(status).toHaveText("");
+  await page.getByTestId("co-instructor-invite-copy").focus();
+
+  const helper = await otherSession(browser, `${seed}-helper`);
+  expect(
+    (
+      await helper.api.post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, {
+        data: { display_name: "박조교" },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await helper.context.close();
+
+  await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(0, { timeout: 10_000 });
+  await expect(status).toHaveText("박조교 님이 초대를 수락했습니다", { timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "초대 링크 만들기" })).toBeFocused();
+});
+}
+
+// #1459 ⑥ — 이전 요청 하나의 변경 신호가 클래스·강사·초대 GET 을 5번 일으켰다. 같은 변경의 재조회는 한 곳에서.
+test("이전 요청에 답이 오면 클래스·강사·초대 재조회가 세 번 이하다", async ({ page, browser }) => {
+  const seed = `rt-refetch-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const classId = await createClass(page, seed);
+  const token = await createInvite(page, classId);
+  const helper = await otherSession(browser, `${seed}-helper`);
+  expect(
+    (
+      await helper.api.post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, {
+        data: { display_name: "박조교" },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  const api = classroomApi(page);
+  const roster = (await (await api.get(`/api/backend/classroom/classes/${classId}/instructors`)).json()) as {
+    co_instructor_id: number | null;
+  }[];
+  const coInstructorId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+  const requested = await api.post(`/api/backend/classroom/classes/${classId}/ownership-transfers`, {
+    data: { co_instructor_id: coInstructorId },
+  });
+  const transferId = (await requested.json()).id as number;
+
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const reads = { all: 0, invites: 0 };
+  let secondInvitesRead!: () => void;
+  const invitesReadTwice = new Promise<void>((resolve) => (secondInvitesRead = resolve));
+  page.on("request", (request) => {
+    if (request.method() !== "GET") return;
+    const path = new URL(request.url()).pathname;
+    if (path === base || path === `${base}/instructors` || path === `${base}/co-instructor-invites`) reads.all += 1;
+    if (path === `${base}/co-instructor-invites`) {
+      reads.invites += 1;
+      if (reads.invites === 2) secondInvitesRead();
+    }
+  });
+  await openWithStream(page, `/classes/${classId}?tab=instructors`);
+  await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
+  // 열릴 때 한 번, 스트림이 이어질 때 한 번 대기 초대를 읽는다 — 그 재조회 사슬이 끝난 뒤부터 센다.
+  await invitesReadTwice;
+  const before = reads.all;
+
+  expect(
+    (await helper.api.post(`${base}/ownership-transfers/${transferId}/decline`)).ok(),
+  ).toBeTruthy();
+  await helper.context.close();
+
+  await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0, { timeout: 10_000 });
+  // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라 조용해질 때까지 기다린다.
+  await page.waitForLoadState("networkidle");
+  expect(reads.all - before).toBeGreaterThan(0);
+  expect(reads.all - before).toBeLessThanOrEqual(3);
+});

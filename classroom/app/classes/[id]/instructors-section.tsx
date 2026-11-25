@@ -27,8 +27,6 @@ import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 import { pendingTransferEndNote } from "@/lib/co-instructors/transfer-end-note";
-import { INSTRUCTORS_CHANGED, isClassSignal, type StreamEvent } from "@/lib/events/types";
-import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import { formatDay } from "@/lib/classes/format-day";
 import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 import { cancelTransferButtonLabel, removeButtonLabel, transferButtonLabel } from "@/lib/co-instructors/instructor-labels";
@@ -370,15 +368,14 @@ function LeaveSection({ classId }: { classId: number }) {
   );
 }
 
-// 강사 영역은 늘 보고 있는 화면이 아니라 스트림이 끊겨도 폴링하지 않는다(`waiting: false`) — 이 값은 쓰이지 않는다.
-const ROSTER_FALLBACK_POLL_MS = 30_000;
-
 export function InstructorsSection({
   classId,
   role,
   pendingTransfer,
   onTransferChanged,
   focusPendingTransfer,
+  classVersion,
+  signalPending,
 }: {
   classId: number;
   // 부른 사람의 이 클래스 역할 — 클래스 응답에서 온다. 바뀌면(넘겨받기·넘겨주기) 목록을 다시 읽는다.
@@ -389,6 +386,10 @@ export function InstructorsSection({
   onTransferChanged: (change?: "requested" | "cancel-failed") => void;
   // 요청을 보낸 뒤 강사 목록이 다시 그려지므로(key) 초점 표시는 그 바깥에 둔다.
   focusPendingTransfer: RefObject<boolean>;
+  // 클래스 응답 — 새로 도착할 때마다 바뀐다. 신호로 시작된 재조회의 응답이 오면 명단·대기 초대를 한 번 다시 읽는다(#1459 ⑥).
+  classVersion: unknown;
+  // 신호가 클래스 재조회를 시작했고 그 응답을 아직 못 받았다 — 재조회는 클래스 화면이 한 번만 시작하고 이 영역이 그 응답에 맞춰 읽는다.
+  signalPending: RefObject<boolean>;
 }) {
   const { state: rosterState, reload: reloadRoster } = useBackendQuery<ClassInstructor[]>(bffClient, classInstructorsPath(classId));
   const { state: invitesState, reload: reloadInvites } = useBackendQuery<PendingCoInstructorInvite[]>(
@@ -410,19 +411,6 @@ export function InstructorsSection({
     reloadRoster();
     reloadInvites();
   }, [reloadRoster, reloadInvites]);
-  // 상대가 초대를 수락하거나 이전에 답하면 명단·대기 초대를 다시 읽는다(#1447 10-1). 탭으로 돌아와 스트림이
-  // 다시 열릴 때도 한 번 다시 읽는다 — 숨긴 동안 놓친 신호를 메운다.
-  const matchesInstructorsChange = useCallback(
-    (event: StreamEvent) => isClassSignal(event, INSTRUCTORS_CHANGED, classId),
-    [classId],
-  );
-  useRealtimeRefresh({
-    matches: matchesInstructorsChange,
-    waiting: false,
-    fallbackPollMs: ROSTER_FALLBACK_POLL_MS,
-    reload: reloadBoth,
-  });
-
   // 대기 요청이 끝났는데(거절·만료·취소) 소유자로 남았으면 결과를 알린다 — 그 줄의 「요청 취소」가 사라지므로
   // 초점이 그 안에 있었으면 강사 표 제목으로 옮긴다(#1448 ③). 역할이 바뀐 끝(넘겨줌)은 클래스 화면의 안내가 맡는다.
   const rootRef = useRef<HTMLDivElement>(null);
@@ -434,9 +422,12 @@ export function InstructorsSection({
   useEffect(() => {
     const before = previous.current;
     previous.current = { role, pendingTransfer };
-    if (before.role === role && before.pendingTransfer?.id === pendingTransfer?.id) return;
-    // 역할·대기 요청이 바뀌면 명단의 줄 모양(넘기기·내보내기·이전 대기)이 바뀐다.
-    reloadBoth();
+    const signalled = signalPending.current;
+    signalPending.current = false;
+    const changed = !(before.role === role && before.pendingTransfer?.id === pendingTransfer?.id);
+    // 상대가 초대를 수락하거나 이전에 답했거나(신호) 역할·대기 요청이 바뀌면(명단의 줄 모양이 바뀐다) 한 번만 다시 읽는다.
+    if (signalled || changed) reloadBoth();
+    if (!changed) return;
     setConfirming(null);
     const note = pendingTransferEndNote({
       ended: before.pendingTransfer,
@@ -450,9 +441,41 @@ export function InstructorsSection({
     const active = document.activeElement;
     const lost = active === null || active === document.body || !rootRef.current?.contains(active);
     if (focusWithin.current && lost) headingRef.current?.focus();
-  }, [role, pendingTransfer, reloadBoth]);
+  }, [role, pendingTransfer, classVersion, signalPending, reloadBoth]);
 
   const roster = rosterState.status === "ready" ? rosterState.data : [];
+
+  // 상대가 초대를 수락하면 명단이 늘고 그 대기 초대 줄이 사라진다 — 수락은 늘 있는 상태 영역으로 읽히고, 초점이
+  // 사라진 줄 안에 있었으면 늘 있는 「초대 링크 만들기」로 옮긴다(#1459 ④).
+  const inviteListFocus = useRef(false);
+  const knownInstructorIds = useRef<Set<number> | null>(null);
+  const knownInviteIds = useRef<Set<number> | null>(null);
+  const [acceptedNote, setAcceptedNote] = useState("");
+  useEffect(() => {
+    if (rosterState.status !== "ready") return;
+    const known = knownInstructorIds.current;
+    knownInstructorIds.current = new Set(
+      rosterState.data.flatMap((instructor) => (instructor.co_instructor_id === null ? [] : [instructor.co_instructor_id])),
+    );
+    if (known === null) return;
+    const joined = rosterState.data.filter(
+      (instructor) =>
+        instructor.co_instructor_id !== null && !known.has(instructor.co_instructor_id) && instructor.joined_by === "invite",
+    );
+    if (joined.length > 0) setAcceptedNote(`${joined.map((instructor) => instructor.display_name).join(", ")} 님이 초대를 수락했습니다`);
+  }, [rosterState]);
+  useEffect(() => {
+    if (invitesState.status !== "ready") return;
+    const known = knownInviteIds.current;
+    knownInviteIds.current = new Set(invitesState.data.map((invite) => invite.id));
+    if (known === null || !inviteListFocus.current) return;
+    if (![...known].some((id) => !knownInviteIds.current?.has(id))) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body || !rootRef.current?.contains(active)) {
+      createButtonRef.current?.focus();
+      inviteListFocus.current = false;
+    }
+  }, [invitesState]);
   const me = roster.find((instructor) => instructor.is_me);
   const iAmOwner = me?.role === "owner";
 
@@ -553,6 +576,9 @@ export function InstructorsSection({
         <p role="status" data-testid="ownership-transfer-ended-note" className={transferNote ? "text-[13px] text-ink/70" : "sr-only"}>
           {transferNote}
         </p>
+        <p role="status" data-testid="co-instructor-accepted-note" className={acceptedNote ? "text-[13px] text-ink/70" : "sr-only"}>
+          {acceptedNote}
+        </p>
         <Card>
           <h2
             ref={headingRef}
@@ -616,7 +642,17 @@ export function InstructorsSection({
             </button>
           </div>
           {invites.length > 0 ? (
-            <ul data-testid="co-instructor-invites">
+            <ul
+              data-testid="co-instructor-invites"
+              onFocus={() => {
+                inviteListFocus.current = true;
+              }}
+              onBlur={(event) => {
+                // 줄이 사라져 초점이 빠질 때는 relatedTarget 이 없다 — 그때는 「안에 있었다」를 지우지 않는다.
+                const next = event.relatedTarget;
+                if (next !== null && !event.currentTarget.contains(next as Node)) inviteListFocus.current = false;
+              }}
+            >
               {invites.map((invite) => (
                 <PendingInviteRow
                   key={invite.id}
