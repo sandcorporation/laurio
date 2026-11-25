@@ -73,6 +73,27 @@ function ClassDetail() {
     reloadClass,
   });
   const currentRole = ready?.role ?? null;
+  // 지난 소유권 안내(넘겨받음·거절·넘어감)는 새 이전 요청이 걸리면 걷고, 아무 일 없어도 낭독기가 읽을 시간 뒤 걷는다(#1517 취향 1).
+  const pendingTransferId = ready?.pending_ownership_transfer?.id ?? null;
+  const hasPastTransferNote = justTookOver || justDeclined || ownershipTaken !== null;
+  const lastPendingTransferId = useRef(pendingTransferId);
+  useEffect(() => {
+    if (lastPendingTransferId.current === pendingTransferId) return;
+    lastPendingTransferId.current = pendingTransferId;
+    if (pendingTransferId === null) return;
+    setJustTookOver(false);
+    setJustDeclined(false);
+    setOwnershipTaken(null);
+  }, [pendingTransferId]);
+  useEffect(() => {
+    if (!hasPastTransferNote) return;
+    const timer = window.setTimeout(() => {
+      setJustTookOver(false);
+      setJustDeclined(false);
+      setOwnershipTaken(null);
+    }, 20_000);
+    return () => window.clearTimeout(timer);
+  }, [hasPastTransferNote, justTookOver, justDeclined, ownershipTaken]);
   useEffect(() => {
     if (ready === null) return;
     if (previousRole.current === "owner" && currentRole !== "owner") {

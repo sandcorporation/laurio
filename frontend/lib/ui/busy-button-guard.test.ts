@@ -9,12 +9,8 @@ const ROOT = resolve(__dirname, "../../..");
 const APPS = ["frontend/app", "classroom/app", "operator/app", "operator/lib", "classroom/lib", "packages/bff-client/src"];
 // 이 낱말이 든 식으로 `<button disabled={…}>` 가 꺼지면 진행 중 단추다.
 const BUSY = /\b(saving|submitting|pending|busy|sending|loading|loadingMore|uploading|isSaving|deleting|revealing)\b/;
-// 다른 작업자(1517a/b·1518b)가 맡은 파일 — 거기 남은 것은 PR 본문 목록에 있다.
-const OTHER_TICKETS = [
-  "instructors-section",
-  "certificates/page",
-  "ownership-transfer-offer",
-];
+// 아직 바꾸지 않은 파일 — 지금은 없다. 구조 시험이 모든 앱을 잠근다.
+const OTHER_TICKETS: string[] = [];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {

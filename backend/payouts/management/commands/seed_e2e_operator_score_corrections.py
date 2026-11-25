@@ -21,11 +21,10 @@ from distributions.models import Distribution
 
 from .seed_e2e_operator_queues import (
     DEADLINE_OFFSET,
-    SCORING_RUN_PENDING_URL,
+    run_scoring_scan,
     _RUN_ID_OVERRIDE,
     _clear_stale_seed_contests,
     _close_contest,
-    _internal_headers,
     _publish_contest,
     _submit,
     _verified_user,
@@ -44,8 +43,7 @@ def _scored_contest(client: Client, label: str, uid: str) -> dict:
     devs = [_verified_user(client, f"e2e-corr-{label}-dev-{uid}-{i}") for i in (1, 2)]
     submissions = [_submit(client, dev, contest["id"], requirement_id=requirement_id) for dev in devs]
     _close_contest(client, contest, deadline=deadline)
-    response = client.post(SCORING_RUN_PENDING_URL, **_internal_headers())
-    assert response.status_code == 200, response.content
+    run_scoring_scan(client)
     return {"contest_id": contest["id"], "submission_ids": [s["id"] for s in submissions]}
 
 

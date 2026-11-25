@@ -432,7 +432,7 @@ export default function ContestCertificatesPage() {
                 <button
                   type="button"
                   className={buttonClass("secondary", "sm")}
-                  disabled={busy}
+                  aria-disabled={busy || undefined}
                   onClick={() => void showPreview(p.text.recipient_name, p.text)}
                   data-testid={`certificates-preview-${p.submissionId}`}
                 >
@@ -482,7 +482,7 @@ export default function ContestCertificatesPage() {
                 <button
                   type="button"
                   className={buttonClass("dangerFilled", "sm")}
-                  disabled={busy}
+                  aria-disabled={busy || undefined}
                   onClick={() => void issue()}
                   data-testid="certificates-confirm-issue"
                 >
@@ -500,7 +500,7 @@ export default function ContestCertificatesPage() {
               <button
                 type="button"
                 className={buttonClass("primary")}
-                disabled={busy}
+                aria-disabled={busy || undefined}
                 onClick={() => setConfirming(true)}
                 data-testid="certificates-issue"
               >
@@ -634,7 +634,7 @@ export default function ContestCertificatesPage() {
                         <button
                           type="button"
                           className={buttonClass("dangerFilled", "sm")}
-                          disabled={busy}
+                          aria-disabled={busy || undefined}
                           onClick={() => void cancel(c.id)}
                           data-testid={`certificates-cancel-go-${c.id}`}
                         >
@@ -665,7 +665,7 @@ export default function ContestCertificatesPage() {
                         <button
                           type="button"
                           className={buttonClass("dangerFilled", "sm")}
-                          disabled={busy}
+                          aria-disabled={busy || undefined}
                           onClick={() => void reissueNow()}
                           data-testid={`certificates-reissue-go-${c.id}`}
                         >
