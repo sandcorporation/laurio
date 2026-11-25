@@ -13,6 +13,7 @@ import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { PERFECT_TEXT_CLASS } from "@/lib/design/stamp";
 import { achievementTone, formatPassedPerfect } from "@/lib/problems/achievement";
 import type { ProblemRow } from "@/lib/problems/api";
+import { problemRequiredCount } from "@/lib/problems/required-count";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
@@ -221,7 +222,7 @@ export function ProblemsTable({
         </thead>
         <tbody data-testid="problems-list">
           {problems.map((problem, index) => {
-            const required = problem.checklist_items.filter((item) => item.required).length;
+            const required = problemRequiredCount(problem);
             const dimmed = problem.status === "draft" ? "text-ink/45" : "";
             return (
               <tr key={problem.id} data-testid={`problem-row-${problem.id}`} className="border-b border-rule last:border-b-0">
