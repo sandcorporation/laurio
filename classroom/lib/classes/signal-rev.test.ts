@@ -15,7 +15,7 @@ function driver() {
     machine,
     signal: (rev: number | null) => start(machine.signal(rev)),
     respond: (rev: number | null) => start(machine.succeeded(rev)),
-    fail: () => machine.failed(),
+    fail: () => start(machine.failed()),
     get reads() {
       return reads;
     },
@@ -145,6 +145,64 @@ describe("ClassSignalReload — 실패 (#1496 ④)", () => {
     d.fail();
     d.signal(null);
     expect(d.reads).toBe(2);
+  });
+});
+
+describe("ClassSignalReload — 같은 변경의 두 번째 신호와 실패 (#1503 ③)", () => {
+  it("응답 먼저: 성공한 조회가 담은 번호의 두 번째 신호는 읽지 않는다", () => {
+    const d = driver();
+    d.signal(1);
+    d.respond(1);
+    d.signal(1);
+    expect(d.reads).toBe(1);
+  });
+
+  it("실패 사이: 첫 조회가 실패한 뒤 온 같은 번호의 신호가 다시 읽는다", () => {
+    const d = driver();
+    d.signal(1);
+    d.fail();
+    d.signal(1);
+    expect(d.reads).toBe(2);
+    d.respond(1);
+    expect(d.reads).toBe(2);
+  });
+
+  it("신호 먼저: 읽는 중에 온 같은 번호의 신호는 그 조회가 실패하면 한 번 더 읽는다", () => {
+    const d = driver();
+    d.signal(1);
+    d.signal(1);
+    expect(d.reads).toBe(1);
+    d.fail();
+    expect(d.reads).toBe(2);
+    d.respond(1);
+    expect(d.reads).toBe(2);
+  });
+
+  it("그 한 번 더도 실패하면 거기서 멈춘다 — 신호 하나에 조회 하나", () => {
+    const d = driver();
+    d.signal(1);
+    d.signal(1);
+    d.fail();
+    d.fail();
+    expect(d.reads).toBe(2);
+  });
+
+  it("앞 읽기 중에 온 신호는 그 읽기가 성공하면 갚은 것이다 — 다음 읽기의 실패에 한 번 더를 남기지 않는다", () => {
+    const d = driver();
+    d.signal(1);
+    d.signal(1);
+    d.respond(1);
+    d.signal(2);
+    expect(d.reads).toBe(2);
+    d.fail();
+    expect(d.reads).toBe(2);
+  });
+
+  it("읽는 중에 신호가 없었으면 실패 뒤 다시 읽지 않는다", () => {
+    const d = driver();
+    d.signal(1);
+    d.fail();
+    expect(d.reads).toBe(1);
   });
 });
 

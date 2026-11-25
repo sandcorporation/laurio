@@ -72,6 +72,7 @@ export function useMyProblems(classId: number) {
     waiting: true,
     fallbackPollMs: FALLBACK_POLL_MS,
     reload,
+    settled: queryState,
   });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
