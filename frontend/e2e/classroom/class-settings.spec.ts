@@ -333,6 +333,9 @@ test("채점 키 지우기는 줄 안에서 한 번 더 묻는다 — 브라우�
   await trigger.click();
   await expect(confirm).toContainText("채점이 멈춥니다");
   await expect(confirm.getByRole("button", { name: "그대로 두기" })).toBeFocused();
+  // 초점이 들어갈 때 낭독기가 질문을 함께 읽도록 묶음이 질문 문장을 설명으로 갖는다(#1453).
+  await expect(confirm).toHaveAttribute("role", "group");
+  await expect(confirm).toHaveAccessibleDescription(/채점이 멈춥니다/);
   await page.keyboard.press("Escape");
   await expect(confirm).toHaveCount(0);
   await expect(trigger).toBeFocused();

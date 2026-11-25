@@ -23,6 +23,7 @@ import {
 } from "@/app/components/ui";
 import { importClassTemplate, takedownClassTemplate, type ClassTemplateRow } from "@/lib/class-templates/api";
 import { useClassTemplatePreview } from "@/lib/class-templates/use-class-template-preview";
+import { defaultImportName } from "@/lib/class-templates/import-name";
 import { formatSubmissionFormats } from "@/lib/problems/api";
 import { gradingGuidelineText, gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
@@ -46,7 +47,7 @@ export default function ClassTemplatePreviewPage() {
   const [seededTemplate, setSeededTemplate] = useState<ClassTemplateRow | null>(null);
   if (state.status === "ready" && state.template !== seededTemplate) {
     setSeededTemplate(state.template);
-    setName(state.template.name);
+    setName(defaultImportName(state.template.name));
   }
 
   const [takingDown, setTakingDown] = useState(false);
@@ -220,7 +221,7 @@ export default function ClassTemplatePreviewPage() {
                     value={name}
                     onChange={(event) => setName(event.target.value)}
                     required
-                    placeholder={template.name}
+                    placeholder={defaultImportName(template.name)}
                     className={INPUT_CLASS}
                   />
                   <button
