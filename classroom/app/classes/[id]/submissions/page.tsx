@@ -84,11 +84,10 @@ function RegradeDialogBody({
             예상 금액 {amount}
           </p>
         </div>
-        {failed ? (
-          <p data-testid="regrade-error" className="mt-2 text-[12.5px] text-error">
-            다시 채점을 걸지 못했습니다.
-          </p>
-        ) : null}
+        {/* 늘 있는 알림 영역 — 실패가 뜬 뒤에 만들어진 영역은 낭독기가 읽지 않는다. */}
+        <p role="status" data-testid="regrade-error" className={failed ? "mt-2 text-[12.5px] text-error" : "sr-only"}>
+          {failed ? "다시 채점을 걸지 못했습니다." : ""}
+        </p>
         <div className="mt-5 flex justify-end gap-2">
           <button ref={cancelRef} type="button" data-testid="regrade-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
             취소
@@ -171,6 +170,7 @@ function ClassAttempts() {
   const [target, setTarget] = useState<ClassAttemptRow | null>(null);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [startedNote, setStartedNote] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
@@ -181,6 +181,7 @@ function ClassAttempts() {
 
   function open(attempt: ClassAttemptRow) {
     setFailed(false);
+    setStartedNote("");
     setTarget(attempt);
   }
 
@@ -192,6 +193,7 @@ function ClassAttempts() {
     if (result.ok && result.data.corrections.length > 0) {
       // 걸리면 「다시 채점」 단추가 재조회에서 사라진다 — 단추 대신 늘 남는 제목이 초점을 받는다(#1471 ④).
       titleRef.current?.focus();
+      setStartedNote(`${target.member_display_name} · ${target.problem_title} 다시 채점을 시작했습니다.`);
       setTarget(null);
       reload();
     } else {
@@ -223,6 +225,9 @@ function ClassAttempts() {
 
   return (
     <PageShell>
+      <p role="status" data-testid="regrade-started" className="sr-only">
+        {startedNote}
+      </p>
       <PageHeader
         eyebrow={classState.status === "ready" ? classState.classroom.name : undefined}
         title="제출"

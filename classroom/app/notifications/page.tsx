@@ -271,12 +271,13 @@ type MarkHandlers = {
 // 링크 없는 안 읽은 줄에 다는 작은 「읽음」 버튼 — 묶음 머리글과 개별 시도 줄
 // 둘 다 같은 모양을 쓴다(#345 리뷰: 마크업이 갈라지면 스타일 수정이 한쪽만
 // 반영되기 쉽다는 지적).
-function MarkReadButton({ onClick, testId }: { onClick: () => void; testId: string }) {
+function MarkReadButton({ onClick, testId, target }: { onClick: () => void; testId: string; target: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={testId}
+      aria-label={`읽음 ${target}`}
       className="border border-rule px-2 py-0.5 text-[11.5px] text-ink hover:border-ink"
     >
       읽음
@@ -339,7 +340,7 @@ function NotificationGroupRow({
                 안 읽음 {unreadCount}
               </span>
               {!href && markGroupRead && (
-                <MarkReadButton onClick={markGroupRead} testId={`notification-group-mark-read-${testKey}`} />
+                <MarkReadButton onClick={markGroupRead} testId={`notification-group-mark-read-${testKey}`} target={headerText} />
               )}
             </>
           )}
@@ -392,6 +393,7 @@ function NotificationListRow({
               <MarkReadButton
                 onClick={() => onMarkOneRead(notification.id)}
                 testId={`notification-mark-read-${notification.id}`}
+                target={describeNotification(notification)}
               />
             )}
           </div>
