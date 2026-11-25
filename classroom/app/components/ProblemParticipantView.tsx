@@ -15,8 +15,8 @@
 import { MyQualityCard } from "@/app/components/MyQualityCard";
 import type { MyQuality } from "@/lib/quality/api";
 import Link from "next/link";
-import { createElement, useEffect, useState } from "react";
-import type { ChangeEvent, FormEvent, ReactNode } from "react";
+import { createElement, useEffect, useRef, useState } from "react";
+import type { ChangeEvent, FormEvent, MouseEvent, ReactNode, Ref } from "react";
 
 import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
 import { MarkdownView } from "@codemit/markdown";
@@ -39,9 +39,13 @@ import { DueRows } from "@/app/components/DueLabel";
 import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { formatDueDateTime, withLate } from "@/lib/problems/due-dates";
+import { attemptAnnouncement } from "@/lib/submissions/attempt-announcement";
+import { unpassedBadge } from "@/lib/submissions/unpassed-badge";
 import { requiredSummary, scoreJudgeLabel, syntaxLineReasoning, type RequiredSummary } from "@/lib/submissions/latest-attempts";
 import type { UploadStatus } from "@/lib/submissions/use-source-upload";
+import { waitingNote } from "@/lib/submissions/waiting-note";
 import type { ChecklistVerdict, ClassroomSubmissionRow, SubmitBlockedReason } from "@/lib/submissions/api";
+import { blockedChange } from "@/lib/submissions/blocked-change";
 import { attemptIdFromHash } from "@/lib/submissions/attempt-fold";
 import { attemptEntryLabel } from "@/lib/submissions/contest-entry";
 import { checklistSummaryLine, verdictGlyph, verdictStatusText } from "@/lib/submissions/checklist-summary";
@@ -49,6 +53,7 @@ import { VERDICT_LABEL, type VerdictValue, verdictFromMet, verdictOf } from "@/l
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 import { rejectionText, unseenFilesText } from "@/lib/submissions/rejection";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 export type ParticipantChecklistItem = {
   id: number;
@@ -65,9 +70,7 @@ type InteractiveProps = {
   interactive: true;
   /** 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면 `null`(#439) — 우선순위
    *  (보관 → 내보냄 → 숨김)는 백엔드가 이미 정해서 내려주므로 여기서 다시
-   *  계산하지 않는다. "viewing_as_instructor"는 이 폼이 신경 쓰지 않는다 —
-   *  강사가 학생 화면으로 보는 경우는 위 `InstructorViewingBanner`가 이미
-   *  알리고, 실제 제출은 호출부의 핸들러가 따로 막는다. */
+   *  계산하지 않는다. */
   submitBlockedReason: SubmitBlockedReason;
   /** 소스 zip 업로드 상한(바이트, #671) — 운영자 정책 값 그대로, 드롭 칸이 MB 로 보인다. */
   maxSourceAssetBytes: number;
@@ -85,6 +88,9 @@ type InteractiveProps = {
   /** 필수 항목이 Git 기록을 물어 zip 으로는 언제나 놓치는 문제인가(#587, 백엔드 판정) —
    *  zip 을 고르면 보이는 안내가 경고 띠로 바뀐다. */
   zipGitHistoryWarning?: boolean;
+  /** 화면이 다시 그려져도(숨김 안내로 바뀌었다 돌아옴, #1528) 고르던 형식을 잇는다 — 없으면 이 조각이 혼자 든다. */
+  initialFormat?: SubmissionFormat | null;
+  onFormatChange?: (format: SubmissionFormat | null) => void;
 };
 
 type PreviewProps = {
@@ -99,8 +105,11 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   /** 그 문제가 속한 클래스의 이름(#372 후속) — 기본값을 두지 않는다. 미리보기도
    *  참여자 화면과 같은 눈썹을 보여야 「참여자가 보는 화면 그대로」가 참이다. */
   eyebrow: string;
-  /** 오른쪽 위 「문제 목록으로」의 주소 — 비우면 링크를 내지 않는다(미리보기). 강사가 볼 때는 클래스 상세(#429). */
+  /** 오른쪽 위 돌아가기 링크의 주소 — 비우면 링크를 내지 않는다(미리보기). 강사가 볼 때는 클래스 상세(#429). */
   backHref?: string;
+  backLabel?: "문제 목록으로" | "클래스로";
+  /** 강사로 보는 띠의 링크 둘(#1390) — 「제출 현황」 링크는 화면에 띠의 이 하나뿐이다. */
+  instructorLinks?: { editHref: string; submissionsHref: string };
   title: string;
   titleTestId?: string;
   /** `undefined`면 통과 배지를 아예 내지 않는다 — 미리보기는 아직 아무도
@@ -133,6 +142,8 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
    *  이 값을 쓰지 않는다 — 미리보기는 애초에 참여자도 강사도 아닌, 아직
    *  아무도 아닌 화면이다. */
   viewingAsInstructor?: boolean;
+  /** 강사로 볼 때의 역할 — 멈춘 시도의 한 줄이 이 값으로 갈린다(#1422). 참여자에게는 `null`. */
+  viewerRole?: "owner" | "co_instructor" | null;
   /** `viewingAsInstructor`가 참일 때만 뜻이 있다 — 띠가 몇 줄을 더 말할지
    *  상태 배지를 정한다(초안·숨김이면 배지 하나 더, 열림이면 「강사로 보는 중」뿐). */
   instructorProblemStatus?: "draft" | "open" | "hidden" | null;
@@ -140,16 +151,40 @@ type ProblemParticipantViewProps = (InteractiveProps | PreviewProps) & {
   quality?: MyQuality | null;
 };
 
+function ArchivedNote({ noteRef }: { noteRef?: Ref<HTMLParagraphElement> }) {
+  // 제출 화면에서는 폼이 사라지며 초점이 body 로 빠진다 — 안내가 초점을 받아 낭독된다(#1459 ③).
+  // 강사 띠의 한 줄은 늘 떠 있는 안내라 ref 를 받지 않는다.
+  return (
+    <p
+      ref={noteRef}
+      tabIndex={noteRef ? -1 : undefined}
+      role={noteRef ? "alert" : undefined}
+      data-testid="class-archived-note"
+      data-blocked-note={noteRef ? "" : undefined}
+      className={`text-[13px] text-warning${noteRef ? " outline-none" : ""}`}
+    >
+      이 클래스는 보관되어 새 제출을 받지 않습니다.
+    </p>
+  );
+}
+
 /** 강사가 학생 화면을 열었을 때의 띠(#429) — 배지 둘(#660): 「강사로 보는 중」과 문제 상태
  *  (초안·숨김). 낼 수 있다는 것과 학생에게 보인다는 것은 다른 사실이라 상태 배지를 따로 둔다.
- *  보관된 클래스라 낼 수 없으면 그 이유는 제출 카드 자리의 한 줄이 말한다. */
+ *  낸 시도가 어디에 남는지의 경고와 링크 둘이 붙고(#1390), 보관된 클래스면 낼 수 없으므로
+ *  경고 대신 보관 한 줄이 선다. */
 function InstructorViewingBanner({
   status,
+  archived,
+  archivedNoteRef,
+  links,
 }: {
   status: "draft" | "open" | "hidden" | null | undefined;
+  archived: boolean;
+  archivedNoteRef?: Ref<HTMLParagraphElement>;
+  links?: { editHref: string; submissionsHref: string };
 }) {
   return (
-    <div data-testid="instructor-viewing-banner" className="flex flex-wrap items-center gap-2">
+    <div data-testid="instructor-viewing-banner" className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <Badge tone="warning">강사로 보는 중</Badge>
       {status === "draft" ? (
         <span data-testid="instructor-viewing-banner-draft">
@@ -160,6 +195,23 @@ function InstructorViewingBanner({
           <Badge>숨김</Badge>
         </span>
       ) : null}
+      {archived ? (
+        <ArchivedNote noteRef={archivedNoteRef} />
+      ) : (
+        <p className="text-[13px] text-warning">
+          여기서 낸 시도는 강사 본인 시도로 남고 달성률·제출 현황에 들지 않습니다.
+        </p>
+      )}
+      {links ? (
+        <div className="flex gap-2">
+          <Link href={links.editHref} className={buttonClass("secondary", "sm")}>
+            문제 편집
+          </Link>
+          <Link href={links.submissionsHref} className={buttonClass("secondary", "sm")}>
+            제출 현황
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -168,6 +220,28 @@ function InstructorViewingBanner({
 function formatMegabytes(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return Number.isInteger(mb) ? String(mb) : mb.toFixed(1);
+}
+
+const SUBMIT_CARD_ID = "submit-card";
+const DEADLINE_NOTE_ID = "submit-deadline-note";
+
+// 기존 describedby 가 있으면 공백으로 덧붙인다(#1462).
+function joinDescribedBy(...ids: Array<string | false | null | undefined>): string | undefined {
+  const joined = ids.filter(Boolean).join(" ");
+  return joined === "" ? undefined : joined;
+}
+
+// 「제출 칸으로」 뒤 초점(#1400-8) — 스크롤만 되고 초점이 머리에 남지 않게 첫 입력칸으로 보낸다.
+function focusSubmitField(event: MouseEvent<HTMLAnchorElement>) {
+  const card = document.getElementById(SUBMIT_CARD_ID);
+  if (!card) return;
+  event.preventDefault();
+  window.history.replaceState(null, "", `#${SUBMIT_CARD_ID}`);
+  card.scrollIntoView({ block: "start" });
+  const field =
+    document.getElementById("repository-url") ??
+    card.querySelector<HTMLElement>("input:not([type=hidden]):not(:disabled), textarea, button:not(:disabled)");
+  field?.focus({ preventScroll: true });
 }
 
 export function ProblemParticipantView(props: ProblemParticipantViewProps) {
@@ -190,8 +264,11 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     submissionFormats,
     submissions,
     viewingAsInstructor,
+    viewerRole,
     instructorProblemStatus,
     backHref,
+    backLabel = "문제 목록으로",
+    instructorLinks,
   } = props;
 
   const checklistLabelById = new Map(checklistItems.map((item) => [item.id, item.label]));
@@ -252,13 +329,22 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
     </>
   );
 
+  // 결과 변화를 알리는 live 영역 하나(#1431) — 처음 읽은 상태는 말하지 않고, 그 뒤 상태가 바뀔 때만 한 번 읽힌다.
+  const announcement = attemptAnnouncement(submissions);
+  const [firstAnnouncement] = useState(announcement);
+
   const attempts = (
     <>
+      <p role="status" aria-live="polite" data-testid="attempt-live" className="sr-only">
+        {announcement === firstAnnouncement ? "" : announcement}
+      </p>
       <Card>
-        <CardHeader title="내 시도" hint={submissions.length > 0 ? `${submissions.length}회` : undefined} />
+        <CardHeader title={viewingAsInstructor ? "강사 본인 시도" : "내 시도"} hint={submissions.length > 0 ? `${submissions.length}회` : undefined} />
         {submissions.length === 0 ? (
           <EmptyState>
-            <span data-testid="submissions-empty-state">아직 낸 시도가 없습니다.</span>
+            <span data-testid="submissions-empty-state">
+              {viewingAsInstructor ? "강사 본인이 낸 시도가 없습니다." : "아직 낸 시도가 없습니다."}
+            </span>
           </EmptyState>
         ) : (
           <ol data-testid="submissions-list" className="divide-y divide-rule">
@@ -269,6 +355,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 items={checklistItems}
                 syntaxCheckEnabled={syntaxCheckEnabled}
                 checklistLabelById={checklistLabelById}
+                viewerRole={viewingAsInstructor ? viewerRole : null}
                 open={openIds.has(submission.id)}
                 onToggle={() =>
                   setOpenIds((current) => {
@@ -286,55 +373,78 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   );
 
   // 마감은 제출을 막지 않고 안내와 늦음 표시에 쓴다(#941).
-  const deadlinePassed = props.interactive && dueAt !== null && Date.parse(dueAt) < Date.now();
+  // 보관된 클래스는 낼 수 없으니 마감을 재촉하지 않는다 — 「마감 지남」 배지 없이 흐린 마감 줄만(#1507 A).
+  const archivedForParticipant = props.interactive && props.submitBlockedReason === "archived";
+  const deadlinePassed =
+    props.interactive && !archivedForParticipant && dueAt !== null && Date.parse(dueAt) < Date.now();
+
+  const instructorArchived =
+    viewingAsInstructor === true && props.interactive && props.submitBlockedReason === "archived";
+
+  // 강사가 학생 화면을 연 채 클래스가 보관되면 제출 폼이 통째로 사라져 폼 안의 초점 효과가 돌지 않는다 —
+  // 상위에서 띠의 보관 안내가 초점을 받아 낭독된다(#1471 ①). 처음부터 보관된 채 열린 화면은 건드리지 않는다.
+  const instructorArchivedNoteRef = useRef<HTMLParagraphElement>(null);
+  const wasInstructorArchived = useRef(instructorArchived);
+  useEffect(() => {
+    const before = wasInstructorArchived.current;
+    wasInstructorArchived.current = instructorArchived;
+    if (!before && instructorArchived) instructorArchivedNoteRef.current?.focus();
+  }, [instructorArchived]);
 
   const side = (
     <>
-      <Card>
-        {deadlinePassed ? (
-          <>
-            <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
-              <h2 className="text-[15px] font-semibold tracking-[-0.005em]">제출</h2>
-              <span data-testid="submit-deadline-passed">
-                <Badge tone={passed === true ? "neutral" : "warning"}>마감 지남</Badge>
-              </span>
-            </div>
-            {dueAt ? (
-              <div
-                data-testid="submit-due-rows-due"
-                className="flex justify-between gap-3 border-b border-rule px-4 py-2.5 text-[12.5px] text-ink/60"
-              >
-                <span>마감</span>
-                <span className="font-mono">{formatDueDateTime(dueAt)}</span>
+      {/* 한 열 폭에서 머리의 「제출 칸으로」가 닿는 자리(#1376). 보관한 클래스를 보는 강사에게는
+          낼 칸이 없다 — 보관 한 줄은 띠에 있다. */}
+      {instructorArchived ? null : (
+      <div id={props.interactive ? SUBMIT_CARD_ID : undefined} className="scroll-mt-4">
+        <Card>
+          {deadlinePassed ? (
+            <>
+              <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
+                <h2 className="text-[15px] font-semibold tracking-[-0.005em]">제출</h2>
+                <span data-testid="submit-deadline-passed">
+                  <Badge tone={passed === true ? "neutral" : "warning"}>마감 지남</Badge>
+                </span>
               </div>
-            ) : null}
-          </>
-        ) : (
-          <>
-            <CardHeader title="제출" />
-            <DueRows
-              problem={{ recommended_due_at: recommendedDueAt, due_at: dueAt }}
-              passed={passed === true}
-              testId="submit-due-rows"
-            />
-          </>
-        )}
-        <div
-          data-testid="submit-form-area"
-          className="flex flex-col gap-3.5 p-4"
-        >
-          {deadlinePassed && props.submitBlockedReason === null ? (
-            <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
-              마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
-            </p>
-          ) : null}
-          {props.interactive ? (
-            <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
+              {dueAt ? (
+                <div
+                  data-testid="submit-due-rows-due"
+                  className="flex justify-between gap-3 border-b border-rule px-4 py-2.5 text-[12.5px] text-ink/60"
+                >
+                  <span>마감</span>
+                  <span className="font-mono">{formatDueDateTime(dueAt)}</span>
+                </div>
+              ) : null}
+            </>
           ) : (
-            <PreviewSubmissionForm submissionFormats={submissionFormats} />
+            <>
+              <CardHeader title="제출" />
+              <DueRows
+                problem={{ recommended_due_at: recommendedDueAt, due_at: dueAt }}
+                passed={passed === true}
+                testId="submit-due-rows"
+                archived={archivedForParticipant}
+              />
+            </>
           )}
-        </div>
-      </Card>
+          <div
+            data-testid="submit-form-area"
+            className="flex flex-col gap-3.5 p-4"
+          >
+            {deadlinePassed && props.submitBlockedReason === null ? (
+              <p id={DEADLINE_NOTE_ID} data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
+                마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
+              </p>
+            ) : null}
+            {props.interactive ? (
+              <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} deadlinePassed={deadlinePassed === true} />
+            ) : (
+              <PreviewSubmissionForm submissionFormats={submissionFormats} />
+            )}
+          </div>
+        </Card>
+      </div>
+      )}
       {props.interactive ? (
         <ProblemProgressCard
           met={judgedSummary?.met ?? null}
@@ -348,7 +458,12 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   return (
     <div className="flex flex-col gap-5">
       {viewingAsInstructor ? (
-        <InstructorViewingBanner status={instructorProblemStatus} />
+        <InstructorViewingBanner
+          status={instructorProblemStatus}
+          archived={instructorArchived}
+          archivedNoteRef={instructorArchivedNoteRef}
+          links={instructorLinks}
+        />
       ) : null}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1.5">
@@ -356,7 +471,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             {createElement(
               headingLevel,
-              { className: "text-[22px] font-semibold tracking-[-0.01em]", "data-testid": titleTestId },
+              { className: "text-[22px] font-semibold tracking-[-0.01em] outline-none", "data-testid": titleTestId, tabIndex: -1 },
               title,
             )}
             {passed === undefined ? null : (
@@ -364,21 +479,34 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
                 {stampKind(passed, perfect) ? (
                   <Stamp kind={stampKind(passed, perfect)!} />
                 ) : (
-                  <Badge tone="error">아직 미통과</Badge>
+                  <Badge tone={unpassedBadge(submissions).tone}>{unpassedBadge(submissions).label}</Badge>
                 )}
               </span>
             )}
           </div>
         </div>
-        {backHref ? (
-          <Link
-            href={backHref}
-            data-testid="my-problem-back-link"
-            className={buttonClass("secondary", "sm")}
-          >
-            문제 목록으로
-          </Link>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-2">
+          {props.interactive && !instructorArchived ? (
+            // 두 열(1200px 이상)에서는 제출 카드가 첫 화면에 있어 숨긴다.
+            <a
+              href={`#${SUBMIT_CARD_ID}`}
+              data-testid="my-problem-submit-jump"
+              onClick={focusSubmitField}
+              className={`${buttonClass("secondary", "sm")} min-[1200px]:hidden`}
+            >
+              제출 칸으로
+            </a>
+          ) : null}
+          {backHref ? (
+            <Link
+              href={backHref}
+              data-testid="my-problem-back-link"
+              className={buttonClass("secondary", "sm")}
+            >
+              {backLabel}
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {props.interactive ? (
@@ -660,6 +788,7 @@ function AttemptRow({
   items,
   syntaxCheckEnabled,
   checklistLabelById,
+  viewerRole,
   open,
   onToggle,
 }: {
@@ -667,6 +796,7 @@ function AttemptRow({
   items: ParticipantChecklistItem[];
   syntaxCheckEnabled: boolean;
   checklistLabelById: Map<number, string>;
+  viewerRole: "owner" | "co_instructor" | null | undefined;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -697,8 +827,8 @@ function AttemptRow({
                 submission.pending_reason === "rejected"
                   ? "반려"
                   : submission.pending_reason
-                    ? "채점 대기"
-                    : "채점 중",
+                    ? WAITING_LABEL
+                    : SCORING_LABEL,
                 submission.late,
               )}
             </Badge>
@@ -731,8 +861,8 @@ function AttemptRow({
           {waitingOnInstructor ? (
             // 키가 아예 없는 것(#346)과 거부된 것, 채점 모델을 그 키로 못 쓰는 것(#403)을 여기서는
             // 구별하지 않는다 — 강사가 설정을 고쳐야 풀리는 사유라 참여자에게는 같은 한 줄이다.
-            <span data-testid={`submission-row-${submission.id}-no-api-key-note`} className="min-w-0 truncate">
-              강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다
+            <span data-testid={`submission-row-${submission.id}-no-api-key-note`} className="min-w-0">
+              {waitingNote(submission.pending_reason === "model_rejected" ? "model_rejected" : "no_api_key", viewerRole)}
             </span>
           ) : null}
           {submission.status === "pending" && submission.pending_reason === "rejected" ? (
@@ -819,7 +949,48 @@ function AttemptRow({
 }
 
 function InteractiveSubmissionForm(
-  props: InteractiveProps & { submissionFormats: SubmissionFormat[] },
+  props: InteractiveProps & { submissionFormats: SubmissionFormat[]; deadlinePassed: boolean },
+) {
+  const released = useReleasedNote(props.submitBlockedReason);
+  return (
+    <>
+      {/* 늘 떠 있는 자리 — 안내가 사라진 뒤에 생긴 status 는 낭독기가 읽지 않는다(#1507 A). */}
+      <p
+        role="status"
+        data-testid="submit-released-note"
+        className={released ? "text-[13px] text-ink/70" : "sr-only"}
+      >
+        {released}
+      </p>
+      <InteractiveSubmissionFormBody {...props} />
+    </>
+  );
+}
+
+// 낼 수 없던 이유가 풀리거나 다른 이유로 바뀌면 안내와 함께 초점도 사라져 body 로 빠진다 — 바뀐 것을 알리고,
+// 초점이 안내(또는 body)에 있었을 때만 제출 칸(또는 새 안내)으로 옮긴다. 다른 곳에 있던 초점은 빼앗지 않는다.
+function useReleasedNote(reason: InteractiveProps["submitBlockedReason"]): string {
+  const previous = useRef(reason);
+  const [note, setNote] = useState("");
+  useEffect(() => {
+    const before = previous.current;
+    previous.current = reason;
+    const change = blockedChange(before, reason);
+    setNote(change.note);
+    if (change.focus !== "form") return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    document
+      .querySelector<HTMLElement>(
+        "#repository-url, #source-file, [data-testid=submission-format-option-source]",
+      )
+      ?.focus();
+  }, [reason]);
+  return note;
+}
+
+function InteractiveSubmissionFormBody(
+  props: InteractiveProps & { submissionFormats: SubmissionFormat[]; deadlinePassed: boolean },
 ) {
   const {
     submitBlockedReason,
@@ -835,38 +1006,132 @@ function InteractiveSubmissionForm(
     submissionFormats,
     contestEntry,
     zipGitHistoryWarning = false,
+    deadlinePassed,
+    initialFormat,
+    onFormatChange,
   } = props;
+  // 마감 경고는 차단 사유가 없을 때만 그려진다 — 그릴 때만 잇는다.
+  const deadlineNoteId = deadlinePassed && submitBlockedReason === null ? DEADLINE_NOTE_ID : null;
 
   // 둘 다 열린 문제는 형식 선택을 먼저 보인다(#373 AC) — 하나만 열린
   // 문제는 고르는 단계 없이 그 형식의 입력만 보인다.
   const [chosenFormat, setChosenFormat] = useState<SubmissionFormat | null>(
-    submissionFormats.length === 1 ? submissionFormats[0] : null,
+    submissionFormats.length === 1
+      ? submissionFormats[0]
+      : initialFormat != null && submissionFormats.includes(initialFormat)
+        ? initialFormat
+        : null,
   );
   const resolvedFormat = chosenFormat ?? submissionFormats[0];
   const repositoryCheck = checkGithubRepositoryUrl(repositoryUrl);
+  // 빈 칸으로 낸 뒤에만 안내한다 — 다시 치기 시작하면 걷는다.
+  const [submittedEmpty, setSubmittedEmpty] = useState(false);
+  // 잘못된 모양의 문구는 칸을 떠나거나 낼 때 띄운다 — 적는 동안(다시 적는 동안도) 빨간 글이 보이지 않게.
+  const [urlTouched, setUrlTouched] = useState(false);
+  // 잘못된 주소와 빈 칸 제출 둘 다 오류 문구가 보인다 — 칸이 같이 무효로 알리고 문구와 이어진다(#1422).
+  const showShapeError = urlTouched && repositoryCheck !== null && !repositoryCheck.ok;
+  const repositoryInvalid =
+    showShapeError || (submittedEmpty && repositoryCheck === null);
   const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
+
+  // 형식을 고르면 눌린 단추가 사라진다 — 초점을 새로 나온 칸(저장소 주소·파일 고르기)으로 옮긴다(#1431).
+  // 처음부터 하나만 열린 문제는 초점을 건드리지 않는다.
+  const focusAfterChoice = useRef(false);
+  function chooseFormat(next: SubmissionFormat | null) {
+    focusAfterChoice.current = true;
+    setChosenFormat(next);
+    onFormatChange?.(next);
+  }
+  useEffect(() => {
+    if (!focusAfterChoice.current) return;
+    focusAfterChoice.current = false;
+    const target = needsFormatChoice
+      ? "[data-testid=submission-format-option-source]"
+      : resolvedFormat === "repository"
+        ? "#repository-url"
+        : "#source-file";
+    document.querySelector<HTMLElement>(target)?.focus();
+  }, [needsFormatChoice, resolvedFormat]);
+
+  // 제출·업로드 동안 단추와 파일 칸이 잠겨 초점이 body 로 떨어진다 — 끝나면 돌려놓는다(#1431).
+  const busy = submitting || uploadStatus === "uploading";
+  const wasBusy = useRef(false);
+  useEffect(() => {
+    const finished = wasBusy.current && !busy;
+    wasBusy.current = busy;
+    if (!finished) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    const target = resolvedFormat === "repository" ? "[data-testid=submit-repository]" : "#source-file";
+    document.querySelector<HTMLElement>(target)?.focus();
+  }, [busy, resolvedFormat]);
+
+  // 폼이 보이던 중에 제출이 막히면(403 뒤 다시 읽기, #1423) 폼과 함께 초점도 사라져 `body` 로 빠진다 —
+  // 안내로 초점을 옮겨 스크린리더가 읽게 한다. 처음부터 막힌 채 열린 화면은 초점을 뺏지 않는다.
+  const blockedNoteRef = useRef<HTMLParagraphElement>(null);
+  const previousBlockedReason = useRef(submitBlockedReason);
+  useEffect(() => {
+    const before = previousBlockedReason.current;
+    previousBlockedReason.current = submitBlockedReason;
+    const focus = blockedChange(before, submitBlockedReason).focus;
+    if (focus === "blocked-note") {
+      // 폼이 사라지며 초점이 body 로 떨어졌을 때만 안내로 — 다른 칸에 입력 중인 초점은 두고 본다.
+      const active = document.activeElement;
+      if (active === null || active === document.body) blockedNoteRef.current?.focus();
+    }
+  }, [submitBlockedReason]);
 
   // 낼 수 없는 이유는 제출 카드 자리에 한 줄이다 — 지난 시도와 판정은 옆 열에 그대로 남는다.
   // 백엔드가 보관 → 내보냄 → 숨김 순서로 이유를 하나만 정해 주므로(#439, #941) 그대로 분기한다.
+  // 적던 저장소 주소는 막힌 안내 곁에 남긴다 — 제출 순간 막혀도 다시 적지 않게(#1441-8, #1436-10).
+  const keptDraft = repositoryUrl.trim();
+  const draftLine =
+    keptDraft !== "" ? (
+      <p data-testid="blocked-kept-repository-url" className="text-[12px] text-ink/60">
+        적던 저장소 주소: <span className="break-all font-mono">{keptDraft}</span>
+      </p>
+    ) : null;
   if (submitBlockedReason === "archived") {
     return (
-      <p data-testid="class-archived-note" className="text-[13px] text-warning">
-        이 클래스는 보관되어 새 제출을 받지 않습니다.
-      </p>
+      <>
+        <ArchivedNote noteRef={blockedNoteRef} />
+        {draftLine}
+      </>
     );
   }
-  if (submitBlockedReason === "expelled") {
+  if (submitBlockedReason === "expelled" || submitBlockedReason === "left") {
+    const left = submitBlockedReason === "left";
     return (
-      <p data-testid="member-expelled-note" className="text-[13px] text-warning">
-        이 클래스에서 내보내져 새로 제출할 수 없습니다.
-      </p>
+      <div className="flex flex-col gap-2">
+        <p
+          ref={blockedNoteRef}
+          tabIndex={-1}
+          role="alert"
+          data-testid={left ? "member-left-note" : "member-expelled-note"}
+          data-blocked-note=""
+          className="text-[13px] text-warning outline-none"
+        >
+          {left ? "이 클래스에서 나가 새로 제출할 수 없습니다." : "이 클래스에서 내보내져 새로 제출할 수 없습니다."}
+        </p>
+        {draftLine}
+      </div>
     );
   }
   if (submitBlockedReason === "hidden") {
     return (
-      <p data-testid="problem-hidden-note" className="text-[13px] text-warning">
-        강사가 숨긴 문제라 새로 낼 수 없습니다.
-      </p>
+      <div className="flex flex-col gap-2">
+        <p
+          ref={blockedNoteRef}
+          tabIndex={-1}
+          role="alert"
+          data-testid="problem-hidden-note"
+          data-blocked-note=""
+          className="text-[13px] text-warning outline-none"
+        >
+          강사가 숨긴 문제라 새로 낼 수 없습니다.
+        </p>
+        {draftLine}
+      </div>
     );
   }
 
@@ -880,7 +1145,7 @@ function InteractiveSubmissionForm(
             <button
               type="button"
               data-testid="submission-format-option-source"
-              onClick={() => setChosenFormat("source")}
+              onClick={() => chooseFormat("source")}
               className={buttonClass("secondary")}
             >
               zip 파일
@@ -888,7 +1153,7 @@ function InteractiveSubmissionForm(
             <button
               type="button"
               data-testid="submission-format-option-repository"
-              onClick={() => setChosenFormat("repository")}
+              onClick={() => chooseFormat("repository")}
               className={buttonClass("secondary")}
             >
               GitHub 저장소
@@ -905,7 +1170,7 @@ function InteractiveSubmissionForm(
         <button
           type="button"
           data-testid="submission-format-change"
-          onClick={() => setChosenFormat(null)}
+          onClick={() => chooseFormat(null)}
           className="self-start text-[12px] text-ink/45 hover:underline"
         >
           다른 형식으로 내기
@@ -915,7 +1180,14 @@ function InteractiveSubmissionForm(
       {contestEntry}
 
       {resolvedFormat === "repository" ? (
-        <form onSubmit={onRepositorySubmit} className="flex flex-col gap-3">
+        <form
+          onSubmit={(event) => {
+            setSubmittedEmpty(repositoryCheck === null);
+            setUrlTouched(true);
+            onRepositorySubmit(event);
+          }}
+          className="flex flex-col gap-3"
+        >
           <div className="flex flex-col gap-1.5">
             <label htmlFor="repository-url">
               <FieldLabel>GitHub 저장소 주소</FieldLabel>
@@ -931,13 +1203,20 @@ function InteractiveSubmissionForm(
               spellCheck={false}
               placeholder="https://github.com/owner/repo"
               value={repositoryUrl}
-              onChange={(event) => onRepositoryUrlChange(event.target.value)}
-              required
-              aria-invalid={repositoryCheck !== null && !repositoryCheck.ok}
+              onBlur={() => setUrlTouched(true)}
+              onChange={(event) => {
+                setSubmittedEmpty(false);
+                // 다시 적는 동안은 오류를 숨기고 다음 blur·제출에서 다시 판정한다(#1448 일부-7).
+                setUrlTouched(false);
+                onRepositoryUrlChange(event.target.value);
+              }}
+              readOnly={submitting}
+              aria-invalid={repositoryInvalid}
+              aria-describedby={joinDescribedBy(repositoryInvalid && "repository-url-error", deadlineNoteId)}
               className={`${INPUT_CLASS} font-mono`}
             />
-            {repositoryCheck !== null && !repositoryCheck.ok ? (
-              <p data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
+            {showShapeError && repositoryCheck !== null && !repositoryCheck.ok ? (
+              <p id="repository-url-error" data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
                 {repositoryCheck.message}
                 {repositoryCheck.suggestion ? (
                   <>
@@ -954,12 +1233,17 @@ function InteractiveSubmissionForm(
                   </>
                 ) : null}
               </p>
+            ) : submittedEmpty && repositoryCheck === null ? (
+              <p id="repository-url-error" data-testid="repository-url-invalid" className="text-[12px] leading-relaxed text-error">
+                GitHub 저장소 주소를 넣어 주세요.
+              </p>
             ) : null}
           </div>
           <button
             type="submit"
             data-testid="submit-repository"
-            disabled={submitting || repositoryCheck === null || !repositoryCheck.ok}
+            aria-describedby={joinDescribedBy(deadlineNoteId)}
+            aria-disabled={submitting || undefined}
             className={`${buttonClass("primary")} w-full`}
           >
             {submitting ? "제출하는 중..." : "제출하기"}
@@ -979,7 +1263,7 @@ function InteractiveSubmissionForm(
                   <button
                     type="button"
                     data-testid="zip-git-history-use-repository"
-                    onClick={() => setChosenFormat("repository")}
+                    onClick={() => chooseFormat("repository")}
                     className={`${buttonClass("secondary", "sm")} self-start`}
                   >
                     저장소로 내기
@@ -1003,6 +1287,7 @@ function InteractiveSubmissionForm(
               data-testid="source-file-input"
               type="file"
               aria-label="소스 파일"
+              aria-describedby={joinDescribedBy(deadlineNoteId)}
               onChange={onSourceFile}
               disabled={submitting || uploadStatus === "uploading"}
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"

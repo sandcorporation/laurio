@@ -3,6 +3,7 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
+import { PROBLEM_FIELD_LABELS } from "@/lib/forms/field-labels";
 import type { GradingStrictness } from "@/lib/problems/grading-guideline";
 import type { GradabilityWarning } from "@/lib/problems/gradability";
 import type { ChecklistGrade } from "@/lib/problems/grade";
@@ -64,6 +65,8 @@ export type PublishedProblemTemplateSummary = {
   share_code: string;
   publisher_display_name: string;
   created_at: string;
+  // 부른 사람이 내릴 수 있는가 — 공개한 사람만 내린다(#1446).
+  can_take_down: boolean;
 };
 
 // zip 으로 낸 사람이 언제나 놓칠 필수 항목들(#587) — zip 에는 Git 기록(.git)이 없다. 판정은
@@ -110,7 +113,7 @@ export type ProblemRow = {
   passed_count: number;
   // 달성률의 분모.
   member_count: number;
-  // passed_count / member_count. 분모가 0이면 null — 화면은 "—"(읽기 도구에는 "참여자 없음")로
+  // passed_count / member_count. 분모가 0이거나 채점된 시도가 없으면 null — 화면은 "—"(읽기 도구에는 까닭)로
   // 보여줘야 한다는 신호다(0%와 구별).
   pass_rate: number | null;
   // 「완벽」 받은 참여자 수(#962) — 심화 항목이 없는 문제는 null(0명과 구별).
@@ -213,6 +216,7 @@ export function createProblem(
   return bffClient.post<ProblemRow & { gradability_warnings?: GradabilityWarning[] }>(
     `/api/backend/classroom/classes/${classId}/problems`,
     input,
+    { fieldLabels: PROBLEM_FIELD_LABELS },
   );
 }
 
@@ -242,6 +246,7 @@ export function updateProblem(
     `/api/backend/classroom/classes/${classId}/problems/${problemId}`,
     "PATCH",
     patch,
+    PROBLEM_FIELD_LABELS,
   );
 }
 
@@ -339,7 +344,9 @@ export function createChecklistItem(
   problemId: number,
   input: { label: string; grade: ChecklistGrade },
 ): Promise<ApiResult<SavedChecklistItemRow>> {
-  return bffClient.post<SavedChecklistItemRow>(checklistItemsPath(classId, problemId), input);
+  return bffClient.post<SavedChecklistItemRow>(checklistItemsPath(classId, problemId), input, {
+    fieldLabels: PROBLEM_FIELD_LABELS,
+  });
 }
 
 export function updateChecklistItem(
@@ -352,6 +359,7 @@ export function updateChecklistItem(
     `${checklistItemsPath(classId, problemId)}/${itemId}`,
     "PATCH",
     patch,
+    PROBLEM_FIELD_LABELS,
   );
 }
 

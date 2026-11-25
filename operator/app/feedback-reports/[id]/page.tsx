@@ -154,7 +154,7 @@ export default function FeedbackReportDetailPage() {
                       <textarea data-testid="feedback-report-note" value={note} maxLength={4000} rows={3} onChange={(event) => setNote(event.target.value)} className="border border-rule bg-paper p-2 text-[13px] text-ink" />
                     </label>
                     <div>
-                      <button type="button" data-testid="feedback-report-change" onClick={change} disabled={pending} className={BUTTON}>
+                      <button type="button" data-testid="feedback-report-change" onClick={change} aria-disabled={pending || undefined} className={BUTTON}>
                         {pending ? "처리 중..." : "상태 바꾸기"}
                       </button>
                     </div>

@@ -106,7 +106,7 @@ if want static; then
   step "pytest 조각 나누기" python3 scripts/test_pytest_shards.py
 fi
 if want web; then
-  for pkg in packages/bff-shared packages/markdown packages/banned-words; do
+  for pkg in packages/bff-shared packages/bff-client packages/markdown packages/banned-words; do
     step "단위 시험 $pkg" pnpm --dir "$pkg" run test
   done
   for app in frontend operator classroom; do

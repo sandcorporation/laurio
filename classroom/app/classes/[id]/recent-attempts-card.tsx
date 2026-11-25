@@ -12,6 +12,7 @@ import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { knownOr } from "@/lib/util/known-or";
 import { withLate } from "@/lib/problems/due-dates";
 import { useRecentAttempts, type RecentAttemptRow, type RecentAttemptStatus } from "@/lib/classes/use-recent-attempts";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const UNKNOWN_STATUS = { label: "확인 중", className: "text-ink/45" };
 
@@ -19,8 +20,8 @@ const STATUS_LABEL: Record<RecentAttemptStatus, { label: string; className: stri
   passed: { label: "통과", className: "text-success" },
   attempted_not_passed: { label: "미통과", className: "text-ink/60" },
   scoring_failed: { label: "채점 실패", className: "text-ink/60" },
-  scoring: { label: "채점 중", className: "text-ink/45" },
-  needs_setup: { label: "설정 필요", className: "text-warning" },
+  scoring: { label: SCORING_LABEL, className: "text-ink/45" },
+  needs_setup: { label: WAITING_LABEL, className: "text-warning" },
 };
 
 function AttemptMark({ status }: { status: RecentAttemptStatus }) {
@@ -110,7 +111,7 @@ export function RecentAttemptsCard({ classId }: { classId: number }) {
         </p>
       ) : state.data.length === 0 ? (
         <p data-testid="recent-attempts-empty" className="px-4 py-3 text-[12.5px] text-ink/45">
-          —
+          아직 제출이 없습니다.
         </p>
       ) : (
         <ol data-testid="recent-attempts" className="divide-y divide-rule">

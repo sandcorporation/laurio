@@ -296,7 +296,10 @@ def test_grammar_not_prefetched_falls_back_to_ai_without_downloading(client, db,
     후속) — 새 컨테이너·CI 에서 첫 채점이 GitHub 에 기대 시간 제한에 걸리던 것을 막는다."""
 
     # 비어 있는 캐시를 가리키게 한다 — 격리된 파싱 서브프로세스가 이 환경을 물려받는다.
+    # XDG_CACHE_HOME 은 Linux 에서만 듣는다 — macOS 는 ~/Library/Caches 를 쓰므로, 어느 플랫폼에서나 듣는
+    # 라이브러리의 환경변수로 같이 가리킨다(#1419). 안 그러면 문법이 받아진 mac 에서 이 시험이 깨진다.
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    monkeypatch.setenv("TREE_SITTER_LANGUAGE_PACK_CACHE_DIR", str(tmp_path))
     files = {"app.js": _JS_VALID}
     ctx = _setup(client, files=files)
     sent = []

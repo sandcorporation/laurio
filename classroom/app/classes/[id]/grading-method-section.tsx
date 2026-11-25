@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { ErrorNote, FieldLabel, INPUT_CLASS } from "@/app/components/ui";
 import { updateClass, type ClassRow, type GradingMethod, type OversizePolicy } from "@/lib/classes/api";
-import { AGENT_MODEL_TOOLTIP, UNAVAILABLE_TOOLTIP, vendorLabel } from "@/lib/classes/grading-cost";
+import { agentBlockedNote, vendorLabel } from "@/lib/classes/grading-cost";
 
 import { ScoringCalculator } from "./scoring-calculator";
 
@@ -38,7 +38,8 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
   const [pickingAgent, setPickingAgent] = useState(false);
   const vendor = vendorLabel(classroom.scoring_connection_kind);
   const agentOption = classroom.grading_method_options.find((o) => o.value === "agent");
-  const agentBlockedBy = agentOption?.unavailable_reason ? UNAVAILABLE_TOOLTIP[agentOption.unavailable_reason] : undefined;
+  const agentKeyReason = agentOption?.unavailable_reason ?? null;
+  const oversizeNote = agentBlockedNote({ keyReason: agentKeyReason, modelBlocked: false });
   const defaultModelTakesAgent = classroom.agent_models.includes(classroom.default_model);
 
   async function save(target: Saving, patch: Parameters<typeof updateClass>[1]) {
@@ -75,20 +76,27 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      {ROWS.map(({ field, label, testId }) => (
+      {ROWS.map(({ field, label, testId }) => {
+        // 에이전트는 기본 모델이 받는 모델일 때만 고른다(#1311) — 이미 고른 것은 그대로 보인다.
+        // 까닭은 키(연결)와 모델 둘로 갈라 보이는 글로 두고 선택 그룹이 가리킨다(#1447) — 꺼진 단추의 title 은 터치·키보드·낭독기에 닿지 않는다.
+        const note = agentBlockedNote({
+          keyReason: agentKeyReason,
+          modelBlocked: classroom[field] !== "agent" && !defaultModelTakesAgent,
+        });
+        const noteId = `${testId}-blocked-note`;
+        return (
         <div key={field} className="flex flex-col gap-1.5" data-testid={testId}>
           <FieldLabel>{label}</FieldLabel>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div role="radiogroup" aria-label={label} className="inline-flex border border-rule">
+            <div
+              role="radiogroup"
+              aria-label={label}
+              aria-describedby={note ? noteId : undefined}
+              className="inline-flex border border-rule"
+            >
               {classroom.grading_method_options.map((option) => {
                 const checked = classroom[field] === option.value;
-                // 에이전트는 기본 모델이 받는 모델일 때만 고른다(#1311) — 이미 고른 것은 그대로 보인다.
                 const modelBlocked = option.value === "agent" && !checked && !defaultModelTakesAgent;
-                const reason = option.unavailable_reason
-                  ? UNAVAILABLE_TOOLTIP[option.unavailable_reason]
-                  : modelBlocked
-                    ? AGENT_MODEL_TOOLTIP
-                    : undefined;
                 const selectable = option.selectable && !modelBlocked;
                 return (
                   <button
@@ -97,8 +105,7 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
                     role="radio"
                     aria-checked={checked}
                     data-testid={`${testId}-${option.value}`}
-                    disabled={!selectable || saving !== null}
-                    title={selectable ? undefined : reason}
+                    aria-disabled={(!selectable || saving !== null) || undefined}
                     onClick={() => void choose(field, option.value)}
                     className={radioClass(checked)}
                   >
@@ -113,15 +120,26 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
               </span>
             ) : null}
           </div>
+          {note ? (
+            <p id={noteId} data-testid={`${testId}-blocked-note`} data-reason={note.kind} className="text-[12.5px] text-ink/60">
+              {note.text}
+            </p>
+          ) : null}
         </div>
-      ))}
+        );
+      })}
       {classroom.scoring_method === "agent" ? null : (
         <div className="flex flex-col gap-1.5" data-testid="oversize-policy">
           <FieldLabel>한 번 호출로 못 담는 제출물</FieldLabel>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div role="radiogroup" aria-label="한 번 호출로 못 담는 제출물" className="inline-flex flex-wrap border border-rule">
+            <div
+              role="radiogroup"
+              aria-label="한 번 호출로 못 담는 제출물"
+              aria-describedby={oversizeNote ? "oversize-policy-blocked-note" : undefined}
+              className="inline-flex flex-wrap border border-rule"
+            >
               {OVERSIZE_ORDER.map((value) => {
-                const blocked = value === "agent" ? agentBlockedBy : undefined;
+                const blocked = value === "agent" ? oversizeNote : null;
                 return (
                   <button
                     key={value}
@@ -129,8 +147,7 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
                     role="radio"
                     aria-checked={shownOversize === value}
                     data-testid={`oversize-policy-${value}`}
-                    disabled={Boolean(blocked) || saving !== null}
-                    title={blocked}
+                    aria-disabled={(Boolean(blocked) || saving !== null) || undefined}
                     onClick={() => void chooseOversize(value)}
                     className={radioClass(shownOversize === value)}
                   >
@@ -159,6 +176,11 @@ export function GradingMethodSection({ classId, classroom, onSaved }: { classId:
               </select>
             ) : null}
           </div>
+          {oversizeNote ? (
+            <p id="oversize-policy-blocked-note" data-testid="oversize-policy-blocked-note" data-reason={oversizeNote.kind} className="text-[12.5px] text-ink/60">
+              {oversizeNote.text}
+            </p>
+          ) : null}
         </div>
       )}
       {error ? (

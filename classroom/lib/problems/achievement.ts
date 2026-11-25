@@ -5,7 +5,7 @@
 // 참여자가 0명이면 "0%"가 아니라 "—"로 비운다 — 참여자가 있는데 아무도 못 푼
 // 것(0%)과 아직 아무도 없어 집계 자체가 의미 없는 것을 구별해야 한다. 예전에는
 // 「아직 없음」이라고 썼는데 「아무도 못 풀었다」로 읽혔고, 좁은 칸에서 줄이
-// 밀렸다(2026-09-14). 그 이유는 화면에 글자로 늘어놓지 않고 읽기 도구에만
+// 밀렸다(2026-09-14). 참여자는 있지만 채점된 시도가 없을 때도 같은 「—」다(#1400). 그 이유는 화면에 글자로 늘어놓지 않고 읽기 도구에만
 // `describeAchievementRate`로 말한다.
 type AchievementInput = {
   passed_count: number;
@@ -13,18 +13,19 @@ type AchievementInput = {
   pass_rate: number | null;
 };
 
-function hasMembers(problem: AchievementInput): boolean {
+function hasRate(problem: AchievementInput): boolean {
   return problem.member_count !== 0 && problem.pass_rate !== null;
 }
 
 export function formatAchievementRate(problem: AchievementInput): string {
-  if (!hasMembers(problem)) return "—";
+  if (!hasRate(problem)) return "—";
   return `${Math.round((problem.pass_rate as number) * 100)}% · ${problem.passed_count}/${problem.member_count}명`;
 }
 
 /** 읽기 도구용 — 「—」가 무엇을 뜻하는지 말로 풀어 준다. */
 export function describeAchievementRate(problem: AchievementInput): string {
-  return `달성률 ${hasMembers(problem) ? formatAchievementRate(problem) : "참여자 없음"}`;
+  const empty = problem.member_count === 0 ? "참여자 없음" : "채점된 시도 없음";
+  return `달성률 ${hasRate(problem) ? formatAchievementRate(problem) : empty}`;
 }
 
 /** 달성률 막대·숫자의 색(#633, 시안 v2) — 60% 이상 verified, 30% 미만 attention, 사이는 ink. 비율은 0~1. */

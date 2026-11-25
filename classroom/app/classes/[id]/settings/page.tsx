@@ -5,6 +5,7 @@
 // 알림이 가리킨다. 공동 강사에게는 소유자 전용 입력(채점 연결 폼·클래스 삭제)을 그리지 않는다.
 // 키는 저장 뒤 마스킹된 형태로만 보인다 — 평문은 다시 보여주지 않는다.
 
+import { useScrollToHash } from "@/lib/util/use-scroll-to-hash";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -26,6 +27,8 @@ import {
   PageShell,
   buttonClass,
 } from "@/app/components/ui";
+import { UnsavedNames } from "./unsaved-names";
+import { LiveTemplateRow } from "@/app/components/LiveTemplateRow";
 import { publishClassAsTemplate, takedownClassTemplate } from "@/lib/class-templates/api";
 import {
   copyClass,
@@ -37,6 +40,8 @@ import {
 } from "@/lib/classes/api";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
 import { classNamesPatch } from "@/lib/classes/name-patch";
+import { reloadAfterNameSave } from "@/lib/classes/name-save-outcome";
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useClass } from "@/lib/classes/use-class";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
 import { useMembers } from "@/lib/members/use-members";
@@ -80,6 +85,16 @@ function ClassTemplatePublishCard({
 
   const [takingDown, setTakingDown] = useState(false);
   const [takedownError, setTakedownError] = useState<string | null>(null);
+  // 공개·내리기는 화면 조각을 통째로 바꾼다 — 초점을 새 조각의 첫 자리로 옮기고 결과를 상태 영역에 적는다(#1447 1-3).
+  const [announcement, setAnnouncement] = useState("");
+  const [focusRequest, setFocusRequest] = useState<"link" | "name" | null>(null);
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (focusRequest === "link") linkRef.current?.focus();
+    if (focusRequest === "name") nameRef.current?.focus();
+    if (focusRequest) setFocusRequest(null);
+  }, [focusRequest, liveTemplate]);
 
   async function handlePublish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -97,6 +112,8 @@ function ClassTemplatePublishCard({
     if (result.ok) {
       setLiveTemplate(liveTemplateFrom(result.data));
       setJustTakenDown(false);
+      setAnnouncement("템플릿으로 공개했습니다.");
+      setFocusRequest("link");
     } else {
       setPublishError(result.detail);
     }
@@ -111,6 +128,8 @@ function ClassTemplatePublishCard({
     if (result.ok) {
       setLiveTemplate(liveTemplateFrom(result.data));
       setJustTakenDown(true);
+      setAnnouncement("템플릿을 내렸습니다.");
+      setFocusRequest("name");
     } else {
       setTakedownError(result.detail);
     }
@@ -119,35 +138,25 @@ function ClassTemplatePublishCard({
 
   return (
     <div className="flex flex-col gap-2.5 p-4">
+        <p role="status" data-testid="publish-class-template-result" className="sr-only">
+          {announcement}
+        </p>
         {liveTemplate ? (
-          <div className="flex flex-col gap-2">
-            <p data-testid="publish-class-template-done">
-              <Badge tone="verified">공개됨</Badge>
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href={`/class-templates/${liveTemplate.shareCode}`}
-                data-testid="publish-class-template-share-link"
-                className="min-w-0 flex-1 break-all border border-rule bg-surface px-3 py-2 font-mono text-[12.5px] hover:underline"
-              >
-                /class-templates/{liveTemplate.shareCode}
-              </Link>
-              <button
-                type="button"
-                data-testid="publish-class-template-takedown"
-                onClick={handleTakedown}
-                disabled={takingDown}
-                className={buttonClass("danger", "sm")}
-              >
-                {takingDown ? "내리는 중..." : "내리기"}
-              </button>
-            </div>
+          <>
+            <LiveTemplateRow
+              template={liveTemplate}
+              hrefBase="/class-templates"
+              testIdPrefix="publish-class-template"
+              linkRef={linkRef}
+              onTakedown={handleTakedown}
+              takingDown={takingDown}
+            />
             {takedownError ? (
               <ErrorNote>
                 <span data-testid="publish-class-template-takedown-error">{takedownError}</span>
               </ErrorNote>
             ) : null}
-          </div>
+          </>
         ) : (
           <>
             {justTakenDown ? (
@@ -166,6 +175,7 @@ function ClassTemplatePublishCard({
             </label>
             <input
               id="publish-class-template-name"
+              ref={nameRef}
               data-testid="publish-class-template-name-input"
               value={publisherDisplayName}
               onChange={(event) => setPublisherDisplayName(event.target.value)}
@@ -175,7 +185,7 @@ function ClassTemplatePublishCard({
             <button
               type="submit"
               data-testid="publish-class-template-submit"
-              disabled={publishing || publisherDisplayName.trim() === ""}
+              aria-disabled={publishing || publisherDisplayName.trim() === ""}
               className={buttonClass("secondary")}
             >
               {publishing ? "공개하는 중..." : "클래스를 템플릿으로 공개"}
@@ -234,7 +244,7 @@ function ClassLifecycleCard({
           type="button"
           data-testid="copy-class-button"
           onClick={handleCopy}
-          disabled={copying}
+          aria-disabled={copying}
           className={buttonClass(classroom.archived ? "primary" : "secondary", "sm")}
         >
           {copying ? "복사하는 중..." : "복사해서 새로 열기"}
@@ -289,6 +299,22 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
   const [typedName, setTypedName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 열면 이름 입력칸으로, 취소하면 「클래스 삭제」 단추로 초점을 옮긴다 — 누른 단추가 사라지며
+  // 초점이 BODY 로 떨어지면 낭독기에 아무것도 읽히지 않고 키보드 사용자는 처음부터 다시 Tab 한다.
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const focusAfterToggle = useRef<"input" | "open" | null>(null);
+
+  useEffect(() => {
+    const target = focusAfterToggle.current;
+    focusAfterToggle.current = null;
+    if (target === "input") {
+      inputRef.current?.focus();
+      inputRef.current?.scrollIntoView({ block: "center" });
+    } else if (target === "open") {
+      openButtonRef.current?.focus();
+    }
+  }, [confirming]);
 
   const previewReady = problemsState.status === "ready" && membersState.status === "ready";
   const problemCount = problemsState.status === "ready" ? problemsState.problems.length : null;
@@ -301,10 +327,12 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
   function openConfirm() {
     setError(null);
     setTypedName("");
+    focusAfterToggle.current = "input";
     setConfirming(true);
   }
 
   function cancel() {
+    focusAfterToggle.current = "open";
     setConfirming(false);
     setTypedName("");
     setError(null);
@@ -340,9 +368,10 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
         {!confirming ? (
           <button
             type="button"
+            ref={openButtonRef}
             data-testid="delete-class-open"
             onClick={openConfirm}
-            disabled={!previewReady}
+            aria-disabled={!previewReady}
             className={buttonClass("danger", "sm")}
           >
             {previewReady ? "클래스 삭제" : "불러오는 중..."}
@@ -354,11 +383,11 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
           <div className="flex flex-col gap-3">
             <Note tone="warning">
               <div className="flex flex-col gap-1">
-                <span data-testid="delete-class-warning">
+                <span id="delete-class-warning" data-testid="delete-class-warning">
                   지우면 문제 {problemCount}개, 체크리스트 항목 {checklistItemCount}개,
                   참여자 {memberCount}명의 가입이 모두 함께 사라지고 되돌릴 수 없습니다.
                 </span>
-                <span data-testid="delete-class-template-note">
+                <span id="delete-class-template-note" data-testid="delete-class-template-note">
                   이 클래스에서 템플릿으로 공개한 것은 그 시점의 사본이라 영향받지
                   않습니다.
                 </span>
@@ -372,7 +401,9 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
             </label>
             <input
               id="delete-class-confirm-input"
+              ref={inputRef}
               data-testid="delete-class-confirm-input"
+              aria-describedby="delete-class-warning delete-class-template-note"
               value={typedName}
               onChange={(event) => setTypedName(event.target.value)}
               className={INPUT_CLASS}
@@ -382,8 +413,9 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
               <button
                 type="button"
                 data-testid="delete-class-confirm"
+                aria-describedby="delete-class-warning delete-class-template-note"
                 onClick={handleDelete}
-                disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
+                aria-disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
                 className={buttonClass("dangerFilled", "sm")}
               >
                 {deleting ? "지우는 중..." : "정말 삭제"}
@@ -392,7 +424,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
                 type="button"
                 data-testid="delete-class-cancel"
                 onClick={cancel}
-                disabled={deleting}
+                aria-disabled={deleting}
                 className={buttonClass("secondary", "sm")}
               >
                 취소
@@ -423,11 +455,23 @@ export default function ClassSettingsPage() {
   const [defaultModelIsReasoning, setDefaultModelIsReasoning] = useState(false);
   const [modelSaving, setModelSaving] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  // 저장 뒤 확인 문구와 초점(#1441-2) — 저장 중 꺼진 단추가 초점을 잃어 BODY 로 간다. 다시 켜진 뒤 되돌린다.
+  const [modelSavedNote, setModelSavedNote] = useState(false);
+  const [refocusModelSubmit, setRefocusModelSubmit] = useState(false);
+  const modelSubmitRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (refocusModelSubmit && !modelSaving) {
+      modelSubmitRef.current?.focus();
+      setRefocusModelSubmit(false);
+    }
+  }, [refocusModelSubmit, modelSaving]);
 
   const [classNameDraft, setClassNameDraft] = useState("");
   const [instructorDisplayName, setInstructorDisplayName] = useState("");
   const [nameSaving, setNameSaving] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
+  // 저장 확인(#1455 2) — 늘 있는 상태 영역에 적어 낭독되게 하고, 다시 고치기 시작하면 비운다.
+  const [nameSaved, setNameSaved] = useState(false);
 
   useClassroomTabTitle({
     screenName: "클래스 설정",
@@ -446,16 +490,16 @@ export default function ClassSettingsPage() {
     setInstructorDisplayName(state.classroom.my_instructor_display_name);
   }
 
-  // 주소의 `#구획`(예: 보관 행·보관 클래스 머리의 `#class-archive`, #658)은 구획이 클래스를 읽은
-  // 뒤에야 그려져 브라우저의 첫 이동이 놓친다 — 처음 그려졌을 때 한 번 그 구획으로 옮긴다.
-  const ready = state.status === "ready";
-  const scrolledToHash = useRef(false);
-  useEffect(() => {
-    if (!ready || scrolledToHash.current) return;
-    scrolledToHash.current = true;
-    const id = window.location.hash.slice(1);
-    if (id) document.getElementById(id)?.scrollIntoView();
-  }, [ready]);
+  // 적던 이름이 있는 채로 접근을 잃으면 안내 곁에 그 값을 남긴다(#1447 11) — 저장되지 않았다.
+  const unsavedNames =
+    state.status === "notFound" && seededClassroom !== null
+      ? classNamesPatch(
+          { name: seededClassroom.name, instructorDisplayName: seededClassroom.my_instructor_display_name },
+          { name: classNameDraft, instructorDisplayName },
+        )
+      : null;
+
+  useScrollToHash(state.status === "ready");
 
   if (state.status === "loading") {
     return (
@@ -468,7 +512,14 @@ export default function ClassSettingsPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="class-settings-not-found" className="text-[22px] font-semibold">클래스를 찾을 수 없습니다</h1>
+        <AccessNotice
+          page="class"
+          classId={classId}
+          testId="class-settings-not-found"
+          retry={{ reload, turns: [state] }}
+          focusOnShow={unsavedNames !== null}
+        />
+        {unsavedNames ? <UnsavedNames patch={unsavedNames} error={nameError} /> : null}
       </PageShell>
     );
   }
@@ -531,18 +582,21 @@ export default function ClassSettingsPage() {
     }
     setNameSaving(true);
     setNameError(null);
+    setNameSaved(false);
     // 클래스 이름은 클래스 설정으로, 강사 이름은 부른 사람 자신의 자리로(#565) 보낸다.
-    let failure: string | null = null;
+    let failure: { status: number; detail: string } | null = null;
     if (namesPatch?.name !== undefined) {
       const result = await updateClass(classId, { name: namesPatch.name });
-      if (!result.ok) failure = result.detail;
+      if (!result.ok) failure = result;
     }
     if (failure === null && namesPatch?.instructor_display_name !== undefined) {
       const result = await renameMyInstructorName(classId, namesPatch.instructor_display_name);
-      if (!result.ok) failure = result.detail;
+      if (!result.ok) failure = result;
     }
-    setNameError(failure);
-    reload();
+    setNameError(failure?.detail ?? null);
+    setNameSaved(failure === null);
+    // 실패했는데 다시 읽으면 새로 읽은 값이 적던 칸을 덮는다(#1447 11) — 접근을 잃었는지 볼 때만 읽는다.
+    if (reloadAfterNameSave(failure)) reload();
     setNameSaving(false);
   }
 
@@ -550,6 +604,7 @@ export default function ClassSettingsPage() {
     event.preventDefault();
     setModelSaving(true);
     setModelError(null);
+    setModelSavedNote(false);
     const result = await updateClass(classId, {
       default_model: defaultModel,
       default_reasoning_effort: defaultReasoningEffort,
@@ -557,10 +612,12 @@ export default function ClassSettingsPage() {
     });
     if (result.ok) {
       reload();
+      setModelSavedNote(true);
     } else {
       setModelError(result.detail);
     }
     setModelSaving(false);
+    setRefocusModelSubmit(true);
   }
 
   const costReady = costState.status === "ready" ? costState.estimate : null;
@@ -598,7 +655,6 @@ export default function ClassSettingsPage() {
         <div className="flex min-w-0 flex-1 flex-col gap-5">
           <SettingsCard id="scoring-key" title="채점 연결">
             <ScoringConnectionSection
-              key={`${classroom.scoring_connection_kind}:${classroom.scoring_server_url ?? ""}`}
               classroom={classroom}
               isOwner={isOwner}
               onSaved={() => {
@@ -656,7 +712,10 @@ export default function ClassSettingsPage() {
                       models={modelsState.models}
                       savedModel={classroom.default_model}
                       selected={defaultModel}
-                      onSelect={setDefaultModel}
+                      onSelect={(id) => {
+                        setModelSavedNote(false);
+                        setDefaultModel(id);
+                      }}
                       costState={costState}
                       reasoningEffort={defaultReasoningEffort}
                     />
@@ -691,9 +750,10 @@ export default function ClassSettingsPage() {
                   ) : null}
                   <div>
                     <button
+                      ref={modelSubmitRef}
                       type="submit"
                       data-testid="class-default-model-submit"
-                      disabled={modelSaving || defaultModel.trim() === ""}
+                      aria-disabled={modelSaving || defaultModel.trim() === ""}
                       className={buttonClass("primary")}
                     >
                       {modelSaving ? "저장하는 중..." : "저장"}
@@ -701,6 +761,13 @@ export default function ClassSettingsPage() {
                   </div>
                 </form>
               )}
+              <p
+                role="status"
+                data-testid="class-default-model-saved"
+                className={modelSavedNote ? "text-[12.5px] text-ink/60" : "sr-only"}
+              >
+                {modelSavedNote ? "기본 모델을 저장했습니다." : ""}
+              </p>
               {modelError ? (
                 <ErrorNote>
                   <span data-testid="class-default-model-error">{modelError}</span>
@@ -771,7 +838,10 @@ export default function ClassSettingsPage() {
                   id="class-name-input"
                   data-testid="class-name-input"
                   value={classNameDraft}
-                  onChange={(event) => setClassNameDraft(event.target.value)}
+                  onChange={(event) => {
+                    setClassNameDraft(event.target.value);
+                    setNameSaved(false);
+                  }}
                   required
                   maxLength={200}
                   className={INPUT_CLASS}
@@ -785,7 +855,10 @@ export default function ClassSettingsPage() {
                   id="class-instructor-display-name-input"
                   data-testid="class-instructor-display-name-input"
                   value={instructorDisplayName}
-                  onChange={(event) => setInstructorDisplayName(event.target.value)}
+                  onChange={(event) => {
+                    setInstructorDisplayName(event.target.value);
+                    setNameSaved(false);
+                  }}
                   required
                   maxLength={100}
                   className={INPUT_CLASS}
@@ -795,12 +868,15 @@ export default function ClassSettingsPage() {
                 <button
                   type="submit"
                   data-testid="class-instructor-display-name-submit"
-                  disabled={nameSaving || namesPatch === null}
+                  aria-disabled={nameSaving || namesPatch === null}
                   className={buttonClass("primary")}
                 >
                   {nameSaving ? "저장하는 중..." : "저장"}
                 </button>
               </div>
+              <p role="status" data-testid="class-names-saved" className="text-[12.5px] text-ink/60">
+                {nameSaved ? "저장했습니다." : ""}
+              </p>
               {nameError ? (
                 <ErrorNote>
                   <span data-testid="class-instructor-display-name-error">{nameError}</span>

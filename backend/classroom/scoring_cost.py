@@ -47,6 +47,15 @@ CHARS_PER_TOKEN = 3.3
 #: 추론하지 않는 모델의 출력(판정 JSON) 토큰 — 체크리스트 수십 항목에 근거 한두 문장씩.
 NON_REASONING_OUTPUT_TOKENS = 2_500
 
+#: 판정 JSON 의 요구사항 하나 몫(id·판정·근거 한두 문장) — 위 2,500 을 「체크리스트 수십 항목」 25개로 나눈 값이다.
+#: 실제 채점은 항목마다 판정 하나를 내므로(`scoring._build_prompt`: 「모든 requirement_id 에 대해 빠짐없이 판정」) 출력은 항목 수에
+#: 비례한다 — 예상 비용표와 계산기(`classroom.scoring_calculator`)가 이 한 값으로 같은 출력을 센다(#1492). 2,500 고정은 항목 수를
+#: 모를 때의 폴백이다.
+OUTPUT_TOKENS_PER_REQUIREMENT = NON_REASONING_OUTPUT_TOKENS // 25
+
+#: 문제를 모를 때(클래스 전체 표) 가정하는 체크리스트 항목 수 — 운영 문제 64개의 항목 수 p50(p90 은 21, #1304).
+ASSUMED_REQUIREMENTS = 6
+
 #: 추론 모델의 출력 토큰(추론 토큰 + 판정 JSON) 어림 — 강도별. 높음은 문제·소스에 따라
 #: 크게 늘어 위로 열어 둔다(`AttemptCost.open_ended`).
 REASONING_OUTPUT_TOKENS = {"low": 4_000, "medium": 7_500, "high": 15_000}
@@ -180,6 +189,16 @@ def tokens_for_chars(chars: int) -> int:
     return round(chars / CHARS_PER_TOKEN)
 
 
+def output_tokens_for(effort: str | None, requirement_count: int) -> int:
+    """항목 `requirement_count` 개를 판정하는 시도의 출력 토큰 — 항목 수에 비례하는 판정 JSON 몫, 추론 모델이면 강도별 추론 몫을 더한다.
+    예상 비용표(`estimate`)와 계산기가 같은 조건에서 같은 금액을 내도록 둘이 이 함수를 쓴다."""
+
+    output_tokens = requirement_count * OUTPUT_TOKENS_PER_REQUIREMENT
+    if effort is not None:
+        output_tokens += REASONING_OUTPUT_TOKENS[effort] - NON_REASONING_OUTPUT_TOKENS
+    return output_tokens
+
+
 def attempt_tokens(reasoning_effort: str | None, *, prompt_chars: int) -> AttemptCost:
     """시도 하나가 쓸 토큰만 — 단가를 모르는 호환 서버(#604). `reasoning_effort` 는 채점 요청에
     실을 값 그대로다(`None` 이면 추론하지 않는 출력으로 센다)."""
@@ -235,9 +254,23 @@ def attempt_cost(
     )
 
 
-def ratio_to_baseline(model_id: str, reasoning_effort: str | None, *, prompt_chars: int) -> float | None:
-    cost = attempt_cost(model_id, reasoning_effort, prompt_chars=prompt_chars)
-    baseline = attempt_cost(BASELINE_MODEL, None, prompt_chars=prompt_chars)
+def _output_for(model_id: str, reasoning_effort: str | None, requirement_count: int | None) -> int | None:
+    """항목 수를 알면 그 수로 센 출력, 모르면 `None`(강도별 상수 폴백)."""
+
+    if requirement_count is None:
+        return None
+    return output_tokens_for(effort_for(model_id, reasoning_effort), requirement_count)
+
+
+def ratio_to_baseline(
+    model_id: str, reasoning_effort: str | None, *, prompt_chars: int, requirement_count: int | None = None
+) -> float | None:
+    cost = attempt_cost(
+        model_id, reasoning_effort, prompt_chars=prompt_chars, output_tokens=_output_for(model_id, reasoning_effort, requirement_count)
+    )
+    baseline = attempt_cost(
+        BASELINE_MODEL, None, prompt_chars=prompt_chars, output_tokens=_output_for(BASELINE_MODEL, None, requirement_count)
+    )
     if cost is None or baseline is None or baseline.usd == 0:
         return None
     return cost.usd / baseline.usd
@@ -348,6 +381,8 @@ def estimate(
             basis = "class"
 
     attempts, measured = _attempts_per_participant(class_obj)
+    # 출력은 항목 수에 비례한다 — 문제를 알면 그 문제의 항목 수, 클래스 전체 표면 가정 항목 수(계산기와 같은 값).
+    requirement_count = problem.checklist_items.count() if problem is not None else ASSUMED_REQUIREMENTS
 
     if token_settings is not None:
         return CostEstimate(
@@ -369,13 +404,14 @@ def estimate(
 
     rows: list[CostRow] = []
     for model_id, effort in _setting_keys(model_ids):
+        output = _output_for(model_id, effort, requirement_count)
         per_attempt = (
-            attempt_cost(model_id, effort, prompt_chars=avg_chars) if avg_chars is not None else None
+            attempt_cost(model_id, effort, prompt_chars=avg_chars, output_tokens=output) if avg_chars is not None else None
         )
         bands = tuple(
             cost
             for chars in SOURCE_SIZE_BANDS
-            if (cost := attempt_cost(model_id, effort, prompt_chars=chars)) is not None
+            if (cost := attempt_cost(model_id, effort, prompt_chars=chars, output_tokens=output)) is not None
         )
         rows.append(
             CostRow(
@@ -388,7 +424,9 @@ def estimate(
                     per_attempt.krw * participant_count * attempts if per_attempt is not None else None
                 ),
                 per_problem_tokens=None,
-                ratio_to_baseline=ratio_to_baseline(model_id, effort, prompt_chars=reference_chars),
+                ratio_to_baseline=ratio_to_baseline(
+                    model_id, effort, prompt_chars=reference_chars, requirement_count=requirement_count
+                ),
                 by_source_size=bands,
             )
         )
@@ -405,6 +443,8 @@ def estimate(
 
 
 def _token_row(model_id: str, effort: str | None, avg_chars: int | None, attempts_in_problem: float) -> CostRow:
+    # 토큰 줄은 단가가 없어 계산기와 견주지 않고, 응답에 usage 가 없을 때의 사용량 어림(`estimated_usage_tokens`)과 같은
+    # 셈이어야 한다 — 그 어림은 항목 수를 몰라 강도별 상수다. 그래서 항목 수 기준을 쓰지 않는다.
     per_attempt = attempt_tokens(effort, prompt_chars=avg_chars) if avg_chars is not None else None
     return CostRow(
         model_id=model_id,

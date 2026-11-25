@@ -4,6 +4,7 @@
 import type { ApiResult } from "@codemit/bff-client";
 
 import { apiRequest, bffClient } from "@/lib/bff/client";
+import { CLASS_FIELD_LABELS } from "@/lib/forms/field-labels";
 
 // 이 클래스를 원본으로 하는, 지금 살아 있는(내리지 않은) 클래스 템플릿
 // (#333) — 없으면 `null`이다. 클래스 설정 화면이 새로고침 뒤에도 공개 상태를
@@ -22,6 +23,8 @@ export type PublishedClassTemplateSummary = {
   share_code: string;
   publisher_display_name: string;
   created_at: string;
+  // 부른 사람이 내릴 수 있는가 — 공개한 사람만 내린다(#1446).
+  can_take_down: boolean;
 };
 
 export type VendorKey = {
@@ -96,6 +99,8 @@ export type ClassRow = {
   role: "owner" | "co_instructor";
   // 대기 중인 소유권 이전 요청(#564) — 없으면 `null`. 강사 누구나 본다.
   pending_ownership_transfer: PendingOwnershipTransfer | null;
+  // 강사 쪽 변경 번호(#1484 ④) — `instructors-changed` 신호 본문의 `rev` 와 같은 값. 이 번호 이하의 신호는 이 응답이 이미 담았다.
+  signal_rev: number;
   // 클래스 상세 머리의 통계 바와 채점 카드가 읽는 집계(#632) — 문제 목록에서 다시 세지 않는다.
   // 강사 전원을 센다(내보낸 사람 제외).
   member_count: number;
@@ -135,6 +140,8 @@ export type JoinedClassRow = {
   // 강사가 내보냈는가(#281) — 참이면 새 제출만 막히고, 지난 시도·판정은
   // 그대로 읽힌다.
   expelled: boolean;
+  // `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5) — 공동 강사였다가 떠났거나 탈퇴했다.
+  left: boolean;
   // 열린 문제 수와 그중 내가 한 번이라도 통과한 수(#632) — 둘 다 항상 정수다.
   open_problem_count: number;
   passed_count: number;
@@ -144,10 +151,11 @@ export function createClass(
   name: string,
   instructorDisplayName: string,
 ): Promise<ApiResult<ClassRow>> {
-  return bffClient.post<ClassRow>("/api/backend/classroom/classes", {
-    name,
-    instructor_display_name: instructorDisplayName,
-  });
+  return bffClient.post<ClassRow>(
+    "/api/backend/classroom/classes",
+    { name, instructor_display_name: instructorDisplayName },
+    { fieldLabels: CLASS_FIELD_LABELS },
+  );
 }
 
 export function updateClass(
@@ -165,15 +173,18 @@ export function updateClass(
     oversize_agent_model: string;
   }>,
 ): Promise<ApiResult<ClassRow>> {
-  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch);
+  return apiRequest<ClassRow>(`/api/backend/classroom/classes/${classId}`, "PATCH", patch, CLASS_FIELD_LABELS);
 }
 
 // 부른 강사 자신의 강사 이름을 바꾼다(#565) — 소유자든 공동 강사든 자기 자리에만 쓴다.
 // 클래스 설정의 `instructor_display_name` 은 소유자의 이름 칸이라 공동 강사에게는 닫혀 있다.
 export function renameMyInstructorName(classId: number, displayName: string): Promise<ApiResult<unknown>> {
-  return apiRequest<unknown>(`/api/backend/classroom/classes/${classId}/instructors/me`, "PATCH", {
-    display_name: displayName,
-  });
+  return apiRequest<unknown>(
+    `/api/backend/classroom/classes/${classId}/instructors/me`,
+    "PATCH",
+    { display_name: displayName },
+    CLASS_FIELD_LABELS,
+  );
 }
 
 // 채점 키는 저장 뒤 다시 보이지 않는다(#284) — 응답도 언제나 마스킹된

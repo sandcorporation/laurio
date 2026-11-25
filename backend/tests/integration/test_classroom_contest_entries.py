@@ -27,6 +27,7 @@ from tests.classroom_scenarios import (
     login,
     mine,
     open_problem,
+    submit_repository,
     user_id,
     zip_bytes,
 )
@@ -293,6 +294,24 @@ def test_the_form_prefills_the_previous_entry_and_leaves_new_requirements_blank(
     ]
     assert previous["할 일을 지울 수 있다"] is None
     assert set(form["upload_target_refs"]) == {"demo_video", "screenshot"}
+
+
+def test_the_form_stays_open_on_a_hidden_problem_for_whoever_submitted_it(client, world):
+    """접근 계약(#1390) — 숨긴 공모전 문제의 칸은 낸 적 있는 참여자에게만 200 이다."""
+
+    problem_id, class_id = world["problem"]["id"], world["class_id"]
+    submit_repository(client, world["participant"]["access"], class_id, problem_id)
+    bystander = login(client, uid="ce-bystander")
+    join_class(client, bystander["access"], class_id, instructor_access=world["instructor"]["access"])
+    hidden = client.post(
+        f"{CLASSES_URL}/{class_id}/problems/{problem_id}/hide",
+        content_type="application/json",
+        **auth_header(world["instructor"]["access"]),
+    )
+    assert hidden.status_code == 200, hidden.content
+
+    assert _form(client, world).status_code == 200
+    assert _form(client, world, access=bystander["access"]).status_code == 404
 
 
 # --- 시도를 만들기 전에 막는다 ------------------------------------------------------

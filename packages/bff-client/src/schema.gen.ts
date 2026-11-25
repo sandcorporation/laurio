@@ -377,6 +377,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/classroom/classes/former-instructor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Former Instructor Classes
+         * @description 한때 이 사람이 강사(공동 강사·넘겨준 소유자)였다가 지금은 아닌 클래스(#1465 2). 증거는 **그 사람이 수락한
+         *     초대**와 **그 사람이 오간 수락된 소유권 이전**뿐이다 — 초대를 받기만 했거나 처음부터 관계 없던 사람은 빈 목록이라
+         *     남의 클래스의 존재가 새지 않는다(#278). 지금도 강사인 클래스는 뺀다.
+         */
+        get: operations["classroom_api_list_former_instructor_classes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/classroom/classes/joined": {
         parameters: {
             query?: never;
@@ -6344,6 +6366,11 @@ export interface components {
             /** Scoring Server Url */
             scoring_server_url?: string | null;
             /**
+             * Signal Rev
+             * @default 0
+             */
+            signal_rev: number;
+            /**
              * Token Usage Estimated
              * @default 0
              */
@@ -6517,8 +6544,15 @@ export interface components {
             member_display_name: string;
             /** Member Id */
             member_id: number;
+            /** Pending Reason */
+            pending_reason?: string | null;
             /** Problem Id */
             problem_id: number;
+            /**
+             * Problem Model
+             * @default
+             */
+            problem_model: string;
             /** Problem Title */
             problem_title: string;
             /** Status */
@@ -6624,6 +6658,11 @@ export interface components {
             joined_at?: string | null;
             /** Last Submitted At */
             last_submitted_at?: string | null;
+            /**
+             * Left
+             * @default false
+             */
+            left: boolean;
         };
         /**
          * ClassroomHiddenSummaryOut
@@ -6856,6 +6895,8 @@ export interface components {
             submissions: components["schemas"]["ClassroomSubmissionOut"][];
             /** Submit Blocked Reason */
             submit_blocked_reason?: string | null;
+            /** Viewer Role */
+            viewer_role?: ("owner" | "co_instructor") | null;
             /**
              * Viewing As Instructor
              * @default false
@@ -6879,8 +6920,15 @@ export interface components {
             member_display_name: string;
             /** Member Id */
             member_id: number;
+            /** Pending Reason */
+            pending_reason?: string | null;
             /** Problem Id */
             problem_id: number;
+            /**
+             * Problem Model
+             * @default
+             */
+            problem_model: string;
             /** Problem Title */
             problem_title: string;
             /** Status */
@@ -8153,6 +8201,15 @@ export interface components {
             text?: string | null;
         };
         /**
+         * FormerClassOut
+         * @description 강사에서 빠진 클래스 한 줄(#1465 2) — 번호만 준다. 화면이 404 를 만났을 때 「더 이상 강사가 아닙니다」와
+         *     「찾을 수 없습니다」를 가르는 데만 쓴다.
+         */
+        FormerClassOut: {
+            /** Id */
+            id: number;
+        };
+        /**
          * FreeContestCreateIn
          * @description 무료 공모전 초안 생성 입력 (#415, ADR-0048) — `ContestCreateIn`과 달리
          *     `prize`가 없다: 무료 공모전은 상금·결제·Escrow가 없으므로 애초에 받지
@@ -8536,6 +8593,11 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+            /**
+             * Left
+             * @default false
+             */
+            left: boolean;
             /** Name */
             name: string;
             /**
@@ -8735,6 +8797,11 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+            /**
+             * Left
+             * @default false
+             */
+            left: boolean;
         };
         /** MemberRenameIn */
         MemberRenameIn: {
@@ -8944,6 +9011,7 @@ export interface components {
             is_transactional: boolean;
             /** Notification Type */
             notification_type: string;
+            problem_status?: components["schemas"]["ProblemStatusOut"] | null;
             /** Read At */
             read_at: string | null;
             /** Scheduled For */
@@ -8952,6 +9020,8 @@ export interface components {
             status: string;
             /** Title */
             title?: string | null;
+            /** Transfer Status */
+            transfer_status?: string | null;
         };
         /** NotificationPageOut */
         NotificationPageOut: {
@@ -8971,7 +9041,7 @@ export interface components {
          *     해둔다. User Story 80~89 에 나오는 유형 중 최소 집합을 담았다.
          * @enum {string}
          */
-        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_scoring_platform_unavailable" | "classroom_scoring_failure_capped" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued" | "score_corrected" | "certificate_score_corrected" | "feedback_status_changed" | "classroom_feedback_status_changed";
+        NotificationType: "deadline_reminder" | "judging_period_ending_reminder" | "distribution_final_warning" | "result_notice" | "scoring_complete" | "scoring_held_size" | "appeal_ruled" | "new_contest_in_category" | "payout_awaits_you" | "classroom_submission_scored" | "classroom_scoring_key_rejected" | "classroom_scoring_key_missing" | "classroom_scoring_quota_exhausted" | "classroom_scoring_server_unreachable" | "classroom_scoring_platform_unavailable" | "classroom_scoring_failure_capped" | "classroom_contest_entry_rejected" | "classroom_ownership_transfer_requested" | "classroom_ownership_transfer_accepted" | "classroom_ownership_transfer_declined" | "classroom_member_expelled" | "operator_notice" | "contest_updated" | "certificate_issued" | "certificate_reissued" | "score_corrected" | "certificate_score_corrected" | "feedback_status_changed" | "classroom_feedback_status_changed";
         /** OpenAIKeyIn */
         OpenAIKeyIn: {
             /** Api Key */
@@ -9933,6 +10003,13 @@ export interface components {
             /** Problem Ids */
             problem_ids: number[];
         };
+        /** ProblemStatusOut */
+        ProblemStatusOut: {
+            /** Attempt Count */
+            attempt_count: number;
+            /** Passed */
+            passed: boolean;
+        };
         /** ProblemTemplateChecklistItemOut */
         ProblemTemplateChecklistItemOut: {
             /** Grade */
@@ -10069,6 +10146,11 @@ export interface components {
          *     자리에서 그대로 보인다. 없으면 `None`이라 화면이 공개 폼을 보여준다.
          */
         PublishedTemplateSummaryOut: {
+            /**
+             * Can Take Down
+             * @default false
+             */
+            can_take_down: boolean;
             /**
              * Created At
              * Format: date-time
@@ -12287,6 +12369,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorOut"];
+                };
+            };
+        };
+    };
+    classroom_api_list_former_instructor_classes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormerClassOut"][];
                 };
             };
         };

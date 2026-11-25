@@ -3,9 +3,12 @@
 // 문제 편집 (#282/#283/#285, 시안 v2 #637). 1200px 틀 안의 두 열 — 왼쪽은 제목·설명·체크리스트,
 // 오른쪽 300px 은 상태·제출 형식·채점 모델·채점 지침과 끝의 글자 링크 셋(복사·템플릿 공개·삭제).
 // 머리에 「저장」이 있고(제목·설명·제출 형식·채점 모델·채점 지침을 저장), 체크리스트는 항목마다 바로 저장된다.
+import { useScrollToHash } from "@/lib/util/use-scroll-to-hash";
 import { MarkdownView } from "@codemit/markdown";
 import Link from "next/link";
 
+import { CharCount } from "@/app/components/CharCount";
+import { useTablist } from "@/app/components/use-tablist";
 import {
   Badge,
   Card,
@@ -19,6 +22,7 @@ import {
   buttonClass,
 } from "@/app/components/ui";
 import { ChecklistRows, GradeToggle } from "@/app/components/ChecklistRows";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import type { ChecklistGrade } from "@/lib/problems/grade";
 import {
   GRADABILITY_FORM_NOTE,
@@ -34,9 +38,10 @@ import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemSideActions } from "@/app/components/ProblemSideActions";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useMutationRequest } from "@/lib/mutations/use-mutation-request";
@@ -85,12 +90,13 @@ export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
   const classId = Number(params.id);
   // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속, 새 문제 화면과 같다).
-  const { state: classState } = useClass(classId);
+  const { state: classState, reload: reloadClass } = useClass(classId);
   const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const problemId = Number(params.problemId);
   const router = useRouter();
 
   const { state, reload } = useProblem(classId, problemId);
+  useScrollToHash(state.status === "ready");
   const { state: modelsState } = useScoringModels(classId);
   const costState = useScoringCost(classId, problemId);
 
@@ -147,10 +153,34 @@ export default function EditProblemPage() {
   // 바로 실행하지 않는다.
   const [confirmingHide, setConfirmingHide] = useState(false);
   const hideMutation = useMutationRequest();
+  // 숨기기 확인을 열면 안전한 「취소」가, 취소하면 「숨기기」 단추가 초점을 받는다 — 취소 단추가 사라지며
+  // 초점이 BODY 로 떨어지지 않게(#1517).
+  const hideButtonRef = useRef<HTMLButtonElement>(null);
+  const hideCancelRef = useRef<HTMLButtonElement>(null);
+  const focusAfterHideToggle = useRef<"cancel" | "hide" | null>(null);
+  useEffect(() => {
+    const target = focusAfterHideToggle.current;
+    focusAfterHideToggle.current = null;
+    if (target === "cancel") hideCancelRef.current?.focus();
+    else if (target === "hide") hideButtonRef.current?.focus();
+  }, [confirmingHide]);
   const reopenMutation = useMutationRequest();
+  // 열기·숨기기·다시 열기가 성공하면 누른 단추가 다음 전이의 단추로 바뀐다 — 초점이 body 로 떨어졌을 때만
+  // 새 단추로 옮긴다(다른 곳에 있는 초점은 뺏지 않는다, #1519). 상태 전이 단추는 한 자리에 하나다.
+  const transitionButtonRef = useRef<HTMLButtonElement>(null);
+  const transitionFrom = useRef<string | null>(null);
+  const transitionName = state.status === "ready" ? state.problem.available_transitions[0]?.name ?? null : null;
+  useEffect(() => {
+    const from = transitionFrom.current;
+    if (from === null || transitionName === null || transitionName === from) return;
+    transitionFrom.current = null;
+    const active = document.activeElement;
+    if (active === null || active === document.body) transitionButtonRef.current?.focus();
+  }, [transitionName]);
 
   // 「작성」/「미리보기」 탭(#325) — 새 문제 화면과 같은 자리다.
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const tablist = useTablist(tab, { panels: "each" });
 
   useClassroomTabTitle({
     screenName: "문제 편집",
@@ -187,10 +217,36 @@ export default function EditProblemPage() {
     );
   }
 
+  if (state.status === "notFound") {
+    return (
+      <PageShell>
+        <AccessNotice
+          page="problem"
+          classId={classId}
+          testId="edit-problem-not-found"
+          retry={{
+            reload: () => {
+              reloadClass();
+              reload();
+            },
+            turns: [state],
+          }}
+        />
+      </PageShell>
+    );
+  }
+
   if (state.status === "error") {
     return (
       <PageShell>
-        <p data-testid="edit-problem-error" className="text-[15px]">문제를 찾을 수 없습니다.</p>
+        <ErrorNote>
+          <span data-testid="edit-problem-error">문제 정보를 불러오지 못했습니다.</span>
+        </ErrorNote>
+        <p className="mt-4">
+          <button type="button" data-testid="edit-problem-retry" onClick={reload} className={buttonClass("secondary", "sm")}>
+            다시 불러오기
+          </button>
+        </p>
       </PageShell>
     );
   }
@@ -382,6 +438,7 @@ export default function EditProblemPage() {
   }
 
   function handleOpen() {
+    transitionFrom.current = transitionName;
     void openMutation.run(() => openProblem(classId, problemId), {
       fallbackMessage: "문제를 열지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -389,6 +446,7 @@ export default function EditProblemPage() {
   }
 
   function handleHide() {
+    transitionFrom.current = transitionName;
     void hideMutation.run(() => hideProblem(classId, problemId), {
       fallbackMessage: "문제를 숨기지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -397,6 +455,7 @@ export default function EditProblemPage() {
   }
 
   function handleReopen() {
+    transitionFrom.current = transitionName;
     void reopenMutation.run(() => reopenProblem(classId, problemId), {
       fallbackMessage: "문제를 다시 열지 못했습니다. 잠시 후 다시 시도해주세요.",
       reload,
@@ -446,13 +505,7 @@ export default function EditProblemPage() {
             type="submit"
             form="edit-problem-form"
             data-testid="edit-problem-submit"
-            disabled={
-              isArchived ||
-              mainSave.pending ||
-              title.trim() === "" ||
-              submissionFormats.length === 0 ||
-              !isGradingGuidelineValid(gradingGuideline)
-            }
+            aria-disabled={(isArchived || mainSave.pending || title.trim() === "" || submissionFormats.length === 0 || !isGradingGuidelineValid(gradingGuideline)) || undefined}
             className={buttonClass("primary")}
           >
             {mainSave.pending ? "저장하는 중..." : "저장"}
@@ -467,7 +520,8 @@ export default function EditProblemPage() {
           </Note>
         </div>
       ) : null}
-      {mainSave.error ? (
+      {/* 기한 순서 오류는 기한 카드가 한 번만 알린다 — 여기서도 띄우면 낭독기가 두 번 읽는다. */}
+      {mainSave.error && mainSave.error !== DUE_ORDER_MESSAGE ? (
         <div className="mb-5">
           <ErrorNote>
             <span data-testid="edit-problem-error-message">{mainSave.error}</span>
@@ -476,7 +530,7 @@ export default function EditProblemPage() {
       ) : null}
 
       <div className="flex flex-col gap-5">
-        <div role="tablist" aria-label="문제 편집 화면" className="flex items-end gap-0.5 border-b border-rule">
+        <div {...tablist.listProps} aria-label="문제 편집 화면" className="flex items-end gap-0.5 border-b border-rule">
           {(
             [
               ["write", "작성", "edit-problem-tab-write"],
@@ -486,8 +540,7 @@ export default function EditProblemPage() {
             <button
               key={key}
               type="button"
-              role="tab"
-              aria-selected={tab === key}
+              {...tablist.tabProps(key)}
               data-testid={testId}
               onClick={() => setTab(key)}
               className={
@@ -501,7 +554,7 @@ export default function EditProblemPage() {
           ))}
         </div>
 
-        <div data-testid="edit-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
+        <div {...tablist.panelProps("write")} data-testid="edit-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
           <TwoColumnFrame
             sideTestId="edit-problem-side-rail"
             main={
@@ -529,9 +582,11 @@ export default function EditProblemPage() {
                         value={title}
                         onChange={(event) => setTitle(event.target.value)}
                         required
+                        maxLength={INPUT_LIMITS.editProblemTitle}
                         disabled={isArchived || followsContest}
                         className={INPUT_CLASS}
                       />
+                      <CharCount value={title} limit={INPUT_LIMITS.editProblemTitle} testId="edit-problem-title-count" />
                     </div>
 
                     {/* 참여자 화면과 같은 순서 — 수업용 안내가 설명 위다. */}
@@ -604,7 +659,7 @@ export default function EditProblemPage() {
                                 <button
                                   type="button"
                                   data-testid={`zip-git-history-make-optional-${item.id}`}
-                                  disabled={isArchived || checklistMutation.pending}
+                                  aria-disabled={(isArchived || checklistMutation.pending) || undefined}
                                   onClick={() => handleItemGradeChange(item.id, "optional")}
                                   className={buttonClass("secondary", "sm")}
                                 >
@@ -617,7 +672,7 @@ export default function EditProblemPage() {
                       <button
                         type="button"
                         data-testid="zip-git-history-repository-only"
-                        disabled={isArchived || checklistMutation.pending}
+                        aria-disabled={(isArchived || checklistMutation.pending) || undefined}
                         onClick={handleRepositoryOnly}
                         className={`${buttonClass("secondary", "sm")} self-start`}
                       >
@@ -683,16 +738,24 @@ export default function EditProblemPage() {
                       <label htmlFor="new-item-label" className="sr-only">
                         새 항목
                       </label>
-                      <input
-                        id="new-item-label"
-                        data-testid="new-checklist-item-label-input"
-                        value={newItemLabel}
-                        onChange={(event) => setNewItemLabel(event.target.value)}
-                        required
-                        disabled={isArchived}
-                        placeholder="새 항목"
-                        className={`${INPUT_CLASS} min-w-0 flex-1`}
-                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <input
+                          id="new-item-label"
+                          data-testid="new-checklist-item-label-input"
+                          value={newItemLabel}
+                          onChange={(event) => setNewItemLabel(event.target.value)}
+                          required
+                          maxLength={INPUT_LIMITS.editChecklistLabel}
+                          disabled={isArchived}
+                          placeholder="새 항목"
+                          className={INPUT_CLASS}
+                        />
+                        <CharCount
+                          value={newItemLabel}
+                          limit={INPUT_LIMITS.editChecklistLabel}
+                          testId="new-checklist-item-label-count"
+                        />
+                      </div>
                       <GradeToggle
                         grade={newItemGrade}
                         onChange={setNewItemGrade}
@@ -759,20 +822,27 @@ export default function EditProblemPage() {
                           {transitionBlockedReasonText(transition.blocked_reason)}
                         </span>
                       ) : transition?.name === "open" ? (
-                        <button type="button" data-testid="open-problem-button" onClick={handleOpen} className={buttonClass("primary", "sm")}>
+                        <button type="button" ref={transitionButtonRef} data-testid="open-problem-button" onClick={handleOpen} className={buttonClass("primary", "sm")}>
                           문제 열기
                         </button>
                       ) : transition?.name === "hide" ? (
                         <button
                           type="button"
+                          ref={(node) => {
+                            hideButtonRef.current = node;
+                            transitionButtonRef.current = node;
+                          }}
                           data-testid="hide-problem-button"
-                          onClick={() => setConfirmingHide(true)}
+                          onClick={() => {
+                            focusAfterHideToggle.current = "cancel";
+                            setConfirmingHide(true);
+                          }}
                           className={buttonClass("danger", "sm")}
                         >
                           숨기기
                         </button>
                       ) : transition?.name === "reopen" ? (
-                        <button type="button" data-testid="reopen-problem-button" onClick={handleReopen} className={buttonClass("primary", "sm")}>
+                        <button type="button" ref={transitionButtonRef} data-testid="reopen-problem-button" onClick={handleReopen} className={buttonClass("primary", "sm")}>
                           다시 열기
                         </button>
                       ) : null}
@@ -781,17 +851,20 @@ export default function EditProblemPage() {
                       // 숨기기 전 한 번 더 확인한다(#405 AC "결과를 알고 숨기기 위해서다").
                       <Note tone="warning">
                         <div className="flex flex-col gap-2.5">
-                          <span data-testid="hide-problem-confirm-notice">
+                          <span id="hide-problem-confirm-notice" data-testid="hide-problem-confirm-notice">
                             숨기면 참여자 목록에서 빠지고 새로 낼 수 없습니다. 이미 낸 참여자는 자기 시도와 판정을 계속 볼 수 있습니다.
                           </span>
                           <div className="flex gap-2">
-                            <button type="button" data-testid="hide-problem-confirm" onClick={handleHide} className={buttonClass("danger", "sm")}>
+                            <button type="button" data-testid="hide-problem-confirm" aria-describedby="hide-problem-confirm-notice" onClick={handleHide} className={buttonClass("danger", "sm")}>
                               숨기기
                             </button>
                             <button
                               type="button"
+                              ref={hideCancelRef}
                               data-testid="hide-problem-cancel"
+                              aria-describedby="hide-problem-confirm-notice"
                               onClick={() => {
+                                focusAfterHideToggle.current = "hide";
                                 setConfirmingHide(false);
                                 hideMutation.setError(null);
                               }}
@@ -891,6 +964,7 @@ export default function EditProblemPage() {
         </div>
 
         <div
+          {...tablist.panelProps("preview")}
           data-testid="edit-problem-preview-panel"
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >

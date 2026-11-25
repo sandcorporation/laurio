@@ -298,7 +298,7 @@ function AppealForm({
       <button
         className={`self-start ${buttonClass("primary")}`}
         type="submit"
-        disabled={pending || reason.trim().length === 0}
+        aria-disabled={(pending || reason.trim().length === 0) || undefined}
         data-testid="appeal-submit"
       >
         {pending ? "접수하는 중..." : "이의 제기"}

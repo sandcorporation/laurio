@@ -113,6 +113,21 @@ case "$kind" in
     docker compose -f docker/compose.dev.yaml up -d db >/dev/null
     docker update --cpuset-cpus "$CPUSET" "${COMPOSE_PROJECT_NAME}-db-1" >/dev/null
     cd backend
+    # macOS 에서만 다르게 — 이 셋이 없으면 mac 에서 백엔드 시험이 바꾼 것 없이 깨진다(#1419).
+    if [ "$(uname -s)" = Darwin ]; then
+      # (1) Apple Silicon 의 Homebrew 는 /opt/homebrew/lib 에 두는데 dlopen 기본 경로 밖이라 WeasyPrint 가
+      #     libgobject 를 못 찾는다 — 상장 PDF 시험이 전부 setup 에서 죽는다.
+      if [ -d /opt/homebrew/lib ]; then
+        export DYLD_FALLBACK_LIBRARY_PATH="/opt/homebrew/lib${DYLD_FALLBACK_LIBRARY_PATH:+:$DYLD_FALLBACK_LIBRARY_PATH}"
+      fi
+      # (2) /usr/bin/git 은 Xcode 를 거치는 얇은 껍데기라 실행마다 CPU 8ms 가 든다(진짜 git 은 3ms) — git 을
+      #     150번 부르는 배포 계획 시험이 시험 하나 CPU 한도(1초)를 넘는다. 진짜 git 을 앞에 둔다.
+      real_git=$(xcrun -f git 2>/dev/null || true)
+      [ -x "$real_git" ] && export PATH="$(dirname "$real_git"):$PATH"
+    fi
+    # tree-sitter 문법은 처음 쓸 때 인터넷에서 받는다 — 캐시가 빈 머신(새 mac)에서는 문법 검사 시험이 「AI 판정으로
+    # 넘김」 길로 빠져 셋이 깨진다. 받아 둔다(이미 있으면 그대로, 못 받아도 시험은 계속 돈다).
+    uv run python classroom/grammar_prefetch.py >/dev/null 2>&1 || echo "tree-sitter 문법을 받지 못했다 — 문법 검사 시험이 깨질 수 있다"
     # pyproject 의 `-n auto` 를 칸 크기로 덮는다 — 뒤에 준 값이 이긴다.
     exec ${PIN[@]+"${PIN[@]}"} uv run pytest -n "$CPUS" "$@"
     ;;

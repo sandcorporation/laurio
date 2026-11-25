@@ -4,7 +4,7 @@
 // 감싼다). 이 클래스의 채점이 모델에 닿는 길을 소유자가 고른다: OpenAI·Claude 키를 둘 다 넣어 두고 스위치로
 // 고르거나(#1269), 셋째 선택 「호환 서버」(소유자가 바깥에 열어 둔 OpenAI 호환 주소와 Bearer 값). 상태 한 줄이
 // 먼저 보이고(#636) 그 아래 스위치와 키 두 줄이 선다. 공동 강사는 상태 한 줄만 본다(ADR-0055).
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, buttonClass } from "@/app/components/ui";
@@ -17,10 +17,18 @@ import {
   type ClassRow,
   type VendorKey,
 } from "@/lib/classes/api";
-import { CLAUDE_KEY_LABEL, connectionKindOptions, type ConnectionKind } from "@/lib/classes/connection-kinds";
+import {
+  CLAUDE_KEY_LABEL,
+  connectionKindOptions,
+  vendorKeyButtonName,
+  vendorUnavailableReason,
+  type ConnectionKind,
+} from "@/lib/classes/connection-kinds";
 import { formatDay } from "@/lib/classes/format-day";
 import { checkOpenAIKeyFromBrowser, type OpenAIKeyCheckResult } from "@/lib/classes/openai-key-check";
+import { normalizeServerUrl } from "@/lib/classes/server-url";
 import { settingsStatusBadges } from "@/lib/classes/scoring-status";
+import { useInlineConfirm } from "@/lib/util/use-inline-confirm";
 
 const STATUS_CLASS = "flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-[13.5px]";
 
@@ -114,23 +122,33 @@ function VendorSwitch({
                 ? classroom.anthropic_key
                 : null;
           const checked = option.kind === current || (option.kind === "compatible_server" && compatibleOpen);
-          const disabled = busy || (option.kind !== "compatible_server" && !vendorKey?.switchable);
+          // 꺼진 이유가 있으면(키 없음·거부됨) disabled 가 아니라 aria-disabled 다 — Tab 이 닿아 이유가 설명으로 읽힌다.
+          const reason = option.kind === "compatible_server" ? null : vendorUnavailableReason(vendorKey);
+          const reasonId = `scoring-connection-kind-${option.kind}-reason`;
           return (
-            <button
-              key={option.kind}
-              type="button"
-              role="radio"
-              aria-checked={checked}
-              disabled={disabled}
-              data-testid={`scoring-connection-kind-${option.kind}`}
-              onClick={() => {
-                if (option.kind === "compatible_server") onCompatible();
-                else if (option.kind !== current) onSwitch(option.kind);
-              }}
-              className={buttonClass(checked ? "primary" : "secondary", "sm")}
-            >
-              {VENDOR_LABELS[option.kind]}
-            </button>
+            <span key={option.kind} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                aria-disabled={busy || reason !== null || undefined}
+                aria-describedby={reason ? reasonId : undefined}
+                data-testid={`scoring-connection-kind-${option.kind}`}
+                onClick={() => {
+                  if (reason) return;
+                  if (option.kind === "compatible_server") onCompatible();
+                  else if (option.kind !== current) onSwitch(option.kind);
+                }}
+                className={`${buttonClass(checked ? "primary" : "secondary", "sm")} ${reason ? "cursor-not-allowed opacity-45" : ""}`}
+              >
+                {VENDOR_LABELS[option.kind]}
+              </button>
+              {reason ? (
+                <span id={reasonId} data-testid={reasonId} className="text-[12px] text-ink/60">
+                  {reason}
+                </span>
+              ) : null}
+            </span>
           );
         })}
       </div>
@@ -149,26 +167,38 @@ function VendorKeyRow({
   classroom,
   provider,
   onSaved,
+  announce,
 }: {
   classroom: ClassRow;
   provider: "openai" | "anthropic";
   onSaved: () => void;
+  announce: (message: string) => void;
 }) {
   const vendorKey = provider === "anthropic" ? classroom.anthropic_key : classroom.openai_key;
   const label = provider === "anthropic" ? CLAUDE_KEY_LABEL : "OpenAI 키";
   const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const deleteConfirm = useInlineConfirm(confirming, () => setConfirming(false));
+  // 지우면 「지우기」가 사라진다 — 초점은 늘 있는 「넣기」로.
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const active = classroom.scoring_connection_kind === `${provider}_key`;
 
   async function handleDelete() {
-    const active = classroom.scoring_connection_kind === `${provider}_key`;
-    if (!window.confirm(active ? `${label}를 지우면 채점이 멈춥니다.` : `${label}를 지웁니다.`)) return;
+    announce("");
     setDeleting(true);
     setError(null);
     const result = await deleteVendorKey(classroom.id, provider);
     setDeleting(false);
-    if (result.ok) onSaved();
-    else setError(result.detail);
+    if (result.ok) {
+      changeButtonRef.current?.focus();
+      announce(`${label}를 지웠습니다.`);
+      onSaved();
+    } else {
+      setError(result.detail);
+    }
+    setConfirming(false);
   }
 
   const badge = vendorKey ? KEY_STATUS_BADGE[vendorKey.status] : null;
@@ -190,20 +220,26 @@ function VendorKeyRow({
         </p>
         <div className="flex gap-2">
           <button
+            ref={changeButtonRef}
             type="button"
             data-testid={`vendor-key-${provider}-change`}
+            aria-label={vendorKeyButtonName(label, open ? "닫기" : vendorKey ? "바꾸기" : "넣기")}
             aria-expanded={open}
-            onClick={() => setOpen((value) => !value)}
+            onClick={() => {
+              announce("");
+              setOpen((value) => !value);
+            }}
             className={buttonClass("secondary", "sm")}
           >
             {open ? "닫기" : vendorKey ? "바꾸기" : "넣기"}
           </button>
-          {vendorKey ? (
+          {vendorKey && !confirming ? (
             <button
+              ref={deleteConfirm.triggerRef}
               type="button"
               data-testid={`vendor-key-${provider}-delete`}
-              disabled={deleting}
-              onClick={handleDelete}
+              aria-label={vendorKeyButtonName(label, "지우기")}
+              onClick={() => setConfirming(true)}
               className={buttonClass("secondary", "sm")}
             >
               지우기
@@ -211,6 +247,35 @@ function VendorKeyRow({
           ) : null}
         </div>
       </div>
+      {vendorKey && confirming ? (
+        <div
+          data-testid={`vendor-key-${provider}-delete-confirm`}
+          {...deleteConfirm.groupProps}
+          className="flex flex-wrap items-center gap-2 border border-rule bg-paper px-3 py-2.5"
+        >
+          <span id={deleteConfirm.questionId} className="text-[12.5px] text-ink/70">
+            {active ? `${label}를 지우면 채점이 멈춥니다.` : `${label}를 지웁니다.`}
+          </span>
+          <button
+            type="button"
+            data-testid={`vendor-key-${provider}-delete-confirm-button`}
+            aria-disabled={deleting || undefined}
+            onClick={() => void handleDelete()}
+            className={buttonClass("dangerFilled", "sm")}
+          >
+            {deleting ? "지우는 중..." : "지우기"}
+          </button>
+          <button
+            ref={deleteConfirm.keepRef}
+            type="button"
+            aria-disabled={deleting || undefined}
+            onClick={() => setConfirming(false)}
+            className={buttonClass("secondary", "sm")}
+          >
+            그대로 두기
+          </button>
+        </div>
+      ) : null}
       {error ? (
         <ErrorNote>
           <span data-testid={`vendor-key-${provider}-delete-error`}>{error}</span>
@@ -222,6 +287,9 @@ function VendorKeyRow({
           provider={provider}
           onSaved={() => {
             setOpen(false);
+            // 저장하면 폼과 누른 저장 단추가 사라진다 — 초점은 늘 있는 「바꾸기」로(삭제와 같다).
+            changeButtonRef.current?.focus();
+            announce(`${label}를 저장했습니다.`);
             onSaved();
           }}
         />
@@ -246,6 +314,11 @@ function KeyForm({
   // 저장 전에 브라우저가 직접 벤더에게 물어 미리 말한다(#357) — 문이 아니라 안내다, 저장 버튼은
   // 이 값과 무관하게 항상 눌린다. 입력이 멎은 뒤 한 번만 친다.
   const [liveCheck, setLiveCheck] = useState<OpenAIKeyCheckResult | "checking" | "idle">("idle");
+  const liveId = `${provider}-key-live-check`;
+  const errorId = `${provider}-key-error`;
+  // 확정된 오류만 aria-invalid — 저장이 거절됐거나 벤더가 키를 거부했다. 확인 중·확인 못 함은 오류가 아니다.
+  const invalid = error !== null || liveCheck === "invalid";
+  const describedBy = [liveCheck !== "idle" ? liveId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined;
 
   useEffect(() => {
     const trimmed = apiKey.trim();
@@ -294,38 +367,36 @@ function KeyForm({
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
           required
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
           className={`${INPUT_CLASS} min-w-[240px] flex-1 font-mono`}
           placeholder={anthropic ? "sk-ant-..." : "sk-..."}
         />
         <button
           type="submit"
           data-testid={`${provider}-key-submit`}
-          disabled={saving || apiKey.trim() === ""}
+          aria-disabled={(saving || apiKey.trim() === "") || undefined}
           className={buttonClass("primary")}
         >
           {saving ? "저장하는 중..." : "저장"}
         </button>
       </div>
-      {liveCheck === "checking" ? (
-        <p data-testid={`${provider}-key-live-check`} className="text-[12px] text-ink/45">
-          확인하는 중...
-        </p>
-      ) : liveCheck === "valid" ? (
-        <p data-testid={`${provider}-key-live-check`}>
+      <p id={liveId} role="status" data-testid={liveId} className="text-[12px] text-ink/45 empty:hidden">
+        {liveCheck === "checking" ? (
+          "확인하는 중..."
+        ) : liveCheck === "valid" ? (
           <Badge tone="verified">이 키를 쓸 수 있습니다</Badge>
-        </p>
-      ) : liveCheck === "invalid" ? (
-        <p data-testid={`${provider}-key-live-check`}>
+        ) : liveCheck === "invalid" ? (
           <Badge tone="error">이 키는 쓸 수 없습니다</Badge>
-        </p>
-      ) : liveCheck === "unknown" ? (
-        <p data-testid={`${provider}-key-live-check`}>
+        ) : liveCheck === "unknown" ? (
           <Badge tone="neutral">지금은 확인할 수 없습니다</Badge>
-        </p>
-      ) : null}
+        ) : null}
+      </p>
       {error ? (
         <ErrorNote>
-          <span data-testid={`${provider}-key-error`}>{error}</span>
+          <span id={errorId} data-testid={errorId}>
+            {error}
+          </span>
         </ErrorNote>
       ) : null}
     </form>
@@ -344,11 +415,26 @@ function CompatibleServerForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 부모의 key 로 다시 만들지 않는다(저장 뒤 초점·확인이 남아야 한다, #1459 ⑤) — 다른 탭·사람이 서버를
+  // 바꿔 재조회되면 열려 있던 칸이 새 주소와 빈 인증 값으로 맞춰진다.
+  const savedUrl = classroom.scoring_server_url ?? "";
+  useEffect(() => {
+    setServerUrl(savedUrl);
+    setAuthValue("");
+    setError(null);
+  }, [savedUrl]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const checked = normalizeServerUrl(serverUrl);
+    if (!checked.ok) {
+      setError(checked.message);
+      return;
+    }
+    setServerUrl(checked.url);
     setSaving(true);
     setError(null);
-    const result = await setCompatibleServer(classroom.id, serverUrl.trim(), authValue);
+    const result = await setCompatibleServer(classroom.id, checked.url, authValue);
     if (result.ok) {
       setAuthValue("");
       onSaved();
@@ -359,17 +445,29 @@ function CompatibleServerForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
+    <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-2.5">
       <label htmlFor="scoring-server-url" className="flex flex-col gap-1.5">
         <FieldLabel>주소</FieldLabel>
         <input
           id="scoring-server-url"
           data-testid="scoring-server-url-input"
-          type="url"
+          type="text"
           inputMode="url"
+          autoCapitalize="none"
+          spellCheck={false}
           value={serverUrl}
           onChange={(event) => setServerUrl(event.target.value)}
-          required
+          // 칸을 떠날 때 판정한다 — 빠진 https:// 는 채워 주고, 읽을 수 없는 주소는 앱 문장으로 말한다.
+          onBlur={() => {
+            if (serverUrl.trim() === "") return;
+            const checked = normalizeServerUrl(serverUrl);
+            if (checked.ok) {
+              setServerUrl(checked.url);
+              setError(null);
+            } else setError(checked.message);
+          }}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? "scoring-server-error" : undefined}
           className={`${INPUT_CLASS} font-mono`}
           placeholder="https://llm.example.com/v1"
         />
@@ -382,6 +480,8 @@ function CompatibleServerForm({
           type="password"
           value={authValue}
           onChange={(event) => setAuthValue(event.target.value)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? "scoring-server-error" : undefined}
           className={`${INPUT_CLASS} font-mono`}
           placeholder="선택"
         />
@@ -390,7 +490,7 @@ function CompatibleServerForm({
         <button
           type="submit"
           data-testid="scoring-server-submit"
-          disabled={saving || serverUrl.trim() === ""}
+          aria-disabled={(saving || serverUrl.trim() === "") || undefined}
           className={buttonClass("primary")}
         >
           {saving ? "서버에 닿아 보는 중..." : "확인하고 저장"}
@@ -398,7 +498,9 @@ function CompatibleServerForm({
       </div>
       {error ? (
         <ErrorNote>
-          <span data-testid="scoring-server-error">{error}</span>
+          <span id="scoring-server-error" data-testid="scoring-server-error">
+            {error}
+          </span>
         </ErrorNote>
       ) : null}
     </form>
@@ -419,10 +521,14 @@ export function ScoringConnectionSection({
   const [compatibleOpen, setCompatibleOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  // 저장·삭제 결과를 늘 떠 있는 상태 영역으로 알린다 — 폼이 사라지는 동작이라 결과가 눈에도 귀에도 남아야 한다.
+  const [notice, setNotice] = useState("");
+  const statusRef = useRef<HTMLDivElement>(null);
   // 시행일 전에는(#803) Claude 키 줄을 보이지 않는다 — 이미 넣어 둔 키가 있으면 보인다.
   const showClaude = classroom.anthropic_key_selectable || classroom.anthropic_key !== null;
 
   async function handleSwitch(kind: VendorKind) {
+    setNotice("");
     setSwitching(true);
     setSwitchError(null);
     const result = await switchScoringVendor(classroom.id, kind);
@@ -434,7 +540,9 @@ export function ScoringConnectionSection({
   return (
     <div className="flex flex-col gap-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <ConnectionStatus classroom={classroom} />
+        <div ref={statusRef} tabIndex={-1} data-testid="scoring-connection-focus" className="min-w-0 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink">
+          <ConnectionStatus classroom={classroom} />
+        </div>
         {!isOwner ? (
           <span data-testid="openai-key-owner-only">
             <Badge>소유자만</Badge>
@@ -444,13 +552,19 @@ export function ScoringConnectionSection({
             type="button"
             data-testid="scoring-connection-change"
             aria-expanded={compatibleOpen}
-            onClick={() => setCompatibleOpen((value) => !value)}
+            onClick={() => {
+              setNotice("");
+              setCompatibleOpen((value) => !value);
+            }}
             className={buttonClass("secondary", "sm")}
           >
             {compatibleOpen ? "닫기" : "바꾸기"}
           </button>
         ) : null}
       </div>
+      <p role="status" data-testid="scoring-connection-notice" className="text-[12.5px] text-ink/60 empty:hidden">
+        {notice}
+      </p>
       {isOwner ? (
         <div className="flex flex-col gap-4 border-t border-rule pt-4">
           <VendorSwitch
@@ -458,7 +572,10 @@ export function ScoringConnectionSection({
             compatibleOpen={compatibleOpen && !compatible}
             busy={switching}
             onSwitch={handleSwitch}
-            onCompatible={() => setCompatibleOpen((value) => !value)}
+            onCompatible={() => {
+              setNotice("");
+              setCompatibleOpen((value) => !value);
+            }}
           />
           {switchError ? (
             <ErrorNote>
@@ -476,13 +593,16 @@ export function ScoringConnectionSection({
                 classroom={classroom}
                 onSaved={() => {
                   setCompatibleOpen(false);
+                  // 서버 폼이 닫히며 저장 단추가 사라진다 — 초점은 연결 상태로.
+                  statusRef.current?.focus();
+                  setNotice("호환 서버를 저장했습니다.");
                   onSaved();
                 }}
               />
             </div>
           ) : null}
-          <VendorKeyRow classroom={classroom} provider="openai" onSaved={onSaved} />
-          {showClaude ? <VendorKeyRow classroom={classroom} provider="anthropic" onSaved={onSaved} /> : null}
+          <VendorKeyRow classroom={classroom} provider="openai" onSaved={onSaved} announce={setNotice} />
+          {showClaude ? <VendorKeyRow classroom={classroom} provider="anthropic" onSaved={onSaved} announce={setNotice} /> : null}
         </div>
       ) : null}
     </div>

@@ -199,15 +199,15 @@ export type AttemptContestEntry = {
 };
 
 // 참여자가 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면 `null`(#439). 우선순위는
-// 보관 → 내보냄 → 숨김이고, "viewing_as_instructor"(강사가 학생 화면으로 보는
-// 중)는 그 셋과 겹치지 않는 별도 판정이다. 백엔드가 이미 우선순위를 정해
+// 보관 → 내보냄 → 숨김이고 강사에게는 "archived" 만 온다. 백엔드가 이미 우선순위를 정해
 // 하나만 내려주므로 화면은 이 값을 다시 계산하지 않는다
 // (`classroom.participation.participant_submit_blocked_reason`).
 export type SubmitBlockedReason =
   | "archived"
   | "expelled"
+  // 공동 강사였다가 스스로 나갔다(#1492-5) — 막는 것은 "expelled" 와 같고 문구만 다르다.
+  | "left"
   | "hidden"
-  | "viewing_as_instructor"
   | null;
 
 export type ProblemSubmissions = {
@@ -227,6 +227,8 @@ export type ProblemSubmissions = {
   // 있게 되면서 둘이 갈렸다 — 띠는 이 값으로, 제출 잠금은
   // `submit_blocked_reason`으로 정한다.
   viewing_as_instructor: boolean;
+  // 강사가 열었을 때의 역할 — 멈춘 시도의 안내가 소유자와 공동 강사에서 갈린다(#1422). 참여자는 null.
+  viewer_role: "owner" | "co_instructor" | null;
 };
 
 // 참여자 본인이 그 클래스에서 불릴 이름을 스스로 바꾼다(#372) — 강사는 이

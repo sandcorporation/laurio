@@ -444,7 +444,13 @@ services:
       # 강의실 컨테이너가 읽는 것과 **같은 `.env` 줄**이다(CODEMIT_OPERATOR_ORIGIN 과
       # 같은 원칙) — 어긋나면 복귀가 조용히 안 되고 사람은 공개 앱에 남는다.
       # 안전한 쪽으로 실패하지만 원인을 찾기 어려우니 한 줄로 맞춰 둔다.
-      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-}
+      #
+      # dev 기본값은 이 스택의 강의실 주소다(#1388) — 시드 로그인도 서버
+      # (`/api/auth/continue`)가 이 목록으로 목적지를 정하므로, 비우면 강의실로 못
+      # 돌아간다. 호스트 이름은 강의실의 CODEMIT_WEB_ORIGIN 과 같은 `localhost` 다
+      # (두 앱을 localhost 로 열어야 세션 쿠키가 같이 실린다). 강의실 컨테이너 자신의
+      # CODEMIT_CLASSROOM_ORIGIN(Origin 검증용)은 계속 비워 둔다.
+      CODEMIT_CLASSROOM_ORIGIN: ${CODEMIT_CLASSROOM_ORIGIN:-http://localhost:${CODEMIT_CLASSROOM_WEB_PORT:-53002}}
       # 컨테이너 안에서는 compose 네트워크 이름으로 백엔드에 붙는다. 호스트에서
       # `pnpm dev` 로 돌릴 때는 이 값이 없어 settings 의 기본값(127.0.0.1:58000)이 쓰인다.
       CODEMIT_API_BASE_URL: http://backend:8000
@@ -621,8 +627,8 @@ services:
       # 붙는다.
       #
       # CODEMIT_WEB_ORIGIN은 이 앱 자신의 Origin 검증에는 쓰이지 않는다(그건
-      # CODEMIT_CLASSROOM_ORIGIN 몫이다) — /login 화면이 "공개 앱으로 가서
-      # 로그인하라"는 링크를 지을 때만 읽는다(lib/auth/public-app.ts). 이 스택의
+      # CODEMIT_CLASSROOM_ORIGIN 몫이다) — /login 이 공개 앱 로그인으로 보낼
+      # 주소를 지을 때만 읽는다(lib/auth/public-app.ts, #1388). 이 스택의
       # frontend 서비스가 실제로 뜨는 포트와 항상 같은 값이어야 하므로 하드코딩하지
       # 않고 그 서비스의 포트 변수를 그대로 참조한다 — 오프셋 워크트리
       # (docker/dev-env.sh)에서도 자동으로 맞는다.

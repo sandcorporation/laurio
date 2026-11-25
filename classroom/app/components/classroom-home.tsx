@@ -10,6 +10,7 @@
 // 인증 구역이므로 SSR 하지 않는다(frontend/app/console/contests/page.tsx와
 // 같은 이유, ADR-0015) — 클라이언트 컴포넌트로 목록을 받아온다.
 import Link from "next/link";
+import { useEffect, useRef } from "react";
 
 import {
   Badge,
@@ -169,6 +170,7 @@ function ClassList({
                   <Link
                     href={`/classes/${classroom.id}`}
                     data-testid={`classroom-row-${classroom.id}-view`}
+                    aria-label={`지난 기록 보기 ${classroom.name}`}
                     className={buttonClass("secondary", "sm")}
                   >
                     지난 기록 보기
@@ -176,6 +178,7 @@ function ClassList({
                   <Link
                     href={`/classes/${classroom.id}/settings#class-archive`}
                     data-testid={`classroom-row-${classroom.id}-copy`}
+                    aria-label={`복사해서 새 기수 열기 ${classroom.name}`}
                     className={buttonClass("secondary", "sm")}
                   >
                     복사해서 새 기수 열기
@@ -185,6 +188,7 @@ function ClassList({
                 <Link
                   href={`/classes/${classroom.id}`}
                   data-testid={`classroom-row-${classroom.id}-open`}
+                  aria-label={`열기 ${classroom.name}`}
                   className={buttonClass("secondary", "sm")}
                 >
                   열기
@@ -232,7 +236,12 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
                   {/* 내보내져도 행을 지우지 않는다 — 지난 시도·판정은 그대로 읽힌다
                       (member_expelled와 같은 신호, #300). 여기서는 그 상태를
                       알리기만 하고 링크는 그대로 열어 둔다. */}
-                  {classroom.expelled ? (
+                  {/* 공동 강사였다가 스스로 떠났으면(#1492-5) 내보내진 것이 아니다. */}
+                  {classroom.expelled && classroom.left ? (
+                    <span data-testid={`classroom-joined-row-${classroom.id}-left-badge`}>
+                      <Badge>나감</Badge>
+                    </span>
+                  ) : classroom.expelled ? (
                     <span data-testid={`classroom-joined-row-${classroom.id}-expelled-badge`}>
                       <Badge tone="warning">내보내짐</Badge>
                     </span>
@@ -250,12 +259,15 @@ function JoinedClassList({ classes }: { classes: JoinedClassRow[] }) {
                 caption="통과"
                 plain
               />
+              {/* 내보내진 사람·보관된 클래스는 새로 풀 수 없다 — 지난 시도를 읽는 길만 남긴다(#1507 B).
+                  같은 글자의 링크가 줄마다 있으니 접근성 이름에 클래스 이름을 담는다(#1507 C, #1492-4 와 같은 꼴). */}
               <Link
                 href={href}
                 data-testid={`classroom-joined-row-${classroom.id}-solve`}
+                aria-label={`${classroom.expelled || classroom.archived ? "지난 시도 보기" : "문제 풀기"} ${classroom.name}`}
                 className={buttonClass("secondary", "sm")}
               >
-                문제 풀기
+                {classroom.expelled || classroom.archived ? "지난 시도 보기" : "문제 풀기"}
               </Link>
             </li>
           );
@@ -271,6 +283,11 @@ export default function ClassroomHome() {
   useClassroomTabTitle({ screenName: "내 클래스" });
 
   const loading = taught.status === "loading" || joined.status === "loading";
+  // 클래스 삭제 뒤 이동처럼 초점이 갈 곳 없이 body 에 있을 때만 제목이 받는다(#1517) — 다른 곳의 초점은 빼앗지 않는다.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (!loading && document.activeElement === document.body) titleRef.current?.focus();
+  }, [loading]);
   // 아무 데도 안 속한 사람 — 강사로 연 것도, 참여자로 들어간 것도 없다.
   const nothingAtAll =
     taught.status === "ready" &&
@@ -300,6 +317,7 @@ export default function ClassroomHome() {
         eyebrow="클래스"
         title="내 클래스"
         titleTestId="classroom-home-heading"
+        titleRef={titleRef}
         actions={headerActions}
       />
 

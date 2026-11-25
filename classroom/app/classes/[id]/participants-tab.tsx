@@ -8,13 +8,15 @@
 // 이름 열을 고정한 뜻을 잃는다.
 //
 // 셀을 글자가 아니라 **모양**으로 그린다 — 스물몇 행 × 열몇 개에 「시도했으나 미통과」를 글자로 채우면
-// 읽히지 않는다. 글자는 `aria-label` 과 범례가 진다. 화면에 설명 문장은 두지 않는다 — 내보내기의 뜻은
+// 읽히지 않는다. 글자는 표식의 `aria-label`·칸의 `title`·범례가 진다. 화면에 설명 문장은 두지 않는다 — 내보내기의 뜻은
 // 확인 대화가 말한다.
 import { useEffect, useRef, useState } from "react";
 
 import { Stamp } from "@/app/components/Stamp";
 import { Badge, Card, EmptyState, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatDay } from "@/lib/classes/format-day";
+import { useDialogFocus } from "@codemit/bff-client/dialog-focus";
+import { useMenuFocus } from "@/app/components/use-menu-focus";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { describeDue, lateLabel, type LateStatus, type DueFields } from "@/lib/problems/due-dates";
 import { achievementTone, describeAchievementRate } from "@/lib/problems/achievement";
@@ -22,14 +24,15 @@ import type { GridCell, GridCellStatus, GridMemberRow } from "@/lib/roster-grid/
 import { gridEntryLabel } from "@/lib/submissions/contest-entry";
 import { openPassedSummary } from "@/lib/roster-grid/passed";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const PROBLEM_STATUS_LABEL: Record<string, string> = { draft: "초안", hidden: "숨김" };
 
 const STATUS_LABEL: Record<GridCellStatus, string> = {
   passed: "통과",
   attempted_not_passed: "시도했으나 미통과",
-  needs_setup: "설정 필요",
-  scoring: "채점 중",
+  needs_setup: WAITING_LABEL,
+  scoring: SCORING_LABEL,
   not_submitted: "미제출",
 };
 
@@ -73,7 +76,7 @@ function StatusMark({ status, perfect = false }: { status: GridCellStatus; perfe
   if (status === "attempted_not_passed")
     return <span className="mx-auto block h-[15px] w-[15px] border border-error" />;
   if (status === "needs_setup")
-    // 「설정 필요」는 강사가 키를 넣거나 모델을 바꾸기 전까지 절대 바뀌지
+    // 「채점 대기」(`needs_setup`)는 강사가 키를 넣거나 모델을 바꾸기 전까지 절대 바뀌지
     // 않는다(#346, #403, #434) — 「채점 중」의 빗금과 달리 속이 빈 주의색
     // 테두리로 "멈춰 있다"를 그린다.
     return <span className="mx-auto block h-[15px] w-[15px] border border-warning border-dashed" />;
@@ -110,27 +113,15 @@ const TONE_CLASS = { verified: "text-success", attention: "text-warning", ink: "
 function RowMenu({ member, onExpel }: { member: GridMemberRow; onExpel: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === "Escape") setOpen(false);
-      } else if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
+  const { onKeyDown: onMenuKeyDown } = useMenuFocus({ open, setOpen, triggerRef, menuRef, containerRef: ref });
 
   return (
     <span ref={ref} className="relative inline-block align-middle">
       <button
+        ref={triggerRef}
         type="button"
         data-testid={`participant-row-${member.id}-menu`}
         aria-label={`${member.display_name} 메뉴`}
@@ -142,10 +133,17 @@ function RowMenu({ member, onExpel }: { member: GridMemberRow; onExpel: () => vo
         ⋮
       </button>
       {open ? (
-        <span role="menu" className="absolute right-0 top-full z-10 mt-1 block w-28 border border-rule bg-surface py-1">
+        <span
+          ref={menuRef}
+          role="menu"
+          aria-label={`${member.display_name} 메뉴`}
+          onKeyDown={onMenuKeyDown}
+          className="absolute right-0 top-full z-10 mt-1 block w-28 border border-rule bg-surface py-1"
+        >
           <button
             type="button"
             role="menuitem"
+            tabIndex={-1}
             data-testid={`participant-row-${member.id}-expel`}
             onClick={() => {
               setOpen(false);
@@ -173,29 +171,36 @@ function ExpelDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  // 열리면 안전한 「취소」가 초점을 받는다. 닫힌 뒤 초점은 ParticipantsTab 이 정한다(#1447).
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onCancel, initialFocus: cancelRef });
+
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
-      <button type="button" aria-label="닫기" onClick={onCancel} className="fixed inset-0 cursor-default" />
+      <button type="button" tabIndex={-1} aria-label="닫기" onClick={onCancel} className="fixed inset-0 cursor-default" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="참여자 내보내기"
+        aria-describedby={descriptionId}
         data-testid="expel-dialog"
         className="relative w-full max-w-[420px] border border-rule bg-surface p-5"
       >
         <h2 className="text-[16px] font-semibold">{member.display_name}님을 내보낼까요?</h2>
-        <p className="mt-2 break-keep text-[13px] leading-relaxed text-ink/70">
-          내보내도 이름과 지난 제출·판정은 그대로 남습니다. 다만 다시 가입하거나 제출할 수는 없고, 달성률을
-          셀 때도 빠집니다.
+        <p id={descriptionId} className="mt-2 break-keep text-[13px] leading-relaxed text-ink/70">
+          {member.display_name}님을 내보냅니다. 내보내도 이름과 지난 제출·판정은 그대로 남습니다. 다만 다시 가입하거나
+          제출할 수는 없고, 달성률을 셀 때도 빠집니다.
         </p>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" data-testid="expel-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
+          <button ref={cancelRef} type="button" data-testid="expel-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
             취소
           </button>
           <button
             type="button"
             data-testid="expel-confirm"
-            disabled={busy}
+            aria-disabled={busy || undefined}
             onClick={onConfirm}
             className={buttonClass("dangerFilled", "sm")}
           >
@@ -211,14 +216,39 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
   const { state, expel, expelError } = useRosterGrid(classId);
   const [expelling, setExpelling] = useState<GridMemberRow | null>(null);
   const [busy, setBusy] = useState(false);
+  // 확인창이 닫히면(성공·실패·취소) 연 메뉴 단추로, 행이 내보내져 메뉴가 없어졌으면 인접 행의 메뉴나 표 머리로 초점을 돌린다(#1447 1-4).
+  const [restore, setRestore] = useState<{ id: number; expelled: boolean } | null>(null);
+  const gridState = state.status === "ready" ? state.grid : null;
+
+  useEffect(() => {
+    if (!restore || !gridState) return;
+    const list = gridState.members;
+    const at = list.findIndex((m) => m.id === restore.id);
+    // 내보냄이 격자에 반영되기 전에는 옛 행의 메뉴가 아직 있다 — 기다린다.
+    if (restore.expelled && at >= 0 && !list[at].expelled) return;
+    setRestore(null);
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const menuOf = (id: number) => document.querySelector<HTMLElement>(`[data-testid="participant-row-${id}-menu"]`);
+    let target = at >= 0 ? menuOf(restore.id) : null;
+    for (let i = 1; !target && at >= 0 && i < list.length; i++) {
+      target = (list[at + i] ? menuOf(list[at + i].id) : null) ?? (list[at - i] ? menuOf(list[at - i].id) : null);
+    }
+    (target ?? document.querySelector<HTMLElement>('[data-testid="participants-header-name"]'))?.focus();
+  }, [restore, gridState]);
 
   async function confirmExpel() {
     if (!expelling) return;
     setBusy(true);
     const ok = await expel(expelling.id);
     setBusy(false);
+    setRestore({ id: expelling.id, expelled: ok });
     setExpelling(null);
     if (ok) onChanged?.();
+  }
+
+  function cancelExpel() {
+    if (expelling) setRestore({ id: expelling.id, expelled: false });
+    setExpelling(null);
   }
 
   if (state.status === "loading") {
@@ -273,16 +303,75 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
       {expelError ? (
         <div className="border-b border-rule p-3">
           <ErrorNote>
-            <span data-testid="participants-expel-error">내보내지 못했습니다. 다시 시도해주세요.</span>
+            <span data-testid="participants-expel-error">{expelError}</span>
           </ErrorNote>
         </div>
       ) : null}
+      {/* 범례는 40줄 표 아래로 밀리지 않게 표 위에 둔다(#1422). */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-rule px-4 py-3">
+        <ul data-testid="participants-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          {(Object.keys(STATUS_LABEL) as GridCellStatus[]).map((status) => (
+            <li
+              key={status}
+              data-testid={`participants-legend-${status}`}
+              className="flex items-center gap-2 text-[12px] text-ink/60"
+            >
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <StatusMark status={status} />
+              </span>
+              {STATUS_LABEL[status]}
+            </li>
+          ))}
+          {hasPerfect ? (
+            <li data-testid="participants-legend-perfect" className="flex items-center gap-2 text-[12px] text-ink/60">
+              <Stamp kind="perfect" size="sm" />
+            </li>
+          ) : null}
+        </ul>
+        {hasLate ? (
+          <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <LateMark late="recommended" inline />
+              </span>
+              권장 기한 뒤 제출
+            </li>
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <LateMark late="deadline" inline />
+              </span>
+              마감 기한 뒤 제출
+            </li>
+          </ul>
+        ) : null}
+        {hasContestEntries ? (
+          <ul data-testid="participants-contest-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <ContestEntryMark entry="current" inline />
+              </span>
+              지금 공모전 제출
+            </li>
+            <li className="flex items-center gap-2 text-[12px] text-ink/60">
+              <span className="flex h-[15px] w-[15px] items-center justify-center">
+                <ContestEntryMark entry="entered" inline />
+              </span>
+              공모전에도 냈었음
+            </li>
+          </ul>
+        ) : null}
+      </div>
+
       {/* 가로 스크롤은 이 div 안에서만 일어난다 — 페이지 전체가 아니라 이 wrapper 가 overflow 를 갖는다. */}
       <div className="max-w-full overflow-x-auto" data-testid="participants-scroll-area">
         <table data-testid="participants-table" className="w-full border-collapse text-[13px]">
           <thead>
             <tr>
-              <th className={`${STICKY} ${HEAD} tracking-[0.06em]`} data-testid="participants-header-name">
+              <th
+                tabIndex={-1}
+                className={`${STICKY} ${HEAD} tracking-[0.06em] outline-none focus-visible:ring-2 focus-visible:ring-ink/40`}
+                data-testid="participants-header-name"
+              >
                 참여자
               </th>
               {problems.map((problem) => (
@@ -314,13 +403,20 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
             {members.map((member) => (
               <tr key={member.id} data-testid={`participant-row-${member.id}`}>
                 <td className={STICKY} data-testid={`participant-row-${member.id}-name`}>
-                  <span className={member.expelled ? "text-ink/40 line-through" : ""}>{member.display_name}</span>
+                  {/* 취소선은 「내보냄」만 — 스스로 나간 사람(#1492-5)은 흐리게만 한다. */}
+                  <span className={member.expelled ? (member.left ? "text-ink/40" : "text-ink/40 line-through") : ""}>
+                    {member.display_name}
+                  </span>
                   {member.is_instructor ? (
                     <span data-testid={`participant-row-${member.id}-instructor-badge`} className="ml-2 inline-block">
                       <Badge>강사 본인</Badge>
                     </span>
                   ) : null}
-                  {member.expelled ? (
+                  {member.expelled && member.left ? (
+                    <span data-testid={`participant-row-${member.id}-left-badge`} className="ml-2 inline-block">
+                      <Badge>나감</Badge>
+                    </span>
+                  ) : member.expelled ? (
                     <span data-testid={`participant-row-${member.id}-expelled-badge`} className="ml-2 inline-block">
                       <Badge tone="warning">내보냄</Badge>
                     </span>
@@ -343,10 +439,10 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
                     data-perfect={cell.perfect === true ? "true" : undefined}
                     data-contest-entry={cell.contest_entry ?? undefined}
                     data-late={cell.late || undefined}
-                    aria-label={cellLabel(cell)}
                     title={cellLabel(cell)}
                   >
-                    <span className="relative mx-auto block w-fit">
+                    {/* 이름은 `td` 속성이 아니라 칸 내용인 표식이 갖는다(#1398) — 칸 내용을 읽는 스크린리더에 빈 칸이 아니게. */}
+                    <span role="img" aria-label={cellLabel(cell)} className="relative mx-auto block w-fit">
                       <StatusMark status={cell.status} perfect={cell.perfect === true} />
                       {cell.contest_entry ? <ContestEntryMark entry={cell.contest_entry} /> : null}
                       {cell.late ? <LateMark late={cell.late} /> : null}
@@ -405,65 +501,11 @@ export function ParticipantsTab({ classId, onChanged }: { classId: number; onCha
         </table>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-        <ul data-testid="participants-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          {(Object.keys(STATUS_LABEL) as GridCellStatus[]).map((status) => (
-            <li
-              key={status}
-              data-testid={`participants-legend-${status}`}
-              className="flex items-center gap-2 text-[12px] text-ink/60"
-            >
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <StatusMark status={status} />
-              </span>
-              {STATUS_LABEL[status]}
-            </li>
-          ))}
-          {hasPerfect ? (
-            <li data-testid="participants-legend-perfect" className="flex items-center gap-2 text-[12px] text-ink/60">
-              <Stamp kind="perfect" size="sm" />
-            </li>
-          ) : null}
-        </ul>
-        {hasLate ? (
-          <ul data-testid="participants-late-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <LateMark late="recommended" inline />
-              </span>
-              권장 기한 뒤 제출
-            </li>
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <LateMark late="deadline" inline />
-              </span>
-              마감 기한 뒤 제출
-            </li>
-          </ul>
-        ) : null}
-        {hasContestEntries ? (
-          <ul data-testid="participants-contest-legend" className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <ContestEntryMark entry="current" inline />
-              </span>
-              지금 공모전 제출
-            </li>
-            <li className="flex items-center gap-2 text-[12px] text-ink/60">
-              <span className="flex h-[15px] w-[15px] items-center justify-center">
-                <ContestEntryMark entry="entered" inline />
-              </span>
-              공모전에도 냈었음
-            </li>
-          </ul>
-        ) : null}
-      </div>
-
       {expelling ? (
         <ExpelDialog
           member={expelling}
           busy={busy}
-          onCancel={() => setExpelling(null)}
+          onCancel={cancelExpel}
           onConfirm={confirmExpel}
         />
       ) : null}

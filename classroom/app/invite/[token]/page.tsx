@@ -10,14 +10,17 @@
 // 흐르고 버튼이 가로 전체를 쓴다.
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { Badge, Card, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
 import { useMe } from "@/lib/auth/use-me";
 import { acceptCoInstructorInvite } from "@/lib/co-instructors/api";
+import { inviteView } from "@/lib/co-instructors/invite-view";
 import { useInvitePreview } from "@/lib/co-instructors/use-invite-preview";
+import { focusUnlessTaken } from "@/lib/dom/focus-unless-taken";
 import { checkDisplayNameForBannedWords } from "@/lib/members/display-name-check";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function CoInstructorInvitePage() {
   const params = useParams<{ token: string }>();
@@ -25,6 +28,12 @@ export default function CoInstructorInvitePage() {
   const preview = useInvitePreview(token);
   const me = useMe();
   const router = useRouter();
+  useClassroomTabTitle({
+    screenName: "강사 초대",
+    className: preview.status === "ready" ? preview.preview.class_name : null,
+  });
+  // 이름 칸이 처음 그려질 때 초점을 받는다 — 참여 화면과 같다(#1436-3).
+  const focusNameField = useCallback((input: HTMLInputElement | null) => focusUnlessTaken(input), []);
   const [displayName, setDisplayName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,6 +95,7 @@ export default function CoInstructorInvitePage() {
   }
 
   const info = preview.preview;
+  const view = inviteView(info);
 
   return (
     <Shell>
@@ -101,11 +111,11 @@ export default function CoInstructorInvitePage() {
         ) : null}
       </div>
 
-      {info.status !== "pending" ? (
+      {view === "unusable" ? (
         <Note tone="error">
           <span data-testid="invite-unusable">{info.status_message}</span>
         </Note>
-      ) : info.already_instructor ? (
+      ) : view === "already_instructor" ? (
         <Card className="p-5">
           <div className="flex flex-col gap-3">
             <span data-testid="invite-already-instructor" className="text-[13.5px]">
@@ -122,13 +132,13 @@ export default function CoInstructorInvitePage() {
         </Card>
       ) : me.status === "error" ? (
         <Card className="p-5">
-          <Link
+          <a
             href={`/login?next=${encodeURIComponent(`/invite/${token}`)}`}
             data-testid="invite-login-link"
             className={`${buttonClass("primary")} w-full`}
           >
             로그인하고 수락하기
-          </Link>
+          </a>
         </Card>
       ) : me.status === "loading" ? (
         <p data-testid="invite-login-status-loading" className="text-[13.5px] text-ink/45">
@@ -143,6 +153,7 @@ export default function CoInstructorInvitePage() {
               </label>
               <input
                 id="invite-display-name"
+                ref={focusNameField}
                 data-testid="invite-display-name-input"
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
@@ -159,7 +170,7 @@ export default function CoInstructorInvitePage() {
             <button
               type="submit"
               data-testid="invite-accept"
-              disabled={submitting || displayName.trim() === ""}
+              aria-disabled={(submitting || displayName.trim() === "") || undefined}
               className={`${buttonClass("primary")} w-full sm:w-auto sm:self-start`}
             >
               {submitting ? "수락하는 중..." : "공동 강사로 수락"}

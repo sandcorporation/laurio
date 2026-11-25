@@ -134,7 +134,7 @@ function RetryButton({
       <button
         type="button"
         onClick={handleClick}
-        disabled={pending}
+        aria-disabled={pending || undefined}
         data-testid="payout-retry-submit"
         className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
       >
@@ -263,7 +263,7 @@ function PayoutQueueContent() {
               <button
                 type="button"
                 onClick={queue.loadMore}
-                disabled={queue.loadingMore}
+                aria-disabled={queue.loadingMore || undefined}
                 data-testid="payout-queue-load-more"
                 className="w-fit border border-rule bg-surface px-3 py-1.5 text-[12.5px] text-ink disabled:opacity-50"
               >

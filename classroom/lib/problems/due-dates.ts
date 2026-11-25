@@ -39,12 +39,26 @@ export function formatDueDateTime(iso: string): string {
   return `${formatDay(iso)} (${WEEKDAY[d.getDay()]}) ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
+const SOON_MS = 60 * 60 * 1000;
+
+function isSameLocalDay(a: number, b: number): boolean {
+  const x = new Date(a);
+  const y = new Date(b);
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+}
+
+function formatClock(ms: number): string {
+  const d = new Date(ms);
+  return `${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
 /**
+ * `archived` — 보관된 클래스(읽기 전용, #1507 B)면 마감은 재촉할 일이 아니다 — 「곧 마감」·「마감 지남」·주의색을 끄고 흐린 「마감」만 남긴다.
  * `passed` — 참여자 화면이면 그 참여자가 이 문제를 통과했는가, 강사 화면(표·격자)이면 null.
  */
 export function describeDue(
   problem: DueFields,
-  { passed, now = Date.now() }: { passed: boolean | null; now?: number },
+  { passed, now = Date.now(), archived = false }: { passed: boolean | null; now?: number; archived?: boolean },
 ): DueDescription {
   const done = passed === true;
   let recommended: DueMark | null = null;
@@ -60,11 +74,15 @@ export function describeDue(
   let due: DueMark | null = null;
   if (problem.due_at) {
     const behind = Date.parse(problem.due_at) < now;
-    const attention = behind && passed === false;
+    const attention = !archived && behind && passed === false;
+    const dueMs = Date.parse(problem.due_at);
+    // 아직 안 지난 오늘 마감은 날짜 대신 시각으로, 한 시간 안이면 「곧 마감」으로 알린다.
+    const today = !behind && isSameLocalDay(dueMs, now);
+    const soon = !archived && !behind && dueMs - now <= SOON_MS;
     due = {
-      label: attention ? "마감 지남" : "마감",
-      text: formatDay(problem.due_at),
-      tone: attention ? "attention" : done || behind ? "faint" : "normal",
+      label: attention ? "마감 지남" : soon ? "곧 마감" : today && !archived ? "오늘 마감" : "마감",
+      text: today ? formatClock(dueMs) : formatDay(problem.due_at),
+      tone: attention ? "attention" : archived || done || behind ? "faint" : soon && passed === false ? "attention" : "normal",
       passed: behind,
     };
   }
@@ -138,3 +156,8 @@ export function dueOrderViolated(recommended: DueDraft, due: DueDraft): boolean 
 
 /** 서버가 순서 위반에 주는 문구 — 422 를 받으면 칸을 붉게 두는 데 쓴다. */
 export const DUE_ORDER_MESSAGE = "권장 기한은 마감보다 늦을 수 없습니다.";
+
+/** 권장 기한이 마감보다 늦을 때 칸 아래에 보이고 읽힐 문구 — 순서가 맞으면 null. */
+export function dueOrderNote(violated: boolean): string | null {
+  return violated ? "권장 기한이 마감보다 늦습니다. 권장 기한을 마감 이전으로 바꾸세요." : null;
+}

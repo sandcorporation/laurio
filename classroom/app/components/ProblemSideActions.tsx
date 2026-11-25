@@ -7,9 +7,10 @@
 // 다시 쳐야 열린다, 공개는 보일 이름을 받는다)은 예전 카드와 같다.
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { LiveTemplateRow } from "@/app/components/LiveTemplateRow";
 import { Badge, ErrorNote, FieldLabel, INPUT_CLASS, Note, buttonClass } from "@/app/components/ui";
 import { selectCopyTargets } from "@/lib/classes/copy-targets";
 import { isDeleteConfirmationTyped } from "@/lib/classes/delete-confirmation";
@@ -38,6 +39,7 @@ export function ProblemSideActions({
   reload: () => void;
 }) {
   const [open, setOpen] = useState<Panel | null>(null);
+  const deleteOpenRef = useRef<HTMLButtonElement>(null);
   const followsContest = problem.contest !== null;
   const toggle = (panel: Panel) => setOpen((prev) => (prev === panel ? null : panel));
 
@@ -69,7 +71,7 @@ export function ProblemSideActions({
             시도가 있어 지울 수 없습니다
           </span>
         ) : (
-          <button type="button" data-testid="delete-problem-open" aria-expanded={open === "delete"} onClick={() => toggle("delete")} className={`${LINK_CLASS} hover:text-error`}>
+          <button type="button" ref={deleteOpenRef} data-testid="delete-problem-open" aria-expanded={open === "delete"} onClick={() => toggle("delete")} className={`${LINK_CLASS} hover:text-error`}>
             문제 삭제
           </button>
         )}
@@ -80,7 +82,16 @@ export function ProblemSideActions({
         <PublishPanel classId={classId} problemId={problemId} problem={problem} reload={reload} />
       ) : null}
       {open === "delete" && problem.deletable && !isArchived ? (
-        <DeletePanel classId={classId} problemId={problemId} problem={problem} onCancel={() => setOpen(null)} />
+        <DeletePanel
+          classId={classId}
+          problemId={problemId}
+          problem={problem}
+          onCancel={() => {
+            setOpen(null);
+            // 취소 단추가 사라지며 초점이 BODY 로 떨어지지 않게 연 링크로 되돌린다.
+            deleteOpenRef.current?.focus();
+          }}
+        />
       ) : null}
     </div>
   );
@@ -148,7 +159,7 @@ function CopyPanel({ classId, problemId }: { classId: number; problemId: number 
           <button
             type="submit"
             data-testid="copy-problem-submit"
-            disabled={copyMutation.pending || targetClassId === ""}
+            aria-disabled={copyMutation.pending || targetClassId === ""}
             className={buttonClass("secondary")}
           >
             {copyMutation.pending ? "복사하는 중..." : "복사"}
@@ -183,9 +194,20 @@ function PublishPanel({
   // `lib/problem-templates/live-state.ts` 한 곳에 있고, 「방금 내렸다」는 폼을 막지 않는 배지로 따로 뜬다.
   const [liveTemplate, setLiveTemplate] = useState<LiveTemplate>(liveTemplateFrom(problem.published_template));
   const [justTakenDown, setJustTakenDown] = useState(false);
+  // 공개·내리기는 화면 조각을 통째로 바꾼다 — 누른 단추가 사라지니 초점을 새 조각의 첫 자리로 옮기고,
+  // 결과를 늘 있는 상태 영역에 적어 화면 낭독기가 읽게 한다(#1447 1-3).
+  const [announcement, setAnnouncement] = useState("");
+  const [focusRequest, setFocusRequest] = useState<"link" | "name" | null>(null);
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     setLiveTemplate(liveTemplateFrom(problem.published_template));
   }, [problem.published_template]);
+  useEffect(() => {
+    if (focusRequest === "link") linkRef.current?.focus();
+    if (focusRequest === "name") nameRef.current?.focus();
+    if (focusRequest) setFocusRequest(null);
+  }, [focusRequest, liveTemplate]);
 
   function handlePublish(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -202,6 +224,8 @@ function PublishPanel({
       onSuccess: (template) => {
         setLiveTemplate(liveTemplateFrom(template));
         setJustTakenDown(false);
+        setAnnouncement("템플릿으로 공개했습니다.");
+        setFocusRequest("link");
       },
     });
   }
@@ -214,36 +238,26 @@ function PublishPanel({
       onSuccess: (template) => {
         setLiveTemplate(liveTemplateFrom(template));
         setJustTakenDown(true);
+        setAnnouncement("템플릿을 내렸습니다.");
+        setFocusRequest("name");
       },
     });
   }
 
   return (
     <PanelFrame>
+      <p role="status" data-testid="publish-template-result" className="sr-only">
+        {announcement}
+      </p>
       {liveTemplate ? (
-        <div className="flex flex-col gap-2">
-          <span data-testid="publish-template-done" className="self-start">
-            <Badge tone="verified">공개됨</Badge>
-          </span>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/templates/${liveTemplate.shareCode}`}
-              data-testid="publish-template-share-link"
-              className="min-w-0 flex-1 break-all border border-rule bg-paper px-3 py-2 font-mono text-[12.5px] hover:underline"
-            >
-              /templates/{liveTemplate.shareCode}
-            </Link>
-            <button
-              type="button"
-              data-testid="publish-template-takedown"
-              onClick={handleTakedown}
-              disabled={takedownMutation.pending}
-              className={buttonClass("danger", "sm")}
-            >
-              {takedownMutation.pending ? "내리는 중..." : "내리기"}
-            </button>
-          </div>
-        </div>
+        <LiveTemplateRow
+          template={liveTemplate}
+          hrefBase="/templates"
+          testIdPrefix="publish-template"
+          linkRef={linkRef}
+          onTakedown={handleTakedown}
+          takingDown={takedownMutation.pending}
+        />
       ) : (
         <>
           {justTakenDown ? (
@@ -257,6 +271,7 @@ function PublishPanel({
             </label>
             <input
               id="publish-template-name"
+              ref={nameRef}
               data-testid="publish-template-name-input"
               value={publisherDisplayName}
               onChange={(event) => setPublisherDisplayName(event.target.value)}
@@ -266,7 +281,7 @@ function PublishPanel({
             <button
               type="submit"
               data-testid="publish-template-submit"
-              disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
+              aria-disabled={publishMutation.pending || publisherDisplayName.trim() === ""}
               className={buttonClass("secondary")}
             >
               {publishMutation.pending ? "공개하는 중..." : "템플릿으로 공개"}
@@ -304,6 +319,13 @@ function DeletePanel({
   const router = useRouter();
   const [typedTitle, setTypedTitle] = useState("");
   const deleteMutation = useMutationRequest();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // 열리면 제목 입력칸으로 — 경고는 입력칸의 설명으로 묶여 있어 초점이 가야 읽힌다.
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.scrollIntoView({ block: "center" });
+  }, []);
 
   function handleDelete() {
     void deleteMutation.run(() => deleteProblem(classId, problemId), {
@@ -315,7 +337,7 @@ function DeletePanel({
   return (
     <PanelFrame>
       <Note tone="warning">
-        <span data-testid="delete-problem-warning">
+        <span id="delete-problem-warning" data-testid="delete-problem-warning">
           지우면 체크리스트 항목 {problem.checklist_items.length}개가 함께 사라지고 되돌릴 수 없습니다.
         </span>
       </Note>
@@ -326,7 +348,9 @@ function DeletePanel({
       </label>
       <input
         id="delete-problem-confirm-input"
+        ref={inputRef}
         data-testid="delete-problem-confirm-input"
+        aria-describedby="delete-problem-warning"
         value={typedTitle}
         onChange={(event) => setTypedTitle(event.target.value)}
         className={INPUT_CLASS}
@@ -337,7 +361,7 @@ function DeletePanel({
           type="button"
           data-testid="delete-problem-confirm"
           onClick={handleDelete}
-          disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
+          aria-disabled={!isDeleteConfirmationTyped(problem.title, typedTitle) || deleteMutation.pending}
           className={buttonClass("dangerFilled", "sm")}
         >
           {deleteMutation.pending ? "지우는 중..." : "정말 삭제"}
@@ -350,7 +374,7 @@ function DeletePanel({
             deleteMutation.setError(null);
             onCancel();
           }}
-          disabled={deleteMutation.pending}
+          aria-disabled={deleteMutation.pending}
           className={buttonClass("secondary", "sm")}
         >
           취소

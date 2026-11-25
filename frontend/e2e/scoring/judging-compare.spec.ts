@@ -170,9 +170,19 @@ test("Award 뒤 Sponsor가 인수를 확인하면 Escrow가 해제된다", async
   await page.goto(`/console/contests/${seeded.judging.id}/judge`);
   await expect(page.getByTestId("comparison-matrix")).toBeVisible();
 
+  // 확정 확인: 열면 「취소」가 초점을 받고 안내를 읽으며, 취소하면 「당선작으로 확정」 단추로 돌아온다(#1517).
+  await page.getByTestId(`award-button-${submission.id}`).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId(`award-cancel-${submission.id}`)).toBeFocused();
+  await expect(page.getByTestId(`award-cancel-${submission.id}`)).toHaveAccessibleDescription(/당선작으로 확정하시겠습니까/);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId(`award-button-${submission.id}`)).toBeFocused();
+
   await page.getByTestId(`award-button-${submission.id}`).click();
   await page.getByTestId(`award-confirm-${submission.id}`).click();
   await expect(page.getByTestId("award-success")).toBeVisible();
+  // 확정 단추가 사라진 뒤 초점은 「당선 확정」 표시가 받는다.
+  await expect(page.getByTestId(`awarded-badge-${submission.id}`)).toBeFocused();
 
   // Award 직후 인수 확인 화면으로 간다 — 「내 공모전」의 「인수 확인하러
   // 가기」 링크가 실제로 여기로 보낸다(use-my-contests.ts의
@@ -181,6 +191,15 @@ test("Award 뒤 Sponsor가 인수를 확인하면 Escrow가 해제된다", async
   await expect(page.getByTestId("handover-pending-notice")).toBeVisible();
   // 자동 해제가 있다는 사실을 숨기지 않는다 — 방치해도 상금이 묶이지 않는다.
   await expect(page.getByTestId("handover-deadline-notice")).toBeVisible();
+
+  // 인수 확인: 열면 「취소」가 초점을 받고 경고를 읽으며, 취소하면 「인수 확인」 단추로 돌아온다(#1517).
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.getByTestId("handover-accept-button").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("handover-accept-cancel")).toBeFocused();
+  await expect(page.getByTestId("handover-accept-cancel")).toHaveAccessibleDescription(/되돌릴 수 없습니다/);
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("handover-accept-button")).toBeFocused();
 
   await page.getByTestId("handover-accept-button").click();
   await expect(page.getByTestId("handover-accept-confirm-notice")).toBeVisible();

@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { useTablist } from "@/app/components/use-tablist";
 import { Badge, Card, EmptyState, ErrorNote, Num, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import {
   fetchMyClassTemplates,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/class-templates/api";
 import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import { fetchMyProblemTemplates, takedownProblemTemplate, type ProblemTemplateRow } from "@/lib/problem-templates/api";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type Kind = "problem" | "class";
 
@@ -29,6 +31,8 @@ type ClassState =
 
 export default function MyTemplatesPage() {
   const [kind, setKind] = useState<Kind>("problem");
+  const tablist = useTablist(kind);
+  useClassroomTabTitle({ screenName: "내가 올린 템플릿" });
 
   const [problemState, setProblemState] = useState<ProblemState>({ status: "loading" });
   const [classState, setClassState] = useState<ClassState>({ status: "loading" });
@@ -98,7 +102,7 @@ export default function MyTemplatesPage() {
       />
 
       <div
-        role="tablist"
+        {...tablist.listProps}
         aria-label="템플릿 종류"
         className="mb-5 flex items-end gap-0.5 border-b border-rule"
       >
@@ -111,8 +115,7 @@ export default function MyTemplatesPage() {
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={kind === key}
+            {...tablist.tabProps(key)}
             data-testid={testId}
             onClick={() => setKind(key)}
             className={
@@ -126,6 +129,7 @@ export default function MyTemplatesPage() {
         ))}
       </div>
 
+      <div {...tablist.panelProps()}>
       {takedownError ? (
         <div className="mb-3">
           <ErrorNote>
@@ -286,6 +290,7 @@ export default function MyTemplatesPage() {
           </ul>
         </Card>
       )}
+      </div>
     </PageShell>
   );
 }

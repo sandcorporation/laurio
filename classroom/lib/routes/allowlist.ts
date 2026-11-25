@@ -1,6 +1,6 @@
 // 의도적으로 인바운드 링크가 없는 라우트(#166) — 강의실 몫. "/"는 header
-// brand가, "/login"은 middleware.ts의 `new URL("/login", ...)`가 각각 링크를
-// 낸다.
+// brand가 링크를 낸다. "/login"은 화면이 아니라 라우트 핸들러(app/login/route.ts,
+// #1388)라 라우트 목록에 들지 않는다.
 import type { OrphanAllowlistEntry } from "@codemit/route-audit";
 
 export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
@@ -28,6 +28,14 @@ export const ORPHAN_ALLOWLIST: OrphanAllowlistEntry[] = [
       "공유 코드를 지운 주소를 친 사람만 밟는다(#350) — 목록 링크는 전부 " +
       "/class-templates/<공유코드>로 이어지고, 이 라우트는 /templates?kind=class로 " +
       "리다이렉트만 한다. 이 앱 안의 <Link>가 이 라우트로 이어질 이유가 없다.",
+  },
+  {
+    route: "/classes/[id]/scoring-key",
+    reason:
+      // SCREEN-LANGUAGE-EXCEPTION: route-audit 도구가 읽는 개발자용 근거 문서이지
+      // 사용자에게 렌더링되는 화면 문자열이 아니다 — 이슈 번호가 바로 그 근거다.
+      "알림 링크 도착점 — 서버 알림 목록이 만든 주소(lib/notifications/link.ts)로만 연다(#1426). " +
+      "열 때 역할을 읽어 설정이나 클래스 화면으로 리다이렉트만 한다.",
   },
   {
     route: "/classes/[id]/members",

@@ -31,8 +31,10 @@ test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다�
   });
 
   test("/login·/api/**·/healthz는 세션 없이도 가드에 걸리지 않는다", async ({ request }) => {
-    const login = await request.get("/login");
-    expect(login.status()).toBe(200);
+    // /login 은 화면 없이 공개 앱 로그인으로 307 한다(#1388) — 미들웨어가 막았다면
+    // Location 이 강의실 자신의 `/login?next=` 일 것이다.
+    const login = await request.get("/login", { maxRedirects: 0 });
+    expect(login.status()).toBe(307);
 
     const health = await request.get("/healthz");
     expect([200, 503]).toContain(health.status());
@@ -43,6 +45,34 @@ test.describe("미들웨어 가드 — 콘텐츠가 그려지기 전에 리다�
     const proxied = await request.get("/api/backend/anything");
     expect(proxied.status()).not.toBe(302);
     expect(proxied.status()).not.toBe(307);
+  });
+});
+
+test.describe("/login — 화면 없이 공개 앱 로그인으로 보낸다 (#1388)", () => {
+  // 강의실 시험은 다른 오리진(공개 앱)을 따라가지 않는다 — 이 조각에서 강의실이 짓는
+  // 공개 앱 주소로는 닿지 못한다(docs/ops/frontend.md). `Location` 만 본다.
+  test("307 이고 Location 은 공개 앱 /login 이며 next_origin·next 를 싣는다", async ({
+    request,
+    baseURL,
+  }) => {
+    const res = await request.get(`/login?next=${encodeURIComponent("/join/abc")}`, {
+      maxRedirects: 0,
+    });
+    expect(res.status()).toBe(307);
+    expect(res.headers()["cache-control"]).toContain("no-store");
+    const location = new URL(res.headers()["location"]!);
+    expect(location.pathname).toBe("/login");
+    expect(location.origin).not.toBe(new URL(baseURL!).origin);
+    expect(location.searchParams.get("next")).toBe("/join/abc");
+    expect(location.searchParams.get("next_origin")).toBeTruthy();
+  });
+
+  test("바깥 주소를 가리키는 next 는 / 로 바꿔 싣는다", async ({ request }) => {
+    const res = await request.get(`/login?next=${encodeURIComponent("//evil.example")}`, {
+      maxRedirects: 0,
+    });
+    expect(res.status()).toBe(307);
+    expect(new URL(res.headers()["location"]!).searchParams.get("next")).toBe("/");
   });
 });
 
@@ -73,7 +103,7 @@ test.describe("죽은 세션 — 공유 BFF 클라이언트가 로그인으로 �
   // 손으로 쓴 클라이언트가 "찾을 수 없습니다"로만 보여줬다 — 아무도 로그인
   // 으로 보내지 않았다(#461 문제 진술). 지금은 공유 BFF 클라이언트
   // (`@codemit/bff-client`)가 그 자리를 대신해 곧장 로그인으로 보낸다.
-  test("쿠키는 있지만 죽은 세션으로 열면 강의실 자신의 /login 을 거쳐 공개 앱 로그인으로 간다", async ({
+  test("쿠키는 있지만 죽은 세션으로 열면 강의실 자신의 /login 을 거쳐 공개 앱 로그인으로 보낸다", async ({
     page,
   }) => {
     // 먼저 정상 세션을 세워 강의실이 실제로 화면을 그린다는 것을 확인한다
@@ -105,17 +135,31 @@ test.describe("죽은 세션 — 공유 BFF 클라이언트가 로그인으로 �
     // 조회든 변경이든 같은 한 경로 — 이 앱 자신의 `/login` — 로 보낸다.
     // 거기서 공개 앱 로그인으로 다시 보내며 돌아올 자리(`next_origin`·`next`)
     // 를 함께 싣는다(#297 후속·#334) — 로그인을 마치면 이 화면으로 돌아온다.
+    //
+    // 강의실 `/login` 은 공개 앱으로 307 한다(#1388) — 이 조각에서는 그 오리진에 닿지
+    // 못하므로 따라가지 않는다. BFF 가 이동한 강의실 `/login?next=…` 요청을 붙잡아 그
+    // 307 의 `Location` 으로 끝을 판정하고, 브라우저에는 빈 응답을 준다.
+    let resolveLocation!: (value: string) => void;
+    const firstLocation = new Promise<string>((resolve) => (resolveLocation = resolve));
+    await page.route(
+      (url) => url.origin === new URL(classroomUrl).origin && url.pathname === "/login",
+      async (route) => {
+        const response = await route.fetch({ maxRedirects: 0 });
+        resolveLocation(`${response.status()} ${response.headers()["location"] ?? ""}`);
+        await route.fulfill({ status: 200, contentType: "text/plain", body: "" });
+      },
+    );
     await page.goto("/");
     // 이동 사건(`waitForURL`)이 아니라 도착한 주소를 본다(2026-10-02). 이 화면은 요청
     // 둘(내 클래스·알림 벨)이 함께 401 을 받아 같은 로그인 주소로 두 번 이동하는데,
     // 두 번째가 첫 번째를 취소해 `waitForURL` 이 `ERR_ABORTED` 로 떨어졌다(80번에 1번).
     // 이 시험이 고정하는 것은 「결국 로그인으로 간다」다.
     await expect(page).toHaveURL(/\/login\?next=/);
-    const loginLink = page.getByTestId("classroom-login-link");
-    await expect(loginLink).toBeVisible();
-    const href = await loginLink.getAttribute("href");
-    expect(href).toContain("/login?");
-    expect(href).toContain("next_origin=");
-    expect(href).toContain("next=");
+    const [status, location] = (await firstLocation).split(" ");
+    expect(status).toBe("307");
+    const publicLogin = new URL(location!);
+    expect(publicLogin.pathname).toBe("/login");
+    expect(publicLogin.searchParams.get("next_origin")).toBeTruthy();
+    expect(publicLogin.searchParams.get("next")).toBe("/");
   });
 });

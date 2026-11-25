@@ -264,13 +264,27 @@ def parse_build_args(text: str) -> dict[str, str]:
     return args
 
 
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+_git_cache: dict[tuple[str, tuple[str, ...]], str] = {}
+
+
 def _git(*args: str) -> str:
-    return subprocess.run(
+    """읽기 전용 git 한 번. 객체 이름이 커밋 해시 전체인 호출은 같은 프로세스 안에서 답이 바뀌지 않으니
+    한 번만 부른다(#1419) — 서비스 일곱이 `.dockerignore`·`packages`·잠금 파일을 같이 읽어, 배포 계획 한 번에
+    git 150번이 서른 번 남짓으로 준다. macOS 의 git 은 실행마다 CPU 3~8ms 라 이 수가 시험 CPU 한도를 갈랐다."""
+    key = (os.getcwd(), args)
+    pinned = any(_FULL_SHA.match(a) for a in args)
+    if pinned and key in _git_cache:
+        return _git_cache[key]
+    out = subprocess.run(
         ["git", "-c", f"safe.directory={os.getcwd()}", *args],
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+    if pinned:
+        _git_cache[key] = out
+    return out
 
 
 def git_objects(paths: list[str], rev: str = "HEAD") -> dict[str, str]:

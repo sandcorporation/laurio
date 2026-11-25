@@ -80,7 +80,7 @@ function CancelCell({
         <button
           type="button"
           data-testid={`certificate-cancel-confirm-${id}`}
-          disabled={step === "sending"}
+          aria-disabled={(step === "sending") || undefined}
           onClick={confirm}
           className="border border-attention bg-surface px-2.5 py-1 text-[12px] text-attention disabled:opacity-50"
         >
@@ -88,7 +88,7 @@ function CancelCell({
         </button>
         <button
           type="button"
-          disabled={step === "sending"}
+          aria-disabled={(step === "sending") || undefined}
           onClick={() => setStep("idle")}
           className="border border-rule bg-surface px-2.5 py-1 text-[12px] text-ink disabled:opacity-50"
         >

@@ -2,7 +2,12 @@
 // format.ts)과 같은 이유로 백엔드 SMS 렌더러(`notifications/rendering.py`)와
 // 분리돼 있다 — 강의실 알림은 애초에 SMS로 안 나가므로(#301) 그 렌더러가
 // 이 유형들의 문구를 아예 갖고 있지도 않다. 이 파일이 유일한 문구 출처다.
+import { withLate } from "../problems/due-dates";
+
 import type { NotificationRow } from "./api";
+
+/** 알림 목록이 비었을 때의 한 줄 — 강사인 클래스가 있든 없든 같다(#1389). */
+export const EMPTY_NOTIFICATIONS_TEXT = "아직 알림이 없습니다.";
 
 export function describeNotification(notification: NotificationRow): string {
   const context = (notification.context ?? {}) as Record<string, unknown>;
@@ -16,13 +21,19 @@ export function describeNotification(notification: NotificationRow): string {
         typeof context.attempt_number === "number" ? context.attempt_number : null;
       const passed = context.passed === true;
       const attemptLabel = attemptNumber !== null ? `${attemptNumber}번째 시도` : "제출";
-      return `'${className}' 클래스 '${problemTitle}' 문제 ${attemptLabel} 채점 결과 — ${
-        passed ? "통과" : "미통과"
-      }.`;
+      const late = context.late === "deadline" || context.late === "recommended" ? context.late : null;
+      return `'${className}' 클래스 '${problemTitle}' 문제 ${attemptLabel} 채점 결과 — ${withLate(
+        passed ? "통과" : "미통과",
+        late,
+      )}.`;
     }
     case "classroom_scoring_key_rejected": {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
       return `'${className}' 클래스의 채점 키가 거부되어 채점이 멈췄습니다 — 클래스 설정에서 새 키를 저장해 주세요.`;
+    }
+    case "classroom_scoring_key_missing": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      return `'${className}' 클래스에 채점 연결이 없어 참여자의 제출이 채점되지 않고 있습니다 — 클래스 설정에서 채점 키를 넣으면 밀린 제출부터 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.`;
     }
     case "classroom_scoring_quota_exhausted": {
       const className = typeof context.class_name === "string" ? context.class_name : "클래스";
@@ -68,6 +79,10 @@ export function describeNotification(notification: NotificationRow): string {
         typeof context.requester_display_name === "string" && context.requester_display_name
           ? `${context.requester_display_name}님이`
           : "소유자가";
+      // 문구는 받은 때의 것이다 — 서버가 요청이 끝났다고 알려 주면 수락·거절을 청하지 않고 어떻게 끝났는지 말한다(#1435·#1441).
+      // 어느 요청인지 모르면(`unknown`) 받은 때의 기한을 말하지 않고 요청 카드로 보낸다(#1459 ①).
+      const ended = endedTransferText(notification.transfer_status, className);
+      if (ended !== null) return ended;
       const until =
         typeof context.expires_at === "string" ? `${formatShortDateTime(context.expires_at)}까지` : "7일 안에";
       return `${requester} '${className}' 클래스의 소유권을 나에게 넘기려 합니다 — 넘겨받으면 지금 채점 키가 비워져 내 채점 키를 넣어야 채점이 이어집니다. ${until} 클래스 화면에서 수락하거나 거절해 주세요.`;
@@ -82,12 +97,40 @@ export function describeNotification(notification: NotificationRow): string {
       const recipient = recipientSubject(context);
       return `${recipient} '${className}' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.`;
     }
+    case "classroom_member_expelled": {
+      const className = typeof context.class_name === "string" ? context.class_name : "클래스";
+      return `'${className}' 클래스에서 내보내졌습니다 — 새로 제출할 수 없고, 지난 시도와 채점 결과는 그대로 볼 수 있습니다.`;
+    }
     case "classroom_feedback_status_changed": {
       const label = typeof context.status_label === "string" ? context.status_label : "";
       return label ? `보내신 제보가 '${label}' 상태로 바뀌었습니다.` : "보내신 제보의 상태가 바뀌었습니다.";
     }
     default:
       return "새 알림이 있습니다.";
+  }
+}
+
+function endedTransferText(status: NotificationRow["transfer_status"], className: string): string | null {
+  const subject = `'${className}' 클래스의 소유권 이전 요청`;
+  switch (status) {
+    case "accepted":
+      return `${subject}을 수락했습니다 — 이제 내가 이 클래스의 소유자입니다.`;
+    case "declined":
+      return `${subject}을 거절했습니다 — 소유권은 그대로입니다.`;
+    case "cancelled":
+      return `${subject}이 취소됐습니다 — 요청한 쪽이 거두었습니다.`;
+    case "expired":
+      return `${subject}이 기한이 지나 만료됐습니다.`;
+    // 요청이 끝났는데 어떻게 끝났는지는 모른다(#1448) — 받는 사람이 떠나 요청이 지워졌거나, 요청에 잇지 못한 옛
+    // 알림인데 그 클래스에 나에게 온 대기 요청이 없다.
+    case "gone":
+      return `${subject}은 이미 끝났습니다 — 더 답할 것이 없습니다.`;
+    // 요청에 잇지 못한 옛 알림인데 그 클래스에 나에게 온 대기 요청이 있다(#1459 ①) — 그것이 이 알림의 요청인지
+    // 모른다. 끝났다고 단정하지 않고, 알림 줄이 가는 클래스 화면의 요청 카드로 보낸다.
+    case "unknown":
+      return `'${className}' 클래스에 나에게 온 소유권 이전 요청이 지금 대기 중입니다 — 이 알림이 그 요청인지는 알 수 없으니 클래스 화면의 요청 카드에서 확인하고 답해 주세요.`;
+    default:
+      return null;
   }
 }
 

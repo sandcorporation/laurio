@@ -9,14 +9,19 @@
 // 실제로 그리는 일은 `ProblemParticipantView`(#325)가 한다 — 문제 만들기/
 // 편집의 「미리보기」 탭이 **같은 조각**을 쓴다. 이 파일은 데이터를 불러오고
 // 제출 요청을 보내는 배선만 맡는다.
+import { returnAction } from "@/lib/submissions/return-focus";
+import { submitRejectedAsBlocked } from "@/lib/submissions/submit-blocked";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
+
+import type { SubmissionFormat } from "@/lib/problems/api";
 
 import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 
-import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
+import { AccessNotice } from "@/app/components/AccessNotice";
+import { ErrorNote, Note, PageShell, buttonClass } from "@/app/components/ui";
 import { ContestEntryFields } from "@/app/components/ContestEntryFields";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
 import { useMyQuality } from "@/lib/quality/use-quality";
@@ -38,19 +43,13 @@ function sourceTargetRef(problemId: number, userId: number): string {
   return `classroom-submission:${problemId}:${userId}:source`;
 }
 
-// 문제 목록으로 돌아가는 길(#328) — 이 화면 전에는 브랜드를 눌러도(참여자에게
-// 빈 강사 홈으로 가거나) 브라우저 뒤로 가기뿐이었다. `/mine`은 강사 전용
-// 상세와 달리 참여자에게 실제로 존재하는 화면이라 안전하게 돌아갈 수 있다.
-//
-// **강사가 「학생 화면으로」 연 경우에는 그 주소가 강사에게 없다**(#429) —
-// `/problems/mine`은 `ClassMember`를 요구하는데 강사는 보통 그 클래스의
-// 참여자가 아니라 이 링크를 눌러도 404로 되돌아온다. 그래서 `href`를 받는
-// 자리를 열어 두고, 강사가 보고 있을 때는 문제 편집 화면으로 돌려보낸다.
-function BackToMyProblems({ classId, href }: { classId: number; href?: string }) {
+// 조회에 실패한 화면에서 문제 목록으로 돌아가는 길(#328). 불러온 화면의 링크는
+// `ProblemParticipantView`가 그리며, 강사가 볼 때는 클래스 상세로 간다(#429).
+function BackToMyProblems({ classId }: { classId: number }) {
   return (
     <p className="mb-4">
       <Link
-        href={href ?? `/classes/${classId}/problems/mine`}
+        href={`/classes/${classId}/problems/mine`}
         data-testid="my-problem-back-link"
         className={buttonClass("secondary", "sm")}
       >
@@ -76,6 +75,8 @@ export default function ProblemSubmitPage() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // 낸 것이 가는 중이면 참 — `submitting` 상태는 다음 렌더 전에는 바뀌지 않아 연타를 못 막는다(#1390).
+  const submitInFlight = useRef(false);
 
   const targetRef =
     me.status === "ready" ? sourceTargetRef(problemId, me.userId) : null;
@@ -99,6 +100,39 @@ export default function ProblemSubmitPage() {
     if (offersContestEntry) void loadEntryForm();
   }, [offersContestEntry, loadEntryForm]);
 
+  // 폼이 보이던 화면이 다시 읽은 끝에 찾을 수 없음 안내로 바뀌면 폼과 함께 초점이 사라진다 — 안내가 받는다(#1431).
+  const [hadForm, setHadForm] = useState(false);
+  // 강사로(학생 화면) 보던 중이었는지 — 사라진 이유를 문제가 아니라 강사 권한으로 말하게 한다(#1471 ③).
+  const [wasInstructor, setWasInstructor] = useState(false);
+  if (state.status === "ready" && (state.data.viewing_as_instructor === true) !== wasInstructor) {
+    setWasInstructor(state.data.viewing_as_instructor === true);
+  }
+  useEffect(() => {
+    if (state.status === "ready") setHadForm(true);
+  }, [state.status]);
+
+  // 고르던 형식 — 숨김 안내로 화면이 바뀌면 폼이 사라지니 여기 들고 있다가 돌아올 때 펼친 채로 돌려준다(#1528).
+  const [chosenFormat, setChosenFormat] = useState<SubmissionFormat | null>(null);
+  // 숨김 안내로 바뀌었다가 돌아오면 알리고, 초점이 안내와 함께 사라졌을 때(body)만 입력하던 칸이나 제목으로 옮긴다.
+  const lostForm = useRef(false);
+  const [reopenedNote, setReopenedNote] = useState("");
+  useEffect(() => {
+    const active = document.activeElement;
+    const action = returnAction({
+      status: state.status,
+      lost: lostForm.current,
+      hadForm,
+      reason: state.status === "ready" ? state.data.submit_blocked_reason : null,
+      focusAtBody: active === null || active === document.body,
+      hasDraft: repositoryUrl.trim() !== "",
+    });
+    lostForm.current = action.lost;
+    if (action.note !== null) setReopenedNote(action.note);
+    if (action.focus === "blocked-note") document.querySelector<HTMLElement>("[data-blocked-note]")?.focus();
+    else if (action.focus === "draft") document.querySelector<HTMLElement>("#repository-url")?.focus();
+    else if (action.focus === "title") document.querySelector<HTMLElement>("[data-testid=my-problem-title]")?.focus();
+  }, [state, hadForm]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useClassroomTabTitle({
     screenName: "문제 제출",
     className: state.status === "ready" ? state.data.class_name : undefined,
@@ -108,6 +142,9 @@ export default function ProblemSubmitPage() {
   if (state.status === "loading") {
     return (
       <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
         <p data-testid="my-problem-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
       </PageShell>
     );
@@ -116,10 +153,19 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <BackToMyProblems classId={classId} />
-        <h1 data-testid="my-problem-not-found" className="text-[22px] font-semibold">
-          문제를 찾을 수 없습니다
-        </h1>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
+        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} hadAccess={hadForm} wasInstructor={wasInstructor} />
+        {hadForm && repositoryUrl.trim() !== "" ? (
+          <div className="mt-4">
+            <Note tone="warning">
+              <span data-testid="my-problem-lost-draft">
+                적던 저장소 주소: <span className="break-all">{repositoryUrl.trim()}</span>
+              </span>
+            </Note>
+          </div>
+        ) : null}
       </PageShell>
     );
   }
@@ -127,6 +173,9 @@ export default function ProblemSubmitPage() {
   if (state.status === "error") {
     return (
       <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
         <BackToMyProblems classId={classId} />
         <ErrorNote>
           <span data-testid="my-problem-error">문제 정보를 불러오지 못했습니다.</span>
@@ -143,6 +192,7 @@ export default function ProblemSubmitPage() {
     max_source_asset_bytes: maxSourceAssetBytes,
     instructor_problem_status: instructorProblemStatus,
     viewing_as_instructor: viewingAsInstructor,
+    viewer_role: viewerRole,
   } = state.data;
   // 강사가 보는 중이라고 해서 못 내는 것은 아니다(2026-09-17) — 열린 문제면
   // 백엔드가 `submit_blocked_reason`을 비워 내려주고, 그때는 참여자와 같은
@@ -151,6 +201,17 @@ export default function ProblemSubmitPage() {
 
   const entryOn = entryForm !== null && entryState !== null && entryState.on;
   const entryBlocked = entryOn ? entryBlockedReason(entryForm, entryState) : null;
+
+  /** 버튼과 zip 고르기가 함께 쓰는 문 — 하나가 끝나기 전의 다음 것은 버린다(낸 만큼 시도가 쌓인다). */
+  async function runOneSubmission(send: () => Promise<void>) {
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
+    try {
+      await send();
+    } finally {
+      submitInFlight.current = false;
+    }
+  }
 
   async function submitValue(
     submissionFormat: "source" | "repository",
@@ -169,9 +230,15 @@ export default function ProblemSubmitPage() {
     });
     if (result.ok) {
       setRepositoryUrl("");
+      // 낸 뒤에는 다시 엶 안내가 낡았다 — 걷는다(#1532 ①).
+      setReopenedNote("");
       reload();
       // 공모전에 냈으면 「이미 낸 제출」이 생겼다 — 칸을 새로 읽어 다음 시도의 확인을 받는다.
       if (contestEntry !== null) void loadEntryForm();
+    } else if (submitRejectedAsBlocked(result)) {
+      // 내보내짐·숨김·보관 — 새로 고친 뒤와 같은 상태로: 폼이 사라지고 이유 한 줄이 남는다(#1422).
+      setSubmitError(null);
+      reload();
     } else {
       setSubmitError(result.detail);
     }
@@ -188,10 +255,10 @@ export default function ProblemSubmitPage() {
       setSubmitError(entryBlocked);
       return;
     }
-    // 끝의 .git·슬래시 같은 것은 정리된 주소로 보낸다 — 거부할 모양이면 버튼이 이미 잠겨 있다.
+    // 끝의 .git·슬래시 같은 것은 누른 시점의 값을 정리해 보낸다 — 빈 칸과 거부할 모양은 칸 아래 안내가 말한다.
     const repository = checkGithubRepositoryUrl(repositoryUrl);
     if (repository === null || !repository.ok) return;
-    await submitValue("repository", repository.url);
+    await runOneSubmission(() => submitValue("repository", repository.url));
   }
 
   async function handleSourceFile(event: ChangeEvent<HTMLInputElement>) {
@@ -203,20 +270,32 @@ export default function ProblemSubmitPage() {
       setSubmitError(entryBlocked);
       return;
     }
-    try {
-      const uploaded = await upload(file);
-      await submitValue("source", uploaded.objectKey, uploaded.contentType);
-    } catch {
-      // useSourceUpload가 이미 uploadState.error에 이유를 남긴다.
-    }
+    await runOneSubmission(async () => {
+      try {
+        const uploaded = await upload(file);
+        await submitValue("source", uploaded.objectKey, uploaded.contentType);
+      } catch {
+        // useSourceUpload가 이미 uploadState.error에 이유를 남긴다.
+      }
+    });
   }
 
   return (
     <PageShell>
+      <p role="status" data-testid="submit-reopened-note" className={reopenedNote ? "mb-3 text-[13px] text-ink/70" : "sr-only"}>
+        {reopenedNote}
+      </p>
       <ProblemParticipantView
+        initialFormat={chosenFormat}
+        onFormatChange={setChosenFormat}
         quality={quality}
         interactive
         backHref={viewingAsInstructor ? `/classes/${classId}` : `/classes/${classId}/problems/mine`}
+        backLabel={viewingAsInstructor ? "클래스로" : "문제 목록으로"}
+        instructorLinks={{
+          editHref: `/classes/${classId}/problems/${problemId}`,
+          submissionsHref: `/classes/${classId}/problems/${problemId}/submissions`,
+        }}
         eyebrow={className}
         title={problem.title}
         titleTestId="my-problem-title"
@@ -237,6 +316,7 @@ export default function ProblemSubmitPage() {
         zipGitHistoryWarning={problem.zip_git_history_warning !== null}
         submissions={submissions}
         viewingAsInstructor={viewingAsInstructor}
+        viewerRole={viewerRole}
         instructorProblemStatus={instructorProblemStatus}
         submitBlockedReason={submitBlockedReason}
         maxSourceAssetBytes={maxSourceAssetBytes}

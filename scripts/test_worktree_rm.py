@@ -54,6 +54,9 @@ class Base(unittest.TestCase):
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "FAKE": str(self.fake),
             "CODEMIT_DEV_SERVER_DIR": str(self.tmp / "state"),
+            # dev-env.sh 의 칸 예약(#1411)이 이 머신의 실제 예약에 닿지 않게 한다.
+            "HOME": str(self.tmp / "home"),
+            "XDG_STATE_HOME": str(self.tmp / "xdg"),
             "TMPDIR": str(self.tmp),
         }
         self.env.pop("CODEMIT_DEV_OFFSET", None)
@@ -71,7 +74,8 @@ class Base(unittest.TestCase):
         return log.read_text().splitlines() if log.exists() else []
 
     def copy_tree(self, root: Path) -> None:
-        for rel in ("scripts/worktree-rm.sh", "scripts/dev-server.sh", "docker/dev-stack-orphans.sh", "docker/dev-env.sh"):
+        helpers = [f"docker/{p.name}" for p in (REPO / "docker").glob("dev-*.sh")]
+        for rel in ("scripts/worktree-rm.sh", "scripts/dev-server.sh", *helpers):
             dst = root / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text((REPO / rel).read_text())
@@ -100,6 +104,19 @@ class WorktreeRm(Base):
         self.assertIn("compose -p codemit-dev-6 down --remove-orphans", downs)
         self.assertFalse(any("codemit-dev-7" in d for d in downs))
         self.assertEqual(list((self.tmp).glob("worktree-rm.*")), [])  # 임시 사본은 치운다
+
+    def test_releases_only_the_slot_reservations_of_that_worktree(self) -> None:
+        wt = self.make_worktree("t1")
+        other = self.make_worktree("t2")
+        self.stacks()
+        slots = self.tmp / "xdg" / "codemit" / "dev-slots"
+        slots.mkdir(parents=True)
+        (slots / "3").write_text(f"{wt}\n")
+        (slots / "4").write_text(f"{other}\n")
+        r = subprocess.run(["bash", str(wt / "scripts" / "worktree-rm.sh"), str(wt), "t1"], cwd=wt, capture_output=True, text=True, env=self.env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse((slots / "3").exists())
+        self.assertEqual((slots / "4").read_text(), f"{other}\n")
 
     def test_refuses_the_main_worktree(self) -> None:
         wt = self.make_worktree("t1")

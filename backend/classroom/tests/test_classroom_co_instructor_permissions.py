@@ -350,6 +350,7 @@ def _instructor_route_names() -> set[str]:
 #: 강사 판정을 부르지만 클래스 하나의 강사 라우트가 아닌 것 — 표 밖에 둔다.
 _NOT_A_CLASS_ROUTE = {
     "list_joined_classes": "참여자 목록에서 가르치는 클래스를 빼려고 부른다 — 클래스 하나를 여는 문이 아니다.",
+    "list_former_instructor_classes": "자기 기록(수락한 초대·이전)에서 지금 가르치지 않는 클래스를 가려 번호만 준다 — 클래스 하나에 대한 권한이 아니다(#1465 2).",
 }
 
 

@@ -31,6 +31,8 @@ from django.db import connections, transaction
 from django.db.models import Count, Max
 from django.http import HttpRequest, StreamingHttpResponse
 from django.utils import timezone
+from notifications.models import NotificationType
+from notifications.services import notify_safely
 from ninja import Router
 from ninja.errors import HttpError
 
@@ -57,6 +59,7 @@ from submissions.models import (
 )
 from submissions.scoring_basis import PLATFORM_FAILURE_MODEL_VERSION
 
+from .departures import is_left, left_member_ids
 from .models import (
     ANTHROPIC_KEY_FIELDS,
     OPENAI_KEY_FIELDS,
@@ -68,7 +71,10 @@ from .models import (
     ClassroomScore,
     ClassroomScoreCorrection,
     ClassroomSubmission,
+    ClassScoringKeyMissingAlert,
     ClassTemplate,
+    CoInstructorInvite,
+    OwnershipTransfer,
     Problem,
     ProblemTemplate,
     key_fields_for,
@@ -138,6 +144,7 @@ from .schemas import (
     InstructorNameIn,
     PendingCoInstructorInviteOut,
     ImportableProblemOut,
+    FormerClassOut,
     JoinedClassOut,
     JoinIn,
     JoinLinkOut,
@@ -173,15 +180,20 @@ from .git_history_hint import zip_git_history_item_ids
 from .gradability_hint import gradability_warnings
 from . import agent_grading, pending_scoring, quality, score_corrections
 from .score_reuse import score_reused
-from .events import publish_attempt_submitted
+from .events import (
+    publish_attempt_submitted,
+    publish_instructors_changed,
+    publish_participation_changed,
+    publish_problems_changed,
+)
 from .current_score import CurrentClassroomScore, current_score, current_score_prefetch
 from .instructor_scope import OWNER_ONLY_MESSAGE, class_scope, owned_problem_or_404, problem_scope
 from .instructors import active_participant_q, classes_owned_by, classes_taught_by, instructor_display_name_of, instructor_user_ids, is_instructor, is_owner
 from .participation import (
     SUBMIT_BLOCKED_ARCHIVED,
     SUBMIT_BLOCKED_EXPELLED,
+    SUBMIT_BLOCKED_LEFT,
     SUBMIT_BLOCKED_HIDDEN,
-    SUBMIT_BLOCKED_VIEWING_AS_INSTRUCTOR,
     instructor_can_submit,
     participant_membership_blocked_reason,
     participant_submit_blocked_reason,
@@ -190,6 +202,7 @@ from .participation import (
 from . import class_authoring, co_instructors, ownership_transfers, problem_authoring
 from .problem_transitions import available_transitions, execute_transition
 from .scoring import check_scoring_key, enqueue_scoring
+from .scoring_key_missing import alert_missing_key_safely, close_open_alert
 from . import rule_derivation, scoring_calculator, scoring_cost
 from .scoring_model_catalog import cached_scoring_model_catalog, get_scoring_model_catalog, remember_model_ids
 from . import scoring_connection
@@ -258,13 +271,15 @@ def _vendor_key_out(class_obj: Class, kind: str) -> VendorKeyOut | None:
     )
 
 
-def _published_template_summary(template) -> PublishedTemplateSummaryOut | None:
+def _published_template_summary(template, *, viewer_id: int | None) -> PublishedTemplateSummaryOut | None:
     if template is None:
         return None
     return PublishedTemplateSummaryOut(
         share_code=template.share_code,
         publisher_display_name=template.publisher_display_name,
         created_at=template.created_at,
+        # 내리기는 공개한 사람만 한다(`takedown_own_template`) — 다른 강사에게는 단추 대신 공개자만 보인다(#1446).
+        can_take_down=viewer_id is not None and template.published_by_id == viewer_id,
     )
 
 
@@ -334,9 +349,10 @@ def _serialize_class(
         token_usage_total=class_obj.token_usage_total,
         token_usage_estimated=class_obj.token_usage_estimated,
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
-        published_template=_published_template_summary(_live_class_template(class_obj)),
+        published_template=_published_template_summary(_live_class_template(class_obj), viewer_id=viewer_id),
         role="owner" if viewer_is_owner else "co_instructor",
         pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
+        signal_rev=class_obj.signal_rev,
         **row_stats,
     )
 
@@ -417,17 +433,32 @@ def _active_member_ids(class_obj: Class) -> set[int]:
 
 def _problem_pass_stats(
     problem: Problem, active_member_ids: set[int], *, submissions=None
-) -> tuple[int, int]:
-    """(passed_count, member_count) — `_problem_stats` 에서 통과 수와 분모만."""
+) -> tuple[int, int, float | None]:
+    """(passed_count, member_count, pass_rate) — `_problem_stats` 에서 「완벽」만 뺀 것."""
 
-    passed_count, _perfect_count, member_count = _problem_stats(problem, active_member_ids, submissions=submissions)
-    return passed_count, member_count
+    passed_count, _perfect_count, member_count, pass_rate = _problem_stats(
+        problem, active_member_ids, submissions=submissions
+    )
+    return passed_count, member_count, pass_rate
+
+
+def _pass_rate(passed_count: int, member_count: int, submissions) -> float | None:
+    """달성률 — 참여자가 없거나 채점된 시도가 하나도 없으면 `None` 이다(#1400): 채점 대기를 0% 로
+    말하지 않는다. 실패 상한의 자동 점수는 채점된 것이 아니다."""
+
+    if not member_count:
+        return None
+    if not passed_count:
+        scores = (current_score(submission) for submission in submissions)
+        if not any(s is not None and s.model_version != PLATFORM_FAILURE_MODEL_VERSION for s in scores):
+            return None
+    return passed_count / member_count
 
 
 def _problem_stats(
     problem: Problem, active_member_ids: set[int], *, submissions=None
-) -> tuple[int, int | None, int]:
-    """(passed_count, perfect_count, member_count) — 분모는 `active_member_ids`의 크기,
+) -> tuple[int, int | None, int, float | None]:
+    """(passed_count, perfect_count, member_count, pass_rate) — 분모는 `active_member_ids`의 크기,
     분자는 그중 이 문제를 한 번이라도 통과한 사람 수다(#289). `perfect_count` 는 그중 한 번이라도
     「완벽」(`Problem.is_score_perfect`, #962)을 받은 사람 수이고, 심화 항목이 없는 문제는 `None` 이다.
     같은 시도 묶음을 한 번 훑어 둘을 함께 센다 — 질의는 늘지 않는다. 매번 지금의
@@ -439,10 +470,7 @@ def _problem_stats(
     checklist_items = list(problem.checklist_items.all())
     has_advanced = Problem.has_advanced_items(checklist_items)
     if not active_member_ids:
-        return 0, (0 if has_advanced else None), 0
-
-    if not any(item.required for item in checklist_items):
-        return 0, (0 if has_advanced else None), member_count
+        return 0, (0 if has_advanced else None), 0, None
 
     if submissions is None:
         submissions = ClassroomSubmission.objects.filter(
@@ -451,7 +479,9 @@ def _problem_stats(
 
     passed_member_ids: set[int] = set()
     perfect_member_ids: set[int] = set()
-    for submission in submissions:
+    # 필수 항목이 없으면 통과할 수 있는 시도가 없다.
+    has_required = any(item.required for item in checklist_items)
+    for submission in submissions if has_required else ():
         if submission.member_id in passed_member_ids and (
             not has_advanced or submission.member_id in perfect_member_ids
         ):
@@ -462,7 +492,12 @@ def _problem_stats(
             if has_advanced and problem.is_score_perfect(score, checklist_items=checklist_items):
                 perfect_member_ids.add(submission.member_id)
 
-    return len(passed_member_ids), (len(perfect_member_ids) if has_advanced else None), member_count
+    return (
+        len(passed_member_ids),
+        (len(perfect_member_ids) if has_advanced else None),
+        member_count,
+        _pass_rate(len(passed_member_ids), member_count, submissions),
+    )
 
 
 # --- 집계 필드 (#632, 시안 v2) ------------------------------------------------
@@ -544,19 +579,22 @@ def _class_row_stats(classes: list[Class]) -> dict[int, dict]:
 
     stats: dict[int, dict] = {}
     for cid in class_ids:
-        rates = []
+        rates: list[float | None] = []
         for problem in problems_by_class[cid]:
             if problem.status != Problem.Status.OPEN:
                 continue
-            passed_count, member_count = _problem_pass_stats(
+            _passed_count, member_count, pass_rate = _problem_pass_stats(
                 problem, active_ids[cid], submissions=submissions_by_problem.get(problem.id, [])
             )
             if member_count:
-                rates.append(passed_count / member_count)
+                rates.append(pass_rate)
+        # 열린 문제 전부에 채점된 시도가 없으면 평균도 비운다. 하나라도 있으면 나머지는
+        # 아직 아무도 못 푼 몫(0)으로 센다(#1400).
+        graded = any(rate is not None for rate in rates)
         stats[cid] = {
             "member_count": len(active_ids[cid]),
             "problem_count": len(problems_by_class[cid]),
-            "average_pass_rate": (sum(rates) / len(rates)) if rates else None,
+            "average_pass_rate": (sum(rate or 0 for rate in rates) / len(rates)) if graded else None,
             "last_submitted_at": last_by_class.get(cid),
             "scored_attempt_count": scored_by_class.get(cid, 0),
         }
@@ -638,13 +676,14 @@ def _serialize_problem(
     submission_marks_by_problem: dict[int, tuple[object, int]] | None = None,
     submissions_by_problem: dict[int, list[ClassroomSubmission]] | None = None,
     live_template_by_problem: dict[int, ProblemTemplate] | None = None,
+    viewer_id: int | None = None,
 ) -> ProblemOut:
     if submission_marks_by_problem is None:
         submission_marks_by_problem = _participant_submission_marks("problem_id", problem_id=problem.id)
     last_submitted_at, participant_attempt_count = submission_marks_by_problem.get(problem.id, (None, 0))
     if active_member_ids is None:
         active_member_ids = _active_member_ids(class_obj)
-    passed_count, perfect_count, member_count = _problem_stats(
+    passed_count, perfect_count, member_count, pass_rate = _problem_stats(
         problem,
         active_member_ids,
         submissions=None if submissions_by_problem is None else submissions_by_problem.get(problem.id, []),
@@ -681,9 +720,9 @@ def _serialize_problem(
         checklist_items=[_serialize_checklist_item(i) for i in checklist_items],
         passed_count=passed_count,
         member_count=member_count,
-        pass_rate=(passed_count / member_count) if member_count else None,
+        pass_rate=pass_rate,
         perfect_count=perfect_count,
-        published_template=_published_template_summary(live_template),
+        published_template=_published_template_summary(live_template, viewer_id=viewer_id),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
         available_transitions=[
             ProblemTransitionOut(name=t.name, to_state=t.to_state, blocked_reason=t.blocked_reason)
@@ -1011,6 +1050,7 @@ def list_joined_classes(request: HttpRequest):
     )
     memberships = list(memberships)
     progress = _joined_progress(memberships)
+    left_ids = left_member_ids(memberships)
     return 200, [
         JoinedClassOut(
             id=m.classroom.id,
@@ -1019,11 +1059,40 @@ def list_joined_classes(request: HttpRequest):
             joined_at=m.joined_at,
             archived=m.classroom.archived_at is not None,
             expelled=m.expelled_at is not None,
+            left=m.id in left_ids,
             passed_count=progress[m.id][0],
             open_problem_count=progress[m.id][1],
         )
         for m in memberships
     ]
+
+
+@router.get("/classes/former-instructor", response={200: list[FormerClassOut]}, auth=jwt_auth)
+def list_former_instructor_classes(request: HttpRequest):
+    """한때 이 사람이 강사(공동 강사·넘겨준 소유자)였다가 지금은 아닌 클래스(#1465 2). 증거는 **그 사람이 수락한
+    초대**와 **그 사람이 오간 수락된 소유권 이전**뿐이다 — 초대를 받기만 했거나 처음부터 관계 없던 사람은 빈 목록이라
+    남의 클래스의 존재가 새지 않는다(#278). 지금도 강사인 클래스는 뺀다."""
+
+    user_id = request.auth_user.id
+    touched = (
+        set(
+            CoInstructorInvite.objects.filter(accepted_by_id=user_id, accepted_at__isnull=False).values_list(
+                "classroom_id", flat=True
+            )
+        )
+        | set(
+            OwnershipTransfer.objects.filter(accepted_at__isnull=False, requested_by_id=user_id).values_list(
+                "classroom_id", flat=True
+            )
+        )
+        | set(
+            OwnershipTransfer.objects.filter(accepted_at__isnull=False, recipient_id=user_id).values_list(
+                "classroom_id", flat=True
+            )
+        )
+    )
+    taught = set(classes_taught_by(user_id).values_list("id", flat=True))
+    return 200, [FormerClassOut(id=class_id) for class_id in sorted(touched - taught)]
 
 
 @router.get("/classes/{class_id}", response={200: ClassOut, 404: ErrorOut}, auth=jwt_auth)
@@ -1205,8 +1274,14 @@ def _save_scoring_connection(
         )
         if not saved:
             raise HttpError(403, OWNER_ONLY_MESSAGE)
+        if connection_changed:
+            # 연결이 바뀌었다 — 열린 「연결 없음」 기록을 닫아, 다시 멈추면 다시 알린다(#1389). 위 UPDATE 가 이미
+            # `Class` 행을 잠갔다(`classroom.scoring_key_missing` 의 잠금 규칙 ②).
+            close_open_alert(class_obj.id, ClassScoringKeyMissingAlert.ClosedReason.OWNER)
         if vendor_kind is not None:
             _return_foreign_problem_models_to_default(class_obj, vendor_kind)
+        # 열어 둔 클래스 상세(다른 탭·공동 강사)가 채점 연결을 다시 읽는다(#1532 ②) — 본문은 class_id·rev 뿐, 키 값은 싣지 않는다.
+        publish_instructors_changed(class_obj)
 
 
 _VENDOR_KEY_LABELS = {
@@ -1841,11 +1916,14 @@ def join_class(request: HttpRequest, join_code: str, payload: JoinIn):
     if class_obj.archived_at is not None:
         raise HttpError(403, "이 클래스는 보관되어 더 이상 가입할 수 없습니다.")
     _reject_if_banned_name(payload.display_name)
-    member, _created = ClassMember.objects.get_or_create(
+    member, created = ClassMember.objects.get_or_create(
         classroom=class_obj,
         user_id=request.auth_user.id,
         defaults={"display_name": payload.display_name},
     )
+    if created:
+        # 격자의 새 행·달성률 분모 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 다시 읽는다(#1471 ⑦).
+        publish_instructors_changed(class_obj)
     return 200, JoinResultOut(
         class_id=class_obj.id, class_name=class_obj.name, display_name=member.display_name
     )
@@ -2078,12 +2156,13 @@ def accept_co_instructor_invite(request: HttpRequest, token: str, payload: CoIns
 # --- Member (#281) ---------------------------------------------------------------
 
 
-def _serialize_member(member: ClassMember, class_obj: Class) -> MemberOut:
+def _serialize_member(member: ClassMember, class_obj: Class, *, left: bool | None = None) -> MemberOut:
     return MemberOut(
         id=member.id,
         display_name=member.display_name,
         joined_at=member.joined_at,
         expelled=member.expelled_at is not None,
+        left=is_left(member) if left is None else left,
         is_instructor=is_instructor(class_obj, member.user_id),
     )
 
@@ -2104,7 +2183,9 @@ def _serialize_members(class_obj: Class) -> list[MemberOut]:
     """참여자 명단 — 화면(`list_members`)과 연결된 앱의 읽기 도구
     (`classroom.mcp_read_tools`, #513)가 함께 부른다."""
 
-    return [_serialize_member(m, class_obj) for m in class_obj.members.all()]
+    members = list(class_obj.members.all())
+    left_ids = left_member_ids(members)
+    return [_serialize_member(m, class_obj, left=m.id in left_ids) for m in members]
 
 
 @router.post(
@@ -2146,9 +2227,25 @@ def assert_member_expellable(class_obj: Class, member: ClassMember) -> None:
 def expel_class_member(member: ClassMember) -> ClassMember:
     """내보낸다 — 행을 지우지 않고 표시만, 이미 내보낸 사람이면 그대로(`expel_member` docstring)."""
 
-    if member.expelled_at is None:
-        member.expelled_at = timezone.now()
-        member.save(update_fields=["expelled_at"])
+    if member.expelled_at is not None:
+        return member
+    # 조건부 갱신으로 최초 전이를 가린다(#1448 ④) — 두 강사가 동시에 내보내 둘 다 `expelled_at=None` 을
+    # 읽었어도 행을 바꾼 쪽은 하나다. 진 쪽은 이긴 쪽이 남긴 시각을 읽어 돌려준다.
+    # 사유를 확정으로 적는다 — 비워 두면 「사유 불명」이라 탈퇴 흔적 추론이 「나감」으로 덮는다(#1509 ①).
+    first = ClassMember.objects.filter(id=member.id, expelled_at__isnull=True).update(
+        expelled_at=timezone.now(), left_by_self=False
+    )
+    member.refresh_from_db(fields=["expelled_at", "left_by_self"])
+    if first:
+        # 내보내진 그 사람의 열린 제출 화면만 — 다른 참여자에게는 보내지 않는다(#1447 10-2).
+        # 그 행·달성률 분모도 바뀐다 — 강사가 열어 둔 클래스 머리·격자·문제 목록이 같은 변경 번호로 다시 읽는다(#1471 ⑦).
+        publish_participation_changed(member.classroom, member_user_ids=[member.user_id])
+        # 처음 내보낼 때만 — 내보내진 사람에게 알린다(#1441-8). 알림이 실패해도 내보내기는 그대로다.
+        notify_safely(
+            recipient=member.user,
+            notification_type=NotificationType.CLASSROOM_MEMBER_EXPELLED,
+            context={"class_id": member.classroom_id, "class_name": member.classroom.name},
+        )
     return member
 
 
@@ -2177,7 +2274,7 @@ def rename_myself(request: HttpRequest, class_id: int, payload: MemberRenameIn):
     reason = participant_membership_blocked_reason(member.classroom, member)
     if reason == SUBMIT_BLOCKED_ARCHIVED:
         raise HttpError(403, "이 클래스는 보관되어 이름을 바꿀 수 없습니다.")
-    if reason == SUBMIT_BLOCKED_EXPELLED:
+    if reason in (SUBMIT_BLOCKED_EXPELLED, SUBMIT_BLOCKED_LEFT):
         raise HttpError(403, "더 이상 이 클래스의 참여자가 아닙니다.")
     _reject_if_banned_name(payload.display_name)
 
@@ -2263,7 +2360,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
 
     problem_stats = []
     for problem in problems:
-        passed_count, perfect_count, member_count = _problem_stats(problem, active_member_ids)
+        passed_count, perfect_count, member_count, pass_rate = _problem_stats(problem, active_member_ids)
         problem_stats.append(
             ClassroomProblemStatsOut(
                 id=problem.id,
@@ -2271,7 +2368,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 status=problem.status,
                 passed_count=passed_count,
                 member_count=member_count,
-                pass_rate=(passed_count / member_count) if member_count else None,
+                pass_rate=pass_rate,
                 perfect_count=perfect_count,
                 recommended_due_at=problem.recommended_due_at,
                 due_at=problem.due_at,
@@ -2281,6 +2378,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
     checklist_by_problem = {p.id: list(p.checklist_items.all()) for p in problems}
     marks = entry_marks(problems)
     member_rows = []
+    left_ids = left_member_ids(members)
     for member in members:
         cells = [
             ClassroomGridCellOut(
@@ -2306,6 +2404,7 @@ def _build_roster_grid(class_obj: Class) -> ClassroomRosterGridOut:
                 display_name=member.display_name,
                 is_instructor=is_instructor(class_obj, member.user_id),
                 expelled=member.expelled_at is not None,
+                left=member.id in left_ids,
                 cells=cells,
                 joined_at=member.joined_at,
                 last_submitted_at=max(
@@ -2403,8 +2502,10 @@ def _class_attempts_newest_first(class_obj: Class):
 
 def _recent_attempt_row(class_obj: Class, attempt: ClassroomSubmission) -> ClassroomRecentAttemptOut:
     score = current_score(attempt)
+    pending_reason = None
     if score is None:
-        status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
+        pending_reason = pending_scoring.blocking_reason(class_obj, attempt.problem)
+        status = "needs_setup" if pending_reason is not None else "scoring"
     else:
         status = "passed" if attempt.problem.is_score_passed(score) else "attempted_not_passed"
         if score.model_version == PLATFORM_FAILURE_MODEL_VERSION:
@@ -2420,6 +2521,8 @@ def _recent_attempt_row(class_obj: Class, attempt: ClassroomSubmission) -> Class
         status=status,
         submitted_at=attempt.created_at,
         late=attempt.problem.lateness(attempt.created_at),
+        pending_reason=pending_reason,
+        problem_model=attempt.problem.model,
     )
 
 
@@ -2439,7 +2542,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = problem_authoring.create_problem(class_obj, payload)
-    out = _serialize_problem(problem, class_obj)
+    out = _serialize_problem(problem, class_obj, viewer_id=request.auth_user.id)
     out.gradability_warnings = [GradabilityWarningOut(**w) for w in gradability_warnings(problem.checklist_items.all())]
     return 201, out
 
@@ -2451,17 +2554,19 @@ def list_problems(request: HttpRequest, class_id: int):
     """강사 본인의 클래스 문제 전부(초안 + 열림), 순서대로."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
-    return 200, _serialize_problem_list(class_obj)
+    return 200, _serialize_problem_list(class_obj, viewer_id=request.auth_user.id)
 
 
-def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
+def _serialize_problem_list(class_obj: Class, viewer_id: int | None = None) -> list[ProblemOut]:
     """클래스의 문제 전부를 순서대로 — 화면(`list_problems`)과 연결된 앱의 읽기
     도구(`classroom.mcp_read_tools`, #513)가 함께 부른다."""
 
-    return _serialize_problems(class_obj, class_obj.problems.prefetch_related("checklist_items").all())
+    return _serialize_problems(
+        class_obj, class_obj.problems.prefetch_related("checklist_items").all(), viewer_id=viewer_id
+    )
 
 
-def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
+def _serialize_problems(class_obj: Class, problems, viewer_id: int | None = None) -> list[ProblemOut]:
     """문제 여럿을 한 번에(#679·#684) — 목록과 순서 바꾸기 응답이 함께 쓴다. 문제마다 따로 들던
     질의(제출 표식·달성률의 제출·살아 있는 템플릿)를 클래스 단위로 한 번씩 세어 넘기므로, 질의 수가
     문제 수와 무관하다. `problems` 는 체크리스트를 미리 불러 둔 것이어야 한다."""
@@ -2490,6 +2595,7 @@ def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
             submission_marks_by_problem=submission_marks,
             submissions_by_problem=submissions_by_problem,
             live_template_by_problem=live_template_by_problem,
+            viewer_id=viewer_id,
         )
         for p in problems
     ]
@@ -2510,7 +2616,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     ordered = problem_authoring.reorder_problems(class_obj, payload.problem_ids)
     # 목록(`_serialize_problem_list`)과 같이 문제 행을 클래스 단위로 한 번에 센다(#679·#684).
-    return 200, _serialize_problems(class_obj, ordered)
+    return 200, _serialize_problems(class_obj, ordered, viewer_id=request.auth_user.id)
 
 
 #: 들여오기 목록 한 쪽의 크기(#548) — 공모전이 수백 개여도 시트가 한 번에 다 받지 않는다.
@@ -2563,7 +2669,7 @@ def import_contest_as_problem(request: HttpRequest, class_id: int, payload: Impo
 
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = import_contest_problem(class_obj, payload.contest_id)
-    return 201, _serialize_problem(problem, class_obj)
+    return 201, _serialize_problem(problem, class_obj, viewer_id=request.auth_user.id)
 
 
 @router.get(
@@ -2694,7 +2800,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
     """문제 편집 화면이 초기값을 채우는 자리."""
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
-    return 200, _serialize_problem(scope.problem, scope.class_obj)
+    return 200, _serialize_problem(scope.problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.patch(
@@ -2705,7 +2811,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
 def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemPatchIn):
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = problem_authoring.update_problem(scope.class_obj, scope.problem, payload)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.delete(
@@ -2758,7 +2864,10 @@ def remove_problem(class_obj: Class, problem: Problem) -> None:
         # 그 채점에 덧댄 정정(#1317)도 같은 범위로 먼저 걷는다 — 정정이 점수를 PROTECT 로 가리킨다.
         ClassroomScoreCorrection.objects.filter(score__in=own).delete()
         own.delete()
+        participants_saw_it = problem.status != Problem.Status.DRAFT
         problem.delete()
+        # 격자 열·문제 목록에서 빠진다 — 그 클래스의 열린 화면이 다시 읽는다(#1471 ⑦).
+        publish_problems_changed(class_obj, participants_see_it=participants_saw_it)
 
 
 @router.post(
@@ -2773,7 +2882,7 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("open", scope.problem)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.post(
@@ -2788,7 +2897,7 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("hide", scope.problem)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.post(
@@ -2803,7 +2912,7 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("reopen", scope.problem)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 # --- Submission (참여자, #286) --------------------------------------------------
@@ -2999,6 +3108,7 @@ def get_my_problem(request: HttpRequest, class_id: int, problem_id: int):
             submit_blocked_reason=_instructor_submit_blocked_reason(class_obj, problem),
             instructor_problem_status=problem.status,
             viewing_as_instructor=True,
+            viewer_role="owner" if is_owner(class_obj, request.auth_user.id) else "co_instructor",
         )
 
     member = _get_member_or_404(class_id, request.auth_user.id)
@@ -3085,7 +3195,7 @@ def create_classroom_submission(
         # #294 AC "보관된 클래스에는 새 제출을 낼 수 없다" — 지난 시도는
         # 그대로 읽히므로(`get_my_problem`) 이 엔드포인트만 막는다.
         raise HttpError(403, "이 클래스는 보관되어 새 제출을 받지 않습니다.")
-    if blocked_reason == SUBMIT_BLOCKED_EXPELLED:
+    if blocked_reason in (SUBMIT_BLOCKED_EXPELLED, SUBMIT_BLOCKED_LEFT):
         # ClassMember.expelled_at의 docstring이 이 엔드포인트를 지목해 둔
         # 자리다 — 행은 지우지 않되 새 제출만 막는다. 강사가 이미 그 사실을
         # 아는 사람에게는 404(존재 자체를 숨김)보다 403(권한이 없다는 것을
@@ -3177,6 +3287,9 @@ def _create_submission_row(request: HttpRequest, problem, member, payload):
         # 있다) 채점 워커가 아직 존재하지 않는 시도를 찾다 건너뛰기 때문이다.
         # dev·CI는 eager 라 이 콜백 안에서 채점까지 끝난다(ADR-0056).
         transaction.on_commit(lambda: _enqueue_immediate_scoring(submission.id))
+        # 채점 연결이 없어 이 시도가 멈추면 소유자에게 한 번 알린다(#1389) — 커밋 뒤라 제출의 잠금을 쥐고 있지 않고,
+        # 실패해도 제출은 실패하지 않는다(60초 스캔이 다시 한다). 강사 본인 시도만으로는 알리지 않는다(그 판정은 안에서).
+        transaction.on_commit(lambda: alert_missing_key_safely(problem.classroom_id))
         if contest_entry is not None:
             # 커밋된 뒤 공모전에 보낸다 — 결과는 신호로 돌아와 이 시도에 남는다.
             request_contest_entry(submission, contest_entry)
@@ -3390,7 +3503,7 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
     target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True, owner=False).class_obj
 
     copy = copy_problem_to_class(problem, target_class)
-    return 201, _serialize_problem(copy, target_class)
+    return 201, _serialize_problem(copy, target_class, viewer_id=request.auth_user.id)
 
 
 # --- ChecklistItem -------------------------------------------------------------

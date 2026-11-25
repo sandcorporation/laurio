@@ -15,6 +15,7 @@
 
 import os
 import resource
+import sys
 import time
 
 from datetime import date
@@ -49,6 +50,10 @@ from storage.adapters.fake import FakeStorageAdapter
 # 기준(최근 대기열 junit 의 시험별 중앙값)보다 얼마나 느렸나로 잰다(#1211, `tests/cpu_speed.py`).
 
 _CPU_LIMIT_SECONDS = float(os.environ.get("CODEMIT_TEST_CPU_LIMIT", "1.0"))
+# macOS 는 프로세스 하나를 띄우는 데 CPU 가 Linux 의 2~3배 든다(/usr/bin/git 껍데기 8ms·진짜 git 3ms, 새로 쓴 스크립트의
+# 첫 실행 검사 — 2026-11-25 mac 에서 git·sh 를 수십 번 부르는 배포 계획 시험이 일의 양은 같은데 1.0→1.05초를 썼다, #1419).
+# 서브프로세스를 세는 이 한도는 그만큼 넉넉히 둔다. Linux·CI 는 1.0 그대로다.
+_SPAWN_COST_FACTOR = 1.25 if sys.platform == "darwin" else 1.0
 _runner_pace = None
 
 
@@ -146,12 +151,12 @@ def pytest_runtest_makereport(item, call):
             for prop in (("cpu_scale", round(scale, 3)), ("cpu_scale_samples", pace.samples)):
                 item.user_properties.append(prop)
                 report.user_properties.append(prop)
-            limit = _CPU_LIMIT_SECONDS * scale
+            limit = _CPU_LIMIT_SECONDS * scale * _SPAWN_COST_FACTOR
             if spent > limit:
                 report.outcome = "failed"
                 report.longrepr = (
                     f"시험 본문이 CPU {spent:.2f}초를 썼다 — 한도 {limit:.2f}초"
-                    f" (CODEMIT_TEST_CPU_LIMIT {_CPU_LIMIT_SECONDS:.2f} × 실행기 배율 {scale:.2f})."
+                    f" (CODEMIT_TEST_CPU_LIMIT {_CPU_LIMIT_SECONDS:.2f} × 실행기 배율 {scale:.2f} × 프로세스 비용 {_SPAWN_COST_FACTOR:.2f})."
                     " 원인을 찾아 줄인다; 한도를 늘리지 않는다."
                 )
         pace.record(_cpu_key(item.nodeid), spent)

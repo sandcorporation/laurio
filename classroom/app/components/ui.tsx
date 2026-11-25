@@ -8,7 +8,7 @@
 // 리터럴 hex 는 여기에도 없다 — 전부 `app/tokens.css` 의 `@theme` 가 만든
 // 유틸리티다(`bg-paper`·`text-ink`·`border-rule`·`text-error`·`text-success`).
 import { createElement } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 /** 화면 한 장의 바깥 틀 — 폭과 여백을 여기서만 정한다. */
 export function PageShell({ children }: { children: ReactNode }) {
@@ -23,7 +23,10 @@ export function PageHeader({
   description,
   actions,
   headingLevel = "h1",
+  titleRef,
 }: {
+  /** 화면이 열릴 때 제목이 초점을 받아야 하는 자리(가입 뒤 이동 등)에 쓴다 — 주면 `tabIndex=-1` 이 붙는다. */
+  titleRef?: Ref<HTMLHeadingElement>;
   eyebrow?: string;
   title: string;
   /** 화면의 제목은 `h1` 하나여야 한다 — 테스트가 잡을 자리를 여기로 준다.
@@ -46,7 +49,11 @@ export function PageHeader({
         ) : null}
         {createElement(
           headingLevel,
-          { className: "text-[22px] font-semibold tracking-[-0.01em]", "data-testid": titleTestId },
+          {
+            className: `text-[22px] font-semibold tracking-[-0.01em]${titleRef ? " outline-none" : ""}`,
+            "data-testid": titleTestId,
+            ...(titleRef ? { ref: titleRef, tabIndex: -1 } : {}),
+          },
           title,
         )}
         {description ? (
@@ -120,7 +127,7 @@ export function EmptyState({ children }: { children: ReactNode }) {
 
 const BUTTON_BASE =
   "inline-flex items-center justify-center whitespace-nowrap text-[13.5px] " +
-  "transition-colors disabled:cursor-not-allowed disabled:opacity-45";
+  "transition-colors disabled:cursor-not-allowed disabled:opacity-45 aria-disabled:cursor-not-allowed aria-disabled:opacity-45";
 const BUTTON_TONE = {
   primary: "bg-ink text-paper hover:bg-ink/85",
   secondary: "border border-rule bg-surface text-ink hover:bg-paper",
@@ -150,9 +157,12 @@ export function iconButtonClass(tone: ButtonTone = "secondary"): string {
 /** 상태 표시. 중립·오류·주의·충족·심화 다섯이다 — 색은 팔레트 역할 이름(ADR-0080)을 따른다. */
 export function Badge({
   tone = "neutral",
+  wrap = false,
   children,
 }: {
   tone?: "neutral" | "error" | "warning" | "verified" | "advanced";
+  /** 긴 라벨(「채점 대기 · 마감 기한 뒤」)이 칸 폭에서 줄바꿈하게 한다 — 기본은 한 줄이다. */
+  wrap?: boolean;
   children: ReactNode;
 }) {
   const cls = {
@@ -168,7 +178,7 @@ export function Badge({
     // 나왔다: `inline-block` 은 flex 자식으로서 min-content 까지 줄어들고, 그 폭이
     // 한 글자다. 라벨은 짧은 낱말이므로 줄바꿈할 이유가 애초에 없다.
     <span
-      className={`inline-block shrink-0 border px-2 py-0.5 text-[11px] leading-tight whitespace-nowrap ${cls}`}
+      className={`inline-block border px-2 py-0.5 text-[11px] leading-tight ${wrap ? "min-w-0 whitespace-normal" : "shrink-0 whitespace-nowrap"} ${cls}`}
     >
       {children}
     </span>

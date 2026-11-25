@@ -28,8 +28,8 @@
 //
 // 쿠키의 "존재"만 본다 — 유효성 판단은 언제나 백엔드 몫이다. 강의실은 자기
 // 로그인을 갖지 않으므로(ADR-0038 — 공개 앱에서 발급된 쿠키가 부모 도메인을 타고
-// 온다) 이 쿠키가 없는 사람에게 보여줄 자기 로그인 폼이 없다 — /login 화면은
-// 공개 앱으로 가는 안내만 한다.
+// 온다) 이 쿠키가 없는 사람에게 보여줄 자기 로그인 폼이 없다 — /login 은 화면
+// 없이 공개 앱 로그인으로 307 한다(#1388, app/login/route.ts).
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 

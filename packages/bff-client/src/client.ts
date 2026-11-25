@@ -19,6 +19,7 @@ import createClient from "openapi-fetch";
 import {
   type ApiFailure,
   type ApiResult,
+  type FieldLabels,
   FALLBACK_DETAIL,
   codeForStatus,
   normalizeDetail,
@@ -41,6 +42,8 @@ export interface BffRequestInit extends RequestInit {
    * 사용자가 만료된 액세스로 온 경우를 흡수해야 한다) `onUnauthorized` 는 부르지 않는다 —
    * 부르면 로그인 페이지가 자기 자신으로 리다이렉트하며 로그인 흐름을 끊는다(실제로 재현됐다). */
   unauthorizedIsAnswer?: boolean;
+  /** 422 문구에서 필드를 부를 라벨 — `request`·`get`·`post` 의 실패 `detail` 에만 쓰인다. */
+  fieldLabels?: FieldLabels;
 }
 
 export interface BffClient {
@@ -131,7 +134,7 @@ export function createBffClient(options: BffClientOptions): BffClient {
       ok: false,
       status: response.status,
       code: codeForStatus(response.status),
-      detail: normalizeDetail(raw),
+      detail: normalizeDetail(raw, FALLBACK_DETAIL, init?.fieldLabels),
     };
     return failure;
   }

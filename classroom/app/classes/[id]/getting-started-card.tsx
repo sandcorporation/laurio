@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { Card, CardHeader, buttonClass } from "@/app/components/ui";
 import type { ClassRow } from "@/lib/classes/api";
+import { connectStepNote } from "@/lib/classes/connect-step-note";
 import { describeConnection } from "@/lib/classes/scoring-status";
 
 export type StartSteps = { connected: boolean; hasProblem: boolean; hasMember: boolean };
@@ -85,7 +86,7 @@ export function GettingStartedCard({ classroom, joinUrl }: { classroom: ClassRow
         <Step
           n={1}
           title="채점 연결 넣기"
-          detail={steps.connected ? describeConnection(classroom) : undefined}
+          detail={steps.connected ? describeConnection(classroom) : (connectStepNote(classroom.role) ?? undefined)}
           done={steps.connected}
           current={currentStep === 1}
           testId="getting-started-connect"

@@ -28,6 +28,20 @@ export interface AttemptScoredPayload {
  * 물어보기만 하면 된다. */
 export const NOTIFICATION_CHANGED = "notification-changed" as const;
 
+/** 클래스의 강사 쪽 상태(강사 명단·대기 초대·소유권 이전)가 바뀌었다(#1447 10-1) — 그 클래스 강사에게만
+ * 온다. payload 는 `class_id` 와 변경 번호 `rev` — 받으면 클래스와 두 목록을 다시 읽는다. */
+export const INSTRUCTORS_CHANGED = "instructors-changed" as const;
+
+/** 참여자가 그 클래스에 낼 수 있는지가 바뀌었다 — 문제 열기·숨김, 클래스 보관, 내보내기(#1447 10-2). 그
+ * 클래스의 참여자(내보내기는 그 사람)에게만 온다. payload 는 `class_id` 와, 같은 변경의 `instructors-changed` 와 같은
+ * 변경 번호 `rev`(#1496 ⑤, `./same-change`). */
+export const PARTICIPATION_CHANGED = "participation-changed" as const;
+
+/** 이 클래스에 대한 재조회 신호인가 — 두 신호 모두 `class_id` 와 변경 번호 `rev` 를 싣는다. */
+export function isClassSignal(event: StreamEvent, kind: string, classId: number): boolean {
+  return event.kind === kind && event.payload.class_id === classId;
+}
+
 export interface StreamEvent {
   kind: string;
   payload: Record<string, unknown>;

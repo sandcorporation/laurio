@@ -234,8 +234,20 @@ class Class(models.Model):
     #: 연다(CONTEXT.md 「Class」).
     archived_at = models.DateTimeField(null=True, blank=True)
 
+    #: 강사 쪽 변경 번호(#1484 ④) — `publish_instructors_changed` 가 바꿀 때마다 하나 올리고, 그 신호 본문과 클래스 응답이 같은
+    #: 값을 싣는다. 열어 둔 화면은 이미 읽은 번호 이하의 신호를 건너뛴다(시간 창 없이 같은 변경의 재조회를 한 번으로).
+    #: 오래 든 인스턴스의 `save()` 가 되돌리지 못하게 전체 저장에서는 빠진다(`save`).
+    signal_rev = models.PositiveBigIntegerField(default=0, db_default=0)
+
     class Meta:
         ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None and kwargs.get("update_fields") is None and not kwargs.get("force_insert"):
+            kwargs["update_fields"] = [
+                f.name for f in self._meta.concrete_fields if not f.primary_key and f.name != "signal_rev"
+            ]
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Class(id={self.pk}, name={self.name!r})"
@@ -585,6 +597,12 @@ class ClassMember(models.Model):
     #: 새 제출을 못 내는 것은 이 값을 보는 제출 엔드포인트(#286)의 몫이다 —
     #: 이 티켓은 그 신호를 남기는 데까지다.
     expelled_at = models.DateTimeField(null=True, blank=True)
+    #: `expelled_at` 이 찬 까닭이 스스로 나간 것인가(#1492-5). 참여자였던 공동 강사가 떠나거나
+    #: 탈퇴하면(`classroom.co_instructors.depart`) 참여자 행도 닫히는데, 그것은 누가 내보낸 것이
+    #: 아니다 — 화면이 「나감」과 「내보냄」을 가른다. 새 제출이 막히는 것은 둘이 같다. 새 코드는 닫을
+    #: 때마다 참(나감)·거짓(내보냄)을 적는다. NULL 은 사유 불명 — 이 칸을 모르는 쓰기(칸 이전의 행·옛
+    #: 서버)가 남긴 것이고, 그때만 남은 흔적으로 추론한다(`classroom.departures`, #1503·#1509 ①).
+    left_by_self = models.BooleanField(null=True)
 
     class Meta:
         ordering = ["joined_at", "id"]
@@ -1507,3 +1525,44 @@ class ClassroomAgentRun(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover
         return f"ClassroomAgentRun(submission={self.submission_id}, {self.purpose}, {self.outcome})"
+
+
+class ClassScoringKeyMissingAlert(models.Model):
+    """「채점 연결 없음」 알림을 한 번 보냈다는 기록(#1389, CONTEXT.md 「강의실 알림」).
+
+    채점 연결이 없는 클래스에서 참여자의 시도가 멈추면 소유자에게 앱 안 알림을 **한 번** 보낸다. 그 「한 번」을
+    DB 가 지킨다 — 클래스마다 열린(`closed_at` 이 빈) 기록은 하나뿐이다(부분 유일 제약). 알림 행은 이 기록과
+    같은 트랜잭션에서 만들어 여기 잇는다(`classroom.scoring_key_missing.alert_missing_key`). 연결을 바꾸면
+    (`owner`) 또는 소유권이 넘어가면(`transfer`) 기록이 닫히고, 다시 멈추면 새 기록·새 알림이 생긴다.
+
+    받는 사람은 기록을 연 순간의 소유자다 — 나중에 소유권이 넘어가도 바꾸지 않는다(알림은 append-only)."""
+
+    class ClosedReason(models.TextChoices):
+        NONE = "", "열림"
+        OWNER = "owner", "소유자가 연결을 바꿨다"
+        TRANSFER = "transfer", "소유권이 넘어갔다"
+
+    classroom = models.ForeignKey(Class, related_name="scoring_key_missing_alerts", on_delete=models.CASCADE)
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, related_name="classroom_scoring_key_missing_alerts", on_delete=models.CASCADE
+    )
+    #: 이 기록과 같은 트랜잭션에서 만든 알림. 알림이 지워져도(탈퇴 정리 등) 기록은 남아 다시 보내지 않는다.
+    notification = models.ForeignKey(
+        "notifications.Notification", null=True, blank=True, related_name="+", on_delete=models.SET_NULL
+    )
+    opened_at = models.DateTimeField()
+    closed_at = models.DateTimeField(null=True, blank=True)
+    closed_reason = models.CharField(max_length=10, choices=ClosedReason.choices, blank=True, default="")
+
+    class Meta:
+        ordering = ["-opened_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["classroom"],
+                condition=models.Q(closed_at__isnull=True),
+                name="unique_open_scoring_key_missing_alert",
+            )
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover
+        return f"ClassScoringKeyMissingAlert(classroom={self.classroom_id}, closed_at={self.closed_at})"

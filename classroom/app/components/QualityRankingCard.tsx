@@ -2,10 +2,12 @@
 
 // 강사 제출 현황의 「완성도 순위」(#883, ADR-0072) — 「완성도 채점」 버튼 → 비용 확인 → 큐에 넣기, 순위 표(펼치면
 // 근거), 참여자 공개 스위치. 대상은 참여자별 가장 최근 통과 시도이고 계산·등수는 백엔드가 한다.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Badge, Card, CardHeader, EmptyState, ErrorNote, Num, buttonClass } from "@/app/components/ui";
 import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
+import type { ClassRow } from "@/lib/classes/api";
+import { modelRejectedNote, scoringBlockNote } from "@/lib/classes/scoring-block-note";
 import { updateProblem } from "@/lib/problems/api";
 import { BonusScoreEditor } from "@/app/components/BonusScoreEditor";
 import { GRADE_LABEL } from "@/lib/problems/grade";
@@ -115,13 +117,19 @@ function QualityRow({
 export function QualityRankingCard({
   classId,
   problemId,
-  canChangeKey,
+  problemModel,
+  classroom,
 }: {
   classId: number;
   problemId: number;
-  canChangeKey: boolean;
+  /** 이 문제 자신의 채점 모델. 비어 있으면 클래스 기본값을 따른다. */
+  problemModel?: string;
+  /** 연결 때문에 막혔을 때 원인을 말하고, 키 링크를 소유자에게만 보인다. 못 읽었으면 null. */
+  classroom: ClassRow | null;
 }) {
   const { state, reload } = useProblemQuality(classId, problemId);
+  const keyNote = scoringBlockNote(classroom, "quality");
+  const modelNote = modelRejectedNote(classroom?.role, classId, problemId, problemModel);
   const [confirm, setConfirm] = useState<Confirm>({ step: "idle" });
   const [openIds, setOpenIds] = useState<ReadonlySet<number>>(new Set());
   const [publicSaving, setPublicSaving] = useState(false);
@@ -129,13 +137,26 @@ export function QualityRankingCard({
   // 누른 값을 곧바로 보인다 — 저장에 실패하면 서버 값으로 돌아간다.
   const [publicOverride, setPublicOverride] = useState<boolean | null>(null);
 
+  // 누른 단추가 비활성이 되거나 확인 줄이 닫히면 초점이 body 로 떨어진다 — 단계가 바뀌면 다음 단추로 옮긴다(#1436 9번).
+  const runButtonRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLDivElement>(null);
+  const moveFocus = useRef(false);
+  useEffect(() => {
+    if (!moveFocus.current || confirm.step === "loading" || confirm.step === "running") return;
+    moveFocus.current = false;
+    const target = confirm.step === "ready" ? confirmRef.current?.querySelector("button") : runButtonRef.current;
+    target?.focus();
+  }, [confirm.step]);
+
   const openConfirm = async () => {
+    moveFocus.current = true;
     setConfirm({ step: "loading" });
     const result = await fetchQualityEstimate(classId, problemId);
     setConfirm(result.ok ? { step: "ready", estimate: result.data } : { step: "error", message: "불러오지 못했습니다." });
   };
 
   const run = async () => {
+    moveFocus.current = true;
     setConfirm({ step: "running" });
     const result = await runQuality(classId, problemId);
     if (!result.ok) {
@@ -183,9 +204,10 @@ export function QualityRankingCard({
       <div className="flex flex-wrap items-center gap-3 border-b border-rule px-4 py-3">
         <button
           type="button"
+          ref={runButtonRef}
           data-testid="quality-run-button"
           onClick={() => void openConfirm()}
-          disabled={confirm.step !== "idle" && confirm.step !== "error"}
+          aria-disabled={(confirm.step !== "idle" && confirm.step !== "error") || undefined}
           className={buttonClass("primary", "sm")}
         >
           완성도 채점
@@ -241,26 +263,24 @@ export function QualityRankingCard({
         </div>
       ) : null}
       {confirm.step === "ready" ? (
-        <div data-testid="quality-confirm" className="flex flex-col gap-3 border-b border-rule px-4 py-3">
+        <div ref={confirmRef} data-testid="quality-confirm" className="flex flex-col gap-3 border-b border-rule px-4 py-3">
           {confirm.estimate.blocked_reason === "no_api_key" ? (
             <MissingScoringKeyNote
               classId={classId}
-              message="이 클래스의 채점 키 문제로 채점할 수 없습니다 — 클래스 설정에서 확인해주세요."
+              {...keyNote}
               noteTestId="quality-no-api-key-note"
               settingsLinkTestId="quality-no-api-key-settings-link"
-              actionLabel={canChangeKey ? undefined : null}
             />
           ) : confirm.estimate.blocked_reason === "model_rejected" ? (
             <MissingScoringKeyNote
               classId={classId}
-              message="이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+              {...modelNote}
               noteTestId="quality-model-rejected-note"
               settingsLinkTestId="quality-model-rejected-settings-link"
-              actionLabel="채점 모델 바꾸기"
               settingsAnchor="scoring-model"
             />
           ) : (
-            <span data-testid="quality-confirm-line" className="text-[13.5px]">
+            <span id="quality-confirm-line" data-testid="quality-confirm-line" role="status" className="text-[13.5px]">
               {confirm.estimate.new_count === 0 ? "새로 채점할 사람이 없습니다" : estimateLine(confirm.estimate)}
             </span>
           )}
@@ -278,7 +298,15 @@ export function QualityRankingCard({
             <button
               type="button"
               data-testid="quality-confirm-cancel"
-              onClick={() => setConfirm({ step: "idle" })}
+              aria-describedby={
+                confirm.estimate.blocked_reason === null && confirm.estimate.new_count === 0
+                  ? "quality-confirm-line"
+                  : undefined
+              }
+              onClick={() => {
+                moveFocus.current = true;
+                setConfirm({ step: "idle" });
+              }}
               className={buttonClass("secondary", "sm")}
             >
               {confirm.estimate.blocked_reason === null && confirm.estimate.new_count > 0 ? "취소" : "닫기"}

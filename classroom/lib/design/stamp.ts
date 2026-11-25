@@ -8,6 +8,13 @@ export function stampKind(passed: boolean, perfect: boolean | null | undefined):
 
 export const STAMP_LABEL: Record<StampKind, string> = { passed: "통과", perfect: "완벽" };
 
+// 완벽은 통과의 부분집합이라 통과 계열 색을 쓴다(#1381) — 붉은 계열은 「미통과」로 읽힌다.
+export const PERFECT_TEXT_CLASS = "text-success";
+export const STAMP_COLOR_CLASS: Record<StampKind, string> = {
+  passed: "border-success text-success",
+  perfect: "border-success text-success",
+};
+
 // 「처음 볼 때」 — 같은 브라우저에서 그 도장(scope + 판정)을 이전에 렌더한 적이 없을 때.
 const PREFIX = "codemit:stamp-seen:";
 

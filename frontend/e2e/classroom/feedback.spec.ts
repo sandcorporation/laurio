@@ -57,9 +57,100 @@ test("켠 계정은 강의실에서 제보 버튼 → 가리기 → 보내기 �
   await page.mouse.up();
   await expect(page.getByTestId("feedback-undo")).toBeEnabled();
 
+  // 빈 채로 보내면 오류가 뜨고, 창은 그 오류를 설명으로 가리킨다(낭독기가 창에 들어가며 듣는다).
+  await page.getByTestId("feedback-submit").click();
+  await expect(page.getByRole("dialog", { name: "제보" })).toHaveAccessibleDescription("내용을 적어 주세요.");
   await page.getByTestId("feedback-body").fill(`강의실 e2e ${e2eRunId()}`);
   await page.getByTestId("feedback-submit").click();
   await expect(page.getByTestId("feedback-done")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "제보" })).toHaveAccessibleDescription("접수했습니다.");
+  await context.close();
+});
+
+// 제보 창의 초점 규약(#1496 ⑧) — 키보드로 열면 내용 칸으로 들어가고, Tab·Shift+Tab 은 창 안에 갇히며, Escape 로 닫히면 「제보」 단추로 돌아온다.
+test("제보 창은 초점이 안으로 들어가 갇히고 Escape 로 닫히며 「제보」 단추로 돌아온다", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: onState });
+  const page = await context.newPage();
+  await page.goto("/");
+  const opener = page.getByTestId("feedback-open");
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "제보" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByTestId("feedback-body")).toBeFocused();
+  // 창 안 대상 수보다 많이 눌러 가장자리를 넘긴다.
+  const count = await dialog.evaluate(
+    (el) => el.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])').length,
+  );
+  for (const key of Array(count + 2).fill("Tab").concat(Array(count + 2).fill("Shift+Tab"))) {
+    await page.keyboard.press(key);
+    await expect(dialog.locator(":focus")).toHaveCount(1);
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await context.close();
+});
+
+// 초점 없이 열어도(낭독기 활성화·초점을 못 받는 터치) Escape 로 닫히면 초점은 「제보」 단추로 돌아온다(#1509 ②).
+test("초점 없이 연 제보 창을 Escape 로 닫으면 초점이 「제보」 단추에 있다", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: onState });
+  const page = await context.newPage();
+  await page.goto("/");
+  const opener = page.getByTestId("feedback-open");
+  // 화면이 다 그려지면 제목이 초점을 받는다(#1517) — 그 뒤에 초점을 거둬야 「초점 없이 연」 전제가 선다.
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await opener.dispatchEvent("click");
+  const dialog = page.getByRole("dialog", { name: "제보" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+  await context.close();
+});
+
+// 캡처가 끝나기 전에 Escape 로 그만두면 늦게 끝난 캡처가 창을 다시 열지 않는다(#1503 ⑤) — 초점은 「제보」 단추에 그대로다.
+// 캡처의 마지막 단계(그림 해독)를 시험이 쥐고 있다가 Escape 뒤에 풀어 늦게 끝나는 캡처를 만든다.
+test("제보 캡처 중 Escape 로 그만두면 캡처가 끝나도 창이 다시 열리지 않는다", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: onState });
+  const page = await context.newPage();
+  await page.addInitScript(() => {
+    const w = window as unknown as { __release: () => void };
+    const gate = new Promise<void>((resolve) => (w.__release = resolve));
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = async function (this: HTMLImageElement) {
+      await gate;
+      return decode.call(this);
+    };
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+    CanvasRenderingContext2D.prototype.drawImage = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
+      document.documentElement.dataset.captureDrawn = "1";
+      return (drawImage as (...a: unknown[]) => void).apply(this, args);
+    } as typeof drawImage;
+  });
+  await page.goto("/");
+  const opener = page.getByTestId("feedback-open");
+  // 화면이 다 그려져 제목이 초점을 받은 뒤에 단추에 초점을 준다(#1517) — 캡처 중 단추가 꺼져 초점이 body 로 빠진 뒤에 제목이 가로채지 않게.
+  await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+  await opener.focus();
+  await page.keyboard.press("Enter");
+  await expect(opener).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(opener).toBeEnabled();
+  await expect(opener).toBeFocused();
+
+  await page.evaluate(() => (window as unknown as { __release: () => void }).__release());
+  await expect(page.locator("html")).toHaveAttribute("data-capture-drawn", "1");
+  // 캡처가 끝난 뒤의 마이크로태스크·렌더가 지나가도록 두 프레임.
+  await page.evaluate(
+    // TEST-WAIT-EXCEPTION: 「일어나지 않음」을 보이려면 늦은 캡처 결과가 반영될 두 프레임을 흘려야 한다 — 기다릴 사건이 없다.
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  );
+  await expect(page.getByRole("dialog", { name: "제보" })).toHaveCount(0);
+  await expect(opener).toBeEnabled();
+  await expect(opener).toBeFocused();
   await context.close();
 });
 

@@ -45,7 +45,7 @@ describe("notificationHref — classroom_scoring_key_rejected", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_key_rejected", context: { class_id: 7 } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 
   it("클래스 id가 없으면 링크를 짓지 않는다", () => {
@@ -56,12 +56,26 @@ describe("notificationHref — classroom_scoring_key_rejected", () => {
   });
 });
 
+describe("notificationHref — classroom_scoring_key_missing", () => {
+  it("그 클래스의 설정 화면 채점 키 자리로 간다(#1389)", () => {
+    const href = notificationHref(
+      row({ notification_type: "classroom_scoring_key_missing", context: { class_id: 7, class_name: "1반" } }),
+    );
+    expect(href).toBe("/classes/7/scoring-key");
+  });
+
+  it("클래스 id가 빠진 옛 줄은 링크를 짓지 않는다", () => {
+    const href = notificationHref(row({ notification_type: "classroom_scoring_key_missing", context: {} }));
+    expect(href).toBeNull();
+  });
+});
+
 describe("notificationHref — classroom_scoring_quota_exhausted", () => {
   it("그 클래스의 설정 화면 채점 키 자리로 간다(#586)", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_quota_exhausted", context: { class_id: 7 } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 });
 
@@ -70,7 +84,7 @@ describe("notificationHref — classroom_scoring_server_unreachable", () => {
     const href = notificationHref(
       row({ notification_type: "classroom_scoring_server_unreachable", context: { class_id: 7 } }),
     );
-    expect(href).toBe("/classes/7/settings#scoring-key");
+    expect(href).toBe("/classes/7/scoring-key");
   });
 });
 
@@ -100,6 +114,15 @@ describe("notificationHref — 소유권 이전 (#575)", () => {
     expect(
       notificationHref(row({ notification_type: "classroom_ownership_transfer_requested", context: {} })),
     ).toBeNull();
+  });
+});
+
+describe("notificationHref — 내보내짐 (#1441)", () => {
+  it("참여자 화면(지난 시도)으로 간다", () => {
+    expect(notificationHref(row({ notification_type: "classroom_member_expelled", context: { class_id: 7 } }))).toBe(
+      "/classes/7/problems/mine",
+    );
+    expect(notificationHref(row({ notification_type: "classroom_member_expelled", context: {} }))).toBeNull();
   });
 });
 

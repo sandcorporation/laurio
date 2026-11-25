@@ -29,8 +29,10 @@
 // 않고(로그인 여부가 아직 갈리지 않았다), 실패(401 등)면 로그인 링크로 대체한다.
 import Link from "next/link";
 import { UserRound } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { AFTER_LOGOUT_PATH } from "@/lib/auth/logout";
+import { withFromPath } from "@/lib/auth/return-link";
 import { useMe } from "@/lib/auth/use-me";
 
 import { buttonClass } from "./ui";
@@ -44,6 +46,18 @@ export function AccountMenuClient({
 }) {
   const me = useMe();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [open]);
 
   if (me.status === "loading") {
     return <span data-testid="account-menu-loading" aria-hidden="true" />;
@@ -51,25 +65,26 @@ export function AccountMenuClient({
 
   if (me.status === "error") {
     return (
-      <Link
+      <a
         href="/login"
         data-testid="account-menu-login-link"
         className={buttonClass("secondary", "sm")}
       >
         로그인
-      </Link>
+      </a>
     );
   }
 
   async function handleLogout() {
     setOpen(false);
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-    window.location.href = "/login";
+    window.location.href = AFTER_LOGOUT_PATH;
   }
 
   return (
     <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((value) => !value)}
         data-testid="account-menu-trigger"
@@ -95,7 +110,7 @@ export function AccountMenuClient({
             className="absolute right-0 z-20 mt-1.5 flex w-44 flex-col border border-rule bg-surface text-[13px]"
           >
             <a
-              href={profileUrl}
+              href={withFromPath(profileUrl, `${window.location.pathname}${window.location.search}`)}
               data-testid="account-menu-profile-link"
               className="px-3 py-2 text-ink hover:bg-paper"
             >

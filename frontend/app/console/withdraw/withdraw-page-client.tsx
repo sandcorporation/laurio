@@ -25,7 +25,7 @@ import {
   useWithdrawalEligibility,
 } from "@/lib/withdrawal/use-withdrawal";
 
-export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | null }) {
+export function WithdrawPageClient({ returnOrigin, returnUrl }: { returnOrigin: string | null; returnUrl: string | null }) {
   const session = useSession();
   const eligibility = useWithdrawalEligibility();
   const router = useRouter();
@@ -73,7 +73,7 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
         {returnOrigin && (
           <a
             className="text-sm text-ink/60"
-            href={returnOrigin}
+            href={returnUrl ?? returnOrigin}
             data-testid="withdraw-return-to-classroom"
           >
             강의실로 돌아가기 →
@@ -138,7 +138,7 @@ export function WithdrawPageClient({ returnOrigin }: { returnOrigin: string | nu
               <button
                 type="button"
                 onClick={handleWithdraw}
-                disabled={!acknowledged || submitting}
+                aria-disabled={(!acknowledged || submitting) || undefined}
                 data-testid="withdraw-submit"
                 className={`mt-4 ${buttonClass("dangerFilled")}`}
               >

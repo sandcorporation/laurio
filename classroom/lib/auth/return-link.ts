@@ -4,12 +4,29 @@
 // (docs/features/classroom.md). `from_origin`이 실제로 우리 형제 오리진인지는
 // 공개 앱이 자기 설정과 대조해 판정한다(frontend/lib/auth/sibling-origins.ts의
 // resolveSiblingOrigin) — 이 함수는 값을 실어 보낼 뿐 검증하지 않는다.
+import { isSafeNextPath } from "./next-path";
+
 function withFromOrigin(basePath: string, publicOrigin: string, classroomOrigin: string): string {
   const url = new URL(basePath, publicOrigin);
   url.searchParams.set("from_origin", classroomOrigin);
   return url.toString();
 }
 
-export function buildProfileUrl(publicOrigin: string, classroomOrigin: string): string {
-  return withFromOrigin("/console/profile", publicOrigin, classroomOrigin);
+export function buildProfileUrl(publicOrigin: string, classroomOrigin: string, fromPath?: string): string {
+  return withFromPath(withFromOrigin("/console/profile", publicOrigin, classroomOrigin), fromPath);
+}
+
+// 떠난 화면(경로·쿼리)을 `from_path` 로 싣는다(#1478 5) — 공개 앱이 「돌아가기」를 그 화면으로 이어 준다.
+// 이 앱 안의 같은 출처 경로만 싣는다: `//`·역슬래시·절대 주소·`javascript:`·제어 문자는 싣지 않는다.
+// 받는 쪽(공개 앱 `resolveSiblingReturnUrl`)도 같은 검사를 따로 한다 — 이쪽은 보내는 값을 깨끗이 두는 몫이다.
+export function isSafeFromPath(path: string | null | undefined): path is string {
+  if (!path || /[\u0000-\u001f\u007f\\]/.test(path)) return false;
+  return isSafeNextPath(path);
+}
+
+export function withFromPath(profileUrl: string, path: string | null | undefined): string {
+  if (!isSafeFromPath(path)) return profileUrl;
+  const url = new URL(profileUrl);
+  url.searchParams.set("from_path", path);
+  return url.toString();
 }

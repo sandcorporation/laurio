@@ -36,6 +36,7 @@ from ninja.errors import HttpError
 from core.clock import Clock
 
 from .class_authoring import reject_banned_name
+from .events import publish_instructors_changed
 from .instructors import is_instructor, is_owner
 from .models import (
     CO_INSTRUCTOR_INVITE_TTL_DAYS,
@@ -68,12 +69,14 @@ def create_invite(class_obj: Class, created_by_id: int) -> CoInstructorInvite:
     """강사(소유자 또는 공동 강사)가 초대를 하나 만든다 — 여러 개가 동시에 열려 있어도 된다."""
 
     now = Clock.now()
-    return CoInstructorInvite.objects.create(
+    invite = CoInstructorInvite.objects.create(
         classroom=class_obj,
         created_by_id=created_by_id,
         created_at=now,
         expires_at=now + timedelta(days=CO_INSTRUCTOR_INVITE_TTL_DAYS),
     )
+    publish_instructors_changed(class_obj)
+    return invite
 
 
 def invite_or_404(token: str) -> CoInstructorInvite:
@@ -168,6 +171,7 @@ def cancel_invite(class_obj: Class, invite_id: int) -> None:
             raise HttpError(409, message)
         invite.cancelled_at = Clock.now()
         invite.save(update_fields=["cancelled_at"])
+        publish_instructors_changed(class_obj)
 
 
 def accept_invite(token: str, user_id: int, display_name: str) -> Class:
@@ -208,6 +212,8 @@ def accept_invite(token: str, user_id: int, display_name: str) -> Class:
         invite.accepted_by_id = user_id
         invite.accepted_at = now
         invite.save(update_fields=["accepted_by", "accepted_at"])
+        # 열어 둔 강사 탭의 명단·대기 초대를 맞춘다(#1447 10-1).
+        publish_instructors_changed(class_obj)
     return class_obj
 
 
@@ -239,6 +245,7 @@ def rename_myself(class_obj: Class, user_id: int, display_name: str) -> dict:
             if is_owner(locked, user_id):
                 locked.instructor_display_name = display_name
                 locked.save(update_fields=["instructor_display_name"])
+                publish_instructors_changed(locked)
                 return _my_roster_row(locked, user_id)
             # 겹친 이전 수락이 방금 이 사람을 공동 강사로 옮겼을 수 있다 — 클래스 잠금 뒤 다시 본다.
             row = (
@@ -250,6 +257,7 @@ def rename_myself(class_obj: Class, user_id: int, display_name: str) -> dict:
                 raise HttpError(404, NOT_INSTRUCTOR_MESSAGE)
         row.display_name = display_name
         row.save(update_fields=["display_name"])
+    publish_instructors_changed(class_obj)
     return _my_roster_row(class_obj, user_id)
 
 
@@ -260,12 +268,13 @@ def _my_roster_row(class_obj: Class, user_id: int) -> dict:
 # --- 떠나기 (#563) -----------------------------------------------------------------
 
 
-def depart(row: ClassCoInstructor) -> bool:
+def depart(row: ClassCoInstructor, *, by_self: bool) -> bool:
     """공동 강사 한 사람이 클래스에서 빠진다 — 세 길(떠나기·내보내기·탈퇴)이 모두 이 함수를
     탄다. 한 트랜잭션에서:
 
     1. 공동 강사 자리를 지운다 — 그 순간부터 「강사인가」가 거짓이라 강사 라우트가 404 다.
-    2. 그 사람의 참여자 행이 있으면 내보낸 참여자로 표시한다(이미 내보냈으면 그대로). 강사일
+    2. 그 사람의 참여자 행이 있으면 닫는다(이미 닫혔으면 그대로) — 떠나기·탈퇴(`by_self`)면
+       스스로 나간 것으로, 소유자의 내보내기면 내보낸 것으로 적는다(#1492-5). 강사일
        때 집계에서 빠지던 점검용 시도가 「지금 배우는 사람」으로 돌아오지 않게 하고, 그 시도는
        내보낸 참여자의 시도로 남아 문제 삭제를 막는다(ADR-0050).
     3. 그 사람이 만든 대기 중 초대를 취소한다 — 더 믿지 않는 사람이 나눠 준 링크로 누가
@@ -287,10 +296,15 @@ def depart(row: ClassCoInstructor) -> bool:
         ClassCoInstructor.objects.filter(id=row.id).delete()
         ClassMember.objects.filter(
             classroom_id=row.classroom_id, user_id=row.user_id, expelled_at__isnull=True
-        ).update(expelled_at=now)
+        ).update(expelled_at=now, left_by_self=by_self)
         CoInstructorInvite.objects.filter(
             _pending_q(now), classroom_id=row.classroom_id, created_by_id=row.user_id
         ).update(cancelled_at=now)
+        publish_instructors_changed(
+            row.classroom,
+            also={row.user_id},
+            departed={"co_instructor_id": row.id, "display_name": row.display_name, "left": by_self},
+        )
     return True
 
 
@@ -301,14 +315,14 @@ def leave(class_obj: Class, user_id: int) -> None:
         raise HttpError(409, OWNER_CANNOT_LEAVE_MESSAGE)
     row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, user_id=user_id).first()
     if row is not None:
-        depart(row)
+        depart(row, by_self=True)
 
 
 def remove_by_owner(class_obj: Class, co_instructor_id: int) -> None:
     """소유자가 공동 강사 한 사람을 내보낸다. 이 클래스의 공동 강사 줄이 아니면 404."""
 
     row = ClassCoInstructor.objects.filter(classroom_id=class_obj.id, id=co_instructor_id).first()
-    if row is None or not depart(row):
+    if row is None or not depart(row, by_self=False):
         raise HttpError(404, "이 클래스에 그런 공동 강사가 없습니다.")
 
 
@@ -318,4 +332,4 @@ def leave_all_on_withdrawal(sender, user, **kwargs) -> None:
     않는다(보관하지 않은 소유 클래스는 탈퇴를 막고, 보관한 것은 소유자에게 남는다)."""
 
     for row in ClassCoInstructor.objects.filter(user_id=user.id):
-        depart(row)
+        depart(row, by_self=True)

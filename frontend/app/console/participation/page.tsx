@@ -90,7 +90,7 @@ export default function MyParticipationPage() {
               className={`mt-4 ${buttonClass("secondary")}`}
               type="button"
               onClick={state.loadMore}
-              disabled={state.loadingMore}
+              aria-disabled={state.loadingMore || undefined}
               data-testid="participation-load-more"
             >
               {state.loadingMore
@@ -269,7 +269,7 @@ function CertificateRow({ certificate, onChanged }: { certificate: MyCertificate
             <button
               type="button"
               className={buttonClass("secondary", "sm")}
-              disabled={busy}
+              aria-disabled={busy || undefined}
               onClick={() => toggle(action.hidden)}
               data-testid={`${testid}-visibility`}
             >

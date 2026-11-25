@@ -72,6 +72,8 @@ class PublishedTemplateSummaryOut(Schema):
     share_code: str
     publisher_display_name: str
     created_at: datetime
+    #: 부른 사람이 내릴 수 있는가 — 공개한 사람만 내린다. 아니면 화면이 단추 대신 공개자 이름만 보인다(#1446).
+    can_take_down: bool = False
 
 
 class PendingOwnershipTransferOut(Schema):
@@ -190,6 +192,8 @@ class ClassOut(Schema):
     #: 대기 중인 소유권 이전 요청(#564) — 없으면 `None`. 강사 누구나 본다: 소유자는 취소하고,
     #: 받는 공동 강사(`recipient_is_me`)는 클래스 화면에서 수락하거나 거절한다.
     pending_ownership_transfer: PendingOwnershipTransferOut | None = None
+    #: 강사 쪽 변경 번호(#1484 ④) — `instructors-changed` 신호 본문의 `rev` 와 같은 값. 이 번호 이하의 신호는 이 응답이 이미 담았다.
+    signal_rev: int = 0
     #: 클래스 행 수치(#632) — 모두 「강사 본인·내보낸 참여자 제외」의 달성률과 같은 기준이다.
     #: 참여 중인 참여자 수.
     member_count: int = 0
@@ -222,6 +226,13 @@ class CompatibleServerIn(Schema):
     auth_value: str = Field(default="", max_length=400)
 
 
+class FormerClassOut(Schema):
+    """강사에서 빠진 클래스 한 줄(#1465 2) — 번호만 준다. 화면이 404 를 만났을 때 「더 이상 강사가 아닙니다」와
+    「찾을 수 없습니다」를 가르는 데만 쓴다."""
+
+    id: int
+
+
 class JoinedClassOut(Schema):
     """「내가 참여자로 들어간 클래스」한 줄(#328) — 강사 전용 `ClassOut`과
     달리 `join_code`·OpenAI 키·토큰 사용량을 싣지 않는다: 그 값들은 강사만의
@@ -240,6 +251,9 @@ class JoinedClassOut(Schema):
     #: 강사가 내보냈는가(#281) — 참이어도 행은 지워지지 않고 지난 시도·판정은
     #: 그대로 읽힌다(`member_expelled`와 같은 신호, #300). 새 제출만 막힌다.
     expelled: bool = False
+    #: `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5, `ClassMember.left_by_self`) — 공동
+    #: 강사로 있다가 떠나거나 탈퇴한 사람이다. 화면은 「내보내짐」 대신 「나감」으로 적는다.
+    left: bool = False
     #: 내 진행(#632) — 지금 열린 문제 수와 그중 내가 한 번이라도 통과한 수.
     open_problem_count: int = 0
     passed_count: int = 0
@@ -969,6 +983,8 @@ class MemberOut(Schema):
     display_name: str
     joined_at: datetime
     expelled: bool
+    #: `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5, `ClassMember.left_by_self`).
+    left: bool = False
     is_instructor: bool
 
 
@@ -1292,19 +1308,18 @@ class ClassroomProblemSubmissionsOut(Schema):
     problem: ClassroomProblemMineOut
     submissions: list[ClassroomSubmissionOut]
     #: 이 요청을 보낸 사람이 지금 새로 낼 수 없는 이유 하나, 낼 수 있으면
-    #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) |
-    #: "hidden"(강사가 이 문제를 숨김) |
-    #: "viewing_as_instructor"(강사가 학생 화면으로 보는 중) 중 하나다 — 우선순위는
+    #: `None`(#439). "archived"(클래스가 보관됨) | "expelled"(내보내짐) | "left"(스스로 나감, #1492-5) |
+    #: "hidden"(강사가 이 문제를 숨김) 중 하나다 — 우선순위는
     #: 보관 → 내보냄 → 숨김이고
-    #: (`classroom.participation.participant_submit_blocked_reason`), 강사
-    #: 보기는 그 셋과 겹치지 않는 별도 판정이다. 예전의 네 불리언
+    #: (`classroom.participation.participant_submit_blocked_reason`), 강사에게는
+    #: "archived" 만 나온다. 예전의 네 불리언
     #: (`member_expelled`·`archived`·`problem_hidden`·`viewing_as_instructor`)을
     #: 이 값 하나로 합쳤다 — 화면이 우선순위를 다시 계산하지 않는다. 지난
     #: 시도는 이 값과 무관하게 `submissions`에 그대로 남는다 — 막히는 것은
     #: 새 제출뿐이다.
     submit_blocked_reason: str | None = None
-    #: `submit_blocked_reason`이 "viewing_as_instructor"일 때만 채워지는 문제
-    #: 상태("draft"|"open"|"hidden") — 띠가 몇 줄을 더 말할지 이 값으로
+    #: `viewing_as_instructor`일 때만 채워지는 문제
+    #: 상태("draft"|"open"|"hidden") — 띠가 상태 배지를 이 값으로
     #: 정한다. 참여자 시점에는 언제나 `None`이다(참여자에게는 상태 구분이
     #: 필요 없다는 것이 이미 `ClassroomProblemMineOut`의 설계다).
     instructor_problem_status: str | None = None
@@ -1314,6 +1329,10 @@ class ClassroomProblemSubmissionsOut(Schema):
     #: 낼 수 있게 되면서 둘이 갈렸다 — 띠(「학생 화면으로 보고 있다」)는 이
     #: 값으로, 제출 잠금은 `submit_blocked_reason`으로 정한다.
     viewing_as_instructor: bool = False
+    #: 강사가 열었을 때만 채워지는 보는 사람의 역할("owner"|"co_instructor") — 채점 키·모델은 소유자만
+    #: 바꾸므로, 멈춘 시도의 안내가 소유자에게는 「넣으면」, 공동 강사에게는 「소유자에게 부탁」이 된다
+    #: (#1421·#1422). 참여자 시점에는 언제나 `None`이다.
+    viewer_role: Literal["owner", "co_instructor"] | None = None
 
 
 class ClassroomProblemStatsOut(Schema):
@@ -1364,6 +1383,8 @@ class ClassroomGridMemberOut(Schema):
     display_name: str
     is_instructor: bool
     expelled: bool
+    #: `expelled` 가 참인 까닭이 스스로 나간 것인가(#1492-5) — 참여자 표가 「나감」과 「내보냄」을 가른다.
+    left: bool = False
     cells: list[ClassroomGridCellOut]
     #: 가입 시각과 이 사람의 가장 최근 제출 시각(#632). 제출이 없으면 `None`.
     joined_at: datetime | None = None
@@ -1390,6 +1411,11 @@ class ClassroomRecentAttemptOut(Schema):
     submitted_at: datetime
     #: 늦음 단계(#941) — `ClassroomSubmissionOut.late` 와 같은 셈.
     late: LateStatus
+    #: `status` 가 "needs_setup" 일 때 멈춘 사유 — 참여자 화면 `pending_reason` 과 같은 값
+    #: ("no_api_key" | "model_rejected"), 아니면 null(#1436).
+    pending_reason: str | None = None
+    #: 이 문제 자신의 채점 모델(비면 클래스 기본값을 따른다) — 모델 거부의 「채점 모델 바꾸기」 갈 곳을 가른다.
+    problem_model: str = ""
 
 
 class ClassroomAttemptRowOut(ClassroomRecentAttemptOut):

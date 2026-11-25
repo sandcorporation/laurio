@@ -16,7 +16,14 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { ATTEMPT_SCORED, ATTEMPT_SUBMITTED, type StreamEvent } from "@/lib/events/types";
+import {
+  ATTEMPT_SCORED,
+  ATTEMPT_SUBMITTED,
+  INSTRUCTORS_CHANGED,
+  PARTICIPATION_CHANGED,
+  isClassSignal,
+  type StreamEvent,
+} from "@/lib/events/types";
 
 import type { ProblemSubmissions } from "./api";
 
@@ -54,14 +61,29 @@ export function useMyProblem(classId: number, problemId: number) {
   // ADR-0046). attempt-submitted를 더한 이유는 #383 AC "다른 탭에서 낸
   // 시도가 나타난다" — 이 참여자가 다른 탭·기기에서 낸 시도도 새로고침
   // 없이 이 목록에 보여야 한다.
+  //
+  // participation-changed(#1447 10-2)는 문제 숨김·클래스 보관·내보내기 — 열어 둔 화면이 「낼 수 있음」에
+  // 머물지 않고 제출 가능 상태를 다시 읽는다. 클래스 단위 신호라 문제 번호를 보지 않는다.
   const matches = useCallback(
     (event: StreamEvent) =>
-      (event.kind === ATTEMPT_SCORED || event.kind === ATTEMPT_SUBMITTED) &&
-      event.payload.class_id === classId &&
-      event.payload.problem_id === problemId,
+      isClassSignal(event, PARTICIPATION_CHANGED, classId) ||
+      // 강사로 보던 화면(학생 화면)은 강사 권한이 빠지는 것도 다시 읽어 접근 안내로 바뀐다(#1471 ③).
+      isClassSignal(event, INSTRUCTORS_CHANGED, classId) ||
+      ((event.kind === ATTEMPT_SCORED || event.kind === ATTEMPT_SUBMITTED) &&
+        event.payload.class_id === classId &&
+        event.payload.problem_id === problemId),
     [classId, problemId],
   );
-  useRealtimeRefresh({ matches, waiting: hasPendingAttempt, fallbackPollMs: FALLBACK_POLL_MS, reload });
+  // 참여자 행이 있는 강사는 보관·문제 쓰기 한 번에 participation-changed·instructors-changed 를 함께 받는다 —
+  // 둘이 따로 도착하면 같은 재조회가 두 번 돈다(#1484 ③). 두 신호가 싣는 같은 변경 번호로 하나가 된다(#1496 ⑤,
+  // `useRealtimeRefresh`).
+  useRealtimeRefresh({
+    matches,
+    waiting: hasPendingAttempt,
+    fallbackPollMs: FALLBACK_POLL_MS,
+    reload,
+    settled: queryState,
+  });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
   // 호출부가 폭주할 수 있다(#462 코드 리뷰).

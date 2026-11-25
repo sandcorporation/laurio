@@ -27,25 +27,29 @@ import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { QualityRankingCard } from "@/app/components/QualityRankingCard";
 import { SubmissionVerdictList } from "@/app/components/SubmissionVerdictList";
 import { detailTabHref } from "@/lib/classes/detail-tab";
+import { modelRejectedNote, scoringBlockNote } from "@/lib/classes/scoring-block-note";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
 import { useClass } from "@/lib/classes/use-class";
 import { useRosterGrid } from "@/lib/roster-grid/use-roster-grid";
 import type { InstructorSubmissionRow } from "@/lib/submissions/api";
 import {
+  countTone,
   latestPerMember,
   participantAttempts,
   participantIdsOf,
   requiredSummary,
   submissionStats,
 } from "@/lib/submissions/latest-attempts";
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useProblem } from "@/lib/problems/use-problem";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { useProblemSubmissions } from "@/lib/submissions/use-problem-submissions";
 import { Stamp } from "@/app/components/Stamp";
-import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
+import { PERFECT_TEXT_CLASS, STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { withLate } from "@/lib/problems/due-dates";
 import { currentEntryAttemptByMember, latestRowEntryBadge } from "@/lib/submissions/contest-entry";
 import { rejectionText } from "@/lib/submissions/rejection";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
 
@@ -55,14 +59,14 @@ function StatBar({ stats, perfect }: { stats: ReturnType<typeof submissionStats>
       key: "passed",
       label: "통과",
       value: `${stats.passed}/${stats.participants ?? "—"}`,
-      tone: "text-success",
+      tone: countTone(stats.passed, "text-success"),
     },
     ...(perfect === null
       ? []
-      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: "text-advanced" }]),
+      : [{ key: "perfect", label: "완벽", value: `${perfect}/${stats.participants ?? "—"}`, tone: countTone(perfect, PERFECT_TEXT_CLASS) }]),
     { key: "attempts", label: "시도", value: String(stats.attempts) },
     { key: "scoring", label: "채점 중", value: String(stats.scoring) },
-    { key: "waiting", label: "채점 대기", value: String(stats.waiting) },
+    { key: "waiting", label: WAITING_LABEL, value: String(stats.waiting) },
   ];
   return (
     <div data-testid="submissions-stat-bar" className="grid grid-cols-4 border border-rule bg-surface sm:flex sm:w-fit">
@@ -89,8 +93,8 @@ function StatusBadge({ submission }: { submission: InstructorSubmissionRow }) {
             submission.pending_reason === "rejected"
               ? "반려"
               : submission.pending_reason
-                ? "채점 대기"
-                : "채점 중",
+                ? WAITING_LABEL
+                : SCORING_LABEL,
             submission.late,
           )}
         </Badge>
@@ -138,6 +142,8 @@ function AttemptRow({
   const summary = requiredSummary(submission, items, syntaxCheckEnabled);
   const entry = latestRowEntryBadge(submission, currentEntryAttempt);
   const canOpen = submission.status === "scored" && submission.score !== null;
+  // 줄마다 같은 글자의 단추·링크가 되풀이된다 — 낭독기 목록에서 가르도록 누구의 몇 번째 시도인지를 이름에 잇는다(보이는 글은 앞에 그대로).
+  const who = `${submission.member_display_name} 시도 ${submission.attempt_number}`;
   return (
     <li id={`submission-${submission.id}`} data-testid={testId} className="scroll-mt-4 px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
@@ -165,6 +171,7 @@ function AttemptRow({
             type="button"
             data-testid={`${testId}-verdict-toggle`}
             aria-expanded={open}
+            aria-label={`판정 ${who}`}
             onClick={onToggle}
             className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
           >
@@ -178,6 +185,7 @@ function AttemptRow({
               target="_blank"
               rel="noreferrer"
               data-testid={`${testId}-repository`}
+              aria-label={`저장소 ${who}`}
               className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
             >
               저장소
@@ -189,6 +197,7 @@ function AttemptRow({
                 target="_blank"
                 rel="noreferrer"
                 data-testid={`${testId}-commit`}
+                aria-label={`커밋 ${shortSha(submission.commit_sha)} ${who}`}
                 className="order-6 py-1.5 font-mono text-[12px] text-ink/60 hover:text-ink sm:order-none"
               >
                 {shortSha(submission.commit_sha)}
@@ -199,6 +208,7 @@ function AttemptRow({
           <a
             href={submission.download_url}
             data-testid={`${testId}-download`}
+            aria-label={`다운로드 ${who}`}
             className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
           >
             다운로드
@@ -224,7 +234,7 @@ export default function ProblemSubmissionsPage() {
   const problemId = Number(params.problemId);
 
   const problemState = useProblem(classId, problemId);
-  const { state } = useProblemSubmissions(classId, problemId);
+  const { state, reload } = useProblemSubmissions(classId, problemId);
   const { state: classState } = useClass(classId);
   const { state: gridState } = useRosterGrid(classId);
   const [showAll, setShowAll] = useState(false);
@@ -244,12 +254,21 @@ export default function ProblemSubmissionsPage() {
     );
   }
 
-  if (state.status === "notFound") {
+  if (state.status === "notFound" || problemState.state.status === "notFound") {
     return (
       <PageShell>
-        <h1 data-testid="problem-submissions-not-found" className="text-[22px] font-semibold">
-          문제를 찾을 수 없습니다
-        </h1>
+        <AccessNotice
+          page="problem"
+          classId={classId}
+          testId="problem-submissions-not-found"
+          retry={{
+            reload: () => {
+              reload();
+              problemState.reload();
+            },
+            turns: [state, problemState.state],
+          }}
+        />
       </PageShell>
     );
   }
@@ -334,10 +353,10 @@ export default function ProblemSubmissionsPage() {
       <div className="flex flex-col gap-4">
         <StatBar stats={stats} perfect={perfectCount} />
 
-        {blockedByMissingKey ? (
+        {blockedByMissingKey && classState.status === "ready" ? (
           <MissingScoringKeyNote
             classId={classId}
-            message="이 클래스의 채점 키 문제로 일부 시도가 채점되지 않고 있습니다 — 클래스 설정에서 확인해주세요."
+            {...scoringBlockNote(classState.classroom, "submissions")}
             noteTestId="submissions-no-api-key-note"
             settingsLinkTestId="submissions-no-api-key-settings-link"
           />
@@ -346,10 +365,9 @@ export default function ProblemSubmissionsPage() {
         {blockedByRejectedModel ? (
           <MissingScoringKeyNote
             classId={classId}
-            message="이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요."
+            {...modelRejectedNote(classState.status === "ready" ? classState.classroom.role : null, classId, problemId, problem?.model)}
             noteTestId="submissions-model-rejected-note"
             settingsLinkTestId="submissions-model-rejected-settings-link"
-            actionLabel="채점 모델 바꾸기"
             settingsAnchor="scoring-model"
           />
         ) : null}
@@ -424,7 +442,8 @@ export default function ProblemSubmissionsPage() {
         <QualityRankingCard
           classId={classId}
           problemId={problemId}
-          canChangeKey={classState.status === "ready" && classState.classroom.role === "owner"}
+          problemModel={problem?.model}
+          classroom={classState.status === "ready" ? classState.classroom : null}
         />
       </div>
     </PageShell>

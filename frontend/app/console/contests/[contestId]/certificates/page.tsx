@@ -8,7 +8,7 @@
 // 서버가 거절하고, 이 화면은 그 문구를 그대로 보여 준다.
 //
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015).
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -26,6 +26,7 @@ import {
   type CertificateOut,
   type CertificateTextIn,
 } from "@/lib/certificates/types";
+import { useDialogFocus } from "@codemit/bff-client/dialog-focus";
 import { buttonClass } from "@/lib/ui/classnames";
 
 import { CertificateFields } from "./certificate-fields";
@@ -48,6 +49,59 @@ function api(contestId: string, suffix = ""): string {
   return `/api/backend/contests/${contestId}/certificates${suffix}`;
 }
 
+// 머리글로 초점을 돌려야 할 때 — 머리글은 기본이 초점 대상이 아니라 tabindex=-1 을 단 뒤 준다.
+function focusIssuedHeading(): HTMLElement | null {
+  const heading = document.querySelector<HTMLElement>('[data-testid="certificates-issued"] h2');
+  if (heading) heading.tabIndex = -1;
+  return heading;
+}
+
+// 되돌릴 수 없는 확인창(role=alertdialog) — 열면 안전한 쪽(돌아가기), Tab 은 창 안에, Escape 는 닫기.
+function ConfirmDialog({
+  testId,
+  label,
+  onDismiss,
+  returnTo,
+  opener,
+  children,
+  dismissLabel = "돌아가기",
+  actions,
+}: {
+  testId: string;
+  /** 창의 접근성 이름 — 무엇을 확인하는 창인지. */
+  label: string;
+  onDismiss: () => void;
+  returnTo: () => HTMLElement | null;
+  /** 연 단추(클릭의 currentTarget) — 초점 없이 열려도 닫으면 여기로 돌아온다. */
+  opener?: HTMLElement | null;
+  children: ReactNode;
+  dismissLabel?: string;
+  actions: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const safeRef = useRef<HTMLButtonElement>(null);
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onDismiss, initialFocus: safeRef, fallbackFocus: returnTo, opener });
+  return (
+    <div
+      ref={dialogRef}
+      className="flex flex-col gap-3 border border-error p-4 text-sm"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={label}
+      aria-describedby={descriptionId}
+      data-testid={testId}
+    >
+      <div id={descriptionId}>{children}</div>
+      <div className="flex gap-2">
+        {actions}
+        <button ref={safeRef} type="button" className={buttonClass("secondary", "sm")} onClick={onDismiss}>
+          {dismissLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ContestCertificatesPage() {
   const params = useParams<{ contestId: string }>();
   const contestId = params.contestId;
@@ -60,8 +114,13 @@ export default function ContestCertificatesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // 「전체 선택」의 결과 — 낭독기가 몇 명이 골라졌는지 듣는다(자리는 늘 떠 있어야 바뀐 글이 읽힌다).
+  const [pickResult, setPickResult] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [cancelling, setCancelling] = useState<number | null>(null);
+  // 취소창을 연 단추 — 낭독기 활성화·일부 터치는 초점을 옮기지 않아 activeElement 로는 돌아갈 곳을 모른다.
+  // (발급창은 돌아갈 곳이 늘 발급 단추라 fallback 이 대신한다.)
+  const [cancelOpener, setCancelOpener] = useState<HTMLElement | null>(null);
   // 묶어 받을 발급된 상장 id. 비어 있으면 받을 수 있는 것 전부를 받는다.
   const [bundlePicked, setBundlePicked] = useState<ReadonlySet<number>>(new Set());
   const [reissue, setReissue] = useState<{ id: number; text: CertificateTextIn } | null>(null);
@@ -135,6 +194,7 @@ export default function ContestCertificatesPage() {
   const pickedIds = new Set(picked.map((p) => p.submissionId));
 
   const togglePick = (submissionId: number, name: string) => {
+    setPickResult("");
     setConfirming(false);
     setError(null);
     setNotice(null);
@@ -169,9 +229,16 @@ export default function ContestCertificatesPage() {
     setError(null);
     if (picked.length === Math.min(issuable.length, ISSUE_BATCH_LIMIT) && picked.length > 0) {
       setPicked([]);
+      setPickResult("선택을 모두 풀었습니다.");
       return;
     }
     const base = picked.at(-1)?.text;
+    const chosen = Math.min(issuable.length, ISSUE_BATCH_LIMIT);
+    setPickResult(
+      chosen < issuable.length
+        ? `발급할 수 있는 ${issuable.length}명 중 한 번에 발급할 수 있는 ${chosen}명을 선택했습니다.`
+        : `${chosen}명을 모두 선택했습니다.`,
+    );
     setPicked(
       issuable.slice(0, ISSUE_BATCH_LIMIT).map((r) => ({
         submissionId: r.submission_id,
@@ -244,6 +311,8 @@ export default function ContestCertificatesPage() {
     }
     setNotice("상장을 취소했습니다.");
     await reload();
+    // 다시 불린 목록에서 취소된 장의 「취소」 단추가 사라진다 — 초점이 body 로 빠지지 않게 머리글로.
+    focusIssuedHeading()?.focus();
   };
 
   const reissueNow = async () => {
@@ -262,6 +331,8 @@ export default function ContestCertificatesPage() {
     setReissue(null);
     setNotice(`${result.data.number} 번으로 다시 발급했습니다.`);
     await reload();
+    // 다시 발급한 장의 옛 행에서 단추들이 사라진다 — 머리글로.
+    focusIssuedHeading()?.focus();
   };
 
   return (
@@ -277,21 +348,22 @@ export default function ContestCertificatesPage() {
       />
 
       {error ? <ErrorNote testId="certificates-error">{error}</ErrorNote> : null}
-      {notice ? (
-        <p className="text-sm text-success" role="status" data-testid="certificates-notice">
-          {notice}
-        </p>
-      ) : null}
+      <p className="text-sm text-success empty:hidden" role="status" data-testid="certificates-notice">
+        {notice}
+      </p>
 
       <section className="flex flex-col gap-3" data-testid="certificates-recipients">
         <SectionHeading
           title="제출자"
           hint={
-            <span data-testid="certificates-picked-count">
+            <span role="status" data-testid="certificates-picked-count">
               {picked.length}/{Math.min(issuable.length, ISSUE_BATCH_LIMIT)} 선택
             </span>
           }
         />
+        <p role="status" className="sr-only" data-testid="certificates-pick-result">
+          {pickResult}
+        </p>
         {board.recipients.length === 0 ? (
           <EmptyState>
             <span data-testid="certificates-recipients-empty">제출이 없습니다.</span>
@@ -360,7 +432,7 @@ export default function ContestCertificatesPage() {
                 <button
                   type="button"
                   className={buttonClass("secondary", "sm")}
-                  disabled={busy}
+                  aria-disabled={busy || undefined}
                   onClick={() => void showPreview(p.text.recipient_name, p.text)}
                   data-testid={`certificates-preview-${p.submissionId}`}
                 >
@@ -399,40 +471,36 @@ export default function ContestCertificatesPage() {
           ) : null}
 
           {confirming ? (
-            <div
-              className="flex flex-col gap-3 border border-error p-4 text-sm"
-              role="alertdialog"
-              data-testid="certificates-confirm"
-            >
-              <p>
-                {picked.length}장을 발급합니다. 발급한 상장은 고칠 수 없고, 받는 사람에게 알림이 갑니다.
-                고치려면 취소한 뒤 다시 발급해야 합니다.
-              </p>
-              <div className="flex gap-2">
+            <ConfirmDialog
+              testId="certificates-confirm"
+              label="상장 발급 확인"
+              onDismiss={() => setConfirming(false)}
+              returnTo={() =>
+                document.querySelector<HTMLElement>('[data-testid="certificates-issue"]') ?? focusIssuedHeading()
+              }
+              actions={
                 <button
                   type="button"
                   className={buttonClass("dangerFilled", "sm")}
-                  disabled={busy}
+                  aria-disabled={busy || undefined}
                   onClick={() => void issue()}
                   data-testid="certificates-confirm-issue"
                 >
                   발급
                 </button>
-                <button
-                  type="button"
-                  className={buttonClass("secondary", "sm")}
-                  onClick={() => setConfirming(false)}
-                >
-                  돌아가기
-                </button>
-              </div>
-            </div>
+              }
+            >
+              <p>
+                {picked.length}장을 발급합니다. 발급한 상장은 고칠 수 없고, 받는 사람에게 알림이 갑니다.
+                고치려면 취소한 뒤 다시 발급해야 합니다.
+              </p>
+            </ConfirmDialog>
           ) : (
             <div>
               <button
                 type="button"
                 className={buttonClass("primary")}
-                disabled={busy}
+                aria-disabled={busy || undefined}
                 onClick={() => setConfirming(true)}
                 data-testid="certificates-issue"
               >
@@ -543,7 +611,8 @@ export default function ContestCertificatesPage() {
                       <button
                         type="button"
                         className="underline"
-                        onClick={() => {
+                        onClick={(event) => {
+                          setCancelOpener(event.currentTarget);
                           setCancelling(c.id);
                           setReissue(null);
                         }}
@@ -555,34 +624,29 @@ export default function ContestCertificatesPage() {
                   ) : null}
 
                   {cancelling === c.id ? (
-                    <div
-                      className="flex flex-col gap-3 border border-error p-3 text-sm"
-                      role="alertdialog"
-                      data-testid={`certificates-cancel-confirm-${c.id}`}
-                    >
-                      <p>
-                        {c.number} 을(를) 취소합니다. 확인 페이지에 「취소됨」으로 보이고 되돌릴 수 없습니다.
-                        다시 받는 사람에게 발급하려면 새 번호로 발급해야 합니다.
-                      </p>
-                      <div className="flex gap-2">
+                    <ConfirmDialog
+                      testId={`certificates-cancel-confirm-${c.id}`}
+                      label={`${c.number} 취소 확인`}
+                      onDismiss={() => setCancelling(null)}
+                      returnTo={focusIssuedHeading}
+                      opener={cancelOpener}
+                      actions={
                         <button
                           type="button"
                           className={buttonClass("dangerFilled", "sm")}
-                          disabled={busy}
+                          aria-disabled={busy || undefined}
                           onClick={() => void cancel(c.id)}
                           data-testid={`certificates-cancel-go-${c.id}`}
                         >
                           취소하기
                         </button>
-                        <button
-                          type="button"
-                          className={buttonClass("secondary", "sm")}
-                          onClick={() => setCancelling(null)}
-                        >
-                          돌아가기
-                        </button>
-                      </div>
-                    </div>
+                      }
+                    >
+                      <p>
+                        {c.number} 을(를) 취소합니다. 확인 페이지에 「취소됨」으로 보이고 되돌릴 수 없습니다.
+                        다시 받는 사람에게 발급하려면 새 번호로 발급해야 합니다.
+                      </p>
+                    </ConfirmDialog>
                   ) : null}
 
                   {reissue?.id === c.id ? (
@@ -601,7 +665,7 @@ export default function ContestCertificatesPage() {
                         <button
                           type="button"
                           className={buttonClass("dangerFilled", "sm")}
-                          disabled={busy}
+                          aria-disabled={busy || undefined}
                           onClick={() => void reissueNow()}
                           data-testid={`certificates-reissue-go-${c.id}`}
                         >

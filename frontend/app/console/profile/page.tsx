@@ -5,9 +5,12 @@
 // 읽어(`CODEMIT_CLASSROOM_ORIGIN`) 브라우저 번들에서는 값을 얻을 수 없으므로
 // 서버 컴포넌트에서만 부를 수 있다(로그인 화면의 `classroomOrigin()`과 같은
 // 제약, app/login/page.tsx).
-import { resolveSiblingOrigin } from "@/lib/auth/sibling-origins";
+import type { Metadata } from "next";
+import { resolveSiblingOrigin, resolveSiblingReturnUrl } from "@/lib/auth/sibling-origins";
 
 import { ProfilePageClient } from "./profile-page-client";
+
+export const metadata: Metadata = { title: "내 정보" };
 
 // `searchParams`를 읽어 이미 사실상 동적이지만, `CODEMIT_CLASSROOM_ORIGIN`을
 // 읽는 진입점이라는 것을 구조 검사(`lib/rendering/runtime-config.test.ts`,
@@ -17,9 +20,10 @@ export const dynamic = "force-dynamic";
 export default async function ProfilePage({
   searchParams,
 }: {
-  searchParams: Promise<{ from_origin?: string }>;
+  searchParams: Promise<{ from_origin?: string; from_path?: string }>;
 }) {
   const params = await searchParams;
   const returnOrigin = resolveSiblingOrigin(params.from_origin);
-  return <ProfilePageClient returnOrigin={returnOrigin} />;
+  const returnUrl = resolveSiblingReturnUrl(params.from_origin, params.from_path);
+  return <ProfilePageClient returnOrigin={returnOrigin} returnUrl={returnUrl} />;
 }

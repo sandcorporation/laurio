@@ -5,8 +5,10 @@ import { FeedbackReportList } from "@codemit/bff-client/feedback";
 
 import { PageHeader, PageShell } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 export default function MyFeedbackPage() {
+  useClassroomTabTitle({ screenName: "내 제보" });
   return (
     <PageShell>
       <PageHeader title="내 제보" titleTestId="feedback-title" />

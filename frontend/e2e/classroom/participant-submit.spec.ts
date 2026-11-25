@@ -46,7 +46,7 @@ test("형식을 고르고 저장소를 내면 내 시도에 줄이 생긴다", a
   await page.goto(`/classes/${classId}/problems/${problemId}/submit`);
 
   await expect(page.getByTestId("my-problem-title")).toHaveText("목록 그리기");
-  await expect(page.getByTestId("my-problem-passed-status")).toHaveText("아직 미통과");
+  await expect(page.getByTestId("my-problem-passed-status")).toHaveText("미제출");
   await expect(page.getByTestId("my-problem-back-link")).toHaveAttribute("href", `/classes/${classId}/problems/mine`);
   await expect(page.getByTestId("submissions-empty-state")).toBeVisible();
   // 체크리스트는 아직 판정이 없어 항목만 있다.
@@ -57,14 +57,140 @@ test("형식을 고르고 저장소를 내면 내 시도에 줄이 생긴다", a
   const side = page.getByTestId("my-problem-side");
   await side.getByTestId("submission-format-option-source").click();
   await expect(side.getByTestId("source-file-input")).toBeAttached();
+  await expect(side.getByTestId("source-file-input")).toBeFocused();
   await expect(side.getByTestId("source-file-max-size")).toHaveText("최대 50MB");
   await side.getByTestId("submission-format-change").click();
   await side.getByTestId("submission-format-option-repository").click();
+  await expect(side.getByTestId("repository-url-input")).toBeFocused();
   await side.getByTestId("repository-url-input").fill("https://github.com/octocat/e2e-submit");
   await side.getByTestId("submit-repository").click();
+  // 제출이 끝나면 초점이 body 로 떨어지지 않고, 결과 변화는 live 영역 하나가 알린다(#1431).
+  await expect(side.getByTestId("submit-repository")).toBeFocused();
+  await expect(page.getByTestId("attempt-live")).toHaveAttribute("role", "status");
 
   const rows = page.getByTestId("submissions-list").locator(":scope > li");
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("시도 1");
   await expect(page.getByTestId("my-problem-progress-count")).toBeVisible();
+});
+
+// 390px(#1376) — 채점 대기 사유가 잘리지 않고, 제출 칸은 링크 한 번이면 닿는다.
+test("좁은 폭에서 대기 사유가 다 보이고 링크로 제출 칸에 닿는다", async ({ page, browser }) => {
+  const seed = `participant-submit-narrow-${test.info().workerIndex}-${Date.now()}`;
+
+  const instructorContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const instructorPage = await instructorContext.newPage();
+  await establishClassroomSession(instructorPage, seed);
+  const api = classroomApi(instructorPage);
+
+  const classId = (
+    await (
+      await api.post("/api/backend/classroom/classes", {
+        data: { name: `좁은 폭 제출 ${Date.now()}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const problemId = (
+    await (await api.post(`${base}/problems`, { data: { title: "목록 그리기", submission_formats: ["repository"] } })).json()
+  ).id as number;
+  // 첫 화면 밖으로 제출 칸이 밀리도록 체크리스트를 쌓는다.
+  for (let index = 1; index <= 8; index += 1) {
+    expect(
+      (await api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: `항목 ${index}`, required: true } })).ok(),
+    ).toBeTruthy();
+  }
+  expect((await api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+
+  const joinCode = (await (await api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  const participant = classroomApi(page);
+  expect(
+    (await participant.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "서지우" } })).ok(),
+  ).toBeTruthy();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/classes/${classId}/problems/${problemId}/submit`);
+
+  const submitForm = page.getByTestId("submit-form-area");
+  await expect(submitForm).not.toBeInViewport();
+  await page.getByTestId("my-problem-submit-jump").click();
+  await expect(submitForm).toBeInViewport();
+  // 「제출 칸으로」 뒤 초점은 저장소 주소 칸에 있다(#1400-8).
+  await expect(page.getByTestId("repository-url-input")).toBeFocused();
+
+  await page.getByTestId("repository-url-input").fill("https://github.com/octocat/e2e-submit");
+  await page.getByTestId("submit-repository").click();
+
+  // 키 없는 클래스라 시도는 채점 대기에 머문다.
+  const note = page.getByTestId(/^submission-row-\d+-no-api-key-note$/);
+  await expect(note).toHaveText("강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다");
+  // 제목 옆 배지도 목록과 같은 「채점 대기」다(#1395).
+  await expect(page.getByTestId("my-problem-passed-status")).toHaveText("채점 대기");
+  expect(
+    await note.evaluate((element) => ({
+      clipped: element.scrollWidth > element.clientWidth,
+      pageOverflows: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    })),
+  ).toEqual({ clipped: false, pageOverflows: false });
+});
+
+// 마감 지난 문제의 경고가 입력칸·제출 단추의 접근성 설명에 있다(#1462) — 「제출 칸으로」 뒤 낭독기가 경고를 건너뛰지 않는다.
+test("390px 마감 지난 문제는 경고가 입력칸·제출 단추의 설명에 있고 마감 전에는 없다", async ({ page, browser }) => {
+  const seed = `participant-deadline-desc-${test.info().workerIndex}-${Date.now()}`;
+  const instructorContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const instructorPage = await instructorContext.newPage();
+  await establishClassroomSession(instructorPage, seed);
+  const api = classroomApi(instructorPage);
+  const classId = (
+    await (
+      await api.post("/api/backend/classroom/classes", {
+        data: { name: `마감 설명 ${Date.now()}`, instructor_display_name: "강사" },
+      })
+    ).json()
+  ).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+
+  async function openProblem(title: string, due: Date, formats: string[]): Promise<number> {
+    const created = await api.post(`${base}/problems`, {
+      data: { title, submission_formats: formats, due_at: due.toISOString() },
+    });
+    expect(created.ok()).toBeTruthy();
+    const id = (await created.json()).id as number;
+    for (let index = 1; index <= 8; index += 1) {
+      expect(
+        (await api.post(`${base}/problems/${id}/checklist-items`, { data: { label: `항목 ${index}`, required: true } })).ok(),
+      ).toBeTruthy();
+    }
+    expect((await api.post(`${base}/problems/${id}/open`)).ok()).toBeTruthy();
+    return id;
+  }
+  const past = await openProblem("마감 지난 문제", new Date(Date.now() - 36 * 3600_000), ["repository"]);
+  const pastZip = await openProblem("마감 지난 zip 문제", new Date(Date.now() - 36 * 3600_000), ["source"]);
+  const future = await openProblem("마감 전 문제", new Date(Date.now() + 36 * 3600_000), ["repository"]);
+
+  const joinCode = (await (await api.get(base)).json()).join_code as string;
+  await establishClassroomSession(page, `${seed}-participant`);
+  expect(
+    (await classroomApi(page).post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "서지우" } })).ok(),
+  ).toBeTruthy();
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  const warning = "마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다";
+
+  await page.goto(`/classes/${classId}/problems/${past}/submit`);
+  await page.getByTestId("my-problem-submit-jump").click();
+  const url = page.getByTestId("repository-url-input");
+  await expect(url).toBeFocused();
+  await expect(url).toHaveAccessibleDescription(warning);
+  await expect(page.getByTestId("submit-repository")).toHaveAccessibleDescription(warning);
+
+  await page.goto(`/classes/${classId}/problems/${pastZip}/submit`);
+  await page.getByTestId("my-problem-submit-jump").click();
+  await expect(page.getByTestId("source-file-input")).toHaveAccessibleDescription(warning);
+
+  await page.goto(`/classes/${classId}/problems/${future}/submit`);
+  await expect(page.getByTestId("submit-deadline-note")).toHaveCount(0);
+  await expect(page.getByTestId("repository-url-input")).not.toHaveAttribute("aria-describedby", /.+/);
+  await expect(page.getByTestId("submit-repository")).not.toHaveAttribute("aria-describedby", /.+/);
 });

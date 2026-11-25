@@ -16,9 +16,11 @@ import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
+import { useTablist } from "@/app/components/use-tablist";
 import { Card, EmptyState, ErrorNote, FieldLabel, INPUT_CLASS, Num, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { useClassTemplates } from "@/lib/class-templates/use-class-templates";
 import { useProblemTemplates } from "@/lib/problem-templates/use-problem-templates";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type Kind = "problem" | "class";
 
@@ -27,6 +29,7 @@ function TemplatesPageInner() {
   const [kind, setKind] = useState<Kind>(searchParams.get("kind") === "class" ? "class" : "problem");
   const [query, setQuery] = useState("");
   const [committedQuery, setCommittedQuery] = useState("");
+  const tablist = useTablist(kind);
 
   const problemTemplates = useProblemTemplates(kind === "problem" ? committedQuery : "");
   const classTemplates = useClassTemplates(kind === "class" ? committedQuery : "");
@@ -50,7 +53,7 @@ function TemplatesPageInner() {
       />
 
       <div
-        role="tablist"
+        {...tablist.listProps}
         aria-label="템플릿 종류"
         className="mb-5 flex items-end gap-0.5 border-b border-rule"
       >
@@ -63,8 +66,7 @@ function TemplatesPageInner() {
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={kind === key}
+            {...tablist.tabProps(key)}
             data-testid={testId}
             onClick={() => {
               setKind(key);
@@ -82,6 +84,7 @@ function TemplatesPageInner() {
         ))}
       </div>
 
+      <div {...tablist.panelProps()}>
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -120,11 +123,13 @@ function TemplatesPageInner() {
           committedQuery={committedQuery}
         />
       )}
+      </div>
     </PageShell>
   );
 }
 
 export default function TemplatesPage() {
+  useClassroomTabTitle({ screenName: "공개된 템플릿" });
   return (
     <Suspense fallback={null}>
       <TemplatesPageInner />
@@ -191,7 +196,11 @@ function ProblemTemplatesList({
                   <Num>{new Date(item.created_at).toLocaleDateString("ko-KR")}</Num> 공개
                 </div>
               </div>
-              <Link href={`/templates/${item.share_code}`} className={buttonClass("secondary", "sm")}>
+              <Link
+                href={`/templates/${item.share_code}`}
+                aria-label={`미리보기 ${item.title}`}
+                className={buttonClass("secondary", "sm")}
+              >
                 미리보기
               </Link>
             </li>
@@ -273,7 +282,11 @@ function ClassTemplatesList({
                   <Num>{new Date(item.created_at).toLocaleDateString("ko-KR")}</Num> 공개
                 </div>
               </div>
-              <Link href={`/class-templates/${item.share_code}`} className={buttonClass("secondary", "sm")}>
+              <Link
+                href={`/class-templates/${item.share_code}`}
+                aria-label={`미리보기 ${item.name}`}
+                className={buttonClass("secondary", "sm")}
+              >
                 미리보기
               </Link>
             </li>

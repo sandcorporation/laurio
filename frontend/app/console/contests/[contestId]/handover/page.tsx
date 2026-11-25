@@ -19,7 +19,7 @@
 //
 // 인증 구역이므로 SSR 하지 않는다(ADR-0015).
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 
 import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { useSession } from "@/lib/auth/use-session";
@@ -202,6 +202,20 @@ function PendingAcceptance({
   const isConfirming = accept.status === "confirming";
   const isSaving = accept.status === "saving";
 
+  // 확인을 열면 안전한 「취소」가, 취소하면 「인수 확인」 단추가 초점을 받는다 — 누른 단추가 사라지며
+  // 초점이 body 로 떨어지지 않게(#1517).
+  const acceptRef = useRef<HTMLButtonElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    if (isConfirming && !wasConfirming.current) cancelRef.current?.focus();
+    else if (!isConfirming && wasConfirming.current) {
+      const active = document.activeElement;
+      if (accept.status === "idle" && (active === null || active === document.body)) acceptRef.current?.focus();
+    }
+    wasConfirming.current = isConfirming;
+  }, [isConfirming, accept.status]);
+
   return (
     <div className="mt-6 flex flex-col gap-4">
       <p data-testid="handover-pending-notice">
@@ -220,6 +234,7 @@ function PendingAcceptance({
       {!isConfirming ? (
         <button
           type="button"
+          ref={acceptRef}
           onClick={onAcceptClick}
           className={buttonClass("danger")}
           data-testid="handover-accept-button"
@@ -228,14 +243,15 @@ function PendingAcceptance({
         </button>
       ) : (
         <div className="flex flex-col gap-2 border border-error bg-surface p-4">
-          <p data-testid="handover-accept-confirm-notice">
+          <p id="handover-accept-confirm-notice" data-testid="handover-accept-confirm-notice">
             정말 확인하시겠습니까? 예치금이 즉시 해제되며 되돌릴 수 없습니다.
           </p>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={onConfirm}
-              disabled={isSaving}
+              aria-disabled={isSaving || undefined}
+              aria-describedby="handover-accept-confirm-notice"
               className={buttonClass("dangerFilled")}
               data-testid="handover-accept-confirm"
             >
@@ -243,8 +259,10 @@ function PendingAcceptance({
             </button>
             <button
               type="button"
+              ref={cancelRef}
               onClick={onCancel}
-              disabled={isSaving}
+              aria-disabled={isSaving || undefined}
+              aria-describedby="handover-accept-confirm-notice"
               className={buttonClass("secondary")}
               data-testid="handover-accept-cancel"
             >

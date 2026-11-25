@@ -30,12 +30,14 @@
 //    로그인하므로 여기는 손대지 않는다. `showDevSeedForm`이 false면(배포 환경,
 //    app/login/page.tsx가 서버에서 판정) 이 절 자체가 렌더되지 않는다 — 배포
 //    환경에 로그인 우회가 실려 나가는 것이 막는 값이다(#95).
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { normalizeDetail } from "@codemit/bff-client";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 
-import { Card, ErrorNote, INPUT_CLASS } from "@/app/components/ui";
+import { Card, ErrorNote, INPUT_CLASS, Note } from "@/app/components/ui";
+import { autoContinuePath } from "@/lib/auth/login-auto-continue";
+import { continuePath } from "@/lib/auth/login-destination";
 import { resolveNextPath } from "@/lib/auth/next-path";
 import type { SocialProvider } from "@/lib/auth/social-providers";
 import { buttonClass } from "@/lib/ui/classnames";
@@ -77,6 +79,10 @@ function describeOAuthError(code: string | null): string | null {
 }
 
 interface LoginButtonsProps {
+  /** 세션 쿠키가 있어 먼저 세션을 확인할지(app/login/page.tsx 가 판정). */
+  checkSessionFirst: boolean;
+  /** 순환 차단기가 자동 넘김을 막아 폼이 뜬 것인지. */
+  autoContinueStopped: boolean;
   showDevSeedForm: boolean;
   githubConfigured: boolean;
   googleConfigured: boolean;
@@ -91,15 +97,20 @@ interface OAuthButtonSpec {
   configured: boolean;
 }
 
-function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: LoginButtonsProps) {
-  const router = useRouter();
+function LoginButtons({
+  checkSessionFirst,
+  autoContinueStopped,
+  showDevSeedForm,
+  githubConfigured,
+  googleConfigured,
+}: LoginButtonsProps) {
   const searchParams = useSearchParams();
   // 같은 오리진 경로가 아니면 기본값으로 떨어진다(오픈 리다이렉트 방어) —
   // authorize 라우트가 이 값을 다시 한번 같은 규칙으로 검증한다.
   const next = resolveNextPath(searchParams.get("next"));
   // 강의실처럼 다른 서브도메인에서 온 사람은 로그인이 끝나면 거기로 돌아가야
   // 한다(#297 후속). 여기서는 **그대로 실어 나르기만** 한다 — 그 값이 우리
-  // 오리진인지는 authorize 라우트가 허용목록과 대조해 판정한다
+  // 오리진인지는 authorize 라우트와 `/api/auth/continue` 가 허용목록과 대조해 판정한다
   // (lib/auth/sibling-origins.ts). 화면이 판정하면 클라이언트가 고칠 수 있다.
   const nextOrigin = searchParams.get("next_origin");
   const authorizeQuery = (provider: string) => {
@@ -108,6 +119,29 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
     return `/api/auth/social/${provider}/authorize?${params.toString()}`;
   };
   const oauthError = describeOAuthError(searchParams.get("error"));
+
+  // 로그인한 사람은 폼 대신 목적지로(#1388 T3). 백엔드가 확인한 세션(200)일 때만
+  // 넘긴다 — 죽은 쿠키면 `/api/auth/session` 이 지우고 폼을 그린다(순환 없음).
+  const [checkingSession, setCheckingSession] = useState(checkSessionFirst);
+  useEffect(() => {
+    if (!checkSessionFirst) return;
+    let cancelled = false;
+    fetch("/api/auth/session", { cache: "no-store" })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 200) {
+          window.location.replace(autoContinuePath(next, nextOrigin));
+          return;
+        }
+        setCheckingSession(false);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [checkSessionFirst, next, nextOrigin]);
 
   const [seed, setSeed] = useState("dev-user");
   const [pending, setPending] = useState<DevSeedProviderId | null>(null);
@@ -130,16 +164,10 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
         return;
       }
 
-      // dev 시드 로그인도 같은 규칙을 따른다 — 강의실에서 왔으면 거기로
-      // 돌아간다. 이 경로는 OAuth 왕복이 없어 쿠키에 실을 곳이 없으므로 여기서
-      // 바로 절대 URL 로 보낸다. 값 검증은 서버가 이미 못 하므로 dev 전용
-      // 경로임을 근거로 둔다 — 배포 환경에는 이 버튼 자체가 없다.
-      if (nextOrigin) {
-        window.location.assign(new URL(next, nextOrigin).toString());
-        return;
-      }
-      router.replace(next);
-      router.refresh();
+      // 목적지는 화면이 아니라 서버가 정한다(#1388) — `next_origin` 을 여기서 쓰면
+      // 허용목록을 거치지 않고 바깥으로 나간다(dev 에서 실제로 그랬다). `replace` 라
+      // 뒤로 가기 기록에 로그인 폼이 남지 않는다.
+      window.location.replace(continuePath(next, nextOrigin));
     } catch {
       setDevSeedError("로그인 요청을 보내지 못했습니다. 네트워크를 확인해주세요.");
     } finally {
@@ -155,10 +183,20 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
     { provider: "google", label: "Google로 로그인", configured: googleConfigured },
   ];
 
+  if (checkingSession) {
+    return <main className="min-h-screen" data-testid="login-session-check" aria-busy="true" />;
+  }
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-6">
       <Card className="flex w-full max-w-sm flex-col gap-6 p-8">
         <h1 className="text-2xl font-semibold">로그인</h1>
+
+        {autoContinueStopped && (
+          <Note tone="attention">
+            <span data-testid="login-bounce-notice">자동 이동을 멈췄습니다. 다시 로그인해 주세요.</span>
+          </Note>
+        )}
 
         <div className="flex flex-col items-stretch gap-3">
           {/* 카카오 로그인 버튼은 카카오가 배포하는 공식 이미지 그대로다
@@ -229,7 +267,7 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
                   key={provider.id}
                   type="button"
                   onClick={() => handleDevSeedLogin(provider.id)}
-                  disabled={pending !== null}
+                  aria-disabled={(pending !== null) || undefined}
                   data-testid={`login-${provider.id}`}
                   className={buttonClass("secondary")}
                 >
@@ -245,6 +283,8 @@ function LoginButtons({ showDevSeedForm, githubConfigured, googleConfigured }: L
 }
 
 export default function LoginForm({
+  checkSessionFirst,
+  autoContinueStopped,
   showDevSeedForm,
   githubConfigured,
   googleConfigured,
@@ -252,6 +292,8 @@ export default function LoginForm({
   return (
     <Suspense fallback={null}>
       <LoginButtons
+        checkSessionFirst={checkSessionFirst}
+        autoContinueStopped={autoContinueStopped}
         showDevSeedForm={showDevSeedForm}
         githubConfigured={githubConfigured}
         googleConfigured={googleConfigured}

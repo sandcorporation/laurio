@@ -20,6 +20,10 @@ class ClassroomConfig(AppConfig):
         from .scoring import CLASSROOM_SUBMISSION_SCORING_SCAN
 
         register_scan(CLASSROOM_SUBMISSION_SCORING_SCAN)
+        # 「채점 연결 없음」 알림(#1389) — 실패 재시도·배포 시점에 이미 멈춘 클래스·이전 뒤 남은 대기 시도를 맡는다.
+        from .scoring_key_missing import CLASSROOM_SCORING_KEY_MISSING_SCAN
+
+        register_scan(CLASSROOM_SCORING_KEY_MISSING_SCAN)
         # 공모전 문제(#548, ADR-0054) — 공개 중인 무료 공모전의 원본이 바뀌면 그 공모전을
         # 들여온 문제가 따라간다. 신호는 공유층에 있어 공모전 앱을 임포트하지 않는다.
         from core.contest_catalog import contest_source_changed
@@ -74,6 +78,22 @@ class ClassroomConfig(AppConfig):
         from .withdrawal import instructor_has_class_in_progress
 
         INSTRUCTOR_CLASS_IN_PROGRESS.register(instructor_has_class_in_progress)
+        # 알림 목록이 싣는 「그 문제의 지금 상태」(#1405) — 공유층 `notifications` 가 강의실을 import 하지 않게.
+        from notifications.ports import CLASSROOM_PROBLEM_STATUSES
+
+        from .notification_problem_status import problem_statuses_for
+
+        CLASSROOM_PROBLEM_STATUSES.register(problem_statuses_for)
+        from notifications.ports import CLASSROOM_TRANSFER_STATES
+
+        from .notification_problem_status import transfer_states_for
+
+        CLASSROOM_TRANSFER_STATES.register(transfer_states_for)
+        from notifications.ports import CLASSROOM_PENDING_TRANSFER_CLASSES
+
+        from .notification_problem_status import classes_with_pending_transfer_for
+
+        CLASSROOM_PENDING_TRANSFER_CLASSES.register(classes_with_pending_transfer_for)
 
         # 채점 방식 실험의 `classroom_call` 줄(#1262) — `scoring` 이 강의실을 import 하지 않고 강의실 프롬프트로 채점한다.
         from core.experiment_material import CLASSROOM_EXPERIMENT_CALL, CLASSROOM_EXPERIMENT_STAGED_CALL

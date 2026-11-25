@@ -15,7 +15,7 @@ import { useBackendQuery } from "@codemit/bff-client";
 
 import { bffClient } from "@/lib/bff/client";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { ATTEMPT_SCORED, type StreamEvent } from "@/lib/events/types";
+import { ATTEMPT_SCORED, PARTICIPATION_CHANGED, isClassSignal, type StreamEvent } from "@/lib/events/types";
 
 import type { MyProblems, ProblemListItem } from "./api";
 
@@ -59,14 +59,21 @@ export function useMyProblems(classId: number) {
     refetch();
   }, [refetch]);
 
-  // 이 클래스의 attempt-scored만 반응한다 — 다른 클래스의 신호는 무시한다
-  // (각 화면은 자기와 관계있는 신호에만 반응한다, ADR-0046). 이 목록은
-  // 「채점 중」 표시가 없어 늘 기다리는 셈이다 — `waiting`을 고정 `true`로 준다.
+  // 이 클래스의 attempt-scored 와, 보이는 문제가 바뀌었다는 participation-changed(열기·숨김·보관, 열린 문제의
+  // 만들기·고치기·지우기·순서·체크리스트, #1471 ⑦)에 반응한다 — 다른 클래스의 신호는 무시한다(ADR-0046). 이
+  // 목록은 「채점 중」 표시가 없어 늘 기다리는 셈이다 — `waiting`을 고정 `true`로 준다.
   const matches = useCallback(
-    (event: StreamEvent) => event.kind === ATTEMPT_SCORED && event.payload.class_id === classId,
+    (event: StreamEvent) =>
+      isClassSignal(event, ATTEMPT_SCORED, classId) || isClassSignal(event, PARTICIPATION_CHANGED, classId),
     [classId],
   );
-  useRealtimeRefresh({ matches, waiting: true, fallbackPollMs: FALLBACK_POLL_MS, reload });
+  useRealtimeRefresh({
+    matches,
+    waiting: true,
+    fallbackPollMs: FALLBACK_POLL_MS,
+    reload,
+    settled: queryState,
+  });
 
   // useMemo 없이 매 렌더 새 객체를 만들면 이 값을 effect 의존성으로 쓰는
   // 호출부가 폭주할 수 있다(#462 코드 리뷰).

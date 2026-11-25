@@ -9,6 +9,8 @@ describe("liveTemplateFrom", () => {
   it("공개 응답은 공유 코드를 남긴다 — 공개 폼이 감춰진다", () => {
     expect(liveTemplateFrom({ share_code: "abc123", taken_down: false })).toEqual({
       shareCode: "abc123",
+      publisherDisplayName: "",
+      canTakeDown: false,
     });
   });
 
@@ -27,7 +29,11 @@ describe("liveTemplateFrom", () => {
     // 백엔드는 상세에 **살아 있는 것만** 싣고 아니면 null 이라(`_live_problem_template`)
     // 그 요약에는 이 칸이 없다 — 없는 것을 「내려갔다」로 읽으면 공개한 템플릿이
     // 새로고침마다 사라진다.
-    expect(liveTemplateFrom({ share_code: "abc123" })).toEqual({ shareCode: "abc123" });
+    expect(liveTemplateFrom({ share_code: "abc123" })).toEqual({
+      shareCode: "abc123",
+      publisherDisplayName: "",
+      canTakeDown: false,
+    });
   });
 
   it("공개 → 내리기 → 다시 공개가 폼이 뜬 상태를 거쳐 돈다", () => {
@@ -40,6 +46,22 @@ describe("liveTemplateFrom", () => {
     expect(takenDown).toBeNull();
     // 재공개는 **새 공유 코드**다(백엔드가 새 템플릿 행을 만든다) — 옛 코드가
     // 남아 있으면 죽은 주소를 전달하게 된다.
-    expect(republished).toEqual({ shareCode: "second" });
+    expect(republished).toEqual({ shareCode: "second", publisherDisplayName: "", canTakeDown: false });
+  });
+
+  it("공개자가 아닌 강사의 요약은 내릴 수 없고, 공개자 이름이 남는다(#1446)", () => {
+    expect(
+      liveTemplateFrom({ share_code: "abc", publisher_display_name: "김강사", can_take_down: false }),
+    ).toEqual({ shareCode: "abc", publisherDisplayName: "김강사", canTakeDown: false });
+  });
+
+  it("공개자의 요약은 내릴 수 있다", () => {
+    expect(
+      liveTemplateFrom({ share_code: "abc", publisher_display_name: "김강사", can_take_down: true })?.canTakeDown,
+    ).toBe(true);
+  });
+
+  it("방금 공개한 응답(`is_mine`)은 내릴 수 있다 — 응답을 부른 사람이 공개자다", () => {
+    expect(liveTemplateFrom({ share_code: "abc", taken_down: false, is_mine: true })?.canTakeDown).toBe(true);
   });
 });

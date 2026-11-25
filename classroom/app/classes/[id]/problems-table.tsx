@@ -2,16 +2,19 @@
 
 // 클래스 상세 · 문제 탭의 표(#633, 시안 v2). 번호·제목(+숨김·초안 배지)·필수 항목 수·달성률 막대·
 // 통과 n/N·최근 제출, 행 끝에 「편집」「제출 현황」 글자 링크와 ⋮(위로·아래로). 아래에 「새 문제」·
-// 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 목록 안에 입구 둘(새 문제·문제 가져오기).
+// 「문제 가져오기」(#876 — 템플릿·다른 클래스·공모전이 시트의 탭). 문제가 없으면 빈 상태 문구와 입구 둘(새 문제·문제 가져오기).
 // 달성률·통과 수는 목록 응답의 값이고, 위쪽 통계 바의 평균은 클래스 응답의 값이다 — 다시 세지 않는다.
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { DueInline } from "@/app/components/DueLabel";
+import { useMenuFocus } from "@/app/components/use-menu-focus";
 import { Badge, Card, ErrorNote, buttonClass } from "@/app/components/ui";
 import { formatRelativeTime } from "@/lib/classes/relative-time";
+import { PERFECT_TEXT_CLASS } from "@/lib/design/stamp";
 import { achievementTone, formatPassedPerfect } from "@/lib/problems/achievement";
 import type { ProblemRow } from "@/lib/problems/api";
+import { problemRequiredCount } from "@/lib/problems/required-count";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 
 const STATUS_LABEL: Record<string, string> = { draft: "초안", open: "열림", hidden: "숨김" };
@@ -54,27 +57,15 @@ function RowMenu({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent) {
-        if (event.key === "Escape") setOpen(false);
-      } else if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [open]);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  const { onKeyDown, closeToTrigger } = useMenuFocus({ open, setOpen, triggerRef, menuRef, containerRef: ref });
 
   const item = "block w-full px-4 py-2 text-left text-[13px] hover:bg-paper disabled:cursor-not-allowed disabled:opacity-40";
   return (
     <span ref={ref} className="relative inline-block align-middle">
       <button
+        ref={triggerRef}
         type="button"
         data-testid={`problem-row-${problem.id}-menu`}
         aria-label={`${problem.title} 순서 메뉴`}
@@ -86,14 +77,19 @@ function RowMenu({
         ⋮
       </button>
       {open ? (
-        <span role="menu" className="absolute right-0 top-full z-10 mt-1 block w-24 border border-rule bg-surface py-1 shadow-none">
+        <span
+          ref={menuRef}
+          role="menu"
+          aria-label={`${problem.title} 순서 메뉴`}
+          onKeyDown={onKeyDown}
+          className="absolute right-0 top-full z-10 mt-1 block w-24 border border-rule bg-surface py-1 shadow-none">
           <button
             type="button"
             role="menuitem"
             data-testid={`problem-row-${problem.id}-move-up`}
             disabled={disabledUp}
             onClick={() => {
-              setOpen(false);
+              closeToTrigger();
               onMove("up");
             }}
             className={item}
@@ -106,7 +102,7 @@ function RowMenu({
             data-testid={`problem-row-${problem.id}-move-down`}
             disabled={disabledDown}
             onClick={() => {
-              setOpen(false);
+              closeToTrigger();
               onMove("down");
             }}
             className={item}
@@ -135,9 +131,23 @@ export function ProblemsTable({
   error: boolean;
   problems: ProblemRow[];
   reorderError: boolean;
-  onMove: (problemId: number, direction: "up" | "down") => void;
-  onOpenPicker: (tab: PickerTab) => void;
+  onMove: (problemId: number, direction: "up" | "down") => Promise<boolean>;
+  onOpenPicker: (tab: PickerTab, opener: HTMLElement) => void;
 }) {
+  // 옮긴 뒤 안내(#1478 6번, #1484 ②) — 서버가 확정한 뒤에 성공·실패를 읽는다. 낙관 배열만 보고 알리지 않는다.
+  const [moveStatus, setMoveStatus] = useState("");
+  async function moveProblem(problemId: number, direction: "up" | "down") {
+    const index = problems.findIndex((p) => p.id === problemId);
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (index < 0 || target < 0 || target >= problems.length) return;
+    const title = problems[index].title;
+    setMoveStatus("");
+    const ok = await onMove(problemId, direction);
+    setMoveStatus(
+      ok ? `${title} — ${target + 1}번째로 옮겼습니다` : `${title} — 순서를 바꾸지 못해 원래 자리로 돌아갔습니다`,
+    );
+  }
+
   const newProblem = archived ? (
     <span
       data-testid="new-problem-blocked"
@@ -156,7 +166,7 @@ export function ProblemsTable({
       type="button"
       data-testid={testId}
       disabled={archived}
-      onClick={() => onOpenPicker(tab)}
+      onClick={(event) => onOpenPicker(tab, event.currentTarget)}
       className={buttonClass("secondary", "sm")}
     >
       {label}
@@ -187,7 +197,7 @@ export function ProblemsTable({
     return (
       <Card className="border-t-0">
         <div data-testid="problems-empty-state" className="flex flex-col items-center gap-3.5 px-4 py-12 text-[13.5px] text-ink/45">
-          <span>—</span>
+          <span>아직 문제가 없습니다.</span>
           <div className="flex flex-wrap justify-center gap-2">
             {newProblem}
             {pickerButton("public", "문제 가져오기", "problems-empty-import")}
@@ -199,6 +209,9 @@ export function ProblemsTable({
 
   return (
     <Card className="border-t-0">
+      <p role="status" data-testid="problems-move-status" className="sr-only">
+        {moveStatus}
+      </p>
       {reorderError ? (
         <div className="p-4 pb-0">
           <ErrorNote>
@@ -220,7 +233,7 @@ export function ProblemsTable({
         </thead>
         <tbody data-testid="problems-list">
           {problems.map((problem, index) => {
-            const required = problem.checklist_items.filter((item) => item.required).length;
+            const required = problemRequiredCount(problem);
             const dimmed = problem.status === "draft" ? "text-ink/45" : "";
             return (
               <tr key={problem.id} data-testid={`problem-row-${problem.id}`} className="border-b border-rule last:border-b-0">
@@ -257,7 +270,7 @@ export function ProblemsTable({
                         <span
                           data-testid={`problem-row-${problem.id}-perfect`}
                           title={formatPassedPerfect(problem)}
-                          className="mt-0.5 block text-[11px] text-advanced"
+                          className={`mt-0.5 block text-[11px] ${PERFECT_TEXT_CLASS}`}
                         >
                           완벽 {problem.perfect_count}
                         </span>
@@ -269,12 +282,13 @@ export function ProblemsTable({
                   {formatRelativeTime(problem.last_submitted_at)}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-right">
-                  <Link href={`/classes/${classId}/problems/${problem.id}`} data-testid={`problem-row-${problem.id}-edit`} className={`${LINK_BUTTON} hidden sm:inline-block`}>
+                  <Link href={`/classes/${classId}/problems/${problem.id}`} data-testid={`problem-row-${problem.id}-edit`} aria-label={`편집 ${problem.title}`} className={`${LINK_BUTTON} hidden sm:inline-block`}>
                     편집
                   </Link>
                   <Link
                     href={`/classes/${classId}/problems/${problem.id}/submissions`}
                     data-testid={`problem-row-${problem.id}-submissions`}
+                    aria-label={`제출 현황 ${problem.title}`}
                     className={LINK_BUTTON}
                   >
                     제출 현황
@@ -284,7 +298,7 @@ export function ProblemsTable({
                       problem={problem}
                       disabledUp={index === 0}
                       disabledDown={index === problems.length - 1}
-                      onMove={(direction) => onMove(problem.id, direction)}
+                      onMove={(direction) => moveProblem(problem.id, direction)}
                     />
                   )}
                 </td>

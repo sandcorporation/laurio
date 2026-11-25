@@ -1,7 +1,7 @@
 "use client";
 
-// 클래스 상세 상태 (#278/#279). 남의 클래스는 백엔드가 404를 준다 — 그 사실을
-// "notFound"로 구별해 화면이 "클래스를 찾을 수 없습니다"를 보여준다. 공유
+// 클래스 상세 상태 (#278/#279). 비강사에게는 백엔드가 404를 준다 — 그 사실을
+// "notFound"로 구별해 화면이 접근 안내(`AccessNotice`, #1390)를 보여준다. 공유
 // 클라이언트 위에 선다(#462) — 취소 플래그·401 처리는 `useBackendQuery`가
 // 소유하고, 이 훅은 경로와 404 해석만 남는다.
 import { useCallback, useMemo, useState } from "react";
@@ -81,5 +81,7 @@ export function useClass(classId: number) {
     [classId, reload],
   );
 
-  return { state, reload, regenerateJoinCode, setArchived };
+  // 요청 하나가 끝날 때마다(성공·실패) 새 값이 된다 — 신호 재조회가 「읽는 중」을 풀 자리(#1496 ④). `state` 는 이름 바꾸기·보관
+  // 오류 표시로도 바뀌어 요청의 끝으로 쓸 수 없다.
+  return { state, settled: queryState, reload, regenerateJoinCode, setArchived };
 }

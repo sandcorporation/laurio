@@ -8,6 +8,8 @@ import { useParams, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { CharCount } from "@/app/components/CharCount";
+import { useTablist } from "@/app/components/use-tablist";
 import {
   Badge,
   Card,
@@ -23,6 +25,7 @@ import {
 } from "@/app/components/ui";
 import { isGradingGuidelineValid, type GradingGuidelineValue } from "@/app/components/GradingGuidelineEditor";
 import { ChecklistRows, GradeToggle } from "@/app/components/ChecklistRows";
+import { INPUT_LIMITS } from "@/lib/forms/limits";
 import { type ChecklistGrade, defaultPoints } from "@/lib/problems/grade";
 import { TwoColumnFrame } from "@/app/components/TwoColumnFrame";
 import { MarkdownEditor } from "@/app/components/MarkdownEditor";
@@ -30,6 +33,7 @@ import { ProblemParticipantView } from "@/app/components/ProblemParticipantView"
 import { ProblemDueCard } from "@/app/components/ProblemDueCard";
 import { ProblemSettingsForm } from "@/app/components/ProblemSettingsForm";
 import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { GRADABILITY_FORM_NOTE, stashWarnings } from "@/lib/problems/gradability";
@@ -43,6 +47,8 @@ import {
 } from "@/lib/problems/due-dates";
 import { useScoringCost } from "@/lib/scoring/use-scoring-cost";
 import { useScoringModels } from "@/lib/scoring/use-scoring-models";
+import { OPEN_BLOCKED_REASON_ID, openBlockedReason } from "@/lib/problems/open-blocked-reason";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 type DraftChecklistItem = {
   key: number;
@@ -58,7 +64,11 @@ export default function NewProblemPage() {
   const classId = Number(params.id);
   // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속). 불러오는 중에는
   // 비워 둔다 — 「클래스」 같은 자리표시를 잠깐 보였다 바꾸면 깜빡임만 는다.
-  const { state: classState } = useClass(classId);
+  const { state: classState, reload: reloadClass } = useClass(classId);
+  useClassroomTabTitle({
+    screenName: "새 문제",
+    className: classState.status === "ready" ? classState.classroom.name : null,
+  });
   const costState = useScoringCost(classId);
   const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const router = useRouter();
@@ -89,12 +99,14 @@ export default function NewProblemPage() {
   // 자리에서 저장하지 않고 지금 상태를 그대로 비춘다(아래 렌더에서
   // `ProblemParticipantView`에 이 컴포넌트의 상태를 직접 넘긴다).
   const [tab, setTab] = useState<"write" | "preview">("write");
+  const tablist = useTablist(tab, { panels: "each" });
 
   // 「이미 있는 문제로 시작하기」(#326) — 대상 클래스는 묻지 않는다, 지금
   // 이 클래스(`classId`)로 곧장 들어온다. 시트가 스스로 가져오기까지 끝내고
   // 나면 이 화면(빈 초안 폼)은 더 볼 일이 없다 — 가져온 문제의 편집
   // 화면으로 곧장 보낸다.
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerOpener = useRef<HTMLElement | null>(null);
   // 「공모전에서 들여오기」(#548) — 템플릿과 같은 자리, 들여온 뒤 그 문제의 편집 화면으로 간다.
 
   function handleImported(problem: ProblemRow) {
@@ -228,7 +240,39 @@ export default function NewProblemPage() {
     void submitProblem(true);
   }
 
-  if (classState.status === "ready" && classState.classroom.archived) {
+  // 클래스를 읽기 전에는 폼을 그리지 않는다 — 강사가 아닌 사람에게 빈 폼이 비치지 않게(#1390).
+  if (classState.status === "notFound") {
+    return (
+      <PageShell>
+        <AccessNotice
+          page="class"
+          classId={classId}
+          testId="new-problem-not-found"
+          retry={{ reload: reloadClass, turns: [classState] }}
+        />
+      </PageShell>
+    );
+  }
+
+  if (classState.status === "loading") {
+    return (
+      <PageShell>
+        <p data-testid="new-problem-loading" className="text-[13.5px] text-ink/45">불러오는 중...</p>
+      </PageShell>
+    );
+  }
+
+  if (classState.status === "error") {
+    return (
+      <PageShell>
+        <ErrorNote>
+          <span data-testid="new-problem-class-error">클래스 정보를 불러오지 못했습니다.</span>
+        </ErrorNote>
+      </PageShell>
+    );
+  }
+
+  if (classState.classroom.archived) {
     // 클래스 상세는 이 화면으로 가는 링크 자체를 감추지만(#438), 주소를 직접
     // 열면 여기까지 온다 — 서버도 같은 요청을 403으로 거절하므로 폼을 아예
     // 보여주지 않고 이유만 말한다.
@@ -246,6 +290,7 @@ export default function NewProblemPage() {
 
   const createDisabled =
     submitting || title.trim() === "" || submissionFormats.length === 0 || !isGradingGuidelineValid(gradingGuideline);
+  const openBlockedText = openBlockedReason({ createDisabled, hasRequiredItem });
   const classLabel = classState.status === "ready" ? `${classState.classroom.name} › ` : "";
 
   return (
@@ -261,7 +306,10 @@ export default function NewProblemPage() {
           <button
             type="button"
             data-testid="open-problem-import"
-            onClick={() => setPickerOpen(true)}
+            onClick={(event) => {
+              pickerOpener.current = event.currentTarget;
+              setPickerOpen(true);
+            }}
             className={buttonClass("secondary")}
           >
             문제 가져오기
@@ -279,15 +327,26 @@ export default function NewProblemPage() {
             type="button"
             data-testid="new-problem-create-and-open-submit"
             disabled={createDisabled || !hasRequiredItem}
+            aria-describedby={openBlockedText ? OPEN_BLOCKED_REASON_ID : undefined}
             onClick={handleCreateAndOpen}
             className={buttonClass("primary")}
           >
             {submitting ? "만드는 중..." : "만들고 바로 열기"}
           </button>
+          {openBlockedText ? (
+            <p
+              id={OPEN_BLOCKED_REASON_ID}
+              data-testid="new-problem-open-blocked-reason"
+              className="basis-full text-right text-[12px] text-ink/60"
+            >
+              {openBlockedText}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      {error ? (
+      {/* 기한 순서 오류는 기한 카드가 한 번만 알린다 — 여기서도 띄우면 낭독기가 두 번 읽는다. */}
+      {error && error !== DUE_ORDER_MESSAGE ? (
         <div className="mb-5">
           <ErrorNote>
             <span data-testid="new-problem-error">{error}</span>
@@ -296,7 +355,7 @@ export default function NewProblemPage() {
       ) : null}
 
       <div className="flex flex-col gap-5">
-        <div role="tablist" aria-label="새 문제 화면" className="flex items-end gap-0.5 border-b border-rule">
+        <div {...tablist.listProps} aria-label="새 문제 화면" className="flex items-end gap-0.5 border-b border-rule">
           {(
             [
               ["write", "작성", "new-problem-tab-write"],
@@ -306,8 +365,7 @@ export default function NewProblemPage() {
             <button
               key={key}
               type="button"
-              role="tab"
-              aria-selected={tab === key}
+              {...tablist.tabProps(key)}
               data-testid={testId}
               onClick={() => setTab(key)}
               className={
@@ -321,7 +379,7 @@ export default function NewProblemPage() {
           ))}
         </div>
 
-        <div data-testid="new-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
+        <div {...tablist.panelProps("write")} data-testid="new-problem-write-panel" className={tab === "write" ? "block" : "hidden"}>
           <TwoColumnFrame
             sideTestId="new-problem-side-rail"
             main={
@@ -338,9 +396,11 @@ export default function NewProblemPage() {
                         value={title}
                         onChange={(event) => setTitle(event.target.value)}
                         required
+                        maxLength={INPUT_LIMITS.newProblemTitle}
                         className={INPUT_CLASS}
                         placeholder="예: fetch 로 목록 그리기"
                       />
+                      <CharCount value={title} limit={INPUT_LIMITS.newProblemTitle} testId="new-problem-title-count" />
                     </div>
 
                     <div className="flex flex-col gap-1.5">
@@ -405,14 +465,22 @@ export default function NewProblemPage() {
                     <label htmlFor="new-item-label" className="sr-only">
                       새 항목
                     </label>
-                    <input
-                      id="new-item-label"
-                      data-testid="new-problem-new-checklist-item-label-input"
-                      value={newItemLabel}
-                      onChange={(event) => setNewItemLabel(event.target.value)}
-                      placeholder="새 항목"
-                      className={`${INPUT_CLASS} min-w-0 flex-1`}
-                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <input
+                        id="new-item-label"
+                        data-testid="new-problem-new-checklist-item-label-input"
+                        value={newItemLabel}
+                        onChange={(event) => setNewItemLabel(event.target.value)}
+                        maxLength={INPUT_LIMITS.newChecklistLabel}
+                        placeholder="새 항목"
+                        className={INPUT_CLASS}
+                      />
+                      <CharCount
+                        value={newItemLabel}
+                        limit={INPUT_LIMITS.newChecklistLabel}
+                        testId="new-problem-new-checklist-item-label-count"
+                      />
+                    </div>
                     <GradeToggle
                       grade={newItemGrade}
                       onChange={setNewItemGrade}
@@ -485,6 +553,7 @@ export default function NewProblemPage() {
         </div>
 
         <div
+          {...tablist.panelProps("preview")}
           data-testid="new-problem-preview-panel"
           className={tab === "preview" ? "flex w-full flex-col gap-4" : "hidden"}
         >
@@ -519,6 +588,7 @@ export default function NewProblemPage() {
       {pickerOpen ? (
         <ProblemImportSheet
           classId={classId}
+          opener={pickerOpener.current}
           onClose={() => setPickerOpen(false)}
           onImported={handleImported}
         />

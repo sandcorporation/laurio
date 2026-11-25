@@ -36,6 +36,7 @@ import { ErrorNote, INPUT_CLASS, PageHeader, PageShell, buttonClass } from "@/ap
 import { bffClient } from "@/lib/bff/client";
 import { useSession } from "@/lib/auth/use-session";
 import { checkDisplayNameForBannedWords } from "@/lib/profile/display-name-check";
+import { DEVELOPER_PROFILE_DESCRIPTION, PROFILE_FIELD_LABELS } from "@/lib/profile/field-labels";
 
 import { ConnectedAppsSection } from "./connected-apps-section";
 
@@ -62,13 +63,12 @@ const ROLE_COPY: Record<Role, { title: string; description: string; path: string
   },
   developer: {
     title: "참가자 표시 이름 · 소개",
-    description:
-      "공개 개발자 프로필과 제출물에서 보이는 이름입니다. 비워두면 참가자#{id}로 보입니다.",
+    description: DEVELOPER_PROFILE_DESCRIPTION,
     path: "developer-profile",
   },
 };
 
-export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | null }) {
+export function ProfilePageClient({ returnOrigin, returnUrl }: { returnOrigin: string | null; returnUrl: string | null }) {
   const session = useSession();
 
   if (session.status === "unauthenticated") return null;
@@ -89,7 +89,7 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
         {returnOrigin && (
           <a
             className="text-sm text-ink/60"
-            href={returnOrigin}
+            href={returnUrl ?? returnOrigin}
             data-testid="profile-return-to-classroom"
           >
             강의실로 돌아가기 →
@@ -119,7 +119,7 @@ export function ProfilePageClient({ returnOrigin }: { returnOrigin: string | nul
         <Link
           href={
             returnOrigin
-              ? `/console/withdraw?from_origin=${encodeURIComponent(returnOrigin)}`
+              ? `/console/withdraw?from_origin=${encodeURIComponent(returnOrigin)}${returnUrl && returnUrl !== returnOrigin ? `&from_path=${encodeURIComponent(returnUrl.slice(returnOrigin.length))}` : ""}`
               : "/console/withdraw"
           }
           data-testid="profile-withdraw-link"
@@ -159,7 +159,7 @@ function RoleSection({ role }: { role: Role }) {
   }, [copy.path]);
 
   async function handleSave() {
-    if (save.status === "saving") return; // 중복 클릭 방지 — 버튼도 disabled 지만 방어로 한 번 더.
+    if (save.status === "saving") return; // 중복 클릭 방지 — 버튼은 disabled 가 아니라 aria-disabled 다(초점을 잃지 않게) — 이 가드가 진짜 막는다.
     // 제출을 누르는 순간에만 검사한다 — 타이핑 중에는 부르지 않는다(spec
     // #474, #478). 서버가 진짜 문이고(#478) 이건 편의라, 여기서 걸러도
     // 걸러지지 않아도 서버가 같은 이유로 다시 거절한다.
@@ -172,7 +172,7 @@ function RoleSection({ role }: { role: Role }) {
     const result = await bffClient.post<ProfileOut>(`/api/backend/accounts/${copy.path}`, {
       display_name: displayName,
       bio,
-    });
+    }, { fieldLabels: PROFILE_FIELD_LABELS });
     if (!result.ok) {
       setSave({ status: "error", message: result.detail });
       return;
@@ -256,7 +256,7 @@ function RoleSection({ role }: { role: Role }) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={save.status === "saving"}
+            aria-disabled={save.status === "saving" || undefined}
             data-testid={`profile-${role}-save`}
             className={`mt-4 ${buttonClass("primary")}`}
           >

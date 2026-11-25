@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   dueDraftFromIso,
   dueDraftToIso,
+  dueOrderNote,
   dueOrderViolated,
   describeDue,
   formatDueDateTime,
@@ -61,6 +62,38 @@ describe("describeDue", () => {
   });
 });
 
+describe("describeDue — 오늘 마감", () => {
+  const at = (h: number, mi: number) => local(2026, 10, 21, h, mi).toISOString();
+  const due = (iso: string, passed: boolean | null) =>
+    describeDue({ recommended_due_at: null, due_at: iso }, { passed, now: NOW }).due;
+
+  it("오늘 마감이 한 시간보다 멀면 날짜 대신 시각을 보인다", () => {
+    expect(due(at(23, 59), false)).toEqual({ label: "오늘 마감", text: "23:59", tone: "normal", passed: false });
+  });
+
+  it("한 시간 안이면 「곧 마감」 — 아직 통과하지 못한 참여자에게는 주의색", () => {
+    expect(due(at(12, 53), false)).toEqual({ label: "곧 마감", text: "12:53", tone: "attention", passed: false });
+    expect(due(at(12, 53), true)?.tone).toBe("faint");
+    expect(due(at(12, 53), null)?.label).toBe("곧 마감");
+  });
+
+  it("내일 마감은 그대로 날짜", () => {
+    expect(due(iso(2026, 10, 22), false)).toEqual({ label: "마감", text: "10/22", tone: "normal", passed: false });
+  });
+});
+
+describe("describeDue — 보관된 클래스(읽기 전용)", () => {
+  const at = (h: number, mi: number) => local(2026, 10, 21, h, mi).toISOString();
+  const due = (iso: string, passed: boolean | null) =>
+    describeDue({ recommended_due_at: null, due_at: iso }, { passed, now: NOW, archived: true }).due;
+
+  it("곧 마감·마감 지남으로 재촉하지 않는다 — 라벨은 「마감」, 색은 흐리다", () => {
+    expect(due(at(12, 53), false)).toEqual({ label: "마감", text: "12:53", tone: "faint", passed: false });
+    expect(due(iso(2026, 10, 20), false)).toEqual({ label: "마감", text: "10/20", tone: "faint", passed: true });
+    expect(due(iso(2026, 10, 27), false)?.tone).toBe("faint");
+  });
+});
+
 describe("withLate", () => {
   it("늦음 두 단계를 배지 글자로 나눈다", () => {
     expect(withLate("통과", "recommended")).toBe("통과 · 권장 기한 뒤");
@@ -106,5 +139,14 @@ describe("due draft", () => {
     expect(dueOrderViolated(due, due)).toBe(false);
     expect(dueOrderViolated({ date: "2026-10-24", time: "23:59" }, due)).toBe(false);
     expect(dueOrderViolated(rec, { date: "", time: "" })).toBe(false);
+  });
+});
+
+describe("dueOrderNote", () => {
+  it("권장 기한이 마감보다 늦으면 두 날짜를 짚는 문구를 준다", () => {
+    expect(dueOrderNote(true)).toBe("권장 기한이 마감보다 늦습니다. 권장 기한을 마감 이전으로 바꾸세요.");
+  });
+  it("순서가 맞으면 없다", () => {
+    expect(dueOrderNote(false)).toBeNull();
   });
 });

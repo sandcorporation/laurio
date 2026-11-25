@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { LANDING_DESCRIPTION } from "../landing-copy";
+import { buildClassroomTabTitle } from "../rendering/tab-title";
 import type { JoinPreview } from "./api";
 
 // 가입 링크(`/join/<코드>`)를 메신저·SNS 에 붙였을 때 뜨는 공유 카드(#788).
@@ -29,9 +30,11 @@ export const SHARE_IMAGE = {
   type: "image/png",
 };
 
-function card(title: string, description: string): Metadata {
+// 가입 링크의 문서 제목은 다른 화면처럼 「화면 · 클래스 · Codemit」 꼴이다(#1441 9번, #1431 의 결정을 뒤집음).
+// 메신저 카드 제목(openGraph·twitter)은 따로이고 그대로다(#1400).
+function card(title: string, description: string, className?: string): Metadata {
   return {
-    title,
+    title: buildClassroomTabTitle({ screenName: "클래스 가입", className }),
     description,
     openGraph: { title, description, type: "website", images: [SHARE_IMAGE] },
     twitter: { card: "summary_large_image", title, description, images: [SHARE_IMAGE] },
@@ -52,7 +55,7 @@ export function joinShareMetadata(
   if (name === "") return card(GENERIC_JOIN_TITLE, LANDING_DESCRIPTION);
   const count = preview.open_problem_count;
   const description = count > 0 ? `열린 문제 ${count}개 · ${GRADING}` : GRADING;
-  return card(`${name} — ${SUFFIX}`, description);
+  return card(`${name} — ${SUFFIX}`, description, name);
 }
 
 const FETCH_TIMEOUT_MS = 3000;

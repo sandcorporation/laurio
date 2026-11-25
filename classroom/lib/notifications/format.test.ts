@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { NotificationRow } from "./api";
-import { describeNotification } from "./format";
+import { EMPTY_NOTIFICATIONS_TEXT, describeNotification } from "./format";
 
 function row(overrides: Partial<NotificationRow>): NotificationRow {
   return {
@@ -38,6 +38,15 @@ describe("describeNotification — classroom_submission_scored", () => {
     expect(text).not.toContain("미통과");
   });
 
+  it("늦게 낸 시도는 결과 뒤에 늦음 단계를 붙인다(#1400)", () => {
+    const base = { class_name: "1반", problem_title: "문제", attempt_number: 2, passed: true };
+    expect(describeNotification(row({ context: { ...base, late: "deadline" } }))).toContain("통과 · 마감 기한 뒤.");
+    expect(describeNotification(row({ context: { ...base, late: "recommended" } }))).toContain("통과 · 권장 기한 뒤.");
+    // 늦지 않았거나 늦음 값이 없는 옛 알림은 결과에서 끝난다.
+    expect(describeNotification(row({ context: { ...base, late: null } }))).toMatch(/통과\.$/);
+    expect(describeNotification(row({ context: base }))).toMatch(/통과\.$/);
+  });
+
   it("미통과 결과는 미통과라고 말한다", () => {
     const text = describeNotification(
       row({ context: { class_name: "1반", problem_title: "문제", attempt_number: 1, passed: false } }),
@@ -55,6 +64,22 @@ describe("describeNotification — classroom_scoring_key_rejected", () => {
     expect(text).toContain("거부");
     expect(text).toContain("클래스 설정");
     expect(text).toContain("새 키");
+  });
+});
+
+describe("describeNotification — classroom_scoring_key_missing", () => {
+  it("연결이 없어 참여자의 제출이 멈췄고, 키를 넣으면 밀린 제출부터 채점되며, 미달이 되지 않는다고 말한다(#1389)", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_scoring_key_missing", context: { class_id: 7, class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toBe(
+      "'알고리즘 1반' 클래스에 채점 연결이 없어 참여자의 제출이 채점되지 않고 있습니다 — 클래스 설정에서 채점 키를 넣으면 밀린 제출부터 채점됩니다. 참여자의 시도는 미달로 처리되지 않습니다.",
+    );
+  });
+
+  it("클래스 이름이 빠진 옛 줄도 문장을 짓는다", () => {
+    const text = describeNotification(row({ notification_type: "classroom_scoring_key_missing", context: {} }));
+    expect(text).toContain("'클래스' 클래스에 채점 연결이 없어");
   });
 });
 
@@ -117,6 +142,54 @@ describe("소유권 이전 알림 (#575)", () => {
     expect(text).toContain("까지 클래스 화면에서 수락하거나 거절해 주세요");
   });
 
+  it.each([
+    ["accepted", "'알고리즘 1반' 클래스의 소유권 이전 요청을 수락했습니다 — 이제 내가 이 클래스의 소유자입니다."],
+    ["declined", "'알고리즘 1반' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로입니다."],
+    ["cancelled", "'알고리즘 1반' 클래스의 소유권 이전 요청이 취소됐습니다 — 요청한 쪽이 거두었습니다."],
+    ["expired", "'알고리즘 1반' 클래스의 소유권 이전 요청이 기한이 지나 만료됐습니다."],
+    // 끝났는데 행이 없다 — 받는 사람이 떠나 요청이 지워졌거나, 잇지 못한 옛 알림인데 대기 요청이 없다(#1448).
+    ["gone", "'알고리즘 1반' 클래스의 소유권 이전 요청은 이미 끝났습니다 — 더 답할 것이 없습니다."],
+  ] as const)("끝난 요청이면 어떻게 끝났는지(%s) 말하고 수락·거절을 청하지 않는다 (#1441)", (transfer_status, expected) => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_requested",
+        transfer_status,
+        context: { class_name: "알고리즘 1반", requester_display_name: "주강사", expires_at: "2026-10-13T03:00:00Z" },
+      }),
+    );
+    expect(text).toBe(expected);
+    expect(text).not.toContain("수락하거나");
+  });
+
+  it("어느 요청인지 모르는 옛 알림은 끝났다고 단정하지 않고 클래스의 요청 카드로 보낸다 (#1459 ①)", () => {
+    const text = describeNotification(
+      row({
+        notification_type: "classroom_ownership_transfer_requested",
+        transfer_status: "unknown",
+        context: { class_name: "알고리즘 1반", requester_display_name: "주강사", expires_at: "2026-10-13T03:00:00Z" },
+      }),
+    );
+    expect(text).toBe(
+      "'알고리즘 1반' 클래스에 나에게 온 소유권 이전 요청이 지금 대기 중입니다 — 이 알림이 그 요청인지는 알 수 없으니 클래스 화면의 요청 카드에서 확인하고 답해 주세요.",
+    );
+    expect(text).not.toContain("끝났습니다");
+    // 받은 때의 기한은 이 알림의 요청 것인지 모른다.
+    expect(text).not.toContain("까지");
+  });
+
+  it("아직 답을 기다리는 요청이거나 상태를 모르면 받은 때의 문구 그대로다 (#1435)", () => {
+    for (const transfer_status of ["pending", null, undefined] as const) {
+      const text = describeNotification(
+        row({
+          notification_type: "classroom_ownership_transfer_requested",
+          transfer_status,
+          context: { class_name: "알고리즘 1반", requester_display_name: "주강사" },
+        }),
+      );
+      expect(text).toContain("수락하거나 거절해 주세요");
+    }
+  });
+
   it("요청한 사람의 강사 이름이 비어 있으면 「소유자가」로 말한다", () => {
     const text = describeNotification(
       row({
@@ -145,6 +218,15 @@ describe("소유권 이전 알림 (#575)", () => {
       }),
     );
     expect(text).toBe("보조 강사님이 '알고리즘 1반' 클래스의 소유권 이전 요청을 거절했습니다 — 소유권은 그대로 나에게 있습니다.");
+  });
+});
+
+describe("내보내짐 알림 (#1441)", () => {
+  it("어느 클래스에서 내보내졌고 지난 시도는 읽힌다는 것을 말한다", () => {
+    const text = describeNotification(
+      row({ notification_type: "classroom_member_expelled", context: { class_name: "알고리즘 1반" } }),
+    );
+    expect(text).toBe("'알고리즘 1반' 클래스에서 내보내졌습니다 — 새로 제출할 수 없고, 지난 시도와 채점 결과는 그대로 볼 수 있습니다.");
   });
 });
 
@@ -181,5 +263,11 @@ describe("describeNotification — classroom_scoring_failure_capped", () => {
     expect(text).toContain("'알고리즘 1반' 클래스 김하늘 님의 '두 수의 합' 문제 2번째 시도");
     expect(text).toContain("자동으로 미달");
     expect(text).toContain("제한 시간 안에 답하지 않았습니다");
+  });
+});
+
+describe("EMPTY_NOTIFICATIONS_TEXT", () => {
+  it("강사 여부와 무관하게 한 줄이고, 언제 채워지는지 말하지 않는다(#1389)", () => {
+    expect(EMPTY_NOTIFICATIONS_TEXT).toBe("아직 알림이 없습니다.");
   });
 });

@@ -48,11 +48,13 @@ export function notificationHref(notification: NotificationRow): string | null {
       return detailTabHref(classId, "problems");
     }
     case "classroom_scoring_key_rejected":
+    case "classroom_scoring_key_missing":
     case "classroom_scoring_quota_exhausted":
     case "classroom_scoring_server_unreachable": {
       const classId = context.class_id;
       if (typeof classId !== "number") return null;
-      return `/classes/${classId}/settings#scoring-key`;
+      // 설정이냐 클래스 화면이냐는 여는 때의 역할로 고른다(#1426) — 도착 화면이 갈라 준다.
+      return `/classes/${classId}/scoring-key`;
     }
     // 소유권 이전(#575) — 받는 사람은 클래스 화면 맨 위의 요청 카드로, 넘긴 사람은 강사 목록이
     // 있는 강사 탭(#635)으로 간다(#669).
@@ -66,6 +68,12 @@ export function notificationHref(notification: NotificationRow): string | null {
       const classId = context.class_id;
       if (typeof classId !== "number") return null;
       return detailTabHref(classId, "instructors");
+    }
+    // 내보내진 참여자 — 지난 시도를 읽는 참여자 화면으로(강사 전용 상세는 참여자에게 404).
+    case "classroom_member_expelled": {
+      const classId = context.class_id;
+      if (typeof classId !== "number") return null;
+      return `/classes/${classId}/problems/mine`;
     }
     case "classroom_feedback_status_changed": {
       const reportId = context.report_id;

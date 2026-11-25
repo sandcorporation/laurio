@@ -14,6 +14,7 @@ import { usePolicy } from "@/lib/policies/use-policy";
 import { usePolicyHistory } from "@/lib/policies/use-policy-history";
 import { PolicyEditor } from "@/lib/policies/policy-editor";
 import { PolicyHistoryTable } from "@/lib/policies/policy-history";
+import { useTablist } from "@/app/components/use-tablist";
 import { PolicyValuesTable } from "@/lib/policies/policy-values-table";
 import { SETTINGS_TABS, accountRefusalText, policyFieldsOfTab, settingsOfTab, tabFromParam } from "@/lib/runtime-settings/view";
 
@@ -24,6 +25,7 @@ function Heading({ children }: { children: string }) {
 function RuntimeSettingsScreen() {
   const router = useRouter();
   const tab = tabFromParam(useSearchParams().get("tab"));
+  const tablist = useTablist(tab, { id: "runtime-settings" });
   const policyFields = policyFieldsOfTab(tab);
   const hasPolicy = policyFields.length > 0;
   const session = useSession();
@@ -64,15 +66,12 @@ function RuntimeSettingsScreen() {
       <PageHeader crumb="기준 · 운영 설정" title="운영 설정" />
       <div className="flex flex-1 flex-col gap-6 p-4 sm:p-8">
         <div className="flex items-baseline justify-between gap-3">
-          <div role="tablist" aria-label="운영 설정" className="flex flex-wrap items-end gap-0.5">
+          <div {...tablist.listProps} aria-label="운영 설정" className="flex flex-wrap items-end gap-0.5">
             {visibleTabs.map(({ id, label }) => (
               <button
                 key={id}
                 type="button"
-                role="tab"
-                id={`runtime-settings-tab-${id}`}
-                aria-selected={tab === id}
-                aria-controls="runtime-settings-panel"
+                {...tablist.tabProps(id)}
                 data-testid={`runtime-settings-tab-${id}`}
                 onClick={() => router.replace(`/settings?tab=${id}`)}
                 className={
@@ -95,7 +94,7 @@ function RuntimeSettingsScreen() {
           )}
         </div>
 
-        <div role="tabpanel" id="runtime-settings-panel" aria-labelledby={`runtime-settings-tab-${tab}`} className="-mt-5 flex flex-col gap-6">
+        <div {...tablist.panelProps()} className="-mt-5 flex flex-col gap-6">
           {settings.status === "error" && (
             <p role="alert" data-testid="runtime-settings-error" className="text-[13px] text-attention">
               운영 설정을 불러오지 못했습니다.
@@ -104,9 +103,9 @@ function RuntimeSettingsScreen() {
           {tabSettings.length > 0 && (
             <div data-testid="runtime-settings-list" className="border border-rule bg-surface">
               {tabSettings.map((setting) => (
-                // 저장 뒤 다시 읽으면 key 가 같아도 updated_at 이 달라 입력 상태를 새로 시작한다.
+                // key 는 설정 키뿐이다 — 저장 뒤 다시 읽어도 줄을 새로 만들지 않아 눌렀던 단추의 초점이 남는다.
                 <RuntimeSettingRow
-                  key={`${setting.key}-${setting.updated_at ?? "none"}-${setting.source}`}
+                  key={setting.key}
                   setting={setting}
                   editable={editable}
                   onChanged={reload}

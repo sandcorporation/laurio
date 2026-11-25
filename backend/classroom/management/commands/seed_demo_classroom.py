@@ -70,6 +70,9 @@ _PARTICIPANT_EMAIL_PREFIX = "demo-classroom-"
 
 _REPO = "https://github.com/octocat/Hello-World"
 
+#: `--many-notifications` 때 참여자 1(이수민)이 받는 알림 수 — 알림 화면 한 쪽(50건)을 넘긴다.
+_MANY_NOTIFICATIONS = 60
+
 
 def _participant(index: int, display: str):
     User = get_user_model()
@@ -94,6 +97,14 @@ class Command(BaseCommand):
             action="store_true",
             help="심지 않고 이 강사의 데모 클래스만 걷어낸다",
         )
+        parser.add_argument(
+            "--many-notifications",
+            action="store_true",
+            help=(
+                f"{_PARTICIPANT_EMAIL_PREFIX}1 의 2주차 시도를 늘려 알림을 "
+                f"{_MANY_NOTIFICATIONS}건 만든다(알림 화면의 「더 보기」)"
+            ),
+        )
 
     def handle(self, *args, **options):
         instructor = self._resolve_instructor(options)
@@ -104,7 +115,7 @@ class Command(BaseCommand):
             return
 
         with transaction.atomic():
-            summary = self._seed(instructor)
+            summary = self._seed(instructor, options["many_notifications"])
         self._dispatch_notifications(summary)
         self._report(instructor, summary)
 
@@ -168,7 +179,7 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ 심기
 
-    def _seed(self, instructor) -> dict:
+    def _seed(self, instructor, many_notifications: bool) -> dict:
         now = timezone.now()
         made = {
             "classes": [],
@@ -227,9 +238,11 @@ class Command(BaseCommand):
             [("API 로 목록을 받아온다", True)],
         )
 
-        # 이수민: 1주차 두 번 만에 통과, 2주차 미통과 한 번
-        self._attempts(p1, members[0], [False, True], made)
-        self._attempts(p2, members[0], [False], made)
+        # 이수민: 1주차 두 번 만에 통과, 2주차 미통과 한 번(선택지를 주면 알림 수를 채울 만큼)
+        first_week = [False, True]
+        second_week = _MANY_NOTIFICATIONS - len(first_week) if many_notifications else 1
+        self._attempts(p1, members[0], first_week, made)
+        self._attempts(p2, members[0], [False] * second_week, made)
         # 박지호: 1주차 한 번에 통과
         self._attempts(p1, members[1], [True], made)
         # 최은영: 1주차 세 번 냈지만 아직 미통과
@@ -338,7 +351,8 @@ class Command(BaseCommand):
             )
             if expelled_index is not None and index == expelled_index:
                 member.expelled_at = timezone.now()
-                member.save(update_fields=["expelled_at"])
+                member.left_by_self = False
+                member.save(update_fields=["expelled_at", "left_by_self"])
             made.append(member)
         return made
 
@@ -384,7 +398,7 @@ class Command(BaseCommand):
                         "checklist_item_id": item.id,
                         "is_met": passed or not item.required,
                         "reasoning": (
-                            "충족했다." if (passed or not item.required) else "아직 확인되지 않았다."
+                            "확인되었습니다." if (passed or not item.required) else "아직 확인되지 않았습니다."
                         ),
                     }
                     for item in items

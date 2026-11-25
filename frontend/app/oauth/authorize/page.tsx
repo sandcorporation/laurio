@@ -4,10 +4,13 @@
 // `state`·`resource`). 로그인하지 않았으면 middleware.ts 가 `/login?next=…` 로 보내고, 로그인이
 // 끝나면 쿼리까지 그대로 여기로 돌아온다. 누가 허락하는지는 로그인 쿠키가 정한다. 개최 권한이
 // 없는 사람은 백엔드가 403 으로 거절하고, 이 화면은 그 이유를 보여준다.
+import type { Metadata } from "next";
 import { PageShell } from "@/app/components/ui";
 import { pickAuthorizeParams } from "@/lib/connected-apps/format";
 
 import { ConsentPanel } from "./consent-panel";
+
+export const metadata: Metadata = { title: "연결 허용" };
 
 export const dynamic = "force-dynamic";
 

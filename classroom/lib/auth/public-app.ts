@@ -1,5 +1,5 @@
 // 공개 앱(codemit.…)의 오리진 — 강의실은 자기 로그인이 없어(ADR-0038) /login
-// 화면이 할 일은 "저기서 로그인하고 오라"고 안내하는 것뿐이다. CODEMIT_WEB_ORIGIN을
+// 은 화면 없이 공개 앱 로그인으로 보낸다(#1388, app/login/route.ts). CODEMIT_WEB_ORIGIN을
 // 재사용한다 — 이미 배포 환경에서 공개 앱 자신의 Origin 검증이 요구하는 값과
 // 같은 값(같은 .env 줄을 나눠 읽는다, CODEMIT_OPERATOR_ORIGIN과 같은 원칙)이고,
 // "공개 앱이 어디 있는가"라는 같은 사실을 가리킨다.

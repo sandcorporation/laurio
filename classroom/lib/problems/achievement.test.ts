@@ -15,6 +15,12 @@ describe("달성률 표시 문구", () => {
     expect(formatAchievementRate({ passed_count: 0, member_count: 0, pass_rate: null })).toBe("—");
   });
 
+  it("참여자는 있는데 채점된 시도가 없으면 「—」 이고 까닭이 다르다(#1400)", () => {
+    const ungraded = { passed_count: 0, member_count: 5, pass_rate: null };
+    expect(formatAchievementRate(ungraded)).toBe("—");
+    expect(describeAchievementRate(ungraded)).toBe("달성률 채점된 시도 없음");
+  });
+
   it("「—」 는 읽기 도구에 이유를 따로 말한다", () => {
     expect(describeAchievementRate({ passed_count: 0, member_count: 0, pass_rate: null })).toBe("달성률 참여자 없음");
     expect(describeAchievementRate({ passed_count: 5, member_count: 12, pass_rate: 5 / 12 })).toBe(

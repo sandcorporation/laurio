@@ -14,6 +14,7 @@ import pytest
 from django.utils import timezone
 
 from classroom.models import ChecklistItem
+from core.events import FakeEventBus
 from contests.models import Contest
 from tests.classroom_scenarios import (
     CLASSES_URL,
@@ -297,6 +298,49 @@ def test_turning_the_allowance_off_closes_entries_for_imported_problems(client, 
         )
 
     assert _problem(client, access, world["class_id"], problem["id"])["contest"]["accepts_entries"] is False
+
+
+# --- 열어 둔 화면의 재조회 신호(#1471 ⑦ 후속 2) -----------------------------------------
+
+
+def _instructor_signals(world) -> list[int]:
+    return [
+        e.payload["class_id"]
+        for e in FakeEventBus._queues.get(user_id("cp-instructor"), [])
+        if e.kind == "instructors-changed"
+    ]
+
+
+def test_importing_a_contest_problem_signals_the_class_instructors(client, world, django_capture_on_commit_callbacks):
+    FakeEventBus._queues.clear()
+    with django_capture_on_commit_callbacks(execute=True):
+        _import(client, world["instructor"]["access"], world["class_id"], world["contest"]["id"])
+
+    assert _instructor_signals(world) == [world["class_id"]]
+
+
+def test_a_contest_edit_that_changes_the_problem_signals_and_one_that_does_not_stays_quiet(
+    client, world, django_capture_on_commit_callbacks
+):
+    _import(client, world["instructor"]["access"], world["class_id"], world["contest"]["id"])
+    host_header = _auth_header(world["host"]["access"])
+
+    FakeEventBus._queues.clear()
+    with django_capture_on_commit_callbacks(execute=True):
+        client.patch(
+            f"{CONTESTS_URL}/{world['contest']['id']}", data={"title": "할 일 웹앱 v2"},
+            content_type="application/json", **host_header,
+        )
+    assert _instructor_signals(world) == [world["class_id"]]
+
+    # 제목·설명·요구사항이 그대로인 편집(받기 허용 끄기)은 문제를 바꾸지 않는다 — 신호도 없다.
+    FakeEventBus._queues.clear()
+    with django_capture_on_commit_callbacks(execute=True):
+        client.patch(
+            f"{CONTESTS_URL}/{world['contest']['id']}", data={"allows_classroom_import": False},
+            content_type="application/json", **host_header,
+        )
+    assert _instructor_signals(world) == []
 
 
 # --- 복사·템플릿 ---------------------------------------------------------------

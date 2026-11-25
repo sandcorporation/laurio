@@ -42,14 +42,27 @@ test("강사 탭 — 소유자가 초대 링크를 만들고 소유권을 넘기
 
   await page.goto(`/classes/${classId}?tab=instructors`);
   await expect(page.getByTestId("class-instructors-count")).toHaveText("2명");
-  await expect(page.getByTestId("class-leave")).toBeDisabled();
+  await expect(page.getByTestId("class-leave")).toHaveCount(0);
 
   await page.getByTestId("co-instructor-invite-create").click();
   await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(1);
 
+  // 줄마다 같은 이름이 되지 않게 대상 이름이 붙는다(#1436 4번).
+  await expect(page.getByRole("button", { name: "박조교에게 소유권 넘기기" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "공동 강사 박조교 내보내기" })).toBeVisible();
+
   await page.getByTestId("ownership-transfer-start").click();
+  const transferConfirm = page.getByTestId("ownership-transfer-confirm");
+  await expect(transferConfirm.getByRole("button", { name: "그만두기" })).toBeFocused();
+  await expect(transferConfirm).toHaveAttribute("role", "group");
+  await expect(transferConfirm).toHaveAccessibleDescription(/소유권을 넘길까요/);
+  // 되돌리기 어려운 결과(채점 키가 비워져 채점이 멈춘다)도 같은 묶음 설명으로 읽힌다(#1489).
+  await expect(transferConfirm).toHaveAccessibleDescription(/새 소유자가 자기 키를 넣을 때까지 참여자의 제출은 채점되지 않고 기다립니다/);
   await page.getByTestId("ownership-transfer-confirm-button").click();
   await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
+  // 보낸 뒤 초점이 BODY 로 떨어지지 않고 보낸 요청의 상태로 옮겨 가며, 읽힌다(#1435).
+  await expect(page.getByTestId("ownership-transfer-pending")).toBeFocused();
+  await expect(page.getByRole("status").filter({ hasText: "까지 답을 기다립니다" })).toBeVisible();
   await expect(page.getByTestId("ownership-transfer-start")).toHaveCount(0);
   // 대기 중인 줄에는 「요청 취소」만 — 내보내기가 없다(#669).
   await expect(page.getByTestId("co-instructor-remove")).toHaveCount(0);
@@ -81,4 +94,203 @@ test("강사 탭 — 공동 강사는 소유자 전용 행동 없이 떠나기�
     `/api/backend/classroom/classes/${classId}`,
   );
   expect(gone.ok()).toBeFalsy();
+});
+
+test("강사 탭 — 공동 강사 초대는 「정말 취소」를 눌러야 취소된다", async ({
+  page,
+}) => {
+  const seed = `instructors-tab-invite-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const api = classroomApi(page);
+  const created = await api.post("/api/backend/classroom/classes", {
+    data: { name: `초대 취소 ${seed}`, instructor_display_name: "김소유" },
+  });
+  const classId = (await created.json()).id as number;
+  const invitesPath = `/api/backend/classroom/classes/${classId}/co-instructor-invites`;
+  await api.post(invitesPath);
+
+  await page.goto(`/classes/${classId}?tab=instructors`);
+  const confirm = page.getByTestId("co-instructor-invite-cancel-confirm-button");
+
+  // 한 번 눌러서는 취소되지 않는다(#1378).
+  await page.getByTestId("co-instructor-invite-cancel").click();
+  await expect(confirm).toHaveText("정말 취소");
+  // 되돌릴 수 없다는 결과가 확인 묶음의 설명으로 읽힌다(#1489 같은 꼴).
+  await expect(page.getByRole("group").filter({ has: confirm })).toHaveAccessibleDescription(/다시 쓸 수 없습니다/);
+  expect(await (await api.get(invitesPath)).json()).toHaveLength(1);
+
+  // 확인이 열리면 초점은 「그대로 두기」에 있고, 닫히면 「취소」로 돌아온다(#1400) — `body` 로 빠지지 않는다.
+  const trigger = page.getByTestId("co-instructor-invite-cancel");
+  const keep = page.getByTestId("co-instructor-invite-cancel-keep");
+  await expect(keep).toBeFocused();
+  await keep.click();
+  await expect(confirm).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  // 키보드로 열고 Esc 로 닫는다.
+  await page.keyboard.press("Enter");
+  await expect(keep).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await confirm.click();
+  await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(0);
+  await expect(page.getByTestId("co-instructor-invite-create")).toBeFocused();
+});
+
+test("소유권 이전 — 받는 공동 강사가 넘겨받으면 결과 문구가 읽히고 초점을 받으며, 받은 알림은 끝난 요청이라고 말한다", async ({
+  page,
+}) => {
+  const seed = `transfer-accept-${test.info().workerIndex}-${Date.now()}`;
+  const classId = await openClassWithCoInstructor(page, seed);
+  // 소유자가 이전을 요청한다.
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  const ownerApi = classroomApi(page);
+  const roster = (await (await ownerApi.get(`/api/backend/classroom/classes/${classId}/instructors`)).json()) as {
+    co_instructor_id: number | null;
+  }[];
+  const coId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+  const requested = await ownerApi.post(`/api/backend/classroom/classes/${classId}/ownership-transfers`, {
+    data: { co_instructor_id: coId },
+  });
+  expect(requested.ok()).toBeTruthy();
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-helper`);
+  await page.goto(`/classes/${classId}`);
+  // 요청 카드는 이름 있는 영역이다.
+  await expect(page.getByRole("region", { name: "소유권 이전 요청" })).toBeVisible();
+
+  await page.getByTestId("ownership-transfer-accept").click();
+  const note = page.getByRole("status").filter({ has: page.getByTestId("ownership-transfer-accepted-note") });
+  await expect(note).toBeVisible();
+  await expect(note).toBeFocused();
+
+  // 받은 알림의 문구는 받은 때의 것 — 끝난 요청이면 수락·거절을 청하지 않는다(#1436 5번).
+  await page.goto("/notifications");
+  await expect(page.getByText("소유권 이전 요청을 수락했습니다 — 이제 내가 이 클래스의 소유자입니다.")).toBeVisible();
+  await expect(page.getByText("수락하거나 거절해 주세요")).toHaveCount(0);
+});
+
+test("소유권 이전 — 받는 공동 강사가 거절해도 결과 문구가 읽히고 초점을 받는다", async ({ page }) => {
+  const seed = `transfer-decline-${test.info().workerIndex}-${Date.now()}`;
+  const classId = await openClassWithCoInstructor(page, seed);
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  const ownerApi = classroomApi(page);
+  const roster = (await (await ownerApi.get(`/api/backend/classroom/classes/${classId}/instructors`)).json()) as {
+    co_instructor_id: number | null;
+  }[];
+  const coId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+  await ownerApi.post(`/api/backend/classroom/classes/${classId}/ownership-transfers`, {
+    data: { co_instructor_id: coId },
+  });
+
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-helper`);
+  await page.goto(`/classes/${classId}`);
+  await page.getByTestId("ownership-transfer-decline").click();
+  const note = page.getByRole("status").filter({ has: page.getByTestId("ownership-transfer-declined-note") });
+  await expect(note).toBeFocused();
+});
+
+async function ownerWithPendingRequest(page: Page, seed: string) {
+  const classId = await openClassWithCoInstructor(page, seed);
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+  const ownerApi = classroomApi(page);
+  const roster = (await (await ownerApi.get(`/api/backend/classroom/classes/${classId}/instructors`)).json()) as {
+    co_instructor_id: number | null;
+  }[];
+  const coId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+  const requested = await ownerApi.post(`/api/backend/classroom/classes/${classId}/ownership-transfers`, {
+    data: { co_instructor_id: coId },
+  });
+  return { classId, transferId: (await requested.json()).id as number };
+}
+
+async function helperAccepts(page: Page, seed: string, classId: number, transferId: number) {
+  await page.context().clearCookies();
+  await establishClassroomSession(page, `${seed}-helper`);
+  const accepted = await classroomApi(page).post(
+    `/api/backend/classroom/classes/${classId}/ownership-transfers/${transferId}/accept`,
+  );
+  expect(accepted.ok()).toBeTruthy();
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+}
+
+test("소유권 이전 — 받는 사람이 넘겨받으면 열려 있는 소유자 화면이 저절로 맞춰지고 그 사실이 읽힌다 (#1441 5번)", async ({
+  page,
+  browser,
+}) => {
+  test.setTimeout(20_000);
+  const seed = `transfer-live-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, transferId } = await ownerWithPendingRequest(page, seed);
+  await page.goto(`/classes/${classId}?tab=instructors`);
+  await expect(page.getByTestId("ownership-transfer-cancel")).toBeVisible();
+
+  // 받는 사람은 다른 브라우저에서 넘겨받는다 — 열려 있는 소유자 화면의 쿠키는 그대로다.
+  const helperContext = await browser.newContext({ baseURL: test.info().project.use.baseURL });
+  const helperPage = await helperContext.newPage();
+  await establishClassroomSession(helperPage, `${seed}-helper`);
+  const accepted = await classroomApi(helperPage).post(
+    `/api/backend/classroom/classes/${classId}/ownership-transfers/${transferId}/accept`,
+  );
+  expect(accepted.ok()).toBeTruthy();
+  await helperContext.close();
+
+  const note = page.getByRole("status").filter({ has: page.getByTestId("ownership-transfer-taken-note") });
+  await expect(note).toContainText("박조교님이 소유권을 넘겨받았습니다");
+  await expect(note).toBeFocused();
+  await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0);
+});
+
+test("소유권 이전 — 넘어간 뒤 소유자가 「요청 취소」를 누르면 「이미 넘겨받았습니다」가 읽히고 초점을 받는다 (#1441 5번)", async ({
+  page,
+}) => {
+  const seed = `transfer-taken-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, transferId } = await ownerWithPendingRequest(page, seed);
+  // 실시간 신호가 닿지 않는 화면 — 눌러서야 사실을 알게 되는 길.
+  await page.route("**/classroom/events/stream", (route) => route.abort());
+  await page.goto(`/classes/${classId}?tab=instructors`);
+  await expect(page.getByTestId("ownership-transfer-cancel")).toBeVisible();
+
+  await helperAccepts(page, seed, classId, transferId);
+
+  await page.getByTestId("ownership-transfer-cancel").click();
+  const note = page.getByRole("status").filter({ has: page.getByTestId("ownership-transfer-taken-note") });
+  await expect(note).toContainText("이미 박조교님이 넘겨받았습니다");
+  await expect(note).toBeFocused();
+  await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0);
+});
+
+test("강사 탭 — 서버 신호와 클래스 재조회가 요청 응답보다 먼저 와도 요청을 보낸 뒤 초점이 대기 줄에 있다 (#1496 ⑥)", async ({
+  page,
+}) => {
+  const seed = `instructors-tab-order-${test.info().workerIndex}-${Date.now()}`;
+  const classId = await openClassWithCoInstructor(page, seed);
+  await page.context().clearCookies();
+  await establishClassroomSession(page, seed);
+
+  const stream = page.waitForResponse((r) => r.url().includes("/api/backend/classroom/events/stream"));
+  await page.goto(`/classes/${classId}?tab=instructors`);
+  await stream;
+  await expect(page.getByTestId("class-instructors-count")).toHaveText("2명");
+
+  // 요청 응답을 붙들어 둔다 — 서버가 처리한 뒤 신호→클래스 재조회로 대기 줄이 먼저 그려진 다음에야 응답이 닿는다.
+  await page.route("**/classroom/classes/*/ownership-transfers", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const response = await route.fetch();
+    await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible({ timeout: 10_000 });
+    await route.fulfill({ response });
+  });
+
+  await page.getByTestId("ownership-transfer-start").click();
+  await page.getByTestId("ownership-transfer-confirm-button").click();
+  await expect(page.getByTestId("ownership-transfer-pending")).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("data-testid"))).toBe("ownership-transfer-pending");
 });

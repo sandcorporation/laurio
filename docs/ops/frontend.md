@@ -8,7 +8,7 @@ Next.js + React. 저장소 루트가 pnpm 워크스페이스다(운영자 앱 04
 그 멤버다 — `packages/bff-shared`(서버 쪽: 경로 순회 방어·Origin 검증·허용목록 검사
 함수·백엔드 전달 기계. 허용목록의 **내용**은 앱마다 자기 파일에 남는다, ADR-0021),
 `packages/bff-client`(브라우저 쪽, #146: 인증 구역 호출의 클라이언트·`ApiResult`·
-`normalizeDetail`·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — **강의실도
+`normalizeDetail`(422 의 pydantic `type` 을 한국어로 옮긴다, 단위 시험 `pnpm --dir packages/bff-client test`)·`useBackendQuery`/`usePagedList`·생성 타입 `schema.gen.ts` — **강의실도
 이제 이 패키지를 쓴다**(#462). 손으로 다시 쓴 클라이언트(`lib/backend/client.ts`)와
 그 사본이 낳던 결함 — 세션이 끊긴 사람을 로그인으로 보내는 동작이 강의실에만 없던
 것 — 을 함께 걷어냈다. 강의실도 공개 앱과 같이 `revive` 를 준다(#767) — 401 이면
@@ -36,12 +36,13 @@ docker/compose.dev.yaml up` 으로 세 앱이 다 뜬 스택을 띄운 뒤 `pnpm
 
 **강의실은 자기 로그인을 갖지 않는다**(ADR-0038, #276) — 회원은 공개 앱과 공유한다.
 그래서 강의실 e2e 스펙은 강의실에서 로그인하지 않는다: 부모 도메인 쿠키 공유는
-dev(localhost, 포트로 앱을 가른다)에서 재현할 수 없고, 실제 공유는 배포 환경(prod)에서만
-검증된다(#277). 강의실의 인증 구역을 걷는 스펙(과 dev에서 눈으로 확인할 때)은 공개
-앱에 로그인해 받은 `codemit_access`/`codemit_refresh` 쿠키 값을 강의실 오리진에 수동으로
-심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
-`context.addCookies`) — 실제 브라우저가 두 쿠키를 부모 도메인으로 공유하는 것을
-로컬에서 흉내 내는 유일한 길이다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
+e2e 조각(호스트 포트를 커널이 고르고, 강의실이 짓는 공개 앱 주소로는 닿지 못한다)에서
+재현할 수 없고, 실제 공유는 배포 환경(prod)에서만 검증된다(#277). 강의실의 인증 구역을
+걷는 스펙은 공개 앱에 로그인해 받은 `codemit_access`/`codemit_refresh` 쿠키 값을 강의실
+오리진에 수동으로 심는다(`frontend/e2e/classroom/lib/cross-app-session.ts`, Playwright의
+`context.addCookies`). **dev 브라우저로 걸을 때는 두 앱을 모두 `localhost` 로 열면 세션이
+그대로 실린다** — 도메인 없는 쿠키는 포트를 가리지 않는다(2026-11-25, #1388 에서 강의실 가입
+링크 → 공개 앱 시드 로그인 → 강의실 복귀로 확인). 한쪽만 `127.0.0.1` 로 열면 실리지 않는다. **그래서 `frontend-e2e-classroom` CI 잡은 강의실만이
 아니라 공개 앱도 띄운다** — 빼면 그 헬퍼가 `ECONNREFUSED 127.0.0.1:53000` 으로 죽는다
 (#318 이 그 스펙을 더한 뒤 main 에서 여섯 번 연속 그렇게 빨갛게 났다).
 **e2e 프로젝트가 닿을 수 있는 앱은 자기 조각이 띄우는 것뿐이다** — 로컬은 세 앱이 다 떠 있어 통과하고 CI 조각에서만 붉던 실수(#1247)를 `scripts/test_e2e_origins.py` 가 정적으로 잡는다(조각 정의는 `scripts/ci/e2e.sh` 의 `want_*`, 닿음은 spec 에서 상대 import 를 따라 쓰이는 선언만 본다). 다른 앱이 필요하면 backend 포트를 직접 치거나 `e2e.sh` 조각에 앱을 더한다. 글자로만 있는 예외는 그 시험의 `ALLOWED` 에 이유와 함께 둔다.
@@ -252,7 +253,10 @@ ADR-0017 의 세 위험(공개 페이지 SSR·인증 구역 가드·프록시 �
 오리진 목록**(`CODEMIT_CLASSROOM_ORIGIN`)과 대조해 통과한 것만 OAuth 왕복 쿠키에
 싣고, 콜백이 거기로 돌려보낸다. 사용자 입력이 고르는 것은 「이 목록 중 어느
 것인가」뿐이다. 실패 경로(`oauth_unconfigured` 등)도 같은 값을 실어 보낸다 —
-안 그러면 한 번 실패한 사람이 다시 성공해도 공개 앱에 남는다.
+안 그러면 한 번 실패한 사람이 다시 성공해도 공개 앱에 남는다. 판정은
+`frontend/lib/auth/login-destination.ts` 한 곳이고, OAuth 왕복이 없는 dev 시드 로그인도
+`/api/auth/continue` 로 와서 같은 판정을 받는다(#1388 — 그 전에는 화면이 `next_origin`
+을 검증 없이 썼다).
 
 **`CODEMIT_CLASSROOM_ORIGIN` 은 공개 앱과 강의실이 같은 `.env` 줄을 나눠 읽는
 값이다**(`CODEMIT_OPERATOR_ORIGIN` 과 같은 원칙). 어긋나면 복귀가 조용히 안 되고
@@ -294,6 +298,7 @@ primary·secondary·info·success·warning·error·advanced. 값은 옛 토큰�
 2026-09-16 에 늘었다: 강의실의 `test:unit` 은 **CI 에서 한 번도 돌지 않고 있었고**
 (그래서 위 토큰·로고 사본 대조와 런타임 설정 구조 검사가 실제로는 아무 문도 아니었다),
 마크다운 허용 목록 검사도 강의실 안에 있던 동안 같은 처지였다.
+`packages/bff-client` 의 `detail` 번역 시험도 같은 자리(`scripts/ci/sub-checks-inside.sh web`)에서 돈다(#1390).
 
 **다크 테마도 이 토큰 파일 하나에만 산다**(#397, spec #396 「따뜻한 먹」). 여섯
 색 각각이 `light-dark(라이트, 다크)`로 두 값을 갖고, 문서 루트(`<html>`)의

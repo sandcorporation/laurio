@@ -43,7 +43,7 @@ from scoring.models import Score, ScoreCorrection
 from .seed_e2e_operator_queues import (
     DEADLINE_OFFSET,
     _RUN_ID_OVERRIDE,
-    SCORING_RUN_PENDING_URL,
+    run_scoring_scan,
     _auth_header,
     _clear_stale_seed_contests,
     _close_contest,
@@ -129,8 +129,7 @@ def seed_appeal_for_detail(*, rule: str | None, corrected: bool = False) -> dict
     )
     _close_contest(client, contest, deadline=deadline)
 
-    scoring_resp = client.post(SCORING_RUN_PENDING_URL, **_internal_headers())
-    assert scoring_resp.status_code == 200, scoring_resp.content
+    run_scoring_scan(client)
 
     correction = _add_correction(submission["id"]) if corrected else None
 

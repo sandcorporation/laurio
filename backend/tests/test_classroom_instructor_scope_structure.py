@@ -369,6 +369,9 @@ DIRECT_INSTRUCTOR_ALLOWLIST: dict[Path, dict[str, str]] = {
         "(#586, #603). 플랫폼 장애 멈춤도 같은 자리라 같은 수신자다(#1318).",
         "_notify_owner_of_failure_cap": "실패 상한 알림의 수신자 — 멈춤 알림과 같이 소유자에게만 간다(#1318).",
     },
+    Path("classroom/scoring_key_missing.py"): {
+        "alert_missing_key": "「채점 연결 없음」 알림의 수신자 — 잠근 순간의 소유자에게만 간다(키 알림과 같은 규칙, #1389).",
+    },
     Path("classroom/ownership_transfers.py"): {
         "accept": "소유권 이전 수락이 소유자 자체를 바꾼다(CONTEXT.md 「소유권 이전」, #564) — 넘긴 사람을 읽어 공동 강사로 남기고 받는 사람을 소유자로 쓴다.",
     },

@@ -9,6 +9,9 @@ core 의 내부 틱 엔드포인트와 같은 `InternalAuth` 를 쓴다 — 둘 
 인프라(또는 아직 없는 상위 도메인 로직)가 호출하는 진입점이기 때문이다.
 """
 
+from collections.abc import Collection
+from dataclasses import asdict
+
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
@@ -26,6 +29,7 @@ from .models import (
     NotificationDispatch,
     NotificationType,
 )
+from .ports import CLASSROOM_PENDING_TRANSFER_CLASSES, CLASSROOM_PROBLEM_STATUSES, CLASSROOM_TRANSFER_STATES
 from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
@@ -71,6 +75,11 @@ class DispatchOut(Schema):
     failure_reason: str
 
 
+class ProblemStatusOut(Schema):
+    passed: bool
+    attempt_count: int
+
+
 class NotificationOut(Schema):
     id: int
     notification_type: str
@@ -92,6 +101,14 @@ class NotificationOut(Schema):
     title: str | None = None
     body: str | None = None
     has_image: bool = False
+    # 채점 완료 알림이 가리키는 문제의 **지금** 상태(#1405) — `context.passed` 는 그 시도의 채점 때
+    # 사실이다. 강의실 목록(`/me?classroom_only=true`)만 채우고, 받는 사람 자신의 시도가 없는 문제는 `null`.
+    problem_status: ProblemStatusOut | None = None
+    # 소유권 이전 요청 알림이 가리키는 요청의 **지금** 상태(#1435·#1441) — `pending`·`accepted`·`declined`·
+    # `cancelled`·`expired`, 끝났지만 요청 행이 없으면 `gone`(#1448), 어느 요청인지 정하지 못한 옛 알림인데 그 클래스에
+    # 대기 요청이 있으면 `unknown`(#1459 ①). 알림 문구는 받은 때의 것이다.
+    # 강의실 목록만 채우고, 다른 유형은 `null`.
+    transfer_status: str | None = None
 
 
 class UnreadCountOut(Schema):
@@ -194,6 +211,75 @@ def _serialize(notification: Notification, *, for_recipient: bool = False) -> di
     }
 
 
+def _scored_problem_id(notification: Notification) -> int | None:
+    if notification.notification_type != NotificationType.CLASSROOM_SUBMISSION_SCORED:
+        return None
+    problem_id = (notification.context or {}).get("problem_id")
+    return problem_id if isinstance(problem_id, int) else None
+
+
+def _transfer_id(notification: Notification) -> int | None:
+    if notification.notification_type != NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED:
+        return None
+    transfer_id = (notification.context or {}).get("transfer_id")
+    return transfer_id if isinstance(transfer_id, int) else None
+
+
+def _unlinked_class_id(notification: Notification) -> int | None:
+    """`transfer_id` 없는 옛 요청 알림(#1441 전, 0052 가 하나로 정하지 못함)의 클래스."""
+
+    if notification.notification_type != NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED:
+        return None
+    if _transfer_id(notification) is not None:
+        return None
+    class_id = (notification.context or {}).get("class_id")
+    return class_id if isinstance(class_id, int) else None
+
+
+#: 요청이 끝났는데 행이 없다(#1448) — 받는 사람이 떠나 요청 행이 지워졌거나, 잇지 못한 옛 알림인데 그 클래스에 그
+#: 사람 앞 대기 요청이 없다(대기 중인 요청은 언제나 행이 있으므로 그 알림의 요청도 끝났다).
+TRANSFER_GONE = "gone"
+#: 잇지 못한 옛 알림인데 그 클래스에 그 사람 앞 대기 요청이 있다(#1459 ①) — 그 요청이 이 알림의 것인지 모른다.
+#: 끝났다고 단정하지 않고, 대기 중이라고도 하지 않는다(답은 클래스 화면의 요청 카드에서).
+TRANSFER_UNKNOWN = "unknown"
+
+
+def _transfer_status(
+    notification: Notification, transfer_id: int | None, states: dict[int, str], pending_classes: Collection[int]
+) -> str | None:
+    if notification.notification_type != NotificationType.CLASSROOM_OWNERSHIP_TRANSFER_REQUESTED:
+        return None
+    if transfer_id is None:
+        return TRANSFER_UNKNOWN if _unlinked_class_id(notification) in pending_classes else TRANSFER_GONE
+    return states.get(transfer_id, TRANSFER_GONE)
+
+
+def _serialize_page(notifications: list[Notification], *, recipient_id: int) -> list[dict]:
+    """받는 사람의 목록 한 쪽 — 채점 알림에는 문제의 지금 상태를 한 번에 물어 싣는다(#1405)."""
+
+    problem_ids = {pid for n in notifications if (pid := _scored_problem_id(n)) is not None}
+    statuses = CLASSROOM_PROBLEM_STATUSES.get()(recipient_id, problem_ids) if problem_ids else {}
+    transfer_ids = {tid for n in notifications if (tid := _transfer_id(n)) is not None}
+    transfer_states = CLASSROOM_TRANSFER_STATES.get()(recipient_id, transfer_ids) if transfer_ids else {}
+    unlinked_class_ids = {cid for n in notifications if (cid := _unlinked_class_id(n)) is not None}
+    pending_classes = (
+        CLASSROOM_PENDING_TRANSFER_CLASSES.get()(recipient_id, unlinked_class_ids) if unlinked_class_ids else set()
+    )
+    items = []
+    for notification in notifications:
+        problem_id = _scored_problem_id(notification)
+        transfer_id = _transfer_id(notification)
+        status = None if problem_id is None else statuses.get(problem_id)
+        items.append(
+            {
+                **_serialize(notification, for_recipient=True),
+                "problem_status": None if status is None else asdict(status),
+                "transfer_status": _transfer_status(notification, transfer_id, transfer_states, pending_classes),
+            }
+        )
+    return items
+
+
 @router.post("", response=NotificationOut)
 def create(request, payload: CreateNotificationIn):
     recipient = get_object_or_404(get_user_model(), pk=payload.recipient_id)
@@ -255,7 +341,7 @@ def list_my_notifications(request, after: str | None = None, classroom_only: boo
         notifications, after=after, page_size=NOTIFICATION_HISTORY_PAGE_SIZE
     )
     return {
-        "items": [_serialize(n, for_recipient=True) for n in items],
+        "items": _serialize_page(items, recipient_id=request.auth_user.id),
         "count": notifications.count(),
         "next": next_cursor,
     }

@@ -120,6 +120,8 @@ test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 
   await page.getByTestId("certificates-issue").click();
   // 되돌릴 수 없다는 경고가 먼저 뜬다 — 확인 전에는 보내지 않는다.
   await expect(page.getByTestId("certificates-confirm")).toContainText("고칠 수 없고");
+  // 낭독기는 확인창에 들어가며 무엇을 하는지(장수·되돌릴 수 없음)를 듣는다(#1477).
+  await expect(page.getByRole("alertdialog", { name: "상장 발급 확인" })).toHaveAccessibleDescription(/1장을 발급합니다.*고칠 수 없고/);
   expect(sent).toBeNull();
   await page.getByTestId("certificates-confirm-issue").click();
 
@@ -170,11 +172,135 @@ test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
   await row.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.locator('[data-testid^="certificates-cancel-confirm-"]')).toContainText("되돌릴 수 없습니다");
+  await expect(page.getByRole("alertdialog", { name: /^\S+ 취소 확인$/ })).toHaveAccessibleDescription(
+    /을\(를\) 취소합니다.*되돌릴 수 없습니다/,
+  );
   await page.locator('[data-testid^="certificates-cancel-go-"]').click();
   await expect(row).toHaveAttribute("data-status", "cancelled");
+  // 취소된 장에서 「취소」 단추가 사라진다 — 초점은 body 가 아니라 「발급한 상장」 머리글로 간다.
+  await expect(page.getByRole("heading", { name: "발급한 상장" })).toBeFocused();
   // 취소된 상장은 묶음에 고를 수 없다.
   await expect(row.getByRole("checkbox")).toBeDisabled();
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeEnabled();
+});
+
+// 확인창의 초점 규약(#1471 ⑥) — 열면 안전한 쪽(돌아가기), Tab 은 창 안에 갇히고, Escape·돌아가기는 닫고
+// 연 자리로 돌아온다. 읽기만 한다(발급·취소를 보내지 않는다).
+test("발급 확인창은 돌아가기에 초점을 두고 Tab 을 가두며 Escape 로 닫으면 발급 단추로 돌아온다", async ({ page }) => {
+  const { id, submissionId } = await openBoardWithoutLoading(page, 0);
+  await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+    const response = await route.fetch();
+    const board = await response.json();
+    board.certificates = board.certificates.filter((c: { submission_id: number }) => c.submission_id !== submissionId);
+    board.recipients = board.recipients.map((r: { submission_id: number }) =>
+      r.submission_id === submissionId ? { ...r, certificate_id: null } : r,
+    );
+    await route.fulfill({ response, json: board });
+  });
+  await page.goto(`/console/contests/${id}/certificates`);
+  await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
+  await page.getByTestId(`certificates-pick-${submissionId}`).check();
+  await page.getByTestId("certificates-issue").focus();
+  await page.keyboard.press("Enter");
+
+  const dialog = page.getByRole("alertdialog");
+  const back = dialog.getByRole("button", { name: "돌아가기" });
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "발급", exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(dialog.getByRole("button", { name: "발급", exact: true })).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByTestId("certificates-issue")).toBeFocused();
+
+  await page.keyboard.press("Enter");
+  await page.getByRole("alertdialog").getByRole("button", { name: "돌아가기" }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page.getByTestId("certificates-issue")).toBeFocused();
+});
+
+test("취소 확인창은 돌아가기에 초점을 두고 Tab 을 가두며 Escape 로 닫으면 취소 단추로 돌아온다", async ({ page }) => {
+  await openBoard(page, 1);
+  const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+  const opener = row.getByRole("button", { name: "취소", exact: true });
+  await opener.focus();
+  await page.keyboard.press("Enter");
+
+  const dialog = page.getByRole("alertdialog");
+  const back = dialog.getByRole("button", { name: "돌아가기" });
+  await expect(back).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(dialog.getByRole("button", { name: "취소하기" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(back).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
+});
+
+// 초점 없이 열어도(낭독기 활성화·초점을 못 받는 터치) 닫으면 초점은 연 단추로 돌아온다 — 제목으로 가지 않는다(#1518 ③).
+for (const how of ["Escape", "돌아가기 단추"] as const) {
+  test(`초점 없이 연 취소 확인창을 ${how}로 닫으면 초점이 취소 단추에 있다`, async ({ page }) => {
+    await openBoard(page, 1);
+    const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+    const opener = row.getByRole("button", { name: "취소", exact: true });
+    await opener.evaluate((el) => (el as HTMLElement).blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await opener.dispatchEvent("click");
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await dialog.getByRole("button", { name: "돌아가기" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+
+  test(`초점 없이 연 발급 확인창을 ${how}로 닫으면 초점이 발급 단추에 있다`, async ({ page }) => {
+    const { id, submissionId } = await openBoardWithoutLoading(page, 0);
+    await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+      const response = await route.fetch();
+      const board = await response.json();
+      board.certificates = board.certificates.filter((c: { submission_id: number }) => c.submission_id !== submissionId);
+      board.recipients = board.recipients.map((r: { submission_id: number }) =>
+        r.submission_id === submissionId ? { ...r, certificate_id: null } : r,
+      );
+      await route.fulfill({ response, json: board });
+    });
+    await page.goto(`/console/contests/${id}/certificates`);
+    await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
+    await page.getByTestId(`certificates-pick-${submissionId}`).check();
+    const opener = page.getByTestId("certificates-issue");
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await opener.dispatchEvent("click");
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await dialog.getByRole("button", { name: "돌아가기" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+  });
+}
+
+// 390px(터치 폭)에서도 같다 — 초점 없이 연 취소창을 Escape 로 닫으면 초점이 취소 단추에 있다(#1518 ③).
+test("390px 에서 초점 없이 연 취소 확인창을 Escape 로 닫으면 초점이 취소 단추에 있다", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openBoard(page, 1);
+  const row = page.locator('[data-testid^="certificates-row-"]', { hasText: "김첫째" });
+  const opener = row.getByRole("button", { name: "취소", exact: true });
+  await opener.evaluate((el) => (el as HTMLElement).blur());
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await opener.dispatchEvent("click");
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
 });
 
 test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기·다시 발급이 꺼진다", async ({ page }) => {
@@ -215,4 +341,27 @@ test("받는 사람이 탈퇴한 상장은 파일 없음으로 보이고 받기�
   await expect(page.getByTestId("certificates-select-9001")).toBeEnabled();
   // 묶음에는 파일 있는 한 장만 센다.
   await expect(page.getByTestId("certificates-bundle")).toHaveText("묶음 받기 (전체 1)");
+});
+
+// 「전체 선택」 — 고른 수와 결과를 낭독기가 듣는다(status). 읽기만 한다.
+test("전체 선택은 고른 수를 status 로 알리고 다시 누르면 풀었다고 알린다", async ({ page }) => {
+  const { id } = await openBoardWithoutLoading(page, 0);
+  await page.route(`**/api/backend/contests/${id}/certificates`, async (route) => {
+    const response = await route.fetch();
+    const board = await response.json();
+    board.certificates = [];
+    board.recipients = board.recipients.map((r: object) => ({ ...r, certificate_id: null }));
+    await route.fulfill({ response, json: board });
+  });
+  await page.goto(`/console/contests/${id}/certificates`);
+  await expect(page.getByTestId("certificates-contest-title")).toBeVisible();
+  const total = await page.locator('[data-testid^="certificates-recipient-"]').count();
+  expect(total).toBeGreaterThan(0);
+  await expect(page.getByTestId("certificates-picked-count")).toHaveAttribute("role", "status");
+  await page.getByTestId("certificates-pick-all").check();
+  await expect(page.getByTestId("certificates-pick-result")).toHaveText(`${total}명을 모두 선택했습니다.`);
+  await expect(page.getByRole("status").filter({ hasText: `${total}/${total} 선택` })).toHaveCount(1);
+  await page.getByTestId("certificates-pick-all").uncheck();
+  await expect(page.getByTestId("certificates-pick-result")).toHaveText("선택을 모두 풀었습니다.");
+  await expect(page.getByRole("status").filter({ hasText: `0/${total} 선택` })).toHaveCount(1);
 });

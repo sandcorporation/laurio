@@ -45,6 +45,11 @@ export function submissionStats(
   return { passed: passedMembers.size, participants, attempts: rows.length, scoring, waiting };
 }
 
+/** 통과·완벽 「n/N」의 색 — n 이 0 이면 좋은 소식이 아니라 색을 켜지 않는다(#1400). */
+export function countTone(count: number, tone: string): string | undefined {
+  return count > 0 ? tone : undefined;
+}
+
 /** 참여자마다 가장 높은 시도 번호 한 줄 — 가장 최근에 낸 사람이 위. */
 export function latestPerMember(rows: InstructorSubmissionRow[]): InstructorSubmissionRow[] {
   const latest = new Map<number, InstructorSubmissionRow>();
@@ -56,6 +61,9 @@ export function latestPerMember(rows: InstructorSubmissionRow[]): InstructorSubm
   }
   return [...latest.values()].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 }
+
+/** 문법 검사 기본 항목의 문구(CONTEXT.md 「문법 검사」) — 미충족 이름도 이 문구 그대로다. */
+const SYNTAX_CHECK_LABEL = "소스에 문법 오류가 없다";
 
 export type RequiredSummary = {
   /** 충족한 필수 항목 수 — 채점 전이면 null. */
@@ -92,8 +100,8 @@ export function requiredSummary(
   if (syntaxCheckEnabled) {
     const syntax = row.score.syntax_check;
     syntaxMet = syntax ? syntax.is_met : false;
-    if (!syntax) unmet.push("문법 검사");
-    else if (!syntax.is_met) unmet.push("문법 오류");
+    // 제출 화면 체크리스트는 문법 줄이 맨 위다 — 미충족 목록도 같은 순서로 문법 항목을 앞에 둔다(#1422).
+    if (!syntaxMet) unmet.unshift(SYNTAX_CHECK_LABEL);
   }
   return { met: total - unmet.length, total, unmet, syntaxMet };
 }

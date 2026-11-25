@@ -22,7 +22,7 @@
 // 주지 않는다 — 다시 불러오면 "새 알림" 표시가 그 사이 사라진다. 그래서
 // 페이지를 쌓는 로직은 같은 커서 계약으로 손으로 유지한다.
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
@@ -51,6 +51,10 @@ export default function NotificationsPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
+  // 강의실 알림 목록과 같은 규약(#1476) — 단추가 사라지므로 초점은 제목으로, 결과는 늘 있는 status 영역이 읽는다.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const markAllRef = useRef<HTMLButtonElement>(null);
+  const [announcement, setAnnouncement] = useState("");
 
   // 헤더 배지와 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
   // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로 보이면, 1페이지를
@@ -116,8 +120,13 @@ export default function NotificationsPage() {
       const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
       applyRead(new Map(unreadIds.map((id) => [id, now])));
       broadcastNotificationsRead();
+      setAnnouncement("알림을 모두 읽음으로 표시했습니다");
+      headingRef.current?.focus();
+    } else {
+      setAnnouncement("모두 읽음으로 표시하지 못했습니다. 다시 시도해 주세요");
     }
     setMarkingAll(false);
+    if (!res.ok) markAllRef.current?.focus();
   }
 
   async function loadMore() {
@@ -157,9 +166,11 @@ export default function NotificationsPage() {
       <PageHeader
         title="알림"
         titleTestId="notifications-heading"
+        titleRef={headingRef}
         actions={
           unreadCount > 0 && (
             <button
+              ref={markAllRef}
               type="button"
               onClick={markAllRead}
               disabled={markingAll}
@@ -171,6 +182,10 @@ export default function NotificationsPage() {
           )
         }
       />
+
+      <p role="status" data-testid="notifications-status" className="sr-only">
+        {announcement}
+      </p>
 
       {load.status === "error" ? (
         <ErrorNote>
@@ -198,7 +213,7 @@ export default function NotificationsPage() {
             <button
               type="button"
               onClick={loadMore}
-              disabled={loadingMore}
+              aria-disabled={loadingMore || undefined}
               data-testid="notifications-load-more"
               className={`mt-4 ${buttonClass("secondary")}`}
             >

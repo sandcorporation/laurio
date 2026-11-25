@@ -56,6 +56,7 @@ from . import pending_scoring
 from .api import _active_member_ids, _cell_status, _pending_reason, _problem_pass_stats
 from .contest_entries import entry_marks
 from .current_score import current_score, current_score_prefetch
+from .departures import is_left, left_member_ids
 from .instructor_scope import class_scope, problem_scope
 from .instructors import classes_taught_by, is_instructor
 from .mcp_read_tools import CONTEST_ENTRY_CELL_SCHEMA, LATE_STATUS_SCHEMA
@@ -178,7 +179,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
 
     problem_rows = []
     for problem in problems:
-        passed_count, member_count = _problem_pass_stats(problem, active_member_ids)
+        passed_count, member_count, pass_rate = _problem_pass_stats(problem, active_member_ids)
         problem_rows.append(
             {
                 "id": problem.id,
@@ -191,11 +192,12 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                 ],
                 "passed_count": passed_count,
                 "member_count": member_count,
-                "pass_rate": (passed_count / member_count) if member_count else None,
+                "pass_rate": pass_rate,
             }
         )
 
     participant_rows = []
+    left_ids = left_member_ids(members)
     for member in members:
         cells = []
         for problem in problems:
@@ -227,6 +229,7 @@ def _get_participant_report(grant: ConnectedApp, arguments: dict) -> dict:
                 "display_name": member.display_name,
                 "is_instructor": is_instructor(class_obj, member.user_id),
                 "expelled": member.expelled_at is not None,
+                "left": member.id in left_ids,
                 "problems": cells,
             }
         )
@@ -353,6 +356,7 @@ def _open_submission_source(grant: ConnectedApp, arguments: dict) -> dict:
             "id": submission.member.id,
             "display_name": submission.member.display_name,
             "expelled": submission.member.expelled_at is not None,
+            "left": is_left(submission.member),
             "is_instructor": is_instructor(scope.class_obj, submission.member.user_id),
         },
         "attempt_number": submission.attempt_number,
@@ -457,7 +461,7 @@ _REPORT_OUTPUT = {
                     },
                     "passed_count": {**_COUNT, "description": "한 번이라도 통과한 참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
                     "member_count": {**_COUNT, "description": "참여자 수(강사(소유자·공동 강사)·내보낸 참여자 제외)"},
-                    "pass_rate": {"type": ["number", "null"], "description": "달성률. 참여자가 없으면 null"},
+                    "pass_rate": {"type": ["number", "null"], "description": "달성률. 참여자나 채점된 시도가 없으면 null"},
                 },
                 "required": ["id", "title", "status", "checklist_items", "passed_count", "member_count"],
             },
@@ -470,7 +474,8 @@ _REPORT_OUTPUT = {
                     "id": {"type": "integer", "description": "참여자 번호"},
                     "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
                     "is_instructor": {"type": "boolean", "description": "강사(소유자·공동 강사)가 참여자로도 들어온 자리인가 — 집계에서 빠진다"},
-                    "expelled": {"type": "boolean", "description": "내보낸 참여자인가 — 기록은 남는다"},
+                    "expelled": {"type": "boolean", "description": "내보냈거나 스스로 나간 참여자인가 — 기록은 남는다"},
+                    "left": {"type": "boolean", "description": "expelled 가 참인 까닭이 스스로 나간 것인가(공동 강사였다가 떠남·탈퇴)"},
                     "problems": {
                         "type": "array",
                         "items": {
@@ -520,7 +525,7 @@ _REPORT_OUTPUT = {
                         },
                     },
                 },
-                "required": ["id", "display_name", "is_instructor", "expelled", "problems"],
+                "required": ["id", "display_name", "is_instructor", "expelled", "left", "problems"],
             },
         },
     },
@@ -540,9 +545,10 @@ _SOURCE_OUTPUT = {
                 "id": {"type": "integer"},
                 "display_name": {"type": "string", "description": "이 클래스에서 불릴 이름"},
                 "expelled": {"type": "boolean"},
+                "left": {"type": "boolean"},
                 "is_instructor": {"type": "boolean"},
             },
-            "required": ["id", "display_name", "expelled", "is_instructor"],
+            "required": ["id", "display_name", "expelled", "left", "is_instructor"],
         },
         "attempt_number": {"type": "integer"},
         "submitted_at": _DATETIME,

@@ -15,9 +15,10 @@
 import { knownOr } from "@/lib/util/known-or";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import {
   Badge,
   Card,
@@ -37,6 +38,7 @@ import { renameMyself, type ProblemListItem } from "@/lib/submissions/api";
 import { Stamp } from "@/app/components/Stamp";
 import { STAMP_LABEL, stampKind } from "@/lib/design/stamp";
 import { useMyProblems } from "@/lib/submissions/use-my-problems";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 const UNKNOWN_BADGE = { label: "확인 중", tone: "neutral" } as const;
 
@@ -46,8 +48,8 @@ const STATUS_BADGE: Record<
 > = {
   passed: { label: "통과", tone: "verified" },
   attempted_not_passed: { label: "미통과", tone: "error" },
-  scoring: { label: "채점 중", tone: "neutral" },
-  needs_setup: { label: "채점 대기", tone: "warning" },
+  scoring: { label: SCORING_LABEL, tone: "neutral" },
+  needs_setup: { label: WAITING_LABEL, tone: "warning" },
   not_submitted: { label: "미제출", tone: "neutral" },
 };
 
@@ -56,9 +58,11 @@ const STATUS_BADGE: Record<
 function ProblemListRow({
   classId,
   problem,
+  archived,
 }: {
   classId: number;
   problem: ProblemListItem;
+  archived: boolean;
 }) {
   const badge = knownOr(STATUS_BADGE, problem.status, UNKNOWN_BADGE);
   return (
@@ -66,13 +70,13 @@ function ProblemListRow({
       <Link
         href={`/classes/${classId}/problems/${problem.id}/submit`}
         data-testid={`my-problem-row-${problem.id}-link`}
-        className="flex items-center gap-3.5 px-4 py-2.5 hover:bg-ink/[0.03]"
+        className="flex flex-wrap items-center gap-x-3.5 gap-y-1 px-4 py-2.5 hover:bg-ink/[0.03]"
       >
         <span className="min-w-0 flex-1 truncate text-[14px]">
           {problem.title}
         </span>
         {/* 고정 폭 세 칸(#770) — 기한(권장 100px · 마감 150px), 시도·마지막, 상태 배지. 한 줄 높이. */}
-        <DueCells problem={problem} passed={problem.status === "passed"} testId={`my-problem-row-${problem.id}`} />
+        <DueCells problem={problem} passed={problem.status === "passed"} testId={`my-problem-row-${problem.id}`} archived={archived} />
         <span className="w-[170px] shrink-0 text-right text-[12px] whitespace-nowrap text-ink/45 max-sm:hidden">
           {problem.attempt_count > 0 ? (
             <span data-testid={`my-problem-row-${problem.id}-attempts`}>
@@ -82,14 +86,14 @@ function ProblemListRow({
         </span>
         <span
           data-testid={`my-problem-row-${problem.id}-status`}
-          className="w-[96px] shrink-0 text-right"
+          className="flex min-w-[96px] max-w-[132px] shrink-0 justify-end text-right max-sm:max-w-[45%]"
         >
           {problem.status === "passed" ? (
-            <Stamp kind={stampKind(true, problem.perfect)!} size="sm">
+            <Stamp kind={stampKind(true, problem.perfect)!} size="sm" wrap>
               {withLate(STAMP_LABEL[stampKind(true, problem.perfect)!], problem.late)}
             </Stamp>
           ) : (
-            <Badge tone={badge.tone}>{withLate(badge.label, problem.late)}</Badge>
+            <Badge tone={badge.tone} wrap>{withLate(badge.label, problem.late)}</Badge>
           )}
         </span>
       </Link>
@@ -102,9 +106,11 @@ function ProblemListRow({
 function HiddenProblemsSection({
   classId,
   hiddenProblems,
+  archived,
 }: {
   classId: number;
   hiddenProblems: ProblemListItem[];
+  archived: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -133,6 +139,7 @@ function HiddenProblemsSection({
                 key={problem.id}
                 classId={classId}
                 problem={problem}
+                archived={archived}
               />
             ))}
           </ul>
@@ -153,7 +160,7 @@ function ProgressLine({ problems }: { problems: ProblemListItem[] }) {
   ).length;
   const rest = [
     scoring > 0 ? `채점 중 ${scoring}` : null,
-    waiting > 0 ? `채점 대기 ${waiting}` : null,
+    waiting > 0 ? `${WAITING_LABEL} ${waiting}` : null,
     notSubmitted > 0 ? `미제출 ${notSubmitted}` : null,
   ].filter((part): part is string => part !== null);
   return (
@@ -207,6 +214,17 @@ function MyDisplayName({
   const [nameInput, setNameInput] = useState(displayName);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 저장·취소로 폼이 닫히면 사라진 단추 대신 「바꾸기」가 초점을 받는다(#1447 1-1). 저장 성공은 늘 있는 상태 영역으로 알린다.
+  const editRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (!editing && restoreFocus.current) {
+      restoreFocus.current = false;
+      editRef.current?.focus();
+    }
+  }, [editing]);
 
   // 다시 불러온 이름(저장 직후 `onRenamed`가 부른 새로고침, 또는 다른 탭에서
   // 바꾼 값)으로 입력칸 초기값을 맞춘다 — 편집 중이 아닐 때만이다, 타이핑
@@ -230,6 +248,8 @@ function MyDisplayName({
     setError(null);
     const result = await renameMyself(classId, trimmedName);
     if (result.ok) {
+      restoreFocus.current = true;
+      setNotice("이름을 바꿨습니다.");
       setEditing(false);
       onRenamed();
     } else {
@@ -241,6 +261,7 @@ function MyDisplayName({
   function cancel() {
     setNameInput(displayName);
     setError(null);
+    restoreFocus.current = true;
     setEditing(false);
   }
 
@@ -265,7 +286,7 @@ function MyDisplayName({
           <button
             type="submit"
             data-testid="my-display-name-submit"
-            disabled={saving || nameInput.trim() === ""}
+            aria-disabled={(saving || nameInput.trim() === "") || undefined}
             className={buttonClass("primary", "sm")}
           >
             {saving ? "저장하는 중..." : "저장"}
@@ -274,7 +295,7 @@ function MyDisplayName({
             type="button"
             data-testid="my-display-name-cancel"
             onClick={cancel}
-            disabled={saving}
+            aria-disabled={saving || undefined}
             className={buttonClass("secondary", "sm")}
           >
             취소
@@ -291,8 +312,12 @@ function MyDisplayName({
               <span aria-hidden="true"> · </span>
               <button
                 type="button"
+                ref={editRef}
                 data-testid="my-display-name-edit"
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  setNotice("");
+                  setEditing(true);
+                }}
                 className="text-ink/60 underline underline-offset-2 hover:text-ink"
               >
                 바꾸기
@@ -301,6 +326,9 @@ function MyDisplayName({
           ) : null}
         </p>
       )}
+      <span role="status" data-testid="my-display-name-status" className="sr-only">
+        {notice}
+      </span>
       {error ? (
         <span
           data-testid="my-display-name-error"
@@ -317,6 +345,13 @@ export default function MyProblemsPage() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
   const { state, reload } = useMyProblems(classId);
+
+  // 가입 뒤 이동처럼 초점이 갈 곳 없이 body 에 있을 때만 제목이 받는다(#1441 9번) — 이미 다른 곳에 있던 초점은 빼앗지 않는다.
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const ready = state.status === "ready";
+  useEffect(() => {
+    if (ready && document.activeElement === document.body) titleRef.current?.focus();
+  }, [ready]);
 
   useClassroomTabTitle({
     screenName: "문제 목록",
@@ -339,12 +374,7 @@ export default function MyProblemsPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <h1
-          data-testid="my-problems-not-found"
-          className="text-[22px] font-semibold"
-        >
-          클래스를 찾을 수 없습니다
-        </h1>
+        <AccessNotice page="mine" classId={classId} testId="my-problems-not-found" />
       </PageShell>
     );
   }
@@ -380,6 +410,7 @@ export default function MyProblemsPage() {
             : className
         }
         title="문제"
+        titleRef={titleRef}
         actions={
           // 내보내진 참여자·보관된 클래스는 이름만 보이고 「바꾸기」가 없다(#372 AC) —
           // 어차피 서버가 403으로 거절할 요청을 화면에서 미리 막는다.
@@ -393,6 +424,11 @@ export default function MyProblemsPage() {
       />
 
       <div className="flex flex-col gap-5">
+        {archived ? (
+          <p data-testid="my-problems-archived-note" className="text-[13px] font-medium text-ink/75">
+            보관됨 · 읽기 전용
+          </p>
+        ) : null}
         {problems.length > 0 ? <ProgressLine problems={problems} /> : null}
 
         {problems.length === 0 ? (
@@ -411,6 +447,7 @@ export default function MyProblemsPage() {
                   key={problem.id}
                   classId={classId}
                   problem={problem}
+                  archived={archived}
                 />
               ))}
             </ul>
@@ -420,6 +457,7 @@ export default function MyProblemsPage() {
         <HiddenProblemsSection
           classId={classId}
           hiddenProblems={hiddenProblems}
+          archived={archived}
         />
       </div>
     </PageShell>

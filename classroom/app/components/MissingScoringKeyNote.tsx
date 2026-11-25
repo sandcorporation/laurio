@@ -12,8 +12,9 @@ export function MissingScoringKeyNote({
   message,
   noteTestId,
   settingsLinkTestId,
-  actionLabel = "클래스 설정에서 넣기",
+  actionLabel,
   settingsAnchor = "scoring-key",
+  href,
 }: {
   classId: number;
   message: string;
@@ -21,13 +22,15 @@ export function MissingScoringKeyNote({
    *  붙인 것이 서로 다르다) 접두어 조립 대신 둘 다 호출부가 그대로 준다. */
   noteTestId: string;
   settingsLinkTestId: string;
-  /** 키가 아예 없을 때는 "넣기"가 맞지만, 있는데 거부됐을 때는 "바꾸기"다
-   *  (#355) — 기본값은 예전 문구 그대로다. `null`이면 링크를 그리지 않는다 —
-   *  키를 바꿀 수 없는 공동 강사(#561)에게 갈 곳 없는 버튼을 보이지 않으려고. */
-  actionLabel?: string | null;
+  /** 단추는 `message` 의 동사를 쓴다 — 키 문제의 두 값은 `scoringBlockNote`(#1397)가
+   *  원인별로 함께 낸다. `null`이면 링크를 그리지 않는다 —
+   *  채점 키를 바꿀 수 없는 공동 강사(#561)에게 갈 곳 없는 버튼을 보이지 않으려고. */
+  actionLabel: string | null;
   /** 클래스 설정 화면의 어느 카드로 스크롤할지(`id` 속성) — 채점 키 문제는
    *  "scoring-key"(기본값), 채점 모델 거부(#403)는 "scoring-model"이다. */
   settingsAnchor?: string;
+  /** 클래스 설정이 아닌 곳으로 보낼 때(공동 강사의 채점 모델 변경은 문제 편집, #1425). */
+  href?: string | null;
 }) {
   return (
     <Note tone="warning">
@@ -37,7 +40,7 @@ export function MissingScoringKeyNote({
         </span>
         {actionLabel !== null ? (
           <Link
-            href={`/classes/${classId}/settings#${settingsAnchor}`}
+            href={href ?? `/classes/${classId}/settings#${settingsAnchor}`}
             data-testid={settingsLinkTestId}
             className={buttonClass("secondary", "sm")}
           >

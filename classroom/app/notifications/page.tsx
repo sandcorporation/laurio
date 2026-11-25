@@ -26,12 +26,12 @@
 // 읽음」이 서버를 다시 불러오지 않고 로컬에서 `read_at`만 바꾸는 자리
 // (`applyRead`)가 그 훅에는 없다.
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Card, EmptyState, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
+import { useSessionRecheck } from "@/lib/auth/use-session-recheck";
 import { NOTIFICATION_CHANGED, type StreamEvent } from "@/lib/events/types";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
-import { useTeacherClassGate } from "@/lib/classes/use-teacher-class-gate";
 import {
   fetchMyNotifications,
   markAllRead,
@@ -39,9 +39,13 @@ import {
   markOneRead,
   type NotificationRow,
 } from "@/lib/notifications/api";
-import { describeNotification, formatDateTime } from "@/lib/notifications/format";
 import {
-  groupCurrentlyPassed,
+  EMPTY_NOTIFICATIONS_TEXT,
+  describeNotification,
+  formatDateTime,
+} from "@/lib/notifications/format";
+import {
+  groupHeaderText,
   groupHref,
   groupNotifications,
   groupUnreadCount,
@@ -50,9 +54,10 @@ import {
   type NotificationGroup,
 } from "@/lib/notifications/group";
 import { notificationHref } from "@/lib/notifications/link";
-import { mergeFirstPage } from "@/lib/notifications/merge";
+import { loadNextPage, mergePage, type UpdateList } from "@/lib/notifications/merge";
 import { broadcastNotificationsRead } from "@/lib/notifications/read-bus";
 import { useUnreadCount } from "@/lib/notifications/use-unread-count";
+import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 
 function isNotificationChanged(event: StreamEvent): boolean {
   return event.kind === NOTIFICATION_CHANGED;
@@ -67,13 +72,19 @@ export default function NotificationsPage() {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
   const [loadingMore, setLoadingMore] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
+  // 「모두 읽음」을 누르면 그 단추가 사라진다 — 초점이 BODY 로 떨어지지 않게 제목으로 옮기고(#1476),
+  // 결과는 늘 있는 status 영역이 읽는다(영역이 눌린 뒤에 생기면 낭독기가 놓친다).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const markAllRef = useRef<HTMLButtonElement>(null);
+  const [announcement, setAnnouncement] = useState("");
   // 강사인 클래스가 있는가 — 채점 연결 알림(키 거부·크레딧 소진)은 강사에게만 오므로 빈
   // 상태 문구가 그것을 언급할지 여기 판정으로 가른다(#343).
-  const teacherGate = useTeacherClassGate();
   // 헤더 종과 같은 조회다(#466 AC "배지 수와 목록이 같은 사실을 가리킨다") —
   // 「모두 읽음」 버튼을 지금 로드된 페이지의 안 읽은 줄 수로만 보이면, 1페이지를
   // 전부 읽어도 2페이지 너머에 안 읽은 알림이 남아 있을 때 버튼이 먼저 사라진다.
   const unreadCountState = useUnreadCount();
+  useSessionRecheck();
+  useClassroomTabTitle({ screenName: "알림" });
 
   useEffect(() => {
     let cancelled = false;
@@ -92,18 +103,20 @@ export default function NotificationsPage() {
     };
   }, []);
 
-  // 실시간 신호(#1346) — 첫 쪽만 다시 불러와 지금 목록에 합친다(`mergeFirstPage`).
+  const updateList = useCallback<UpdateList>((change) => {
+    setLoad((current) =>
+      current.status === "ready" ? { ...current, ...change(current) } : current,
+    );
+  }, []);
+
+  // 실시간 신호(#1346) — 첫 쪽만 다시 불러와 지금 목록에 합친다(`mergePage`).
   // 아래 줄·다음 쪽 커서·스크롤은 그대로고, 실패해도 화면을 건드리지 않는다.
   const refreshFirstPage = useCallback(() => {
     fetchMyNotifications().then((result) => {
       if (!result.ok) return;
-      setLoad((current) =>
-        current.status === "ready"
-          ? { ...current, items: mergeFirstPage(current.items, result.data.items) }
-          : current,
-      );
+      updateList((current) => ({ ...current, items: mergePage(current.items, result.data.items) }));
     });
-  }, []);
+  }, [updateList]);
 
   useRealtimeRefresh({
     matches: isNotificationChanged,
@@ -115,14 +128,14 @@ export default function NotificationsPage() {
   async function loadMore() {
     if (load.status !== "ready" || load.nextCursor === null) return;
     setLoadingMore(true);
-    const result = await fetchMyNotifications(load.nextCursor);
-    if (result.ok) {
-      setLoad({
-        status: "ready",
-        items: [...load.items, ...result.data.items],
-        nextCursor: result.data.next,
-      });
-    }
+    await loadNextPage(
+      load.nextCursor,
+      async (after) => {
+        const result = await fetchMyNotifications(after);
+        return result.ok ? result.data : null;
+      },
+      updateList,
+    );
     setLoadingMore(false);
   }
 
@@ -166,8 +179,13 @@ export default function NotificationsPage() {
       const unreadIds = load.items.filter((n) => n.read_at === null).map((n) => n.id);
       applyRead(unreadIds, now);
       broadcastNotificationsRead();
+      setAnnouncement("알림을 모두 읽음으로 표시했습니다");
+      headingRef.current?.focus();
+    } else {
+      setAnnouncement("모두 읽음으로 표시하지 못했습니다. 다시 시도해 주세요");
     }
     setMarkingAll(false);
+    if (!result.ok) markAllRef.current?.focus();
   }
 
   if (load.status === "loading") {
@@ -185,9 +203,10 @@ export default function NotificationsPage() {
   return (
     <PageShell>
       <div className="flex items-center justify-between gap-3">
-        <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" />
+        <PageHeader eyebrow="클래스" title="알림" titleTestId="notifications-heading" titleRef={headingRef} />
         {unreadCount > 0 && (
           <button
+            ref={markAllRef}
             type="button"
             onClick={handleMarkAllRead}
             disabled={markingAll}
@@ -199,29 +218,20 @@ export default function NotificationsPage() {
         )}
       </div>
 
+      <p role="status" data-testid="notifications-status" className="sr-only">
+        {announcement}
+      </p>
+
       {load.status === "error" ? (
         <ErrorNote>
           <span data-testid="notifications-load-error">알림을 불러오지 못했습니다.</span>
         </ErrorNote>
       ) : load.items.length === 0 ? (
-        // 강사인 클래스 판정이 끝나기 전에는 어느 쪽 문구로도 단정하지
-        // 않는다(#343, #332와 같은 규칙) — 판정이 늦게 끝나 문구가 바뀌는
-        // 깜빡임을 막는다.
-        teacherGate.pending ? (
-          <p data-testid="notifications-empty-pending" className="text-[13.5px] text-ink/45">
-            불러오는 중...
-          </p>
-        ) : (
-          <Card>
-            <EmptyState>
-              <span data-testid="notifications-empty">
-                {teacherGate.hasTaughtClasses
-                  ? "아직 알림이 없습니다 — 제출이 채점되거나 채점 연결에 문제가 생기면 여기 나타납니다."
-                  : "아직 알림이 없습니다 — 제출이 채점되면 여기 나타납니다."}
-              </span>
-            </EmptyState>
-          </Card>
-        )
+        <Card>
+          <EmptyState>
+            <span data-testid="notifications-empty">{EMPTY_NOTIFICATIONS_TEXT}</span>
+          </EmptyState>
+        </Card>
       ) : (
         <ul
           data-testid="notifications-list"
@@ -242,7 +252,7 @@ export default function NotificationsPage() {
         <button
           type="button"
           onClick={loadMore}
-          disabled={loadingMore}
+          aria-disabled={loadingMore || undefined}
           data-testid="notifications-load-more"
           className={`mt-4 self-start ${buttonClass("secondary")}`}
         >
@@ -261,12 +271,13 @@ type MarkHandlers = {
 // 링크 없는 안 읽은 줄에 다는 작은 「읽음」 버튼 — 묶음 머리글과 개별 시도 줄
 // 둘 다 같은 모양을 쓴다(#345 리뷰: 마크업이 갈라지면 스타일 수정이 한쪽만
 // 반영되기 쉽다는 지적).
-function MarkReadButton({ onClick, testId }: { onClick: () => void; testId: string }) {
+function MarkReadButton({ onClick, testId, target }: { onClick: () => void; testId: string; target: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={testId}
+      aria-label={`읽음 ${target}`}
       className="border border-rule px-2 py-0.5 text-[11.5px] text-ink hover:border-ink"
     >
       읽음
@@ -288,13 +299,10 @@ function NotificationGroupRow({
   }
 
   const latest = group.notifications[0];
-  const currentlyPassed = groupCurrentlyPassed(group);
   const unreadCount = groupUnreadCount(group);
   const testKey = group.problemId ?? group.key;
   const href = groupHref(group);
-  const headerText = `'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제 — 지금 상태 ${
-    currentlyPassed ? "통과" : "미통과"
-  } (시도 ${group.notifications.length}건)`;
+  const headerText = groupHeaderText(group);
   const headerBody = (
     <>
       <p className="text-[13.5px] leading-relaxed">{headerText}</p>
@@ -332,7 +340,7 @@ function NotificationGroupRow({
                 안 읽음 {unreadCount}
               </span>
               {!href && markGroupRead && (
-                <MarkReadButton onClick={markGroupRead} testId={`notification-group-mark-read-${testKey}`} />
+                <MarkReadButton onClick={markGroupRead} testId={`notification-group-mark-read-${testKey}`} target={headerText} />
               )}
             </>
           )}
@@ -385,6 +393,7 @@ function NotificationListRow({
               <MarkReadButton
                 onClick={() => onMarkOneRead(notification.id)}
                 testId={`notification-mark-read-${notification.id}`}
+                target={describeNotification(notification)}
               />
             )}
           </div>
