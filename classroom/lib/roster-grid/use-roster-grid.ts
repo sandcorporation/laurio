@@ -44,11 +44,11 @@ export function useRosterGrid(classId: number) {
   }, [refetch]);
 
   // 내보내기(#634) — 합친 참여자 탭의 ⋮ 메뉴가 부른다. 성공하면 격자를 다시 읽는다.
-  const [expelError, setExpelError] = useState(false);
+  const [expelError, setExpelError] = useState<string | null>(null);
   const expel = useCallback(
     async (memberId: number) => {
       const result = await expelMember(classId, memberId);
-      setExpelError(!result.ok);
+      setExpelError(result.ok ? null : result.detail || "내보내지 못했습니다. 다시 시도해주세요.");
       if (result.ok) reload();
       return result.ok;
     },
