@@ -137,6 +137,7 @@ export default function ProblemSubmitPage() {
     max_source_asset_bytes: maxSourceAssetBytes,
     instructor_problem_status: instructorProblemStatus,
     viewing_as_instructor: viewingAsInstructor,
+    viewer_role: viewerRole,
   } = state.data;
   // 강사가 보는 중이라고 해서 못 내는 것은 아니다(2026-09-17) — 열린 문제면
   // 백엔드가 `submit_blocked_reason`을 비워 내려주고, 그때는 참여자와 같은
@@ -249,6 +250,7 @@ export default function ProblemSubmitPage() {
         zipGitHistoryWarning={problem.zip_git_history_warning !== null}
         submissions={submissions}
         viewingAsInstructor={viewingAsInstructor}
+        viewerRole={viewerRole}
         instructorProblemStatus={instructorProblemStatus}
         submitBlockedReason={submitBlockedReason}
         maxSourceAssetBytes={maxSourceAssetBytes}
