@@ -52,6 +52,7 @@ import { VERDICT_LABEL, type VerdictValue, verdictFromMet, verdictOf } from "@/l
 import type { GradingStrictness, SubmissionFormat } from "@/lib/problems/api";
 import { gradingStrictnessLabel } from "@/lib/problems/grading-guideline";
 import { rejectionText, unseenFilesText } from "@/lib/submissions/rejection";
+import { SCORING_LABEL, WAITING_LABEL } from "@/lib/submissions/status-names";
 
 export type ParticipantChecklistItem = {
   id: number;
@@ -789,8 +790,8 @@ function AttemptRow({
                 submission.pending_reason === "rejected"
                   ? "반려"
                   : submission.pending_reason
-                    ? "채점 대기"
-                    : "채점 중",
+                    ? WAITING_LABEL
+                    : SCORING_LABEL,
                 submission.late,
               )}
             </Badge>

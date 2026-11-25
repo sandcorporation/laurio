@@ -121,3 +121,12 @@ test("390px 폭에서 설명 편집기가 페이지에 가로 스크롤을 만�
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
 });
+
+test("주소의 #scoring-model 로 열면 채점 모델 칸이 화면 안으로 스크롤된다(#1429)", async ({ page }) => {
+  const { classId, problemId } = await seedProblem(page, `edit-hash-${test.info().workerIndex}-${Date.now()}`, ["통과 조건"]);
+  await page.goto(`/classes/${classId}/problems/${problemId}#scoring-model`);
+
+  const card = page.locator("#scoring-model");
+  await expect(card).toBeVisible();
+  await expect(card).toBeInViewport();
+});

@@ -3,6 +3,7 @@
 // 문제 편집 (#282/#283/#285, 시안 v2 #637). 1200px 틀 안의 두 열 — 왼쪽은 제목·설명·체크리스트,
 // 오른쪽 300px 은 상태·제출 형식·채점 모델·채점 지침과 끝의 글자 링크 셋(복사·템플릿 공개·삭제).
 // 머리에 「저장」이 있고(제목·설명·제출 형식·채점 모델·채점 지침을 저장), 체크리스트는 항목마다 바로 저장된다.
+import { useScrollToHash } from "@/lib/util/use-scroll-to-hash";
 import { MarkdownView } from "@codemit/markdown";
 import Link from "next/link";
 
@@ -94,6 +95,7 @@ export default function EditProblemPage() {
   const router = useRouter();
 
   const { state, reload } = useProblem(classId, problemId);
+  useScrollToHash(state.status === "ready");
   const { state: modelsState } = useScoringModels(classId);
   const costState = useScoringCost(classId, problemId);
 

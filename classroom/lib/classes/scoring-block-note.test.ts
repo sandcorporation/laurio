@@ -167,20 +167,29 @@ describe("scoringBlockNote — 공동 강사(#1421)", () => {
 describe("modelRejectedNote — 키 사유는 소유자 몫, 모델 사유는 공동 강사도 바꾼다(#1425)", () => {
   const message = "이 키로 쓸 수 없는 채점 모델입니다 — 채점 모델을 바꿔주세요.";
 
-  it("소유자 — 클래스 설정의 모델 카드로", () => {
-    expect(modelRejectedNote("owner", 7, 3)).toEqual({
+  const action = "채점 모델 바꾸기";
+
+  it("소유자 + 문제 모델 없음 — 클래스 기본 모델(그 문제의 거부도 풀린다)", () => {
+    expect(modelRejectedNote("owner", 7, 3, "")).toEqual({ message, actionLabel: action, href: "/classes/7/settings#scoring-model" });
+    expect(modelRejectedNote("owner", 7, 3)).toMatchObject({ href: "/classes/7/settings#scoring-model" });
+  });
+
+  it("소유자 + 문제 모델 있음 — 문제 편집의 채점 모델 칸(클래스 기본값을 바꿔도 안 풀린다)", () => {
+    expect(modelRejectedNote("owner", 7, 3, "gpt-5-retired")).toEqual({
       message,
-      actionLabel: "채점 모델 바꾸기",
-      href: "/classes/7/settings#scoring-model",
+      actionLabel: action,
+      href: "/classes/7/problems/3#scoring-model",
     });
   });
 
-  it("공동 강사 — 같은 문구, 단추는 문제 편집으로(소유자에게 부탁하지 않는다)", () => {
-    expect(modelRejectedNote("co_instructor", 7, 3)).toEqual({
-      message,
-      actionLabel: "채점 모델 바꾸기",
-      href: "/classes/7/problems/3",
-    });
+  it("공동 강사 — 문제 모델이 있든 없든 문제 편집의 채점 모델 칸", () => {
+    for (const m of ["", "gpt-5-retired"]) {
+      expect(modelRejectedNote("co_instructor", 7, 3, m)).toEqual({
+        message,
+        actionLabel: action,
+        href: "/classes/7/problems/3#scoring-model",
+      });
+    }
   });
 
   it("역할을 모르면 문구만 — 갈 곳이 열릴지 모른다", () => {

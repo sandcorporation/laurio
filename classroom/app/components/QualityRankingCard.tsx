@@ -117,16 +117,19 @@ function QualityRow({
 export function QualityRankingCard({
   classId,
   problemId,
+  problemModel,
   classroom,
 }: {
   classId: number;
   problemId: number;
+  /** 이 문제 자신의 채점 모델. 비어 있으면 클래스 기본값을 따른다. */
+  problemModel?: string;
   /** 연결 때문에 막혔을 때 원인을 말하고, 키 링크를 소유자에게만 보인다. 못 읽었으면 null. */
   classroom: ClassRow | null;
 }) {
   const { state, reload } = useProblemQuality(classId, problemId);
   const keyNote = scoringBlockNote(classroom, "quality");
-  const modelNote = modelRejectedNote(classroom?.role, classId, problemId);
+  const modelNote = modelRejectedNote(classroom?.role, classId, problemId, problemModel);
   const [confirm, setConfirm] = useState<Confirm>({ step: "idle" });
   const [openIds, setOpenIds] = useState<ReadonlySet<number>>(new Set());
   const [publicSaving, setPublicSaving] = useState(false);
