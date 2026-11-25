@@ -15,7 +15,7 @@
 import { MyQualityCard } from "@/app/components/MyQualityCard";
 import type { MyQuality } from "@/lib/quality/api";
 import Link from "next/link";
-import { createElement, useEffect, useState } from "react";
+import { createElement, useEffect, useRef, useState } from "react";
 import type { ChangeEvent, FormEvent, MouseEvent, ReactNode } from "react";
 
 import { checkGithubRepositoryUrl, commitUrl, shortSha } from "@codemit/bff-client/repository-url";
