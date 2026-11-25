@@ -31,6 +31,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 from contextvars import ContextVar
 import uuid
 from datetime import timedelta
@@ -52,6 +53,23 @@ CONTESTS_URL = "/api/contests"
 PAYMENTS_URL = "/api/payments"
 PAYOUTS_URL = "/api/payouts"
 SCORING_RUN_PENDING_URL = "/api/internal/scans/submission-scoring"
+
+
+def run_scoring_scan(client: Client, *, attempts: int = 120, wait_seconds: float = 0.5) -> dict:
+    """채점 스캔을 한 번 **실제로** 돌린다.
+
+    스캔은 앞 실행(다른 시험의 시드·주기 실행)이 아직 돌면 200 으로 `{"skipped": "running"}` 을
+    돌려주고 아무것도 채점하지 않는다. 그 응답을 성공으로 읽으면 제출이 채점 전인 채로 남아 이의 접수가
+    「아직 채점되지 않은 제출물」로 거절된다 — 앞 실행이 끝날 때까지 다시 부른다.
+    """
+    for _ in range(attempts):
+        response = client.post(SCORING_RUN_PENDING_URL, **_internal_headers())
+        assert response.status_code == 200, response.content
+        body = response.json()
+        if body.get("skipped") != "running":
+            return body
+        time.sleep(wait_seconds)
+    raise AssertionError("채점 스캔이 계속 돌고 있어 이번 실행이 건너뛰어졌다")
 
 # 이 명령이 심은 Contest 는 전부 이 접두어로 시작한다(코드리뷰 지적) — clear_queues()가
 # "이 명령이 만든 것"만 골라 지우려면 다른 시드·실사용 데이터와 구별할 표식이
@@ -390,8 +408,7 @@ def seed_pending_appeal() -> dict:
     submission = _submit(client, dev, contest["id"], requirement_id=requirement_id)
     _close_contest(client, contest, deadline=deadline)
 
-    scoring_resp = client.post(SCORING_RUN_PENDING_URL, **_internal_headers())
-    assert scoring_resp.status_code == 200, scoring_resp.content
+    run_scoring_scan(client)
 
     reason = "e2e 큐 시드 — AI가 놓친 근거가 실제로 소스에 있습니다."
     appeal_resp = client.post(

@@ -15,7 +15,6 @@ const OTHER_TICKETS = [
   "settings/page",
   "ProblemSideActions",
   "MarkdownEditor",
-  "certificates/page",
   "ownership-transfer-offer",
 ];
 
