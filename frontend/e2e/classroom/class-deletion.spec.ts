@@ -43,6 +43,11 @@ test("제출이 없는 클래스는 이름을 다시 쳐야 지워지고, 지우
   await expect(page.getByTestId("delete-class-warning")).toContainText("문제 1개");
   await expect(page.getByTestId("delete-class-warning")).toContainText("체크리스트 항목 1개");
 
+  // 되돌릴 수 없다는 경고가 입력과 삭제 단추의 설명으로 이어 읽힌다(#1492).
+  const warned = /문제 1개.*되돌릴 수 없습니다.*템플릿으로 공개한 것은/s;
+  await expect(page.getByTestId("delete-class-confirm-input")).toHaveAccessibleDescription(warned);
+  await expect(page.getByRole("button", { name: "정말 삭제" })).toHaveAccessibleDescription(warned);
+
   // 잘못된 이름으로는 눌리지 않는다 — 실수로 지워지지 않는다는 AC.
   await page.getByTestId("delete-class-confirm-input").fill("아무 이름");
   await expect(page.getByTestId("delete-class-confirm")).toBeDisabled();

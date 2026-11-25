@@ -364,11 +364,11 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
           <div className="flex flex-col gap-3">
             <Note tone="warning">
               <div className="flex flex-col gap-1">
-                <span data-testid="delete-class-warning">
+                <span id="delete-class-warning" data-testid="delete-class-warning">
                   지우면 문제 {problemCount}개, 체크리스트 항목 {checklistItemCount}개,
                   참여자 {memberCount}명의 가입이 모두 함께 사라지고 되돌릴 수 없습니다.
                 </span>
-                <span data-testid="delete-class-template-note">
+                <span id="delete-class-template-note" data-testid="delete-class-template-note">
                   이 클래스에서 템플릿으로 공개한 것은 그 시점의 사본이라 영향받지
                   않습니다.
                 </span>
@@ -383,6 +383,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
             <input
               id="delete-class-confirm-input"
               data-testid="delete-class-confirm-input"
+              aria-describedby="delete-class-warning delete-class-template-note"
               value={typedName}
               onChange={(event) => setTypedName(event.target.value)}
               className={INPUT_CLASS}
@@ -392,6 +393,7 @@ function DeleteClassRow({ classId, classroom }: { classId: number; classroom: Cl
               <button
                 type="button"
                 data-testid="delete-class-confirm"
+                aria-describedby="delete-class-warning delete-class-template-note"
                 onClick={handleDelete}
                 disabled={!isDeleteConfirmationTyped(classroom.name, typedName) || deleting}
                 className={buttonClass("dangerFilled", "sm")}
