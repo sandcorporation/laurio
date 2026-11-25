@@ -94,12 +94,12 @@ export function useProblems(classId: number) {
   );
 
   const move = useCallback(
-    async (problemId: number, direction: "up" | "down") => {
+    async (problemId: number, direction: "up" | "down"): Promise<boolean> => {
       const current = problems;
-      if (!current) return;
+      if (!current) return false;
       const index = current.findIndex((p) => p.id === problemId);
       const swapWith = direction === "up" ? index - 1 : index + 1;
-      if (index < 0 || swapWith < 0 || swapWith >= current.length) return;
+      if (index < 0 || swapWith < 0 || swapWith >= current.length) return false;
 
       const reordered = [...current];
       [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
@@ -112,10 +112,11 @@ export function useProblems(classId: number) {
       );
       if (result.ok) {
         setOverride(result.data);
-      } else {
-        setOverride(current);
-        setReorderError(true);
+        return true;
       }
+      setOverride(current);
+      setReorderError(true);
+      return false;
     },
     [classId, problems],
   );

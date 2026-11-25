@@ -156,3 +156,23 @@ test("문제 순서를 옮기면 상태 영역이 「<문제> — N번째로 옮
   await page.getByTestId(`problem-row-${ids[2]}-move-up`).click();
   await expect(status).toHaveText("셋째 문제 — 2번째로 옮겼습니다");
 });
+
+test("순서 변경을 서버가 거절하면 상태 영역은 성공 대신 원래 자리로 돌아갔다고 읽고 순서도 원복된다", async ({ page }) => {
+  const { api, classId } = await newClass(page, "순서 거절");
+  const ids: number[] = [];
+  for (const title of ["첫째 문제", "둘째 문제"]) ids.push(await newProblem(api, classId, title));
+
+  await page.goto(`/classes/${classId}`);
+  const status = page.getByRole("status").filter({ has: page.locator("xpath=self::*[@data-testid='problems-move-status']") });
+  const rows = page.locator("[data-testid^='problem-row-'][data-testid$='-menu']");
+  await expect(rows).toHaveCount(2);
+
+  await page.route("**/classroom/classes/*/problems/reorder", (route) =>
+    route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ detail: "거절" }) }),
+  );
+  await page.getByTestId(`problem-row-${ids[0]}-menu`).click();
+  await page.getByTestId(`problem-row-${ids[0]}-move-down`).click();
+  await expect(status).toHaveText("첫째 문제 — 순서를 바꾸지 못해 원래 자리로 돌아갔습니다");
+  await expect(status).not.toContainText("옮겼습니다");
+  await expect(rows.first()).toHaveAttribute("data-testid", `problem-row-${ids[0]}-menu`);
+});
