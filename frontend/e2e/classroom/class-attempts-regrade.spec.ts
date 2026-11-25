@@ -105,10 +105,14 @@ test("「다시 채점」은 확인 창을 거쳐 걸리고, 새로고침 뒤 �
   await expect(page.getByTestId("regrade-amount")).toContainText("원");
   await page.getByTestId("regrade-confirm").click();
   await expect(dialog).toBeHidden();
+  const heading = page.getByTestId("class-attempts-heading");
+  await expect(heading).toBeFocused();
 
   // 정정이 끝나면 grader 가 attempt-scored 를 내고 화면이 다시 읽는다 — 그다음 새로고침해도 그대로다.
   await expect(page.getByTestId(`regrade-${submissionId}`)).toHaveCount(0);
   await expect(row).not.toContainText("채점 실패");
+  // 단추가 사라진 뒤에도 초점은 제목에 있다 — body 로 빠지지 않는다(#1471 ④).
+  await expect(heading).toBeFocused();
   await page.reload();
   await expect(row).toContainText("통과");
   await expect(row).not.toContainText("채점 실패");

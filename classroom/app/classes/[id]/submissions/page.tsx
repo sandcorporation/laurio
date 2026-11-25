@@ -51,12 +51,6 @@ function RegradeDialog({
   useDialogFocus(dialogRef, {
     onEscape: onCancel,
     initialFocus: cancelRef,
-    // 정정을 걸면 「다시 채점」 단추가 사라진다 — 제목으로 돌아온다.
-    fallbackFocus: () => {
-      const heading = document.querySelector<HTMLElement>('[data-testid="class-attempts-heading"]');
-      heading?.setAttribute("tabindex", "-1");
-      return heading;
-    },
   });
   const amount = state.status === "ready" ? submissionAmount(state.data) : state.status === "error" ? "—" : "…";
   return (
@@ -165,6 +159,7 @@ function ClassAttempts() {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   useClassroomTabTitle({
     screenName: "제출",
@@ -182,6 +177,8 @@ function ClassAttempts() {
     const result = await requestRegrade(classId, target.id);
     setBusy(false);
     if (result.ok && result.data.corrections.length > 0) {
+      // 걸리면 「다시 채점」 단추가 재조회에서 사라진다 — 단추 대신 늘 남는 제목이 초점을 받는다(#1471 ④).
+      titleRef.current?.focus();
       setTarget(null);
       reload();
     } else {
@@ -217,6 +214,7 @@ function ClassAttempts() {
         eyebrow={classState.status === "ready" ? classState.classroom.name : undefined}
         title="제출"
         titleTestId="class-attempts-heading"
+        titleRef={titleRef}
       />
       {classState.status === "loading" || state.status === "loading" ? (
         <p data-testid="class-attempts-loading" className="text-[13.5px] text-ink/45">
