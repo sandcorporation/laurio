@@ -16,6 +16,7 @@ import { ErrorNote, PageShell } from "@/app/components/ui";
 import { ProblemImportSheet } from "@/app/components/ProblemImportSheet";
 import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
+import { offerEndNote } from "@/lib/co-instructors/transfer-end-note";
 import { useClass } from "@/lib/classes/use-class";
 import { INSTRUCTORS_CHANGED, NOTIFICATION_CHANGED, isClassSignal, type StreamEvent } from "@/lib/events/types";
 import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
@@ -85,6 +86,28 @@ function ClassDetail() {
     previousRole.current = currentRole;
     cancelFailed.current = false;
   }, [ready, currentRole]);
+  // 나에게 온 요청이 내가 답하기 전에 끝나면(소유자의 취소·만료) 맨 위 카드가 사라진다 — 끝남을 늘 있는 상태
+  // 영역으로 읽고, 초점이 카드 안(수락·거절)에 있었으면 그 영역으로 옮긴다(#1447 검토, 소유자 쪽 #1448 ③과 같은 장치).
+  const offerFocusWithin = useRef(false);
+  const answeredByMe = useRef(false);
+  const offerEndRef = useRef<HTMLParagraphElement>(null);
+  const [offerEnd, setOfferEnd] = useState("");
+  const offerOpen = ready?.pending_ownership_transfer?.recipient_is_me === true;
+  const previousOffer = useRef(false);
+  useEffect(() => {
+    if (ready === null) return;
+    const wasOpen = previousOffer.current;
+    previousOffer.current = offerOpen;
+    if (!wasOpen || offerOpen) return;
+    const byMe = answeredByMe.current;
+    answeredByMe.current = false;
+    const hadFocus = offerFocusWithin.current;
+    offerFocusWithin.current = false;
+    if (byMe || ready.role !== "co_instructor") return;
+    setOfferEnd(offerEndNote(ready.instructor_display_name));
+    const active = document.activeElement;
+    if (hadFocus && (active === null || active === document.body)) offerEndRef.current?.focus();
+  }, [ready, offerOpen]);
   const { state: problemsState, reload: reloadProblems, move } = useProblems(classId);
   const router = useRouter();
   // 빈 목록의 입구가 시트를 곧장 그 탭으로 연다.
@@ -149,17 +172,39 @@ function ClassDetail() {
 
       <div className="flex flex-col gap-5">
         {/* 나에게 온 소유권 이전 요청(#564) — 답을 기다리는 일이라 맨 위에 둔다. */}
+        <p
+          ref={offerEndRef}
+          role="status"
+          tabIndex={-1}
+          data-testid="ownership-transfer-offer-ended-note"
+          className={offerEnd ? "text-[13px] text-ink/70 outline-none focus-visible:ring-2 focus-visible:ring-ink/40" : "sr-only"}
+        >
+          {offerEnd}
+        </p>
         {classroom.pending_ownership_transfer?.recipient_is_me ? (
-          <OwnershipTransferOffer
-            classId={classId}
-            transfer={classroom.pending_ownership_transfer}
-            ownerName={classroom.instructor_display_name}
-            onDone={(accepted) => {
-              setJustTookOver(accepted);
-              setJustDeclined(!accepted);
-              reloadClass();
+          <div
+            onFocus={() => {
+              offerFocusWithin.current = true;
             }}
-          />
+            onBlur={(event) => {
+              // 카드가 사라져 초점이 빠질 때는 relatedTarget 이 없다 — 그때는 「안에 있었다」를 지우지 않는다.
+              const next = event.relatedTarget;
+              if (next !== null && !event.currentTarget.contains(next)) offerFocusWithin.current = false;
+            }}
+          >
+            <OwnershipTransferOffer
+              classId={classId}
+              transfer={classroom.pending_ownership_transfer}
+              ownerName={classroom.instructor_display_name}
+              onDone={(accepted) => {
+                answeredByMe.current = true;
+                setOfferEnd("");
+                setJustTookOver(accepted);
+                setJustDeclined(!accepted);
+                reloadClass();
+              }}
+            />
+          </div>
         ) : null}
         {justTookOver && classroom.role === "owner" ? <OwnershipTransferAcceptedNote classId={classId} /> : null}
         {justDeclined && !classroom.pending_ownership_transfer?.recipient_is_me ? <OwnershipTransferDeclinedNote /> : null}

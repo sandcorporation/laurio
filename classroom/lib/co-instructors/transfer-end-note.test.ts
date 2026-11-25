@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PendingOwnershipTransfer } from "@/lib/classes/api";
 
-import { pendingTransferEndNote } from "./transfer-end-note";
+import { offerEndNote, pendingTransferEndNote } from "./transfer-end-note";
 
 const pending: PendingOwnershipTransfer = {
   id: 7,
@@ -30,5 +30,12 @@ describe("pendingTransferEndNote", () => {
     expect(pendingTransferEndNote({ ended: pending, now: null, stillOwner: false, cancelledByMe: false })).toBeNull();
     expect(pendingTransferEndNote({ ended: null, now: pending, stillOwner: true, cancelledByMe: false })).toBeNull();
     expect(pendingTransferEndNote({ ended: null, now: null, stillOwner: true, cancelledByMe: false })).toBeNull();
+  });
+});
+
+describe("offerEndNote", () => {
+  it("보낸 소유자 이름으로, 이름이 없으면 「소유자가」로 말한다", () => {
+    expect(offerEndNote("김소유")).toBe("김소유님이 보낸 소유권 이전 요청이 끝났습니다. 공동 강사로 남습니다.");
+    expect(offerEndNote("")).toBe("소유자가 보낸 소유권 이전 요청이 끝났습니다. 공동 강사로 남습니다.");
   });
 });

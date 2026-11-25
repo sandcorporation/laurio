@@ -262,12 +262,22 @@ test("공동 강사가 클래스 화면을 연 채로 소유자가 이전을 요
   expect(requested.ok()).toBeTruthy();
   await expect(page.getByTestId("ownership-transfer-offer")).toBeVisible({ timeout: 10_000 });
 
+  // 받는 공동 강사의 초점이 카드의 「거절」에 있다 — 곧 카드가 사라진다.
+  await page.getByTestId("ownership-transfer-decline").focus();
+
   const transferId = (await requested.json()).id as number;
   expect(
     (await owner.api.post(`/api/backend/classroom/classes/${classId}/ownership-transfers/${transferId}/cancel`)).ok(),
   ).toBeTruthy();
   await owner.context.close();
   await expect(page.getByTestId("ownership-transfer-offer")).toHaveCount(0, { timeout: 10_000 });
+
+  // 끝남이 읽히고, 초점은 BODY 가 아니라 그 안내로 간다.
+  const ended = page
+    .getByRole("status")
+    .filter({ hasText: "김소유님이 보낸 소유권 이전 요청이 끝났습니다. 공동 강사로 남습니다." });
+  await expect(ended).toBeVisible();
+  await expect(ended).toBeFocused();
 });
 
 test("390px 터치 — 「요청 취소」를 누르면 취소가 화면에 보이고 초점이 강사 표 제목으로 간다", async ({ browser }) => {

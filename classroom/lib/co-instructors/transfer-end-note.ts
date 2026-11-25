@@ -21,3 +21,12 @@ export function pendingTransferEndNote({
   const name = ended.recipient_display_name || "받는 사람";
   return `${name}님에게 보낸 소유권 이전 요청이 끝났습니다. 소유자는 그대로입니다.`;
 }
+
+/**
+ * 나에게 온 이전 요청이 내가 답하기 전에 끝났을 때(소유자의 취소·만료) 클래스 화면이 읽어 줄 한 줄. 취소와 만료는
+ * 클래스 응답만으로 가르지 않는다.
+ */
+export function offerEndNote(ownerName: string): string {
+  const owner = ownerName ? `${ownerName}님이` : "소유자가";
+  return `${owner} 보낸 소유권 이전 요청이 끝났습니다. 공동 강사로 남습니다.`;
+}
