@@ -261,13 +261,15 @@ def _vendor_key_out(class_obj: Class, kind: str) -> VendorKeyOut | None:
     )
 
 
-def _published_template_summary(template) -> PublishedTemplateSummaryOut | None:
+def _published_template_summary(template, *, viewer_id: int | None) -> PublishedTemplateSummaryOut | None:
     if template is None:
         return None
     return PublishedTemplateSummaryOut(
         share_code=template.share_code,
         publisher_display_name=template.publisher_display_name,
         created_at=template.created_at,
+        # 내리기는 공개한 사람만 한다(`takedown_own_template`) — 다른 강사에게는 단추 대신 공개자만 보인다(#1446).
+        can_take_down=viewer_id is not None and template.published_by_id == viewer_id,
     )
 
 
@@ -337,7 +339,7 @@ def _serialize_class(
         token_usage_total=class_obj.token_usage_total,
         token_usage_estimated=class_obj.token_usage_estimated,
         has_submissions=ClassroomSubmission.objects.filter(problem__classroom=class_obj).exists(),
-        published_template=_published_template_summary(_live_class_template(class_obj)),
+        published_template=_published_template_summary(_live_class_template(class_obj), viewer_id=viewer_id),
         role="owner" if viewer_is_owner else "co_instructor",
         pending_ownership_transfer=_pending_ownership_transfer_out(class_obj, viewer_id),
         **row_stats,
@@ -663,6 +665,7 @@ def _serialize_problem(
     submission_marks_by_problem: dict[int, tuple[object, int]] | None = None,
     submissions_by_problem: dict[int, list[ClassroomSubmission]] | None = None,
     live_template_by_problem: dict[int, ProblemTemplate] | None = None,
+    viewer_id: int | None = None,
 ) -> ProblemOut:
     if submission_marks_by_problem is None:
         submission_marks_by_problem = _participant_submission_marks("problem_id", problem_id=problem.id)
@@ -708,7 +711,7 @@ def _serialize_problem(
         member_count=member_count,
         pass_rate=pass_rate,
         perfect_count=perfect_count,
-        published_template=_published_template_summary(live_template),
+        published_template=_published_template_summary(live_template, viewer_id=viewer_id),
         deletable=_problem_deletable(problem, class_obj, blocking_problem_ids=blocking_problem_ids),
         available_transitions=[
             ProblemTransitionOut(name=t.name, to_state=t.to_state, blocked_reason=t.blocked_reason)
@@ -2482,7 +2485,7 @@ def create_problem(request: HttpRequest, class_id: int, payload: ProblemIn):
 
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = problem_authoring.create_problem(class_obj, payload)
-    out = _serialize_problem(problem, class_obj)
+    out = _serialize_problem(problem, class_obj, viewer_id=request.auth_user.id)
     out.gradability_warnings = [GradabilityWarningOut(**w) for w in gradability_warnings(problem.checklist_items.all())]
     return 201, out
 
@@ -2494,17 +2497,19 @@ def list_problems(request: HttpRequest, class_id: int):
     """강사 본인의 클래스 문제 전부(초안 + 열림), 순서대로."""
 
     class_obj = class_scope(class_id, request.auth_user.id, write=False, owner=False).class_obj
-    return 200, _serialize_problem_list(class_obj)
+    return 200, _serialize_problem_list(class_obj, viewer_id=request.auth_user.id)
 
 
-def _serialize_problem_list(class_obj: Class) -> list[ProblemOut]:
+def _serialize_problem_list(class_obj: Class, viewer_id: int | None = None) -> list[ProblemOut]:
     """클래스의 문제 전부를 순서대로 — 화면(`list_problems`)과 연결된 앱의 읽기
     도구(`classroom.mcp_read_tools`, #513)가 함께 부른다."""
 
-    return _serialize_problems(class_obj, class_obj.problems.prefetch_related("checklist_items").all())
+    return _serialize_problems(
+        class_obj, class_obj.problems.prefetch_related("checklist_items").all(), viewer_id=viewer_id
+    )
 
 
-def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
+def _serialize_problems(class_obj: Class, problems, viewer_id: int | None = None) -> list[ProblemOut]:
     """문제 여럿을 한 번에(#679·#684) — 목록과 순서 바꾸기 응답이 함께 쓴다. 문제마다 따로 들던
     질의(제출 표식·달성률의 제출·살아 있는 템플릿)를 클래스 단위로 한 번씩 세어 넘기므로, 질의 수가
     문제 수와 무관하다. `problems` 는 체크리스트를 미리 불러 둔 것이어야 한다."""
@@ -2533,6 +2538,7 @@ def _serialize_problems(class_obj: Class, problems) -> list[ProblemOut]:
             submission_marks_by_problem=submission_marks,
             submissions_by_problem=submissions_by_problem,
             live_template_by_problem=live_template_by_problem,
+            viewer_id=viewer_id,
         )
         for p in problems
     ]
@@ -2553,7 +2559,7 @@ def reorder_problems(request: HttpRequest, class_id: int, payload: ProblemReorde
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     ordered = problem_authoring.reorder_problems(class_obj, payload.problem_ids)
     # 목록(`_serialize_problem_list`)과 같이 문제 행을 클래스 단위로 한 번에 센다(#679·#684).
-    return 200, _serialize_problems(class_obj, ordered)
+    return 200, _serialize_problems(class_obj, ordered, viewer_id=request.auth_user.id)
 
 
 #: 들여오기 목록 한 쪽의 크기(#548) — 공모전이 수백 개여도 시트가 한 번에 다 받지 않는다.
@@ -2606,7 +2612,7 @@ def import_contest_as_problem(request: HttpRequest, class_id: int, payload: Impo
 
     class_obj = class_scope(class_id, request.auth_user.id, write=True, owner=False).class_obj
     problem = import_contest_problem(class_obj, payload.contest_id)
-    return 201, _serialize_problem(problem, class_obj)
+    return 201, _serialize_problem(problem, class_obj, viewer_id=request.auth_user.id)
 
 
 @router.get(
@@ -2737,7 +2743,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
     """문제 편집 화면이 초기값을 채우는 자리."""
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=False, owner=False)
-    return 200, _serialize_problem(scope.problem, scope.class_obj)
+    return 200, _serialize_problem(scope.problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.patch(
@@ -2748,7 +2754,7 @@ def get_problem(request: HttpRequest, class_id: int, problem_id: int):
 def update_problem(request: HttpRequest, class_id: int, problem_id: int, payload: ProblemPatchIn):
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = problem_authoring.update_problem(scope.class_obj, scope.problem, payload)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.delete(
@@ -2816,7 +2822,7 @@ def open_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("open", scope.problem)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.post(
@@ -2831,7 +2837,7 @@ def hide_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("hide", scope.problem)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 @router.post(
@@ -2846,7 +2852,7 @@ def reopen_problem(request: HttpRequest, class_id: int, problem_id: int):
 
     scope = problem_scope(class_id, problem_id, request.auth_user.id, write=True, owner=False)
     problem = execute_transition("reopen", scope.problem)
-    return 200, _serialize_problem(problem, scope.class_obj)
+    return 200, _serialize_problem(problem, scope.class_obj, viewer_id=request.auth_user.id)
 
 
 # --- Submission (참여자, #286) --------------------------------------------------
@@ -3437,7 +3443,7 @@ def copy_problem(request: HttpRequest, class_id: int, problem_id: int, payload: 
     target_class = class_scope(payload.target_class_id, request.auth_user.id, write=True, owner=False).class_obj
 
     copy = copy_problem_to_class(problem, target_class)
-    return 201, _serialize_problem(copy, target_class)
+    return 201, _serialize_problem(copy, target_class, viewer_id=request.auth_user.id)
 
 
 # --- ChecklistItem -------------------------------------------------------------

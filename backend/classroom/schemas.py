@@ -72,6 +72,8 @@ class PublishedTemplateSummaryOut(Schema):
     share_code: str
     publisher_display_name: str
     created_at: datetime
+    #: 부른 사람이 내릴 수 있는가 — 공개한 사람만 내린다. 아니면 화면이 단추 대신 공개자 이름만 보인다(#1446).
+    can_take_down: bool = False
 
 
 class PendingOwnershipTransferOut(Schema):

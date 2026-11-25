@@ -13,7 +13,13 @@
 // 문제 템플릿과 클래스 템플릿이 같은 모양이라 같은 함수를 쓴다(#316·#319).
 
 /** 화면이 실제로 쓰는 것은 공유 코드 하나다(#333 이 이 상태를 세운 이유). */
-export type LiveTemplate = { shareCode: string } | null;
+export type LiveTemplate = {
+  shareCode: string;
+  /** 공개한 사람의 표시 이름 — 내릴 수 없는 사람에게 단추 대신 보인다(#1446). */
+  publisherDisplayName: string;
+  /** 부른 사람이 내릴 수 있는가 — 공개한 사람만 내린다(백엔드 규칙). 모르면 거짓이다. */
+  canTakeDown: boolean;
+} | null;
 
 /**
  * 두 모양을 함께 받는다.
@@ -24,7 +30,15 @@ export type LiveTemplate = { shareCode: string } | null;
  *   것만 골라 싣고 아니면 `null` 이다(`_live_problem_template`). 그래서 칸이 없으면
  *   「살아 있다」로 읽는다.
  */
-type TemplateResponse = { share_code: string; taken_down?: boolean };
+type TemplateResponse = {
+  share_code: string;
+  taken_down?: boolean;
+  publisher_display_name?: string;
+  /** 상세 응답의 요약이 싣는다. */
+  can_take_down?: boolean;
+  /** 공개·내리기 응답이 싣는다 — 그 응답을 부른 사람이 공개자이니 참이다. */
+  is_mine?: boolean;
+};
 
 /**
  * 공개·내리기 응답(또는 상세 응답의 `published_template`)에서 살아 있는 템플릿을 읽는다.
@@ -34,5 +48,9 @@ type TemplateResponse = { share_code: string; taken_down?: boolean };
 export function liveTemplateFrom(template: TemplateResponse | null | undefined): LiveTemplate {
   if (!template) return null;
   if (template.taken_down === true) return null;
-  return { shareCode: template.share_code };
+  return {
+    shareCode: template.share_code,
+    publisherDisplayName: template.publisher_display_name ?? "",
+    canTakeDown: template.can_take_down ?? template.is_mine ?? false,
+  };
 }
