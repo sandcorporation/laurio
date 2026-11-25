@@ -44,6 +44,10 @@ scripts/test.sh backend tests/test_x.py   # 호스트에서 돈다 — 포트는
 
 macOS 기본 환경(bash 3.2, `nproc`·`taskset`·`flock` 없음)에서도 같은 명령이 돈다 —
 코어 수는 `sysctl`, 칸은 디렉터리 잠금으로 잡고 CPU 고정은 건너뛴다(#1006).
+mac 에서만 다르게 하는 것(#1419): `scripts/test.sh backend` 가 `DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib`(WeasyPrint 가
+`brew install pango` 의 libgobject 를 찾는다)·진짜 git(`xcrun -f git`, `/usr/bin/git` 껍데기는 실행마다 CPU 가 2.5배)을 앞에 두고,
+tree-sitter 문법을 미리 받는다(캐시가 빈 머신). 시험 하나 CPU 한도는 mac 에서 1.25배다(프로세스 띄우기가 비싸다 — `conftest.py`).
+mac 의 tree-sitter 캐시는 `~/Library/Caches` 라 `XDG_CACHE_HOME` 으로 못 비운다 — `TREE_SITTER_LANGUAGE_PACK_CACHE_DIR` 로 비운다.
 
 **로컬 시험 고르기 — `scripts/test.sh affected`(#1330).** 바뀐 파일(기준 커밋 뒤의 커밋·커밋하지 않은 변경·새 파일)에서
 백엔드·vitest·e2e 를 골라 돈다. `--list` 는 고르기만, `--only backend,vitest,e2e` 로 좁힌다. 기준을 주지 않으면

@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import os
 import runpy
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -45,7 +47,10 @@ def _get(path: str) -> bytes:
 
 
 def _serve(tmp_path: Path, *extra: str):
-    sock = str(tmp_path / "g.sock")
+    # 유닉스 소켓 경로는 macOS 에서 104자(Linux 108)까지다 — pytest 의 tmp_path 는 mac 에서 135자라
+    # gunicorn 이 「AF_UNIX path too long」으로 못 떴다(#1419). 짧은 임시 폴더를 따로 쓴다.
+    sock_dir = Path(tempfile.mkdtemp(prefix="g"))
+    sock = str(sock_dir / "g.sock")
     env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parent)}
     env.pop("PROMETHEUS_MULTIPROC_DIR", None)
     proc = subprocess.Popen(
@@ -62,6 +67,7 @@ def _serve(tmp_path: Path, *extra: str):
             pass
         if proc.poll() is not None or time.monotonic() > deadline:
             proc.kill()
+            shutil.rmtree(sock_dir, ignore_errors=True)
             raise AssertionError("gunicorn 이 뜨지 않았다")
         time.sleep(0.05)
     return proc, sock
@@ -87,6 +93,7 @@ def _reply_while_idle_connections_held(tmp_path: Path, *extra: str) -> bytes | N
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
+        shutil.rmtree(Path(sock).parent, ignore_errors=True)
 
 
 def test_idle_connections_do_not_block_the_next_request(tmp_path):
