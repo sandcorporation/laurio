@@ -19,6 +19,7 @@ import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
 import {
   ATTEMPT_SCORED,
   ATTEMPT_SUBMITTED,
+  INSTRUCTORS_CHANGED,
   PARTICIPATION_CHANGED,
   isClassSignal,
   type StreamEvent,
@@ -66,6 +67,8 @@ export function useMyProblem(classId: number, problemId: number) {
   const matches = useCallback(
     (event: StreamEvent) =>
       isClassSignal(event, PARTICIPATION_CHANGED, classId) ||
+      // 강사로 보던 화면(학생 화면)은 강사 권한이 빠지는 것도 다시 읽어 접근 안내로 바뀐다(#1471 ③).
+      isClassSignal(event, INSTRUCTORS_CHANGED, classId) ||
       ((event.kind === ATTEMPT_SCORED || event.kind === ATTEMPT_SUBMITTED) &&
         event.payload.class_id === classId &&
         event.payload.problem_id === problemId),

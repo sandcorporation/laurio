@@ -523,3 +523,63 @@ test("공동 강사가 내보내지면 열어 둔 화면과 새로 연 주소가
   );
   await stranger.context.close();
 });
+
+// 참여자 이력이 있는 공동 강사 — 소유자와 같은 클래스의 학생 화면을 본다. 강사 전용 계정은 참여자 신호를 받지 않는다(백엔드는
+// 참여자 행이 있는 사람에게만 participation-changed 를 보낸다).
+async function seedCoInstructorWithParticipantRow(page: Page, browser: Browser, seed: string, open: boolean) {
+  const owner = await otherSession(browser, seed);
+  const created = await owner.api.post("/api/backend/classroom/classes", {
+    data: { name: `공동 강사 ${seed}`, instructor_display_name: "김소유" },
+  });
+  const classId = (await created.json()).id as number;
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const problemId = (
+    await (await owner.api.post(`${base}/problems`, { data: { title: "1주차", submission_formats: ["repository"] } })).json()
+  ).id as number;
+  await owner.api.post(`${base}/problems/${problemId}/checklist-items`, { data: { label: "동작한다", required: true } });
+  if (open) expect((await owner.api.post(`${base}/problems/${problemId}/open`)).ok()).toBeTruthy();
+  const joinCode = (await (await owner.api.get(base)).json()).join_code as string;
+  const token = (await (await owner.api.post(`${base}/co-instructor-invites`)).json()).token as string;
+  await establishClassroomSession(page, `${seed}-co`);
+  const api = classroomApi(page);
+  expect((await api.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: "박참여" } })).ok()).toBeTruthy();
+  expect(
+    (await api.post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, { data: { display_name: "박조교" } })).ok(),
+  ).toBeTruthy();
+  const roster = (await (await owner.api.get(`${base}/instructors`)).json()) as { co_instructor_id: number | null }[];
+  const coId = roster.find((row) => row.co_instructor_id !== null)!.co_instructor_id;
+  return { owner, classId, base, problemId, coId };
+}
+
+// #1471 ① — 강사가 학생 화면을 연 채 클래스가 보관되면 제출 폼과 함께 폼 안의 초점 효과가 사라진다.
+test("강사의 학생 화면을 연 채 클래스가 보관되면 띠의 보관 안내가 낭독되고 초점을 받는다", async ({ page, browser }) => {
+  const seed = `rt-instructor-archived-${test.info().workerIndex}-${Date.now()}`;
+  const { owner, classId, base, problemId } = await seedCoInstructorWithParticipantRow(page, browser, seed, true);
+
+  await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+  await expect(page.getByTestId("submit-repository")).toBeVisible();
+  expect((await owner.api.post(`${base}/archive`)).ok()).toBeTruthy();
+  await owner.context.close();
+
+  const note = page.getByTestId("instructor-viewing-banner").getByTestId("class-archived-note");
+  await expect(note).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("submit-repository")).toHaveCount(0);
+  await expect(note).toHaveAttribute("role", "alert");
+  await expect(note).toBeFocused();
+});
+
+// #1471 ③ — 참여자 이력이 있는 공동 강사가 학생 화면을 보던 중 내보내지면 문제 비공개가 아니라 강사 권한 상실이다.
+test("학생 화면을 보던 공동 강사가 내보내지면 문제 비공개가 아니라 강사 권한 상실을 읽는다", async ({ page, browser }) => {
+  const seed = `rt-removed-submit-${test.info().workerIndex}-${Date.now()}`;
+  const { owner, classId, base, problemId, coId } = await seedCoInstructorWithParticipantRow(page, browser, seed, false);
+
+  await openWithStream(page, `/classes/${classId}/problems/${problemId}/submit`, `${base}/problems/${problemId}/mine`);
+  await expect(page.getByTestId("instructor-viewing-banner")).toBeVisible();
+  expect((await owner.api.post(`${base}/co-instructors/${coId}/remove`)).ok()).toBeTruthy();
+  await owner.context.close();
+
+  await expect(page.getByTestId("my-problem-not-found")).toContainText("더 이상 이 클래스의 강사가 아닙니다", {
+    timeout: 10_000,
+  });
+  await expect(page.getByRole("heading", { name: "더 이상 이 클래스의 강사가 아닙니다" })).toBeFocused();
+});

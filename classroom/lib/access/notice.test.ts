@@ -168,4 +168,31 @@ describe("접근을 잃은 이유(#1465 2) — 증거가 있는 사람에게만 
       unrelated,
     );
   });
+  it("제출 화면: 강사로 보던 중 내보내진 사람은 문제 비공개가 아니라 강사 권한 상실을 듣는다(#1471 ③)", () => {
+    const lost = {
+      kind: "notice",
+      title: "더 이상 이 클래스의 강사가 아닙니다",
+      link: { label: "홈으로", href: "/" },
+    };
+    // 참여자 이력이 있어 joined 에도 남아 있다.
+    expect(
+      accessNotice({ page: "submit", status: "initial", joined: has, taught: lacks, former, hadAccess: true, wasInstructor: true, classId: CLASS_ID }),
+    ).toEqual(lost);
+    // 강사로 보던 증거가 없으면 참여자의 문제 비공개 문구다.
+    expect(
+      accessNotice({ page: "submit", status: "initial", joined: has, taught: lacks, former, hadAccess: true, classId: CLASS_ID }),
+    ).toEqual({
+      kind: "notice",
+      title: "강사가 이 문제를 숨기거나 삭제했습니다",
+      link: { label: "문제 목록으로", href: "/classes/7/problems/mine" },
+    });
+    // 과거 강사 증거가 없으면 말하지 않는다.
+    expect(
+      accessNotice({ page: "submit", status: "initial", joined: has, taught: lacks, former: noFormer, hadAccess: true, wasInstructor: true, classId: CLASS_ID }),
+    ).toEqual({
+      kind: "notice",
+      title: "강사가 이 문제를 숨기거나 삭제했습니다",
+      link: { label: "문제 목록으로", href: "/classes/7/problems/mine" },
+    });
+  });
 });

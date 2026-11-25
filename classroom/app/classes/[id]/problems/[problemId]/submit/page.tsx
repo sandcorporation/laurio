@@ -99,6 +99,11 @@ export default function ProblemSubmitPage() {
 
   // 폼이 보이던 화면이 다시 읽은 끝에 찾을 수 없음 안내로 바뀌면 폼과 함께 초점이 사라진다 — 안내가 받는다(#1431).
   const [hadForm, setHadForm] = useState(false);
+  // 강사로(학생 화면) 보던 중이었는지 — 사라진 이유를 문제가 아니라 강사 권한으로 말하게 한다(#1471 ③).
+  const [wasInstructor, setWasInstructor] = useState(false);
+  if (state.status === "ready" && (state.data.viewing_as_instructor === true) !== wasInstructor) {
+    setWasInstructor(state.data.viewing_as_instructor === true);
+  }
   useEffect(() => {
     if (state.status === "ready") setHadForm(true);
   }, [state.status]);
@@ -120,7 +125,7 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} hadAccess={hadForm} />
+        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" focusOnShow={hadForm} hadAccess={hadForm} wasInstructor={wasInstructor} />
         {hadForm && repositoryUrl.trim() !== "" ? (
           <div className="mt-4">
             <Note tone="warning">

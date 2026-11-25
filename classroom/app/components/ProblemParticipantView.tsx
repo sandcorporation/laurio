@@ -170,10 +170,12 @@ function ArchivedNote({ noteRef }: { noteRef?: Ref<HTMLParagraphElement> }) {
 function InstructorViewingBanner({
   status,
   archived,
+  archivedNoteRef,
   links,
 }: {
   status: "draft" | "open" | "hidden" | null | undefined;
   archived: boolean;
+  archivedNoteRef?: Ref<HTMLParagraphElement>;
   links?: { editHref: string; submissionsHref: string };
 }) {
   return (
@@ -189,7 +191,7 @@ function InstructorViewingBanner({
         </span>
       ) : null}
       {archived ? (
-        <ArchivedNote />
+        <ArchivedNote noteRef={archivedNoteRef} />
       ) : (
         <p className="text-[13px] text-warning">
           여기서 낸 시도는 강사 본인 시도로 남고 달성률·제출 현황에 들지 않습니다.
@@ -371,6 +373,16 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
   const instructorArchived =
     viewingAsInstructor === true && props.interactive && props.submitBlockedReason === "archived";
 
+  // 강사가 학생 화면을 연 채 클래스가 보관되면 제출 폼이 통째로 사라져 폼 안의 초점 효과가 돌지 않는다 —
+  // 상위에서 띠의 보관 안내가 초점을 받아 낭독된다(#1471 ①). 처음부터 보관된 채 열린 화면은 건드리지 않는다.
+  const instructorArchivedNoteRef = useRef<HTMLParagraphElement>(null);
+  const wasInstructorArchived = useRef(instructorArchived);
+  useEffect(() => {
+    const before = wasInstructorArchived.current;
+    wasInstructorArchived.current = instructorArchived;
+    if (!before && instructorArchived) instructorArchivedNoteRef.current?.focus();
+  }, [instructorArchived]);
+
   const side = (
     <>
       {/* 한 열 폭에서 머리의 「제출 칸으로」가 닿는 자리(#1376). 보관한 클래스를 보는 강사에게는
@@ -440,6 +452,7 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
         <InstructorViewingBanner
           status={instructorProblemStatus}
           archived={instructorArchived}
+          archivedNoteRef={instructorArchivedNoteRef}
           links={instructorLinks}
         />
       ) : null}
