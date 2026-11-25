@@ -935,6 +935,16 @@ function InteractiveSubmissionForm(
     (repositoryCheck !== null && !repositoryCheck.ok) || (submittedEmpty && repositoryCheck === null);
   const needsFormatChoice = submissionFormats.length > 1 && chosenFormat === null;
 
+  // 폼이 보이던 중에 제출이 막히면(403 뒤 다시 읽기, #1423) 폼과 함께 초점도 사라져 `body` 로 빠진다 —
+  // 안내로 초점을 옮겨 스크린리더가 읽게 한다. 처음부터 막힌 채 열린 화면은 초점을 뺏지 않는다.
+  const blockedNoteRef = useRef<HTMLParagraphElement>(null);
+  const previousBlockedReason = useRef(submitBlockedReason);
+  useEffect(() => {
+    const before = previousBlockedReason.current;
+    previousBlockedReason.current = submitBlockedReason;
+    if (before === null && submitBlockedReason !== null) blockedNoteRef.current?.focus();
+  }, [submitBlockedReason]);
+
   // 낼 수 없는 이유는 제출 카드 자리에 한 줄이다 — 지난 시도와 판정은 옆 열에 그대로 남는다.
   // 백엔드가 보관 → 내보냄 → 숨김 순서로 이유를 하나만 정해 주므로(#439, #941) 그대로 분기한다.
   if (submitBlockedReason === "archived") {
@@ -942,14 +952,26 @@ function InteractiveSubmissionForm(
   }
   if (submitBlockedReason === "expelled") {
     return (
-      <p data-testid="member-expelled-note" className="text-[13px] text-warning">
+      <p
+        ref={blockedNoteRef}
+        tabIndex={-1}
+        role="alert"
+        data-testid="member-expelled-note"
+        className="text-[13px] text-warning outline-none"
+      >
         이 클래스에서 내보내져 새로 제출할 수 없습니다.
       </p>
     );
   }
   if (submitBlockedReason === "hidden") {
     return (
-      <p data-testid="problem-hidden-note" className="text-[13px] text-warning">
+      <p
+        ref={blockedNoteRef}
+        tabIndex={-1}
+        role="alert"
+        data-testid="problem-hidden-note"
+        className="text-[13px] text-warning outline-none"
+      >
         강사가 숨긴 문제라 새로 낼 수 없습니다.
       </p>
     );
