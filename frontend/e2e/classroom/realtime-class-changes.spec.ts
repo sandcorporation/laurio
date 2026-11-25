@@ -373,18 +373,24 @@ test("이전 요청에 답이 오면 클래스·강사·초대 재조회가 세 
   });
   const transferId = (await requested.json()).id as number;
 
-  await openWithStream(page, `/classes/${classId}?tab=instructors`);
-  await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
-  // 스트림이 이어지며 일어나는 재조회가 끝난 뒤부터 센다 — 열린 뒤 명단·대기 초대를 한 번 읽은 것이 보인다.
-  await expect(page.getByTestId("class-instructors-count")).toHaveText("2명");
-
   const base = `/api/backend/classroom/classes/${classId}`;
-  let count = 0;
+  const reads = { all: 0, invites: 0 };
+  let secondInvitesRead!: () => void;
+  const invitesReadTwice = new Promise<void>((resolve) => (secondInvitesRead = resolve));
   page.on("request", (request) => {
     if (request.method() !== "GET") return;
     const path = new URL(request.url()).pathname;
-    if (path === base || path === `${base}/instructors` || path === `${base}/co-instructor-invites`) count += 1;
+    if (path === base || path === `${base}/instructors` || path === `${base}/co-instructor-invites`) reads.all += 1;
+    if (path === `${base}/co-instructor-invites`) {
+      reads.invites += 1;
+      if (reads.invites === 2) secondInvitesRead();
+    }
   });
+  await openWithStream(page, `/classes/${classId}?tab=instructors`);
+  await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
+  // 열릴 때 한 번, 스트림이 이어질 때 한 번 대기 초대를 읽는다 — 그 재조회 사슬이 끝난 뒤부터 센다.
+  await invitesReadTwice;
+  const before = reads.all;
 
   expect(
     (await helper.api.post(`${base}/ownership-transfers/${transferId}/decline`)).ok(),
@@ -394,6 +400,6 @@ test("이전 요청에 답이 오면 클래스·강사·초대 재조회가 세 
   await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0, { timeout: 10_000 });
   // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라 조용해질 때까지 기다린다.
   await page.waitForLoadState("networkidle");
-  expect(count).toBeGreaterThan(0);
-  expect(count).toBeLessThanOrEqual(3);
+  expect(reads.all - before).toBeGreaterThan(0);
+  expect(reads.all - before).toBeLessThanOrEqual(3);
 });

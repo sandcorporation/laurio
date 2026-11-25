@@ -81,7 +81,7 @@ function ClassDetail() {
     reloadTimer.current = window.setTimeout(() => {
       reloadTimer.current = null;
       reloadClass();
-    }, 100);
+    }, 250);
   }, [reloadClass]);
   useEffect(
     () => () => {
