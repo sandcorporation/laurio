@@ -221,15 +221,35 @@ describe("coInstructorCardHint — 채점 카드 (#1431)", () => {
 });
 
 describe("attemptWaitingNote — 펼친 채점 대기 시도 (#1436 7번)", () => {
-  it("채점 대기 시도만 멈춘 까닭과 고칠 곳을 준다", () => {
-    expect(attemptWaitingNote("needs_setup", missing)).toEqual(scoringBlockNote(missing, "submissions"));
-    expect(attemptWaitingNote("scoring", missing)).toBeNull();
-    expect(attemptWaitingNote("passed", missing)).toBeNull();
+  const base = { problem_id: 9, problem_model: "" };
+  const co = { ...missing, role: "co_instructor" as const };
+
+  it("채점 대기 시도만 노트를 준다", () => {
+    expect(attemptWaitingNote({ ...base, status: "scoring" }, missing, 3)).toBeNull();
+    expect(attemptWaitingNote({ ...base, status: "passed" }, missing, 3)).toBeNull();
   });
 
-  it("공동 강사는 단추 없이 소유자에게 부탁하는 문장", () => {
-    const note = attemptWaitingNote("needs_setup", { ...missing, role: "co_instructor" });
-    expect(note?.actionLabel).toBeNull();
-    expect(note?.message).toContain("소유자에게");
+  it("키 사유 — 클래스 연결 문구, 소유자만 단추", () => {
+    const row = { ...base, status: "needs_setup", pending_reason: "no_api_key" };
+    expect(attemptWaitingNote(row, missing, 3)).toMatchObject(scoringBlockNote(missing, "submissions"));
+    expect(attemptWaitingNote(row, co, 3)).toMatchObject({ actionLabel: null });
+  });
+
+  it("모델 사유 — 키가 연결돼 있어도 채점 모델을 말한다(클래스 연결 문구가 아니다)", () => {
+    const row = { ...base, status: "needs_setup", pending_reason: "model_rejected" };
+    const owner = attemptWaitingNote(row, connected, 3);
+    expect(owner?.message).toBe(modelRejectedNote("owner", 3, 9, "").message);
+    expect(owner?.message).not.toContain("채점 연결");
+    expect(owner).toMatchObject({ actionLabel: "채점 모델 바꾸기", href: "/classes/3/settings#scoring-model" });
+    // 문제가 자기 모델을 쓰면 소유자도 문제 편집으로
+    expect(attemptWaitingNote({ ...row, problem_model: "gpt-5-mini" }, connected, 3)?.href).toBe(
+      "/classes/3/problems/9#scoring-model",
+    );
+    // 공동 강사 — 같은 문장, 문제 편집으로
+    expect(attemptWaitingNote(row, { ...connected, role: "co_instructor" }, 3)).toMatchObject({
+      message: owner?.message,
+      actionLabel: "채점 모델 바꾸기",
+      href: "/classes/3/problems/9#scoring-model",
+    });
   });
 });

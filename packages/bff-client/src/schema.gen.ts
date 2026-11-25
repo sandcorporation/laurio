@@ -6517,8 +6517,15 @@ export interface components {
             member_display_name: string;
             /** Member Id */
             member_id: number;
+            /** Pending Reason */
+            pending_reason?: string | null;
             /** Problem Id */
             problem_id: number;
+            /**
+             * Problem Model
+             * @default
+             */
+            problem_model: string;
             /** Problem Title */
             problem_title: string;
             /** Status */
@@ -6881,8 +6888,15 @@ export interface components {
             member_display_name: string;
             /** Member Id */
             member_id: number;
+            /** Pending Reason */
+            pending_reason?: string | null;
             /** Problem Id */
             problem_id: number;
+            /**
+             * Problem Model
+             * @default
+             */
+            problem_model: string;
             /** Problem Title */
             problem_title: string;
             /** Status */

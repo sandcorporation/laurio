@@ -114,7 +114,7 @@ function AttemptVerdicts({
     );
   }
   const { score, checklist_items: items } = state.data;
-  const waiting = score === null ? attemptWaitingNote(attempt.status, classroom) : null;
+  const waiting = score === null ? attemptWaitingNote(attempt, classroom, classId) : null;
   if (waiting) {
     return (
       <MissingScoringKeyNote
