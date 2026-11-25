@@ -16,6 +16,8 @@
 // 만든다(`services.import_problem_template`/`copy_problem_to_class`). 여기서는
 // 그 사실을 문구로만 말한다.
 import { useEffect, useRef, useState } from "react";
+
+import { useDialogFocus } from "@/app/components/use-dialog-focus";
 import type { ReactNode } from "react";
 
 import { MarkdownView } from "@codemit/markdown";
@@ -76,13 +78,9 @@ export function ProblemImportSheet({
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  // 초점은 창 안으로·Tab 은 창 안에·Escape 는 닫고 여는 단추로(#1463).
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef, { onEscape: onClose });
 
   // --- 공개된 문제 ---------------------------------------------------------
   const [publicQuery, setPublicQuery] = useState("");
@@ -251,11 +249,13 @@ export function ProblemImportSheet({
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
       <button
         type="button"
+        tabIndex={-1}
         aria-label="닫기"
         onClick={onClose}
         className="fixed inset-0 cursor-default"
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="문제 가져오기"

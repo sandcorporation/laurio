@@ -216,6 +216,13 @@ function formatMegabytes(bytes: number): string {
 }
 
 const SUBMIT_CARD_ID = "submit-card";
+const DEADLINE_NOTE_ID = "submit-deadline-note";
+
+// 기존 describedby 가 있으면 공백으로 덧붙인다(#1462).
+function joinDescribedBy(...ids: Array<string | false | null | undefined>): string | undefined {
+  const joined = ids.filter(Boolean).join(" ");
+  return joined === "" ? undefined : joined;
+}
 
 // 「제출 칸으로」 뒤 초점(#1400-8) — 스크롤만 되고 초점이 머리에 남지 않게 첫 입력칸으로 보낸다.
 function focusSubmitField(event: MouseEvent<HTMLAnchorElement>) {
@@ -404,12 +411,12 @@ export function ProblemParticipantView(props: ProblemParticipantViewProps) {
             className="flex flex-col gap-3.5 p-4"
           >
             {deadlinePassed && props.submitBlockedReason === null ? (
-              <p data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
+              <p id={DEADLINE_NOTE_ID} data-testid="submit-deadline-note" className="text-[13px] leading-relaxed text-warning">
                 마감이 지났습니다 — 지금 내면 「마감 기한 뒤 제출」로 표시됩니다
               </p>
             ) : null}
             {props.interactive ? (
-              <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} />
+              <InteractiveSubmissionForm {...props} submissionFormats={submissionFormats} deadlinePassed={deadlinePassed === true} />
             ) : (
               <PreviewSubmissionForm submissionFormats={submissionFormats} />
             )}
@@ -920,7 +927,7 @@ function AttemptRow({
 }
 
 function InteractiveSubmissionForm(
-  props: InteractiveProps & { submissionFormats: SubmissionFormat[] },
+  props: InteractiveProps & { submissionFormats: SubmissionFormat[]; deadlinePassed: boolean },
 ) {
   const {
     submitBlockedReason,
@@ -936,7 +943,10 @@ function InteractiveSubmissionForm(
     submissionFormats,
     contestEntry,
     zipGitHistoryWarning = false,
+    deadlinePassed,
   } = props;
+  // 마감 경고는 차단 사유가 없을 때만 그려진다 — 그릴 때만 잇는다.
+  const deadlineNoteId = deadlinePassed && submitBlockedReason === null ? DEADLINE_NOTE_ID : null;
 
   // 둘 다 열린 문제는 형식 선택을 먼저 보인다(#373 AC) — 하나만 열린
   // 문제는 고르는 단계 없이 그 형식의 입력만 보인다.
@@ -1124,7 +1134,7 @@ function InteractiveSubmissionForm(
               }}
               readOnly={submitting}
               aria-invalid={repositoryInvalid}
-              aria-describedby={repositoryInvalid ? "repository-url-error" : undefined}
+              aria-describedby={joinDescribedBy(repositoryInvalid && "repository-url-error", deadlineNoteId)}
               className={`${INPUT_CLASS} font-mono`}
             />
             {showShapeError && repositoryCheck !== null && !repositoryCheck.ok ? (
@@ -1154,6 +1164,7 @@ function InteractiveSubmissionForm(
           <button
             type="submit"
             data-testid="submit-repository"
+            aria-describedby={joinDescribedBy(deadlineNoteId)}
             disabled={submitting}
             className={`${buttonClass("primary")} w-full`}
           >
@@ -1198,6 +1209,7 @@ function InteractiveSubmissionForm(
               data-testid="source-file-input"
               type="file"
               aria-label="소스 파일"
+              aria-describedby={joinDescribedBy(deadlineNoteId)}
               onChange={onSourceFile}
               disabled={submitting || uploadStatus === "uploading"}
               className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"

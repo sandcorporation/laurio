@@ -4,10 +4,11 @@
 // (문제, 학생)의 최근 시도에만 「다시 채점」이 붙는다. 누르면 확인 창이 「예상 비용」 카드와 같은 셈의 금액을 보인다.
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 
 import { useBackendQuery } from "@codemit/bff-client";
 
+import { useDialogFocus } from "@/app/components/use-dialog-focus";
 import { AccessNotice } from "@/app/components/AccessNotice";
 import { Card, ErrorNote, PageHeader, PageShell, buttonClass } from "@/app/components/ui";
 import { bffClient } from "@/lib/bff/client";
@@ -45,11 +46,24 @@ function RegradeDialog({
 }) {
   // 「예상 비용」 카드와 같은 셈 — 지금 이 클래스의 조합으로 그 문제의 제출 한 건.
   const { state } = useBackendQuery<ScoringCalculator>(bffClient, calculatorPath(classId, { problemId: attempt.problem_id }));
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(dialogRef, {
+    onEscape: onCancel,
+    initialFocus: cancelRef,
+    // 정정을 걸면 「다시 채점」 단추가 사라진다 — 제목으로 돌아온다.
+    fallbackFocus: () => {
+      const heading = document.querySelector<HTMLElement>('[data-testid="class-attempts-heading"]');
+      heading?.setAttribute("tabindex", "-1");
+      return heading;
+    },
+  });
   const amount = state.status === "ready" ? submissionAmount(state.data) : state.status === "error" ? "—" : "…";
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
-      <button type="button" aria-label="닫기" onClick={onCancel} className="fixed inset-0 cursor-default" />
+      <button type="button" tabIndex={-1} aria-label="닫기" onClick={onCancel} className="fixed inset-0 cursor-default" />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="다시 채점"
@@ -69,7 +83,7 @@ function RegradeDialog({
           </p>
         ) : null}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" data-testid="regrade-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
+          <button ref={cancelRef} type="button" data-testid="regrade-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
             취소
           </button>
           <button
