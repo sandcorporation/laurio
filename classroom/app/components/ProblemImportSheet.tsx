@@ -80,7 +80,7 @@ export function ProblemImportSheet({
 
   // 초점은 창 안으로·Tab 은 창 안에·Escape 는 닫고 여는 단추로(#1463).
   const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(dialogRef, { onEscape: onClose });
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onClose });
 
   // --- 공개된 문제 ---------------------------------------------------------
   const [publicQuery, setPublicQuery] = useState("");
@@ -259,13 +259,14 @@ export function ProblemImportSheet({
         role="dialog"
         aria-modal="true"
         aria-label="문제 가져오기"
+        aria-describedby={descriptionId}
         data-testid="problem-import-sheet"
         className="relative flex max-h-[85vh] w-full max-w-[820px] flex-col border border-rule bg-surface"
       >
         <div className="flex items-start justify-between gap-3 border-b border-rule p-5">
           <div>
             <h2 className="text-[17px] font-semibold">문제 가져오기</h2>
-            <p className="mt-1 text-[12px] leading-relaxed text-ink/60">
+            <p id={descriptionId} className="mt-1 text-[12px] leading-relaxed text-ink/60">
               고른 문제가 지금 이 클래스에 초안으로 들어옵니다 — 가져온 뒤 고칠
               수 있습니다.
             </p>

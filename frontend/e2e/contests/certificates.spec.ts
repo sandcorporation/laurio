@@ -120,6 +120,8 @@ test("제출자를 골라 상장을 발급하면 목록에 행이 생기고 그 
   await page.getByTestId("certificates-issue").click();
   // 되돌릴 수 없다는 경고가 먼저 뜬다 — 확인 전에는 보내지 않는다.
   await expect(page.getByTestId("certificates-confirm")).toContainText("고칠 수 없고");
+  // 낭독기는 확인창에 들어가며 무엇을 하는지(장수·되돌릴 수 없음)를 듣는다(#1477).
+  await expect(page.getByRole("alertdialog")).toHaveAccessibleDescription(/1장을 발급합니다.*고칠 수 없고/);
   expect(sent).toBeNull();
   await page.getByTestId("certificates-confirm-issue").click();
 
@@ -170,6 +172,7 @@ test("발급한 상장은 새로고침 뒤에도 남고, 취소하면 경고를 
   await expect(page.getByTestId(`certificates-pick-${submissionId}`)).toBeDisabled();
   await row.getByRole("button", { name: "취소", exact: true }).click();
   await expect(page.locator('[data-testid^="certificates-cancel-confirm-"]')).toContainText("되돌릴 수 없습니다");
+  await expect(page.getByRole("alertdialog")).toHaveAccessibleDescription(/을\(를\) 취소합니다.*되돌릴 수 없습니다/);
   await page.locator('[data-testid^="certificates-cancel-go-"]').click();
   await expect(row).toHaveAttribute("data-status", "cancelled");
   // 취소된 상장은 묶음에 고를 수 없다.

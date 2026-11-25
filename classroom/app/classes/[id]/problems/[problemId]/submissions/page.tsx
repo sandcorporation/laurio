@@ -142,6 +142,8 @@ function AttemptRow({
   const summary = requiredSummary(submission, items, syntaxCheckEnabled);
   const entry = latestRowEntryBadge(submission, currentEntryAttempt);
   const canOpen = submission.status === "scored" && submission.score !== null;
+  // 줄마다 같은 글자의 단추·링크가 되풀이된다 — 낭독기 목록에서 가르도록 누구의 몇 번째 시도인지를 이름에 잇는다(보이는 글은 앞에 그대로).
+  const who = `${submission.member_display_name} 시도 ${submission.attempt_number}`;
   return (
     <li id={`submission-${submission.id}`} data-testid={testId} className="scroll-mt-4 px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
@@ -169,6 +171,7 @@ function AttemptRow({
             type="button"
             data-testid={`${testId}-verdict-toggle`}
             aria-expanded={open}
+            aria-label={`판정 ${who}`}
             onClick={onToggle}
             className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
           >
@@ -182,6 +185,7 @@ function AttemptRow({
               target="_blank"
               rel="noreferrer"
               data-testid={`${testId}-repository`}
+              aria-label={`저장소 ${who}`}
               className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
             >
               저장소
@@ -193,6 +197,7 @@ function AttemptRow({
                 target="_blank"
                 rel="noreferrer"
                 data-testid={`${testId}-commit`}
+                aria-label={`커밋 ${shortSha(submission.commit_sha)} ${who}`}
                 className="order-6 py-1.5 font-mono text-[12px] text-ink/60 hover:text-ink sm:order-none"
               >
                 {shortSha(submission.commit_sha)}
@@ -203,6 +208,7 @@ function AttemptRow({
           <a
             href={submission.download_url}
             data-testid={`${testId}-download`}
+            aria-label={`다운로드 ${who}`}
             className="order-6 px-3 py-1.5 text-[12.5px] text-ink/60 underline underline-offset-[3px] hover:text-ink sm:order-none"
           >
             다운로드

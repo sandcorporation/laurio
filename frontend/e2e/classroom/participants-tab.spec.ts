@@ -72,6 +72,10 @@ test("참여자 탭 — 한 표에서 가입일·통과 n/N 을 보고 내보내
   await page.getByTestId(`participant-row-${memberId}-menu`).click();
   await page.getByTestId(`participant-row-${memberId}-expel`).click();
   await expect(page.getByTestId("expel-dialog")).toContainText("나가는사람");
+  // 낭독기는 이름과 함께 본문을 듣는다 — 누가 어떻게 되는지(#1477).
+  await expect(page.getByRole("dialog", { name: "참여자 내보내기" })).toHaveAccessibleDescription(
+    /나가는사람님을 내보냅니다.*이름과 지난 제출·판정은 그대로 남습니다/,
+  );
   await page.getByTestId("expel-confirm").click();
   await expect(page.getByTestId(`participant-row-${memberId}-expelled-badge`)).toBeVisible();
   await expect(page.getByTestId(`participant-row-${memberId}-menu`)).toHaveCount(0);

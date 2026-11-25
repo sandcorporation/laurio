@@ -174,7 +174,7 @@ function ExpelDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   // 열리면 안전한 「취소」가 초점을 받는다. 닫힌 뒤 초점은 ParticipantsTab 이 정한다(#1447).
-  useDialogFocus(dialogRef, { onEscape: onCancel, initialFocus: cancelRef });
+  const { descriptionId } = useDialogFocus(dialogRef, { onEscape: onCancel, initialFocus: cancelRef });
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 p-4">
@@ -184,13 +184,14 @@ function ExpelDialog({
         role="dialog"
         aria-modal="true"
         aria-label="참여자 내보내기"
+        aria-describedby={descriptionId}
         data-testid="expel-dialog"
         className="relative w-full max-w-[420px] border border-rule bg-surface p-5"
       >
         <h2 className="text-[16px] font-semibold">{member.display_name}님을 내보낼까요?</h2>
-        <p className="mt-2 break-keep text-[13px] leading-relaxed text-ink/70">
-          내보내도 이름과 지난 제출·판정은 그대로 남습니다. 다만 다시 가입하거나 제출할 수는 없고, 달성률을
-          셀 때도 빠집니다.
+        <p id={descriptionId} className="mt-2 break-keep text-[13px] leading-relaxed text-ink/70">
+          {member.display_name}님을 내보냅니다. 내보내도 이름과 지난 제출·판정은 그대로 남습니다. 다만 다시 가입하거나
+          제출할 수는 없고, 달성률을 셀 때도 빠집니다.
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <button ref={cancelRef} type="button" data-testid="expel-cancel" onClick={onCancel} className={buttonClass("secondary", "sm")}>
