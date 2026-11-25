@@ -18,6 +18,9 @@ import {
   type ClassAttemptRow,
   type ClassAttemptVerdicts,
 } from "@/lib/classes/use-class-attempts";
+import type { ClassRow } from "@/lib/classes/api";
+import { attemptWaitingNote } from "@/lib/classes/scoring-block-note";
+import { MissingScoringKeyNote } from "@/app/components/MissingScoringKeyNote";
 import { useClass } from "@/lib/classes/use-class";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
 import { calculatorPath, submissionAmount, type ScoringCalculator } from "@/lib/scoring/calculator";
@@ -85,7 +88,15 @@ function RegradeDialog({
 }
 
 // 펼친 줄의 판정(#1334) — 펼칠 때 그 제출 하나만 읽는다. 채점 전·실패면 판정 대신 빈 글자.
-function AttemptVerdicts({ classId, attempt }: { classId: number; attempt: ClassAttemptRow }) {
+function AttemptVerdicts({
+  classId,
+  attempt,
+  classroom,
+}: {
+  classId: number;
+  attempt: ClassAttemptRow;
+  classroom: ClassRow | null;
+}) {
   const { state } = useBackendQuery<ClassAttemptVerdicts>(bffClient, classAttemptVerdictsPath(classId, attempt.id));
   const testId = `class-attempt-${attempt.id}`;
   if (state.status === "loading") {
@@ -103,6 +114,17 @@ function AttemptVerdicts({ classId, attempt }: { classId: number; attempt: Class
     );
   }
   const { score, checklist_items: items } = state.data;
+  const waiting = score === null ? attemptWaitingNote(attempt.status, classroom) : null;
+  if (waiting) {
+    return (
+      <MissingScoringKeyNote
+        classId={classId}
+        {...waiting}
+        noteTestId={`${testId}-waiting-note`}
+        settingsLinkTestId={`${testId}-waiting-link`}
+      />
+    );
+  }
   if (score === null) {
     return (
       <p data-testid={`${testId}-verdicts-empty`} className="text-[12.5px] text-ink/45">
@@ -208,7 +230,11 @@ function ClassAttempts() {
                       expanded: expandedId === attempt.id,
                       onToggle: () => setExpandedId(expandedId === attempt.id ? null : attempt.id),
                     }}
-                    detail={<AttemptVerdicts classId={classId} attempt={attempt} />}
+                    detail={<AttemptVerdicts
+                        classId={classId}
+                        attempt={attempt}
+                        classroom={classState.status === "ready" ? classState.classroom : null}
+                      />}
                     action={
                       attempt.correctable ? (
                         <button

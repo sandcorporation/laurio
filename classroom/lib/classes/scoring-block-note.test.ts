@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NotificationRow } from "../notifications/api";
 import { describeNotification } from "../notifications/format";
 
-import { coInstructorCardHint, modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
+import { attemptWaitingNote, coInstructorCardHint, modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
 
 const connected = {
   archived: false,
@@ -217,5 +217,19 @@ describe("coInstructorCardHint — 채점 카드 (#1431)", () => {
   it("소유자·연결됨이면 없다", () => {
     expect(coInstructorCardHint(missing)).toBeNull();
     expect(coInstructorCardHint({ ...connected, role: "co_instructor" })).toBeNull();
+  });
+});
+
+describe("attemptWaitingNote — 펼친 채점 대기 시도 (#1436 7번)", () => {
+  it("채점 대기 시도만 멈춘 까닭과 고칠 곳을 준다", () => {
+    expect(attemptWaitingNote("needs_setup", missing)).toEqual(scoringBlockNote(missing, "submissions"));
+    expect(attemptWaitingNote("scoring", missing)).toBeNull();
+    expect(attemptWaitingNote("passed", missing)).toBeNull();
+  });
+
+  it("공동 강사는 단추 없이 소유자에게 부탁하는 문장", () => {
+    const note = attemptWaitingNote("needs_setup", { ...missing, role: "co_instructor" });
+    expect(note?.actionLabel).toBeNull();
+    expect(note?.message).toContain("소유자에게");
   });
 });
