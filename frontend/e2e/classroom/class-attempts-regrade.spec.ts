@@ -15,6 +15,8 @@ let ownerState: State;
 let classId: number;
 let submissionId: number;
 let secondSubmissionId: number;
+// 연 단추가 사라진 뒤 그만두는 시험 둘이 각자 쓴다(다시 채점을 걸면 그 단추는 없어진다).
+const goneOpenerIds: Record<"Escape" | "취소 단추", number> = { Escape: 0, "취소 단추": 0 };
 
 test.beforeAll(async ({ browser }) => {
   test.setTimeout(30_000);
@@ -67,6 +69,20 @@ test.beforeAll(async ({ browser }) => {
   expect(secondSubmitted.ok()).toBeTruthy();
   secondSubmissionId = (await secondSubmitted.json()).id as number;
   await second.close();
+  for (const [how, name] of [["Escape", "오세린"], ["취소 단추", "문도현"]] as const) {
+    const ctx = await browser.newContext();
+    const ctxPage = await ctx.newPage();
+    await establishClassroomSession(ctxPage, `${seed}-${how === "Escape" ? "c" : "d"}`);
+    const ctxApi = classroomApi(ctxPage);
+    await ctxApi.post(`/api/backend/classroom/join/${joinCode}`, { data: { display_name: name } });
+    const made = await ctxApi.post(`${base}/submissions`, {
+      data: { value: `https://github.com/octocat/${marker}`, submission_format: "repository" },
+    });
+    expect(made.ok()).toBeTruthy();
+    goneOpenerIds[how] = (await made.json()).id as number;
+    await ctx.close();
+    await runSeed("classroom-failed-score", { submission_id: goneOpenerIds[how] });
+  }
   await runSeed("classroom-failed-score", { submission_id: submissionId });
   await runSeed("classroom-failed-score", { submission_id: secondSubmissionId });
 
@@ -149,11 +165,43 @@ for (const how of ["Escape", "취소 단추"] as const) {
     if (how === "Escape") await page.keyboard.press("Escape");
     else await loading.getByRole("button", { name: "취소" }).click();
     await expect(loading).toHaveCount(0);
+    // 단추가 사라진 직후에도 초점은 body 가 아니라 연 단추다(#1503 ④).
+    await expect(opener).toBeFocused();
     const answered = page.waitForResponse("**/scoring-calculator**");
     release();
     await answered;
     await expect(page.getByRole("dialog", { name: "다시 채점" })).toHaveCount(0);
-    if (how === "Escape") await expect(opener).toBeFocused();
+    await expect(opener).toBeFocused();
+  });
+}
+
+// 조회 중 원래 단추가 다른 탭의 다시 채점으로 사라진 뒤 그만두면 — 클릭이든 Escape 든 초점은 제목으로 간다(#1503 ④).
+for (const how of ["Escape", "취소 단추"] as const) {
+  test(`금액 조회 중 연 단추가 사라진 뒤 ${how}로 그만두면 초점이 제목으로 간다`, async ({ browser }) => {
+    const page = await (await browser.newContext({ storageState: ownerState })).newPage();
+    await page.route("**/scoring-calculator**", async (route) => {
+      await new Promise(() => {});
+      await route.continue();
+    });
+    await page.goto(`/classes/${classId}/submissions`);
+    const opener = page.getByTestId(`regrade-${goneOpenerIds[how]}`);
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    const loading = page.getByRole("status").filter({ hasText: "예상 금액을 불러오는 중" });
+    await expect(loading).toBeVisible();
+
+    const other = await (await browser.newContext({ storageState: ownerState })).newPage();
+    await other.goto(`/classes/${classId}/submissions`);
+    const response = await classroomApi(other).post(`/api/backend/classroom/classes/${classId}/score-corrections`, {
+      data: { submission_ids: [goneOpenerIds[how]] },
+    });
+    expect(response.ok()).toBeTruthy();
+    await expect(opener).toHaveCount(0);
+
+    if (how === "Escape") await page.keyboard.press("Escape");
+    else await loading.getByRole("button", { name: "취소" }).click();
+    await expect(loading).toHaveCount(0);
+    await expect(page.getByTestId("class-attempts-heading")).toBeFocused();
   });
 }
 

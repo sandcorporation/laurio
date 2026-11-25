@@ -25,6 +25,7 @@ import {
   exportUnderLimit,
 } from "./capture";
 import { trapTabTarget } from "./focus-trap";
+import { createSessionGate } from "./session-gate";
 import { MarkupEditor, type MarkupHandle } from "./markup";
 
 type Phase = "closed" | "capturing" | "editing" | "sending" | "done";
@@ -60,6 +61,8 @@ export function FeedbackLauncher({
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   // 제보 버튼 — 창이 닫히면 초점이 돌아올 곳(#1496 ⑧).
   const opener = useRef<HTMLElement | null>(null);
+  // 기다리는 일(캡처·화면 공유·파일)이 끝났을 때 그 사이 창이 닫혔으면 늦은 결과를 버린다(#1503 ⑤).
+  const gate = useRef(createSessionGate());
   // 창의 설명 — 접수 결과, 아니면 지금 떠 있는 경고·오류. 가리킬 것이 없으면 속성을 달지 않는다.
   const doneId = useId();
   const captureFailedId = useId();
@@ -76,6 +79,7 @@ export function FeedbackLauncher({
   }, [client, permissionClient]);
 
   const close = useCallback(() => {
+    gate.current.invalidate();
     setPhase("closed");
     setSource(null);
     setCaptureFailed(false);
@@ -124,18 +128,21 @@ export function FeedbackLauncher({
     opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setPhase("capturing");
     setError(null);
+    const ticket = gate.current.begin();
     const canvas = await captureViewport();
+    if (!gate.current.isCurrent(ticket)) return;
     setSource(canvas);
     setCaptureFailed(canvas === null);
     setPhase("editing");
   }
 
   async function retakeFromDisplay() {
+    const ticket = gate.current.begin();
     setHiddenForShare(true);
     await new Promise((resolve) => setTimeout(resolve, 250));
     const canvas = await captureFromDisplay();
     setHiddenForShare(false);
-    if (canvas) {
+    if (canvas && gate.current.isCurrent(ticket)) {
       setSource(canvas);
       setCaptureFailed(false);
     }
@@ -143,7 +150,9 @@ export function FeedbackLauncher({
 
   async function attachFile(file: File | undefined) {
     if (!file) return;
+    const ticket = gate.current.begin();
     const canvas = await canvasFromFile(file);
+    if (!gate.current.isCurrent(ticket)) return;
     if (canvas) {
       setSource(canvas);
       setCaptureFailed(false);
