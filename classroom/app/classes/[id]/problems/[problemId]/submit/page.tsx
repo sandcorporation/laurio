@@ -16,6 +16,7 @@ import type { ChangeEvent, FormEvent } from "react";
 
 import { checkGithubRepositoryUrl } from "@codemit/bff-client/repository-url";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { ErrorNote, PageShell, buttonClass } from "@/app/components/ui";
 import { ContestEntryFields } from "@/app/components/ContestEntryFields";
 import { ProblemParticipantView } from "@/app/components/ProblemParticipantView";
@@ -116,10 +117,7 @@ export default function ProblemSubmitPage() {
   if (state.status === "notFound") {
     return (
       <PageShell>
-        <BackToMyProblems classId={classId} />
-        <h1 data-testid="my-problem-not-found" className="text-[22px] font-semibold">
-          문제를 찾을 수 없습니다
-        </h1>
+        <AccessNotice page="submit" classId={classId} testId="my-problem-not-found" />
       </PageShell>
     );
   }

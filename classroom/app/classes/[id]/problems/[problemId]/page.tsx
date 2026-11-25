@@ -37,6 +37,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { AccessNotice } from "@/app/components/AccessNotice";
 import { useClass } from "@/lib/classes/use-class";
 import { checkPublicTextForBannedWords } from "@/lib/moderation/public-text-check";
 import { useMutationRequest } from "@/lib/mutations/use-mutation-request";
@@ -85,7 +86,7 @@ export default function EditProblemPage() {
   const params = useParams<{ id: string; problemId: string }>();
   const classId = Number(params.id);
   // 미리보기 눈썹이 참여자 화면과 같이 클래스 이름을 말한다(#372 후속, 새 문제 화면과 같다).
-  const { state: classState } = useClass(classId);
+  const { state: classState, reload: reloadClass } = useClass(classId);
   const previewEyebrow = classState.status === "ready" ? classState.classroom.name : "";
   const problemId = Number(params.problemId);
   const router = useRouter();
@@ -187,10 +188,36 @@ export default function EditProblemPage() {
     );
   }
 
+  if (state.status === "notFound") {
+    return (
+      <PageShell>
+        <AccessNotice
+          page="problem"
+          classId={classId}
+          testId="edit-problem-not-found"
+          retry={{
+            reload: () => {
+              reloadClass();
+              reload();
+            },
+            turns: [state],
+          }}
+        />
+      </PageShell>
+    );
+  }
+
   if (state.status === "error") {
     return (
       <PageShell>
-        <p data-testid="edit-problem-error" className="text-[15px]">문제를 찾을 수 없습니다.</p>
+        <ErrorNote>
+          <span data-testid="edit-problem-error">문제 정보를 불러오지 못했습니다.</span>
+        </ErrorNote>
+        <p className="mt-4">
+          <button type="button" data-testid="edit-problem-retry" onClick={reload} className={buttonClass("secondary", "sm")}>
+            다시 불러오기
+          </button>
+        </p>
       </PageShell>
     );
   }
