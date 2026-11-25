@@ -142,10 +142,30 @@ def test_class_row_problem_count_includes_drafts_and_the_average_is_over_open_pr
     row = _row(client, owner["access"], class_id)
 
     rates = [p["pass_rate"] for p in list_problems(client, owner["access"], class_id) if p["status"] == "open"]
-    assert rates == [0.5, 0.0]
+    # 아무도 채점되지 않은 「2주차」는 0% 가 아니라 비어 있고, 평균에서는 아직 아무도 못 푼 몫(0)이다(#1400).
+    assert rates == [0.5, None]
     assert row["problem_count"] == 3
     assert row["average_pass_rate"] == pytest.approx(0.25)
     assert second.id
+
+
+def test_pass_rate_is_null_until_an_attempt_is_graded_and_zero_after_an_unmet_one(client, db, monkeypatch):
+    """채점 대기와 미통과를 가른다(#1400) — 낸 시도만 있으면 비어 있고, 미충족으로 채점되면 0% 다."""
+
+    owner, class_id, problem, a, _b = _class_with_two_learners(client)
+    submit_repository(client, a["access"], class_id, problem.id)
+
+    def rates():
+        listed = list_problems(client, owner["access"], class_id)[0]["pass_rate"]
+        grid = _get(client, owner["access"], f"/{class_id}/roster-grid").json()["problems"][0]["pass_rate"]
+        return listed, grid, _row(client, owner["access"], class_id)["average_pass_rate"]
+
+    assert rates() == (None, None, None)
+
+    respond_with_verdict(monkeypatch, problem.item_id, is_met=False)
+    run_scan(client)
+
+    assert rates() == (0.0, 0.0, 0.0)
 
 
 def test_join_preview_counts_match_the_class_rows(client, db):
