@@ -9,7 +9,7 @@
 // 소진·서버 연결 불가)는 배너가 아니라 「채점」 카드의 상태 한 줄이 말한다.
 // 강사 탭의 내용은 #635 가 다시 짠다 — 그때까지는 예전 화면을 그 자리에 둔다.
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 
 import { AccessNotice } from "@/app/components/AccessNotice";
 import { ErrorNote, PageShell } from "@/app/components/ui";
@@ -18,8 +18,7 @@ import { parseDetailTab } from "@/lib/classes/detail-tab";
 import { scoringStatus } from "@/lib/classes/scoring-status";
 import { offerEndNote } from "@/lib/co-instructors/transfer-end-note";
 import { useClass } from "@/lib/classes/use-class";
-import { INSTRUCTORS_CHANGED, NOTIFICATION_CHANGED, isClassSignal, type StreamEvent } from "@/lib/events/types";
-import { useRealtimeRefresh } from "@/lib/events/use-realtime-refresh";
+import { useClassSignalReload } from "@/lib/classes/use-class-signal-reload";
 import type { PickerTab } from "@/lib/problem-templates/picker-selection";
 import { useProblems } from "@/lib/problems/use-problems";
 import { useClassroomTabTitle } from "@/lib/rendering/use-tab-title";
@@ -45,8 +44,6 @@ function joinLinkUrl(joinCode: string): string {
   return `${window.location.origin}/join/${joinCode}`;
 }
 
-const TRANSFER_FALLBACK_POLL_MS = 30_000;
-
 function ClassDetail() {
   const params = useParams<{ id: string }>();
   const classId = Number(params.id);
@@ -64,36 +61,14 @@ function ClassDetail() {
   const ready = classState.status === "ready" ? classState.classroom : null;
   const waitingForAnswer = ready?.role === "owner" && ready.pending_ownership_transfer !== null;
   // 강사 쪽 상태가 바뀌면(초대 수락·이전 요청·답, #1447 10-1) 클래스를 다시 읽는다 — 역할과 대기 요청이 여기 있다.
-  // 소유권 이전의 답은 요청한 사람에게 알림으로도 온다(#1441) — 답을 기다리는 동안만 그 신호도 본다. 탭으로
-  // 돌아오면 스트림이 다시 열리며 한 번 다시 읽는다(`decideStreamRefresh`).
-  const matchesClassChange = useCallback(
-    (event: StreamEvent) =>
-      isClassSignal(event, INSTRUCTORS_CHANGED, classId) || (waitingForAnswer && event.kind === NOTIFICATION_CHANGED),
-    [classId, waitingForAnswer],
-  );
-  // 같은 변경의 재조회는 여기서 한 번만 시작한다(#1459 ⑥) — 강사 영역은 이 응답에 맞춰 명단·대기 초대를 읽는다.
-  // 초대 수락 신호와 이전 답 알림이 잇따라 와도 클래스 요청은 하나다.
-  const signalPending = useRef(false);
-  const reloadTimer = useRef<number | null>(null);
-  const reloadForSignal = useCallback(() => {
-    signalPending.current = true;
-    if (reloadTimer.current !== null) return;
-    reloadTimer.current = window.setTimeout(() => {
-      reloadTimer.current = null;
-      reloadClass();
-    }, 250);
-  }, [reloadClass]);
-  useEffect(
-    () => () => {
-      if (reloadTimer.current !== null) window.clearTimeout(reloadTimer.current);
-    },
-    [],
-  );
-  useRealtimeRefresh({
-    matches: matchesClassChange,
-    waiting: waitingForAnswer,
-    fallbackPollMs: TRANSFER_FALLBACK_POLL_MS,
-    reload: reloadForSignal,
+  // 같은 변경의 재조회는 시간 창이 아니라 변경 번호로 하나가 된다(#1484 ④): 이미 읽은 번호의 신호는 건너뛴다.
+  // 강사 영역은 이 응답에 맞춰 명단·대기 초대를 읽는다(`signalPending`). 탭으로 돌아오면 스트림이 다시 열리며 한 번 읽는다.
+  const { signalPending, beginCommand, reloadAfterCommand } = useClassSignalReload({
+    classId,
+    loaded: ready,
+    classroomSignalRev: ready?.signal_rev ?? 0,
+    waitingForAnswer,
+    reloadClass,
   });
   const currentRole = ready?.role ?? null;
   useEffect(() => {
@@ -283,11 +258,12 @@ function ClassDetail() {
               classId={classId}
               role={classroom.role}
               pendingTransfer={classroom.pending_ownership_transfer}
-              onTransferChanged={(change) => {
+              onCommandStart={beginCommand}
+              onTransferChanged={(change, seenRevAtStart) => {
                 if (change === "requested") focusPendingTransfer.current = true;
                 if (change === "cancel-failed") cancelFailed.current = true;
-                // 같은 변경의 서버 신호가 곧 따라오므로 신호와 같은 조정 경로로 한 번만 읽는다(#1471 ②).
-                reloadForSignal();
+                // 같은 변경의 서버 신호는 번호로 알아본다 — 이미 읽은 번호면 건너뛰고, 명령 사이에 먼저 왔으면 그 신호가 읽는다(#1484 ④).
+                reloadAfterCommand(seenRevAtStart);
               }}
               focusPendingTransfer={focusPendingTransfer}
               classVersion={classroom}
