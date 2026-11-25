@@ -111,6 +111,8 @@ test("좁은 폭에서 대기 사유가 다 보이고 링크로 제출 칸에 �
   await expect(submitForm).not.toBeInViewport();
   await page.getByTestId("my-problem-submit-jump").click();
   await expect(submitForm).toBeInViewport();
+  // 「제출 칸으로」 뒤 초점은 저장소 주소 칸에 있다(#1400-8).
+  await expect(page.getByTestId("repository-url-input")).toBeFocused();
 
   await page.getByTestId("repository-url-input").fill("https://github.com/octocat/e2e-submit");
   await page.getByTestId("submit-repository").click();
@@ -118,6 +120,8 @@ test("좁은 폭에서 대기 사유가 다 보이고 링크로 제출 칸에 �
   // 키 없는 클래스라 시도는 채점 대기에 머문다.
   const note = page.getByTestId(/^submission-row-\d+-no-api-key-note$/);
   await expect(note).toHaveText("강사의 채점 설정 때문에 멈췄습니다 — 다시 낼 필요 없습니다");
+  // 제목 옆 배지도 목록과 같은 「채점 대기」다(#1395).
+  await expect(page.getByTestId("my-problem-passed-status")).toHaveText("채점 대기");
   expect(
     await note.evaluate((element) => ({
       clipped: element.scrollWidth > element.clientWidth,
