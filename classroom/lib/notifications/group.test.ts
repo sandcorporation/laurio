@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { NotificationRow } from "./api";
 import {
-  groupCurrentlyPassed,
+  groupHeaderText,
   groupHref,
   groupNotifications,
   groupUnreadCount,
@@ -50,23 +50,45 @@ describe("groupNotifications", () => {
   });
 });
 
-describe("groupCurrentlyPassed", () => {
-  it("가장 최근 시도가 미통과여도 이전에 통과한 적이 있으면 통과다", () => {
+describe("groupHeaderText", () => {
+  const context = { class_id: 7, class_name: "1반", problem_id: 1, problem_title: "문제 A" };
+
+  it("불러온 알림이 전부 미통과여도 서버가 말하는 지금 상태와 시도 수를 적는다(#1405)", () => {
+    // 통과 알림은 다음 쪽에 있어 아직 불러오지 않았다.
+    const problemStatus = { passed: true, attempt_count: 5 };
     const items = [
-      row({ id: 2, context: { problem_id: 1, passed: false } }), // 최신, 미통과
-      row({ id: 1, context: { problem_id: 1, passed: true } }), // 이전, 통과
+      row({ id: 5, context: { ...context, passed: false }, problem_status: problemStatus }),
+      row({ id: 4, context: { ...context, passed: false }, problem_status: problemStatus }),
     ];
     const [group] = groupNotifications(items);
-    expect(groupCurrentlyPassed(group)).toBe(true);
+    expect(groupHeaderText(group)).toBe("'1반' 클래스 '문제 A' 문제 — 지금 상태 통과 (시도 5건)");
   });
 
-  it("한 번도 통과한 적이 없으면 미통과다", () => {
+  it("지난 채점이 통과였어도 지금 상태가 미통과면 미통과다", () => {
     const items = [
-      row({ id: 2, context: { problem_id: 1, passed: false } }),
-      row({ id: 1, context: { problem_id: 1, passed: false } }),
+      row({ id: 2, context: { ...context, passed: true }, problem_status: { passed: false, attempt_count: 2 } }),
+      row({ id: 1, context: { ...context, passed: true } }),
     ];
     const [group] = groupNotifications(items);
-    expect(groupCurrentlyPassed(group)).toBe(false);
+    expect(groupHeaderText(group)).toContain("지금 상태 미통과 (시도 2건)");
+  });
+
+  it("여러 번 불러와 값이 다르면 가장 최근 알림이 실어 온 것을 따른다", () => {
+    const items = [
+      row({ id: 2, context, problem_status: { passed: true, attempt_count: 3 } }),
+      row({ id: 1, context, problem_status: { passed: false, attempt_count: 2 } }),
+    ];
+    const [group] = groupNotifications(items);
+    expect(groupHeaderText(group)).toContain("지금 상태 통과 (시도 3건)");
+  });
+
+  it("서버가 상태를 모르면 불러온 알림에서 지어내지 않는다", () => {
+    const items = [
+      row({ id: 2, context: { ...context, passed: false }, problem_status: null }),
+      row({ id: 1, context: { ...context, passed: true } }),
+    ];
+    const [group] = groupNotifications(items);
+    expect(groupHeaderText(group)).toBe("'1반' 클래스 '문제 A' 문제");
   });
 });
 

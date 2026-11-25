@@ -9,6 +9,8 @@ core 의 내부 틱 엔드포인트와 같은 `InternalAuth` 를 쓴다 — 둘 
 인프라(또는 아직 없는 상위 도메인 로직)가 호출하는 진입점이기 때문이다.
 """
 
+from dataclasses import asdict
+
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 from ninja import Router, Schema
@@ -26,6 +28,7 @@ from .models import (
     NotificationDispatch,
     NotificationType,
 )
+from .ports import CLASSROOM_PROBLEM_STATUSES
 from .services import create_notification
 
 router = Router(tags=["internal", "notifications"], auth=InternalAuth())
@@ -71,6 +74,11 @@ class DispatchOut(Schema):
     failure_reason: str
 
 
+class ProblemStatusOut(Schema):
+    passed: bool
+    attempt_count: int
+
+
 class NotificationOut(Schema):
     id: int
     notification_type: str
@@ -92,6 +100,9 @@ class NotificationOut(Schema):
     title: str | None = None
     body: str | None = None
     has_image: bool = False
+    # 채점 완료 알림이 가리키는 문제의 **지금** 상태(#1405) — `context.passed` 는 그 시도의 채점 때
+    # 사실이다. 강의실 목록(`/me?classroom_only=true`)만 채우고, 받는 사람 자신의 시도가 없는 문제는 `null`.
+    problem_status: ProblemStatusOut | None = None
 
 
 class UnreadCountOut(Schema):
@@ -194,6 +205,31 @@ def _serialize(notification: Notification, *, for_recipient: bool = False) -> di
     }
 
 
+def _scored_problem_id(notification: Notification) -> int | None:
+    if notification.notification_type != NotificationType.CLASSROOM_SUBMISSION_SCORED:
+        return None
+    problem_id = (notification.context or {}).get("problem_id")
+    return problem_id if isinstance(problem_id, int) else None
+
+
+def _serialize_page(notifications: list[Notification], *, recipient_id: int) -> list[dict]:
+    """받는 사람의 목록 한 쪽 — 채점 알림에는 문제의 지금 상태를 한 번에 물어 싣는다(#1405)."""
+
+    problem_ids = {pid for n in notifications if (pid := _scored_problem_id(n)) is not None}
+    statuses = CLASSROOM_PROBLEM_STATUSES.get()(recipient_id, problem_ids) if problem_ids else {}
+    items = []
+    for notification in notifications:
+        problem_id = _scored_problem_id(notification)
+        status = None if problem_id is None else statuses.get(problem_id)
+        items.append(
+            {
+                **_serialize(notification, for_recipient=True),
+                "problem_status": None if status is None else asdict(status),
+            }
+        )
+    return items
+
+
 @router.post("", response=NotificationOut)
 def create(request, payload: CreateNotificationIn):
     recipient = get_object_or_404(get_user_model(), pk=payload.recipient_id)
@@ -255,7 +291,7 @@ def list_my_notifications(request, after: str | None = None, classroom_only: boo
         notifications, after=after, page_size=NOTIFICATION_HISTORY_PAGE_SIZE
     )
     return {
-        "items": [_serialize(n, for_recipient=True) for n in items],
+        "items": _serialize_page(items, recipient_id=request.auth_user.id),
         "count": notifications.count(),
         "next": next_cursor,
     }

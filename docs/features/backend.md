@@ -1187,6 +1187,14 @@ SMS·LMS 어느 것도 시도하지 않고 야간 연기 대상도 되지 않으
 머리글이 쓴다)는 `pk__in`을 같은 `recipient` 필터로 좁혀 갱신한다 — 남의
 id가 섞여 들어와도 에러 없이 그 행만 걸러진다.
 
+`GET /notifications/me?classroom_only=true`는 채점 완료 알림마다 `problem_status`
+(`passed`·`attempt_count`)를 싣는다(#1405) — `context.passed`는 그 시도를 채점한 때의
+값이고, `problem_status`는 응답하는 때의 값이다. 통과는 참여자의 문제 목록과 같은
+판정(시도 어느 하나라도 지금의 체크리스트로 통과)이고, **받는 사람 자신의 시도만**
+센다 — 자기 시도가 없는 문제와 다른 알림 유형은 `null`이다. 읽음 처리 응답은 언제나
+`null`이다. 강의실 앱이 `notifications.ports.CLASSROOM_PROBLEM_STATUSES`에 구현을
+올리고, 한 쪽의 문제들을 한 번에 물어 질의 수가 문제 수만큼 늘지 않는다.
+
 ## 정책 값
 
 **정책은 DB 에 살고 운영자 API 로만 바뀐다**(ADR-0023). 단일 행이고 모든 변경이 이력으로

@@ -44,7 +44,7 @@ import {
   formatDateTime,
 } from "@/lib/notifications/format";
 import {
-  groupCurrentlyPassed,
+  groupHeaderText,
   groupHref,
   groupNotifications,
   groupUnreadCount,
@@ -281,13 +281,10 @@ function NotificationGroupRow({
   }
 
   const latest = group.notifications[0];
-  const currentlyPassed = groupCurrentlyPassed(group);
   const unreadCount = groupUnreadCount(group);
   const testKey = group.problemId ?? group.key;
   const href = groupHref(group);
-  const headerText = `'${group.className ?? "클래스"}' 클래스 '${group.problemTitle ?? "문제"}' 문제 — 지금 상태 ${
-    currentlyPassed ? "통과" : "미통과"
-  } (시도 ${group.notifications.length}건)`;
+  const headerText = groupHeaderText(group);
   const headerBody = (
     <>
       <p className="text-[13.5px] leading-relaxed">{headerText}</p>

@@ -30,6 +30,9 @@ export type NotificationRow = {
   context: Record<string, unknown>;
   dispatches: NotificationDispatchRow[];
   read_at: string | null;
+  // 채점 알림이 가리키는 문제의 **지금** 상태(#1405) — 목록 응답만 채운다. 받는 사람 자신의
+  // 시도가 없는 문제(지워졌거나 클래스를 떠난 경우)는 `null`이다.
+  problem_status?: { passed: boolean; attempt_count: number } | null;
 };
 
 export type UnreadCount = { count: number };
