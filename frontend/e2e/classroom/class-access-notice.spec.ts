@@ -374,3 +374,28 @@ test("제출 중 내보내짐(403)을 받으면 새로 고친 뒤처럼 폼이 �
   await expect(page.getByTestId("member-expelled-note")).toHaveAttribute("role", "alert");
   await expect(page.getByTestId("member-expelled-note")).toBeFocused();
 });
+
+test("폼을 연 채 문제가 숨겨지면 적던 저장소 주소를 안내 아래에 남긴다 (#1436 10번)", async ({ page, browser }) => {
+  const seed = `access-hidden-${test.info().workerIndex}-${Date.now()}`;
+  const { classId, openId, joinCode } = await seedClass(browser, seed);
+  await joinAs(page, seed, joinCode);
+  await page.goto(`/classes/${classId}/problems/${openId}/submit`);
+  await expect(page.getByTestId("repository-url-input")).toBeVisible();
+
+  await page.getByTestId("repository-url-input").fill("https://github.com/owner/repo");
+  await page.route(
+    (url) => url.pathname.endsWith(`/problems/${openId}/submissions`),
+    (route) =>
+      route.request().method() === "POST"
+        ? route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not Found" }) })
+        : route.continue(),
+  );
+  await page.route(
+    (url) => url.pathname.endsWith(`/problems/${openId}/mine`),
+    (route) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not Found" }) }),
+  );
+  await page.getByTestId("submit-repository").click();
+
+  await expect(page.getByTestId("my-problem-not-found")).toBeVisible();
+  await expect(page.getByTestId("my-problem-lost-draft")).toContainText("https://github.com/owner/repo");
+});

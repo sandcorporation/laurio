@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { NotificationRow } from "../notifications/api";
 import { describeNotification } from "../notifications/format";
 
-import { coInstructorCardHint, modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
+import { attemptWaitingNote, coInstructorCardHint, modelRejectedNote, scoringBlockNote } from "./scoring-block-note";
 
 const connected = {
   archived: false,
@@ -217,5 +217,39 @@ describe("coInstructorCardHint — 채점 카드 (#1431)", () => {
   it("소유자·연결됨이면 없다", () => {
     expect(coInstructorCardHint(missing)).toBeNull();
     expect(coInstructorCardHint({ ...connected, role: "co_instructor" })).toBeNull();
+  });
+});
+
+describe("attemptWaitingNote — 펼친 채점 대기 시도 (#1436 7번)", () => {
+  const base = { problem_id: 9, problem_model: "" };
+  const co = { ...missing, role: "co_instructor" as const };
+
+  it("채점 대기 시도만 노트를 준다", () => {
+    expect(attemptWaitingNote({ ...base, status: "scoring" }, missing, 3)).toBeNull();
+    expect(attemptWaitingNote({ ...base, status: "passed" }, missing, 3)).toBeNull();
+  });
+
+  it("키 사유 — 클래스 연결 문구, 소유자만 단추", () => {
+    const row = { ...base, status: "needs_setup", pending_reason: "no_api_key" };
+    expect(attemptWaitingNote(row, missing, 3)).toMatchObject(scoringBlockNote(missing, "submissions"));
+    expect(attemptWaitingNote(row, co, 3)).toMatchObject({ actionLabel: null });
+  });
+
+  it("모델 사유 — 키가 연결돼 있어도 채점 모델을 말한다(클래스 연결 문구가 아니다)", () => {
+    const row = { ...base, status: "needs_setup", pending_reason: "model_rejected" };
+    const owner = attemptWaitingNote(row, connected, 3);
+    expect(owner?.message).toBe(modelRejectedNote("owner", 3, 9, "").message);
+    expect(owner?.message).not.toContain("채점 연결");
+    expect(owner).toMatchObject({ actionLabel: "채점 모델 바꾸기", href: "/classes/3/settings#scoring-model" });
+    // 문제가 자기 모델을 쓰면 소유자도 문제 편집으로
+    expect(attemptWaitingNote({ ...row, problem_model: "gpt-5-mini" }, connected, 3)?.href).toBe(
+      "/classes/3/problems/9#scoring-model",
+    );
+    // 공동 강사 — 같은 문장, 문제 편집으로
+    expect(attemptWaitingNote(row, { ...connected, role: "co_instructor" }, 3)).toMatchObject({
+      message: owner?.message,
+      actionLabel: "채점 모델 바꾸기",
+      href: "/classes/3/problems/9#scoring-model",
+    });
   });
 });

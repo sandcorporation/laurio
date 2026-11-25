@@ -1393,6 +1393,11 @@ class ClassroomRecentAttemptOut(Schema):
     submitted_at: datetime
     #: 늦음 단계(#941) — `ClassroomSubmissionOut.late` 와 같은 셈.
     late: LateStatus
+    #: `status` 가 "needs_setup" 일 때 멈춘 사유 — 참여자 화면 `pending_reason` 과 같은 값
+    #: ("no_api_key" | "model_rejected"), 아니면 null(#1436).
+    pending_reason: str | None = None
+    #: 이 문제 자신의 채점 모델(비면 클래스 기본값을 따른다) — 모델 거부의 「채점 모델 바꾸기」 갈 곳을 가른다.
+    problem_model: str = ""
 
 
 class ClassroomAttemptRowOut(ClassroomRecentAttemptOut):

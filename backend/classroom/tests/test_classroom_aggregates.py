@@ -322,6 +322,26 @@ def test_recent_attempts_marks_needs_setup_when_there_is_no_scoring_key(client, 
     rows = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
 
     assert [r["status"] for r in rows] == ["needs_setup"]
+    assert rows[0]["pending_reason"] == "no_api_key"
+
+
+@pytest.mark.parametrize("own_model", ["", "gpt-5-mini"])
+def test_recent_attempts_names_the_model_rejection_apart_from_the_key(client, db, own_model):
+    from classroom.models import Problem
+
+    owner = login(client, "owner")
+    class_id = create_class(client, owner["access"])
+    problem = create_open_problem(client, owner["access"], class_id)
+    Problem.objects.filter(id=problem.id).update(scoring_model_rejected_at="2026-01-01T00:00:00Z", model=own_model)
+    a = login(client, "learner-a")
+    join_class(client, a["access"], class_id, instructor_access=owner["access"], display_name="가")
+    submit_repository(client, a["access"], class_id, problem.id)
+
+    rows = _get(client, owner["access"], f"/{class_id}/recent-attempts").json()
+
+    assert rows[0]["status"] == "needs_setup"
+    assert rows[0]["pending_reason"] == "model_rejected"
+    assert rows[0]["problem_model"] == own_model
 
 
 def test_recent_attempts_skip_the_instructor_and_the_expelled_and_are_instructor_only(client, db):

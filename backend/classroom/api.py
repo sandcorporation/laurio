@@ -2430,8 +2430,10 @@ def _class_attempts_newest_first(class_obj: Class):
 
 def _recent_attempt_row(class_obj: Class, attempt: ClassroomSubmission) -> ClassroomRecentAttemptOut:
     score = current_score(attempt)
+    pending_reason = None
     if score is None:
-        status = "needs_setup" if pending_scoring.needs_setup(class_obj, attempt.problem) else "scoring"
+        pending_reason = pending_scoring.blocking_reason(class_obj, attempt.problem)
+        status = "needs_setup" if pending_reason is not None else "scoring"
     else:
         status = "passed" if attempt.problem.is_score_passed(score) else "attempted_not_passed"
         if score.model_version == PLATFORM_FAILURE_MODEL_VERSION:
@@ -2447,6 +2449,8 @@ def _recent_attempt_row(class_obj: Class, attempt: ClassroomSubmission) -> Class
         status=status,
         submitted_at=attempt.created_at,
         late=attempt.problem.lateness(attempt.created_at),
+        pending_reason=pending_reason,
+        problem_model=attempt.problem.model,
     )
 
 

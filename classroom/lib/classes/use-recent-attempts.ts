@@ -26,6 +26,9 @@ export type RecentAttemptRow = {
   submitted_at: string;
   // 권장 기한 뒤에 낸 시도인가(#769) — 결과 낱말에 「· 늦음」으로 붙는다(#774).
   late: LateStatus;
+  // `status` 가 needs_setup 일 때 멈춘 사유(참여자 화면 `pending_reason` 과 같은 값)와 문제 자신의 채점 모델(#1436).
+  pending_reason?: string | null;
+  problem_model?: string;
 };
 
 const FALLBACK_POLL_MS = 30_000;

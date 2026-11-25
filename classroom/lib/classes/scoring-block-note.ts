@@ -117,3 +117,20 @@ export function coInstructorCardHint(
   if (scoringStatusTone(scoringStatus(classroom)) !== "warning") return null;
   return scoringBlockNote(classroom, "quality").message;
 }
+
+/** 제출 현황에서 펼친 시도가 「채점 대기」면 멈춘 까닭과 고칠 곳(#1436 7번) — 아니면 null.
+ * 사유가 모델 거부면 클래스 연결이 아니라 문제의 채점 모델을 말한다(#1425·#1429). */
+export function attemptWaitingNote(
+  attempt: { status: string; pending_reason?: string | null; problem_id: number; problem_model?: string },
+  classroom: Parameters<typeof scoringBlockNote>[0],
+  classId: number,
+): (Note & { href: string | null; settingsAnchor: string | undefined }) | null {
+  if (attempt.status !== "needs_setup") return null;
+  if (attempt.pending_reason === "model_rejected") {
+    return {
+      ...modelRejectedNote(classroom?.role, classId, attempt.problem_id, attempt.problem_model),
+      settingsAnchor: "scoring-model",
+    };
+  }
+  return { ...scoringBlockNote(classroom, "submissions"), href: null, settingsAnchor: undefined };
+}
