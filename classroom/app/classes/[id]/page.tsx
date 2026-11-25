@@ -285,7 +285,8 @@ function ClassDetail() {
               onTransferChanged={(change) => {
                 if (change === "requested") focusPendingTransfer.current = true;
                 if (change === "cancel-failed") cancelFailed.current = true;
-                reloadClass();
+                // 같은 변경의 서버 신호가 곧 따라오므로 신호와 같은 조정 경로로 한 번만 읽는다(#1471 ②).
+                reloadForSignal();
               }}
               focusPendingTransfer={focusPendingTransfer}
               classVersion={classroom}

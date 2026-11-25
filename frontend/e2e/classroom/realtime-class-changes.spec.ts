@@ -416,6 +416,81 @@ test("이전 요청에 답이 오면 클래스·강사·초대 재조회가 세 
   expect(reads.all - before).toBeLessThanOrEqual(3);
 });
 
+// #1471 ② — 내가 보낸 이전 요청·취소는 성공 콜백의 재조회와 같은 변경의 서버 신호가 따로 돌아 클래스·강사·초대를 두 번씩 읽었다.
+// 명령 성공도 신호와 같은 재조회 조정 경로로 보내 한 번만 읽는다(클래스 1 + 강사 1 + 초대 1).
+test("내가 이전을 요청하고 취소하면 각각 클래스·강사·초대 재조회가 한 번씩이다", async ({ page, browser }) => {
+  test.setTimeout(30_000);
+  const seed = `rt-own-refetch-${test.info().workerIndex}-${Date.now()}`;
+  await establishClassroomSession(page, seed);
+  const classId = await createClass(page, seed);
+  const token = await createInvite(page, classId);
+  const helper = await otherSession(browser, `${seed}-helper`);
+  expect(
+    (
+      await helper.api.post(`/api/backend/classroom/co-instructor-invites/${token}/accept`, {
+        data: { display_name: "박조교" },
+      })
+    ).ok(),
+  ).toBeTruthy();
+  await helper.context.close();
+
+  const base = `/api/backend/classroom/classes/${classId}`;
+  const reads = { classes: 0, roster: 0, invites: 0, invitesTotal: 0 };
+  let secondInvitesRead!: () => void;
+  const invitesReadTwice = new Promise<void>((resolve) => (secondInvitesRead = resolve));
+  page.on("request", (request) => {
+    if (request.method() !== "GET") return;
+    const path = new URL(request.url()).pathname;
+    if (path === base) reads.classes += 1;
+    if (path === `${base}/instructors`) reads.roster += 1;
+    if (path === `${base}/co-instructor-invites`) {
+      reads.invites += 1;
+      reads.invitesTotal += 1;
+      if (reads.invitesTotal === 2) secondInvitesRead();
+    }
+  });
+  await openWithStream(page, `/classes/${classId}?tab=instructors`);
+  await invitesReadTwice;
+  // TEST-WAIT-EXCEPTION: 열릴 때의 재조회 사슬이 조용해질 때까지 기다린다 — 사건이 없는 부정 단언의 앞자리.
+  await page.waitForLoadState("networkidle");
+
+  async function measure(act: () => Promise<void>, done: () => Promise<void>) {
+    reads.classes = reads.roster = reads.invites = 0;
+    await act();
+    await done();
+    // TEST-WAIT-EXCEPTION: 「더 오는 요청이 없다」는 사건이 없는 부정 단언이라 조용해질 때까지 기다린다.
+    await page.waitForLoadState("networkidle");
+    // TEST-WAIT-EXCEPTION: 신호의 지연 재조회(250ms 창)가 늦게 와도 세도록 한 박자 더 기다린다.
+    await page.waitForTimeout(1000);
+    return { ...reads };
+  }
+
+  const requested = await measure(
+    async () => {
+      await page.getByTestId("ownership-transfer-start").click();
+      await page.getByTestId("ownership-transfer-confirm-button").click();
+    },
+    async () => {
+      await expect(page.getByTestId("ownership-transfer-pending")).toBeVisible();
+    },
+  );
+  expect(requested.classes).toBe(1);
+  expect(requested.roster).toBe(1);
+  expect(requested.invites).toBe(1);
+
+  const cancelled = await measure(
+    async () => {
+      await page.getByTestId("ownership-transfer-cancel").press("Enter");
+    },
+    async () => {
+      await expect(page.getByTestId("ownership-transfer-pending")).toHaveCount(0);
+    },
+  );
+  expect(cancelled.classes).toBe(1);
+  expect(cancelled.roster).toBe(1);
+  expect(cancelled.invites).toBe(1);
+});
+
 // #1464 — 거절 뒤의 「소유자는 그대로입니다」는 다음 요청이 걸리거나 역할이 바뀌면 지워진다.
 for (const next of ["다시 요청", "수락"] as const) {
   test(`이전 요청 거절 문구는 ${next} 뒤에 강사 탭에서 사라진다`, async ({ page, browser }) => {
