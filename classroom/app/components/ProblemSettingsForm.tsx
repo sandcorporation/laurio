@@ -126,7 +126,7 @@ export function ProblemSettingsForm({
 
       <Card>
         <CardHeader title="채점 모델" />
-        <div className="flex flex-col gap-2.5 p-4">
+        <div id="scoring-model" className="flex flex-col gap-2.5 p-4">
           {modelRejection ? (
             <Note tone="error">
               <div data-testid={`${testIdPrefix}-model-rejected-note`} className="flex flex-col gap-2">
@@ -182,6 +182,12 @@ export function ProblemSettingsForm({
                 <option value="" data-testid={`${testIdPrefix}-model-option-inherit`}>
                   {inheritLabel}
                 </option>
+                {model !== "" && !modelsState.models.some((option) => option.id === model) ? (
+                  // 목록에 없는 실제 모델(내려간 모델 등)을 「클래스 기본값」으로 숨기지 않는다(#1431).
+                  <option value={model} data-testid={`${testIdPrefix}-model-option-current`}>
+                    {model}
+                  </option>
+                ) : null}
                 {modelsState.models.map((option) => (
                   <option
                     key={option.id}
