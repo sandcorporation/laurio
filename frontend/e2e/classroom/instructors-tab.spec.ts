@@ -104,10 +104,23 @@ test("강사 탭 — 공동 강사 초대는 「정말 취소」를 눌러야 �
   await expect(confirm).toHaveText("정말 취소");
   expect(await (await api.get(invitesPath)).json()).toHaveLength(1);
 
-  await page.getByTestId("co-instructor-invite-cancel-keep").click();
+  // 확인이 열리면 초점은 「그대로 두기」에 있고, 닫히면 「취소」로 돌아온다(#1400) — `body` 로 빠지지 않는다.
+  const trigger = page.getByTestId("co-instructor-invite-cancel");
+  const keep = page.getByTestId("co-instructor-invite-cancel-keep");
+  await expect(keep).toBeFocused();
+  await keep.click();
   await expect(confirm).toHaveCount(0);
+  await expect(trigger).toBeFocused();
 
-  await page.getByTestId("co-instructor-invite-cancel").click();
+  // 키보드로 열고 Esc 로 닫는다.
+  await page.keyboard.press("Enter");
+  await expect(keep).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
   await confirm.click();
   await expect(page.getByTestId("co-instructor-invite-row")).toHaveCount(0);
+  await expect(page.getByTestId("co-instructor-invite-create")).toBeFocused();
 });
